@@ -13,7 +13,7 @@ concurrency:
 jobs:
   checks:
     name: Bun checks
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
 
   e2e:
     name: E2E (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
