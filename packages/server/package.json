@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@pario/auth-magic-link": "workspace:*",
+    "@pario/auth-oidc": "workspace:*",
     "@pario/sqlite": "workspace:*",
     "@tailwindcss/cli": "^4.2.2",
     "@types/bun": "latest",

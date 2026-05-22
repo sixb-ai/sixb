@@ -10,6 +10,7 @@ import {
   generateCsrfToken,
   type InvitationRecord,
   isMagicLinkAuthStrategy,
+  isOidcAuthStrategy,
   type OntologySource,
   type Pario,
   verifyDoubleSubmitCsrf,
@@ -233,27 +234,36 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
       "/auth/sign-in",
       async ({ body, request }) => {
         const strategy = pario.auth.getStrategy()
-        if (!isMagicLinkAuthStrategy(strategy)) {
-          return strategyNotImplementedResponse("Sign-in is not implemented yet.")
-        }
-
-        const email = body.email
         const returnTo = sanitizeReturnTo(body.returnTo)
         const authStorage = requireAuthStorage(pario)
 
-        await strategy.requestMagicLink({
-          projectId: pario.id,
-          authStorage,
-          email,
-          returnTo,
-          requestOrigin: new URL(request.url).origin,
-        })
+        if (isMagicLinkAuthStrategy(strategy)) {
+          await strategy.requestMagicLink({
+            projectId: pario.id,
+            authStorage,
+            email: body.email ?? "",
+            returnTo,
+            requestOrigin: new URL(request.url).origin,
+          })
 
-        return htmlMessageResponse("If this email can sign in, we sent a link.")
+          return htmlMessageResponse("If this email can sign in, we sent a link.")
+        }
+
+        if (isOidcAuthStrategy(strategy)) {
+          const result = await strategy.startOidcSignIn({
+            projectId: pario.id,
+            authStorage,
+            returnTo,
+            requestOrigin: new URL(request.url).origin,
+          })
+          return redirectResponse(result.redirectTo)
+        }
+
+        return strategyNotImplementedResponse("Sign-in is not implemented yet.")
       },
       {
         body: t.Object({
-          email: t.String(),
+          email: t.Optional(t.String()),
           returnTo: t.Optional(t.String()),
         }),
         parse: "urlencoded",
@@ -262,14 +272,26 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
     )
     .get(
       "/auth/sign-in",
-      ({ request }) => {
+      async ({ request }) => {
         const strategy = pario.auth.getStrategy()
-        if (!isMagicLinkAuthStrategy(strategy)) {
-          return strategyNotImplementedResponse("Sign-in is not implemented yet.")
+        const url = new URL(request.url)
+        const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"))
+
+        if (isMagicLinkAuthStrategy(strategy)) {
+          return signInFormResponse(returnTo)
         }
 
-        const url = new URL(request.url)
-        return signInFormResponse(sanitizeReturnTo(url.searchParams.get("returnTo")))
+        if (isOidcAuthStrategy(strategy)) {
+          const result = await strategy.startOidcSignIn({
+            projectId: pario.id,
+            authStorage: requireAuthStorage(pario),
+            returnTo,
+            requestOrigin: url.origin,
+          })
+          return redirectResponse(result.redirectTo)
+        }
+
+        return strategyNotImplementedResponse("Sign-in is not implemented yet.")
       },
       { detail: { hide: true } }
     )
@@ -277,67 +299,118 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
       "/auth/callback",
       async ({ request }) => {
         const strategy = pario.auth.getStrategy()
-        if (!isMagicLinkAuthStrategy(strategy)) {
-          return strategyNotImplementedResponse("Auth callback is not implemented yet.")
-        }
-
-        const url = new URL(request.url)
-        const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
-        const token = url.searchParams.get("token")?.trim()
-        const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"))
-
-        if (!magicLinkId || !token) {
-          return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
-        }
-
         const now = new Date()
         const sessionCredential = createSessionCredential()
 
-        try {
-          await strategy.completeMagicLinkSignIn({
-            projectId: pario.id,
-            authStorage: requireAuthStorage(pario),
-            magicLinkId,
-            token,
-            session: {
-              id: sessionCredential.sessionId,
-              tokenHash: sessionCredential.tokenHash,
-              createdAt: now,
-              expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
-            },
+        if (isMagicLinkAuthStrategy(strategy)) {
+          const url = new URL(request.url)
+          const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
+          const token = url.searchParams.get("token")?.trim()
+          const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"))
+
+          if (!magicLinkId || !token) {
+            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+          }
+
+          try {
+            await strategy.completeMagicLinkSignIn({
+              projectId: pario.id,
+              authStorage: requireAuthStorage(pario),
+              magicLinkId,
+              token,
+              session: {
+                id: sessionCredential.sessionId,
+                tokenHash: sessionCredential.tokenHash,
+                createdAt: now,
+                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
+              },
+            })
+          } catch {
+            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+          }
+
+          return sessionRedirectResponse({
+            pario,
+            request,
+            sessionCredential,
+            returnTo,
           })
-        } catch {
-          return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
         }
 
-        const cookieOptions = pario.auth.getCookieOptions()
-        const headers = new Headers({
-          location: returnTo,
-          "cache-control": "no-store",
-        })
-        headers.append(
-          "set-cookie",
-          createSessionCookieHeader({
-            request,
-            value: sessionCredential.cookieValue,
-            maxAgeSeconds: Math.trunc(pario.auth.getSessionTtlMs() / 1000),
-            options: cookieOptions,
-          })
-        )
-        headers.append(
-          "set-cookie",
-          createCsrfCookieHeader({
-            request,
-            value: generateCsrfToken(),
-            maxAgeSeconds: Math.trunc(pario.auth.getSessionTtlMs() / 1000),
-            options: cookieOptions,
-          })
-        )
+        if (isOidcAuthStrategy(strategy)) {
+          try {
+            const result = await strategy.completeOidcSignIn({
+              projectId: pario.id,
+              authStorage: requireAuthStorage(pario),
+              requestUrl: request.url,
+              requestOrigin: new URL(request.url).origin,
+              session: {
+                id: sessionCredential.sessionId,
+                tokenHash: sessionCredential.tokenHash,
+                createdAt: now,
+                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
+              },
+            })
 
-        return new Response(null, { status: 303, headers })
+            return sessionRedirectResponse({
+              pario,
+              request,
+              sessionCredential,
+              returnTo: result.returnTo,
+            })
+          } catch (error) {
+            logAuthCallbackError("OIDC", error)
+            return htmlMessageResponse("This sign-in attempt could not be completed.", 400)
+          }
+        }
+
+        return strategyNotImplementedResponse("Auth callback is not implemented yet.")
       },
       { detail: { hide: true } }
     )
+}
+
+function sessionRedirectResponse(input: {
+  readonly pario: Pario<readonly OntologySource[]>
+  readonly request: Request
+  readonly sessionCredential: ReturnType<typeof createSessionCredential>
+  readonly returnTo: string
+}): Response {
+  const cookieOptions = input.pario.auth.getCookieOptions()
+  const headers = new Headers({
+    location: input.returnTo,
+    "cache-control": "no-store",
+  })
+  headers.append(
+    "set-cookie",
+    createSessionCookieHeader({
+      request: input.request,
+      value: input.sessionCredential.cookieValue,
+      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      options: cookieOptions,
+    })
+  )
+  headers.append(
+    "set-cookie",
+    createCsrfCookieHeader({
+      request: input.request,
+      value: generateCsrfToken(),
+      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      options: cookieOptions,
+    })
+  )
+
+  return new Response(null, { status: 303, headers })
+}
+
+function redirectResponse(location: string): Response {
+  return new Response(null, {
+    status: 303,
+    headers: {
+      location,
+      "cache-control": "no-store",
+    },
+  })
 }
 
 function strategyNotImplementedResponse(message: string): Response {
@@ -478,6 +551,21 @@ function authRouteErrorResponse(error: unknown): Response {
   }
 
   return jsonResponse({ error: String(error) }, 500)
+}
+
+function logAuthCallbackError(kind: string, error: unknown): void {
+  if (process.env.NODE_ENV !== "development" && process.env.PARIO_AUTH_DEBUG !== "1") {
+    return
+  }
+
+  const detail =
+    error instanceof AuthStorageError
+      ? `${error.name}(${error.code}): ${error.message}`
+      : error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error)
+
+  console.error(`[ParioServer] ${kind} auth callback failed: ${detail}`)
 }
 
 function jsonResponse(body: unknown, status: number): Response {

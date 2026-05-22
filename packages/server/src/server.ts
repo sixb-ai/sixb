@@ -218,6 +218,7 @@ async function createBuiltInUiRoutes(): Promise<Record<string, HtmlRouteHandler>
   const uiRoot = join(import.meta.dir, "ui")
   return {
     "/favicon.svg": () => new Response(Bun.file(join(uiRoot, "favicon.svg"))),
+    "/favicon.ico": () => new Response(null, { status: 204 }),
   }
 }
 
