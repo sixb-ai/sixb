@@ -1,8 +1,8 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { StatusResponseSchema } from "../schemas/status"
 
-export function registerStatusRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerStatusRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app.get(
     "/api/status",
     async () => ({

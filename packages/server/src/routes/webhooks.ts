@@ -2,8 +2,6 @@ import type {
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
-  OntologySource,
-  Pario,
   RegisteredWebhook,
   WebhookDefinition,
   WebhookDeliveryKey,
@@ -11,6 +9,7 @@ import type {
   WebhookResponse,
 } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
 
@@ -20,14 +19,14 @@ interface ElysiaSet {
 }
 
 interface DispatchWebhookOptions {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly pario: ParioServerRuntime
   readonly registered: RegisteredWebhook
   readonly request: Request
   readonly set: ElysiaSet
   readonly bodyLimitBytes?: number
 }
 
-export function registerWebhookRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerWebhookRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app.all(
     "/api/webhooks/:connectorId/:webhookId",
     async ({ params, request, set }) => {
@@ -173,7 +172,7 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 }
 
 async function claimDeliveryKey(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   webhook: WebhookDefinition,
   context: Parameters<NonNullable<WebhookDefinition["idempotencyKey"]>>[0]
 ): Promise<
@@ -217,7 +216,7 @@ async function claimDeliveryKey(
 }
 
 function createClientResolver(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   connector: ConnectorDefinition
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null

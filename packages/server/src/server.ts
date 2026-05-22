@@ -1,12 +1,7 @@
 import { join } from "node:path"
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import {
-  type AuthSessionAudience,
-  type OntologySource,
-  type Pario,
-  resolveAuthSessionAudience,
-} from "@pario/core"
+import { type AuthSessionAudience, resolveAuthSessionAudience } from "@pario/core"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -16,16 +11,28 @@ import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWsRoutes } from "./routes/ws"
+import type { ParioServerRuntime } from "./runtime"
+import {
+  handleCustomAppRequest,
+  isReservedPath,
+  validateCustomAppMount,
+} from "./surfaces/customAppRouter"
+import { normalizePublicOrigin } from "./surfaces/publicOrigin"
+import { resolveDefaultSurfaceAudience, resolveServerSurface } from "./surfaces/resolveSurface"
+import type { ParioRuntimeConfig, ParioServerSurface } from "./surfaces/types"
+import { createWebSocketProxy, type WebSocketProxy } from "./surfaces/wsProxy"
 import { ensureBuiltInUiBundle, renderBuiltInUiShell } from "./ui/assets"
 import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./ui/css"
 
 export interface ParioServerOptions {
-  pario: Pario<readonly OntologySource[]>
+  pario: ParioServerRuntime
   port?: number
   host?: string
   quiet?: boolean
   ui?: boolean
+  surface?: ParioServerSurface
   sessionAudience?: AuthSessionAudience
+  publicOrigin?: string
 }
 
 export function createParioServer(options: ParioServerOptions): ParioServer {
@@ -33,26 +40,33 @@ export function createParioServer(options: ParioServerOptions): ParioServer {
 }
 
 export class ParioServer {
-  private readonly pario: Pario<readonly OntologySource[]>
+  private readonly pario: ParioServerRuntime
   private readonly port: number
   private readonly host: string
   private readonly quiet: boolean
-  private readonly ui: boolean
+  private readonly surface: ParioServerSurface
   private readonly sessionAudience: AuthSessionAudience
+  private readonly publicOrigin: string | null
   private app: ParioApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private uiCss: BuiltInUiCssHandle | null = null
+  private customAppStopped = false
 
   constructor(options: ParioServerOptions) {
     this.pario = options.pario
     this.port = options.port ?? 3000
     this.host = options.host ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
-    this.ui = options.ui ?? true
-    this.sessionAudience = resolveAuthSessionAudience(options.sessionAudience)
+    this.surface = resolveServerSurface(options)
+    this.sessionAudience = resolveAuthSessionAudience(
+      options.sessionAudience ?? resolveDefaultSurfaceAudience(this.surface)
+    )
+    this.publicOrigin = options.publicOrigin
+      ? normalizePublicOrigin(options.publicOrigin, "publicOrigin")
+      : null
   }
 
-  getPario(): Pario<readonly OntologySource[]> {
+  getPario(): ParioServerRuntime {
     return this.pario
   }
 
@@ -64,27 +78,33 @@ export class ParioServer {
     return this.sessionAudience
   }
 
+  resolvePublicOrigin(request: Request): string {
+    return this.publicOrigin ?? new URL(request.url).origin
+  }
+
   private isDevelopmentMode(): boolean {
     return process.env.NODE_ENV === "development"
   }
 
   async start(): Promise<void> {
-    this.app = createParioApi(this)
-
     try {
-      if (this.ui) {
-        this.uiCss = await ensureBuiltInUiCss({
-          watch: this.isDevelopmentMode(),
-        })
-        this.bunServer = await this.startUiServer(this.app)
-      } else {
+      this.app = createParioApi(this)
+      if (this.surface.kind === "apiOnly") {
         this.app.listen({ port: this.port, hostname: this.host })
+      } else {
+        if (this.surface.kind === "builtInUi") {
+          this.uiCss = await ensureBuiltInUiCss({
+            watch: this.isDevelopmentMode(),
+          })
+        }
+        this.bunServer = await this.startSurfaceServer(this.app)
       }
     } catch (error) {
       if (this.uiCss) {
         await this.uiCss.stop().catch(() => {})
         this.uiCss = null
       }
+      await this.stopCustomAppSurface().catch(() => {})
       this.app = null
       this.bunServer = null
       const message = error instanceof Error ? error.message : String(error)
@@ -95,8 +115,10 @@ export class ParioServer {
       const base = `http://${this.host}:${this.port}`
       console.log(`Pario server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
-      if (this.ui) {
+      if (this.surface.kind === "builtInUi") {
         console.log(`Built-in UI at ${base}/`)
+      } else if (this.surface.kind === "customApp") {
+        console.log(`Custom app at ${base}/`)
       }
     }
   }
@@ -112,20 +134,31 @@ export class ParioServer {
       this.uiCss = null
     }
 
+    await this.stopCustomAppSurface()
+
     if (this.app) {
       await this.app.stop()
       this.app = null
     }
   }
 
-  private async startUiServer(app: ParioApp) {
+  private async startSurfaceServer(app: ParioApp) {
     const appFetch = (req: Request) => app.fetch(req)
     const guard = new ServerAuthGuard({ pario: this.pario, audience: this.sessionAudience })
-    const routes = (
-      this.isDevelopmentMode()
-        ? await createDevelopmentUiRoutes(guard)
-        : await createProductionUiRoutes(guard)
-    ) as NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
+    const wsProxy = createWebSocketProxy()
+    const customApp = this.surface.kind === "customApp" ? this.surface.app : null
+    const routes =
+      this.surface.kind === "builtInUi"
+        ? ((this.isDevelopmentMode()
+            ? await createDevelopmentUiRoutes(guard)
+            : await createProductionUiRoutes(guard)) as NonNullable<
+            Parameters<typeof Bun.serve>[0]["routes"]
+          >)
+        : {}
+
+    if (customApp) {
+      validateCustomAppMount(customApp)
+    }
 
     const bunServer = Bun.serve({
       port: this.port,
@@ -139,12 +172,44 @@ export class ParioServer {
         "/docs/*": appFetch,
         ...routes,
       },
-      fetch: appFetch,
-      websocket: getElysiaWsHandler(app),
+      fetch: customApp
+        ? async (request, server) => {
+            if (isReservedPath(new URL(request.url).pathname)) {
+              return appFetch(request)
+            }
+
+            return await handleCustomAppRequest({
+              request,
+              app: customApp,
+              guard,
+              runtimeConfig: this.getCustomAppRuntimeConfig(guard),
+              upgradeWebSocket: (upgradeRequest, target) =>
+                wsProxy.upgrade(upgradeRequest, server, target),
+            })
+          }
+        : appFetch,
+      websocket: createWebSocketHandler(app, wsProxy),
     } as Parameters<typeof Bun.serve>[0])
 
     attachBunServer(app, bunServer)
     return bunServer
+  }
+
+  private getCustomAppRuntimeConfig(guard: ServerAuthGuard): ParioRuntimeConfig {
+    return {
+      auth: {
+        csrfCookieName: guard.getCsrfCookieName(),
+      },
+    }
+  }
+
+  private async stopCustomAppSurface(): Promise<void> {
+    if (this.surface.kind !== "customApp" || this.customAppStopped) {
+      return
+    }
+
+    this.customAppStopped = true
+    await this.surface.app.stop?.()
   }
 }
 
@@ -197,7 +262,10 @@ export function createParioApi(server: ParioServer) {
   )
 
   app.onBeforeHandle(({ request }) => guard.handle(request))
-  registerAuthRoutes(app, pario, { audience: server.getSessionAudience() })
+  registerAuthRoutes(app, pario, {
+    audience: server.getSessionAudience(),
+    resolvePublicOrigin: (request) => server.resolvePublicOrigin(request),
+  })
   registerHttpRoutes(app, pario)
   registerWebhookRoutes(app, pario)
   registerWsRoutes(app, server)
@@ -219,6 +287,47 @@ function getElysiaWsHandler(app: ParioApp) {
   return {
     ...elysiaWebSocket,
     ...(cfg?.websocket ?? {}),
+  } as Parameters<typeof Bun.serve>[0]["websocket"]
+}
+
+function createWebSocketHandler(app: ParioApp, wsProxy: WebSocketProxy) {
+  const elysiaHandler = getElysiaWsHandler(app) as unknown as Record<string, unknown>
+
+  return {
+    ...elysiaHandler,
+    open(ws: unknown) {
+      if (wsProxy.isProxySocket(ws)) {
+        wsProxy.open(ws)
+        return
+      }
+
+      const open = elysiaHandler.open
+      if (typeof open === "function") {
+        open(ws)
+      }
+    },
+    message(ws: unknown, message: unknown) {
+      if (wsProxy.isProxySocket(ws)) {
+        wsProxy.message(ws, message)
+        return
+      }
+
+      const messageHandler = elysiaHandler.message
+      if (typeof messageHandler === "function") {
+        messageHandler(ws, message)
+      }
+    },
+    close(ws: unknown, code?: number, reason?: string) {
+      if (wsProxy.isProxySocket(ws)) {
+        wsProxy.close(ws, code, reason)
+        return
+      }
+
+      const close = elysiaHandler.close
+      if (typeof close === "function") {
+        close(ws, code, reason)
+      }
+    },
   } as Parameters<typeof Bun.serve>[0]["websocket"]
 }
 

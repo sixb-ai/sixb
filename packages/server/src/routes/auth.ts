@@ -12,13 +12,12 @@ import {
   type InvitationRecord,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
-  type OntologySource,
-  type Pario,
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
 import { type Elysia, t } from "elysia"
 import { sanitizeReturnTo } from "../auth/return-to"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import {
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
@@ -34,14 +33,17 @@ import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
 export interface AuthRoutesOptions {
   readonly audience: AuthSessionAudience
+  readonly resolvePublicOrigin?: (request: Request) => string
 }
 
 export function registerAuthRoutes(
   app: Elysia,
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   options: AuthRoutesOptions
 ) {
   const authOptions = { audience: options.audience }
+  const resolveRequestOrigin =
+    options.resolvePublicOrigin ?? ((request: Request) => new URL(request.url).origin)
   return app
     .get(
       "/api/auth/session",
@@ -132,7 +134,10 @@ export function registerAuthRoutes(
               expiresAt: parseDate(parsed.expiresAt),
               returnTo: parsed.returnTo,
             },
-            authOptions
+            {
+              ...authOptions,
+              requestOrigin: resolveRequestOrigin(request),
+            }
           )
 
           return jsonResponse(
@@ -265,7 +270,7 @@ export function registerAuthRoutes(
             authStorage,
             email: body.email ?? "",
             returnTo,
-            requestOrigin: new URL(request.url).origin,
+            requestOrigin: resolveRequestOrigin(request),
           })
 
           return htmlMessageResponse("If this email can sign in, we sent a link.")
@@ -276,7 +281,7 @@ export function registerAuthRoutes(
             projectId: pario.id,
             authStorage,
             returnTo,
-            requestOrigin: new URL(request.url).origin,
+            requestOrigin: resolveRequestOrigin(request),
           })
           return redirectResponse(result.redirectTo)
         }
@@ -308,7 +313,7 @@ export function registerAuthRoutes(
             projectId: pario.id,
             authStorage: requireAuthStorage(pario),
             returnTo,
-            requestOrigin: url.origin,
+            requestOrigin: resolveRequestOrigin(request),
           })
           return redirectResponse(result.redirectTo)
         }
@@ -367,7 +372,7 @@ export function registerAuthRoutes(
               projectId: pario.id,
               authStorage: requireAuthStorage(pario),
               requestUrl: request.url,
-              requestOrigin: new URL(request.url).origin,
+              requestOrigin: resolveRequestOrigin(request),
               session: {
                 id: sessionCredential.sessionId,
                 audience: options.audience,
@@ -397,7 +402,7 @@ export function registerAuthRoutes(
 }
 
 function sessionRedirectResponse(input: {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly pario: ParioServerRuntime
   readonly request: Request
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
   readonly audience: AuthSessionAudience
@@ -510,7 +515,7 @@ function htmlMessageResponse(message: string, status = 200): Response {
   )
 }
 
-function requireAuthStorage(pario: Pario<readonly OntologySource[]>): AuthStorage {
+function requireAuthStorage(pario: ParioServerRuntime): AuthStorage {
   if (!pario.storage.auth) {
     throw new Error("[ParioServer] Auth storage is required for auth routes.")
   }

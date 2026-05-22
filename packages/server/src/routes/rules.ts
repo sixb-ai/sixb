@@ -1,11 +1,6 @@
-import {
-  deriveRuleEventDependencies,
-  type OntologySource,
-  type Pario,
-  type RuleDefinition,
-  type RuleStateRecord,
-} from "@pario/core"
+import { deriveRuleEventDependencies, type RuleDefinition, type RuleStateRecord } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RuleParamsSchema,
@@ -27,7 +22,7 @@ function serializeRuleState(state: RuleStateRecord): ReturnType<typeof RuleState
   return RuleStateSchema.parse(state)
 }
 
-export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerRuleRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/rules",

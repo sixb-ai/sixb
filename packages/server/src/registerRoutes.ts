@@ -1,4 +1,3 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { registerActionRoutes } from "./routes/actions"
 import { registerConnectorRoutes } from "./routes/connectors"
@@ -14,8 +13,9 @@ import { registerRuleRoutes } from "./routes/rules"
 import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
+import type { ParioServerRuntime } from "./runtime"
 
-export function registerHttpRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerHttpRoutes(app: Elysia, pario: ParioServerRuntime) {
   registerProjectRoutes(app, pario)
   registerStatusRoutes(app, pario)
   registerConnectorRoutes(app, pario)

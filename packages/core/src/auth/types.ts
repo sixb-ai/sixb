@@ -170,7 +170,9 @@ export interface ListInvitationsResult {
   readonly total: number
 }
 
-export type AuthSessionResolutionOptions = AuthSessionAudienceOptions
+export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
+  readonly requestOrigin?: string
+}
 
 export interface RevokeInvitationInput {
   readonly invitationId: string

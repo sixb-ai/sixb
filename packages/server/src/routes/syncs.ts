@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto"
-import type { OntologySource, Pario, SyncDefinition, SyncRunRecord } from "@pario/core"
+import type { SyncDefinition, SyncRunRecord } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RequestSyncRunBodySchema,
@@ -33,7 +34,7 @@ function serializeSyncRun(run: SyncRunRecord) {
 }
 
 async function getLatestSyncRun(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   syncId: string
 ): Promise<ReturnType<typeof serializeSyncRun> | null> {
   if (!pario.storage.syncRuns) {
@@ -52,7 +53,7 @@ async function getLatestSyncRun(
 }
 
 async function serializeSync(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   sync: SyncDefinition
 ): Promise<ReturnType<typeof SyncSchema.parse>> {
   return SyncSchema.parse({
@@ -71,7 +72,7 @@ async function serializeSync(
   })
 }
 
-export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerSyncRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/syncs",

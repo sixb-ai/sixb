@@ -1,5 +1,6 @@
-import type { DatasetDefinition, DatasetVersion, OntologySource, Pario } from "@pario/core"
+import type { DatasetDefinition, DatasetVersion } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   DatasetCatalogItemSchema,
@@ -49,7 +50,7 @@ function serializeDatasetVersion(version: DatasetVersion) {
   })
 }
 
-function getDatasetReferences(pario: Pario<readonly OntologySource[]>, datasetId: string) {
+function getDatasetReferences(pario: ParioServerRuntime, datasetId: string) {
   const pipelines = pario.getPipelineDefinitions()
   const projections = [...pario.getObjectProjections(), ...pario.getLinkProjections()]
 
@@ -82,10 +83,7 @@ function getDatasetReferences(pario: Pario<readonly OntologySource[]>, datasetId
   }
 }
 
-async function serializeDatasetCatalogItem(
-  pario: Pario<readonly OntologySource[]>,
-  dataset: DatasetDefinition
-) {
+async function serializeDatasetCatalogItem(pario: ParioServerRuntime, dataset: DatasetDefinition) {
   const [storedDataset, latestVersion] = await Promise.all([
     pario.lakeStorage.getDataset(dataset.id),
     pario.lakeStorage.getLatestVersion(dataset.id),
@@ -99,7 +97,7 @@ async function serializeDatasetCatalogItem(
   })
 }
 
-function requireDataset(pario: Pario<readonly OntologySource[]>, datasetId: string) {
+function requireDataset(pario: ParioServerRuntime, datasetId: string) {
   const dataset = pario.getDatasetById(datasetId)
   if (!dataset) {
     throw new Error("Dataset not found")
@@ -141,7 +139,7 @@ async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>
   return collected
 }
 
-export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerDatasetRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/datasets",

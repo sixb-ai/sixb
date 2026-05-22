@@ -1,5 +1,5 @@
 import type { ConnectorDefinition } from "../connectors/types"
-import type { OntologySource, Pario } from "../runtime"
+import type { OntologySource, ParioInstance, ParioRuntimeContext } from "../runtime"
 
 export type WebhookBodyFormat = "json" | "text" | "raw"
 
@@ -47,7 +47,7 @@ export interface WebhookMetadata {
 }
 
 export interface WebhookVerifyContext {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly pario: ParioInstance<readonly OntologySource[]> & ParioRuntimeContext
   readonly connector: ConnectorDefinition
   readonly webhook: WebhookMetadata
   readonly request: Request

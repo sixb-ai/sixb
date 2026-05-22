@@ -1,11 +1,11 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
 function serializeObjectType(
-  pario: Pario<readonly OntologySource[]>,
-  objectType: ReturnType<Pario<readonly OntologySource[]>["listObjectTypes"]>[number]
+  pario: ParioServerRuntime,
+  objectType: ReturnType<ParioServerRuntime["listObjectTypes"]>[number]
 ) {
   return {
     id: objectType.id,
@@ -38,7 +38,7 @@ function serializeObjectType(
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerOntologyRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/object-types",

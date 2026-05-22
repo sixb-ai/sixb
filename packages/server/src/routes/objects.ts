@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ObjectListResponseSchema,
@@ -27,7 +27,7 @@ function serializeObject(row: {
   }
 }
 
-export function registerObjectRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerObjectRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/objects",

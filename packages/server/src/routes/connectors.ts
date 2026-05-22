@@ -1,11 +1,11 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
-  connector: ReturnType<Pario<readonly OntologySource[]>["listConnectors"]>[number],
-  pario: Pario<readonly OntologySource[]>
+  connector: ReturnType<ParioServerRuntime["listConnectors"]>[number],
+  pario: ParioServerRuntime
 ) {
   return {
     id: connector.id,
@@ -28,7 +28,7 @@ function serializeConnector(
   }
 }
 
-export function registerConnectorRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerConnectorRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/connectors",

@@ -186,7 +186,10 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         items={[
           { label: "--entry <path>", value: "Entry file (default: pario.config.ts)" },
           { label: "--port <port>", value: "Server port (default: 3000)" },
+          { label: "--app-port <port>", value: "Custom app server port (default: --port + 1)" },
           { label: "--host <host>", value: "Server host (default: 0.0.0.0)" },
+          { label: "--public-origin <url>", value: "Public admin auth origin" },
+          { label: "--app-public-origin <url>", value: "Public custom app auth origin" },
           {
             label: "--worker <type>",
             value: "Worker type: sync, action, pipeline, projection, workflow",
@@ -205,7 +208,8 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "pario worker",
           "pario worker --worker pipeline",
           "pario worker --worker workflow",
-          "pario dev --entry examples/mac-os/pario.config.ts --port 8080",
+          "pario dev --entry examples/mac-os/pario.config.ts --port 8080 --app-port 8081",
+          "pario start --public-origin https://admin.example.com --app-public-origin https://app.example.com",
           "pario check",
           "pario db migrate",
           "pario build",

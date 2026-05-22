@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   LinkParamsSchema,
@@ -12,7 +12,7 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
-export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerLinkRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",

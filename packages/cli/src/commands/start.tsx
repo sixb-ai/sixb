@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
-import { createParioApp, type ParioAppDevServer } from "@pario/app"
+import { createParioApp } from "@pario/app"
 import { createParioServer, type ParioServer } from "@pario/server"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
 import { runUntilSignal, startParioRuntime, stopQuietly } from "../lib/runtime"
@@ -9,7 +9,10 @@ import { ErrorView, LoadingView, renderPersistent, renderStatic, StartView } fro
 export interface StartOptions {
   entry?: string
   port?: string
+  appPort?: string
   host?: string
+  publicOrigin?: string
+  appPublicOrigin?: string
 }
 
 export async function runStart(options: StartOptions = {}) {
@@ -18,6 +21,7 @@ export async function runStart(options: StartOptions = {}) {
   const sourceEntry = resolve("pario.config.ts")
   const defaultBuiltEntry = resolve(".pario/dist/pario.config.js")
   const port = options.port ? Number.parseInt(options.port, 10) : 3000
+  const appPort = options.appPort ? Number.parseInt(options.appPort, 10) : port + 1
   const host = options.host ?? "0.0.0.0"
 
   let entry = sourceEntry
@@ -33,7 +37,7 @@ export async function runStart(options: StartOptions = {}) {
   )
 
   let server: ParioServer | null = null
-  let customAppServer: ParioAppDevServer | null = null
+  let customAppServer: ParioServer | null = null
   let pario: LoadedPario | null = null
   let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
   const warnings: string[] = []
@@ -42,18 +46,20 @@ export async function runStart(options: StartOptions = {}) {
     pario = await loadParioFromEntry(entry)
     runtime = await startParioRuntime(pario, { cohostWorkers: false })
     const projectRoot = resolveProjectRoot(entry)
+    const displayHost = host === "0.0.0.0" ? "localhost" : host
+    const baseUrl = `http://${displayHost}:${port}`
 
     server = createParioServer({
-      pario: pario as unknown as never,
+      pario,
       port,
       host,
       quiet: true,
-      ui: true,
+      surface: { kind: "builtInUi" },
+      publicOrigin: options.publicOrigin ?? process.env.PARIO_PUBLIC_ORIGIN,
     })
     await server.start()
 
-    const displayHost = host === "0.0.0.0" ? "localhost" : host
-    const baseUrl = `http://${displayHost}:${port}`
+    const appBaseUrl = `http://${displayHost}:${appPort}`
     const customApp = await createParioApp({
       rootDir: projectRoot,
     })
@@ -64,13 +70,25 @@ export async function runStart(options: StartOptions = {}) {
 
     let appUrl: string | null = null
     if (hasBuiltCustomApp) {
-      customAppServer = await customApp.start({
+      if (appPort === port) {
+        throw new Error("[ParioCLI] --app-port must be different from --port.")
+      }
+
+      customAppServer = createParioServer({
+        pario,
+        port: appPort,
         host,
-        port: port + 1,
-        outdir: resolve(projectRoot, ".pario", "dist", "app"),
-        apiBaseUrl: baseUrl,
+        quiet: true,
+        surface: {
+          kind: "customApp",
+          app: await customApp.createProductionMount({
+            outdir: resolve(projectRoot, ".pario", "dist", "app"),
+          }),
+        },
+        publicOrigin: options.appPublicOrigin ?? process.env.PARIO_APP_PUBLIC_ORIGIN,
       })
-      appUrl = customAppServer.url
+      await customAppServer.start()
+      appUrl = appBaseUrl
     } else if (await customApp.hasRoutes()) {
       warnings.push(
         "Custom app source found, but no production build exists at .pario/dist/app. Run `pario build` first."

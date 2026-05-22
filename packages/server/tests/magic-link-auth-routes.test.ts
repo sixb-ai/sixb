@@ -137,6 +137,29 @@ describe("magic-link auth routes", () => {
     expect(messages).toHaveLength(1)
   })
 
+  test("uses server publicOrigin when creating magic links", async () => {
+    const { messages, pario, storage } = createRuntime()
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ui: false,
+        publicOrigin: "https://app.example.com",
+      })
+    )
+    await storage.auth.users.create({
+      id: "usr_1",
+      projectId,
+      email: "ava@acme.com",
+    })
+
+    await postSignIn(app, { email: "ava@acme.com" })
+    const link = linkFromLatestMessage(messages)
+
+    expect(link.origin).toBe("https://app.example.com")
+    expect(link.pathname).toBe("/auth/callback")
+  })
+
   test("callback creates a session, sets cookies, and exposes the session shape", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],

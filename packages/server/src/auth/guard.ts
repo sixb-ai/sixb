@@ -2,11 +2,10 @@ import {
   type AuthSessionAudience,
   type AuthSessionResult,
   DEFAULT_AUTH_SESSION_AUDIENCE,
-  type OntologySource,
-  type Pario,
   resolveAuthSessionAudience,
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
+import type { ParioServerRuntime } from "../runtime"
 import { classifyRoute } from "./public-routes"
 import {
   htmlAuthRedirectResponse,
@@ -16,14 +15,14 @@ import {
 } from "./responses"
 
 export interface ServerAuthGuardOptions {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly pario: ParioServerRuntime
   readonly audience?: AuthSessionAudience
 }
 
 export type HtmlRouteHandler = (request: Request) => Response | Promise<Response>
 
 export class ServerAuthGuard {
-  private readonly pario: Pario<readonly OntologySource[]>
+  private readonly pario: ParioServerRuntime
   private readonly audience: AuthSessionAudience
 
   constructor(options: ServerAuthGuardOptions) {

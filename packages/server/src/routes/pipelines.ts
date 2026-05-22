@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto"
 import type {
-  OntologySource,
-  Pario,
   PipelineDefinition,
   PipelineRunRecord,
   PipelineStepExecutor,
@@ -9,6 +7,7 @@ import type {
 } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   PipelineParamsSchema,
@@ -68,7 +67,7 @@ function serializeExecutor(executor: PipelineStepExecutor) {
 }
 
 async function getLatestPipelineRun(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   pipelineId: string
 ): Promise<ReturnType<typeof serializePipelineRun> | null> {
   if (!pario.storage.pipelineRuns) {
@@ -87,7 +86,7 @@ async function getLatestPipelineRun(
 }
 
 async function serializePipeline(
-  pario: Pario<readonly OntologySource[]>,
+  pario: ParioServerRuntime,
   pipeline: PipelineDefinition
 ): Promise<ReturnType<typeof PipelineSchema.parse>> {
   return PipelineSchema.parse({
@@ -113,7 +112,7 @@ async function serializePipeline(
   })
 }
 
-export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerPipelineRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/pipelines",

@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   AppendTelemetryBodySchema,
@@ -10,7 +10,7 @@ import {
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
-export function registerTelemetryRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerTelemetryRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",

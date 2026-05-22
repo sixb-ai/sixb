@@ -1,11 +1,11 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import type { ParioServerRuntime } from "../runtime"
 import { ActionParamsSchema, RequestActionBodySchema } from "../schemas/actions"
 import { ActionRequestedResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
 
-export function registerActionRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerActionRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app.post(
     "/api/objects/:objectTypeId/:objectId/actions/:actionId",
     async ({ params, body, set }) => {

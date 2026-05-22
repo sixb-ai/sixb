@@ -46,7 +46,14 @@ async function main(): Promise<void> {
   switch (command) {
     case "dev": {
       const { runDev } = await import("./commands/dev")
-      await runDev({ entry: getFlag("entry"), port: getFlag("port"), host: getFlag("host") })
+      await runDev({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        appPort: getFlag("app-port"),
+        host: getFlag("host"),
+        publicOrigin: getFlag("public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
+      })
       break
     }
 
@@ -70,7 +77,14 @@ async function main(): Promise<void> {
 
     case "start": {
       const { runStart } = await import("./commands/start")
-      await runStart({ entry: getFlag("entry"), port: getFlag("port"), host: getFlag("host") })
+      await runStart({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        appPort: getFlag("app-port"),
+        host: getFlag("host"),
+        publicOrigin: getFlag("public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
+      })
       break
     }
 

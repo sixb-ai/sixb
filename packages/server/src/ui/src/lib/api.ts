@@ -1,16 +1,19 @@
 import { client } from "@pario/client"
 
-client.setConfig({ baseUrl: window.location.origin })
-
 declare global {
   interface Window {
     __PARIO_RUNTIME__?: {
+      readonly api?: {
+        readonly baseUrl?: string
+      }
       readonly auth?: {
         readonly csrfCookieName?: string
       }
     }
   }
 }
+
+client.setConfig({ baseUrl: window.__PARIO_RUNTIME__?.api?.baseUrl ?? window.location.origin })
 
 const DEFAULT_CSRF_COOKIE_NAME = "pario_csrf"
 const CSRF_HEADER_NAME = "x-pario-csrf"

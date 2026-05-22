@@ -76,15 +76,24 @@ import {
   createParioServer,
   ParioServer,
 } from "@pario/server"
-import type { ParioApp, ParioServerOptions } from "@pario/server"
+import type { CustomAppMount, ParioApp, ParioServerOptions } from "@pario/server"
 ```
 
-- **`createParioServer(options)`** -- Preferred entrypoint for starting the built-in Pario server.
+- **`createParioServer(options)`** -- Preferred entrypoint for starting Pario server surfaces.
 - **`ParioServer`** -- Manages the server lifecycle (`start`, `stop`).
 - **`createParioApi(server)`** -- Creates the raw Elysia app with all API and WebSocket routes.
 - **`createApp(server)`** -- Alias for `createParioApi(server)` for compatibility.
 - **`ParioApp`** -- Type alias for the Elysia app returned by `createParioApi`.
-- **`ParioServerOptions`** -- Config: `pario` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`, `ui` (default `true`).
+- **`CustomAppMount`** -- Technical custom app mount consumed by `surface: { kind: "customApp", app }`.
+- **`ParioServerOptions`** -- Config: `pario` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`, `surface`, `ui` compatibility, `sessionAudience`, and `publicOrigin`.
+
+`surface` selects what the visible host serves:
+
+- `{ kind: "builtInUi" }` for the default admin UI;
+- `{ kind: "customApp", app }` for a custom app served same-origin with `/api`, `/auth`, `/ws`, and `/docs`;
+- `{ kind: "apiOnly" }` for API-only hosts.
+
+Custom app mounts declare technical resources only. The server keeps ownership of reserved routes, auth, session audience, runtime CSRF injection, HTTP proxying, and HMR WebSocket bridging.
 
 ## OpenAPI
 

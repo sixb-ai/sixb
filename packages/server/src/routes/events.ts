@@ -1,10 +1,10 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import { EventsQuerySchema, EventsResponseSchema } from "../schemas/events"
 import { parseOptionalInt } from "../utils/http"
 
-export function registerEventRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerEventRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app.get(
     "/api/events",
     async ({ query, set }) => {

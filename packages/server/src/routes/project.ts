@@ -1,8 +1,8 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ProjectInfoResponseSchema } from "../schemas/project"
 
-export function registerProjectRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerProjectRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app.get("/api/project", async () => ({ id: pario.id, type: "local" as const }), {
     response: { 200: ProjectInfoResponseSchema },
     detail: {

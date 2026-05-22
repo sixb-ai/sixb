@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import type { PageRoute } from "./scanner"
 
@@ -26,7 +26,7 @@ ${imports}
 `
 
   const outPath = join(generatedDir, "routes.ts")
-  await writeFile(outPath, content, "utf-8")
+  await writeFileIfChanged(outPath, content)
   return outPath
 }
 
@@ -61,8 +61,15 @@ export async function generateAppEntry(
     : ""
   const layoutWrapperStart = hasLayout ? "<RootLayout>" : "<>"
   const layoutWrapperEnd = hasLayout ? "</RootLayout>" : "</>"
+  const runtimeConfig = options.apiBaseUrl
+    ? {
+        api: {
+          baseUrl: options.apiBaseUrl,
+        },
+      }
+    : null
   const runtimeConfigScript = options.apiBaseUrl
-    ? `<script>window.__PARIO_API_BASE_URL__ = ${JSON.stringify(options.apiBaseUrl)};</script>`
+    ? `<script>window.__PARIO_RUNTIME__ = ${JSON.stringify(runtimeConfig).replaceAll("<", "\\u003c")};</script>`
     : ""
 
   // Generate main.tsx
@@ -76,12 +83,62 @@ ${globalsCssImport}
 ${layoutImport}
 
 const runtimeConfig = window as Window & {
+  __PARIO_RUNTIME__?: {
+    readonly api?: {
+      readonly baseUrl?: string
+    }
+    readonly auth?: {
+      readonly csrfCookieName?: string
+    }
+  }
   __PARIO_API_BASE_URL__?: string
 }
 
+const DEFAULT_CSRF_COOKIE_NAME = "pario_csrf"
+const CSRF_HEADER_NAME = "x-pario-csrf"
+const CSRF_EXEMPT_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+
 client.setConfig({
-  baseUrl: runtimeConfig.__PARIO_API_BASE_URL__ ?? window.location.origin,
+  baseUrl:
+    runtimeConfig.__PARIO_RUNTIME__?.api?.baseUrl ??
+    runtimeConfig.__PARIO_API_BASE_URL__ ??
+    window.location.origin,
 })
+
+client.interceptors.request.use((request) => {
+  if (CSRF_EXEMPT_METHODS.has(request.method.toUpperCase())) {
+    return request
+  }
+
+  if (request.headers.has(CSRF_HEADER_NAME)) {
+    return request
+  }
+
+  const csrfToken = readCookie(resolveCsrfCookieName())
+  if (!csrfToken) {
+    return request
+  }
+
+  const headers = new Headers(request.headers)
+  headers.set(CSRF_HEADER_NAME, csrfToken)
+  return new Request(request, { headers })
+})
+
+function resolveCsrfCookieName(): string {
+  return runtimeConfig.__PARIO_RUNTIME__?.auth?.csrfCookieName ?? DEFAULT_CSRF_COOKIE_NAME
+}
+
+function readCookie(name: string): string | null {
+  const prefix = \`\${encodeURIComponent(name)}=\`
+  for (const part of document.cookie.split(";")) {
+    const cookie = part.trim()
+    if (cookie.startsWith(prefix)) {
+      return decodeURIComponent(cookie.slice(prefix.length))
+    }
+  }
+
+  return null
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -149,7 +206,7 @@ createRoot(document.getElementById("root")!).render(<App />)
 `
 
   const mainPath = join(generatedDir, "main.tsx")
-  await writeFile(mainPath, mainContent, "utf-8")
+  await writeFileIfChanged(mainPath, mainContent)
 
   // Generate index.html with a styled fallback shell so pages still look intentional
   // when projects don't define `app/globals.css`.
@@ -196,7 +253,7 @@ createRoot(document.getElementById("root")!).render(<App />)
 `
 
   const htmlPath = join(generatedDir, "index.html")
-  await writeFile(htmlPath, htmlContent, "utf-8")
+  await writeFileIfChanged(htmlPath, htmlContent)
 
   return { htmlPath, mainPath }
 }
@@ -215,4 +272,14 @@ async function fileExists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function writeFileIfChanged(path: string, content: string): Promise<void> {
+  try {
+    if ((await readFile(path, "utf-8")) === content) {
+      return
+    }
+  } catch {}
+
+  await writeFile(path, content, "utf-8")
 }

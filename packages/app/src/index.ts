@@ -5,8 +5,14 @@ export {
   createParioApp,
   type ParioAppBuildOptions,
   type ParioAppDevOptions,
-  type ParioAppDevServer,
   type ParioAppInstance,
   type ParioAppStartOptions,
 } from "./createParioApp"
 export { type PageRoute, scanPages } from "./scanner"
+export type { ParioAppDevServer } from "./surfaces/devSurface"
+export type {
+  AppAsset,
+  AppPathPattern,
+  CustomAppDevelopmentMount,
+  CustomAppProductionMount,
+} from "./surfaces/types"

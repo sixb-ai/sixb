@@ -1,55 +1,7 @@
 import { pathToFileURL } from "node:url"
-import type {
-  ActionDefinition,
-  ConnectorAdapter,
-  ConnectorClient,
-  ConnectorDefinition,
-  DatasetDefinition,
-  LinkProjectionDefinition,
-  ObjectProjectionDefinition,
-  ObjectRow,
-  ParioRuntimeContext,
-  PipelineDefinition,
-  ProjectionDefinition,
-  RuleDefinition,
-  SyncDefinition,
-  WorkflowDefinition,
-} from "@pario/core"
+import type { OntologySource, ParioInstance, ParioRuntimeContext } from "@pario/core"
 
-export interface LoadedPario extends ParioRuntimeContext {
-  readonly id: string
-  listObjectTypes(): readonly unknown[]
-  getActionDefinitions(): readonly ActionDefinition[]
-  getActionById(actionId: string): ActionDefinition | null
-  getSyncDefinitions(): readonly SyncDefinition[]
-  getPipelineDefinitions(): readonly PipelineDefinition[]
-  getPipelineById(pipelineId: string): PipelineDefinition | null
-  getWorkflowDefinitions(): readonly WorkflowDefinition[]
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
-  getObjectProjections(): readonly ObjectProjectionDefinition[]
-  getLinkProjections(): readonly LinkProjectionDefinition[]
-  getDatasetDefinitions(): readonly DatasetDefinition[]
-  getRuleDefinitions(): readonly RuleDefinition[]
-  getDatasetById(datasetId: string): DatasetDefinition | null
-  getProjectionById(projectionId: string): ProjectionDefinition | null
-  getSyncById(syncId: string): SyncDefinition | null
-  getRuleById(ruleId: string): RuleDefinition | null
-  getSubTypes(objectTypeId: string): string[]
-  connector<TAdapter extends ConnectorAdapter>(
-    definition: ConnectorDefinition<string, TAdapter>
-  ): Promise<ConnectorClient<TAdapter>>
-  startFunctions(): Promise<void>
-  stopFunctions(): Promise<void>
-  startScheduler(): Promise<void>
-  stopScheduler(): Promise<void>
-  disconnectConnectors(): Promise<void>
-  closeBroker(): Promise<void>
-  list(params: {
-    objectTypeIds?: readonly string[]
-    limit?: number
-    offset?: number
-  }): Promise<{ total: number; hasMore: boolean; objects: ObjectRow[] }>
-}
+export type LoadedPario = ParioInstance<readonly OntologySource[]> & ParioRuntimeContext
 
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value

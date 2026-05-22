@@ -1,6 +1,6 @@
 # @pario/app
 
-Reusable toolkit for project-specific Pario apps. It owns custom app route scanning, entry generation, Bun dev serving, production builds, and serving built custom apps in production.
+Reusable toolkit for project-specific Pario apps. It owns custom app route scanning, entry generation, Bun dev serving, production builds, and technical app mounts consumed by `@pario/server`.
 
 ## Installation
 
@@ -36,9 +36,13 @@ If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also exp
 
 `buildApp(options)` runs `Bun.build()` on the generated HTML entry point to produce a minified, browser-targeted bundle with external source maps in `.pario/dist/app/`.
 
-### 4. Start
+### 4. Serve
 
-`createParioApp().start(options)` serves the built app from `.pario/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so a separately hosted custom app can still target the main Pario API.
+The preferred production model is same-origin serving through `@pario/server`: the custom app shell, `/api/*`, `/auth/*`, `/ws/*`, and `/docs` are all available on the same visible app origin.
+
+`createParioApp().createDevMount()` and `createParioApp().createProductionMount()` expose technical app resources used by the server. They declare exact assets, dev proxy prefixes, HMR paths, and production HTML lookup helpers; `@pario/server` owns the auth and routing policy.
+
+`createParioApp().start(options)` still serves the built app directly from `.pario/dist/app/`. Treat it as an advanced standalone/static-hosting helper. When `apiBaseUrl` is provided, it is injected into runtime config so a separately hosted custom app can target another Pario API origin.
 
 ## Usage
 
@@ -49,12 +53,23 @@ import { createParioApp } from "@pario/app"
 
 const app = await createParioApp({
   rootDir: process.cwd(),
-  apiBaseUrl: "http://localhost:3000",
 })
 
-await app.dev({ port: 3001 })
 await app.build({ outdir: ".pario/dist/app" })
-await app.start({ port: 3001, outdir: ".pario/dist/app", apiBaseUrl: "http://localhost:3000" })
+
+const devMount = await app.createDevMount()
+const productionMount = await app.createProductionMount({ outdir: ".pario/dist/app" })
+```
+
+Standalone helpers:
+
+```typescript
+await app.dev({ port: 3001 })
+await app.start({
+  port: 3001,
+  outdir: ".pario/dist/app",
+  apiBaseUrl: "http://localhost:3000",
+})
 ```
 
 Low-level pipeline:
@@ -89,7 +104,8 @@ In dev mode the Bun server serves them directly; in production they are copied i
 
 | Export | Description |
 | --- | --- |
-| `createParioApp(options)` | High-level custom app toolkit for dev/build/start |
+| `createParioApp(options)` | High-level custom app toolkit for dev/build/start/mounts |
+| `CustomAppMount` | Technical app mount consumed by `@pario/server` |
 | `scanPages(appDir)` | Scan `app/` for page files and return `PageRoute[]` |
 | `generateRouteManifest(routes, generatedDir)` | Write `routes.ts` with lazy-loaded route imports |
 | `generateAppEntry(projectRoot, generatedDir, options)` | Write `index.html` and `main.tsx` entry points |

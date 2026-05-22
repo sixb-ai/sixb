@@ -1,5 +1,5 @@
 import { dirname, resolve } from "node:path"
-import { createParioApp, type ParioAppDevServer } from "@pario/app"
+import { createParioApp } from "@pario/app"
 import { createParioServer, type ParioServer } from "@pario/server"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
 import { runUntilSignal, startParioRuntime, stopQuietly } from "../lib/runtime"
@@ -8,7 +8,10 @@ import { DevView, ErrorView, LoadingView, renderPersistent, renderStatic } from 
 export interface DevOptions {
   entry?: string
   port?: string
+  appPort?: string
   host?: string
+  publicOrigin?: string
+  appPublicOrigin?: string
 }
 
 export async function runDev(options: DevOptions = {}) {
@@ -16,6 +19,7 @@ export async function runDev(options: DevOptions = {}) {
 
   const entry = resolve(options.entry ?? "pario.config.ts")
   const port = options.port ? Number.parseInt(options.port, 10) : 3000
+  const appPort = options.appPort ? Number.parseInt(options.appPort, 10) : port + 1
   const host = options.host ?? "0.0.0.0"
 
   const app = renderPersistent(
@@ -23,7 +27,7 @@ export async function runDev(options: DevOptions = {}) {
   )
 
   let server: ParioServer | null = null
-  let customAppServer: ParioAppDevServer | null = null
+  let customAppServer: ParioServer | null = null
   let pario: LoadedPario | null = null
   let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
 
@@ -37,31 +41,42 @@ export async function runDev(options: DevOptions = {}) {
 
     const displayHost = host === "0.0.0.0" ? "localhost" : host
     const baseUrl = `http://${displayHost}:${port}`
+    const appBaseUrl = `http://${displayHost}:${appPort}`
     let appUrl: string | null = null
     server = createParioServer({
-      pario: pario as unknown as never,
+      pario,
       port,
       host,
       quiet: true,
-      ui: true,
+      surface: { kind: "builtInUi" },
+      publicOrigin: options.publicOrigin ?? baseUrl,
     })
     await server.start()
 
-    const customApp = await createParioApp({
-      rootDir: projectRoot,
-      apiBaseUrl: baseUrl,
-    })
+    const customApp = await createParioApp({ rootDir: projectRoot })
 
     if (await customApp.hasRoutes()) {
+      if (appPort === port) {
+        throw new Error("[ParioCLI] --app-port must be different from --port.")
+      }
+
       app.rerender(
         <LoadingView title="Starting pario" subtitle={entry} status="Starting custom app" />
       )
 
-      customAppServer = await customApp.dev({
+      customAppServer = createParioServer({
+        pario,
+        port: appPort,
         host,
-        port: port + 1,
+        quiet: true,
+        surface: {
+          kind: "customApp",
+          app: await customApp.createDevMount(),
+        },
+        publicOrigin: options.appPublicOrigin ?? appBaseUrl,
       })
-      appUrl = customAppServer.url
+      await customAppServer.start()
+      appUrl = appBaseUrl
     }
 
     app.rerender(

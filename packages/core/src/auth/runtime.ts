@@ -264,7 +264,7 @@ export class ParioAuthRuntime {
         authStorage,
         invitation,
         returnTo: sanitizeReturnTo(input.returnTo),
-        requestOrigin: new URL(request.url).origin,
+        requestOrigin: options.requestOrigin ?? new URL(request.url).origin,
         now,
       })
     } catch (error) {

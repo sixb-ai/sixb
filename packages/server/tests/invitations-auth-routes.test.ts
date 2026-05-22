@@ -189,6 +189,39 @@ describe("auth invitation routes", () => {
     expect(messages[0]?.email).toBe("ava@acme.com")
   })
 
+  test("uses server publicOrigin when sending invitation magic links", async () => {
+    const { messages, pario, storage } = createRuntime()
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ui: false,
+        publicOrigin: "https://app.example.com",
+      })
+    )
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://internal.local/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "ava@acme.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+    const link = linkFromLatestMessage(messages)
+
+    expect(response.status).toBe(201)
+    expect(link.origin).toBe("https://app.example.com")
+    expect(link.pathname).toBe("/auth/callback")
+  })
+
   test("creates invitations on the current server audience", async () => {
     const { pario, storage } = createRuntime()
     const app = createParioApi(

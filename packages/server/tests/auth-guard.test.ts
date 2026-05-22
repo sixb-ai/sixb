@@ -380,6 +380,102 @@ describe("server auth guard", () => {
       }
     }
   })
+
+  test("protects custom app HTML with the app audience while keeping assets public", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const adminSession = await seedSession(storage)
+    const appCredential = createSessionCredential("ses_app")
+    await storage.auth.sessions.create({
+      id: appCredential.sessionId,
+      projectId: "test-project",
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "app",
+      tokenHash: appCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:01:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const port = await getFreePort()
+    let stopCount = 0
+    const server = new ParioServer({
+      pario,
+      host: "127.0.0.1",
+      port,
+      quiet: true,
+      surface: {
+        kind: "customApp",
+        app: {
+          kind: "production",
+          async indexHtml() {
+            return "<!doctype html><html><head></head><body>App</body></html>"
+          },
+          async asset(pathname) {
+            if (pathname === "/main.js") {
+              return {
+                body: "console.log('app')",
+                contentType: "text/javascript; charset=utf-8",
+              }
+            }
+
+            return null
+          },
+          async html() {
+            return null
+          },
+          async stop() {
+            stopCount++
+          },
+        },
+      },
+    })
+
+    await server.start()
+
+    try {
+      const baseUrl = `http://127.0.0.1:${port}`
+      const asset = await fetch(`${baseUrl}/main.js`)
+      const unauthenticatedHtml = await fetch(`${baseUrl}/dashboard`, { redirect: "manual" })
+      const adminCookieHtml = await fetch(`${baseUrl}/dashboard`, {
+        headers: { cookie: adminSession.cookie },
+        redirect: "manual",
+      })
+      const appHtml = await fetch(`${baseUrl}/dashboard`, {
+        headers: { cookie: `pario_session_app=${appCredential.cookieValue}` },
+      })
+      const wrongSessionAudience = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { cookie: adminSession.cookie },
+      })
+      const appSession = await fetch(`${baseUrl}/api/auth/session`, {
+        headers: { cookie: `pario_session_app=${appCredential.cookieValue}` },
+      })
+      const missingHtml = await fetch(`${baseUrl}/missing.html`, {
+        headers: { cookie: `pario_session_app=${appCredential.cookieValue}` },
+      })
+      const mutation = await fetch(`${baseUrl}/dashboard`, { method: "POST" })
+
+      expect(asset.status).toBe(200)
+      expect(await asset.text()).toContain("console.log")
+      expect(unauthenticatedHtml.status).toBe(302)
+      expect(adminCookieHtml.status).toBe(302)
+      expect(mutation.status).toBe(405)
+      expect(await wrongSessionAudience.json()).toEqual({ authenticated: false })
+      expect(await appSession.json()).toMatchObject({
+        authenticated: true,
+        session: { id: "ses_app" },
+      })
+      expect(missingHtml.status).toBe(404)
+
+      expect(appHtml.status).toBe(200)
+      const html = await appHtml.text()
+      expect(html).toContain("window.__PARIO_RUNTIME__")
+      expect(html).toContain('"auth":{"csrfCookieName":"pario_csrf_app"}')
+    } finally {
+      await server.stop()
+      await server.stop()
+    }
+
+    expect(stopCount).toBe(1)
+  })
 })
 
 async function connectWebSocket(url: string): Promise<void> {

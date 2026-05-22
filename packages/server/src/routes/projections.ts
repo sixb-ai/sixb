@@ -1,5 +1,5 @@
-import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
+import type { ParioServerRuntime } from "../runtime"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ProjectionListResponseSchema,
@@ -7,7 +7,7 @@ import {
   ProjectionResponseSchema,
 } from "../schemas/projections"
 
-export function registerProjectionRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerProjectionRoutes(app: Elysia, pario: ParioServerRuntime) {
   return app
     .get(
       "/api/projections",

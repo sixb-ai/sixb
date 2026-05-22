@@ -36,6 +36,7 @@ const Device = defineObjectType({
 
 class FakeOidcClient implements OidcClientAdapter {
   readonly codeVerifier = "verifier"
+  latestGrantUrl: URL | null = null
   tokenClaims: Readonly<Record<string, unknown>> = {
     sub: "00u-founder",
     email: "founder@acme.com",
@@ -65,9 +66,10 @@ class FakeOidcClient implements OidcClientAdapter {
 
   async authorizationCodeGrant(
     _config: unknown,
-    _currentUrl: URL,
+    currentUrl: URL,
     checks: { readonly expectedNonce: string }
   ): Promise<OidcTokenResponse> {
+    this.latestGrantUrl = currentUrl
     const claims = {
       ...this.tokenClaims,
       nonce: checks.expectedNonce,
@@ -182,6 +184,54 @@ describe("oidc auth routes", () => {
     expect(location.origin).toBe("https://idp.example")
     expect(location.searchParams.get("redirect_uri")).toBe("http://localhost/auth/callback")
     expect(location.searchParams.get("state")).toStartWith("oidc_")
+  })
+
+  test("uses server publicOrigin for the OIDC redirect URI", async () => {
+    const { pario } = createRuntime()
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ui: false,
+        publicOrigin: "https://app.example.com",
+      })
+    )
+
+    const response = await app.fetch(
+      new Request("http://internal.local/auth/sign-in?returnTo=/objects", { redirect: "manual" })
+    )
+    const location = new URL(response.headers.get("location") ?? "")
+
+    expect(response.status).toBe(303)
+    expect(location.searchParams.get("redirect_uri")).toBe("https://app.example.com/auth/callback")
+  })
+
+  test("uses server publicOrigin for the OIDC callback token exchange URL", async () => {
+    const { client, pario } = createRuntime()
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ui: false,
+        publicOrigin: "https://app.example.com",
+      })
+    )
+    const signIn = await app.fetch(
+      new Request("http://internal.local/auth/sign-in?returnTo=/dashboard", { redirect: "manual" })
+    )
+    const providerUrl = new URL(signIn.headers.get("location") ?? "")
+    const state = providerUrl.searchParams.get("state")
+
+    const callback = await app.fetch(
+      new Request(`http://internal.local/auth/callback?code=code&state=${state}`, {
+        redirect: "manual",
+      })
+    )
+
+    expect(callback.status).toBe(303)
+    expect(client.latestGrantUrl?.origin).toBe("https://app.example.com")
+    expect(client.latestGrantUrl?.pathname).toBe("/auth/callback")
+    expect(client.latestGrantUrl?.searchParams.get("state")).toBe(state)
   })
 
   test("callback creates a session, sets cookies, and exposes the session shape", async () => {
