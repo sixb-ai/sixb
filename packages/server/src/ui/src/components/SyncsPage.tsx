@@ -5,6 +5,24 @@ import {
   listSyncsOptions,
   requestSyncRunMutation,
 } from "@pario/client/hooks"
+import {
+  Badge,
+  Button,
+  Card,
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionViewToggle,
+  EmptyState,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Ban,
@@ -13,6 +31,7 @@ import {
   ChevronRight,
   Clock3,
   Database,
+  Loader2,
   LoaderCircle,
   Play,
   RefreshCw,
@@ -24,18 +43,6 @@ import { useNavigate, useParams } from "react-router-dom"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { cn } from "../lib/utils"
-import {
-  CollectionCardButton,
-  CollectionCardGrid,
-  CollectionHeader,
-  CollectionTable,
-  CollectionViewToggle,
-  EmptyState,
-  LoadingSpinner,
-  SearchInput,
-} from "./common"
-import { Badge } from "./ui/badge"
 
 type SyncSummary = ListSyncsResponse[number] | GetSyncResponse
 type SyncRun = ListSyncRunsResponse["runs"][number]
@@ -173,7 +180,7 @@ function SyncListItem({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{syncName(sync)}</p>
-          <span className="shrink-0 rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {sync.mode}
           </span>
         </div>
@@ -201,62 +208,55 @@ function SyncTableView({
   onSelect: (syncId: string) => void
 }) {
   return (
-    <CollectionTable>
-      <thead>
-        <tr className="border-b border-border/50 bg-muted text-xs text-muted-foreground">
-          <th className="py-2 pl-3 pr-3 font-medium">Sync</th>
-          <th className="hidden px-3 py-2 font-medium sm:table-cell">Dataset</th>
-          <th className="hidden px-3 py-2 font-medium md:table-cell">Connector</th>
-          <th className="px-3 py-2 font-medium">Latest Run</th>
-          <th className="hidden px-3 py-2 text-right font-medium lg:table-cell">Triggers</th>
-        </tr>
-      </thead>
-      <tbody className="bg-card">
-        {syncs.map((sync, index) => (
-          <tr
-            key={sync.id}
-            onClick={() => onSelect(sync.id)}
-            className={cn(
-              "cursor-pointer transition-colors hover:bg-muted/30",
-              index !== syncs.length - 1 && "border-b border-border/40"
-            )}
-          >
-            <td className="py-2 pl-3 pr-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <RefreshCw className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-foreground">{syncName(sync)}</p>
-                  <p className="font-mono text-[11px] text-muted-foreground">{sync.mode}</p>
+    <Card className="overflow-hidden p-0">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Sync</TableHead>
+            <TableHead className="hidden sm:table-cell">Dataset</TableHead>
+            <TableHead className="hidden md:table-cell">Connector</TableHead>
+            <TableHead>Latest Run</TableHead>
+            <TableHead className="hidden text-right lg:table-cell">Triggers</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {syncs.map((sync) => (
+            <TableRow key={sync.id} onClick={() => onSelect(sync.id)} className="cursor-pointer">
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-2">
+                  <RefreshCw className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{syncName(sync)}</p>
+                    <p className="font-mono text-[11px] text-muted-foreground">{sync.mode}</p>
+                  </div>
                 </div>
-              </div>
-            </td>
-            <td className="hidden px-3 py-2 sm:table-cell">
-              <span className="font-mono text-xs text-muted-foreground">
+              </TableCell>
+              <TableCell className="hidden font-mono text-xs text-muted-foreground sm:table-cell">
                 {sync.target.dataset.id}
-              </span>
-            </td>
-            <td className="hidden px-3 py-2 md:table-cell">
-              <span className="font-mono text-xs text-muted-foreground">{sync.connector.id}</span>
-            </td>
-            <td className="px-3 py-2">
-              {sync.latestRun ? (
-                <div className="flex flex-col items-start gap-1">
-                  <RunStatusBadge status={sync.latestRun.status} />
-                  <span className="text-xs text-muted-foreground">
-                    {formatRelativeTime(sync.latestRun.startedAt)}
-                  </span>
-                </div>
-              ) : (
-                <span className="text-xs text-muted-foreground">No runs</span>
-              )}
-            </td>
-            <td className="hidden px-3 py-2 text-right text-xs text-muted-foreground lg:table-cell">
-              {sync.triggers.length}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </CollectionTable>
+              </TableCell>
+              <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
+                {sync.connector.id}
+              </TableCell>
+              <TableCell>
+                {sync.latestRun ? (
+                  <div className="flex flex-col items-start gap-1">
+                    <RunStatusBadge status={sync.latestRun.status} />
+                    <span className="text-xs text-muted-foreground">
+                      {formatRelativeTime(sync.latestRun.startedAt)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">No runs</span>
+                )}
+              </TableCell>
+              <TableCell className="hidden text-right text-sm text-muted-foreground lg:table-cell">
+                {sync.triggers.length}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -291,7 +291,7 @@ function DetailSurface({
   return (
     <section
       className={cn(
-        "min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/50 bg-card px-4 py-5 sm:px-5",
+        "min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card px-4 py-5 sm:px-5",
         className
       )}
     >
@@ -328,7 +328,7 @@ function MetricTile({
 function LatestRunSummary({ run }: { run: DisplayRun | null }) {
   if (!run) {
     return (
-      <div className="grid rounded-2xl border border-border/50 bg-card sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-border/40">
+      <div className="grid rounded-lg border border-border bg-card sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-border/40">
         <MetricTile label="Latest run" value="No runs yet" />
         <MetricTile label="Started" />
         <MetricTile label="Duration" />
@@ -338,7 +338,7 @@ function LatestRunSummary({ run }: { run: DisplayRun | null }) {
   }
 
   return (
-    <div className="grid overflow-hidden rounded-2xl border border-border/50 bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-border/40 lg:grid-cols-4">
+    <div className="grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-border/40 lg:grid-cols-4">
       <MetricTile
         label="Latest run"
         detail={
@@ -384,7 +384,7 @@ function SchemaTable({ sync }: { sync: SyncSummary }) {
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="border-b border-border/50 text-xs text-muted-foreground">
+          <tr className="border-b border-border text-xs text-muted-foreground">
             <th className="pb-2 font-medium">Column</th>
             <th className="pb-2 font-medium">Type</th>
           </tr>
@@ -408,7 +408,7 @@ function SchemaTable({ sync }: { sync: SyncSummary }) {
 function SyncRunCard({ run }: { run: DisplayRun }) {
   if (isQueuedRun(run)) {
     return (
-      <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/50 bg-background/50 p-3">
+      <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-background p-3">
         <div className="min-w-0 space-y-2">
           <QueuedRunBadge />
           <div className="min-w-0">
@@ -424,7 +424,7 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
   }
 
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border/50 bg-background/50 p-3">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-background p-3">
       <div className="min-w-0 space-y-2">
         <RunStatusBadge status={run.status} />
         <div className="min-w-0">
@@ -490,7 +490,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
             <col className="w-[10%]" />
           </colgroup>
           <thead>
-            <tr className="sticky top-0 border-b border-border/50 bg-card text-xs text-muted-foreground">
+            <tr className="sticky top-0 border-b border-border bg-card text-xs text-muted-foreground">
               <th className="pb-2 pr-4 font-medium">Run</th>
               <th className="px-3 pb-2 font-medium">Status</th>
               <th className="px-3 pb-2 font-medium">Started</th>
@@ -575,7 +575,10 @@ export function SyncsPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading syncs..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading syncs...</span>
+        </div>
       </div>
     )
   }
@@ -583,7 +586,7 @@ export function SyncsPage() {
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <EmptyState
             icon={<RefreshCw className="h-10 w-10" />}
             title="Syncs unavailable"
@@ -618,12 +621,16 @@ export function SyncsPage() {
       />
 
       {syncs.length > 0 && (
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search syncs, connectors, or datasets..."
-          className="mt-2"
-        />
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search syncs, connectors, or datasets..."
+            className="pl-9"
+          />
+        </div>
       )}
 
       <div className="mt-4">
@@ -713,7 +720,10 @@ export function SyncDetailPage() {
   if (syncQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading sync..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading sync...</span>
+        </div>
       </div>
     )
   }
@@ -721,15 +731,17 @@ export function SyncDetailPage() {
   if (syncQuery.isError || !sync) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/syncs")}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="-ml-2 text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft />
           Syncs
-        </button>
-        <div className="rounded-2xl border border-border/50 bg-card p-8">
+        </Button>
+        <div className="rounded-lg border border-border bg-card p-8">
           <EmptyState
             icon={<RefreshCw className="h-10 w-10" />}
             title="Sync not found"
@@ -742,14 +754,16 @@ export function SyncDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl min-w-0 space-y-4 overflow-hidden">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => navigate("/syncs")}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-ml-2 self-start text-muted-foreground hover:text-foreground"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft />
         Syncs
-      </button>
+      </Button>
 
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -758,42 +772,35 @@ export function SyncDetailPage() {
             {syncName(sync)}
           </h1>
           <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{sync.id}</p>
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={() => navigate(`/datasets/${encodeURIComponent(sync.target.dataset.id)}`)}
-            className={cn(
-              "mt-3 inline-flex max-w-full items-center gap-2 rounded-lg border border-border/60 bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors",
-              "hover:border-primary/40 hover:bg-accent/40 hover:text-foreground"
-            )}
+            className="mt-3 max-w-full justify-start text-muted-foreground hover:text-foreground"
           >
-            <Database className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <Database className="text-muted-foreground" />
             <span className="shrink-0">Outputs to</span>
             <span className="truncate font-mono text-foreground">{sync.target.dataset.id}</span>
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          </button>
+            <ChevronRight className="text-muted-foreground" />
+          </Button>
         </div>
-        <button
+        <Button
           type="button"
+          size="lg"
           onClick={handleRequestRun}
           disabled={requestRun.isPending}
-          className={cn(
-            "inline-flex min-h-10 w-full shrink-0 items-center justify-center gap-2 rounded-lg border border-border/60 bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors sm:w-auto",
-            "hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-          )}
+          className="w-full sm:w-auto"
         >
-          {requestRun.isPending ? (
-            <LoaderCircle className="h-4 w-4 animate-spin" />
-          ) : (
-            <Play className="h-4 w-4" />
-          )}
+          {requestRun.isPending ? <LoaderCircle className="animate-spin" /> : <Play />}
           Run
-        </button>
+        </Button>
       </header>
 
       <LatestRunSummary run={latestRun} />
 
       {requestRun.error && (
-        <div className="rounded-2xl border border-destructive/25 bg-destructive/10 px-5 py-3 text-sm text-destructive">
+        <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-5 py-3 text-sm text-destructive">
           {errorMessage(requestRun.error)}
         </div>
       )}
@@ -803,7 +810,10 @@ export function SyncDetailPage() {
           <DetailSurface title="Recent Runs">
             {runsQuery.isLoading ? (
               <div className="py-10">
-                <LoadingSpinner text="Loading runs..." />
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Loading runs...</span>
+                </div>
               </div>
             ) : runsQuery.isError ? (
               <EmptyState
@@ -835,16 +845,17 @@ export function SyncDetailPage() {
                 label="Dataset"
                 mono
                 value={
-                  <button
+                  <Button
                     type="button"
+                    variant="link"
+                    className="h-auto justify-start gap-1 p-0 font-mono"
                     onClick={() =>
                       navigate(`/datasets/${encodeURIComponent(sync.target.dataset.id)}`)
                     }
-                    className="inline-flex max-w-full items-center gap-1 text-left text-primary transition-colors hover:underline"
                   >
                     <span className="truncate">{sync.target.dataset.id}</span>
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0" />
-                  </button>
+                    <ChevronRight />
+                  </Button>
                 }
               />
               <DetailField label="Columns" value={sync.target.dataset.schema.columns.length} />
@@ -859,7 +870,7 @@ export function SyncDetailPage() {
                 {sync.triggers.map((trigger) => (
                   <span
                     key={triggerLabel(trigger)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5 text-sm text-foreground"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground"
                   >
                     <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
                     {triggerLabel(trigger)}

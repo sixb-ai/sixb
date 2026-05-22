@@ -1,0 +1,234 @@
+@import "tailwindcss";
+@source "../**/*.{ts,tsx}";
+
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #fafafa;
+  --foreground: #101010;
+  --card: #ffffff;
+  --card-foreground: #101010;
+  --popover: #ffffff;
+  --popover-foreground: #101010;
+
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+
+  --secondary: #f0f0f0;
+  --secondary-foreground: #202020;
+  --accent: #f0f0f0;
+  --accent-foreground: #202020;
+
+  --muted: #f4f4f4;
+  --muted-foreground: #5f5f5f;
+
+  --destructive: #e64059;
+  --destructive-foreground: #ffffff;
+
+  --border: #e2e2e2;
+  --input: #e2e2e2;
+  --ring: #0a0a0a;
+
+  --success: #16a34a;
+  --warning: #d97706;
+  --info: #0a0a0a;
+
+  --chart-1: #101010;
+  --chart-2: #5f5f5f;
+  --chart-3: #16a34a;
+  --chart-4: #d97706;
+  --chart-5: #e64059;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #5f5f5f;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ececec;
+  --sidebar-accent-foreground: #101010;
+  --sidebar-border: #e2e2e2;
+  --sidebar-ring: #0a0a0a;
+
+  --font-sans: "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-mono: "SF Mono", "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --radius: 0.5rem;
+  /* 8px — cards */
+
+  /* Hairline-only, no shadow depth */
+  --shadow-2xs: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-xs: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-sm: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-md: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-xl: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-2xl: 0 0 0 1px rgba(0, 0, 0, 0);
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f4f4f4;
+  --card: #141414;
+  --card-foreground: #f4f4f4;
+  --popover: #141414;
+  --popover-foreground: #f4f4f4;
+
+  --primary: #f4f4f4;
+  --primary-foreground: #0a0a0a;
+
+  --secondary: #1c1c1c;
+  --secondary-foreground: #f4f4f4;
+  --accent: #1c1c1c;
+  --accent-foreground: #f4f4f4;
+
+  --muted: #1c1c1c;
+  --muted-foreground: #8a8a8a;
+
+  --destructive: #ef4f6a;
+  --destructive-foreground: #ffffff;
+
+  --border: #262626;
+  --input: #262626;
+  --ring: #f4f4f4;
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #f4f4f4;
+
+  --chart-1: #f4f4f4;
+  --chart-2: #8a8a8a;
+  --chart-3: #22c55e;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4f6a;
+
+  --sidebar: #141414;
+  --sidebar-foreground: #8a8a8a;
+  --sidebar-primary: #f4f4f4;
+  --sidebar-primary-foreground: #0a0a0a;
+  --sidebar-accent: #2a2a2a;
+  --sidebar-accent-foreground: #f4f4f4;
+  --sidebar-border: #262626;
+  --sidebar-ring: #f4f4f4;
+
+  --font-sans: "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-mono: "SF Mono", "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --shadow-2xs: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-xs: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-sm: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-md: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-xl: 0 0 0 1px rgba(0, 0, 0, 0);
+  --shadow-2xl: 0 0 0 1px rgba(0, 0, 0, 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+  --radius-sm: calc(var(--radius) - 2px);
+  /* 6px — buttons / inputs */
+  --radius-md: calc(var(--radius) - 1px);
+  /* 7px */
+  --radius-lg: var(--radius);
+  /* 8px — cards */
+  --radius-xl: calc(var(--radius) + 4px);
+  /* 12px — modals */
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 5px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}

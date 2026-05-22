@@ -1,22 +1,16 @@
-import { Box, render, Text, useApp } from "ink"
+import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
 
-function StaticView({ children }: { children: React.ReactNode }) {
-  const { exit } = useApp()
-
-  useEffect(() => {
-    exit()
-  }, [exit])
-
-  return <Box flexDirection="column">{children}</Box>
-}
-
 export async function renderStatic(view: React.ReactNode) {
-  const app = render(<StaticView>{view}</StaticView>, { exitOnCtrlC: false })
-  await app.waitUntilExit()
+  const app = render(<Box flexDirection="column">{view}</Box>, { exitOnCtrlC: false })
+  // Let ink paint, then tear down explicitly. useApp().exit() + waitUntilExit()
+  // stopped resolving in ink v6, which caused callers (e.g. `pario worker`) to
+  // hang and never reach their `process.exit(1)`, masking failures with exit 0.
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  app.unmount()
 }
 
 export function renderPersistent(view: React.ReactNode) {

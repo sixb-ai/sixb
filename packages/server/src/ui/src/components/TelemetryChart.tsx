@@ -1,6 +1,8 @@
 import type { TelemetryHistory } from "@pario/client"
 import { getTelemetryHistoryOptions } from "@pario/client/hooks"
+import { Button, Card } from "@pario/ui/components"
 import { useQuery } from "@tanstack/react-query"
+import { X } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import {
   CartesianGrid,
@@ -13,7 +15,6 @@ import {
   YAxis,
 } from "recharts/lib/index.js"
 import type { TelemetryUpdate } from "../hooks/useWebSocket"
-import { GlassCard } from "./common"
 import { TelemetryValue } from "./TelemetryValue"
 
 interface TelemetryChartProps {
@@ -224,11 +225,8 @@ export function TelemetryChart({
   const latestValue = liveHistory?.data[liveHistory.data.length - 1]
 
   return (
-    <GlassCard
-      padding="none"
-      className="overflow-hidden motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-500"
-    >
-      <div className="flex flex-col gap-3 border-b border-border/50 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
+    <Card className="overflow-hidden p-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-500">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
         <div className="min-w-0">
           <h3 className="break-all text-[14px] font-semibold tracking-tight text-foreground sm:text-[15px] sm:break-normal">
             {objectId} / {propertyId}
@@ -247,19 +245,9 @@ export function TelemetryChart({
               />
             </div>
           )}
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-          >
-            <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
+          <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close chart">
+            <X />
+          </Button>
         </div>
       </div>
 
@@ -370,6 +358,6 @@ export function TelemetryChart({
           </div>
         )}
       </div>
-    </GlassCard>
+    </Card>
   )
 }

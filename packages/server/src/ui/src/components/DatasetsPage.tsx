@@ -9,6 +9,29 @@ import {
   listDatasetsOptions,
   listDatasetVersionsOptions,
 } from "@pario/client/hooks"
+import {
+  Button,
+  Card,
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionViewToggle,
+  EmptyState,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
   ChevronLeft,
@@ -17,6 +40,7 @@ import {
   Columns3,
   Database,
   GitBranch,
+  Loader2,
   Search,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -25,17 +49,6 @@ import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { cn } from "../lib/utils"
-import {
-  CollectionCardButton,
-  CollectionCardGrid,
-  CollectionHeader,
-  CollectionTable,
-  CollectionViewToggle,
-  EmptyState,
-  LoadingSpinner,
-  SearchInput,
-} from "./common"
 
 type Dataset = ListDatasetsResponse[number] | GetDatasetResponse
 type DatasetListItem = ListDatasetsResponse[number]
@@ -150,50 +163,47 @@ function DatasetTableView({
   onSelect: (datasetId: string) => void
 }) {
   return (
-    <CollectionTable>
-      <thead>
-        <tr className="border-b border-border/40 text-[11px] uppercase tracking-wider text-muted-foreground">
-          <th className="py-2.5 pl-4 pr-3 font-medium">Dataset</th>
-          <th className="hidden px-3 py-2.5 text-right font-medium tabular-nums md:table-cell">
-            Rows
-          </th>
-          <th className="px-3 py-2.5 text-right font-medium tabular-nums">Columns</th>
-          <th className="hidden px-4 py-2.5 text-right font-medium tabular-nums lg:table-cell">
-            Refs
-          </th>
-        </tr>
-      </thead>
-      <tbody className="bg-card">
-        {datasets.map((dataset, index) => (
-          <tr
-            key={dataset.id}
-            onClick={() => onSelect(dataset.id)}
-            className={cn(
-              "cursor-pointer transition-colors hover:bg-accent/30",
-              index !== datasets.length - 1 && "border-b border-border/30"
-            )}
-          >
-            <td className="py-3 pl-4 pr-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {datasetName(dataset)}
-                </p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">{dataset.id}</p>
-              </div>
-            </td>
-            <td className="hidden px-3 py-3 text-right text-sm tabular-nums text-foreground md:table-cell">
-              {formatCount(dataset.latestVersion?.rowCount)}
-            </td>
-            <td className="px-3 py-3 text-right text-sm tabular-nums text-foreground">
-              {dataset.schema.columns.length}
-            </td>
-            <td className="hidden px-4 py-3 text-right text-sm tabular-nums text-muted-foreground lg:table-cell">
-              {sourceCount(dataset) + consumerCount(dataset)}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </CollectionTable>
+    <Card className="overflow-hidden p-0">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Dataset</TableHead>
+            <TableHead className="hidden text-right md:table-cell">Rows</TableHead>
+            <TableHead className="text-right">Columns</TableHead>
+            <TableHead className="hidden text-right lg:table-cell">Refs</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {datasets.map((dataset) => (
+            <TableRow
+              key={dataset.id}
+              onClick={() => onSelect(dataset.id)}
+              className="cursor-pointer"
+            >
+              <TableCell>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {datasetName(dataset)}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {dataset.id}
+                  </p>
+                </div>
+              </TableCell>
+              <TableCell className="hidden text-right text-sm tabular-nums text-foreground md:table-cell">
+                {formatCount(dataset.latestVersion?.rowCount)}
+              </TableCell>
+              <TableCell className="text-right text-sm tabular-nums text-foreground">
+                {dataset.schema.columns.length}
+              </TableCell>
+              <TableCell className="hidden text-right text-sm tabular-nums text-muted-foreground lg:table-cell">
+                {sourceCount(dataset) + consumerCount(dataset)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -211,7 +221,7 @@ function DetailSurface({
   return (
     <section
       className={cn(
-        "min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/40 bg-card px-5 py-5 sm:px-6",
+        "min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card px-5 py-5 sm:px-6",
         className
       )}
     >
@@ -261,7 +271,7 @@ function DatasetMetrics({
     : "—"
 
   return (
-    <div className="grid overflow-hidden rounded-2xl border border-border/40 bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-border/40 lg:grid-cols-4">
+    <div className="grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-border/40 lg:grid-cols-4">
       <MetricTile
         label="Version"
         value={versionValue}
@@ -298,20 +308,23 @@ function VersionSelect({
   if (versions.length === 0) return null
 
   return (
-    <label className="flex min-w-0 items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-      Version
-      <select
-        value={selectedVersionId ?? ""}
-        onChange={(event) => onSelect(event.target.value)}
-        className="h-9 max-w-[280px] rounded-lg border border-border/40 bg-card pl-3 pr-6 font-mono text-xs text-foreground outline-none transition-colors hover:bg-accent/40 focus:border-ring"
-      >
-        {versions.map((version) => (
-          <option key={version.versionId} value={version.versionId}>
-            {version.versionId}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="flex min-w-0 items-center gap-2">
+      <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        Version
+      </Label>
+      <Select value={selectedVersionId ?? undefined} onValueChange={onSelect}>
+        <SelectTrigger className="h-9 max-w-[280px] font-mono text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {versions.map((version) => (
+            <SelectItem key={version.versionId} value={version.versionId} className="font-mono">
+              {version.versionId}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   )
 }
 
@@ -339,7 +352,7 @@ function SchemaTable({
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
         <thead>
-          <tr className="border-b border-border/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+          <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
             <th className="pb-2.5 font-medium">Column</th>
             <th className="px-3 pb-2.5 font-medium">Type</th>
             <th className="pb-2.5 text-right font-medium">Role</th>
@@ -388,7 +401,10 @@ function RowPreview({
   if (isLoading) {
     return (
       <div className="py-10">
-        <LoadingSpinner text="Loading rows..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading rows...</span>
+        </div>
       </div>
     )
   }
@@ -423,33 +439,32 @@ function RowPreview({
       : `${rangeStart}-${rangeEnd}`
 
   return (
-    <div className="-mx-5 min-w-0 sm:-mx-6">
+    <div className="-mx-5 min-w-0 border-y border-border sm:-mx-6">
       <div className="max-h-[520px] overflow-auto">
-        <table className="w-full min-w-[720px] table-fixed text-left text-sm">
-          <thead>
-            <tr className="sticky top-0 border-b border-border/40 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
+        <Table className="min-w-[720px] table-fixed">
+          <TableHeader className="sticky top-0 z-10">
+            <TableRow>
               {rows.columns.map((column, columnIndex) => (
-                <th
+                <TableHead
                   key={column}
                   className={cn(
-                    "w-48 px-3 py-2.5 font-medium",
+                    "w-48 font-mono normal-case",
                     columnIndex === 0 && "pl-5 sm:pl-6",
                     columnIndex === rows.columns.length - 1 && "pr-5 sm:pr-6"
                   )}
                 >
-                  <span className="block truncate font-mono normal-case">{column}</span>
-                </th>
+                  <span className="block truncate">{column}</span>
+                </TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/30">
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {rows.rows.map((row, index) => (
-              <tr key={`${rows.offset}:${index}`} className="align-top">
+              <TableRow key={`${rows.offset}:${index}`} className="align-top">
                 {rows.columns.map((column, columnIndex) => (
-                  <td
+                  <TableCell
                     key={column}
                     className={cn(
-                      "px-3 py-3",
                       columnIndex === 0 && "pl-5 sm:pl-6",
                       columnIndex === rows.columns.length - 1 && "pr-5 sm:pr-6"
                     )}
@@ -457,35 +472,37 @@ function RowPreview({
                     <span className="block max-h-16 overflow-hidden break-words font-mono text-xs text-foreground">
                       {formatValue(row[column])}
                     </span>
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
       <div className="mt-3 flex flex-col gap-2 px-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <span className="tabular-nums">{rangeLabel}</span>
         <div className="flex items-center gap-1">
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onPrevious}
             disabled={offset === 0}
             aria-label="Previous page"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
           >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
-          <button
+            <ChevronLeft />
+          </Button>
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onNext}
             disabled={!rows.hasMore}
             aria-label="Next page"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
           >
-            <ChevronRight className="h-4 w-4" />
-          </button>
+            <ChevronRight />
+          </Button>
         </div>
       </div>
     </div>
@@ -520,17 +537,18 @@ function VersionsTable({
 
           return (
             <li key={version.versionId}>
-              <button
+              <Button
                 type="button"
+                variant="ghost"
                 onClick={() => onSelect(version.versionId)}
                 className={cn(
-                  "flex w-full min-w-0 items-start justify-between gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-accent/40",
-                  selected && "bg-accent/40"
+                  "h-auto w-full justify-start py-2.5 text-left",
+                  selected && "bg-muted"
                 )}
               >
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-mono text-xs text-foreground">{version.versionId}</p>
-                  <p className="mt-1 truncate text-[11px] text-muted-foreground">
+                  <p className="mt-1 truncate text-[11px] font-normal text-muted-foreground">
                     {version.producer
                       ? `${version.producer.kind}${
                           version.producer.id ? ` / ${version.producer.id}` : ""
@@ -538,7 +556,7 @@ function VersionsTable({
                       : formatRelativeTime(version.createdAt)}
                   </p>
                 </div>
-              </button>
+              </Button>
             </li>
           )
         })}
@@ -593,14 +611,16 @@ function ReferenceList({
 
           if (onSelect) {
             return (
-              <button
+              <Button
                 key={id}
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => onSelect(id)}
-                className="-mx-2 inline-flex max-w-full items-center gap-2 rounded-lg px-2 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-accent/40"
+                className="-mx-2 max-w-full justify-start font-mono text-xs text-foreground"
               >
                 {content}
-              </button>
+              </Button>
             )
           }
 
@@ -635,7 +655,10 @@ export function DatasetsPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading datasets..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading datasets...</span>
+        </div>
       </div>
     )
   }
@@ -643,7 +666,7 @@ export function DatasetsPage() {
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <EmptyState
             icon={<Database className="h-10 w-10" />}
             title="Datasets unavailable"
@@ -678,12 +701,16 @@ export function DatasetsPage() {
       />
 
       {datasets.length > 0 && (
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search datasets, columns, syncs, or pipelines..."
-          className="mt-2"
-        />
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search datasets, columns, syncs, or pipelines..."
+            className="pl-9"
+          />
+        </div>
       )}
 
       <div className="mt-4">
@@ -781,7 +808,10 @@ export function DatasetDetailPage() {
   if (datasetQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading dataset..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading dataset...</span>
+        </div>
       </div>
     )
   }
@@ -789,15 +819,17 @@ export function DatasetDetailPage() {
   if (datasetQuery.isError || !dataset) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/datasets")}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="-ml-2 self-start text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft />
           Datasets
-        </button>
-        <div className="rounded-2xl border border-border/50 bg-card p-8">
+        </Button>
+        <div className="rounded-lg border border-border bg-card p-8">
           <EmptyState
             icon={<Database className="h-10 w-10" />}
             title="Dataset not found"
@@ -812,14 +844,16 @@ export function DatasetDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4 overflow-hidden">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => navigate("/datasets")}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-ml-2 self-start text-muted-foreground hover:text-foreground"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft />
         Datasets
-      </button>
+      </Button>
 
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
@@ -879,7 +913,10 @@ export function DatasetDetailPage() {
           <DetailSurface title="Versions">
             {versionsQuery.isLoading ? (
               <div className="py-10">
-                <LoadingSpinner text="Loading versions..." />
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <span className="text-sm">Loading versions...</span>
+                </div>
               </div>
             ) : versionsQuery.isError ? (
               <EmptyState

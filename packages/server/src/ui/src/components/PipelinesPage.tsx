@@ -12,6 +12,24 @@ import {
   listPipelinesOptions,
   requestPipelineRunMutation,
 } from "@pario/client/hooks"
+import {
+  Badge,
+  Button,
+  Card,
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionViewToggle,
+  EmptyState,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Background,
@@ -37,6 +55,7 @@ import {
   Database,
   FunctionSquare,
   History,
+  Loader2,
   LoaderCircle,
   Play,
   Rows3,
@@ -50,18 +69,6 @@ import { useNavigate, useParams } from "react-router-dom"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { cn } from "../lib/utils"
-import {
-  CollectionCardButton,
-  CollectionCardGrid,
-  CollectionHeader,
-  CollectionTable,
-  CollectionViewToggle,
-  EmptyState,
-  LoadingSpinner,
-  SearchInput,
-} from "./common"
-import { Badge } from "./ui/badge"
 
 type PipelineSummary = ListPipelinesResponse[number] | GetPipelineResponse
 type PipelineRun = NonNullable<PipelineSummary["latestRun"]>
@@ -184,7 +191,7 @@ function PipelineListItem({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{pipelineName(pipeline)}</p>
-          <span className="shrink-0 rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {pipeline.graph.nodes.length} step{pipeline.graph.nodes.length === 1 ? "" : "s"}
           </span>
         </div>
@@ -212,56 +219,57 @@ function PipelineTableView({
   onSelect: (pipelineId: string) => void
 }) {
   return (
-    <CollectionTable>
-      <thead>
-        <tr className="border-b border-border/50 bg-muted text-xs text-muted-foreground">
-          <th className="py-2 pl-3 pr-3 font-medium">Pipeline</th>
-          <th className="hidden px-3 py-2 font-medium sm:table-cell">Steps</th>
-          <th className="hidden px-3 py-2 font-medium md:table-cell">Triggers</th>
-          <th className="px-3 py-2 font-medium">Latest Run</th>
-        </tr>
-      </thead>
-      <tbody className="bg-card">
-        {pipelines.map((pipeline, index) => (
-          <tr
-            key={pipeline.id}
-            onClick={() => onSelect(pipeline.id)}
-            className={cn(
-              "cursor-pointer transition-colors hover:bg-muted/30",
-              index !== pipelines.length - 1 && "border-b border-border/40"
-            )}
-          >
-            <td className="py-2 pl-3 pr-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Workflow className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-foreground">{pipelineName(pipeline)}</p>
-                  <p className="font-mono text-[11px] text-muted-foreground">{pipeline.id}</p>
+    <Card className="overflow-hidden p-0">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Pipeline</TableHead>
+            <TableHead className="hidden sm:table-cell">Steps</TableHead>
+            <TableHead className="hidden md:table-cell">Triggers</TableHead>
+            <TableHead>Latest Run</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {pipelines.map((pipeline) => (
+            <TableRow
+              key={pipeline.id}
+              onClick={() => onSelect(pipeline.id)}
+              className="cursor-pointer"
+            >
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-2">
+                  <Workflow className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {pipelineName(pipeline)}
+                    </p>
+                    <p className="font-mono text-[11px] text-muted-foreground">{pipeline.id}</p>
+                  </div>
                 </div>
-              </div>
-            </td>
-            <td className="hidden px-3 py-2 sm:table-cell">
-              <span className="text-xs text-muted-foreground">{pipeline.graph.nodes.length}</span>
-            </td>
-            <td className="hidden px-3 py-2 md:table-cell">
-              <span className="text-xs text-muted-foreground">{pipeline.triggers.length}</span>
-            </td>
-            <td className="px-3 py-2">
-              {pipeline.latestRun ? (
-                <div className="flex flex-col items-start gap-1">
-                  <RunStatusBadge status={pipeline.latestRun.status} />
-                  <span className="text-xs text-muted-foreground">
-                    {formatRelativeTime(pipeline.latestRun.startedAt)}
-                  </span>
-                </div>
-              ) : (
-                <span className="text-xs text-muted-foreground">No runs</span>
-              )}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </CollectionTable>
+              </TableCell>
+              <TableCell className="hidden text-sm text-muted-foreground sm:table-cell">
+                {pipeline.graph.nodes.length}
+              </TableCell>
+              <TableCell className="hidden text-sm text-muted-foreground md:table-cell">
+                {pipeline.triggers.length}
+              </TableCell>
+              <TableCell>
+                {pipeline.latestRun ? (
+                  <div className="flex flex-col items-start gap-1">
+                    <RunStatusBadge status={pipeline.latestRun.status} />
+                    <span className="text-xs text-muted-foreground">
+                      {formatRelativeTime(pipeline.latestRun.startedAt)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">No runs</span>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -291,7 +299,10 @@ export function PipelinesPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading pipelines..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading pipelines...</span>
+        </div>
       </div>
     )
   }
@@ -299,7 +310,7 @@ export function PipelinesPage() {
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <EmptyState
             icon={<Workflow className="h-10 w-10" />}
             title="Pipelines unavailable"
@@ -334,12 +345,16 @@ export function PipelinesPage() {
       />
 
       {pipelines.length > 0 && (
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search pipelines, steps, or datasets..."
-          className="mt-2"
-        />
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search pipelines, steps, or datasets..."
+            className="pl-9"
+          />
+        </div>
       )}
 
       <div className="mt-4">
@@ -547,7 +562,7 @@ function DatasetGraphCard({ data, selected }: NodeProps<DatasetGraphNode>) {
   return (
     <div
       className={cn(
-        "min-w-[160px] max-w-[220px] cursor-pointer rounded-xl border border-border/40 bg-card/90 px-3 py-2 shadow-sm backdrop-blur transition-all hover:border-border/70",
+        "min-w-[160px] max-w-[220px] cursor-pointer rounded-xl border border-border bg-card px-3 py-2 shadow-sm  transition-all hover:border-border",
         selected ? "ring-2 ring-primary/40" : ""
       )}
     >
@@ -581,7 +596,7 @@ function StepGraphCard({ data, selected }: NodeProps<StepGraphNode>) {
   return (
     <div
       className={cn(
-        "min-w-[160px] max-w-[220px] rounded-xl border border-border/40 bg-muted/40 px-3 py-2 shadow-sm backdrop-blur transition-all dark:bg-muted/20",
+        "min-w-[160px] max-w-[220px] rounded-xl border border-border bg-muted px-3 py-2 shadow-sm  transition-all dark:bg-muted",
         selected ? "ring-2 ring-foreground/20" : ""
       )}
     >
@@ -683,7 +698,7 @@ function PipelineCanvas({
     >
       <Background variant={BackgroundVariant.Dots} gap={18} size={1} className="opacity-50" />
       <Controls
-        className="!rounded-xl !border !border-border/60 !bg-card/90 !shadow-sm !backdrop-blur"
+        className="!rounded-xl !border !border-border !bg-card !shadow-sm !"
         showInteractive={false}
       />
     </ReactFlow>
@@ -712,29 +727,28 @@ function RunsFloatingPanel({
   const runs = runsQuery.data?.runs ?? []
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-16 z-20 w-[320px] max-w-[calc(100%-2rem)] overflow-hidden rounded-2xl border border-border/60 bg-card/95 shadow-xl backdrop-blur-xl">
-      <div className="flex items-center justify-between border-b border-border/40 px-4 py-2.5">
+    <div className="pointer-events-auto absolute right-4 top-16 z-20 w-[320px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-card shadow-none ">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-2">
           <History className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-[13px] font-medium text-foreground">Runs</span>
           {runs.length > 0 && (
-            <Badge variant="secondary" className="bg-accent/70 text-[10px]">
+            <Badge variant="secondary" className="bg-muted text-[10px]">
               {runs.length}
             </Badge>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="-mr-1.5 rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+        <Button type="button" variant="ghost" size="icon-xs" onClick={onClose} className="-mr-1.5">
+          <X />
+        </Button>
       </div>
       <div className="max-h-[60vh] overflow-y-auto">
         {runsQuery.isLoading ? (
           <div className="px-4 py-8">
-            <LoadingSpinner text="Loading runs..." />
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Loading runs...</span>
+            </div>
           </div>
         ) : runs.length === 0 ? (
           <div className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -845,7 +859,7 @@ function DatasetPreviewDrawer({
       )}
       aria-hidden={!open}
     >
-      <div className="flex h-full w-full flex-col border-t border-border/60 bg-card/95 backdrop-blur-xl">
+      <div className="flex h-full w-full flex-col border-t border-border bg-card ">
         {/* Drag handle (visual only) */}
         <div className="flex shrink-0 justify-center pt-2">
           <div className="h-1 w-10 rounded-full bg-muted-foreground/25" />
@@ -866,18 +880,19 @@ function DatasetPreviewDrawer({
               <p className="mt-0.5 truncate text-xs text-muted-foreground">{dataset.description}</p>
             )}
           </div>
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
             aria-label="Close dataset preview"
           >
-            <X className="h-4 w-4" />
-          </button>
+            <X />
+          </Button>
         </div>
 
         {/* Stats strip */}
-        <div className="grid shrink-0 grid-cols-2 gap-px overflow-hidden border-y border-border/40 bg-border/40 sm:grid-cols-4">
+        <div className="grid shrink-0 grid-cols-2 gap-px overflow-hidden border-y border-border bg-border/40 sm:grid-cols-4">
           <div className="bg-card px-4 py-2">
             <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
               Rows
@@ -925,7 +940,10 @@ function DatasetPreviewDrawer({
         <div className="min-h-0 flex-1 overflow-auto">
           {datasetQuery.isLoading || rowsQuery.isLoading ? (
             <div className="flex h-full items-center justify-center">
-              <LoadingSpinner text="Loading dataset..." />
+              <div className="flex items-center gap-3 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-sm">Loading dataset...</span>
+              </div>
             </div>
           ) : errorText ? (
             <div className="flex h-full items-center justify-center px-6">
@@ -955,54 +973,51 @@ function DatasetPreviewDrawer({
               />
             </div>
           ) : (
-            <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur">
-                <tr className="border-b border-border/50 text-muted-foreground">
+            <Table>
+              <TableHeader className="sticky top-0 z-10">
+                <TableRow>
                   {columns.map((column) => (
-                    <th
-                      key={column}
-                      className="whitespace-nowrap px-4 py-2 font-medium first:pl-5 last:pr-5"
-                    >
+                    <TableHead key={column} className="font-mono normal-case first:pl-5 last:pr-5">
                       <div className="flex flex-col">
-                        <span className="font-mono text-[11px] text-foreground">{column}</span>
+                        <span className="text-[11px] text-foreground">{column}</span>
                         {columnTypes.get(column) && (
-                          <span className="font-mono text-[10px] text-muted-foreground">
+                          <span className="text-[10px] text-muted-foreground">
                             {columnTypes.get(column)}
                           </span>
                         )}
                       </div>
-                    </th>
+                    </TableHead>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/30 bg-card">
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row, rowIndex) => (
-                  <tr key={`row-${rowIndex}`} className="hover:bg-muted/30">
+                  <TableRow key={`row-${rowIndex}`}>
                     {columns.map((column) => {
                       const raw = (row as Record<string, unknown>)[column]
                       const isNullish = raw === null || raw === undefined
                       return (
-                        <td
+                        <TableCell
                           key={column}
                           className={cn(
-                            "max-w-[320px] truncate whitespace-nowrap px-4 py-2 font-mono text-[11px] first:pl-5 last:pr-5",
+                            "max-w-[320px] truncate whitespace-nowrap font-mono text-[11px] first:pl-5 last:pr-5",
                             isNullish ? "italic text-muted-foreground/60" : "text-foreground"
                           )}
                           title={formatCellValue(raw)}
                         >
                           {formatCellValue(raw)}
-                        </td>
+                        </TableCell>
                       )
                     })}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           )}
         </div>
 
         {rowsData && rows.length > 0 && (
-          <div className="flex shrink-0 items-center justify-between border-t border-border/40 bg-background/40 px-5 py-2 text-[11px] text-muted-foreground">
+          <div className="flex shrink-0 items-center justify-between border-t border-border bg-background/40 px-5 py-2 text-[11px] text-muted-foreground">
             <span>
               Showing {rowsData.offset + 1}–{rowsData.offset + rows.length}
               {rowsData.total !== undefined ? ` of ${formatRowCount(rowsData.total)}` : ""}
@@ -1045,7 +1060,10 @@ export function PipelineDetailPage() {
   if (pipelineQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading pipeline..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading pipeline...</span>
+        </div>
       </div>
     )
   }
@@ -1053,15 +1071,17 @@ export function PipelineDetailPage() {
   if (pipelineQuery.isError || !pipeline) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/pipelines")}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="-ml-2 text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft />
           Pipelines
-        </button>
-        <div className="rounded-2xl border border-border/50 bg-card p-8">
+        </Button>
+        <div className="rounded-lg border border-border bg-card p-8">
           <EmptyState
             icon={<Workflow className="h-10 w-10" />}
             title="Pipeline not found"
@@ -1087,16 +1107,17 @@ export function PipelineDetailPage() {
 
           {/* Floating header */}
           <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
-            <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-2xl border border-border/60 bg-card/85 shadow-sm backdrop-blur-xl">
+            <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card shadow-sm ">
               <div className="flex items-center gap-3 px-3 py-2">
-                <button
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   onClick={() => navigate("/pipelines")}
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
                   aria-label="Back to pipelines"
                 >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
+                  <ChevronLeft />
+                </Button>
                 <div className="min-w-0">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     Pipeline
@@ -1106,18 +1127,18 @@ export function PipelineDetailPage() {
                   </h1>
                 </div>
                 {pipeline.latestRun && (
-                  <div className="ml-1 hidden shrink-0 border-l border-border/40 pl-3 sm:block">
+                  <div className="ml-1 hidden shrink-0 border-l border-border pl-3 sm:block">
                     <RunStatusBadge status={pipeline.latestRun.status} />
                   </div>
                 )}
               </div>
               {(pipeline.graph.nodes.length > 0 || pipeline.triggers.length > 0) && (
-                <div className="flex flex-wrap items-center gap-2 border-t border-border/40 bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
                   <span>{pipelineSummary(pipeline)}</span>
                   {pipeline.triggers.map((trigger) => (
                     <span
                       key={triggerLabel(trigger)}
-                      className="inline-flex items-center gap-1 rounded-md border border-border/40 bg-background/50 px-1.5 py-0.5"
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5"
                     >
                       <Clock3 className="h-3 w-3" />
                       {triggerLabel(trigger)}
@@ -1127,37 +1148,26 @@ export function PipelineDetailPage() {
               )}
             </div>
 
-            <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-border/60 bg-card/85 p-1.5 shadow-sm backdrop-blur-xl">
-              <button
+            <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-border bg-card p-1.5 shadow-sm ">
+              <Button
                 type="button"
+                variant={runsOpen ? "secondary" : "ghost"}
+                size="sm"
                 onClick={() => setRunsOpen((open) => !open)}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors",
-                  runsOpen
-                    ? "bg-foreground/10 text-foreground"
-                    : "text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                )}
                 aria-expanded={runsOpen}
               >
-                <History className="h-3.5 w-3.5" />
+                <History />
                 Runs
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
+                size="sm"
                 onClick={handleRequestRun}
                 disabled={requestRun.isPending}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors",
-                  "hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
-                )}
               >
-                {requestRun.isPending ? (
-                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Play className="h-3.5 w-3.5" />
-                )}
+                {requestRun.isPending ? <LoaderCircle className="animate-spin" /> : <Play />}
                 Run
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -1168,7 +1178,7 @@ export function PipelineDetailPage() {
           />
 
           {requestRun.error && (
-            <div className="pointer-events-auto absolute bottom-4 right-4 z-10 max-w-sm rounded-2xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm backdrop-blur">
+            <div className="pointer-events-auto absolute bottom-4 right-4 z-10 max-w-sm rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm ">
               {errorMessage(requestRun.error)}
             </div>
           )}

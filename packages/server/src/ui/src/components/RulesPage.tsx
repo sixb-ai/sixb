@@ -5,26 +5,32 @@ import {
   type ListRulesResponse,
 } from "@pario/client"
 import { getRuleOptions, listRuleStatesOptions, listRulesOptions } from "@pario/client/hooks"
+import {
+  Badge,
+  Button,
+  Card,
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionViewToggle,
+  EmptyState,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { BellRing, ChevronLeft, ChevronRight, ListChecks, Search } from "lucide-react"
+import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { cn } from "../lib/utils"
-import {
-  CollectionCardButton,
-  CollectionCardGrid,
-  CollectionHeader,
-  CollectionTable,
-  CollectionViewToggle,
-  EmptyState,
-  LoadingSpinner,
-  SearchInput,
-} from "./common"
-import { Badge } from "./ui/badge"
 
 type RuleSummary = ListRulesResponse[number] | GetRuleResponse
 type RuleState = ListRuleStatesResponse["states"][number]
@@ -163,7 +169,7 @@ function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): 
 function ActiveStateBadge({ count }: { count: number }) {
   if (count === 0) {
     return (
-      <Badge variant="outline" className="rounded-md border-border/60 text-muted-foreground">
+      <Badge variant="outline" className="rounded-md border-border text-muted-foreground">
         None active
       </Badge>
     )
@@ -213,7 +219,7 @@ function RuleListItem({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
-          <span className="shrink-0 rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {rule.subject.objectTypeId}
           </span>
         </div>
@@ -242,49 +248,46 @@ function RuleTableView({
   onSelect: (ruleId: string) => void
 }) {
   return (
-    <CollectionTable>
-      <thead>
-        <tr className="border-b border-border/50 bg-muted text-xs text-muted-foreground">
-          <th className="py-2 pl-3 pr-3 font-medium">Rule</th>
-          <th className="hidden px-3 py-2 font-medium sm:table-cell">Subject</th>
-          <th className="hidden px-3 py-2 font-medium md:table-cell">Predicate</th>
-          <th className="px-3 py-2 font-medium">Active</th>
-          <th className="hidden px-3 py-2 text-right font-medium lg:table-cell">Dependencies</th>
-        </tr>
-      </thead>
-      <tbody className="bg-card">
-        {rules.map((rule, index) => {
-          const activeCount = activeCountByRule.get(rule.id) ?? 0
-          return (
-            <tr
-              key={rule.id}
-              onClick={() => onSelect(rule.id)}
-              className={cn(
-                "cursor-pointer transition-colors hover:bg-muted/30",
-                index > 0 && "border-t border-border/40"
-              )}
-            >
-              <td className="max-w-[260px] py-2.5 pl-3 pr-3">
-                <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
-                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{rule.id}</p>
-              </td>
-              <td className="hidden px-3 py-2.5 font-mono text-xs text-muted-foreground sm:table-cell">
-                {rule.subject.objectTypeId}
-              </td>
-              <td className="hidden max-w-[280px] px-3 py-2.5 text-xs text-muted-foreground md:table-cell">
-                <span className="block truncate">{describePredicate(rule.predicate)}</span>
-              </td>
-              <td className="px-3 py-2.5">
-                <ActiveStateBadge count={activeCount} />
-              </td>
-              <td className="hidden px-3 py-2.5 text-right text-xs text-muted-foreground lg:table-cell">
-                {rule.dependencies.length}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </CollectionTable>
+    <Card className="overflow-hidden p-0">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Rule</TableHead>
+            <TableHead className="hidden sm:table-cell">Subject</TableHead>
+            <TableHead className="hidden md:table-cell">Predicate</TableHead>
+            <TableHead>Active</TableHead>
+            <TableHead className="hidden text-right lg:table-cell">Dependencies</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rules.map((rule) => {
+            const activeCount = activeCountByRule.get(rule.id) ?? 0
+            return (
+              <TableRow key={rule.id} onClick={() => onSelect(rule.id)} className="cursor-pointer">
+                <TableCell className="max-w-[260px]">
+                  <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
+                  <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
+                    {rule.id}
+                  </p>
+                </TableCell>
+                <TableCell className="hidden font-mono text-xs text-muted-foreground sm:table-cell">
+                  {rule.subject.objectTypeId}
+                </TableCell>
+                <TableCell className="hidden max-w-[280px] text-xs text-muted-foreground md:table-cell">
+                  <span className="block truncate">{describePredicate(rule.predicate)}</span>
+                </TableCell>
+                <TableCell>
+                  <ActiveStateBadge count={activeCount} />
+                </TableCell>
+                <TableCell className="hidden text-right text-sm text-muted-foreground lg:table-cell">
+                  {rule.dependencies.length}
+                </TableCell>
+              </TableRow>
+            )
+          })}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -297,7 +300,7 @@ function PredicateGroupLabel({ children }: { children: React.ReactNode }) {
 }
 
 function PredicateGroupBody({ children }: { children: React.ReactNode }) {
-  return <div className="mt-2 ml-1 space-y-2 border-l border-border/50 pl-4">{children}</div>
+  return <div className="mt-2 ml-1 space-y-2 border-l border-border pl-4">{children}</div>
 }
 
 function PropertyTerm({ record }: { record: Record<string, unknown> }) {
@@ -384,19 +387,20 @@ function RuleStateCard({
   onSelectObject: () => void
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onSelectObject}
-      className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/50 bg-card/40 p-3 text-left transition-colors hover:bg-muted/40"
+      className="h-auto w-full min-w-0 max-w-full flex-col items-stretch overflow-hidden p-3 text-left"
     >
       <div className="flex min-w-0 items-center justify-between gap-3">
         <p className="truncate font-mono text-xs text-foreground">{state.subject.primaryId}</p>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">
+      <p className="mt-2 text-xs font-normal text-muted-foreground">
         Triggered {formatRelativeTime(state.triggeredAt)}
       </p>
-    </button>
+    </Button>
   )
 }
 
@@ -429,7 +433,7 @@ function RuleStatesList({
           />
         ))}
       </div>
-      <div className="hidden overflow-hidden rounded-xl border border-border/50 md:block">
+      <div className="hidden overflow-hidden rounded-xl border border-border md:block">
         <table className="w-full table-fixed text-left text-sm">
           <colgroup>
             <col className="w-auto" />
@@ -437,7 +441,7 @@ function RuleStatesList({
             <col className="w-10" />
           </colgroup>
           <thead>
-            <tr className="border-b border-border/50 bg-muted/40 text-xs text-muted-foreground">
+            <tr className="border-b border-border bg-muted text-xs text-muted-foreground">
               <th className="py-2 pl-4 pr-3 font-medium">Object</th>
               <th className="px-3 py-2 font-medium">Triggered</th>
               <th className="py-2 pl-3 pr-4 font-medium" />
@@ -447,7 +451,7 @@ function RuleStatesList({
             {states.map((state) => (
               <tr
                 key={`${state.ruleId}:${state.subject.objectTypeId}:${state.subject.primaryId}`}
-                className="group cursor-pointer transition-colors hover:bg-muted/40"
+                className="group cursor-pointer transition-colors hover:bg-muted"
                 onClick={() => onSelectObject(state)}
               >
                 <td className="py-2.5 pl-4 pr-3">
@@ -566,7 +570,10 @@ export function RulesPage() {
   if (rulesQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading rules..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading rules...</span>
+        </div>
       </div>
     )
   }
@@ -574,7 +581,7 @@ export function RulesPage() {
   if (rulesQuery.isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <EmptyState
             icon={<ListChecks className="h-10 w-10" />}
             title="Rules unavailable"
@@ -609,12 +616,16 @@ export function RulesPage() {
       />
 
       {rules.length > 0 && (
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search rules, subjects, or predicates..."
-          className="mt-2"
-        />
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search rules, subjects, or predicates..."
+            className="pl-9"
+          />
+        </div>
       )}
 
       <div className="mt-4">
@@ -660,7 +671,10 @@ export function RuleDetailPage() {
   if (ruleQuery.isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading rule..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading rule...</span>
+        </div>
       </div>
     )
   }
@@ -668,15 +682,17 @@ export function RuleDetailPage() {
   if (ruleQuery.isError || !rule) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/rules")}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="-ml-2 text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft />
           Rules
-        </button>
-        <div className="rounded-2xl border border-border/50 bg-card p-8">
+        </Button>
+        <div className="rounded-lg border border-border bg-card p-8">
           <EmptyState
             icon={<ListChecks className="h-10 w-10" />}
             title="Rule not found"
@@ -692,14 +708,16 @@ export function RuleDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-4xl min-w-0 space-y-8 overflow-hidden">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => navigate("/rules")}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-ml-2 self-start text-muted-foreground hover:text-foreground"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft />
         Rules
-      </button>
+      </Button>
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
@@ -740,7 +758,10 @@ export function RuleDetailPage() {
         <h2 className="text-sm font-semibold tracking-normal text-foreground">Active states</h2>
         {statesQuery.isLoading ? (
           <div className="py-10">
-            <LoadingSpinner text="Loading states..." />
+            <div className="flex items-center gap-3 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Loading states...</span>
+            </div>
           </div>
         ) : statesQuery.isError ? (
           <EmptyState

@@ -23,7 +23,9 @@
     "create-pario": "bun packages/cli/src/index.tsx create",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "generate:client": "bun --filter @pario/server generate:openapi && bun --filter @pario/client generate && bun check:fix"
+    "generate:client": "bun --filter @pario/server generate:openapi && bun --filter @pario/client generate && bun check:fix",
+    "ui:dev": "bun --filter @pario/ui dev",
+    "ui:add": "bun --cwd packages/ui x shadcn@latest add"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
