@@ -1,7 +1,10 @@
 import {
+  type AuthSessionAudience,
   type AuthSessionResult,
+  DEFAULT_AUTH_SESSION_AUDIENCE,
   type OntologySource,
   type Pario,
+  resolveAuthSessionAudience,
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
 import { classifyRoute } from "./public-routes"
@@ -14,15 +17,18 @@ import {
 
 export interface ServerAuthGuardOptions {
   readonly pario: Pario<readonly OntologySource[]>
+  readonly audience?: AuthSessionAudience
 }
 
 export type HtmlRouteHandler = (request: Request) => Response | Promise<Response>
 
 export class ServerAuthGuard {
   private readonly pario: Pario<readonly OntologySource[]>
+  private readonly audience: AuthSessionAudience
 
   constructor(options: ServerAuthGuardOptions) {
     this.pario = options.pario
+    this.audience = resolveAuthSessionAudience(options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE)
   }
 
   isAuthEnabled(): boolean {
@@ -43,7 +49,7 @@ export class ServerAuthGuard {
       return undefined
     }
 
-    const session = await this.pario.auth.getSession(request)
+    const session = await this.pario.auth.getSession(request, { audience: this.audience })
     if (!session.authenticated) {
       if (route.kind === "html") {
         return htmlAuthRedirectResponse(request)
@@ -68,7 +74,7 @@ export class ServerAuthGuard {
       return undefined
     }
 
-    const session = await this.pario.auth.getSession(request)
+    const session = await this.pario.auth.getSession(request, { audience: this.audience })
     if (!session.authenticated) {
       return htmlAuthRedirectResponse(request)
     }
@@ -88,7 +94,11 @@ export class ServerAuthGuard {
   }
 
   async getSession(request: Request): Promise<AuthSessionResult> {
-    return this.pario.auth.getSession(request)
+    return this.pario.auth.getSession(request, { audience: this.audience })
+  }
+
+  getCsrfCookieName(): string {
+    return this.pario.auth.getCookieOptions({ audience: this.audience }).csrfCookieName
   }
 
   verifyCsrf(
@@ -96,7 +106,7 @@ export class ServerAuthGuard {
     _session: Extract<AuthSessionResult, { authenticated: true }>
   ): boolean {
     return verifyDoubleSubmitCsrf(request, {
-      cookieName: this.pario.auth.getCookieOptions().csrfCookieName,
+      cookieName: this.getCsrfCookieName(),
     })
   }
 }

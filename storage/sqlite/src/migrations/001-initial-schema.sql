@@ -315,6 +315,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   strategy_id TEXT NOT NULL,
+  audience TEXT NOT NULL DEFAULT 'admin',
   token_hash TEXT NOT NULL,
   created_at TEXT NOT NULL,
   expires_at TEXT NOT NULL,
@@ -324,7 +325,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
-  ON auth_sessions(project_id, user_id, revoked_at, expires_at);
+  ON auth_sessions(project_id, user_id, audience, revoked_at, expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_token
   ON auth_sessions(project_id, id, token_hash);
 

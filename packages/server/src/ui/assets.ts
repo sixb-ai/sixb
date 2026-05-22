@@ -5,6 +5,10 @@ export interface BuiltInUiBundle {
   outdir: string
 }
 
+export interface BuiltInUiRuntimeConfig {
+  readonly csrfCookieName: string
+}
+
 let readyBundle: Promise<BuiltInUiBundle> | null = null
 
 export async function ensureBuiltInUiBundle(): Promise<BuiltInUiBundle> {
@@ -56,7 +60,13 @@ async function buildBuiltInUiBundle(): Promise<BuiltInUiBundle> {
   return { outdir }
 }
 
-export function renderBuiltInUiShell(): string {
+export function renderBuiltInUiShell(config: BuiltInUiRuntimeConfig): string {
+  const runtimeConfig = JSON.stringify({
+    auth: {
+      csrfCookieName: config.csrfCookieName,
+    },
+  }).replaceAll("<", "\\u003c")
+
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -68,6 +78,7 @@ export function renderBuiltInUiShell(): string {
     <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
     <title>Pario</title>
     <link rel="stylesheet" href="/__pario/main.css" />
+    <script>window.__PARIO_RUNTIME__ = ${runtimeConfig};</script>
     <script type="module" src="/__pario/main.js"></script>
   </head>
   <body>

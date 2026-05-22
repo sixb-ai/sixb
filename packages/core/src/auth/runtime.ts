@@ -8,11 +8,16 @@ import {
 import type { Storage } from "../storage"
 import { type AuthStorage, AuthStorageError, type InvitationRecord } from "../storage/auth"
 import { paginate } from "../storage/pagination"
-import { getCookie, type ResolvedAuthCookieOptions } from "./cookies"
+import {
+  getCookie,
+  type ResolvedAuthCookieOptions,
+  resolveAuthCookieOptionsForAudience,
+} from "./cookies"
 import { AuthRuntimeError } from "./errors"
 import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
 import type {
   AuthenticatedAuthSession,
+  AuthSessionResolutionOptions,
   AuthSessionResult,
   AuthStrategy,
   InvitationDeliveryAuthStrategy,
@@ -34,6 +39,7 @@ import {
   isInvitationDeliveryAuthStrategy,
   normalizePagination,
   resolveAuthConfig,
+  resolveAuthSessionAudience,
   resolveInvitationExpiresAt,
   sanitizeReturnTo,
 } from "./validation"
@@ -85,8 +91,8 @@ export class ParioAuthRuntime {
     return this.config.session.ttlMs
   }
 
-  getCookieOptions(): ResolvedAuthCookieOptions {
-    return this.config.cookies
+  getCookieOptions(options: AuthSessionResolutionOptions = {}): ResolvedAuthCookieOptions {
+    return resolveAuthCookieOptionsForAudience(this.config.cookies, options.audience)
   }
 
   assertCanServeHttp(params: { readonly production: boolean }): void {
@@ -121,12 +127,17 @@ export class ParioAuthRuntime {
     }
   }
 
-  async getSession(request: Request): Promise<AuthSessionResult> {
+  async getSession(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<AuthSessionResult> {
     if (!this.isEnabled()) {
       return { authenticated: false, reason: "auth_disabled" }
     }
 
-    const cookieValue = getCookie(request, this.config.cookies.sessionCookieName)
+    const audience = resolveAuthSessionAudience(options.audience)
+    const cookieOptions = this.getCookieOptions({ audience })
+    const cookieValue = getCookie(request, cookieOptions.sessionCookieName)
     if (!cookieValue) {
       return { authenticated: false, reason: "missing_cookie" }
     }
@@ -140,6 +151,7 @@ export class ParioAuthRuntime {
     const session = await storage.sessions.findValidByTokenHash({
       projectId: this.projectId,
       id: parts.sessionId,
+      audience,
       tokenHash: hashSessionSecret(parts.sessionSecret),
       now: new Date(),
     })
@@ -175,8 +187,11 @@ export class ParioAuthRuntime {
     }
   }
 
-  async requirePrincipal(request: Request): Promise<Principal> {
-    const session = await this.getSession(request)
+  async requirePrincipal(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<Principal> {
+    const session = await this.getSession(request, options)
     if (!session.authenticated) {
       throw new AuthRuntimeError("authentication_required", "[Pario] Authentication is required.")
     }
@@ -184,8 +199,11 @@ export class ParioAuthRuntime {
     return session.principal
   }
 
-  async requireUser(request: Request): Promise<AuthenticatedAuthSession> {
-    const session = await this.getSession(request)
+  async requireUser(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<AuthenticatedAuthSession> {
+    const session = await this.getSession(request, options)
     if (!session.authenticated) {
       throw new AuthRuntimeError("authentication_required", "[Pario] Authentication is required.")
     }
@@ -193,8 +211,11 @@ export class ParioAuthRuntime {
     return session
   }
 
-  async createSecurityContext(request: Request): Promise<SecurityContext> {
-    const session = await this.requireUser(request)
+  async createSecurityContext(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<SecurityContext> {
+    const session = await this.requireUser(request, options)
     return {
       principal: session.principal,
       sessionId: session.session.id,
@@ -203,8 +224,12 @@ export class ParioAuthRuntime {
     }
   }
 
-  async invite(request: Request, input: InviteUserInput): Promise<InviteUserResult> {
-    const session = await this.requireUser(request)
+  async invite(
+    request: Request,
+    input: InviteUserInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<InviteUserResult> {
+    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const now = new Date()
     const groupIds = this.resolveInviteGroupIds(input)
@@ -257,9 +282,10 @@ export class ParioAuthRuntime {
 
   async listInvitations(
     request: Request,
-    input: ListInvitationsInput = {}
+    input: ListInvitationsInput = {},
+    options: AuthSessionResolutionOptions = {}
   ): Promise<ListInvitationsResult> {
-    const session = await this.requireUser(request)
+    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const { limit, offset } = normalizePagination(input)
     const result = await authStorage.invitations.list({
@@ -283,9 +309,10 @@ export class ParioAuthRuntime {
 
   async revokeInvitation(
     request: Request,
-    input: RevokeInvitationInput
+    input: RevokeInvitationInput,
+    options: AuthSessionResolutionOptions = {}
   ): Promise<RevokeInvitationResult> {
-    const session = await this.requireUser(request)
+    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const invitationId = assertNonEmpty(input.invitationId, "Invitation id")
     const invitation = await authStorage.invitations.getById({

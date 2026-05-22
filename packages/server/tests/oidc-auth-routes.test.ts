@@ -149,6 +149,7 @@ async function seedAdminSession(storage: InMemoryStorage) {
     projectId,
     userId: "usr_admin",
     strategyId: "okta",
+    audience: "admin",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2099-05-17T10:00:00.000Z"),

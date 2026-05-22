@@ -40,6 +40,7 @@ export interface PgAuthSessionRow {
   readonly id: string
   readonly user_id: string
   readonly strategy_id: string
+  readonly audience: SessionRecord["audience"]
   readonly token_hash: string
   readonly created_at: PgDate
   readonly expires_at: PgDate
@@ -127,6 +128,7 @@ export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
     projectId: row.project_id,
     userId: row.user_id,
     strategyId: row.strategy_id,
+    audience: row.audience,
     tokenHash: row.token_hash,
     createdAt: toDate(row.created_at),
     expiresAt: toDate(row.expires_at),

@@ -663,6 +663,7 @@ export class SqliteAuthStorage implements AuthStorage {
       projectId: input.projectId,
       userId: input.userId,
       strategyId: input.strategyId,
+      audience: input.session.audience,
       tokenHash: input.session.tokenHash,
       createdAt: input.session.createdAt,
       expiresAt: input.session.expiresAt,

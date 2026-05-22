@@ -13,6 +13,7 @@ function at(value: string): Date {
 function sessionInput(id = "ses_1"): CompleteAuthSessionInput {
   return {
     id,
+    audience: "admin",
     tokenHash: `${id}-hash`,
     createdAt: at("2026-05-16T10:05:00.000Z"),
     expiresAt: at("2026-05-23T10:05:00.000Z"),

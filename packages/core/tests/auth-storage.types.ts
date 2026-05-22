@@ -25,6 +25,7 @@ const session: SessionRecord = {
   projectId: "project-a",
   userId: user.id,
   strategyId: "magic-link",
+  audience: "admin",
   tokenHash: "hash",
   createdAt: new Date(),
   expiresAt: new Date(),
@@ -46,6 +47,7 @@ const completeMagicLinkInput: CompleteMagicLinkSignInInput = {
   newUserId: "usr_1",
   session: {
     id: "ses_1",
+    audience: "admin",
     tokenHash: "session-hash",
     createdAt: new Date(),
     expiresAt: new Date(),

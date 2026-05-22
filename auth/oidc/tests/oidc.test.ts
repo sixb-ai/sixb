@@ -68,6 +68,7 @@ class FakeOidcClient implements OidcClientAdapter {
 function sessionInput(id = "ses_1") {
   return {
     id,
+    audience: "admin",
     tokenHash: `${id}-hash`,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2026-05-24T10:00:00.000Z"),

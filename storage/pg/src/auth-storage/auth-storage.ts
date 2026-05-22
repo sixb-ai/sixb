@@ -678,11 +678,17 @@ export class PgAuthStorage implements AuthStorage {
       readonly userId: string
     }
   ): Promise<SessionRecord> {
+    await lockAdvisoryKeys(sql, [
+      authLockKey("sessions", input.projectId, input.userId),
+      authLockKey("sessions", input.projectId, input.userId, input.session.audience),
+    ])
+
     return createSession(sql, {
       id: input.session.id,
       projectId: input.projectId,
       userId: input.userId,
       strategyId: input.strategyId,
+      audience: input.session.audience,
       tokenHash: input.session.tokenHash,
       createdAt: input.session.createdAt,
       expiresAt: input.session.expiresAt,
