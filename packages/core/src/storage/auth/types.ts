@@ -236,6 +236,9 @@ export interface CompleteOidcSignInInput {
   readonly avatarUrl?: string
   readonly claims?: Readonly<Record<string, unknown>>
   readonly autoLinkByVerifiedEmail?: boolean
+  readonly allowUserCreationWithoutInvitation?: boolean
+  readonly requireNoActiveUsersForUserCreation?: boolean
+  readonly manualGroupIds?: readonly string[]
   readonly newUserId: string
   readonly session: CompleteAuthSessionInput
 }

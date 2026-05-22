@@ -41,6 +41,11 @@ export type {
   AuthSessionResult,
   AuthStrategy,
   AuthStrategyKind,
+  InvitationDeliveryAuthStrategy,
+  InvitationDeliveryInput,
+  InvitationRecipientInput,
+  InvitationRecipientResult,
+  InvitationRecipientStatus,
   InviteDeliveryResult,
   InviteDeliveryStatus,
   InviteUserInput,
@@ -55,6 +60,11 @@ export type {
   MagicLinkRequestInput,
   MagicLinkRequestResult,
   MagicLinkRequestStatus,
+  OidcAuthStrategy,
+  OidcCallbackInput,
+  OidcCallbackResult,
+  OidcStartSignInInput,
+  OidcStartSignInResult,
   ParioAuthConfig,
   Principal,
   ResolvedAuthConfig,
@@ -63,4 +73,8 @@ export type {
   SecurityContext,
   UnauthenticatedAuthSession,
 } from "./types"
-export { isMagicLinkAuthStrategy } from "./validation"
+export {
+  isInvitationDeliveryAuthStrategy,
+  isMagicLinkAuthStrategy,
+  isOidcAuthStrategy,
+} from "./validation"

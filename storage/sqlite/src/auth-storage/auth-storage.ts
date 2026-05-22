@@ -35,7 +35,6 @@ import {
   getOidcAttemptRowById,
   getUserRowByEmail,
   getUserRowById,
-  listMembershipsForUser,
   mapUniqueConstraintError,
   normalizeEmail,
   normalizeGroupIds,
@@ -261,10 +260,18 @@ export class SqliteAuthStorage implements AuthStorage {
           strategyId: attempt.strategy_id,
           subject,
         })
+        const activeInvitation = identity
+          ? null
+          : getActiveInvitationByEmail(this.db, {
+              projectId,
+              email,
+              now: completedAt,
+            })
         let userRow = identity
           ? getUserRowById(this.db, { projectId, id: identity.user_id })
           : getUserRowByEmail(this.db, { projectId, email })
         const shouldCreateUser = !identity && !userRow
+        const manualGroupIds = normalizeGroupIds(input.manualGroupIds)
 
         if (identity && !userRow) {
           this.consumeOidcAttempt(input, completedAt, projectId)
@@ -292,6 +299,42 @@ export class SqliteAuthStorage implements AuthStorage {
             error: new AuthStorageError(
               "suspended_user",
               `[Pario] User '${userRow.id}' is suspended for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (shouldCreateUser && !input.emailVerified) {
+          this.consumeOidcAttempt(input, completedAt, projectId)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
+          this.consumeOidcAttempt(input, completedAt, projectId)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (
+          shouldCreateUser &&
+          !activeInvitation &&
+          input.allowUserCreationWithoutInvitation &&
+          input.requireNoActiveUsersForUserCreation &&
+          hasActiveUsers(this.db, projectId)
+        ) {
+          this.consumeOidcAttempt(input, completedAt, projectId)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
           }
         }
@@ -333,6 +376,19 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         const user = rowToUserRecord(userRow)
+        const invitation = this.acceptInvitationAndApplyGroups({
+          activeInvitation,
+          completedAt,
+          projectId,
+          user,
+        })
+        const groupMemberships = this.applyManualGroups({
+          completedAt,
+          existing: invitation.groupMemberships,
+          groupIds: manualGroupIds,
+          projectId,
+          userId: user.id,
+        })
         const nextIdentity = this.upsertIdentity({
           projectId,
           strategyId: attempt.strategy_id,
@@ -353,10 +409,8 @@ export class SqliteAuthStorage implements AuthStorage {
           user,
           session,
           identity: nextIdentity,
-          groupMemberships: listMembershipsForUser(this.db, {
-            projectId,
-            userId: user.id,
-          }),
+          invitation: invitation.invitation,
+          groupMemberships,
         }
       }
     )

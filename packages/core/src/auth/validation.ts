@@ -3,7 +3,9 @@ import { AuthRuntimeError } from "./errors"
 import type {
   AuthSessionOptions,
   AuthStrategy,
+  InvitationDeliveryAuthStrategy,
   MagicLinkAuthStrategy,
+  OidcAuthStrategy,
   ParioAuthConfig,
   ResolvedAuthConfig,
 } from "./types"
@@ -139,6 +141,36 @@ export function isMagicLinkAuthStrategy(
   return (
     typeof candidate.requestMagicLink === "function" &&
     typeof candidate.completeMagicLinkSignIn === "function"
+  )
+}
+
+export function isInvitationDeliveryAuthStrategy(
+  strategy: AuthStrategy | null
+): strategy is InvitationDeliveryAuthStrategy {
+  if (!strategy) {
+    return false
+  }
+
+  const candidate = strategy as {
+    readonly deliverInvitation?: unknown
+  }
+
+  return typeof candidate.deliverInvitation === "function"
+}
+
+export function isOidcAuthStrategy(strategy: AuthStrategy | null): strategy is OidcAuthStrategy {
+  if (!strategy || strategy.kind !== "oidc") {
+    return false
+  }
+
+  const candidate = strategy as {
+    readonly startOidcSignIn?: unknown
+    readonly completeOidcSignIn?: unknown
+  }
+
+  return (
+    typeof candidate.startOidcSignIn === "function" &&
+    typeof candidate.completeOidcSignIn === "function"
   )
 }
 

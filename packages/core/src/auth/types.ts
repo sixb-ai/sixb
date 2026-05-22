@@ -31,6 +31,45 @@ export interface AuthStrategy {
   readonly allowDisabledInProduction?: boolean
 }
 
+export interface InvitationRecipientInput {
+  readonly projectId: string
+  readonly authStorage: AuthStorage
+  readonly email: string
+  readonly now?: Date
+}
+
+export type InvitationRecipientStatus =
+  | "allowed"
+  | "invalid_email"
+  | "disallowed_domain"
+  | "suspended_user"
+  | "rate_limited"
+
+export interface InvitationRecipientResult {
+  readonly status: InvitationRecipientStatus
+  readonly email?: string
+}
+
+export interface InvitationDeliveryInput {
+  readonly projectId: string
+  readonly authStorage: AuthStorage
+  readonly invitation: InvitationRecord
+  readonly returnTo: string
+  readonly requestOrigin: string
+  readonly now?: Date
+}
+
+export type InviteDeliveryStatus = "sent" | "skipped" | "rate_limited" | "not_supported"
+
+export interface InviteDeliveryResult {
+  readonly status: InviteDeliveryStatus
+}
+
+export interface InvitationDeliveryAuthStrategy extends AuthStrategy {
+  validateInvitationRecipient?(input: InvitationRecipientInput): Promise<InvitationRecipientResult>
+  deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult>
+}
+
 export interface MagicLinkRequestInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
@@ -40,30 +79,17 @@ export interface MagicLinkRequestInput {
   readonly now?: Date
 }
 
-export type MagicLinkRequestStatus = "sent" | "skipped" | "rate_limited"
+export type MagicLinkRequestStatus = Exclude<InviteDeliveryStatus, "not_supported">
 
 export interface MagicLinkRequestResult {
   readonly status: MagicLinkRequestStatus
 }
 
-export interface MagicLinkInvitationRecipientInput {
-  readonly projectId: string
-  readonly authStorage: AuthStorage
-  readonly email: string
-  readonly now?: Date
-}
+export type MagicLinkInvitationRecipientInput = InvitationRecipientInput
 
-export type MagicLinkInvitationRecipientStatus =
-  | "allowed"
-  | "invalid_email"
-  | "disallowed_domain"
-  | "suspended_user"
-  | "rate_limited"
+export type MagicLinkInvitationRecipientStatus = InvitationRecipientStatus
 
-export interface MagicLinkInvitationRecipientResult {
-  readonly status: MagicLinkInvitationRecipientStatus
-  readonly email?: string
-}
+export type MagicLinkInvitationRecipientResult = InvitationRecipientResult
 
 export interface MagicLinkCallbackInput {
   readonly projectId: string
@@ -74,7 +100,7 @@ export interface MagicLinkCallbackInput {
   readonly now?: Date
 }
 
-export interface MagicLinkAuthStrategy extends AuthStrategy {
+export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {
   readonly kind: "magicLink"
   readonly bootstrapGroupIds?: readonly string[]
   validateInvitationRecipient?(
@@ -84,18 +110,44 @@ export interface MagicLinkAuthStrategy extends AuthStrategy {
   completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<CompleteSignInResult>
 }
 
+export interface OidcStartSignInInput {
+  readonly projectId: string
+  readonly authStorage: AuthStorage
+  readonly returnTo: string
+  readonly requestOrigin: string
+  readonly now?: Date
+}
+
+export interface OidcStartSignInResult {
+  readonly redirectTo: string
+}
+
+export interface OidcCallbackInput {
+  readonly projectId: string
+  readonly authStorage: AuthStorage
+  readonly requestUrl: string
+  readonly requestOrigin: string
+  readonly session: CompleteAuthSessionInput
+  readonly now?: Date
+}
+
+export interface OidcCallbackResult extends CompleteSignInResult {
+  readonly returnTo: string
+}
+
+export interface OidcAuthStrategy extends InvitationDeliveryAuthStrategy {
+  readonly kind: "oidc"
+  readonly bootstrapGroupIds?: readonly string[]
+  startOidcSignIn(input: OidcStartSignInInput): Promise<OidcStartSignInResult>
+  completeOidcSignIn(input: OidcCallbackInput): Promise<OidcCallbackResult>
+}
+
 export interface InviteUserInput {
   readonly email: string
   readonly groups?: readonly GroupDefinition[]
   readonly groupIds?: readonly string[]
   readonly expiresAt?: Date
   readonly returnTo?: string
-}
-
-export type InviteDeliveryStatus = MagicLinkRequestStatus | "not_supported"
-
-export interface InviteDeliveryResult {
-  readonly status: InviteDeliveryStatus
 }
 
 export interface InviteUserResult {

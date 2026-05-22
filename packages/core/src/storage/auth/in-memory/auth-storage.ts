@@ -232,10 +232,14 @@ export class InMemoryAuthStorage implements AuthStorage {
     const email = normalizeEmail(input.email)
     const claims = normalizeClaims(input.claims)
     const identity = this.state.identities.get(identityKey(projectId, attempt.strategyId, subject))
+    const activeInvitation = identity
+      ? null
+      : getActiveInvitationByEmail(this.state, projectId, email, completedAt)
     let user = identity
       ? (this.state.users.get(userKey(projectId, identity.userId)) ?? null)
       : getUserByEmail(this.state, projectId, email)
     const shouldCreateUser = !identity && !user
+    const manualGroupIds = normalizeGroupIds(input.manualGroupIds)
 
     if (identity && !user) {
       this.consumeOidcAttempt(input, completedAt, projectId)
@@ -258,6 +262,36 @@ export class InMemoryAuthStorage implements AuthStorage {
       throw new AuthStorageError(
         "suspended_user",
         `[Pario] User '${user.id}' is suspended for project '${projectId}'.`
+      )
+    }
+
+    if (shouldCreateUser && !input.emailVerified) {
+      this.consumeOidcAttempt(input, completedAt, projectId)
+      throw new AuthStorageError(
+        "user_creation_not_allowed",
+        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+      )
+    }
+
+    if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
+      this.consumeOidcAttempt(input, completedAt, projectId)
+      throw new AuthStorageError(
+        "user_creation_not_allowed",
+        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+      )
+    }
+
+    if (
+      shouldCreateUser &&
+      !activeInvitation &&
+      input.allowUserCreationWithoutInvitation &&
+      input.requireNoActiveUsersForUserCreation &&
+      hasActiveUsers(this.state, projectId)
+    ) {
+      this.consumeOidcAttempt(input, completedAt, projectId)
+      throw new AuthStorageError(
+        "user_creation_not_allowed",
+        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -290,6 +324,20 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.state.users.set(userKey(projectId, user.id), cloneRecord(user))
     }
 
+    const invitation = this.acceptInvitationAndApplyGroups({
+      activeInvitation,
+      completedAt,
+      projectId,
+      user,
+    })
+    const memberships = this.applyManualGroups({
+      completedAt,
+      groupIds: manualGroupIds,
+      projectId,
+      userId: user.id,
+      existing: invitation.memberships,
+    })
+
     const nextIdentity: UserIdentityRecord = {
       projectId,
       strategyId: attempt.strategyId,
@@ -311,16 +359,12 @@ export class InMemoryAuthStorage implements AuthStorage {
       userId: user.id,
     })
 
-    const memberships = await this.groupMemberships.listForUser({
-      projectId,
-      userId: user.id,
-    })
-
     return {
       user: cloneRecord(user),
       session: cloneRecord(session),
       identity: cloneRecord(nextIdentity),
-      groupMemberships: memberships,
+      invitation: invitation.invitation ? cloneRecord(invitation.invitation) : undefined,
+      groupMemberships: memberships.map(cloneRecord),
     }
   }
 

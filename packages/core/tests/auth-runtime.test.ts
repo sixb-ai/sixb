@@ -29,6 +29,9 @@ const magicLinkStrategy: MagicLinkAuthStrategy = {
   async requestMagicLink() {
     return { status: "skipped" as const }
   },
+  async deliverInvitation() {
+    return { status: "skipped" as const }
+  },
   async completeMagicLinkSignIn(): Promise<never> {
     throw new Error("unused")
   },
@@ -78,6 +81,17 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
       kind: "magicLink" as const,
       async requestMagicLink(input) {
         requests.push(input)
+        return { status: "sent" as const }
+      },
+      async deliverInvitation(input) {
+        requests.push({
+          projectId: input.projectId,
+          authStorage: input.authStorage,
+          email: input.invitation.email,
+          returnTo: input.returnTo,
+          requestOrigin: input.requestOrigin,
+          now: input.now,
+        })
         return { status: "sent" as const }
       },
       async completeMagicLinkSignIn(): Promise<never> {
@@ -281,6 +295,9 @@ describe("Pario auth runtime", () => {
       async requestMagicLink(): Promise<never> {
         throw new Error("should not send")
       },
+      async deliverInvitation(): Promise<never> {
+        throw new Error("should not send")
+      },
       async completeMagicLinkSignIn(): Promise<never> {
         throw new Error("unused")
       },
@@ -308,6 +325,9 @@ describe("Pario auth runtime", () => {
       id: "magic-link",
       kind: "magicLink" as const,
       async requestMagicLink() {
+        return { status: "skipped" as const }
+      },
+      async deliverInvitation() {
         return { status: "skipped" as const }
       },
       async completeMagicLinkSignIn(): Promise<never> {
