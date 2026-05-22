@@ -753,8 +753,15 @@ describe("ParioServer HTTP contract", () => {
 
       const objectTypesResponse = await fetch(`${baseUrl}/api/object-types`)
       expect(objectTypesResponse.status).toBe(200)
-      const objectTypes = (await objectTypesResponse.json()) as Array<{ id: string }>
+      const objectTypes = (await objectTypesResponse.json()) as Array<{
+        id: string
+        actions: Array<{ id: string }>
+      }>
       expect(objectTypes.map((objectType) => objectType.id)).toEqual(["space", "device"])
+      expect(objectTypes.find((objectType) => objectType.id === "space")?.actions).toEqual([])
+      expect(objectTypes.find((objectType) => objectType.id === "device")?.actions).toEqual([
+        expect.objectContaining({ id: "setSpeed" }),
+      ])
 
       const objectTypeResponse = await fetch(`${baseUrl}/api/object-types/device`)
       expect(objectTypeResponse.status).toBe(200)

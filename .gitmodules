@@ -1,0 +1,3 @@
+[submodule "vendor/s4"]
+	path = vendor/s4
+	url = https://github.com/DanielT777/s4.git

@@ -8,7 +8,9 @@
     "broker/*",
     "queues/*",
     "storage/*",
-    "examples/*"
+    "examples/*",
+    "vendor/s4/packages/*",
+    "vendor/s4/examples/example-rest-api"
   ],
   "scripts": {
     "build": "bun --filter '@pario/*' build",

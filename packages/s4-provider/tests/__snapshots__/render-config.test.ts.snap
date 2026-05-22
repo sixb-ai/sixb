@@ -1,0 +1,35 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`renderParioS4ConfigSource emits the default Pario wiring 1`] = `
+"import { createParioRemoteS4Provider } from "@pario/s4-provider"
+import { mount } from "@s4/runtime"
+
+export default {
+  mounts: [
+    mount("/pario", createParioRemoteS4Provider({
+      baseUrl: process.env.PARIO_API_URL ?? "http://127.0.0.1:3000",
+      headers: process.env.PARIO_RUN_TOKEN
+        ? { authorization: \`Bearer \${process.env.PARIO_RUN_TOKEN}\` }
+        : undefined,
+    })),
+  ],
+}
+"
+`;
+
+exports[`renderParioS4ConfigSource honors custom mount path and base URL 1`] = `
+"import { createParioRemoteS4Provider } from "@pario/s4-provider"
+import { mount } from "@s4/runtime"
+
+export default {
+  mounts: [
+    mount("/acme", createParioRemoteS4Provider({
+      baseUrl: process.env.PARIO_API_URL ?? "http://acme:8080",
+      headers: process.env.PARIO_RUN_TOKEN
+        ? { authorization: \`Bearer \${process.env.PARIO_RUN_TOKEN}\` }
+        : undefined,
+    })),
+  ],
+}
+"
+`;
