@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   defineObjectType,
   InMemoryBlobStorage,
-  InMemoryEventBus,
+  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -36,7 +36,7 @@ function createApp() {
   const pario = new Pario<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Device],
-    eventBus: new InMemoryEventBus(),
+    broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),

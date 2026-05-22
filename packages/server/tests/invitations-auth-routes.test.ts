@@ -6,7 +6,7 @@ import {
   defineInvitePolicy,
   defineObjectType,
   InMemoryBlobStorage,
-  InMemoryEventBus,
+  InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
@@ -46,7 +46,7 @@ function createRuntime() {
   const pario = new Pario<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
-    eventBus: new InMemoryEventBus(),
+    broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
