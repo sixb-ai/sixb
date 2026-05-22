@@ -12,6 +12,9 @@ import type {
   GetActionData,
   GetActionErrors,
   GetActionResponses,
+  GetAuthInvitationOptionsData,
+  GetAuthInvitationOptionsErrors,
+  GetAuthInvitationOptionsResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
   GetConnectorData,
@@ -212,6 +215,18 @@ export const createAuthInvitation = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   })
+
+/**
+ * Get auth invitation options
+ */
+export const getAuthInvitationOptions = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAuthInvitationOptionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetAuthInvitationOptionsResponses,
+    GetAuthInvitationOptionsErrors,
+    ThrowOnError
+  >({ url: "/api/auth/invitation-options", ...options })
 
 /**
  * Revoke an auth invitation

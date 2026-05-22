@@ -20,7 +20,9 @@ import type {
   AuthSessionResolutionOptions,
   AuthSessionResult,
   AuthStrategy,
+  GetInvitationOptionsResult,
   InvitationDeliveryAuthStrategy,
+  InvitationRecipientStatus,
   InviteDeliveryResult,
   InviteDeliveryStatus,
   InviteUserInput,
@@ -225,6 +227,33 @@ export class AuthRuntime {
     }
   }
 
+  async getInvitationOptions(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<GetInvitationOptionsResult> {
+    const session = await this.requireUser(request, options)
+    const scope = this.resolveInvitePolicyScopeForUser(session.groupIds)
+    const groups = this.security
+      .getGroupDefinitions()
+      .filter((group) => scope.canInviteToGroupIds.has(group.id))
+      .map((group) => ({
+        id: group.id,
+        ...(group.label !== undefined ? { label: group.label } : {}),
+        ...(group.description !== undefined ? { description: group.description } : {}),
+      }))
+
+    return {
+      groups,
+      canInviteWithoutGroups: scope.canInviteWithoutGroups,
+      capabilities: {
+        createInvitation: this.resolveCreateInvitationCapability({
+          canInviteToGroups: groups.length > 0,
+          canInviteWithoutGroups: scope.canInviteWithoutGroups,
+        }),
+      },
+    }
+  }
+
   async invite(
     request: Request,
     input: InviteUserInput,
@@ -240,11 +269,11 @@ export class AuthRuntime {
     if (!isInvitationDeliveryAuthStrategy(strategy)) {
       throw new AuthRuntimeError(
         "invalid_auth_config",
-        "[Pario] The active auth strategy does not support invitation email delivery."
+        "[Pario] The active auth strategy does not support invitations."
       )
     }
 
-    await this.assertCanDeliverInvitation(strategy, authStorage, input.email, now)
+    await this.assertCanInviteRecipient(strategy, authStorage, input.email, now)
 
     const invitation = await authStorage.invitations.createOrUpdateActive({
       id: `inv_${randomUUID()}`,
@@ -272,6 +301,10 @@ export class AuthRuntime {
     } catch (error) {
       await this.revokeInvitationAfterDeliveryFailure(authStorage, invitation, now)
       throw error
+    }
+
+    if (delivery.status === "not_supported") {
+      return { invitation, delivery }
     }
 
     if (delivery.status !== "sent") {
@@ -389,7 +422,22 @@ export class AuthRuntime {
     })
   }
 
-  private async assertCanDeliverInvitation(
+  private resolveCreateInvitationCapability(input: {
+    readonly canInviteToGroups: boolean
+    readonly canInviteWithoutGroups: boolean
+  }): GetInvitationOptionsResult["capabilities"]["createInvitation"] {
+    if (!isInvitationDeliveryAuthStrategy(this.getStrategy())) {
+      return { state: "disabled", reason: "invitation_delivery_not_supported" }
+    }
+
+    if (!input.canInviteToGroups && !input.canInviteWithoutGroups) {
+      return { state: "disabled", reason: "missing_invite_policy" }
+    }
+
+    return { state: "enabled" }
+  }
+
+  private async assertCanInviteRecipient(
     strategy: InvitationDeliveryAuthStrategy,
     authStorage: AuthStorage,
     email: string,
@@ -410,30 +458,7 @@ export class AuthRuntime {
       return
     }
 
-    if (result.status === "rate_limited") {
-      throw new AuthRuntimeError(
-        "rate_limited",
-        "[Pario] Invitation delivery is rate limited. Try again later."
-      )
-    }
-
-    if (result.status === "invalid_email") {
-      throw new AuthRuntimeError("invalid_auth_input", "[Pario] Invitation email is invalid.")
-    }
-
-    if (result.status === "disallowed_domain") {
-      throw new AuthRuntimeError(
-        "invalid_auth_input",
-        `[Pario] Invitation email '${result.email ?? email}' is not allowed by the active auth strategy.`
-      )
-    }
-
-    if (result.status === "suspended_user") {
-      throw new AuthRuntimeError(
-        "invalid_auth_input",
-        `[Pario] Invitation email '${result.email ?? email}' belongs to a suspended user.`
-      )
-    }
+    throw createInvitationRecipientError(result.status, result.email ?? email)
   }
 
   private async revokeInvitationAfterDeliveryFailure(
@@ -448,18 +473,13 @@ export class AuthRuntime {
     })
   }
 
-  private createInvitationDeliveryError(status: Exclude<InviteDeliveryStatus, "sent">) {
+  private createInvitationDeliveryError(
+    status: Exclude<InviteDeliveryStatus, "sent" | "not_supported">
+  ) {
     if (status === "rate_limited") {
       return new AuthRuntimeError(
         "rate_limited",
         "[Pario] Invitation delivery is rate limited. Try again later."
-      )
-    }
-
-    if (status === "not_supported") {
-      return new AuthRuntimeError(
-        "invalid_auth_config",
-        "[Pario] The active auth strategy does not support invitation email delivery."
       )
     }
 
@@ -497,5 +517,33 @@ export class AuthRuntime {
 function resolveCorrelationId(request: Request): string {
   return (
     request.headers.get("x-correlation-id") ?? request.headers.get("x-request-id") ?? randomUUID()
+  )
+}
+
+function createInvitationRecipientError(
+  status: Exclude<InvitationRecipientStatus, "allowed">,
+  email: string
+): AuthRuntimeError {
+  if (status === "rate_limited") {
+    return new AuthRuntimeError(
+      "rate_limited",
+      "[Pario] Invitation delivery is rate limited. Try again later."
+    )
+  }
+
+  if (status === "invalid_email") {
+    return new AuthRuntimeError("invalid_auth_input", "[Pario] Invitation email is invalid.")
+  }
+
+  if (status === "disallowed_domain") {
+    return new AuthRuntimeError(
+      "invalid_auth_input",
+      `[Pario] Invitation email '${email}' is not allowed by the active auth strategy.`
+    )
+  }
+
+  return new AuthRuntimeError(
+    "invalid_auth_input",
+    `[Pario] Invitation email '${email}' belongs to a suspended user.`
   )
 }

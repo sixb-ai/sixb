@@ -271,7 +271,11 @@ export {
 
 export type {
   AuthCookieOptions,
+  AuthEmailDeliveryStatus,
   AuthenticatedAuthSession,
+  AuthInvitationRecipientInput,
+  AuthInvitationRecipientResult,
+  AuthInvitationRecipientStatus,
   AuthRuntimeErrorCode,
   AuthRuntimeOptions,
   AuthSessionAudience,
@@ -282,8 +286,11 @@ export type {
   AuthSessionResult,
   AuthStrategy,
   AuthStrategyKind,
+  CreateInvitationCapability,
+  GetInvitationOptionsResult,
   InvitationDeliveryAuthStrategy,
   InvitationDeliveryInput,
+  InvitationGroupOption,
   InvitationRecipientInput,
   InvitationRecipientResult,
   InvitationRecipientStatus,

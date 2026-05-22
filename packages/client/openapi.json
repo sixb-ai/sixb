@@ -693,6 +693,125 @@
         }
       }
     },
+    "/api/auth/invitation-options": {
+      "get": {
+        "summary": "Get auth invitation options",
+        "tags": ["Auth"],
+        "operationId": "getAuthInvitationOptions",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "canInviteWithoutGroups": {
+                      "type": "boolean"
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "createInvitation": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "state": {
+                                  "type": "string",
+                                  "enum": ["enabled"]
+                                }
+                              },
+                              "required": ["state"],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "state": {
+                                  "type": "string",
+                                  "enum": ["disabled"]
+                                },
+                                "reason": {
+                                  "type": "string",
+                                  "enum": [
+                                    "missing_invite_policy",
+                                    "invitation_delivery_not_supported"
+                                  ]
+                                }
+                              },
+                              "required": ["state", "reason"],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      },
+                      "required": ["createInvitation"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["groups", "canInviteWithoutGroups", "capabilities"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/invitations/{invitationId}/revoke": {
       "post": {
         "summary": "Revoke an auth invitation",
