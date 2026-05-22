@@ -24,13 +24,13 @@
     "@pario/server": "workspace:*",
     "@pario/sync-worker": "workspace:*",
     "@pario/workflow-worker": "workspace:*",
-    "ink": "^5.1.0",
-    "react": "^18.3.1",
+    "ink": "^6.0.0",
+    "react": "^19.0.0",
     "react-devtools-core": "^4.19.1"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/react": "^18.3.12",
+    "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
   }
 }

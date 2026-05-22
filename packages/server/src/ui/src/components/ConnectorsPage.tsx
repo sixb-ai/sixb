@@ -1,22 +1,28 @@
 import type { GetConnectorResponse, ListConnectorsResponse } from "@pario/client"
 import { getConnectorOptions, listConnectorsOptions } from "@pario/client/hooks"
+import {
+  Button,
+  Card,
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionViewToggle,
+  EmptyState,
+  Input,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { Cable, ChevronLeft, GitBranch, Search, Webhook } from "lucide-react"
+import { Cable, ChevronLeft, GitBranch, Loader2, Search, Webhook } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { humanizeIdentifier } from "../lib/labels"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
-import { cn } from "../lib/utils"
-import {
-  CollectionCardButton,
-  CollectionCardGrid,
-  CollectionHeader,
-  CollectionTable,
-  CollectionViewToggle,
-  EmptyState,
-  LoadingSpinner,
-  SearchInput,
-} from "./common"
 
 type Connector = ListConnectorsResponse[number] | GetConnectorResponse
 type ConnectorListViewStyle = "cards" | "table"
@@ -56,7 +62,7 @@ function ConnectorListItem({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{connectorName(connector)}</p>
-          <span className="shrink-0 rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             {connector.type}
           </span>
         </div>
@@ -74,47 +80,48 @@ function ConnectorTableView({
   onSelect: (connectorId: string) => void
 }) {
   return (
-    <CollectionTable>
-      <thead>
-        <tr className="border-b border-border/50 bg-muted text-xs text-muted-foreground">
-          <th className="py-2 pl-3 pr-3 font-medium">Connector</th>
-          <th className="px-3 py-2 font-medium">Type</th>
-          <th className="hidden px-3 py-2 text-right font-medium sm:table-cell">Syncs</th>
-          <th className="hidden px-3 py-2 text-right font-medium md:table-cell">Webhooks</th>
-        </tr>
-      </thead>
-      <tbody className="bg-card">
-        {connectors.map((connector, index) => (
-          <tr
-            key={connector.id}
-            onClick={() => onSelect(connector.id)}
-            className={cn(
-              "cursor-pointer transition-colors hover:bg-muted/30",
-              index !== connectors.length - 1 && "border-b border-border/40"
-            )}
-          >
-            <td className="py-2 pl-3 pr-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Cable className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="truncate font-medium text-foreground">{connectorName(connector)}</p>
-                  <p className="font-mono text-[11px] text-muted-foreground">{connector.id}</p>
+    <Card className="overflow-hidden p-0">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Connector</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead className="hidden text-right sm:table-cell">Syncs</TableHead>
+            <TableHead className="hidden text-right md:table-cell">Webhooks</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {connectors.map((connector) => (
+            <TableRow
+              key={connector.id}
+              onClick={() => onSelect(connector.id)}
+              className="cursor-pointer"
+            >
+              <TableCell>
+                <div className="flex min-w-0 items-center gap-2">
+                  <Cable className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {connectorName(connector)}
+                    </p>
+                    <p className="font-mono text-[11px] text-muted-foreground">{connector.id}</p>
+                  </div>
                 </div>
-              </div>
-            </td>
-            <td className="px-3 py-2">
-              <span className="font-mono text-xs text-muted-foreground">{connector.type}</span>
-            </td>
-            <td className="hidden px-3 py-2 text-right text-xs text-muted-foreground sm:table-cell">
-              {connector.syncIds.length}
-            </td>
-            <td className="hidden px-3 py-2 text-right text-xs text-muted-foreground md:table-cell">
-              {connector.webhooks.length}
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </CollectionTable>
+              </TableCell>
+              <TableCell className="font-mono text-xs text-muted-foreground">
+                {connector.type}
+              </TableCell>
+              <TableCell className="hidden text-right text-sm text-muted-foreground sm:table-cell">
+                {connector.syncIds.length}
+              </TableCell>
+              <TableCell className="hidden text-right text-sm text-muted-foreground md:table-cell">
+                {connector.webhooks.length}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
   )
 }
 
@@ -128,7 +135,7 @@ function DetailRow({
   mono?: boolean
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 border-b border-border/40 py-2.5 last:border-0">
+    <div className="flex items-start justify-between gap-4 border-b border-border py-2.5 last:border-0">
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd
         className={cn(
@@ -154,7 +161,7 @@ function ConnectorSection({
   children: React.ReactNode
 }) {
   return (
-    <section className="border-t border-border/50 px-5 py-4">
+    <section className="border-t border-border px-5 py-4">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-2">
           <span className="text-muted-foreground">{icon}</span>
@@ -173,7 +180,7 @@ function ConnectorSection({
 function ConnectorDetail({ connector }: { connector: Connector | null }) {
   if (!connector) {
     return (
-      <div className="rounded-2xl border border-border/50 bg-card p-8">
+      <div className="rounded-lg border border-border bg-card p-8">
         <EmptyState
           icon={<Cable className="h-10 w-10" />}
           title="No connector selected"
@@ -184,8 +191,8 @@ function ConnectorDetail({ connector }: { connector: Connector | null }) {
   }
 
   return (
-    <section className="self-start rounded-2xl border border-border/50 bg-card">
-      <div className="border-b border-border/50 px-5 py-4">
+    <section className="self-start rounded-lg border border-border bg-card">
+      <div className="border-b border-border px-5 py-4">
         <p className="text-sm text-muted-foreground">{connectorSummary(connector)}</p>
         <h2 className="mt-1 text-2xl font-semibold tracking-normal text-foreground">
           {connectorName(connector)}
@@ -260,7 +267,10 @@ export function ConnectorsPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading connectors..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading connectors...</span>
+        </div>
       </div>
     )
   }
@@ -268,7 +278,7 @@ export function ConnectorsPage() {
   if (isError) {
     return (
       <div className="flex h-full items-center justify-center p-6">
-        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+        <div className="w-full max-w-md rounded-lg border border-border bg-card p-6">
           <EmptyState
             icon={<Cable className="h-10 w-10" />}
             title="Connectors unavailable"
@@ -303,12 +313,16 @@ export function ConnectorsPage() {
       />
 
       {connectors.length > 0 && (
-        <SearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search connectors, syncs, or webhooks..."
-          className="mt-2"
-        />
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search connectors, syncs, or webhooks..."
+            className="pl-9"
+          />
+        </div>
       )}
 
       <div className="mt-4">
@@ -362,7 +376,10 @@ export function ConnectorDetailPage() {
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center py-24">
-        <LoadingSpinner text="Loading connector..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading connector...</span>
+        </div>
       </div>
     )
   }
@@ -370,15 +387,17 @@ export function ConnectorDetailPage() {
   if (isError || !connector) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4">
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => navigate("/connectors")}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="-ml-2 text-muted-foreground hover:text-foreground"
         >
-          <ChevronLeft className="h-4 w-4" />
+          <ChevronLeft />
           Connectors
-        </button>
-        <div className="rounded-2xl border border-border/50 bg-card p-8">
+        </Button>
+        <div className="rounded-lg border border-border bg-card p-8">
           <EmptyState
             icon={<Cable className="h-10 w-10" />}
             title="Connector not found"
@@ -391,14 +410,16 @@ export function ConnectorDetailPage() {
 
   return (
     <div className="mx-auto w-full max-w-2xl space-y-4">
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
         onClick={() => navigate("/connectors")}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-ml-2 self-start text-muted-foreground hover:text-foreground"
       >
-        <ChevronLeft className="h-4 w-4" />
+        <ChevronLeft />
         Connectors
-      </button>
+      </Button>
       <ConnectorDetail connector={connector} />
     </div>
   )

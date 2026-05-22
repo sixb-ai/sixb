@@ -1,0 +1,6 @@
+[serve]
+port = 3010
+
+[serve.static]
+plugins = ["bun-plugin-tailwind"]
+env = "NODE_*"

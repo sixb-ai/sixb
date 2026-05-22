@@ -1,4 +1,3 @@
-const favoritesPrefix = "pario:favorites:"
 const recentAssetsPrefix = "pario:recent-assets:"
 
 function readStringArray(key: string): string[] {
@@ -23,29 +22,8 @@ function writeStringArray(key: string, value: string[]) {
   }
 }
 
-function favoritesKey(projectName: string): string {
-  return `${favoritesPrefix}${projectName}`
-}
-
 function recentsKey(projectName: string): string {
   return `${recentAssetsPrefix}${projectName}`
-}
-
-export function getFavoriteObjectIds(projectName: string): string[] {
-  return readStringArray(favoritesKey(projectName))
-}
-
-export function setFavoriteObjectIds(projectName: string, ids: string[]) {
-  writeStringArray(favoritesKey(projectName), ids)
-}
-
-export function toggleFavoriteObject(projectName: string, objectId: string): string[] {
-  const existing = getFavoriteObjectIds(projectName)
-  const next = existing.includes(objectId)
-    ? existing.filter((id) => id !== objectId)
-    : [objectId, ...existing].slice(0, 12)
-  setFavoriteObjectIds(projectName, next)
-  return next
 }
 
 export function trackRecentObject(projectName: string, objectId: string) {
@@ -59,7 +37,10 @@ export function getRecentObjectIds(projectName: string, limit = 5): string[] {
 }
 
 const viewStyleKey = "pario:asset-view-style"
+const objectSortKey = "pario:object-sort"
 const collectionViewStylePrefix = "pario:collection-view-style:"
+
+export type ObjectSortPreference = "primaryId" | "updatedAt"
 
 function readViewStyle<T extends string>(key: string, allowed: readonly T[], fallback: T): T {
   if (typeof window === "undefined") return fallback
@@ -80,12 +61,20 @@ function writeViewStyle(key: string, style: string) {
   }
 }
 
-export function getObjectViewStyle(): "cards" | "table" | "graph" {
-  return readViewStyle(viewStyleKey, ["cards", "table", "graph"], "cards")
+export function getObjectViewStyle(): "cards" | "table" {
+  return readViewStyle(viewStyleKey, ["cards", "table"], "cards")
 }
 
-export function setObjectViewStyle(style: "cards" | "table" | "graph") {
+export function setObjectViewStyle(style: "cards" | "table") {
   writeViewStyle(viewStyleKey, style)
+}
+
+export function getObjectSortPreference(): ObjectSortPreference {
+  return readViewStyle(objectSortKey, ["primaryId", "updatedAt"], "primaryId")
+}
+
+export function setObjectSortPreference(sort: ObjectSortPreference) {
+  writeViewStyle(objectSortKey, sort)
 }
 
 export function getCollectionViewStyle<T extends string>(

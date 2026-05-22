@@ -1,7 +1,7 @@
 import type { TelemetryProperty } from "@pario/client"
+import { Badge } from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useMemo } from "react"
-import { cn } from "../../lib/utils"
-import { Badge } from "../ui/badge"
 import { TelemetryTile } from "./TelemetryTile"
 
 interface TelemetryGridProps {
@@ -114,9 +114,17 @@ export function TelemetryGrid({
 
   return (
     <div className="space-y-6">
-      {renderSection("Sensors", grouped.sensors, "bg-blue-500/20 text-blue-400")}
-      {renderSection("Setpoints", grouped.setpoints, "bg-amber-500/20 text-amber-400")}
-      {renderSection("Commands", grouped.commands, "bg-emerald-500/20 text-emerald-400")}
+      {renderSection("Sensors", grouped.sensors, "bg-muted text-muted-foreground")}
+      {renderSection(
+        "Setpoints",
+        grouped.setpoints,
+        "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+      )}
+      {renderSection(
+        "Commands",
+        grouped.commands,
+        "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+      )}
     </div>
   )
 }

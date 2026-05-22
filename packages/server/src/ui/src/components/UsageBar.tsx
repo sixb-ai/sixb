@@ -1,4 +1,4 @@
-import { cn } from "../lib/utils"
+import { cn } from "@pario/ui/lib/utils"
 
 interface UsageBarProps {
   value: number
@@ -34,7 +34,7 @@ export function UsageBar({
 
   return (
     <div className="w-full">
-      <div className={cn("w-full rounded-full overflow-hidden bg-accent/50", heightClass)}>
+      <div className={cn("w-full rounded-full overflow-hidden bg-muted", heightClass)}>
         <div
           className={cn(
             "rounded-full transition-all duration-500 shadow-[inset_0_-1px_0_rgba(255,255,255,0.2)]",

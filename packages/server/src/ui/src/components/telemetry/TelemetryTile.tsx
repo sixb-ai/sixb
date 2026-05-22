@@ -1,8 +1,7 @@
 import type { TelemetryProperty } from "@pario/client"
-import { cn } from "../../lib/utils"
-import { MiniSparkline } from "../common/MiniSparkline"
+import { Badge, Card, MiniSparkline } from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { TelemetryValue } from "../TelemetryValue"
-import { Badge } from "../ui/badge"
 
 interface TelemetryTileProps {
   propertyId: string
@@ -17,9 +16,9 @@ interface TelemetryTileProps {
 }
 
 const typeColors: Record<string, string> = {
-  sensor: "bg-blue-500/20 text-blue-400 border-blue-500/30",
-  setpoint: "bg-amber-500/20 text-amber-400 border-amber-500/30",
-  command: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
+  sensor: "bg-muted text-muted-foreground border-border",
+  setpoint: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/25",
+  command: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/25",
 }
 
 const qualityDotColors = {
@@ -51,15 +50,19 @@ export function TelemetryTile({
   const hasHistory = historyData && historyData.length > 1
 
   return (
-    <button
+    <Card
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
       className={cn(
-        "relative flex flex-col p-3 rounded-xl text-left transition-all duration-200",
-        "border bg-card/60 backdrop-blur-sm hover:bg-card/80",
-        "hover:scale-[1.02] hover:shadow-lg",
-        isSelected
-          ? "border-emerald-500/50 ring-1 ring-emerald-500/30 bg-emerald-500/5"
-          : "border-border/50 hover:border-border"
+        "relative cursor-pointer flex-col gap-0 p-3 text-left transition-colors duration-150 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        isSelected ? "border-foreground/40 ring-1 ring-foreground/10 bg-muted" : ""
       )}
     >
       {/* Top row: Quality dot + Type badge */}
@@ -156,6 +159,6 @@ export function TelemetryTile({
           <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
         </div>
       )}
-    </button>
+    </Card>
   )
 }

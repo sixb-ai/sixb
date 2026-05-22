@@ -9,11 +9,13 @@ import {
   listRulesOptions,
   listSyncsOptions,
 } from "@pario/client/hooks"
+import { Button, Card, EmptyState } from "@pario/ui/components"
+import { cn } from "@pario/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
+import { Box, Loader2 } from "lucide-react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom"
 import { ConnectorDetailPage, ConnectorsPage } from "./components/ConnectorsPage"
-import { EmptyState, EmptyStateIcons, GlassCard, LoadingSpinner } from "./components/common"
 import { DatasetDetailPage, DatasetsPage } from "./components/DatasetsPage"
 import { AppShell, Sidebar, type ViewMode } from "./components/layout"
 import { ObjectDetailPage } from "./components/ObjectDetailPage"
@@ -24,11 +26,14 @@ import { PipelineDetailPage, PipelinesPage } from "./components/PipelinesPage"
 import { RuleDetailPage, RulesPage } from "./components/RulesPage"
 import { SyncDetailPage, SyncsPage } from "./components/SyncsPage"
 import { type TelemetryUpdate, useWebSocket } from "./hooks/useWebSocket"
-import { cn } from "./lib/utils"
+import {
+  getObjectSortPreference,
+  type ObjectSortPreference,
+  setObjectSortPreference,
+} from "./lib/userPreferences"
 
 interface ProjectSidebarData {
-  objects: ObjectSummary[]
-  selectedObjectId: string | null
+  objectCount: number
   datasetCount: number
   connectorCount: number
   syncCount: number
@@ -97,29 +102,19 @@ function AppLayout() {
       connected={sidebarData?.connected ?? false}
       viewMode={viewMode}
       onViewChange={handleViewChange}
-      objects={sidebarData?.objects ?? []}
-      selectedObjectId={sidebarData?.selectedObjectId ?? null}
-      onSelectObject={(objectId) => {
-        navigate(`/${objectId}`)
-      }}
-      connectorCount={sidebarData?.connectorCount ?? 0}
-      datasetCount={sidebarData?.datasetCount ?? 0}
-      syncCount={sidebarData?.syncCount ?? 0}
-      pipelineCount={sidebarData?.pipelineCount ?? 0}
-      ruleCount={sidebarData?.ruleCount ?? 0}
-      ontologyCount={sidebarData?.ontologyCount ?? 0}
-      showObjectList={false}
+      objectCount={sidebarData?.objectCount}
+      connectorCount={sidebarData?.connectorCount}
+      datasetCount={sidebarData?.datasetCount}
+      syncCount={sidebarData?.syncCount}
+      pipelineCount={sidebarData?.pipelineCount}
+      ruleCount={sidebarData?.ruleCount}
+      ontologyCount={sidebarData?.ontologyCount}
     />
   )
 
   return (
     <SidebarDataContext.Provider value={{ sidebarData, setSidebarData }}>
-      <AppShell
-        sidebar={sidebar}
-        currentProjectName={selectedProject?.name ?? null}
-        viewMode={viewMode}
-        onViewChange={handleViewChange}
-      >
+      <AppShell sidebar={sidebar} currentProjectName={selectedProject?.name ?? null}>
         <Outlet />
       </AppShell>
     </SidebarDataContext.Provider>
@@ -135,6 +130,7 @@ function ProjectWorkspace() {
   const { setSidebarData } = useContext(SidebarDataContext)
 
   const [latestUpdates, setLatestUpdates] = useState<Record<string, TelemetryUpdate>>({})
+  const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
 
   const {
     data: projectInfo,
@@ -152,7 +148,12 @@ function ProjectWorkspace() {
   }, [resolvedProjectName])
 
   const objectsQuery = useQuery({
-    ...listObjectsOptions(),
+    ...listObjectsOptions({
+      query: {
+        orderBy: objectSortBy,
+        order: objectSortBy === "primaryId" ? "asc" : "desc",
+      },
+    }),
     enabled: !!projectInfo,
   })
   const objects = objectsQuery.data ?? emptyObjectList
@@ -207,8 +208,7 @@ function ProjectWorkspace() {
 
   useEffect(() => {
     setSidebarData({
-      objects,
-      selectedObjectId: selectedObjectIdForSidebar,
+      objectCount: objects.length,
       datasetCount: datasets.length,
       connectorCount: connectors.length,
       syncCount: syncs.length,
@@ -218,8 +218,7 @@ function ProjectWorkspace() {
       connected,
     })
   }, [
-    objects,
-    selectedObjectIdForSidebar,
+    objects.length,
     datasets.length,
     connectors.length,
     syncs.length,
@@ -247,10 +246,18 @@ function ProjectWorkspace() {
 
   const toProjectPath = (suffix: string) => `/${suffix}`
 
+  const handleObjectSortByChange = (sortBy: ObjectSortPreference) => {
+    setObjectSortBy(sortBy)
+    setObjectSortPreference(sortBy)
+  }
+
   if (projectLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <LoadingSpinner text="Loading project..." />
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading project...</span>
+        </div>
       </div>
     )
   }
@@ -258,19 +265,21 @@ function ProjectWorkspace() {
   if (projectError || !projectInfo) {
     return (
       <div className="flex h-full items-center justify-center p-4 sm:p-8">
-        <GlassCard className="max-w-md text-center">
+        <Card className="mx-auto max-w-md p-6 text-center">
           <EmptyState
-            icon={EmptyStateIcons.cube}
+            icon={<Box className="size-12 stroke-1" />}
             title="Project unavailable"
             description="Could not load current project metadata."
           />
-          <button
+          <Button
+            variant="outline"
+            size="sm"
+            className="mx-auto mt-2"
             onClick={() => window.location.reload()}
-            className="mt-2 rounded-lg border border-border/60 bg-card/60 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-accent/40 hover:text-foreground"
           >
             Retry
-          </button>
-        </GlassCard>
+          </Button>
+        </Card>
       </div>
     )
   }
@@ -293,8 +302,10 @@ function ProjectWorkspace() {
                   projectName={resolvedProjectName}
                   objects={objects}
                   loading={objectsLoading}
+                  sortBy={objectSortBy}
                   selectedObjectId={selectedObjectIdForSidebar}
                   latestProjectUpdates={latestProjectUpdates}
+                  onSortByChange={handleObjectSortByChange}
                   onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
                 />
               }

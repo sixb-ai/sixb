@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@source "../src/**/*.{ts,tsx}";
+@source "./**/*.{ts,tsx}";
+
+@import "../src/styles/globals.css";
+
+:root {
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  background-color: var(--background);
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background-color: var(--background);
+}
+
+#root {
+  min-height: 100dvh;
+}
