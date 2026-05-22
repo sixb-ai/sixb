@@ -61,6 +61,7 @@ async function seedAuthenticatedUser(
     projectId: pario.id,
     userId: params.userId,
     strategyId: "magic-link",
+    audience: "admin",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -157,6 +158,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
+      audience: "admin",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -174,6 +176,78 @@ describe("Pario auth runtime", () => {
       user: { id: "usr_1", email: "ava@acme.com" },
       groupIds: ["commercial"],
     })
+  })
+
+  test("resolves sessions and cookie names by audience", async () => {
+    const deps = createTestRuntimeDeps()
+    const pario = new Pario({
+      ontology: [],
+      ...deps,
+      auth: {
+        strategy: authStrategy,
+        cookies: {
+          sessionCookieName: "acme_session",
+          csrfCookieName: "acme_csrf",
+        },
+      },
+    })
+    const adminCredential = createSessionCredential("ses_admin")
+    const appCredential = createSessionCredential("ses_app")
+
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: pario.id,
+      email: "ava@acme.com",
+    })
+    await deps.storage.auth.sessions.create({
+      id: adminCredential.sessionId,
+      projectId: pario.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "admin",
+      tokenHash: adminCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    await deps.storage.auth.sessions.create({
+      id: appCredential.sessionId,
+      projectId: pario.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "app",
+      tokenHash: appCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:01:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:01:00.000Z"),
+    })
+
+    expect(pario.auth.getCookieOptions({ audience: "admin" })).toMatchObject({
+      sessionCookieName: "acme_session",
+      csrfCookieName: "acme_csrf",
+    })
+    expect(pario.auth.getCookieOptions({ audience: "app" })).toMatchObject({
+      sessionCookieName: "acme_session_app",
+      csrfCookieName: "acme_csrf_app",
+    })
+
+    await expect(
+      pario.auth.getSession(
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `acme_session_app=${appCredential.cookieValue}` },
+        }),
+        { audience: "app" }
+      )
+    ).resolves.toMatchObject({ authenticated: true, session: { id: "ses_app" } })
+    await expect(
+      pario.auth.getSession(
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `acme_session=${appCredential.cookieValue}` },
+        }),
+        { audience: "admin" }
+      )
+    ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
+    expect(() => pario.auth.getCookieOptions({ audience: "app prod" })).toThrow(
+      "Auth session audience 'app prod' is invalid"
+    )
   })
 
   test("returns unauthenticated results for missing and suspended sessions", async () => {
@@ -196,6 +270,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
+      audience: "admin",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -233,6 +308,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
+      audience: "admin",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),

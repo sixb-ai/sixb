@@ -73,8 +73,13 @@ function createRuntime() {
   }
 }
 
-async function seedAdminSession(storage: InMemoryStorage) {
+async function seedAdminSession(
+  storage: InMemoryStorage,
+  params: { readonly audience?: "admin" | "app" } = {}
+) {
   const credential = createSessionCredential("ses_admin")
+  const audience = params.audience ?? "admin"
+  const cookieSuffix = audience === "admin" ? "" : `_${audience}`
   await storage.auth.users.create({
     id: "usr_admin",
     projectId,
@@ -91,13 +96,14 @@ async function seedAdminSession(storage: InMemoryStorage) {
     projectId,
     userId: "usr_admin",
     strategyId: "magic-link",
+    audience,
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2099-05-17T10:00:00.000Z"),
   })
 
   return {
-    cookie: `pario_session=${credential.cookieValue}; pario_csrf=csrf_1`,
+    cookie: `pario_session${cookieSuffix}=${credential.cookieValue}; pario_csrf${cookieSuffix}=csrf_1`,
     csrfHeader: { "x-pario-csrf": "csrf_1" },
   }
 }
@@ -181,6 +187,37 @@ describe("auth invitation routes", () => {
     expect(text).not.toContain("magicLink")
     expect(messages).toHaveLength(1)
     expect(messages[0]?.email).toBe("ava@acme.com")
+  })
+
+  test("creates invitations on the current server audience", async () => {
+    const { pario, storage } = createRuntime()
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, ui: false, sessionAudience: "app" })
+    )
+    const admin = await seedAdminSession(storage, { audience: "app" })
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "new@acme.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+    expect(await response.json()).toMatchObject({
+      invitation: {
+        email: "new@acme.com",
+        groupIds: ["commercial"],
+      },
+    })
   })
 
   test("rejects invitations when magic-link delivery cannot be sent", async () => {

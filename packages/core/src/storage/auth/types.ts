@@ -1,4 +1,4 @@
-import type { Principal } from "../../auth"
+import type { AuthSessionAudience, Principal } from "../../auth"
 
 export type UserStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
@@ -30,6 +30,7 @@ export interface SessionRecord {
   readonly projectId: string
   readonly userId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -140,6 +141,7 @@ export interface CreateAuthSessionInput {
   readonly projectId: string
   readonly userId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -147,6 +149,7 @@ export interface CreateAuthSessionInput {
 
 export interface CompleteAuthSessionInput {
   readonly id: string
+  readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
@@ -291,11 +294,13 @@ export interface AuthSessionStore {
   getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience: AuthSessionAudience
     readonly now: Date
   }): Promise<SessionRecord | null>
   findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
+    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null>
@@ -307,6 +312,7 @@ export interface AuthSessionStore {
   revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]>
   touch(params: {

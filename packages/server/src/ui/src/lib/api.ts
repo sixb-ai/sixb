@@ -2,7 +2,17 @@ import { client } from "@pario/client"
 
 client.setConfig({ baseUrl: window.location.origin })
 
-const CSRF_COOKIE_NAME = "pario_csrf"
+declare global {
+  interface Window {
+    __PARIO_RUNTIME__?: {
+      readonly auth?: {
+        readonly csrfCookieName?: string
+      }
+    }
+  }
+}
+
+const DEFAULT_CSRF_COOKIE_NAME = "pario_csrf"
 const CSRF_HEADER_NAME = "x-pario-csrf"
 const CSRF_EXEMPT_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
@@ -15,7 +25,7 @@ client.interceptors.request.use((request) => {
     return request
   }
 
-  const csrfToken = readCookie(CSRF_COOKIE_NAME)
+  const csrfToken = readCookie(resolveCsrfCookieName())
   if (!csrfToken) {
     return request
   }
@@ -24,6 +34,10 @@ client.interceptors.request.use((request) => {
   headers.set(CSRF_HEADER_NAME, csrfToken)
   return new Request(request, { headers })
 })
+
+function resolveCsrfCookieName(): string {
+  return window.__PARIO_RUNTIME__?.auth?.csrfCookieName ?? DEFAULT_CSRF_COOKIE_NAME
+}
 
 function readCookie(name: string): string | null {
   const prefix = `${encodeURIComponent(name)}=`

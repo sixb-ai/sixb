@@ -14,6 +14,8 @@ export const DEFAULT_AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const DEFAULT_AUTH_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_AUTH_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
+export { resolveAuthSessionAudience } from "./audience"
+
 export function resolveAuthConfig(config: ParioAuthConfig | undefined): ResolvedAuthConfig {
   if (!config) {
     return {

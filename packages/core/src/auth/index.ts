@@ -1,3 +1,10 @@
+export type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
+export {
+  AUTH_SESSION_AUDIENCE_PATTERN,
+  DEFAULT_AUTH_SESSION_AUDIENCE,
+  isValidAuthSessionAudience,
+  resolveAuthSessionAudience,
+} from "./audience"
 export {
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
@@ -38,6 +45,7 @@ export type {
   AuthenticatedAuthSession,
   AuthSessionFailureReason,
   AuthSessionOptions,
+  AuthSessionResolutionOptions,
   AuthSessionResult,
   AuthStrategy,
   AuthStrategyKind,
