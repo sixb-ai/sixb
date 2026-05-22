@@ -1,0 +1,137 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { col, defineDataset } from "@pario/core"
+import type { DuckLakeStorage } from "../src"
+import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+
+const ordersDataset = defineDataset("raw.erp.orders", {
+  schema: [col("orderId", "string"), col("customerName", "string")],
+})
+
+describe("DuckLakeStorage optimistic concurrency", () => {
+  let rootDir: string
+  let storage: DuckLakeStorage
+  const extraStorages: DuckLakeStorage[] = []
+
+  beforeEach(async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-concurrency-"))
+    storage = createLocalDuckLakeStorage(rootDir)
+    await storage.createDataset(ordersDataset)
+  })
+
+  afterEach(async () => {
+    await storage.close()
+    for (const extraStorage of extraStorages.splice(0)) {
+      await extraStorage.close()
+    }
+    await rm(rootDir, { recursive: true, force: true })
+  })
+
+  test("rejects a stale guarded commit from an older write session", async () => {
+    const initialVersion = await seedInitialVersion(storage)
+
+    const delayedWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await delayedWrite.writeRows([{ orderId: "ord_2", customerName: "Grace" }])
+
+    const competingWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await competingWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
+    const winningVersion = await competingWrite.commit({
+      expectedLatestVersionId: initialVersion.versionId,
+    })
+
+    await expect(
+      delayedWrite.commit({ expectedLatestVersionId: initialVersion.versionId })
+    ).rejects.toThrow(
+      `expected latest version '${initialVersion.versionId}', found '${winningVersion.versionId}'`
+    )
+
+    expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
+      { orderId: "ord_1", customerName: "Ada" },
+      { orderId: "ord_3", customerName: "Katherine" },
+    ])
+    expect(
+      (await storage.listVersions(ordersDataset.id)).map((version) => version.versionId)
+    ).toEqual([winningVersion.versionId, initialVersion.versionId])
+  })
+
+  test("rejects a stale guarded commit from another provider instance", async () => {
+    const initialVersion = await seedInitialVersion(storage)
+    const secondStorage = createLocalDuckLakeStorage(rootDir)
+    extraStorages.push(secondStorage)
+
+    const delayedWrite = await secondStorage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await delayedWrite.writeRows([{ orderId: "ord_2", customerName: "Grace" }])
+
+    const competingWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await competingWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
+    const winningVersion = await competingWrite.commit({
+      expectedLatestVersionId: initialVersion.versionId,
+    })
+
+    await expect(
+      delayedWrite.commit({ expectedLatestVersionId: initialVersion.versionId })
+    ).rejects.toThrow("Optimistic commit failed")
+
+    expect(await secondStorage.getLatestVersion(ordersDataset.id)).toMatchObject({
+      versionId: winningVersion.versionId,
+    })
+    expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
+      { orderId: "ord_1", customerName: "Ada" },
+      { orderId: "ord_3", customerName: "Katherine" },
+    ])
+  })
+
+  test("does not report another session's concurrent commit as successful", async () => {
+    await seedInitialVersion(storage)
+    const secondStorage = createLocalDuckLakeStorage(rootDir)
+    extraStorages.push(secondStorage)
+
+    const firstWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await firstWrite.writeRows([{ orderId: "ord_2", customerName: "Grace" }])
+
+    const secondWrite = await secondStorage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await secondWrite.writeRows([{ orderId: "ord_3", customerName: "Katherine" }])
+
+    const results = await Promise.allSettled([firstWrite.commit(), secondWrite.commit()])
+    const fulfilled = results.filter((result) => result.status === "fulfilled")
+    const fulfilledVersionIds = fulfilled.map((result) => result.value.versionId)
+
+    expect(fulfilled.length).toBeGreaterThan(0)
+    expect(new Set(fulfilledVersionIds).size).toBe(fulfilledVersionIds.length)
+
+    const committedOrderIds = results.flatMap((result, index) =>
+      result.status === "fulfilled" ? [`ord_${index + 2}`] : []
+    )
+    const rows = await collectRows(storage.readRows({ datasetId: ordersDataset.id }))
+    expect(rows.map((row) => row.orderId).sort()).toEqual(["ord_1", ...committedOrderIds].sort())
+  })
+})
+
+async function seedInitialVersion(storage: DuckLakeStorage) {
+  const write = await storage.beginWrite({
+    dataset: ordersDataset,
+    mode: "snapshot",
+  })
+  await write.writeRows([{ orderId: "ord_1", customerName: "Ada" }])
+  return write.commit()
+}

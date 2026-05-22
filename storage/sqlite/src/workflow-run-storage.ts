@@ -1,0 +1,463 @@
+import { Database } from "bun:sqlite"
+import { mkdirSync } from "node:fs"
+import { dirname } from "node:path"
+import type {
+  FinishWorkflowNodeRunInput,
+  FinishWorkflowRunInput,
+  ListWorkflowNodeRunsInput,
+  ListWorkflowNodeRunsResult,
+  ListWorkflowRunsInput,
+  ListWorkflowRunsResult,
+  StartWorkflowNodeRunInput,
+  StartWorkflowRunInput,
+  WorkflowIOSnapshot,
+  WorkflowNodeRunRecord,
+  WorkflowNodeRunStorage,
+  WorkflowRunRecord,
+  WorkflowRunStorage,
+} from "@pario/core"
+import { WorkflowRunError } from "@pario/core"
+import { installFreshSqliteSchema } from "./migrations"
+import {
+  appendRunListFilters,
+  hasEmptyStatuses,
+  queryRunList,
+  type SqliteValue,
+} from "./run-list-query"
+import { isUniqueConstraintError } from "./storage-errors"
+
+export interface SqliteWorkflowRunStorageOptions {
+  /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
+  path?: string
+}
+
+export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
+  readonly nodes: SqliteWorkflowNodeRunStorage
+
+  private readonly db: Database
+
+  constructor(options: SqliteWorkflowRunStorageOptions = {}) {
+    const path = options.path ?? ":memory:"
+    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
+    this.db = new Database(path)
+
+    if (path === ":memory:") {
+      installFreshSqliteSchema(this.db)
+    }
+
+    this.nodes = new SqliteWorkflowNodeRunStorage(this.db)
+  }
+
+  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const startedAt = input.startedAt ?? new Date()
+
+    try {
+      this.db
+        .query(
+          `
+          INSERT INTO workflow_runs (
+            project_id,
+            id,
+            workflow_id,
+            status,
+            input,
+            started_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `
+        )
+        .run(
+          input.projectId,
+          input.id,
+          input.workflowId,
+          "running",
+          serializeRecord(input.input),
+          startedAt.toISOString()
+        )
+    } catch (error) {
+      if (isUniqueConstraintError(error)) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+
+      throw error
+    }
+
+    const record = await this.getById({ projectId: input.projectId, id: input.id })
+    if (!record) {
+      throw new WorkflowRunError(
+        `[ParioSqlite] Failed to load workflow run '${input.id}' for project '${input.projectId}'.`
+      )
+    }
+
+    return record
+  }
+
+  async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
+
+      if (!existing) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "running") {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' is already terminal.`
+        )
+      }
+
+      this.db
+        .query(
+          `
+          UPDATE workflow_runs
+          SET
+            status = ?,
+            finished_at = ?,
+            error = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.status,
+          (input.finishedAt ?? new Date()).toISOString(),
+          input.status === "succeeded" ? null : (input.error ?? null),
+          input.projectId,
+          input.id
+        )
+
+      const updated = this.db
+        .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowRunDatabaseRow
+
+      return rowToWorkflowRunRecord(updated)
+    })()
+  }
+
+  async getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null> {
+    const row = this.db
+      .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+      .get(params.projectId, params.id) as WorkflowRunDatabaseRow | null
+
+    return row ? rowToWorkflowRunRecord(row) : null
+  }
+
+  async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
+    if (hasEmptyStatuses(input)) {
+      return {
+        runs: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
+    const whereClauses = ["project_id = ?"]
+    const args: SqliteValue[] = [input.projectId]
+
+    if (input.workflowId) {
+      whereClauses.push("workflow_id = ?")
+      args.push(input.workflowId)
+    }
+
+    appendRunListFilters(whereClauses, args, input)
+
+    const { rows, total, hasMore } = queryRunList<WorkflowRunDatabaseRow>({
+      db: this.db,
+      tableName: "workflow_runs",
+      whereClauses,
+      args,
+      order: input.order,
+      limit: input.limit,
+      offset: input.offset,
+    })
+
+    return {
+      runs: rows.map(rowToWorkflowRunRecord),
+      hasMore,
+      total,
+    }
+  }
+
+  close(): void {
+    this.db.close()
+  }
+}
+
+export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
+  constructor(private readonly db: Database) {}
+
+  async start(input: StartWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
+
+    return this.db.transaction(() => {
+      const workflowRun = this.db
+        .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.workflowRunId) as WorkflowRunDatabaseRow | null
+
+      if (!workflowRun) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (workflowRun.status !== "running") {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow run '${input.workflowRunId}' for project '${input.projectId}' is already terminal.`
+        )
+      }
+
+      if (workflowRun.workflow_id !== input.workflowId) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
+        )
+      }
+
+      const startedAt = input.startedAt ?? new Date()
+
+      try {
+        this.db
+          .query(
+            `
+            INSERT INTO workflow_node_runs (
+              project_id,
+              id,
+              workflow_run_id,
+              workflow_id,
+              node_index,
+              node_type,
+              node_id,
+              node_key,
+              status,
+              input,
+              started_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `
+          )
+          .run(
+            input.projectId,
+            input.id,
+            input.workflowRunId,
+            input.workflowId,
+            input.nodeIndex,
+            input.nodeType,
+            input.nodeId,
+            input.nodeKey,
+            "running",
+            serializeRecord(input.input),
+            startedAt.toISOString()
+          )
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new WorkflowRunError(
+            `[ParioSqlite] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
+          )
+        }
+
+        throw error
+      }
+
+      const row = this.db
+        .query("SELECT * FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow | null
+
+      if (!row) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Failed to load workflow node run '${input.id}' for project '${input.projectId}'.`
+        )
+      }
+
+      return rowToWorkflowNodeRunRecord(row)
+    })()
+  }
+
+  async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow | null
+
+      if (!existing) {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "running") {
+        throw new WorkflowRunError(
+          `[ParioSqlite] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
+        )
+      }
+
+      this.db
+        .query(
+          `
+          UPDATE workflow_node_runs
+          SET
+            status = ?,
+            finished_at = ?,
+            output = ?,
+            error = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.status,
+          (input.finishedAt ?? new Date()).toISOString(),
+          input.status === "succeeded" && input.output ? serializeRecord(input.output) : null,
+          input.status === "succeeded" ? null : (input.error ?? null),
+          input.projectId,
+          input.id
+        )
+
+      const updated = this.db
+        .query("SELECT * FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowNodeRunDatabaseRow
+
+      return rowToWorkflowNodeRunRecord(updated)
+    })()
+  }
+
+  async getById(params: { projectId: string; id: string }): Promise<WorkflowNodeRunRecord | null> {
+    const row = this.db
+      .query("SELECT * FROM workflow_node_runs WHERE project_id = ? AND id = ?")
+      .get(params.projectId, params.id) as WorkflowNodeRunDatabaseRow | null
+
+    return row ? rowToWorkflowNodeRunRecord(row) : null
+  }
+
+  async list(input: ListWorkflowNodeRunsInput): Promise<ListWorkflowNodeRunsResult> {
+    if (hasEmptyStatuses(input)) {
+      return {
+        nodes: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
+    const whereClauses = ["project_id = ?"]
+    const args: SqliteValue[] = [input.projectId]
+
+    if (input.workflowRunId) {
+      whereClauses.push("workflow_run_id = ?")
+      args.push(input.workflowRunId)
+    }
+
+    if (input.workflowId) {
+      whereClauses.push("workflow_id = ?")
+      args.push(input.workflowId)
+    }
+
+    if (input.nodeType) {
+      whereClauses.push("node_type = ?")
+      args.push(input.nodeType)
+    }
+
+    if (input.nodeId) {
+      whereClauses.push("node_id = ?")
+      args.push(input.nodeId)
+    }
+
+    if (input.nodeKey) {
+      whereClauses.push("node_key = ?")
+      args.push(input.nodeKey)
+    }
+
+    appendRunListFilters(whereClauses, args, input)
+
+    const { rows, total, hasMore } = queryRunList<WorkflowNodeRunDatabaseRow>({
+      db: this.db,
+      tableName: "workflow_node_runs",
+      whereClauses,
+      args,
+      order: input.order,
+      limit: input.limit,
+      offset: input.offset,
+    })
+
+    return {
+      nodes: rows.map(rowToWorkflowNodeRunRecord),
+      hasMore,
+      total,
+    }
+  }
+}
+
+function serializeRecord(value: WorkflowIOSnapshot): string {
+  return JSON.stringify(value)
+}
+
+function parseRecord(value: string): WorkflowIOSnapshot {
+  return JSON.parse(value) as WorkflowIOSnapshot
+}
+
+function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workflowId: row.workflow_id,
+    status: row.status,
+    input: parseRecord(row.input),
+    startedAt: new Date(row.started_at),
+    finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
+    error: row.error ?? undefined,
+  }
+}
+
+function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNodeRunRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    workflowRunId: row.workflow_run_id,
+    workflowId: row.workflow_id,
+    nodeIndex: row.node_index,
+    nodeType: row.node_type,
+    nodeId: row.node_id,
+    nodeKey: row.node_key,
+    status: row.status,
+    input: parseRecord(row.input),
+    startedAt: new Date(row.started_at),
+    finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
+    output: row.output ? parseRecord(row.output) : undefined,
+    error: row.error ?? undefined,
+  }
+}
+
+function assertNonNegativeInteger(value: number, fieldName: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new WorkflowRunError(
+      `[ParioSqlite] Workflow run ${fieldName} must be a non-negative integer.`
+    )
+  }
+}
+
+interface WorkflowRunDatabaseRow {
+  project_id: string
+  id: string
+  workflow_id: string
+  status: WorkflowRunRecord["status"]
+  input: string
+  started_at: string
+  finished_at: string | null
+  error: string | null
+}
+
+interface WorkflowNodeRunDatabaseRow {
+  project_id: string
+  id: string
+  workflow_run_id: string
+  workflow_id: string
+  node_index: number
+  node_type: WorkflowNodeRunRecord["nodeType"]
+  node_id: string
+  node_key: string
+  status: WorkflowNodeRunRecord["status"]
+  input: string
+  started_at: string
+  finished_at: string | null
+  output: string | null
+  error: string | null
+}

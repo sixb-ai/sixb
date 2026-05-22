@@ -1,0 +1,207 @@
+import { describe, expect, test } from "bun:test"
+import { InMemorySyncRunStorage, SyncRunError } from "../src"
+
+describe("InMemorySyncRunStorage", () => {
+  test("starts and finishes a successful run with merged metadata", async () => {
+    const storage = new InMemorySyncRunStorage()
+    const startedAt = new Date("2026-04-06T15:00:00.000Z")
+    const finishedAt = new Date("2026-04-06T15:00:01.280Z")
+
+    const started = await storage.start({
+      id: "syncrun_1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt,
+      expectedLatestVersionId: "ver_prev",
+      commitMessage: "refresh orders",
+      metadata: {
+        connectorType: "sql",
+        context: {
+          source: "erp",
+        },
+      },
+    })
+
+    ;(started.startedAt as Date).setUTCFullYear(2040)
+    ;(
+      (started.metadata as { context?: { source?: string } }).context as { source?: string }
+    ).source = "mutated"
+
+    const finished = await storage.finish({
+      id: "syncrun_1",
+      projectId: "my-app",
+      status: "succeeded",
+      finishedAt,
+      rowsRead: 1250,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_123",
+      },
+      metadata: {
+        datasetCreated: true,
+        durationMs: 1280,
+      },
+    })
+
+    const stored = await storage.getById({
+      projectId: "my-app",
+      id: "syncrun_1",
+    })
+
+    expect(finished.status).toBe("succeeded")
+    expect(finished.rowsRead).toBe(1250)
+    expect(finished.output).toEqual({
+      datasetId: "raw.erp.orders",
+      versionId: "ver_123",
+    })
+    expect(finished.metadata).toEqual({
+      connectorType: "sql",
+      context: {
+        source: "erp",
+      },
+      datasetCreated: true,
+      durationMs: 1280,
+    })
+    expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
+    expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
+    expect(stored?.commitMessage).toBe("refresh orders")
+    expect(stored?.expectedLatestVersionId).toBe("ver_prev")
+  })
+
+  test("rejects duplicate starts and missing finishes", async () => {
+    const storage = new InMemorySyncRunStorage()
+
+    await storage.start({
+      id: "syncrun_1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+    })
+
+    await expect(
+      storage.start({
+        id: "syncrun_1",
+        projectId: "my-app",
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+
+    await expect(
+      storage.finish({
+        id: "missing",
+        projectId: "my-app",
+        status: "failed",
+        error: {
+          message: "boom",
+        },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+
+  test("stores failed runs and lists with filters, ordering, and paging", async () => {
+    const storage = new InMemorySyncRunStorage()
+
+    await storage.start({
+      id: "run-1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await storage.finish({
+      id: "run-1",
+      projectId: "my-app",
+      status: "failed",
+      finishedAt: new Date("2026-04-06T15:00:00.420Z"),
+      rowsRead: 23,
+      error: {
+        name: "Error",
+        message: "Database connection lost",
+      },
+    })
+
+    await storage.start({
+      id: "run-2",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+    await storage.finish({
+      id: "run-2",
+      projectId: "my-app",
+      status: "succeeded",
+      finishedAt: new Date("2026-04-06T16:00:01.000Z"),
+      rowsRead: 100,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_200",
+      },
+    })
+
+    await storage.start({
+      id: "run-3",
+      projectId: "my-app",
+      syncId: "sync-customers",
+      datasetId: "raw.crm.customers",
+      mode: "append",
+      startedAt: new Date("2026-04-06T17:00:00.000Z"),
+    })
+
+    const page = await storage.list({
+      projectId: "my-app",
+      statuses: ["running", "succeeded"],
+      startedAfter: new Date("2026-04-06T15:30:00.000Z"),
+      limit: 1,
+      offset: 1,
+    })
+
+    expect(page.total).toBe(2)
+    expect(page.hasMore).toBe(false)
+    expect(page.runs.map((run) => run.id)).toEqual(["run-2"])
+
+    const failed = await storage.getById({
+      projectId: "my-app",
+      id: "run-1",
+    })
+
+    expect(failed?.status).toBe("failed")
+    expect(failed?.rowsRead).toBe(23)
+    expect(failed?.error).toEqual({
+      name: "Error",
+      message: "Database connection lost",
+    })
+  })
+
+  test("rejects success outputs for a different dataset", async () => {
+    const storage = new InMemorySyncRunStorage()
+
+    await storage.start({
+      id: "syncrun_1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+    })
+
+    await expect(
+      storage.finish({
+        id: "syncrun_1",
+        projectId: "my-app",
+        status: "succeeded",
+        rowsRead: 10,
+        output: {
+          datasetId: "raw.erp.invoices",
+          versionId: "ver_1",
+        },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+})

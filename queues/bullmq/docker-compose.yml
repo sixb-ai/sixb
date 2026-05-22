@@ -1,0 +1,14 @@
+services:
+  redis:
+    image: redis:7-alpine
+    # Custom port (46379) so local dev Redis instances on 6379 do not collide
+    # with this test server. Append-only mode is left off — the test suite
+    # relies on a clean Redis on every run via `down -v`.
+    command: ["redis-server", "--port", "46379"]
+    ports:
+      - "46379:46379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "46379", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15

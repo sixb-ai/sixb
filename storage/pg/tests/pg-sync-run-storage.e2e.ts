@@ -1,0 +1,158 @@
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { SyncRunError } from "@pario/core"
+import type { PostgresStorage } from "../src"
+import { createTestStorage } from "./helpers"
+
+describe("PgSyncRunStorage", () => {
+  let storage: PostgresStorage
+
+  beforeEach(async () => {
+    ;({ storage } = await createTestStorage())
+  })
+
+  afterEach(async () => {
+    await storage.dropSchema()
+    await storage.close()
+  })
+
+  test("starts and finishes runs with merged metadata", async () => {
+    await storage.syncRuns.start({
+      id: "run-1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+      metadata: {
+        connectorType: "sql",
+      },
+    })
+
+    const finished = await storage.syncRuns.finish({
+      id: "run-1",
+      projectId: "my-app",
+      status: "succeeded",
+      finishedAt: new Date("2026-04-06T15:00:01.280Z"),
+      rowsRead: 1250,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_123",
+      },
+      metadata: {
+        datasetCreated: true,
+      },
+    })
+
+    expect(finished.status).toBe("succeeded")
+    expect(finished.output).toEqual({
+      datasetId: "raw.erp.orders",
+      versionId: "ver_123",
+    })
+    expect(finished.metadata).toEqual({
+      connectorType: "sql",
+      datasetCreated: true,
+    })
+  })
+
+  test("stores failures and supports filtered paging", async () => {
+    await storage.syncRuns.start({
+      id: "run-1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await storage.syncRuns.finish({
+      id: "run-1",
+      projectId: "my-app",
+      status: "failed",
+      rowsRead: 23,
+      error: {
+        name: "Error",
+        message: "Database connection lost",
+      },
+    })
+
+    await storage.syncRuns.start({
+      id: "run-2",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+
+    await storage.syncRuns.start({
+      id: "run-3",
+      projectId: "my-app",
+      syncId: "sync-customers",
+      datasetId: "raw.crm.customers",
+      mode: "append",
+      startedAt: new Date("2026-04-06T17:00:00.000Z"),
+    })
+
+    const page = await storage.syncRuns.list({
+      projectId: "my-app",
+      statuses: ["running"],
+      startedAfter: new Date("2026-04-06T15:30:00.000Z"),
+      limit: 1,
+      offset: 0,
+    })
+
+    expect(page.total).toBe(2)
+    expect(page.hasMore).toBe(true)
+    expect(page.runs.map((run) => run.id)).toEqual(["run-3"])
+
+    const failed = await storage.syncRuns.getById({
+      projectId: "my-app",
+      id: "run-1",
+    })
+    expect(failed?.error?.message).toBe("Database connection lost")
+    expect(failed?.rowsRead).toBe(23)
+  })
+
+  test("rejects duplicates, missing runs, and mismatched success outputs", async () => {
+    await storage.syncRuns.start({
+      id: "run-1",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+    })
+
+    await expect(
+      storage.syncRuns.start({
+        id: "run-1",
+        projectId: "my-app",
+        syncId: "sync-orders",
+        datasetId: "raw.erp.orders",
+        mode: "snapshot",
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+
+    await expect(
+      storage.syncRuns.finish({
+        id: "missing",
+        projectId: "my-app",
+        status: "failed",
+        error: {
+          message: "boom",
+        },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+
+    await expect(
+      storage.syncRuns.finish({
+        id: "run-1",
+        projectId: "my-app",
+        status: "succeeded",
+        rowsRead: 10,
+        output: {
+          datasetId: "raw.erp.invoices",
+          versionId: "ver_1",
+        },
+      })
+    ).rejects.toBeInstanceOf(SyncRunError)
+  })
+})

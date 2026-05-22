@@ -1,0 +1,758 @@
+import {
+  encodeObjectId,
+  type GetRuleResponse,
+  type ListRuleStatesResponse,
+  type ListRulesResponse,
+} from "@pario/client"
+import { getRuleOptions, listRuleStatesOptions, listRulesOptions } from "@pario/client/hooks"
+import { useQuery } from "@tanstack/react-query"
+import { BellRing, ChevronLeft, ChevronRight, ListChecks, Search } from "lucide-react"
+import { useMemo, useState } from "react"
+import { useNavigate, useParams } from "react-router-dom"
+import { formatValue } from "../lib/formatValue"
+import { humanizeIdentifier } from "../lib/labels"
+import { formatRelativeTime } from "../lib/time"
+import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
+import { cn } from "../lib/utils"
+import {
+  CollectionCardButton,
+  CollectionCardGrid,
+  CollectionHeader,
+  CollectionTable,
+  CollectionViewToggle,
+  EmptyState,
+  LoadingSpinner,
+  SearchInput,
+} from "./common"
+import { Badge } from "./ui/badge"
+
+type RuleSummary = ListRulesResponse[number] | GetRuleResponse
+type RuleState = ListRuleStatesResponse["states"][number]
+type RulesListViewStyle = "cards" | "table"
+type RulePredicateKind = "all" | "any" | "not" | "property" | "link"
+
+const rulesListViewOptions = [
+  { value: "cards", label: "Cards" },
+  { value: "table", label: "Table" },
+] as const
+
+function ruleName(rule: Pick<RuleSummary, "id">): string {
+  return humanizeIdentifier(rule.id)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function predicateKind(value: unknown): RulePredicateKind | null {
+  if (!isRecord(value) || typeof value.kind !== "string") return null
+  if (
+    value.kind === "all" ||
+    value.kind === "any" ||
+    value.kind === "not" ||
+    value.kind === "property" ||
+    value.kind === "link"
+  ) {
+    return value.kind
+  }
+  return null
+}
+
+function propertyOperatorLabel(op: string): string {
+  switch (op) {
+    case "eq":
+      return "="
+    case "notEq":
+      return "!="
+    case "gt":
+      return ">"
+    case "gte":
+      return ">="
+    case "lt":
+      return "<"
+    case "lte":
+      return "<="
+    case "isPresent":
+      return "present"
+    case "isMissing":
+      return "missing"
+    default:
+      return op
+  }
+}
+
+function formatPredicateValue(value: unknown): string {
+  if (typeof value === "string") return `"${value}"`
+  if (typeof value === "number" || typeof value === "boolean") return formatValue(value)
+  if (value === null) return "null"
+  return ""
+}
+
+function childPredicates(predicate: Record<string, unknown>): unknown[] {
+  return Array.isArray(predicate.predicates) ? predicate.predicates : []
+}
+
+function describePredicate(predicate: unknown): string {
+  if (!isRecord(predicate)) return "Unknown predicate"
+
+  const kind = predicateKind(predicate)
+  if (kind === "property") {
+    const propertyId = typeof predicate.propertyId === "string" ? predicate.propertyId : "property"
+    const op = typeof predicate.op === "string" ? predicate.op : ""
+    if (op === "isPresent" || op === "isMissing") {
+      return `${propertyId} is ${propertyOperatorLabel(op)}`
+    }
+    return `${propertyId} ${propertyOperatorLabel(op)} ${formatPredicateValue(predicate.value)}`
+  }
+
+  if (kind === "link") {
+    const linkId = typeof predicate.linkId === "string" ? predicate.linkId : "link"
+    return `${linkId} ${predicate.op === "exists" ? "exists" : "missing"}`
+  }
+
+  if (kind === "not") {
+    return `Not ${describePredicate(predicate.predicate)}`
+  }
+
+  if (kind === "all" || kind === "any") {
+    const count = childPredicates(predicate).length
+    return `${kind === "all" ? "All" : "Any"} of ${count}`
+  }
+
+  return "Unknown predicate"
+}
+
+function predicateSearchText(predicate: unknown): string {
+  if (!isRecord(predicate)) return ""
+  const kind = predicateKind(predicate)
+  const own = describePredicate(predicate)
+
+  if (kind === "all" || kind === "any") {
+    return [own, ...childPredicates(predicate).map(predicateSearchText)].join(" ")
+  }
+
+  if (kind === "not") {
+    return [own, predicateSearchText(predicate.predicate)].join(" ")
+  }
+
+  return own
+}
+
+function dependencyLabel(dependency: RuleSummary["dependencies"][number]): string {
+  switch (dependency.type) {
+    case "object.upserted":
+      return `Object ${dependency.objectTypeId}`
+    case "link.upserted":
+      return `Link ${dependency.sourceTypeId}.${dependency.linkId} upserted`
+    case "link.removed":
+      return `Link ${dependency.sourceTypeId}.${dependency.linkId} removed`
+  }
+}
+
+function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): string {
+  switch (dependency.type) {
+    case "object.upserted":
+      return `${dependency.objectTypeId} upserted`
+    case "link.upserted":
+      return `${dependency.sourceTypeId}.${dependency.linkId} added`
+    case "link.removed":
+      return `${dependency.sourceTypeId}.${dependency.linkId} removed`
+  }
+}
+
+function ActiveStateBadge({ count }: { count: number }) {
+  if (count === 0) {
+    return (
+      <Badge variant="outline" className="rounded-md border-border/60 text-muted-foreground">
+        None active
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge
+      variant="outline"
+      className="rounded-md border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+    >
+      <BellRing className="h-3 w-3" />
+      {count} active
+    </Badge>
+  )
+}
+
+function RuleIcon({ active }: { active: boolean }) {
+  return (
+    <div
+      className={cn(
+        "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
+        active
+          ? "bg-amber-500/10 text-amber-700 dark:text-amber-200"
+          : "bg-muted text-muted-foreground"
+      )}
+    >
+      <ListChecks className="h-4 w-4" />
+    </div>
+  )
+}
+
+function RuleListItem({
+  rule,
+  activeCount,
+  onSelect,
+}: {
+  rule: ListRulesResponse[number]
+  activeCount: number
+  onSelect: () => void
+}) {
+  return (
+    <CollectionCardButton
+      onClick={onSelect}
+      className={cn(activeCount > 0 && "border-amber-500/40 bg-amber-500/5")}
+    >
+      <RuleIcon active={activeCount > 0} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
+          <span className="shrink-0 rounded-md bg-background/70 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            {rule.subject.objectTypeId}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">{rule.id}</p>
+        <p className="mt-1 truncate text-xs text-muted-foreground">
+          {describePredicate(rule.predicate)}
+        </p>
+      </div>
+      <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
+        <ActiveStateBadge count={activeCount} />
+        <span className="text-xs text-muted-foreground">
+          {rule.dependencies.length} dependenc{rule.dependencies.length === 1 ? "y" : "ies"}
+        </span>
+      </div>
+    </CollectionCardButton>
+  )
+}
+
+function RuleTableView({
+  rules,
+  activeCountByRule,
+  onSelect,
+}: {
+  rules: ListRulesResponse
+  activeCountByRule: ReadonlyMap<string, number>
+  onSelect: (ruleId: string) => void
+}) {
+  return (
+    <CollectionTable>
+      <thead>
+        <tr className="border-b border-border/50 bg-muted text-xs text-muted-foreground">
+          <th className="py-2 pl-3 pr-3 font-medium">Rule</th>
+          <th className="hidden px-3 py-2 font-medium sm:table-cell">Subject</th>
+          <th className="hidden px-3 py-2 font-medium md:table-cell">Predicate</th>
+          <th className="px-3 py-2 font-medium">Active</th>
+          <th className="hidden px-3 py-2 text-right font-medium lg:table-cell">Dependencies</th>
+        </tr>
+      </thead>
+      <tbody className="bg-card">
+        {rules.map((rule, index) => {
+          const activeCount = activeCountByRule.get(rule.id) ?? 0
+          return (
+            <tr
+              key={rule.id}
+              onClick={() => onSelect(rule.id)}
+              className={cn(
+                "cursor-pointer transition-colors hover:bg-muted/30",
+                index > 0 && "border-t border-border/40"
+              )}
+            >
+              <td className="max-w-[260px] py-2.5 pl-3 pr-3">
+                <p className="truncate text-sm font-medium text-foreground">{ruleName(rule)}</p>
+                <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{rule.id}</p>
+              </td>
+              <td className="hidden px-3 py-2.5 font-mono text-xs text-muted-foreground sm:table-cell">
+                {rule.subject.objectTypeId}
+              </td>
+              <td className="hidden max-w-[280px] px-3 py-2.5 text-xs text-muted-foreground md:table-cell">
+                <span className="block truncate">{describePredicate(rule.predicate)}</span>
+              </td>
+              <td className="px-3 py-2.5">
+                <ActiveStateBadge count={activeCount} />
+              </td>
+              <td className="hidden px-3 py-2.5 text-right text-xs text-muted-foreground lg:table-cell">
+                {rule.dependencies.length}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </CollectionTable>
+  )
+}
+
+function PredicateGroupLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      {children}
+    </p>
+  )
+}
+
+function PredicateGroupBody({ children }: { children: React.ReactNode }) {
+  return <div className="mt-2 ml-1 space-y-2 border-l border-border/50 pl-4">{children}</div>
+}
+
+function PropertyTerm({ record }: { record: Record<string, unknown> }) {
+  const propertyId = typeof record.propertyId === "string" ? record.propertyId : "property"
+  const op = typeof record.op === "string" ? record.op : ""
+
+  if (op === "isPresent" || op === "isMissing") {
+    return (
+      <p className="font-mono text-sm text-foreground">
+        <span>{propertyId}</span>{" "}
+        <span className="text-muted-foreground">
+          is {op === "isPresent" ? "present" : "missing"}
+        </span>
+      </p>
+    )
+  }
+
+  return (
+    <p className="font-mono text-sm text-foreground">
+      <span>{propertyId}</span>{" "}
+      <span className="text-muted-foreground">{propertyOperatorLabel(op)}</span>{" "}
+      <span>{formatPredicateValue(record.value)}</span>
+    </p>
+  )
+}
+
+function LinkTerm({ record }: { record: Record<string, unknown> }) {
+  const linkId = typeof record.linkId === "string" ? record.linkId : "link"
+  const op = record.op === "exists" ? "exists" : "missing"
+  return (
+    <p className="font-mono text-sm text-foreground">
+      <span>{linkId}</span> <span className="text-muted-foreground">{op}</span>
+    </p>
+  )
+}
+
+function PredicateExpression({ predicate }: { predicate: unknown }) {
+  if (!isRecord(predicate)) {
+    return <p className="text-sm text-muted-foreground">Unknown predicate</p>
+  }
+
+  const kind = predicateKind(predicate)
+  if (!kind) {
+    return <p className="text-sm text-muted-foreground">Unknown predicate</p>
+  }
+
+  if (kind === "property") {
+    return <PropertyTerm record={predicate} />
+  }
+
+  if (kind === "link") {
+    return <LinkTerm record={predicate} />
+  }
+
+  if (kind === "not") {
+    return (
+      <div className="min-w-0">
+        <PredicateGroupLabel>Not</PredicateGroupLabel>
+        <PredicateGroupBody>
+          <PredicateExpression predicate={predicate.predicate} />
+        </PredicateGroupBody>
+      </div>
+    )
+  }
+
+  const children = childPredicates(predicate)
+  return (
+    <div className="min-w-0">
+      <PredicateGroupLabel>{kind === "all" ? "All of" : "Any of"}</PredicateGroupLabel>
+      <PredicateGroupBody>
+        {children.map((child, index) => (
+          <PredicateExpression key={`${kind}-${index}`} predicate={child} />
+        ))}
+      </PredicateGroupBody>
+    </div>
+  )
+}
+
+function RuleStateCard({
+  state,
+  onSelectObject,
+}: {
+  state: RuleState
+  onSelectObject: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelectObject}
+      className="w-full min-w-0 max-w-full overflow-hidden rounded-xl border border-border/50 bg-card/40 p-3 text-left transition-colors hover:bg-muted/40"
+    >
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <p className="truncate font-mono text-xs text-foreground">{state.subject.primaryId}</p>
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Triggered {formatRelativeTime(state.triggeredAt)}
+      </p>
+    </button>
+  )
+}
+
+function RuleStatesList({
+  states,
+  onSelectObject,
+}: {
+  states: RuleState[]
+  onSelectObject: (state: RuleState) => void
+}) {
+  if (states.length === 0) {
+    return (
+      <EmptyState
+        icon={<BellRing className="h-10 w-10" />}
+        title="No active states"
+        description="Triggered subjects will appear here."
+        className="py-8"
+      />
+    )
+  }
+
+  return (
+    <>
+      <div className="min-w-0 max-w-full space-y-2 overflow-hidden md:hidden">
+        {states.map((state) => (
+          <RuleStateCard
+            key={`${state.ruleId}:${state.subject.objectTypeId}:${state.subject.primaryId}`}
+            state={state}
+            onSelectObject={() => onSelectObject(state)}
+          />
+        ))}
+      </div>
+      <div className="hidden overflow-hidden rounded-xl border border-border/50 md:block">
+        <table className="w-full table-fixed text-left text-sm">
+          <colgroup>
+            <col className="w-auto" />
+            <col className="w-44" />
+            <col className="w-10" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-border/50 bg-muted/40 text-xs text-muted-foreground">
+              <th className="py-2 pl-4 pr-3 font-medium">Object</th>
+              <th className="px-3 py-2 font-medium">Triggered</th>
+              <th className="py-2 pl-3 pr-4 font-medium" />
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {states.map((state) => (
+              <tr
+                key={`${state.ruleId}:${state.subject.objectTypeId}:${state.subject.primaryId}`}
+                className="group cursor-pointer transition-colors hover:bg-muted/40"
+                onClick={() => onSelectObject(state)}
+              >
+                <td className="py-2.5 pl-4 pr-3">
+                  <p className="truncate font-mono text-xs text-foreground">
+                    {state.subject.primaryId}
+                  </p>
+                </td>
+                <td className="px-3 py-2.5 text-xs text-muted-foreground">
+                  {formatRelativeTime(state.triggeredAt)}
+                </td>
+                <td className="py-2.5 pl-3 pr-4 text-right">
+                  <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground/60 transition-colors group-hover:text-foreground" />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
+function RulesContent({
+  rules,
+  filteredRules,
+  viewStyle,
+  activeCountByRule,
+  onSelectRule,
+}: {
+  rules: ListRulesResponse
+  filteredRules: ListRulesResponse
+  viewStyle: RulesListViewStyle
+  activeCountByRule: ReadonlyMap<string, number>
+  onSelectRule: (ruleId: string) => void
+}) {
+  if (rules.length === 0) {
+    return (
+      <EmptyState
+        icon={<ListChecks className="h-10 w-10" />}
+        title="No rules"
+        description="Registered rules will appear here."
+      />
+    )
+  }
+
+  if (filteredRules.length === 0) {
+    return (
+      <EmptyState
+        icon={<Search className="h-9 w-9" />}
+        title="No results"
+        description="Try another search."
+        className="py-12"
+      />
+    )
+  }
+
+  if (viewStyle === "table") {
+    return (
+      <RuleTableView
+        rules={filteredRules}
+        activeCountByRule={activeCountByRule}
+        onSelect={onSelectRule}
+      />
+    )
+  }
+
+  return (
+    <CollectionCardGrid>
+      {filteredRules.map((rule) => (
+        <RuleListItem
+          key={rule.id}
+          rule={rule}
+          activeCount={activeCountByRule.get(rule.id) ?? 0}
+          onSelect={() => onSelectRule(rule.id)}
+        />
+      ))}
+    </CollectionCardGrid>
+  )
+}
+
+export function RulesPage() {
+  const rulesQuery = useQuery(listRulesOptions())
+  const statesQuery = useQuery(listRuleStatesOptions({ query: { order: "desc" } }))
+  const navigate = useNavigate()
+  const [searchQuery, setSearchQuery] = useState("")
+  const [viewStyle, setViewStyle] = useState<RulesListViewStyle>(() =>
+    getCollectionViewStyle("rules", ["cards", "table"], "cards")
+  )
+
+  const rules = rulesQuery.data ?? []
+  const states = statesQuery.data?.states ?? []
+  const activeCountByRule = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const state of states) {
+      counts.set(state.ruleId, (counts.get(state.ruleId) ?? 0) + 1)
+    }
+    return counts
+  }, [states])
+
+  const filteredRules = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return rules
+
+    return rules.filter((rule) => {
+      return (
+        rule.id.toLowerCase().includes(query) ||
+        rule.subject.objectTypeId.toLowerCase().includes(query) ||
+        predicateSearchText(rule.predicate).toLowerCase().includes(query) ||
+        rule.dependencies.some((dependency) =>
+          dependencyLabel(dependency).toLowerCase().includes(query)
+        )
+      )
+    })
+  }, [rules, searchQuery])
+
+  if (rulesQuery.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center py-24">
+        <LoadingSpinner text="Loading rules..." />
+      </div>
+    )
+  }
+
+  if (rulesQuery.isError) {
+    return (
+      <div className="flex h-full items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl border border-border/50 bg-card p-6">
+          <EmptyState
+            icon={<ListChecks className="h-10 w-10" />}
+            title="Rules unavailable"
+            description="Could not load rule metadata."
+          />
+        </div>
+      </div>
+    )
+  }
+
+  const handleSelectRule = (ruleId: string) => {
+    navigate(`/rules/${encodeURIComponent(ruleId)}`)
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-5xl">
+      <CollectionHeader
+        title="Rules"
+        count={filteredRules.length}
+        actions={
+          rules.length > 0 ? (
+            <CollectionViewToggle
+              value={viewStyle}
+              options={rulesListViewOptions}
+              onChange={(style) => {
+                setViewStyle(style)
+                setCollectionViewStyle("rules", style)
+              }}
+            />
+          ) : null
+        }
+      />
+
+      {rules.length > 0 && (
+        <SearchInput
+          value={searchQuery}
+          onChange={setSearchQuery}
+          placeholder="Search rules, subjects, or predicates..."
+          className="mt-2"
+        />
+      )}
+
+      <div className="mt-4">
+        <RulesContent
+          rules={rules}
+          filteredRules={filteredRules}
+          viewStyle={viewStyle}
+          activeCountByRule={activeCountByRule}
+          onSelectRule={handleSelectRule}
+        />
+      </div>
+    </div>
+  )
+}
+
+export function RuleDetailPage() {
+  const { ruleId = "" } = useParams()
+  const navigate = useNavigate()
+  const decodedRuleId = decodeURIComponent(ruleId)
+
+  const ruleQuery = useQuery({
+    ...getRuleOptions({
+      path: { ruleId: decodedRuleId },
+    }),
+    enabled: decodedRuleId.length > 0,
+  })
+
+  const statesQuery = useQuery({
+    ...listRuleStatesOptions({
+      query: { ruleId: decodedRuleId, order: "desc" },
+    }),
+    enabled: decodedRuleId.length > 0,
+    refetchInterval: 5000,
+  })
+
+  const rule = ruleQuery.data
+  const states = statesQuery.data?.states ?? []
+
+  const handleSelectObject = (state: RuleState) => {
+    navigate(`/${encodeObjectId(state.subject.objectTypeId, state.subject.primaryId)}`)
+  }
+
+  if (ruleQuery.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center py-24">
+        <LoadingSpinner text="Loading rule..." />
+      </div>
+    )
+  }
+
+  if (ruleQuery.isError || !rule) {
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-4">
+        <button
+          type="button"
+          onClick={() => navigate("/rules")}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          Rules
+        </button>
+        <div className="rounded-2xl border border-border/50 bg-card p-8">
+          <EmptyState
+            icon={<ListChecks className="h-10 w-10" />}
+            title="Rule not found"
+            description="This rule is not registered in the active Pario runtime."
+          />
+        </div>
+      </div>
+    )
+  }
+
+  const activeTotal = statesQuery.data?.total ?? states.length
+  const triggers = rule.dependencies.map(dependencyEventLabel)
+
+  return (
+    <div className="mx-auto w-full max-w-4xl min-w-0 space-y-8 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => navigate("/rules")}
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        Rules
+      </button>
+
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-normal text-foreground sm:text-3xl">
+            {ruleName(rule)}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Object rule on{" "}
+            <span className="font-mono text-foreground">{rule.subject.objectTypeId}</span>
+            <span className="mx-1.5 text-border">·</span>
+            <span className="font-mono">{rule.id}</span>
+          </p>
+        </div>
+        <ActiveStateBadge count={activeTotal} />
+      </header>
+
+      <section className="space-y-3">
+        <div className="space-y-1">
+          <h2 className="text-sm font-semibold tracking-normal text-foreground">Definition</h2>
+          {triggers.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Triggered by{" "}
+              {triggers.map((trigger, index) => (
+                <span key={trigger}>
+                  {index > 0 && <span className="text-border">, </span>}
+                  <span className="font-mono text-foreground/80">{trigger}</span>
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+        <div className="rounded-xl bg-muted px-5 py-4 sm:px-6 sm:py-5">
+          <PredicateExpression predicate={rule.predicate} />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold tracking-normal text-foreground">Active states</h2>
+        {statesQuery.isLoading ? (
+          <div className="py-10">
+            <LoadingSpinner text="Loading states..." />
+          </div>
+        ) : statesQuery.isError ? (
+          <EmptyState
+            icon={<BellRing className="h-10 w-10" />}
+            title="States unavailable"
+            description="Could not load active rule states."
+            className="py-8"
+          />
+        ) : (
+          <RuleStatesList states={states} onSelectObject={handleSelectObject} />
+        )}
+      </section>
+    </div>
+  )
+}

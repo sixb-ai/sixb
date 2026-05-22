@@ -1,0 +1,278 @@
+import {
+  cloneRecord,
+  compareStartedAt,
+  hasEmptyStatuses,
+  matchesRunListDateFilters,
+  paginate,
+  storageKey,
+  toStatusSet,
+} from "../run-listing"
+import { WorkflowRunError } from "./errors"
+import type {
+  FinishWorkflowNodeRunInput,
+  FinishWorkflowRunInput,
+  ListWorkflowNodeRunsInput,
+  ListWorkflowNodeRunsResult,
+  ListWorkflowRunsInput,
+  ListWorkflowRunsResult,
+  StartWorkflowNodeRunInput,
+  StartWorkflowRunInput,
+  WorkflowNodeRunRecord,
+  WorkflowNodeRunStorage,
+  WorkflowRunRecord,
+  WorkflowRunStorage,
+} from "./types"
+
+function assertNonNegativeInteger(value: number, fieldName: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new WorkflowRunError(`[Pario] Workflow run ${fieldName} must be a non-negative integer.`)
+  }
+}
+
+export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
+  readonly nodes: InMemoryWorkflowNodeRunStorage
+
+  private readonly runs = new Map<string, WorkflowRunRecord>()
+
+  constructor() {
+    this.nodes = new InMemoryWorkflowNodeRunStorage({
+      requireRunningWorkflowRun: (projectId, id) => this.requireRunningWorkflowRun(projectId, id),
+    })
+  }
+
+  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const key = storageKey(input.projectId, input.id)
+    if (this.runs.has(key)) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    const record: WorkflowRunRecord = {
+      id: input.id,
+      projectId: input.projectId,
+      workflowId: input.workflowId,
+      status: "running",
+      input: cloneRecord(input.input),
+      startedAt: new Date(input.startedAt ?? new Date()),
+    }
+
+    this.runs.set(key, cloneRecord(record))
+    return cloneRecord(record)
+  }
+
+  async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    const base: WorkflowRunRecord = {
+      ...existing,
+      status: input.status,
+      finishedAt: new Date(input.finishedAt ?? new Date()),
+    }
+
+    const next: WorkflowRunRecord =
+      input.status === "succeeded"
+        ? {
+            ...base,
+            error: undefined,
+          }
+        : {
+            ...base,
+            error: input.error,
+          }
+
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null> {
+    const record = this.runs.get(storageKey(params.projectId, params.id))
+    return record ? cloneRecord(record) : null
+  }
+
+  async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
+    if (hasEmptyStatuses(input)) {
+      return {
+        runs: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
+    const order = input.order ?? "desc"
+    const statuses = toStatusSet(input.statuses)
+    const filtered = [...this.runs.values()]
+      .filter((record) => record.projectId === input.projectId)
+      .filter((record) => (input.workflowId ? record.workflowId === input.workflowId : true))
+      .filter((record) =>
+        matchesRunListDateFilters(record, {
+          statuses,
+          startedAfter: input.startedAfter,
+          startedBefore: input.startedBefore,
+        })
+      )
+      .sort((left, right) => compareStartedAt(left, right, order))
+
+    const { page, total, hasMore } = paginate(filtered, input)
+
+    return {
+      runs: page.map(cloneRecord),
+      hasMore,
+      total,
+    }
+  }
+
+  private requireExistingWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
+    const record = this.runs.get(storageKey(projectId, id))
+    if (!record) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow run '${id}' not found for project '${projectId}'.`
+      )
+    }
+
+    return record
+  }
+
+  private requireRunningWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
+    const record = this.requireExistingWorkflowRun(projectId, id)
+    if (record.status !== "running") {
+      throw new WorkflowRunError(
+        `[Pario] Workflow run '${id}' for project '${projectId}' is already terminal.`
+      )
+    }
+
+    return record
+  }
+}
+
+export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
+  private readonly nodes = new Map<string, WorkflowNodeRunRecord>()
+
+  constructor(
+    private readonly workflowRuns: {
+      requireRunningWorkflowRun(projectId: string, id: string): WorkflowRunRecord
+    }
+  ) {}
+
+  async start(input: StartWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
+
+    const workflowRun = this.workflowRuns.requireRunningWorkflowRun(
+      input.projectId,
+      input.workflowRunId
+    )
+    if (workflowRun.workflowId !== input.workflowId) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflowId}'.`
+      )
+    }
+
+    const key = storageKey(input.projectId, input.id)
+    if (this.nodes.has(key)) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
+      )
+    }
+
+    const record: WorkflowNodeRunRecord = {
+      id: input.id,
+      projectId: input.projectId,
+      workflowRunId: input.workflowRunId,
+      workflowId: input.workflowId,
+      nodeIndex: input.nodeIndex,
+      nodeType: input.nodeType,
+      nodeId: input.nodeId,
+      nodeKey: input.nodeKey,
+      status: "running",
+      input: cloneRecord(input.input),
+      startedAt: new Date(input.startedAt ?? new Date()),
+    }
+
+    this.nodes.set(key, cloneRecord(record))
+    return cloneRecord(record)
+  }
+
+  async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    const existing = this.requireRunningNodeRun(input.projectId, input.id)
+    const base: WorkflowNodeRunRecord = {
+      ...existing,
+      status: input.status,
+      finishedAt: new Date(input.finishedAt ?? new Date()),
+    }
+
+    const next: WorkflowNodeRunRecord =
+      input.status === "succeeded"
+        ? {
+            ...base,
+            output: input.output ? cloneRecord(input.output) : undefined,
+            error: undefined,
+          }
+        : {
+            ...base,
+            output: undefined,
+            error: input.error,
+          }
+
+    this.nodes.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async getById(params: { projectId: string; id: string }): Promise<WorkflowNodeRunRecord | null> {
+    const record = this.nodes.get(storageKey(params.projectId, params.id))
+    return record ? cloneRecord(record) : null
+  }
+
+  async list(input: ListWorkflowNodeRunsInput): Promise<ListWorkflowNodeRunsResult> {
+    if (hasEmptyStatuses(input)) {
+      return {
+        nodes: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
+    const order = input.order ?? "desc"
+    const statuses = toStatusSet(input.statuses)
+    const filtered = [...this.nodes.values()]
+      .filter((record) => record.projectId === input.projectId)
+      .filter((record) =>
+        input.workflowRunId ? record.workflowRunId === input.workflowRunId : true
+      )
+      .filter((record) => (input.workflowId ? record.workflowId === input.workflowId : true))
+      .filter((record) => (input.nodeType ? record.nodeType === input.nodeType : true))
+      .filter((record) => (input.nodeId ? record.nodeId === input.nodeId : true))
+      .filter((record) => (input.nodeKey ? record.nodeKey === input.nodeKey : true))
+      .filter((record) =>
+        matchesRunListDateFilters(record, {
+          statuses,
+          startedAfter: input.startedAfter,
+          startedBefore: input.startedBefore,
+        })
+      )
+      .sort((left, right) => compareStartedAt(left, right, order))
+
+    const { page, total, hasMore } = paginate(filtered, input)
+
+    return {
+      nodes: page.map(cloneRecord),
+      hasMore,
+      total,
+    }
+  }
+
+  private requireRunningNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
+    const record = this.nodes.get(storageKey(projectId, id))
+    if (!record) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${id}' not found for project '${projectId}'.`
+      )
+    }
+
+    if (record.status !== "running") {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${id}' for project '${projectId}' is already terminal.`
+      )
+    }
+
+    return record
+  }
+}

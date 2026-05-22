@@ -1,0 +1,314 @@
+import { randomUUID } from "node:crypto"
+import {
+  type DatasetColumnDefinition,
+  type DatasetDefinition,
+  type DatasetRow,
+  type DatasetVersion,
+  type DatasetVersionRef,
+  type DatasetWriteMode,
+  type ExecuteSqlTransformInput,
+  type LakeSqlExecutor,
+  LakeStorageError,
+  type PreviewSqlTransformInput,
+} from "@pario/core"
+import type { DuckLakeStorageOptions } from "../types"
+import { applyDatasetRowsFromRelation, assertDatasetWriteMode } from "./dataset-row-commit"
+import { getString } from "./duckdb-row"
+import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
+import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
+import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
+import type { DuckLakeWriteCoordinator } from "./ducklake-write-coordinator"
+import { duckDbTypeToDatasetColumnType } from "./schema"
+import { quoteIdentifier } from "./sql"
+import {
+  type DuckLakeSqlTransformSourceRelation,
+  renderDuckLakeSqlTransformSql,
+} from "./sql-transform-relations"
+import { parseVersionId } from "./versions"
+
+const DEFAULT_PREVIEW_LIMIT = 100
+const MAX_PREVIEW_LIMIT = 1_000
+
+interface ResolvedDuckLakeSqlTransformSources {
+  readonly relations: Readonly<Record<string, DuckLakeSqlTransformSourceRelation>>
+  readonly inputs: readonly DatasetVersionRef[]
+}
+
+interface ApplySqlTransformInput {
+  readonly runtime: DuckDbRuntime
+  readonly target: DatasetDefinition
+  readonly mode: DatasetWriteMode
+  readonly sql: string
+}
+
+/**
+ * DuckDB-backed SQL transform executor for DuckLakeStorage.
+ */
+export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
+  readonly dialect = "duckdb" as const
+  readonly capabilities = {
+    preview: true,
+    supportsAppend: true,
+    supportsSnapshot: true,
+  }
+
+  constructor(
+    private readonly options: DuckLakeStorageOptions,
+    private readonly connections: DuckLakeConnectionManager,
+    private readonly datasets: DuckLakeDatasetCatalog,
+    private readonly snapshots: DuckLakeSnapshotReader,
+    private readonly writes: DuckLakeWriteCoordinator
+  ) {}
+
+  async *preview(input: PreviewSqlTransformInput<"duckdb">): AsyncIterable<DatasetRow> {
+    this.connections.assertOpen()
+
+    const runtime = await this.connections.runtime()
+    const sources = await this.resolveSources(runtime, input.sources)
+    const sql = renderDuckLakeSqlTransformSql({
+      options: this.options,
+      sources: sources.relations,
+      sql: input.sql,
+    })
+    const rows = await runtime.query(buildPreviewSql(sql, previewLimit(input.limit)))
+
+    for (const row of rows) {
+      yield normalizePreviewRow(row)
+    }
+  }
+
+  async execute(input: ExecuteSqlTransformInput<"duckdb">): Promise<DatasetVersion> {
+    this.connections.assertOpen()
+    assertDatasetWriteMode(input.mode, "SQL transform")
+
+    const target = await this.resolveTargetDataset(input.target)
+    const runtime = await this.connections.createRuntime()
+
+    try {
+      const sources = await this.resolveSources(runtime, input.sources)
+      const sql = renderDuckLakeSqlTransformSql({
+        options: this.options,
+        sources: sources.relations,
+        sql: input.sql,
+      })
+
+      await this.assertResultSchemaMatchesTarget(runtime, target, sql)
+
+      return await this.writes.commitDatasetVersion({
+        runtime,
+        dataset: target,
+        mode: input.mode,
+        expectedLatestVersionId: input.expectedLatestVersionId,
+        commitMessage: input.commitMessage ?? `execute SQL transform for dataset ${target.id}`,
+        producer: input.producer,
+        inputs: sources.inputs,
+        applyChanges: (runtime) =>
+          this.applySqlTransform({
+            runtime,
+            target,
+            mode: input.mode,
+            sql,
+          }),
+      })
+    } catch (error) {
+      await runtime.close()
+      throw error
+    }
+  }
+
+  private async resolveSources(
+    runtime: DuckDbRuntime,
+    sources: PreviewSqlTransformInput<"duckdb">["sources"]
+  ): Promise<ResolvedDuckLakeSqlTransformSources> {
+    const relations: Record<string, DuckLakeSqlTransformSourceRelation> = Object.create(null)
+    const inputs: DatasetVersionRef[] = []
+
+    for (const [sourceName, source] of Object.entries(sources)) {
+      const definition = await this.resolveSourceDataset(source.dataset)
+      const version = await this.resolveSourceVersion(runtime, definition, source.versionId)
+
+      relations[sourceName] = {
+        datasetId: definition.id,
+        versionId: version.versionId,
+      }
+      inputs.push({
+        datasetId: definition.id,
+        versionId: version.versionId,
+      })
+    }
+
+    return {
+      relations: Object.freeze(relations),
+      inputs: Object.freeze(inputs),
+    }
+  }
+
+  private async resolveSourceDataset(dataset: DatasetDefinition): Promise<DatasetDefinition> {
+    const definition = await this.datasets.getDataset(dataset.id)
+    if (!definition) {
+      throw new LakeStorageError(
+        `[ParioDuckLake] Unknown SQL transform source dataset '${dataset.id}'.`
+      )
+    }
+
+    return definition
+  }
+
+  private async resolveTargetDataset(dataset: DatasetDefinition): Promise<DatasetDefinition> {
+    const definition = await this.datasets.getDataset(dataset.id)
+    if (!definition) {
+      throw new LakeStorageError(
+        `[ParioDuckLake] Unknown SQL transform target dataset '${dataset.id}'.`
+      )
+    }
+
+    this.datasets.assertSchema(definition)
+    return definition
+  }
+
+  private async resolveSourceVersion(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition,
+    versionId?: string
+  ): Promise<DatasetVersion> {
+    if (versionId !== undefined) {
+      const snapshotId = parseVersionId(versionId)
+      const version = await this.snapshots.getVersionForSnapshot(runtime, dataset, snapshotId)
+      if (version) {
+        return version
+      }
+
+      throwNoCommittedSourceVersion(dataset.id)
+    }
+
+    const latestVersion = await this.snapshots.getLatestVersionForDefinition(runtime, dataset)
+    if (latestVersion) {
+      return latestVersion
+    }
+
+    throwNoCommittedSourceVersion(dataset.id)
+  }
+
+  private async assertResultSchemaMatchesTarget(
+    runtime: DuckDbRuntime,
+    target: DatasetDefinition,
+    sql: string
+  ): Promise<void> {
+    const rows = await runtime.query(
+      `DESCRIBE SELECT * FROM (${sql}) AS pario_sql_transform_result_schema`
+    )
+    const actualColumns = rows.map((row) => resultColumnFromDescribeRow(row))
+    const expectedColumns = target.schema.columns
+
+    if (actualColumns.length !== expectedColumns.length) {
+      throwResultSchemaMismatch(
+        target.id,
+        `expected ${expectedColumns.length} columns, got ${actualColumns.length}`
+      )
+    }
+
+    for (let index = 0; index < expectedColumns.length; index += 1) {
+      const expected = expectedColumns[index]
+      const actual = actualColumns[index]
+
+      if (actual.name !== expected.name) {
+        throwResultSchemaMismatch(
+          target.id,
+          `column ${index + 1} should be '${expected.name}', got '${actual.name}'`
+        )
+      }
+
+      if (actual.type !== expected.type) {
+        throwResultSchemaMismatch(
+          target.id,
+          `column '${expected.name}' should have type '${expected.type}', got '${actual.type}'`
+        )
+      }
+    }
+  }
+
+  private async applySqlTransform(input: ApplySqlTransformInput): Promise<boolean> {
+    const tempTableName = `pario_sql_transform_${randomUUID().replaceAll("-", "")}`
+    const tempTable = quoteIdentifier(tempTableName)
+
+    await input.runtime.run(
+      `CREATE TEMP TABLE ${tempTable} AS SELECT * FROM (${input.sql}) AS pario_sql_transform_result`
+    )
+
+    return applyDatasetRowsFromRelation({
+      options: this.options,
+      runtime: input.runtime,
+      dataset: input.target,
+      mode: input.mode,
+      sourceRelationSql: tempTable,
+    })
+  }
+}
+
+function previewLimit(limit: number | undefined): number {
+  if (limit === undefined || !Number.isFinite(limit)) {
+    return DEFAULT_PREVIEW_LIMIT
+  }
+
+  return Math.min(Math.max(0, Math.trunc(limit)), MAX_PREVIEW_LIMIT)
+}
+
+function buildPreviewSql(sql: string, limit: number): string {
+  return `SELECT * FROM (${sql}) AS pario_sql_transform_preview LIMIT ${limit}`
+}
+
+function resultColumnFromDescribeRow(
+  row: Readonly<Record<string, unknown>>
+): DatasetColumnDefinition {
+  const name = getString(row, "column_name")
+  const type = duckDbTypeToDatasetColumnType(getString(row, "column_type"))
+
+  return { name, type }
+}
+
+function normalizePreviewRow(row: Readonly<Record<string, unknown>>): DatasetRow {
+  const normalized: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(row)) {
+    normalized[key] = normalizePreviewValue(value)
+  }
+
+  return normalized
+}
+
+function normalizePreviewValue(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString()
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizePreviewValue(item))
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const normalized: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) {
+      normalized[key] = normalizePreviewValue(child)
+    }
+    return normalized
+  }
+
+  return value
+}
+
+function throwNoCommittedSourceVersion(datasetId: string): never {
+  throw new LakeStorageError(
+    `[ParioDuckLake] No committed version found for SQL transform source dataset '${datasetId}'.`
+  )
+}
+
+function throwResultSchemaMismatch(datasetId: string, detail: string): never {
+  throw new LakeStorageError(
+    `[ParioDuckLake] SQL transform result schema does not match target dataset '${datasetId}': ${detail}.`
+  )
+}

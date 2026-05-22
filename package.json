@@ -1,0 +1,32 @@
+{
+  "name": "pario",
+  "private": true,
+  "workspaces": [
+    "auth/*",
+    "packages/*",
+    "connectors/*",
+    "broker/*",
+    "queues/*",
+    "storage/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "bun --filter '@pario/*' build",
+    "dev": "bun pario dev",
+    "test": "bun test",
+    "test:e2e": "bun run --workspaces --if-present test:e2e",
+    "test:all": "bun run test && bun run test:e2e",
+    "lint": "biome check auth/*/src packages/*/src connectors/*/src",
+    "typecheck": "bun --filter '@pario/*' typecheck",
+    "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/pario && echo 'Linked pario CLI to ~/.bun/bin/pario'",
+    "pario": "bun packages/cli/src/index.tsx",
+    "create-pario": "bun packages/cli/src/index.tsx create",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "generate:client": "bun --filter @pario/server generate:openapi && bun --filter @pario/client generate && bun check:fix"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.6",
+    "typescript": "^5.7.0"
+  }
+}

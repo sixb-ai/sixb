@@ -1,0 +1,166 @@
+import { z } from "zod"
+
+export const PipelineParamsSchema = z.object({
+  pipelineId: z.string().min(1),
+})
+
+export const PipelineRunParamsSchema = z.object({
+  runId: z.string().min(1),
+})
+
+export const PipelineRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+
+export const PipelineRunsQuerySchema = z.object({
+  pipelineId: z.string().optional(),
+  status: PipelineRunStatusSchema.optional(),
+  startedAfter: z.string().optional(),
+  startedBefore: z.string().optional(),
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+})
+
+const DatasetVersionRefSchema = z.object({
+  datasetId: z.string(),
+  versionId: z.string(),
+})
+
+const DatasetColumnSchema = z.object({
+  name: z.string(),
+  type: z.enum([
+    "string",
+    "boolean",
+    "int64",
+    "float64",
+    "decimal",
+    "date",
+    "timestamp",
+    "json",
+    "fileRef",
+  ]),
+  nullable: z.boolean().optional(),
+})
+
+const DatasetDefinitionSchema = z.object({
+  id: z.string(),
+  description: z.string().optional(),
+  partitionBy: z.array(z.string()).optional(),
+  schema: z.object({
+    columns: z.array(DatasetColumnSchema),
+  }),
+})
+
+const PipelineTriggerSchema = z.union([
+  z.object({
+    type: z.literal("schedule"),
+    scheduleId: z.string(),
+  }),
+  z.object({
+    type: z.literal("sync.finished"),
+    syncId: z.string(),
+    status: z.literal("succeeded"),
+  }),
+  z.object({
+    type: z.literal("pipeline.finished"),
+    pipelineId: z.string(),
+    status: z.literal("succeeded"),
+  }),
+  z.object({
+    type: z.literal("dataset.updated"),
+    datasetId: z.string(),
+  }),
+])
+
+const PipelineStepExecutorSchema = z.union([
+  z.object({
+    kind: z.literal("sql"),
+    dialect: z.literal("duckdb"),
+  }),
+  z.object({
+    kind: z.literal("run"),
+  }),
+])
+
+export const PipelineRunSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  pipelineId: z.string(),
+  status: PipelineRunStatusSchema,
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  output: DatasetVersionRefSchema.optional(),
+  error: z
+    .object({
+      name: z.string().optional(),
+      message: z.string(),
+    })
+    .optional(),
+})
+
+export const PipelineStepRunSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  pipelineRunId: z.string(),
+  pipelineId: z.string(),
+  stepId: z.string(),
+  datasetId: z.string(),
+  mode: z.enum(["snapshot", "append"]),
+  status: PipelineRunStatusSchema,
+  startedAt: z.string(),
+  finishedAt: z.string().optional(),
+  inputs: z.array(DatasetVersionRefSchema),
+  output: DatasetVersionRefSchema.optional(),
+  rowsWritten: z.number().optional(),
+  error: z
+    .object({
+      name: z.string().optional(),
+      message: z.string(),
+    })
+    .optional(),
+})
+
+export const PipelineStepSchema = z.object({
+  id: z.string(),
+  mode: z.enum(["snapshot", "append"]),
+  executor: PipelineStepExecutorSchema,
+  inputs: z.array(
+    z.object({
+      name: z.string(),
+      dataset: DatasetDefinitionSchema,
+    })
+  ),
+  output: DatasetDefinitionSchema,
+})
+
+export const PipelineSchema = z.object({
+  id: z.string(),
+  triggers: z.array(PipelineTriggerSchema),
+  graph: z.object({
+    kind: z.literal("sequence"),
+    nodes: z.array(
+      z.object({
+        kind: z.literal("step"),
+        step: PipelineStepSchema,
+      })
+    ),
+  }),
+  latestRun: PipelineRunSchema.nullable(),
+})
+
+export const PipelineRunListResponseSchema = z.object({
+  runs: z.array(PipelineRunSchema),
+  hasMore: z.boolean(),
+  total: z.number(),
+})
+
+export const PipelineRunDetailResponseSchema = z.object({
+  run: PipelineRunSchema,
+  steps: z.array(PipelineStepRunSchema),
+})
+
+export const RequestPipelineRunResponseSchema = z.object({
+  runId: z.string(),
+  jobId: z.string(),
+  pipelineId: z.string(),
+  queuedAt: z.string(),
+})

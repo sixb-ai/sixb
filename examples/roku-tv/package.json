@@ -1,0 +1,32 @@
+{
+  "name": "@pario/example-roku-tv",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun ../../packages/cli/src/index.tsx dev",
+    "build": "bun ../../packages/cli/src/index.tsx build",
+    "start": "bun ../../packages/cli/src/index.tsx start",
+    "check": "bun ../../packages/cli/src/index.tsx check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pario/app": "workspace:*",
+    "@pario/blob-local": "workspace:*",
+    "@pario/client": "workspace:*",
+    "@pario/connector-rest": "workspace:*",
+    "@pario/core": "workspace:*",
+    "@pario/lake-local": "workspace:*",
+    "@pario/sqlite": "workspace:*",
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.13.0",
+    "tailwindcss": "^4.1.18"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

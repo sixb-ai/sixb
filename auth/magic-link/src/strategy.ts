@@ -1,0 +1,337 @@
+import { randomUUID } from "node:crypto"
+import type {
+  AuthStorage,
+  CompleteSignInResult,
+  GroupDefinition,
+  MagicLinkAuthStrategy,
+  MagicLinkCallbackInput,
+  MagicLinkInvitationRecipientInput,
+  MagicLinkInvitationRecipientResult,
+  MagicLinkRequestInput,
+  MagicLinkRequestResult,
+} from "@pario/core"
+import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
+import {
+  MagicLinkRateLimiter,
+  type MagicLinkRateLimitOptions,
+  resolveRateLimitOptions,
+} from "./rate-limit"
+import { createMagicLinkCredential, hashMagicLinkToken } from "./tokens"
+
+export type MagicLinkGroupRef = string | GroupDefinition
+
+export interface MagicLinkOptions {
+  readonly id?: string
+  readonly allowedDomains: readonly string[]
+  readonly bootstrapUsers?: readonly string[]
+  readonly bootstrapGroups?: readonly MagicLinkGroupRef[]
+  readonly publicUrl?: string
+  readonly magicLinkTtlMs?: number
+  readonly rateLimit?: false | Partial<MagicLinkRateLimitOptions>
+  readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>
+  readonly from?: string
+  readonly subject?: string
+}
+
+export class MagicLinkError extends Error {
+  readonly name = "MagicLinkError"
+
+  constructor(message: string) {
+    super(`[Pario] ${message}`)
+  }
+}
+
+export function magicLink(options: MagicLinkOptions): MagicLinkAuthStrategy {
+  return new MagicLinkAuthStrategyImpl(options)
+}
+
+class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
+  readonly kind = "magicLink"
+  readonly id: string
+  readonly bootstrapGroupIds: readonly string[]
+
+  private readonly allowedDomains: ReadonlySet<string>
+  private readonly bootstrapUsers: ReadonlySet<string>
+  private readonly publicOrigin?: string
+  private readonly magicLinkTtlMs: number
+  private readonly rateLimiter: MagicLinkRateLimiter
+  private readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>
+  private readonly from?: string
+  private readonly subject: string
+
+  constructor(options: MagicLinkOptions) {
+    this.id = normalizeStrategyId(options.id)
+    this.allowedDomains = new Set(normalizeAllowedDomains(options.allowedDomains))
+    this.bootstrapUsers = new Set((options.bootstrapUsers ?? []).map(assertEmail))
+    this.bootstrapGroupIds = normalizeGroupRefs(options.bootstrapGroups)
+    this.publicOrigin = options.publicUrl ? normalizePublicOrigin(options.publicUrl) : undefined
+    this.magicLinkTtlMs = normalizeMagicLinkTtlMs(options.magicLinkTtlMs)
+    this.rateLimiter = new MagicLinkRateLimiter(resolveRateLimitOptions(options.rateLimit))
+    this.sendMagicLink = options.sendMagicLink
+    this.from = options.from
+    this.subject = options.subject ?? "Sign in to Pario"
+  }
+
+  async requestMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkRequestResult> {
+    const now = input.now ? new Date(input.now) : new Date()
+    const email = normalizeEmail(input.email)
+    if (!email || !this.isAllowedEmail(email)) {
+      return { status: "skipped" }
+    }
+
+    const eligible = await this.canRequestMagicLink({
+      email,
+      now,
+      projectId: input.projectId,
+      storage: input.authStorage,
+    })
+    if (!eligible) {
+      return { status: "skipped" }
+    }
+
+    if (!this.rateLimiter.tryConsume(email, now)) {
+      return { status: "rate_limited" }
+    }
+
+    const credential = createMagicLinkCredential()
+    const magicLinkId = `ml_${randomUUID()}`
+    await input.authStorage.magicLinks.create({
+      id: magicLinkId,
+      projectId: input.projectId,
+      strategyId: this.id,
+      email,
+      tokenHash: credential.tokenHash,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + this.magicLinkTtlMs),
+    })
+
+    const link = this.createCallbackUrl({
+      magicLinkId,
+      requestOrigin: input.requestOrigin,
+      returnTo: input.returnTo,
+      token: credential.token,
+    })
+
+    try {
+      await this.sendMagicLink(
+        createMagicLinkEmail({
+          email,
+          from: this.from,
+          link,
+          subject: this.subject,
+        })
+      )
+    } catch (error) {
+      await input.authStorage.magicLinks.revokeActiveForEmail({
+        projectId: input.projectId,
+        email,
+        revokedAt: now,
+      })
+      throw error
+    }
+
+    return { status: "sent" }
+  }
+
+  async validateInvitationRecipient(
+    input: MagicLinkInvitationRecipientInput
+  ): Promise<MagicLinkInvitationRecipientResult> {
+    const now = input.now ? new Date(input.now) : new Date()
+    const email = normalizeEmail(input.email)
+    if (!email) {
+      return { status: "invalid_email" }
+    }
+
+    if (!this.isAllowedEmail(email)) {
+      return { status: "disallowed_domain", email }
+    }
+
+    const user = await input.authStorage.users.getByEmail({
+      projectId: input.projectId,
+      email,
+    })
+    if (user?.status === "suspended") {
+      return { status: "suspended_user", email }
+    }
+
+    if (!this.rateLimiter.canConsume(email, now)) {
+      return { status: "rate_limited", email }
+    }
+
+    return { status: "allowed", email }
+  }
+
+  async completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<CompleteSignInResult> {
+    const now = input.now ? new Date(input.now) : new Date()
+    const magicLink = await input.authStorage.magicLinks.getById({
+      projectId: input.projectId,
+      id: input.magicLinkId,
+    })
+
+    if (!magicLink || !this.isAllowedEmail(magicLink.email)) {
+      throw new MagicLinkError("Magic link is invalid or expired.")
+    }
+
+    const existingUser = await input.authStorage.users.getByEmail({
+      projectId: input.projectId,
+      email: magicLink.email,
+    })
+    const canBootstrap =
+      !existingUser &&
+      this.bootstrapUsers.has(magicLink.email) &&
+      (await hasNoActiveUsers(input.authStorage, input.projectId))
+
+    return input.authStorage.completeMagicLinkSignIn({
+      projectId: input.projectId,
+      magicLinkId: input.magicLinkId,
+      tokenHash: hashMagicLinkToken(input.token),
+      completedAt: now,
+      newUserId: `usr_${randomUUID()}`,
+      allowUserCreationWithoutInvitation: canBootstrap,
+      requireNoActiveUsersForUserCreation: canBootstrap,
+      manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
+      session: input.session,
+    })
+  }
+
+  private async canRequestMagicLink(input: {
+    readonly email: string
+    readonly now: Date
+    readonly projectId: string
+    readonly storage: AuthStorage
+  }): Promise<boolean> {
+    const user = await input.storage.users.getByEmail({
+      projectId: input.projectId,
+      email: input.email,
+    })
+
+    if (user) {
+      return user.status === "active"
+    }
+
+    const invitation = await input.storage.invitations.getActiveByEmail({
+      projectId: input.projectId,
+      email: input.email,
+      now: input.now,
+    })
+    if (invitation) {
+      return true
+    }
+
+    return (
+      this.bootstrapUsers.has(input.email) &&
+      (await hasNoActiveUsers(input.storage, input.projectId))
+    )
+  }
+
+  private createCallbackUrl(input: {
+    readonly magicLinkId: string
+    readonly requestOrigin: string
+    readonly returnTo: string
+    readonly token: string
+  }): string {
+    const origin = this.publicOrigin ?? normalizePublicOrigin(input.requestOrigin)
+    const url = new URL("/auth/callback", origin)
+    url.searchParams.set("magicLinkId", input.magicLinkId)
+    url.searchParams.set("token", input.token)
+    url.searchParams.set("returnTo", input.returnTo)
+    return url.toString()
+  }
+
+  private isAllowedEmail(email: string): boolean {
+    const domain = emailDomain(email)
+    return domain ? this.allowedDomains.has(domain) : false
+  }
+}
+
+async function hasNoActiveUsers(storage: AuthStorage, projectId: string): Promise<boolean> {
+  const page = await storage.users.list({
+    projectId,
+    statuses: ["active"],
+    limit: 1,
+  })
+
+  return page.total === 0
+}
+
+function normalizeStrategyId(value: string | undefined): string {
+  const id = value?.trim() || "magic-link"
+  if (!id) {
+    throw new MagicLinkError("Magic-link auth id is required.")
+  }
+  return id
+}
+
+function normalizeAllowedDomains(domains: readonly string[]): readonly string[] {
+  const normalized = [...new Set(domains.map((domain) => domain.trim().toLowerCase()))].filter(
+    Boolean
+  )
+  if (normalized.length === 0) {
+    throw new MagicLinkError("Magic-link auth allowedDomains must contain at least one domain.")
+  }
+  for (const domain of normalized) {
+    if (domain.includes("@") || domain.includes("/") || domain.includes(":")) {
+      throw new MagicLinkError(`Magic-link auth allowed domain '${domain}' is invalid.`)
+    }
+  }
+  return normalized
+}
+
+function normalizeGroupRefs(groups: readonly MagicLinkGroupRef[] | undefined): readonly string[] {
+  const groupIds = (groups ?? []).map((group) => {
+    const groupId = typeof group === "string" ? group : group.id
+    const normalized = groupId.trim()
+    if (!normalized) {
+      throw new MagicLinkError("Magic-link auth bootstrapGroups must be non-empty.")
+    }
+    return normalized
+  })
+
+  return [...new Set(groupIds)]
+}
+
+function normalizeMagicLinkTtlMs(value: number | undefined): number {
+  const ttlMs = value ?? 15 * 60_000
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+    throw new MagicLinkError("Magic-link auth magicLinkTtlMs must be positive.")
+  }
+  return ttlMs
+}
+
+function normalizePublicOrigin(value: string): string {
+  const url = new URL(value)
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new MagicLinkError("Magic-link auth publicUrl must use http or https.")
+  }
+  return url.origin
+}
+
+function assertEmail(value: string): string {
+  const email = normalizeEmail(value)
+  if (!email) {
+    throw new MagicLinkError(`Magic-link auth address '${value}' is invalid.`)
+  }
+  return email
+}
+
+function normalizeEmail(value: string): string | null {
+  const email = value.trim().toLowerCase()
+  if (!email || /\s/.test(email)) {
+    return null
+  }
+
+  const at = email.lastIndexOf("@")
+  if (at <= 0 || at === email.length - 1 || email.indexOf("@") !== at) {
+    return null
+  }
+
+  return email
+}
+
+function emailDomain(email: string): string | null {
+  const at = email.lastIndexOf("@")
+  if (at <= 0 || at === email.length - 1) {
+    return null
+  }
+  return email.slice(at + 1)
+}

@@ -1,0 +1,33 @@
+{
+  "name": "@pario/example-acme-corp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun ../../packages/cli/src/index.tsx dev",
+    "build": "bun ../../packages/cli/src/index.tsx build",
+    "start": "bun ../../packages/cli/src/index.tsx start",
+    "check": "bun ../../packages/cli/src/index.tsx check",
+    "sync:erp": "bun scripts/sync-erp.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pario/app": "workspace:*",
+    "@pario/auth-magic-link": "workspace:*",
+    "@pario/blob-local": "workspace:*",
+    "@pario/client": "workspace:*",
+    "@pario/core": "workspace:*",
+    "@pario/lake-local": "workspace:*",
+    "@pario/sqlite": "workspace:*",
+    "@tanstack/react-query": "^5.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.13.0",
+    "resend": "^6.12.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0"
+  }
+}

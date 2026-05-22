@@ -1,0 +1,110 @@
+import {
+  deriveRuleEventDependencies,
+  type OntologySource,
+  type Pario,
+  type RuleDefinition,
+  type RuleStateRecord,
+} from "@pario/core"
+import type { Elysia } from "elysia"
+import { ErrorResponseSchema } from "../schemas/common"
+import {
+  RuleParamsSchema,
+  RuleSchema,
+  RuleStateListResponseSchema,
+  RuleStateSchema,
+  RuleStatesQuerySchema,
+} from "../schemas/rules"
+import { handleRouteError, parseOptionalInt } from "../utils/http"
+
+function serializeRule(rule: RuleDefinition): ReturnType<typeof RuleSchema.parse> {
+  return RuleSchema.parse({
+    ...rule,
+    dependencies: deriveRuleEventDependencies(rule),
+  })
+}
+
+function serializeRuleState(state: RuleStateRecord): ReturnType<typeof RuleStateSchema.parse> {
+  return RuleStateSchema.parse(state)
+}
+
+export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+  return app
+    .get(
+      "/api/rules",
+      () => {
+        return pario.getRuleDefinitions().map(serializeRule)
+      },
+      {
+        response: { 200: RuleSchema.array() },
+        detail: {
+          summary: "List registered rules",
+          tags: ["Rules"],
+          operationId: "listRules",
+        },
+      }
+    )
+    .get(
+      "/api/rules/:ruleId",
+      ({ params, set }) => {
+        const rule = pario.getRuleById(params.ruleId)
+        if (!rule) {
+          set.status = 404
+          return { error: "Rule not found" }
+        }
+
+        return serializeRule(rule)
+      },
+      {
+        params: RuleParamsSchema,
+        response: { 200: RuleSchema, 404: ErrorResponseSchema },
+        detail: {
+          summary: "Get rule metadata",
+          tags: ["Rules"],
+          operationId: "getRule",
+        },
+      }
+    )
+    .get(
+      "/api/rule-states",
+      async ({ query, set }) => {
+        try {
+          const parsed = RuleStatesQuerySchema.parse(query)
+          const storage = pario.storage.rules
+          if (!storage) {
+            return {
+              states: [],
+              hasMore: false,
+              total: 0,
+            }
+          }
+
+          const result = await storage.listActive({
+            projectId: pario.id,
+            ruleId: parsed.ruleId,
+            objectTypeId: parsed.objectTypeId,
+            primaryId: parsed.primaryId,
+            limit: parseOptionalInt(parsed.limit),
+            offset: parseOptionalInt(parsed.offset),
+            order: parsed.order,
+          })
+
+          return {
+            states: result.states.map(serializeRuleState),
+            hasMore: result.hasMore,
+            total: result.total,
+          }
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        query: RuleStatesQuerySchema,
+        response: { 200: RuleStateListResponseSchema, 400: ErrorResponseSchema },
+        detail: {
+          summary: "List active rule states",
+          tags: ["Rules"],
+          operationId: "listRuleStates",
+        },
+      }
+    )
+}

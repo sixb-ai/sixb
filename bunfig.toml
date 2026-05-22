@@ -1,0 +1,6 @@
+[install]
+# Install dependencies
+auto = true
+
+[install.lockfile]
+save = true

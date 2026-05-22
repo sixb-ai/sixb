@@ -1,0 +1,443 @@
+import { describe, expect, test } from "bun:test"
+import type {
+  StoredLinkRemovedEvent,
+  StoredLinkUpsertedEvent,
+  StoredObjectUpsertedEvent,
+  StoredTelemetryAppendedEvent,
+} from "../src/events"
+import { InMemoryObjectStorage, InMemoryTimeseriesStorage } from "../src/storage"
+
+function makeObjectUpsertedEvent(
+  projectId: string,
+  objectTypeId: string,
+  primaryId: string,
+  properties: Record<string, unknown>,
+  cursor = "1"
+): StoredObjectUpsertedEvent {
+  return {
+    id: `evt-${crypto.randomUUID()}`,
+    schemaVersion: 1,
+    projectId,
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: `${objectTypeId}:${primaryId}`,
+    occurredAt: new Date().toISOString(),
+    cursor,
+    payload: { objectTypeId, primaryId, properties },
+  }
+}
+
+function makeTelemetryEvent(
+  projectId: string,
+  objectTypeId: string,
+  objectId: string,
+  propertyId: string,
+  value: unknown,
+  at: Date,
+  cursor = "1",
+  unit?: string
+): StoredTelemetryAppendedEvent {
+  return {
+    id: `evt-${crypto.randomUUID()}`,
+    schemaVersion: 1,
+    projectId,
+    type: "telemetry.appended",
+    topic: "telemetry",
+    partitionKey: `${objectTypeId}:${objectId}:${propertyId}`,
+    occurredAt: at.toISOString(),
+    cursor,
+    payload: { objectTypeId, objectId, propertyId, value, unit, at: at.toISOString() },
+  }
+}
+
+function makeLinkUpsertedEvent(
+  projectId: string,
+  sourceTypeId: string,
+  sourceId: string,
+  linkId: string,
+  targetTypeId: string,
+  targetId: string,
+  cursor = "1",
+  properties?: Record<string, unknown>
+): StoredLinkUpsertedEvent {
+  return {
+    id: `evt-${crypto.randomUUID()}`,
+    schemaVersion: 1,
+    projectId,
+    type: "link.upserted",
+    topic: "links",
+    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
+    occurredAt: new Date().toISOString(),
+    cursor,
+    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId, properties },
+  }
+}
+
+function makeLinkRemovedEvent(
+  projectId: string,
+  sourceTypeId: string,
+  sourceId: string,
+  linkId: string,
+  targetTypeId: string,
+  targetId: string,
+  cursor = "1"
+): StoredLinkRemovedEvent {
+  return {
+    id: `evt-${crypto.randomUUID()}`,
+    schemaVersion: 1,
+    projectId,
+    type: "link.removed",
+    topic: "links",
+    partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
+    occurredAt: new Date().toISOString(),
+    cursor,
+    payload: { sourceTypeId, sourceId, linkId, targetTypeId, targetId },
+  }
+}
+
+describe("InMemoryObjectStorage", () => {
+  test("applyObjectUpserted creates and updates objects", async () => {
+    const storage = new InMemoryObjectStorage()
+
+    const event1 = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
+    const row1 = await storage.applyObjectUpserted(event1)
+    expect(row1.primaryId).toBe("r1")
+    expect(row1.properties.name).toBe("A")
+    expect(row1.version).toBe(1)
+
+    const event2 = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "B" }, "2")
+    const row2 = await storage.applyObjectUpserted(event2)
+    expect(row2.properties.name).toBe("B")
+    expect(row2.version).toBe(2)
+  })
+
+  test("applyObjectUpserted is idempotent", async () => {
+    const storage = new InMemoryObjectStorage()
+    const event = makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
+
+    const row1 = await storage.applyObjectUpserted(event)
+    const row2 = await storage.applyObjectUpserted(event)
+    expect(row1.version).toBe(1)
+    expect(row2.version).toBe(1)
+  })
+
+  test("getByPrimaryId returns null for non-existent objects", async () => {
+    const storage = new InMemoryObjectStorage()
+    const result = await storage.getByPrimaryId({
+      projectId: "p1",
+      objectTypeId: "Room",
+      primaryId: "missing",
+    })
+    expect(result).toBeNull()
+  })
+
+  test("list with pagination", async () => {
+    const storage = new InMemoryObjectStorage()
+    for (let i = 1; i <= 5; i++) {
+      await storage.applyObjectUpserted(
+        makeObjectUpsertedEvent("p1", "Room", `r${i}`, { name: `Room ${i}` }, `${i}`)
+      )
+    }
+
+    const page1 = await storage.list({ projectId: "p1", objectTypeId: "Room", limit: 2 })
+    expect(page1.objects).toHaveLength(2)
+    expect(page1.total).toBe(5)
+    expect(page1.hasMore).toBe(true)
+
+    const page2 = await storage.list({ projectId: "p1", objectTypeId: "Room", limit: 2, offset: 4 })
+    expect(page2.objects).toHaveLength(1)
+    expect(page2.hasMore).toBe(false)
+  })
+
+  test("list with primaryIdPrefix filter", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:a", {}, "1"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:b", {}, "2"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "other:c", {}, "3"))
+
+    const result = await storage.list({
+      projectId: "p1",
+      objectTypeId: "Room",
+      primaryIdPrefix: "room:",
+    })
+    expect(result.objects).toHaveLength(2)
+  })
+
+  test("list with primaryIdSuffix filter", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:a", {}, "1"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "room:b", {}, "2"))
+
+    const result = await storage.list({
+      projectId: "p1",
+      objectTypeId: "Room",
+      primaryIdSuffix: ":a",
+    })
+    expect(result.objects).toHaveLength(1)
+    expect(result.objects[0].primaryId).toBe("room:a")
+  })
+
+  test("list orders by key asc", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "c", {}, "1"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "a", {}, "2"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "b", {}, "3"))
+
+    const result = await storage.list({
+      projectId: "p1",
+      objectTypeId: "Room",
+      orderBy: "primaryId",
+      order: "asc",
+    })
+    expect(result.objects.map((o) => o.primaryId)).toEqual(["a", "b", "c"])
+  })
+
+  test("list across multiple object types", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d1", {}, "2"))
+
+    const all = await storage.list({ projectId: "p1" })
+    expect(all.objects).toHaveLength(2)
+  })
+
+  test("findFirst with where clause", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r2", { name: "B" }, "2")
+    )
+
+    const found = await storage.findFirst({
+      projectId: "p1",
+      objectTypeId: "Room",
+      where: [{ propertyId: "name", op: "eq", value: "B" }],
+    })
+    expect(found?.primaryId).toBe("r2")
+  })
+
+  test("applyTelemetryAppended projects value onto object", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
+    )
+
+    const telEvent = makeTelemetryEvent("p1", "Room", "r1", "temp", 22.5, new Date(), "2")
+    await storage.applyTelemetryAppended(telEvent)
+
+    const row = await storage.getByPrimaryId({
+      projectId: "p1",
+      objectTypeId: "Room",
+      primaryId: "r1",
+    })
+    expect(row?.properties.temp).toBe(22.5)
+  })
+
+  test("applyLinkUpserted and listLinks", async () => {
+    const storage = new InMemoryObjectStorage()
+    const event = makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    await storage.applyLinkUpserted(event)
+
+    const links = await storage.listLinks({
+      projectId: "p1",
+      sourceTypeId: "Room",
+      sourceId: "r1",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0].targetId).toBe("d1")
+  })
+
+  test("applyLinkRemoved deletes link", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    )
+
+    await storage.applyLinkRemoved(
+      makeLinkRemovedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "2")
+    )
+
+    const links = await storage.listLinks({
+      projectId: "p1",
+      sourceTypeId: "Room",
+      sourceId: "r1",
+    })
+    expect(links).toHaveLength(0)
+  })
+
+  test("listLinks filters by linkId", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    )
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r1", "hasNeighbor", "Room", "r2", "2")
+    )
+
+    const deviceLinks = await storage.listLinks({
+      projectId: "p1",
+      sourceTypeId: "Room",
+      sourceId: "r1",
+      linkId: "hasDevice",
+    })
+    expect(deviceLinks).toHaveLength(1)
+    expect(deviceLinks[0].linkId).toBe("hasDevice")
+  })
+})
+
+describe("InMemoryTimeseriesStorage", () => {
+  test("stores and retrieves latest point", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const t1 = new Date("2026-01-01T10:00:00Z")
+    const t2 = new Date("2026-01-01T11:00:00Z")
+
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 20, t1, "1")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 22, t2, "2")
+    )
+
+    const latest = await storage.getLatest({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(latest?.value).toBe(22)
+  })
+
+  test("getHistory returns points in order", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const t1 = new Date("2026-01-01T10:00:00Z")
+    const t2 = new Date("2026-01-01T11:00:00Z")
+    const t3 = new Date("2026-01-01T12:00:00Z")
+
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 20, t1, "1")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 22, t2, "2")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 24, t3, "3")
+    )
+
+    const asc = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+      order: "asc",
+    })
+    expect(asc.map((p) => p.value)).toEqual([20, 22, 24])
+
+    const desc = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+      order: "desc",
+    })
+    expect(desc.map((p) => p.value)).toEqual([24, 22, 20])
+  })
+
+  test("getHistory filters by time range", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const t1 = new Date("2026-01-01T10:00:00Z")
+    const t2 = new Date("2026-01-01T11:00:00Z")
+    const t3 = new Date("2026-01-01T12:00:00Z")
+
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 20, t1, "1")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 22, t2, "2")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 24, t3, "3")
+    )
+
+    const filtered = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+      from: new Date("2026-01-01T10:30:00Z"),
+      to: new Date("2026-01-01T11:30:00Z"),
+    })
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0].value).toBe(22)
+  })
+
+  test("getHistory with limit", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    for (let i = 0; i < 5; i++) {
+      const at = new Date(`2026-01-01T${10 + i}:00:00Z`)
+      await storage.applyTelemetryAppended(
+        makeTelemetryEvent("p1", "Room", "r1", "temp", 20 + i, at, `${i + 1}`)
+      )
+    }
+
+    const limited = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+      limit: 3,
+    })
+    expect(limited).toHaveLength(3)
+  })
+
+  test("applyTelemetryAppended is idempotent", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const event = makeTelemetryEvent("p1", "Room", "r1", "temp", 22, new Date(), "1")
+
+    await storage.applyTelemetryAppended(event)
+    await storage.applyTelemetryAppended(event)
+
+    const history = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(history).toHaveLength(1)
+  })
+
+  test("getLatest returns null for no data", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const latest = await storage.getLatest({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(latest).toBeNull()
+  })
+
+  test("stores unit alongside value", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const event = makeTelemetryEvent(
+      "p1",
+      "Room",
+      "r1",
+      "temp",
+      22,
+      new Date(),
+      "1",
+      "degreeCelsius"
+    )
+    await storage.applyTelemetryAppended(event)
+
+    const latest = await storage.getLatest({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(latest?.unit).toBe("degreeCelsius")
+  })
+})

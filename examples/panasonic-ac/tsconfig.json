@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["bun", "node"]
+  },
+  "include": [
+    "actions/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "ontology/**/*.ts",
+    "functions/**/*.ts",
+    "lib/**/*.ts",
+    "connectors/**/*.ts",
+    "pario.config.ts"
+  ]
+}
