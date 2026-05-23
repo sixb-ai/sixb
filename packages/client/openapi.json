@@ -34,6 +34,10 @@
       "description": "Connector metadata and webhook routes"
     },
     {
+      "name": "Webhooks",
+      "description": "Webhook run history"
+    },
+    {
       "name": "Datasets",
       "description": "Dataset definitions, versions, and row previews"
     },
@@ -7579,6 +7583,191 @@
           },
           "404": {
             "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhook-runs": {
+      "get": {
+        "summary": "List webhook run history",
+        "tags": ["Webhooks"],
+        "operationId": "listWebhookRuns",
+        "parameters": [
+          {
+            "name": "connectorId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhookId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["running", "succeeded", "failed", "skipped"]
+            }
+          },
+          {
+            "name": "idempotencyKey",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startedAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "connectorId": {
+                            "type": "string"
+                          },
+                          "webhookId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "succeeded", "failed", "skipped"]
+                          },
+                          "method": {
+                            "type": "string"
+                          },
+                          "route": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "requestBodyBytes": {
+                            "type": "number"
+                          },
+                          "responseStatus": {
+                            "type": "number"
+                          },
+                          "idempotencyKey": {
+                            "type": "string"
+                          },
+                          "deliveryClaimResult": {
+                            "type": "string",
+                            "enum": ["claimed", "duplicate", "in_progress"]
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "connectorId",
+                          "webhookId",
+                          "status",
+                          "method",
+                          "route",
+                          "startedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["runs", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
             "content": {
               "application/json": {
                 "schema": {

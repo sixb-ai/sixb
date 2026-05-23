@@ -173,6 +173,7 @@ export function createParioApi(server: ParioServer) {
           { name: "Status", description: "Runtime status" },
           { name: "Ontology", description: "Object type definitions" },
           { name: "Connectors", description: "Connector metadata and webhook routes" },
+          { name: "Webhooks", description: "Webhook run history" },
           { name: "Datasets", description: "Dataset definitions, versions, and row previews" },
           { name: "Syncs", description: "Sync metadata and run history" },
           { name: "Pipelines", description: "Pipeline metadata and run history" },

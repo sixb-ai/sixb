@@ -390,5 +390,6 @@ function closeSqliteStorage(storage: SqliteStorage): void {
   storage.syncRuns.close()
   storage.timeseries.close()
   storage.webhookDeliveries.close()
+  storage.webhookRuns.close()
   storage.rules.close()
 }

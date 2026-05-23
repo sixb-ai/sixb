@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto"
 import type {
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
+  FinishWebhookRunStatus,
   OntologySource,
   Pario,
   RegisteredWebhook,
   WebhookDefinition,
+  WebhookDeliveryClaimResult,
   WebhookDeliveryKey,
   WebhookMetadata,
   WebhookResponse,
@@ -26,6 +29,30 @@ interface DispatchWebhookOptions {
   readonly set: ElysiaSet
   readonly bodyLimitBytes?: number
 }
+
+interface WebhookRunFinishInput {
+  readonly pario: Pario<readonly OntologySource[]>
+  readonly runId: string | null
+  readonly status: FinishWebhookRunStatus
+  readonly requestBodyBytes?: number
+  readonly responseStatus?: number
+  readonly idempotencyKey?: string
+  readonly deliveryClaimResult?: WebhookDeliveryClaimResult
+  readonly error?: string
+}
+
+type DeliveryClaimResult =
+  | {
+      readonly status: "run"
+      readonly key: WebhookDeliveryKey | null
+      readonly idempotencyKey?: string
+      readonly claimResult?: WebhookDeliveryClaimResult
+    }
+  | {
+      readonly status: "skip"
+      readonly idempotencyKey: string
+      readonly claimResult: WebhookDeliveryClaimResult
+    }
 
 export function registerWebhookRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
   return app.all(
@@ -51,10 +78,19 @@ export function registerWebhookRoutes(app: Elysia, pario: Pario<readonly Ontolog
 async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown> {
   const { pario, registered, request, set } = options
   const { connector, webhook, route } = registered
+  const runId = await startWebhookRun(pario, registered, request)
+  const requestMethod = request.method.toUpperCase()
 
-  if (request.method.toUpperCase() !== webhook.method) {
+  if (requestMethod !== webhook.method) {
     set.status = 405
     setHeader(set, "allow", webhook.method)
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      responseStatus: 405,
+      error: "Method not allowed",
+    })
     return { error: "Method not allowed" }
   }
 
@@ -62,8 +98,17 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   try {
     rawBody = await readRawBody(request, options.bodyLimitBytes ?? DEFAULT_WEBHOOK_BODY_LIMIT_BYTES)
   } catch (error) {
-    set.status = error instanceof WebhookBodyTooLargeError ? 413 : 400
-    return { error: error instanceof Error ? error.message : String(error) }
+    const responseStatus = error instanceof WebhookBodyTooLargeError ? 413 : 400
+    const message = error instanceof Error ? error.message : String(error)
+    set.status = responseStatus
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      responseStatus,
+      error: message,
+    })
+    return { error: message }
   }
 
   const metadata = toWebhookMetadata(webhook, route)
@@ -79,6 +124,14 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     await webhook.verify?.(verifyContext)
   } catch {
     set.status = 401
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      requestBodyBytes: rawBody.byteLength,
+      responseStatus: 401,
+      error: "Webhook verification failed",
+    })
     return { error: "Webhook verification failed" }
   }
 
@@ -86,8 +139,17 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   try {
     body = parseWebhookBody(webhook, rawBody)
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
     set.status = 400
-    return { error: error instanceof Error ? error.message : String(error) }
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      requestBodyBytes: rawBody.byteLength,
+      responseStatus: 400,
+      error: message,
+    })
+    return { error: message }
   }
 
   const handlerContext = {
@@ -99,14 +161,36 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   // Claim before running the handler so duplicate and concurrent provider
   // retries can be acknowledged without repeating side effects.
   let deliveryKey: WebhookDeliveryKey | null = null
+  let idempotencyKey: string | undefined
+  let deliveryClaimResult: WebhookDeliveryClaimResult | undefined
   try {
     const claim = await claimDeliveryKey(pario, webhook, handlerContext)
+    idempotencyKey = claim.idempotencyKey
+    deliveryClaimResult = claim.claimResult
     if (claim.status === "skip") {
-      return accepted(set)
+      const result = accepted(set)
+      await finishWebhookRun({
+        pario,
+        runId,
+        status: "skipped",
+        requestBodyBytes: rawBody.byteLength,
+        responseStatus: 202,
+        idempotencyKey: claim.idempotencyKey,
+        deliveryClaimResult: claim.claimResult,
+      })
+      return result
     }
     deliveryKey = claim.key
   } catch {
     set.status = 500
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      requestBodyBytes: rawBody.byteLength,
+      responseStatus: 500,
+      error: "Webhook delivery claim failed",
+    })
     return { error: "Webhook delivery claim failed" }
   }
 
@@ -125,6 +209,16 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     }
 
     set.status = 500
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      requestBodyBytes: rawBody.byteLength,
+      responseStatus: 500,
+      idempotencyKey,
+      deliveryClaimResult,
+      error: "Webhook handler failed",
+    })
     return { error: "Webhook handler failed" }
   }
 
@@ -138,10 +232,84 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     }
   } catch {
     set.status = 500
+    await finishWebhookRun({
+      pario,
+      runId,
+      status: "failed",
+      requestBodyBytes: rawBody.byteLength,
+      responseStatus: 500,
+      idempotencyKey,
+      deliveryClaimResult,
+      error: "Webhook delivery completion failed",
+    })
     return { error: "Webhook delivery completion failed" }
   }
 
+  const responseStatus = getWebhookResponseStatus(response)
+  const runStatus = responseStatus >= 200 && responseStatus <= 299 ? "succeeded" : "failed"
+  await finishWebhookRun({
+    pario,
+    runId,
+    status: runStatus,
+    requestBodyBytes: rawBody.byteLength,
+    responseStatus,
+    idempotencyKey,
+    deliveryClaimResult,
+    error: runStatus === "failed" ? `Webhook handler returned HTTP ${responseStatus}` : undefined,
+  })
+
   return applyWebhookResponse(set, response)
+}
+
+async function startWebhookRun(
+  pario: Pario<readonly OntologySource[]>,
+  registered: RegisteredWebhook,
+  request: Request
+): Promise<string | null> {
+  const storage = pario.storage.webhookRuns
+  if (!storage) {
+    return null
+  }
+
+  const runId = `webhookrun_${randomUUID()}`
+
+  try {
+    await storage.start({
+      id: runId,
+      projectId: pario.id,
+      connectorId: registered.connector.id,
+      webhookId: registered.webhook.id,
+      method: request.method.toUpperCase(),
+      route: registered.route,
+    })
+    return runId
+  } catch {
+    return null
+  }
+}
+
+async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
+  const storage = input.pario.storage.webhookRuns
+  if (!storage || !input.runId) {
+    return
+  }
+
+  try {
+    await storage.finish({
+      id: input.runId,
+      projectId: input.pario.id,
+      status: input.status,
+      finishedAt: new Date(),
+      requestBodyBytes: input.requestBodyBytes,
+      responseStatus: input.responseStatus,
+      idempotencyKey: input.idempotencyKey,
+      deliveryClaimResult: input.deliveryClaimResult,
+      error: input.error,
+    })
+  } catch {
+    // Webhook run history is observability-only. Do not change provider responses
+    // when history storage is unavailable or temporarily failing.
+  }
 }
 
 async function readRawBody(request: Request, limitBytes: number): Promise<Uint8Array> {
@@ -176,9 +344,7 @@ async function claimDeliveryKey(
   pario: Pario<readonly OntologySource[]>,
   webhook: WebhookDefinition,
   context: Parameters<NonNullable<WebhookDefinition["idempotencyKey"]>>[0]
-): Promise<
-  { readonly status: "run"; readonly key: WebhookDeliveryKey | null } | { readonly status: "skip" }
-> {
+): Promise<DeliveryClaimResult> {
   if (!webhook.idempotencyKey) {
     return { status: "run", key: null }
   }
@@ -206,14 +372,14 @@ async function claimDeliveryKey(
   })
 
   if (result.claimResult === "duplicate" || result.claimResult === "in_progress") {
-    return { status: "skip" }
+    return { status: "skip", idempotencyKey, claimResult: result.claimResult }
   }
 
   if (result.claimResult !== "claimed") {
     throw new Error(`Unknown webhook delivery claim result: ${result.claimResult}`)
   }
 
-  return { status: "run", key: deliveryKey }
+  return { status: "run", key: deliveryKey, idempotencyKey, claimResult: result.claimResult }
 }
 
 function createClientResolver(
@@ -241,7 +407,7 @@ function toWebhookMetadata(webhook: WebhookDefinition, route: string): WebhookMe
 
 function applyWebhookResponse(set: ElysiaSet, response: unknown): unknown {
   const webhookResponse = isWebhookResponse(response) ? response : undefined
-  set.status = webhookResponse?.status ?? 202
+  set.status = getWebhookResponseStatus(response)
 
   if (webhookResponse?.headers) {
     for (const [key, value] of new Headers(webhookResponse.headers)) {
@@ -250,6 +416,11 @@ function applyWebhookResponse(set: ElysiaSet, response: unknown): unknown {
   }
 
   return webhookResponse?.body
+}
+
+function getWebhookResponseStatus(response: unknown): number {
+  const webhookResponse = isWebhookResponse(response) ? response : undefined
+  return webhookResponse?.status ?? 202
 }
 
 function accepted(set: ElysiaSet): undefined {

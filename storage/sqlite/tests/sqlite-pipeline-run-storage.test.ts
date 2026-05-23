@@ -374,6 +374,7 @@ describe("SqlitePipelineRunStorage", () => {
       bundled.syncRuns.close()
       bundled.timeseries.close()
       bundled.webhookDeliveries.close()
+      bundled.webhookRuns.close()
       bundled.rules.close()
     }
   })

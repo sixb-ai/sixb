@@ -14,6 +14,7 @@ import { PgRulesStorage } from "./pg-rules-storage"
 import { PgSyncRunStorage } from "./pg-sync-run-storage"
 import { PgTimeseriesStorage } from "./pg-timeseries-storage"
 import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
+import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 
 export interface PostgresStorageOptions {
@@ -74,6 +75,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: PgTimeseriesStorage
   readonly webhookDeliveries: PgWebhookDeliveryStorage
+  readonly webhookRuns: PgWebhookRunStorage
   readonly rules: PgRulesStorage
   readonly migrators: readonly StorageMigrator[]
 
@@ -133,6 +135,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.projectionRuns = new PgProjectionRunStorage(this.sql)
     this.timeseries = new PgTimeseriesStorage(this.sql)
     this.webhookDeliveries = new PgWebhookDeliveryStorage(this.sql)
+    this.webhookRuns = new PgWebhookRunStorage(this.sql)
     this.rules = new PgRulesStorage(this.sql)
   }
 
@@ -174,4 +177,5 @@ export { PgRulesStorage } from "./pg-rules-storage"
 export { PgSyncRunStorage } from "./pg-sync-run-storage"
 export { PgTimeseriesStorage } from "./pg-timeseries-storage"
 export { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
+export { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 export { PgWorkflowNodeRunStorage, PgWorkflowRunStorage } from "./pg-workflow-run-storage"

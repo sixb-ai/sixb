@@ -34,6 +34,7 @@ import {
   SqliteRulesStorage,
   SqliteSyncRunStorage,
   SqliteTimeseriesStorage,
+  SqliteWebhookRunStorage,
 } from "@pario/sqlite"
 import { ParioServer } from "../src/server"
 
@@ -173,6 +174,7 @@ describe("ParioServer HTTP contract", () => {
         timeseries: new SqliteTimeseriesStorage(),
         syncRuns: new SqliteSyncRunStorage(),
         pipelineRuns: new SqlitePipelineRunStorage(),
+        webhookRuns: new SqliteWebhookRunStorage(),
         rules: new SqliteRulesStorage(),
       },
       lakeStorage,
@@ -303,6 +305,24 @@ describe("ParioServer HTTP contract", () => {
       },
     })
 
+    await pario.storage.webhookRuns!.start({
+      id: "webhook-run-previous",
+      projectId: "contract-project",
+      connectorId: "github",
+      webhookId: "events",
+      method: "POST",
+      route: "/api/webhooks/github/events",
+      startedAt: new Date("2026-02-18T09:10:00.000Z"),
+    })
+    await pario.storage.webhookRuns!.finish({
+      id: "webhook-run-previous",
+      projectId: "contract-project",
+      status: "succeeded",
+      finishedAt: new Date("2026-02-18T09:10:01.000Z"),
+      requestBodyBytes: 18,
+      responseStatus: 202,
+    })
+
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
 
@@ -379,6 +399,27 @@ describe("ParioServer HTTP contract", () => {
       const missingConnectorResponse = await fetch(`${baseUrl}/api/connectors/missing`)
       expect(missingConnectorResponse.status).toBe(404)
       expect(await missingConnectorResponse.json()).toEqual({ error: "Connector not found" })
+
+      const webhookRunsResponse = await fetch(
+        `${baseUrl}/api/webhook-runs?connectorId=github&webhookId=events&limit=5`
+      )
+      expect(webhookRunsResponse.status).toBe(200)
+      expect(await webhookRunsResponse.json()).toMatchObject({
+        total: 1,
+        hasMore: false,
+        runs: [
+          {
+            id: "webhook-run-previous",
+            connectorId: "github",
+            webhookId: "events",
+            method: "POST",
+            route: "/api/webhooks/github/events",
+            status: "succeeded",
+            requestBodyBytes: 18,
+            responseStatus: 202,
+          },
+        ],
+      })
 
       const datasetsResponse = await fetch(`${baseUrl}/api/datasets`)
       expect(datasetsResponse.status).toBe(200)

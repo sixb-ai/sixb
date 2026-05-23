@@ -3,6 +3,7 @@ import type { SQL } from "bun"
 type PgRunListTable =
   | "pipeline_runs"
   | "pipeline_step_runs"
+  | "webhook_runs"
   | "workflow_runs"
   | "workflow_node_runs"
 

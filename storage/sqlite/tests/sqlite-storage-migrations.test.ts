@@ -116,6 +116,10 @@ describe("SQLite storage migrations", () => {
       projectId: "project-a",
       id: "workflow-run-1",
     })
+    const webhookRun = await storage.webhookRuns.getById({
+      projectId: "project-a",
+      id: "webhook-run-1",
+    })
 
     closeStorage(storage)
 
@@ -134,6 +138,12 @@ describe("SQLite storage migrations", () => {
     expect(projectionRun?.objectsUpserted).toBe(4)
     expect(workflowRun?.status).toBe("succeeded")
     expect(workflowRun?.input).toEqual({ transactionId: "txn-1" })
+    expect(webhookRun).toMatchObject({
+      connectorId: "github",
+      webhookId: "events",
+      status: "succeeded",
+      responseStatus: 202,
+    })
     expect(webhookDelivery).toMatchObject({
       status: "completed",
       completedAt: "2026-04-19T12:00:02.000Z",
@@ -402,6 +412,27 @@ async function seedExistingStoreRows(basePath: string): Promise<void> {
       idempotencyKey: "delivery-1",
       completedAt: "2026-04-19T12:00:02.000Z",
     })
+
+    await storage.webhookRuns.start({
+      id: "webhook-run-1",
+      projectId: "project-a",
+      connectorId: "github",
+      webhookId: "events",
+      method: "POST",
+      route: "/api/webhooks/github/events",
+      startedAt: new Date("2026-04-19T12:00:00.000Z"),
+    })
+
+    await storage.webhookRuns.finish({
+      id: "webhook-run-1",
+      projectId: "project-a",
+      status: "succeeded",
+      finishedAt: new Date("2026-04-19T12:00:02.000Z"),
+      responseStatus: 202,
+      requestBodyBytes: 12,
+      idempotencyKey: "delivery-1",
+      deliveryClaimResult: "claimed",
+    })
   } finally {
     closeStorage(storage)
   }
@@ -419,6 +450,7 @@ function closeStorage(storage: SqliteStorage): void {
   storage.syncRuns.close()
   storage.timeseries.close()
   storage.webhookDeliveries.close()
+  storage.webhookRuns.close()
   storage.rules.close()
 }
 

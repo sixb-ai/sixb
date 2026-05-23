@@ -67,12 +67,14 @@ describe("webhook routes", () => {
       },
     })
 
-    const app = createWebhookApp([connector])
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
+    const payload = JSON.stringify({ name: "issue-opened" })
     const response = await app.fetch(
       new Request("http://localhost/api/webhooks/github/events", {
         method: "POST",
         headers: { "content-type": "application/json", "x-provider": "github" },
-        body: JSON.stringify({ name: "issue-opened" }),
+        body: payload,
       })
     )
 
@@ -83,9 +85,27 @@ describe("webhook routes", () => {
       projectId: "test-project",
       requestHeader: "github",
     })
-    expect(rawBodyText).toBe(JSON.stringify({ name: "issue-opened" }))
+    expect(rawBodyText).toBe(payload)
     expect(requestHeader).toBe("github")
     expect(connected).toBe(true)
+
+    const runs = await storage.webhookRuns.list({
+      projectId: "test-project",
+      connectorId: "github",
+      webhookId: "events",
+    })
+    const [run] = runs.runs
+
+    expect(runs.total).toBe(1)
+    expect(run).toMatchObject({
+      connectorId: "github",
+      webhookId: "events",
+      method: "POST",
+      route: "/api/webhooks/github/events",
+      status: "succeeded",
+      responseStatus: 201,
+    })
+    expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
   })
 
   test("returns 400 for body validation failures before handlers run", async () => {
@@ -113,18 +133,33 @@ describe("webhook routes", () => {
       },
     })
 
-    const app = createWebhookApp([connector])
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
+    const payload = JSON.stringify({ value: "hot" })
     const response = await app.fetch(
       new Request("http://localhost/api/webhooks/edge/telemetry", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ value: "hot" }),
+        body: payload,
       })
     )
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: "value must be a number" })
     expect(calls).toBe(0)
+
+    const runs = await storage.webhookRuns.list({ projectId: "test-project" })
+    const [run] = runs.runs
+
+    expect(runs.total).toBe(1)
+    expect(run).toMatchObject({
+      connectorId: "edge",
+      webhookId: "telemetry",
+      status: "failed",
+      responseStatus: 400,
+      error: "value must be a number",
+    })
+    expect(run?.requestBodyBytes).toBe(new TextEncoder().encode(payload).byteLength)
   })
 
   test("skips duplicate idempotent deliveries before handlers run", async () => {
@@ -145,7 +180,8 @@ describe("webhook routes", () => {
       },
     })
 
-    const app = createWebhookApp([connector])
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
     const request = () =>
       new Request("http://localhost/api/webhooks/github/events", {
         method: "POST",
@@ -162,6 +198,59 @@ describe("webhook routes", () => {
     expect(first.status).toBe(202)
     expect(second.status).toBe(202)
     expect(calls).toBe(1)
+
+    const runs = await storage.webhookRuns.list({
+      projectId: "test-project",
+      connectorId: "github",
+      webhookId: "events",
+      order: "asc",
+    })
+    const succeeded = runs.runs.find((run) => run.status === "succeeded")
+    const skipped = runs.runs.find((run) => run.status === "skipped")
+
+    expect(runs.total).toBe(2)
+    expect(succeeded).toMatchObject({
+      responseStatus: 202,
+      idempotencyKey: "delivery-1",
+      deliveryClaimResult: "claimed",
+    })
+    expect(skipped).toMatchObject({
+      responseStatus: 202,
+      idempotencyKey: "delivery-1",
+      deliveryClaimResult: "duplicate",
+    })
+
+    const listResponse = await app.fetch(
+      new Request(
+        "http://localhost/api/webhook-runs?connectorId=github&webhookId=events&status=skipped&idempotencyKey=delivery-1"
+      )
+    )
+    const listBody = (await listResponse.json()) as {
+      runs: Array<{
+        status: string
+        connectorId: string
+        webhookId: string
+        idempotencyKey?: string
+        deliveryClaimResult?: string
+      }>
+      total: number
+      hasMore: boolean
+    }
+
+    expect(listResponse.status).toBe(200)
+    expect(listBody).toMatchObject({
+      total: 1,
+      hasMore: false,
+      runs: [
+        {
+          connectorId: "github",
+          webhookId: "events",
+          status: "skipped",
+          idempotencyKey: "delivery-1",
+          deliveryClaimResult: "duplicate",
+        },
+      ],
+    })
   })
 
   test("maps unknown, unsupported, verification, and handler errors", async () => {
@@ -189,7 +278,8 @@ describe("webhook routes", () => {
       },
     })
 
-    const app = createWebhookApp([connector])
+    const storage = new InMemoryStorage()
+    const app = createWebhookApp([connector], storage)
 
     const unknown = await app.fetch(
       new Request("http://localhost/api/webhooks/github/missing", { method: "POST" })
@@ -215,15 +305,47 @@ describe("webhook routes", () => {
     expect(unsupported.headers.get("allow")).toBe("POST")
     expect(unauthorized.status).toBe(401)
     expect(failed.status).toBe(500)
+
+    const runs = await storage.webhookRuns.list({ projectId: "test-project" })
+
+    expect(runs.total).toBe(3)
+    expect(runs.runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          webhookId: "events",
+          method: "GET",
+          status: "failed",
+          responseStatus: 405,
+          error: "Method not allowed",
+        }),
+        expect.objectContaining({
+          webhookId: "events",
+          method: "POST",
+          status: "failed",
+          responseStatus: 401,
+          error: "Webhook verification failed",
+        }),
+        expect.objectContaining({
+          webhookId: "failing",
+          method: "POST",
+          status: "failed",
+          responseStatus: 500,
+          error: "Webhook handler failed",
+        }),
+      ])
+    )
   })
 })
 
-function createWebhookApp(connectors: ParioOptions<readonly OntologySource[]>["connectors"]) {
+function createWebhookApp(
+  connectors: ParioOptions<readonly OntologySource[]>["connectors"],
+  storage = new InMemoryStorage()
+) {
   const pario = createParioInstance<readonly OntologySource[]>({
     id: "test-project",
     ontology: [],
     broker: new InMemoryBroker(),
-    storage: new InMemoryStorage(),
+    storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
