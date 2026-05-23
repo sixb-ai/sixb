@@ -21,6 +21,7 @@ export type GetAuthSessionResponses = {
       }
     | {
         authenticated: true
+        csrfToken: string
         user: {
           id: string
           email: string

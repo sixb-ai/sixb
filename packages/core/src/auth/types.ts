@@ -189,6 +189,8 @@ export interface AuthCookieOptions {
   readonly csrfCookieName?: string
   readonly cookieDomain?: string
   readonly secure?: boolean | "auto"
+  readonly sameSite?: "strict"
+  readonly csrfHttpOnly?: boolean
 }
 
 export type ParioAuthConfig =

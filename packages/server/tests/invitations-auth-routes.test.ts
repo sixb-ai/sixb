@@ -275,8 +275,11 @@ describe("auth invitation routes", () => {
       })
     )
 
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("/dashboard")
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("location")).toBeNull()
+    expect(await callback.text()).toContain(
+      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+    )
     await expect(
       storage.auth.groupMemberships.listForGroup({
         projectId,

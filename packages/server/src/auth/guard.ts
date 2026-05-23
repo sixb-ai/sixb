@@ -7,28 +7,40 @@ import {
   resolveAuthSessionAudience,
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
+import {
+  BrowserOriginError,
+  createFixedAuthContextResolver,
+  type ResolveRequestAuthContext,
+} from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
   htmlAuthRedirectResponse,
   jsonAuthRequiredResponse,
   jsonCsrfFailedResponse,
+  jsonForbiddenResponse,
   websocketAuthFailedResponse,
 } from "./responses"
 
 export interface ServerAuthGuardOptions {
   readonly pario: Pario<readonly OntologySource[]>
   readonly audience?: AuthSessionAudience
+  readonly resolveAuthContext?: ResolveRequestAuthContext
 }
 
 export type HtmlRouteHandler = (request: Request) => Response | Promise<Response>
 
 export class ServerAuthGuard {
   private readonly pario: Pario<readonly OntologySource[]>
-  private readonly audience: AuthSessionAudience
+  private readonly resolveAuthContext: ResolveRequestAuthContext
+  private readonly staticAudience: AuthSessionAudience
 
   constructor(options: ServerAuthGuardOptions) {
     this.pario = options.pario
-    this.audience = resolveAuthSessionAudience(options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE)
+    this.staticAudience = resolveAuthSessionAudience(
+      options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE
+    )
+    this.resolveAuthContext =
+      options.resolveAuthContext ?? createFixedAuthContextResolver(this.staticAudience)
   }
 
   isAuthEnabled(): boolean {
@@ -49,7 +61,14 @@ export class ServerAuthGuard {
       return undefined
     }
 
-    const session = await this.pario.auth.getSession(request, { audience: this.audience })
+    const authContext = this.tryResolveAuthContext(request)
+    if (authContext instanceof Response) {
+      return authContext
+    }
+
+    const session = await this.pario.auth.getSession(request, {
+      audience: authContext.audience,
+    })
     if (!session.authenticated) {
       if (route.kind === "html") {
         return htmlAuthRedirectResponse(request)
@@ -74,7 +93,14 @@ export class ServerAuthGuard {
       return undefined
     }
 
-    const session = await this.pario.auth.getSession(request, { audience: this.audience })
+    const authContext = this.tryResolveAuthContext(request)
+    if (authContext instanceof Response) {
+      return authContext
+    }
+
+    const session = await this.pario.auth.getSession(request, {
+      audience: authContext.audience,
+    })
     if (!session.authenticated) {
       return htmlAuthRedirectResponse(request)
     }
@@ -94,11 +120,13 @@ export class ServerAuthGuard {
   }
 
   async getSession(request: Request): Promise<AuthSessionResult> {
-    return this.pario.auth.getSession(request, { audience: this.audience })
+    const authContext = this.resolveAuthContext(request)
+    return this.pario.auth.getSession(request, { audience: authContext.audience })
   }
 
-  getCsrfCookieName(): string {
-    return this.pario.auth.getCookieOptions({ audience: this.audience }).csrfCookieName
+  getCsrfCookieName(request?: Request): string {
+    const audience = request ? this.resolveAuthContext(request).audience : this.staticAudience
+    return this.pario.auth.getCookieOptions({ audience }).csrfCookieName
   }
 
   verifyCsrf(
@@ -106,7 +134,21 @@ export class ServerAuthGuard {
     _session: Extract<AuthSessionResult, { authenticated: true }>
   ): boolean {
     return verifyDoubleSubmitCsrf(request, {
-      cookieName: this.getCsrfCookieName(),
+      cookieName: this.getCsrfCookieName(request),
     })
+  }
+
+  private tryResolveAuthContext(
+    request: Request
+  ): ReturnType<ResolveRequestAuthContext> | Response {
+    try {
+      return this.resolveAuthContext(request)
+    } catch (error) {
+      if (error instanceof BrowserOriginError) {
+        return jsonForbiddenResponse("Browser origin is not allowed")
+      }
+
+      throw error
+    }
   }
 }
