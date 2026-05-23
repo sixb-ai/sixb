@@ -14,13 +14,17 @@ import { zodToJsonSchema } from "zod-to-json-schema"
 import {
   BrowserOriginError,
   createBrowserApiAuthContextResolver,
+  createBrowserApiAuthRedirectContextResolver,
   createFixedAuthContextResolver,
+  createFixedAuthRedirectContextResolver,
   isAllowedBrowserApiOrigin,
   type ParioApiBrowserPolicy,
   type RequestAuthContext,
+  type ResolveAuthRedirectContext,
   type ResolvedParioApiBrowserPolicy,
   type ResolveRequestAuthContext,
   resolveBrowserApiPolicy,
+  resolveBrowserApiPublicOrigin,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
 import { PARIO_CSRF_SECURITY_SCHEME, PARIO_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
@@ -61,6 +65,7 @@ export class ParioServer {
   private readonly sessionAudience: AuthSessionAudience
   private readonly browserApiPolicy: ResolvedParioApiBrowserPolicy | null
   private readonly authContextResolver: ResolveRequestAuthContext
+  private readonly authRedirectContextResolver: ResolveAuthRedirectContext
   private app: ParioApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private uiCss: BuiltInUiCssHandle | null = null
@@ -81,6 +86,9 @@ export class ParioServer {
     this.authContextResolver = this.browserApiPolicy
       ? createBrowserApiAuthContextResolver(this.browserApiPolicy)
       : createFixedAuthContextResolver(this.sessionAudience)
+    this.authRedirectContextResolver = this.browserApiPolicy
+      ? createBrowserApiAuthRedirectContextResolver(this.browserApiPolicy)
+      : createFixedAuthRedirectContextResolver(this.sessionAudience)
   }
 
   getPario(): Pario<readonly OntologySource[]> {
@@ -97,6 +105,19 @@ export class ParioServer {
 
   resolveAuthContext(request: Request): RequestAuthContext {
     return this.authContextResolver(request)
+  }
+
+  resolveAuthRedirectContext(
+    request: Parameters<ResolveAuthRedirectContext>[0],
+    input: Parameters<ResolveAuthRedirectContext>[1]
+  ): ReturnType<ResolveAuthRedirectContext> {
+    return this.authRedirectContextResolver(request, input)
+  }
+
+  resolveAuthRequestOrigin(request: Request): string {
+    return this.browserApiPolicy
+      ? resolveBrowserApiPublicOrigin(this.browserApiPolicy, request)
+      : new URL(request.url).origin
   }
 
   getBrowserApiPolicy(): ResolvedParioApiBrowserPolicy | null {
@@ -263,6 +284,9 @@ export function createParioApi(server: ParioServer) {
   app.onBeforeHandle(({ request }) => guard.handle(request))
   registerAuthRoutes(app, pario, {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
+    resolveAuthRedirectContext: (request, input) =>
+      server.resolveAuthRedirectContext(request, input),
+    resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
   })
   registerHttpRoutes(app, pario)
   registerWebhookRoutes(app, pario)

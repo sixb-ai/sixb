@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+import { AuthStorageError, resolveAuthSessionAudience } from "@pario/core"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthMagicLinkRow } from "./rows"
 import { rowToMagicLinkRecord } from "./rows"
@@ -23,6 +23,7 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
       const id = assertNonEmpty(input.id, "Magic link id")
       const projectId = assertNonEmpty(input.projectId, "Project id")
       const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
+      const audience = resolveAuthSessionAudience(input.audience)
       const email = normalizeEmail(input.email)
       const tokenHash = assertNonEmpty(input.tokenHash, "Magic link token hash")
 
@@ -47,19 +48,23 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
               project_id,
               id,
               strategy_id,
+              audience,
               email,
               token_hash,
+              return_to,
               created_at,
               expires_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
           )
           .run(
             projectId,
             id,
             strategyId,
+            audience,
             email,
             tokenHash,
+            input.returnTo ?? null,
             toIso(input.createdAt),
             toIso(input.expiresAt)
           )
@@ -75,8 +80,10 @@ export class SqliteAuthMagicLinkStore implements AuthMagicLinkStore {
         id,
         projectId,
         strategyId,
+        audience,
         email,
         tokenHash,
+        returnTo: input.returnTo,
         createdAt: new Date(input.createdAt),
         expiresAt: new Date(input.expiresAt),
       }

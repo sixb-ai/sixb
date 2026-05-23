@@ -24,6 +24,7 @@ import type {
   InviteDeliveryResult,
   InviteDeliveryStatus,
   InviteUserInput,
+  InviteUserOptions,
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
@@ -227,7 +228,7 @@ export class AuthRuntime {
   async invite(
     request: Request,
     input: InviteUserInput,
-    options: AuthSessionResolutionOptions = {}
+    options: InviteUserOptions = {}
   ): Promise<InviteUserResult> {
     const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
@@ -263,8 +264,9 @@ export class AuthRuntime {
         projectId: this.projectId,
         authStorage,
         invitation,
-        returnTo: sanitizeReturnTo(input.returnTo),
-        requestOrigin: new URL(request.url).origin,
+        audience: resolveAuthSessionAudience(options.audience),
+        returnTo: options.delivery?.returnTo ?? sanitizeReturnTo(input.returnTo),
+        requestOrigin: options.delivery?.requestOrigin ?? new URL(request.url).origin,
         now,
       })
     } catch (error) {

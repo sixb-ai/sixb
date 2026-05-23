@@ -8,7 +8,7 @@ import type {
   SessionRecord,
   UserRecord,
 } from "../storage/auth"
-import type { AuthSessionAudienceOptions } from "./audience"
+import type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
 
 export type Principal =
   | { readonly type: "user"; readonly id: string }
@@ -55,6 +55,7 @@ export interface InvitationDeliveryInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
   readonly invitation: InvitationRecord
+  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   readonly now?: Date
@@ -75,6 +76,7 @@ export interface MagicLinkRequestInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
   readonly email: string
+  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   readonly now?: Date
@@ -101,6 +103,11 @@ export interface MagicLinkCallbackInput {
   readonly now?: Date
 }
 
+export interface MagicLinkCallbackResult extends CompleteSignInResult {
+  readonly audience: AuthSessionAudience
+  readonly returnTo: string
+}
+
 export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {
   readonly kind: "magicLink"
   readonly bootstrapGroupIds?: readonly string[]
@@ -108,12 +115,13 @@ export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {
     input: MagicLinkInvitationRecipientInput
   ): Promise<MagicLinkInvitationRecipientResult>
   requestMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkRequestResult>
-  completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<CompleteSignInResult>
+  completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<MagicLinkCallbackResult>
 }
 
 export interface OidcStartSignInInput {
   readonly projectId: string
   readonly authStorage: AuthStorage
+  readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
   readonly now?: Date
@@ -133,6 +141,7 @@ export interface OidcCallbackInput {
 }
 
 export interface OidcCallbackResult extends CompleteSignInResult {
+  readonly audience: AuthSessionAudience
   readonly returnTo: string
 }
 
@@ -171,6 +180,13 @@ export interface ListInvitationsResult {
 }
 
 export type AuthSessionResolutionOptions = AuthSessionAudienceOptions
+
+export interface InviteUserOptions extends AuthSessionAudienceOptions {
+  readonly delivery?: {
+    readonly requestOrigin?: string
+    readonly returnTo?: string
+  }
+}
 
 export interface RevokeInvitationInput {
   readonly invitationId: string

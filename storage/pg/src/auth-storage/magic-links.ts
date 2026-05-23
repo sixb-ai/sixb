@@ -1,5 +1,5 @@
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+import { AuthStorageError, resolveAuthSessionAudience } from "@pario/core"
 import type { SQL } from "bun"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthMagicLinkRow } from "./rows"
@@ -22,6 +22,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
       const id = assertNonEmpty(input.id, "Magic link id")
       const projectId = assertNonEmpty(input.projectId, "Project id")
       const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
+      const audience = resolveAuthSessionAudience(input.audience)
       const email = normalizeEmail(input.email)
       const tokenHash = assertNonEmpty(input.tokenHash, "Magic link token hash")
 
@@ -46,16 +47,20 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
             project_id,
             id,
             strategy_id,
+            audience,
             email,
             token_hash,
+            return_to,
             created_at,
             expires_at
           ) VALUES (
             ${projectId},
             ${id},
             ${strategyId},
+            ${audience},
             ${email},
             ${tokenHash},
+            ${input.returnTo ?? null},
             ${input.createdAt},
             ${input.expiresAt}
           )

@@ -40,7 +40,7 @@ function createSender() {
   }
 }
 
-function createRuntime() {
+function createRuntime(options: { readonly browserApi?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const { messages, sendMagicLink } = createSender()
   const pario = new Pario<readonly OntologySource[]>({
@@ -66,7 +66,26 @@ function createRuntime() {
   })
 
   return {
-    app: createParioApi(new ParioServer({ pario, quiet: true, ui: false })),
+    app: createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ...(options.browserApi
+          ? {
+              surface: {
+                kind: "browserApi" as const,
+                browser: {
+                  publicOrigin: "http://api.localhost",
+                  allowedOrigins: [
+                    { origin: "http://admin.localhost", audience: "admin" as const },
+                    { origin: "http://app.localhost", audience: "app" as const },
+                  ],
+                },
+              },
+            }
+          : { ui: false }),
+      })
+    ),
     messages,
     pario,
     storage,
@@ -286,6 +305,42 @@ describe("auth invitation routes", () => {
         groupId: "commercial",
       })
     ).resolves.toMatchObject([{ groupId: "commercial", source: "invitation" }])
+  })
+
+  test("browser API invitations create API links that return to the calling UI origin", async () => {
+    const { app, messages, storage } = createRuntime({ browserApi: true })
+    const admin = await seedAdminSession(storage, { audience: "app" })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://app.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "ava@acme.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+    const link = linkFromLatestMessage(messages)
+    expect(link.origin).toBe("http://api.localhost")
+    expect(link.pathname).toBe("/auth/callback")
+    expect(link.searchParams.get("returnTo")).toBeNull()
+
+    const magicLink = await storage.auth.magicLinks.getById({
+      projectId,
+      id: link.searchParams.get("magicLinkId") ?? "",
+    })
+    expect(magicLink).toMatchObject({
+      audience: "app",
+      returnTo: "http://app.localhost/",
+    })
   })
 
   test("lists and revokes invitations by invite policy scope", async () => {

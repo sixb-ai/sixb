@@ -40,6 +40,7 @@ function createRuntime(
   options: {
     readonly bootstrapUsers?: readonly string[]
     readonly bootstrapGroups?: readonly [typeof securityAdmins]
+    readonly browserApi?: boolean
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -62,7 +63,26 @@ function createRuntime(
   })
 
   return {
-    app: createParioApi(new ParioServer({ pario, quiet: true, ui: false })),
+    app: createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ...(options.browserApi
+          ? {
+              surface: {
+                kind: "browserApi" as const,
+                browser: {
+                  publicOrigin: "http://api.localhost",
+                  allowedOrigins: [
+                    { origin: "http://admin.localhost", audience: "admin" as const },
+                    { origin: "http://app.localhost", audience: "app" as const },
+                  ],
+                },
+              },
+            }
+          : { ui: false }),
+      })
+    ),
     messages,
     pario,
     storage,
@@ -117,6 +137,7 @@ describe("magic-link auth routes", () => {
     expect(response.status).toBe(200)
     expect(html).toContain('action="/auth/sign-in"')
     expect(html).toContain('name="email"')
+    expect(html).toContain('name="audience" value="admin"')
     expect(html).toContain('name="returnTo" value="/objects"')
   })
 
@@ -218,6 +239,82 @@ describe("magic-link auth routes", () => {
     expect(callback.status).toBe(200)
     expect(callback.headers.get("location")).toBeNull()
     expect(await callback.text()).toContain('<meta http-equiv="refresh" content="0;url=/">')
+  })
+
+  test("browser API magic-link callbacks use the stored audience and return target", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+      browserApi: true,
+    })
+    const body = new URLSearchParams()
+    body.set("email", "founder@acme.com")
+    body.set("audience", "app")
+    body.set("returnTo", "http://app.localhost/dashboard")
+
+    const signIn = await app.fetch(
+      new Request("http://api.localhost/auth/sign-in", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+      })
+    )
+    const link = linkFromLatestMessage(messages)
+    link.searchParams.set("returnTo", "http://evil.localhost/steal")
+    const callback = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+
+    expect(signIn.status).toBe(200)
+    expect(link.origin).toBe("http://api.localhost")
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://app.localhost"
+    )
+    expect(await callback.clone().text()).toContain(
+      '<meta http-equiv="refresh" content="0;url=http://app.localhost/dashboard">'
+    )
+
+    const setCookie = callback.headers.get("set-cookie")
+    const sessionCookie = cookieValue(setCookie, "pario_session_app")
+    const sessionResponse = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: `pario_session_app=${sessionCookie}`,
+        },
+      })
+    )
+
+    expect(await sessionResponse.json()).toMatchObject({
+      authenticated: true,
+      user: { email: "founder@acme.com" },
+      session: { id: expect.any(String) },
+    })
+  })
+
+  test("browser API sign-in rejects return targets outside the audience origin", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+      browserApi: true,
+    })
+    const body = new URLSearchParams()
+    body.set("email", "founder@acme.com")
+    body.set("audience", "app")
+    body.set("returnTo", "http://evil.localhost/dashboard")
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/auth/sign-in", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toContain("This sign-in request is invalid.")
+    expect(messages).toHaveLength(0)
   })
 
   test("sign-out revokes the magic-link-created session and clears cookies", async () => {

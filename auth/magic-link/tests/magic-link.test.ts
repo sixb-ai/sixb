@@ -53,6 +53,7 @@ async function requestMagicLink(input: {
     projectId,
     authStorage: input.storage,
     email: input.email,
+    audience: "admin",
     returnTo: "/dashboard",
     requestOrigin,
     now: input.now ?? at("2026-05-16T10:00:00.000Z"),
@@ -186,7 +187,7 @@ describe("magicLink", () => {
 
     expect(link.origin).toBe(requestOrigin)
     expect(link.pathname).toBe("/auth/callback")
-    expect(link.searchParams.get("returnTo")).toBe("/dashboard")
+    expect(link.searchParams.get("returnTo")).toBeNull()
     expect(token).toBeTruthy()
     expect(magicLinkId).toBeTruthy()
 
@@ -197,6 +198,8 @@ describe("magicLink", () => {
     expect(record).toMatchObject({
       email: "ava@acme.com",
       strategyId: "magic-link",
+      audience: "admin",
+      returnTo: "/dashboard",
       tokenHash: hashMagicLinkToken(token ?? ""),
     })
     expect(record?.tokenHash).not.toBe(token)
@@ -307,6 +310,7 @@ describe("magicLink", () => {
 
     expect(result.user.email).toBe("founder@acme.com")
     expect(result.session).toMatchObject({ id: "ses_1", strategyId: "magic-link" })
+    expect(result).toMatchObject({ audience: "admin", returnTo: "/dashboard" })
     await expect(
       storage.groupMemberships.listForUser({ projectId, userId: result.user.id })
     ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])

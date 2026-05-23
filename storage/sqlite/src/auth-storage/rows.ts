@@ -73,8 +73,10 @@ export interface SqliteAuthMagicLinkRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
+  readonly audience: MagicLinkRecord["audience"]
   readonly email: string
   readonly token_hash: string
+  readonly return_to: string | null
   readonly created_at: string
   readonly expires_at: string
   readonly consumed_at: string | null
@@ -85,6 +87,7 @@ export interface SqliteAuthOidcAttemptRow {
   readonly project_id: string
   readonly id: string
   readonly strategy_id: string
+  readonly audience: OidcAuthorizationAttemptRecord["audience"]
   readonly state_hash: string
   readonly nonce_hash: string
   readonly code_verifier: string
@@ -177,8 +180,10 @@ export function rowToMagicLinkRecord(row: SqliteAuthMagicLinkRow): MagicLinkReco
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
+    audience: row.audience,
     email: row.email,
     tokenHash: row.token_hash,
+    returnTo: row.return_to ?? undefined,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),
     consumedAt: row.consumed_at ? new Date(row.consumed_at) : undefined,
@@ -193,6 +198,7 @@ export function rowToOidcAuthorizationAttemptRecord(
     id: row.id,
     projectId: row.project_id,
     strategyId: row.strategy_id,
+    audience: row.audience,
     stateHash: row.state_hash,
     nonceHash: row.nonce_hash,
     codeVerifier: row.code_verifier,
