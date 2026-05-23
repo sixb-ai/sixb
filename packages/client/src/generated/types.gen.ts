@@ -2645,3 +2645,59 @@ export type GetProjectionResponses = {
 }
 
 export type GetProjectionResponse = GetProjectionResponses[keyof GetProjectionResponses]
+
+export type ListWebhookRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    connectorId?: string
+    webhookId?: string
+    status?: "running" | "succeeded" | "failed" | "skipped"
+    idempotencyKey?: string
+    startedAfter?: string
+    startedBefore?: string
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/webhook-runs"
+}
+
+export type ListWebhookRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListWebhookRunsError = ListWebhookRunsErrors[keyof ListWebhookRunsErrors]
+
+export type ListWebhookRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      connectorId: string
+      webhookId: string
+      status: "running" | "succeeded" | "failed" | "skipped"
+      method: string
+      route: string
+      startedAt: string
+      finishedAt?: string
+      requestBodyBytes?: number
+      responseStatus?: number
+      idempotencyKey?: string
+      deliveryClaimResult?: "claimed" | "duplicate" | "in_progress"
+      error?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListWebhookRunsResponse = ListWebhookRunsResponses[keyof ListWebhookRunsResponses]

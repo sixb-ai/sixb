@@ -13,6 +13,7 @@ import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
 import { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
+import { SqliteWebhookRunStorage } from "./webhook-run-storage"
 import { SqliteWorkflowRunStorage } from "./workflow-run-storage"
 
 export interface SqliteStorageOptions {
@@ -23,8 +24,8 @@ export interface SqliteStorageOptions {
 /**
  * SQLite storage provider for Pario.
  *
- * Bundles object, timeseries, auth, sync run, pipeline run, projection run, workflow run, and
- * webhook delivery storage backed by SQLite.
+ * Bundles object, timeseries, auth, sync run, pipeline run, projection run, workflow run, webhook
+ * run, and webhook delivery storage backed by SQLite.
  *
  * Usage:
  * ```ts
@@ -46,6 +47,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly workflowRuns: SqliteWorkflowRunStorage
   readonly timeseries: SqliteTimeseriesStorage
   readonly webhookDeliveries: SqliteWebhookDeliveryStorage
+  readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
   readonly migrators: readonly StorageMigrator[]
 
@@ -78,6 +80,9 @@ export class SqliteStorage implements MigrationCapableStorage {
       path,
     })
     this.webhookDeliveries = new SqliteWebhookDeliveryStorage({
+      path,
+    })
+    this.webhookRuns = new SqliteWebhookRunStorage({
       path,
     })
     this.rules = new SqliteRulesStorage({
@@ -117,5 +122,7 @@ export type { SqliteTimeseriesStorageOptions } from "./timeseries-storage"
 export { SqliteTimeseriesStorage } from "./timeseries-storage"
 export type { SqliteWebhookDeliveryStorageOptions } from "./webhook-delivery-storage"
 export { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
+export type { SqliteWebhookRunStorageOptions } from "./webhook-run-storage"
+export { SqliteWebhookRunStorage } from "./webhook-run-storage"
 export type { SqliteWorkflowRunStorageOptions } from "./workflow-run-storage"
 export { SqliteWorkflowNodeRunStorage, SqliteWorkflowRunStorage } from "./workflow-run-storage"

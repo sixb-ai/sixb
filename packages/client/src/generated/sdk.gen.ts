@@ -93,6 +93,9 @@ import type {
   ListSyncRunsResponses,
   ListSyncsData,
   ListSyncsResponses,
+  ListWebhookRunsData,
+  ListWebhookRunsErrors,
+  ListWebhookRunsResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -637,5 +640,16 @@ export const getProjection = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetProjectionResponses, GetProjectionErrors, ThrowOnError>({
     url: "/api/projections/{projectionId}",
+    ...options,
+  })
+
+/**
+ * List webhook run history
+ */
+export const listWebhookRuns = <ThrowOnError extends boolean = false>(
+  options?: Options<ListWebhookRunsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListWebhookRunsResponses, ListWebhookRunsErrors, ThrowOnError>({
+    url: "/api/webhook-runs",
     ...options,
   })

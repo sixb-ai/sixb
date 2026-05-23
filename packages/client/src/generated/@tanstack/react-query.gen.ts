@@ -43,6 +43,7 @@ import {
   listRules,
   listSyncRuns,
   listSyncs,
+  listWebhookRuns,
   type Options,
   removeObjectLink,
   requestAction,
@@ -144,6 +145,9 @@ import type {
   ListSyncRunsResponse,
   ListSyncsData,
   ListSyncsResponse,
+  ListWebhookRunsData,
+  ListWebhookRunsError,
+  ListWebhookRunsResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -1515,3 +1519,71 @@ export const getProjectionOptions = (options: Options<GetProjectionData>) =>
     },
     queryKey: getProjectionQueryKey(options),
   })
+
+export const listWebhookRunsQueryKey = (options?: Options<ListWebhookRunsData>) =>
+  createQueryKey("listWebhookRuns", options)
+
+/**
+ * List webhook run history
+ */
+export const listWebhookRunsOptions = (options?: Options<ListWebhookRunsData>) =>
+  queryOptions<
+    ListWebhookRunsResponse,
+    ListWebhookRunsError,
+    ListWebhookRunsResponse,
+    ReturnType<typeof listWebhookRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listWebhookRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listWebhookRunsQueryKey(options),
+  })
+
+export const listWebhookRunsInfiniteQueryKey = (
+  options?: Options<ListWebhookRunsData>
+): QueryKey<Options<ListWebhookRunsData>> => createQueryKey("listWebhookRuns", options, true)
+
+/**
+ * List webhook run history
+ */
+export const listWebhookRunsInfiniteOptions = (options?: Options<ListWebhookRunsData>) =>
+  infiniteQueryOptions<
+    ListWebhookRunsResponse,
+    ListWebhookRunsError,
+    InfiniteData<ListWebhookRunsResponse>,
+    QueryKey<Options<ListWebhookRunsData>>,
+    string | Pick<QueryKey<Options<ListWebhookRunsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListWebhookRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listWebhookRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listWebhookRunsInfiniteQueryKey(options),
+    }
+  )

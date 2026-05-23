@@ -231,6 +231,39 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_project_received
   ON webhook_deliveries (project_id, received_at DESC);
 
+CREATE TABLE IF NOT EXISTS webhook_runs (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  webhook_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'skipped')),
+  method TEXT NOT NULL,
+  route TEXT NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  finished_at TIMESTAMPTZ,
+  request_body_bytes INTEGER CHECK (request_body_bytes IS NULL OR request_body_bytes >= 0),
+  response_status INTEGER CHECK (
+    response_status IS NULL OR (response_status >= 100 AND response_status <= 599)
+  ),
+  idempotency_key TEXT,
+  delivery_claim_result TEXT CHECK (
+    delivery_claim_result IS NULL OR delivery_claim_result IN ('claimed', 'duplicate', 'in_progress')
+  ),
+  error TEXT,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_started
+  ON webhook_runs (project_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_connector_started
+  ON webhook_runs (project_id, connector_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_webhook_started
+  ON webhook_runs (project_id, connector_id, webhook_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_status_started
+  ON webhook_runs (project_id, status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_runs_project_idempotency
+  ON webhook_runs (project_id, idempotency_key);
+
 CREATE TABLE IF NOT EXISTS rule_states (
   project_id TEXT NOT NULL,
   rule_id TEXT NOT NULL,

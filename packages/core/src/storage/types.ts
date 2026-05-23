@@ -7,6 +7,7 @@ import type { RulesStorage } from "./rules"
 import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
 import type { WebhookDeliveryStorage } from "./webhook-deliveries"
+import type { WebhookRunStorage } from "./webhook-runs"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
 export type {
@@ -117,6 +118,17 @@ export type {
   WebhookDeliveryStorage,
 } from "./webhook-deliveries"
 export type {
+  FinishWebhookRunInput,
+  FinishWebhookRunStatus,
+  ListWebhookRunsInput,
+  ListWebhookRunsResult,
+  StartWebhookRunInput,
+  WebhookRunRecord,
+  WebhookRunStatus,
+  WebhookRunStorage,
+} from "./webhook-runs"
+export { WebhookRunError } from "./webhook-runs"
+export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListWorkflowNodeRunsInput,
@@ -146,5 +158,6 @@ export interface Storage {
   projectionRuns?: ProjectionRunStorage
   workflowRuns?: WorkflowRunStorage
   webhookDeliveries?: WebhookDeliveryStorage
+  webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
 }

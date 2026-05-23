@@ -134,6 +134,17 @@ export type {
 } from "./webhook-deliveries"
 export { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
 export type {
+  FinishWebhookRunInput,
+  FinishWebhookRunStatus,
+  ListWebhookRunsInput,
+  ListWebhookRunsResult,
+  StartWebhookRunInput,
+  WebhookRunRecord,
+  WebhookRunStatus,
+  WebhookRunStorage,
+} from "./webhook-runs"
+export { InMemoryWebhookRunStorage, WebhookRunError } from "./webhook-runs"
+export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListWorkflowNodeRunsInput,
@@ -167,6 +178,7 @@ import { InMemorySyncRunStorage } from "./sync-runs"
 import { InMemoryTimeseriesStorage } from "./timeseries"
 import type { Storage } from "./types"
 import { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
+import { InMemoryWebhookRunStorage } from "./webhook-runs"
 import { InMemoryWorkflowRunStorage } from "./workflow-runs"
 
 export class InMemoryStorage implements Storage {
@@ -179,5 +191,6 @@ export class InMemoryStorage implements Storage {
   readonly projectionRuns = new InMemoryProjectionRunStorage()
   readonly workflowRuns = new InMemoryWorkflowRunStorage()
   readonly webhookDeliveries = new InMemoryWebhookDeliveryStorage()
+  readonly webhookRuns = new InMemoryWebhookRunStorage()
   readonly rules = new InMemoryRulesStorage()
 }
