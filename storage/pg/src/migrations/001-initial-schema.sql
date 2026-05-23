@@ -319,6 +319,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   strategy_id TEXT NOT NULL,
+  audience TEXT NOT NULL DEFAULT 'admin',
   token_hash TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   expires_at TIMESTAMPTZ NOT NULL,
@@ -330,10 +331,10 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
-  ON auth_sessions (project_id, user_id, expires_at DESC, created_at DESC, id DESC)
+  ON auth_sessions (project_id, user_id, audience, expires_at DESC, created_at DESC, id DESC)
   WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_created
-  ON auth_sessions (project_id, user_id, created_at DESC, id DESC);
+  ON auth_sessions (project_id, user_id, audience, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS auth_invitations (
   project_id TEXT NOT NULL,

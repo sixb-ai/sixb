@@ -87,9 +87,11 @@ function createRuntime(options: { readonly auth?: boolean; readonly connector?: 
 
 async function seedSession(
   storage: InMemoryStorage,
-  params: { readonly status?: "active" | "suspended" } = {}
+  params: { readonly audience?: "admin" | "app"; readonly status?: "active" | "suspended" } = {}
 ) {
   const credential = createSessionCredential("ses_1")
+  const audience = params.audience ?? "admin"
+  const cookieSuffix = audience === "admin" ? "" : `_${audience}`
   await storage.auth.users.create({
     id: "usr_1",
     projectId: "test-project",
@@ -108,6 +110,7 @@ async function seedSession(
     projectId: "test-project",
     userId: "usr_1",
     strategyId: "test",
+    audience,
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -115,8 +118,8 @@ async function seedSession(
 
   return {
     credential,
-    cookie: `pario_session=${credential.cookieValue}`,
-    csrfCookie: "pario_csrf=csrf_1",
+    cookie: `pario_session${cookieSuffix}=${credential.cookieValue}`,
+    csrfCookie: `pario_csrf${cookieSuffix}=csrf_1`,
     csrfHeader: { "x-pario-csrf": "csrf_1" },
   }
 }
@@ -185,6 +188,32 @@ describe("server auth guard", () => {
         expiresAt: "2099-05-16T10:00:00.000Z",
       },
     })
+  })
+
+  test("resolves sessions with the server audience cookie names", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, ui: false, sessionAudience: "app" })
+    )
+
+    const accepted = await app.fetch(
+      new Request("http://localhost/api/auth/session", {
+        headers: { cookie: seeded.cookie },
+      })
+    )
+    const adminCookie = await app.fetch(
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `pario_session=${seeded.credential.cookieValue}` },
+      })
+    )
+
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toMatchObject({
+      authenticated: true,
+      session: { id: "ses_1" },
+    })
+    expect(adminCookie.status).toBe(401)
   })
 
   test("requires CSRF only after authentication for mutations", async () => {
@@ -339,7 +368,9 @@ describe("server auth guard", () => {
       })
 
       expect(response.status).toBe(200)
-      expect(await response.text()).toContain('<div id="root"></div>')
+      const html = await response.text()
+      expect(html).toContain('<div id="root"></div>')
+      expect(html).toContain('"auth":{"csrfCookieName":"pario_csrf"}')
     } finally {
       await server.stop()
       if (previous === undefined) {

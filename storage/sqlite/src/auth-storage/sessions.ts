@@ -30,6 +30,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const row = this.db
@@ -39,13 +40,19 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
         FROM auth_sessions
         WHERE project_id = ?
           AND user_id = ?
+          AND audience = ?
           AND revoked_at IS NULL
           AND expires_at > ?
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       `
       )
-      .get(params.projectId, params.userId, toIso(params.now)) as SqliteAuthSessionRow | null
+      .get(
+        params.projectId,
+        params.userId,
+        params.audience,
+        toIso(params.now)
+      ) as SqliteAuthSessionRow | null
 
     return row ? rowToSessionRecord(row) : null
   }
@@ -53,6 +60,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
+    readonly audience: string
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -60,6 +68,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
 
     if (
       !row ||
+      row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
       row.revoked_at ||
       new Date(row.expires_at) <= params.now
@@ -106,6 +115,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience?: string
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return runImmediateTransaction(this.db, () => revokeActiveSessionsForUser(this.db, params))

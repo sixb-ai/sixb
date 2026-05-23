@@ -72,6 +72,7 @@ describe("SQLite storage migrations", () => {
     closeStorage(storage)
 
     const tables = readTableNames(sqliteStoragePath(tempDir))
+    const sessionColumns = readTableColumns(sqliteStoragePath(tempDir), "auth_sessions")
     expect(tables).toContain("auth_users")
     expect(tables).toContain("auth_user_identities")
     expect(tables).toContain("auth_sessions")
@@ -80,6 +81,7 @@ describe("SQLite storage migrations", () => {
     expect(tables).toContain("auth_group_memberships")
     expect(tables).toContain("auth_magic_links")
     expect(tables).toContain("auth_oidc_authorization_attempts")
+    expect(sessionColumns).toContain("audience")
   })
 
   test("migrations preserve existing store rows", async () => {
@@ -194,6 +196,20 @@ function readTableNames(path: string): readonly string[] {
         ORDER BY name
       `)
       .all() as Array<{ readonly name: string }>
+
+    return rows.map((row) => row.name)
+  } finally {
+    db.close()
+  }
+}
+
+function readTableColumns(path: string, tableName: string): readonly string[] {
+  const db = new Database(path, { readonly: true })
+
+  try {
+    const rows = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
+      readonly name: string
+    }>
 
     return rows.map((row) => row.name)
   } finally {

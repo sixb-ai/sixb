@@ -1,7 +1,12 @@
 import { join } from "node:path"
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import type { OntologySource, Pario } from "@pario/core"
+import {
+  type AuthSessionAudience,
+  type OntologySource,
+  type Pario,
+  resolveAuthSessionAudience,
+} from "@pario/core"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -20,6 +25,7 @@ export interface ParioServerOptions {
   host?: string
   quiet?: boolean
   ui?: boolean
+  sessionAudience?: AuthSessionAudience
 }
 
 export function createParioServer(options: ParioServerOptions): ParioServer {
@@ -32,6 +38,7 @@ export class ParioServer {
   private readonly host: string
   private readonly quiet: boolean
   private readonly ui: boolean
+  private readonly sessionAudience: AuthSessionAudience
   private app: ParioApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private uiCss: BuiltInUiCssHandle | null = null
@@ -42,6 +49,7 @@ export class ParioServer {
     this.host = options.host ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
     this.ui = options.ui ?? true
+    this.sessionAudience = resolveAuthSessionAudience(options.sessionAudience)
   }
 
   getPario(): Pario<readonly OntologySource[]> {
@@ -50,6 +58,10 @@ export class ParioServer {
 
   getPort(): number {
     return this.port
+  }
+
+  getSessionAudience(): AuthSessionAudience {
+    return this.sessionAudience
   }
 
   private isDevelopmentMode(): boolean {
@@ -108,7 +120,7 @@ export class ParioServer {
 
   private async startUiServer(app: ParioApp) {
     const appFetch = (req: Request) => app.fetch(req)
-    const guard = new ServerAuthGuard({ pario: this.pario })
+    const guard = new ServerAuthGuard({ pario: this.pario, audience: this.sessionAudience })
     const routes = (
       this.isDevelopmentMode()
         ? await createDevelopmentUiRoutes(guard)
@@ -138,7 +150,7 @@ export class ParioServer {
 
 export function createParioApi(server: ParioServer) {
   const pario = server.getPario()
-  const guard = new ServerAuthGuard({ pario })
+  const guard = new ServerAuthGuard({ pario, audience: server.getSessionAudience() })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
 
   const app = new Elysia().use(cors()).use(
@@ -185,7 +197,7 @@ export function createParioApi(server: ParioServer) {
   )
 
   app.onBeforeHandle(({ request }) => guard.handle(request))
-  registerAuthRoutes(app, pario)
+  registerAuthRoutes(app, pario, { audience: server.getSessionAudience() })
   registerHttpRoutes(app, pario)
   registerWebhookRoutes(app, pario)
   registerWsRoutes(app, server)
@@ -252,7 +264,7 @@ async function createBundledUiRoutes(
   uiRoutes: Record<string, HtmlRouteHandler>
 ) {
   const bundle = await ensureBuiltInUiBundle()
-  const shell = renderBuiltInUiShell()
+  const shell = renderBuiltInUiShell({ csrfCookieName: guard.getCsrfCookieName() })
   const shellHandler = guard.withProtectedHtml(() => htmlResponse(shell))
 
   return {

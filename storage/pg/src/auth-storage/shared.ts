@@ -450,6 +450,7 @@ export async function validateCompleteSessionInput(
   session: CompleteAuthSessionInput
 ): Promise<void> {
   const sessionId = assertNonEmpty(session.id, "Session id")
+  assertNonEmpty(session.audience, "Session audience")
   assertNonEmpty(session.tokenHash, "Session token hash")
   await assertSessionIdAvailable(sql, projectId, sessionId)
 }
@@ -475,6 +476,7 @@ export async function createSession(
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const userId = assertNonEmpty(input.userId, "User id")
   const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
+  const audience = assertNonEmpty(input.audience, "Session audience")
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   await requireUserById(sql, { projectId, id: userId })
@@ -482,6 +484,7 @@ export async function createSession(
   await revokeActiveSessionsForUser(sql, {
     projectId,
     userId,
+    audience,
     revokedAt: input.createdAt,
   })
 
@@ -492,6 +495,7 @@ export async function createSession(
         id,
         user_id,
         strategy_id,
+        audience,
         token_hash,
         created_at,
         expires_at
@@ -500,6 +504,7 @@ export async function createSession(
         ${id},
         ${userId},
         ${strategyId},
+        ${audience},
         ${tokenHash},
         ${input.createdAt},
         ${input.expiresAt}
@@ -519,27 +524,57 @@ export async function createSession(
 
 export async function revokeActiveSessionsForUser(
   sql: SQL,
-  params: { readonly projectId: string; readonly userId: string; readonly revokedAt: Date }
+  params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly audience?: string
+    readonly revokedAt: Date
+  }
 ): Promise<readonly SessionRecord[]> {
-  const rows = (await sql`
-    SELECT *
-    FROM auth_sessions
-    WHERE project_id = ${params.projectId}
-      AND user_id = ${params.userId}
-      AND revoked_at IS NULL
-      AND expires_at > ${params.revokedAt}
-    ORDER BY created_at ASC, id ASC
-    FOR UPDATE
-  `) as PgAuthSessionRow[]
+  const rows =
+    params.audience === undefined
+      ? ((await sql`
+      SELECT *
+      FROM auth_sessions
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.revokedAt}
+      ORDER BY created_at ASC, id ASC
+      FOR UPDATE
+    `) as PgAuthSessionRow[])
+      : ((await sql`
+      SELECT *
+      FROM auth_sessions
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        AND audience = ${params.audience}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.revokedAt}
+      ORDER BY created_at ASC, id ASC
+      FOR UPDATE
+    `) as PgAuthSessionRow[])
 
-  await sql`
-    UPDATE auth_sessions
-    SET revoked_at = ${params.revokedAt}
-    WHERE project_id = ${params.projectId}
-      AND user_id = ${params.userId}
-      AND revoked_at IS NULL
-      AND expires_at > ${params.revokedAt}
-  `
+  if (params.audience === undefined) {
+    await sql`
+      UPDATE auth_sessions
+      SET revoked_at = ${params.revokedAt}
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.revokedAt}
+    `
+  } else {
+    await sql`
+      UPDATE auth_sessions
+      SET revoked_at = ${params.revokedAt}
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        AND audience = ${params.audience}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.revokedAt}
+    `
+  }
 
   return rows.map((row) =>
     rowToSessionRecord({

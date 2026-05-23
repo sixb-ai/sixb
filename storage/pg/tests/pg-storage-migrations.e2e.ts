@@ -86,6 +86,7 @@ describe("Postgres storage migrations", () => {
         email: "ava@acme.com",
       })
       const tableNames = await readTableNames(schemaName)
+      const sessionColumns = await readTableColumns(schemaName, "auth_sessions")
 
       expect(user).toMatchObject({
         id: "usr_1",
@@ -103,6 +104,7 @@ describe("Postgres storage migrations", () => {
           "auth_oidc_authorization_attempts",
         ])
       )
+      expect(sessionColumns).toContain("audience")
     })
   })
 
@@ -277,6 +279,23 @@ async function readTableNames(schemaName: string): Promise<readonly string[]> {
     )) as Array<{ tablename: string }>
 
     return rows.map((row) => row.tablename)
+  })
+}
+
+async function readTableColumns(schemaName: string, tableName: string): Promise<readonly string[]> {
+  return withSql(async (sql) => {
+    const rows = (await sql.unsafe(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = $1
+          AND table_name = $2
+        ORDER BY ordinal_position
+      `,
+      [schemaName, tableName]
+    )) as Array<{ column_name: string }>
+
+    return rows.map((row) => row.column_name)
   })
 }
 

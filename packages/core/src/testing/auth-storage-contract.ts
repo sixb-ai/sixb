@@ -21,9 +21,14 @@ function at(value: string): Date {
   return new Date(value)
 }
 
-function sessionInput(id: string, tokenHash = `${id}-hash`): CompleteAuthSessionInput {
+function sessionInput(
+  id: string,
+  tokenHash = `${id}-hash`,
+  audience: CompleteAuthSessionInput["audience"] = "admin"
+): CompleteAuthSessionInput {
   return {
     id,
+    audience,
     tokenHash,
     createdAt: at("2026-05-14T10:10:00.000Z"),
     expiresAt: at("2026-05-21T10:10:00.000Z"),
@@ -139,7 +144,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("creates one active session per user and never extends expiry on touch", async () => {
+    test("creates one active session per user per audience and never extends expiry on touch", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)
 
@@ -148,6 +153,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
+          audience: "admin",
           tokenHash: "hash-1",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -157,6 +163,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
+          audience: "admin",
           tokenHash: "hash-2",
           createdAt: at("2026-05-14T10:05:00.000Z"),
           expiresAt: at("2026-05-21T10:05:00.000Z"),
@@ -170,6 +177,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.getActiveByUserId({
             projectId,
             userId: "usr_1",
+            audience: "admin",
             now: at("2026-05-14T10:06:00.000Z"),
           })
         ).resolves.toMatchObject({ id: "ses_2" })
@@ -177,6 +185,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           storage.sessions.findValidByTokenHash({
             projectId,
             id: "ses_2",
+            audience: "admin",
             tokenHash: "wrong",
             now: at("2026-05-14T10:06:00.000Z"),
           })
@@ -189,6 +198,29 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         })
         expect(touched.lastSeenAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z")
         expect(touched.expiresAt.toISOString()).toBe("2026-05-21T10:05:00.000Z")
+
+        const appSession = await storage.sessions.create({
+          id: "ses_app",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "app",
+          tokenHash: "hash-app",
+          createdAt: at("2026-05-14T10:06:00.000Z"),
+          expiresAt: at("2026-05-21T10:06:00.000Z"),
+        })
+        expect(appSession.revokedAt).toBeUndefined()
+        const currentAdminSession = await storage.sessions.getById({ projectId, id: "ses_2" })
+        expect(currentAdminSession?.revokedAt).toBeUndefined()
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_app",
+            audience: "admin",
+            tokenHash: "hash-app",
+            now: at("2026-05-14T10:07:00.000Z"),
+          })
+        ).resolves.toBeNull()
       })
     })
 
@@ -387,6 +419,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
+          audience: "admin",
           tokenHash: "old-hash",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -959,9 +992,20 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
+          audience: "admin",
           tokenHash: "hash-1",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+        await storage.sessions.create({
+          id: "ses_app",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "app",
+          tokenHash: "hash-app",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+          expiresAt: at("2026-05-21T10:01:00.000Z"),
         })
 
         const suspended = await storage.suspendUserAndRevokeSessions({
@@ -974,6 +1018,11 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await expect(storage.sessions.getById({ projectId, id: "ses_1" })).resolves.toMatchObject({
           revokedAt: at("2026-05-14T10:05:00.000Z"),
         })
+        await expect(storage.sessions.getById({ projectId, id: "ses_app" })).resolves.toMatchObject(
+          {
+            revokedAt: at("2026-05-14T10:05:00.000Z"),
+          }
+        )
       })
     })
   })

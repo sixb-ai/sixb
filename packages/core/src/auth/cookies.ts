@@ -1,3 +1,5 @@
+import type { AuthSessionAudience } from "./audience"
+import { DEFAULT_AUTH_SESSION_AUDIENCE, resolveAuthSessionAudience } from "./audience"
 import type { AuthCookieOptions } from "./types"
 
 export const DEFAULT_SESSION_COOKIE_NAME = "pario_session"
@@ -28,6 +30,22 @@ export function resolveAuthCookieOptions(
     csrfCookieName: options?.csrfCookieName ?? DEFAULT_CSRF_COOKIE_NAME,
     domain: options?.cookieDomain,
     secure: options?.secure ?? "auto",
+  }
+}
+
+export function resolveAuthCookieOptionsForAudience(
+  options: ResolvedAuthCookieOptions,
+  audience: AuthSessionAudience | undefined
+): ResolvedAuthCookieOptions {
+  const resolvedAudience = resolveAuthSessionAudience(audience)
+  if (resolvedAudience === DEFAULT_AUTH_SESSION_AUDIENCE) {
+    return options
+  }
+
+  return {
+    ...options,
+    sessionCookieName: `${options.sessionCookieName}_${resolvedAudience}`,
+    csrfCookieName: `${options.csrfCookieName}_${resolvedAudience}`,
   }
 }
 

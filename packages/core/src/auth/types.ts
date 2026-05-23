@@ -8,6 +8,7 @@ import type {
   SessionRecord,
   UserRecord,
 } from "../storage/auth"
+import type { AuthSessionAudienceOptions } from "./audience"
 
 export type Principal =
   | { readonly type: "user"; readonly id: string }
@@ -168,6 +169,8 @@ export interface ListInvitationsResult {
   readonly hasMore: boolean
   readonly total: number
 }
+
+export type AuthSessionResolutionOptions = AuthSessionAudienceOptions
 
 export interface RevokeInvitationInput {
   readonly invitationId: string

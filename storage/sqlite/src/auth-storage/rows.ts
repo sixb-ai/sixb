@@ -38,6 +38,7 @@ export interface SqliteAuthSessionRow {
   readonly id: string
   readonly user_id: string
   readonly strategy_id: string
+  readonly audience: SessionRecord["audience"]
   readonly token_hash: string
   readonly created_at: string
   readonly expires_at: string
@@ -124,6 +125,7 @@ export function rowToSessionRecord(row: SqliteAuthSessionRow): SessionRecord {
     projectId: row.project_id,
     userId: row.user_id,
     strategyId: row.strategy_id,
+    audience: row.audience,
     tokenHash: row.token_hash,
     createdAt: new Date(row.created_at),
     expiresAt: new Date(row.expires_at),

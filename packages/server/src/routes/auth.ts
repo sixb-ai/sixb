@@ -1,5 +1,6 @@
 import {
   AuthRuntimeError,
+  type AuthSessionAudience,
   type AuthStorage,
   AuthStorageError,
   clearCsrfCookieHeader,
@@ -31,12 +32,21 @@ import {
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
-export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export interface AuthRoutesOptions {
+  readonly audience: AuthSessionAudience
+}
+
+export function registerAuthRoutes(
+  app: Elysia,
+  pario: Pario<readonly OntologySource[]>,
+  options: AuthRoutesOptions
+) {
+  const authOptions = { audience: options.audience }
   return app
     .get(
       "/api/auth/session",
       async ({ request }) => {
-        const session = await pario.auth.getSession(request)
+        const session = await pario.auth.getSession(request, authOptions)
         if (!session.authenticated) {
           return { authenticated: false as const }
         }
@@ -68,11 +78,12 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
     .post(
       "/api/auth/sign-out",
       async ({ request }) => {
-        const session = await pario.auth.getSession(request)
+        const session = await pario.auth.getSession(request, authOptions)
+        const cookieOptions = pario.auth.getCookieOptions(authOptions)
         if (
           session.authenticated &&
           !verifyDoubleSubmitCsrf(request, {
-            cookieName: pario.auth.getCookieOptions().csrfCookieName,
+            cookieName: cookieOptions.csrfCookieName,
           })
         ) {
           return jsonResponse({ error: "CSRF verification failed" }, 403)
@@ -87,7 +98,6 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
         }
 
         const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
-        const cookieOptions = pario.auth.getCookieOptions()
         headers.append("set-cookie", clearSessionCookieHeader({ request, options: cookieOptions }))
         headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
 
@@ -114,12 +124,16 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ request, body }) => {
         try {
           const parsed = CreateAuthInvitationBodySchema.parse(body)
-          const result = await pario.auth.invite(request, {
-            email: parsed.email,
-            groupIds: parsed.groupIds,
-            expiresAt: parseDate(parsed.expiresAt),
-            returnTo: parsed.returnTo,
-          })
+          const result = await pario.auth.invite(
+            request,
+            {
+              email: parsed.email,
+              groupIds: parsed.groupIds,
+              expiresAt: parseDate(parsed.expiresAt),
+              returnTo: parsed.returnTo,
+            },
+            authOptions
+          )
 
           return jsonResponse(
             {
@@ -156,13 +170,17 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ request, query }) => {
         try {
           const parsed = ListAuthInvitationsQuerySchema.parse(query)
-          const result = await pario.auth.listInvitations(request, {
-            email: parsed.email,
-            statuses: parsed.status ? [parsed.status] : undefined,
-            limit: parseOptionalInt(parsed.limit),
-            offset: parseOptionalInt(parsed.offset),
-            order: parsed.order,
-          })
+          const result = await pario.auth.listInvitations(
+            request,
+            {
+              email: parsed.email,
+              statuses: parsed.status ? [parsed.status] : undefined,
+              limit: parseOptionalInt(parsed.limit),
+              offset: parseOptionalInt(parsed.offset),
+              order: parsed.order,
+            },
+            authOptions
+          )
 
           return jsonResponse(
             {
@@ -198,9 +216,13 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ request, params }) => {
         try {
           const parsed = RevokeAuthInvitationParamsSchema.parse(params)
-          const result = await pario.auth.revokeInvitation(request, {
-            invitationId: parsed.invitationId,
-          })
+          const result = await pario.auth.revokeInvitation(
+            request,
+            {
+              invitationId: parsed.invitationId,
+            },
+            authOptions
+          )
 
           return jsonResponse(
             {
@@ -320,6 +342,7 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
               token,
               session: {
                 id: sessionCredential.sessionId,
+                audience: options.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
@@ -333,6 +356,7 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
             pario,
             request,
             sessionCredential,
+            audience: options.audience,
             returnTo,
           })
         }
@@ -346,6 +370,7 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
               requestOrigin: new URL(request.url).origin,
               session: {
                 id: sessionCredential.sessionId,
+                audience: options.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
@@ -356,6 +381,7 @@ export function registerAuthRoutes(app: Elysia, pario: Pario<readonly OntologySo
               pario,
               request,
               sessionCredential,
+              audience: options.audience,
               returnTo: result.returnTo,
             })
           } catch (error) {
@@ -374,9 +400,10 @@ function sessionRedirectResponse(input: {
   readonly pario: Pario<readonly OntologySource[]>
   readonly request: Request
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
+  readonly audience: AuthSessionAudience
   readonly returnTo: string
 }): Response {
-  const cookieOptions = input.pario.auth.getCookieOptions()
+  const cookieOptions = input.pario.auth.getCookieOptions({ audience: input.audience })
   const headers = new Headers({
     location: input.returnTo,
     "cache-control": "no-store",

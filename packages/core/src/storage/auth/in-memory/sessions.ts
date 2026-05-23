@@ -30,11 +30,13 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const sessions = [...this.state.sessions.values()]
       .filter((session) => session.projectId === params.projectId)
       .filter((session) => session.userId === params.userId)
+      .filter((session) => session.audience === params.audience)
       .filter((session) => isActiveSession(session, params.now))
       .sort((a, b) => compareByCreatedAt(a, b, "desc"))
 
@@ -44,12 +46,14 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
+    readonly audience: string
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const session = this.state.sessions.get(sessionKey(params.projectId, params.id))
     if (
       !session ||
+      session.audience !== params.audience ||
       session.tokenHash !== params.tokenHash ||
       !isActiveSession(session, params.now)
     ) {
@@ -85,13 +89,15 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
+    readonly audience?: string
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return revokeActiveSessionsForUser(
       this.state,
       params.projectId,
       params.userId,
-      params.revokedAt
+      params.revokedAt,
+      params.audience
     ).map(cloneRecord)
   }
 

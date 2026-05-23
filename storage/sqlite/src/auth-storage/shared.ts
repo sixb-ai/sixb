@@ -406,6 +406,7 @@ export function validateCompleteSessionInput(
   session: CompleteAuthSessionInput
 ): void {
   const sessionId = assertNonEmpty(session.id, "Session id")
+  assertNonEmpty(session.audience, "Session audience")
   assertNonEmpty(session.tokenHash, "Session token hash")
   assertSessionIdAvailable(db, projectId, sessionId)
 }
@@ -427,12 +428,14 @@ export function createSession(
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const userId = assertNonEmpty(input.userId, "User id")
   const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
+  const audience = assertNonEmpty(input.audience, "Session audience")
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   assertSessionIdAvailable(db, projectId, id)
   revokeActiveSessionsForUser(db, {
     projectId,
     userId,
+    audience,
     revokedAt: input.createdAt,
   })
 
@@ -443,16 +446,18 @@ export function createSession(
       id,
       user_id,
       strategy_id,
+      audience,
       token_hash,
       created_at,
       expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `
   ).run(
     projectId,
     id,
     userId,
     strategyId,
+    audience,
     tokenHash,
     toIso(input.createdAt),
     toIso(input.expiresAt)
@@ -470,9 +475,23 @@ export function createSession(
 
 export function revokeActiveSessionsForUser(
   db: Database,
-  params: { readonly projectId: string; readonly userId: string; readonly revokedAt: Date }
+  params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly audience?: string
+    readonly revokedAt: Date
+  }
 ): readonly ReturnType<typeof rowToSessionRecord>[] {
   const revokedAt = toIso(params.revokedAt)
+  const audienceCondition = params.audience === undefined ? "" : "AND audience = ?"
+  const selectArgs =
+    params.audience === undefined
+      ? [params.projectId, params.userId, revokedAt]
+      : [params.projectId, params.userId, params.audience, revokedAt]
+  const updateArgs =
+    params.audience === undefined
+      ? [revokedAt, params.projectId, params.userId, revokedAt]
+      : [revokedAt, params.projectId, params.userId, params.audience, revokedAt]
   const rows = db
     .query(
       `
@@ -480,12 +499,13 @@ export function revokeActiveSessionsForUser(
       FROM auth_sessions
       WHERE project_id = ?
         AND user_id = ?
+        ${audienceCondition}
         AND revoked_at IS NULL
         AND expires_at > ?
       ORDER BY created_at ASC, id ASC
     `
     )
-    .all(params.projectId, params.userId, revokedAt) as SqliteAuthSessionRow[]
+    .all(...selectArgs) as SqliteAuthSessionRow[]
 
   db.query(
     `
@@ -493,10 +513,11 @@ export function revokeActiveSessionsForUser(
     SET revoked_at = ?
     WHERE project_id = ?
       AND user_id = ?
+      ${audienceCondition}
       AND revoked_at IS NULL
       AND expires_at > ?
   `
-  ).run(revokedAt, params.projectId, params.userId, revokedAt)
+  ).run(...updateArgs)
 
   return rows.map((row) =>
     rowToSessionRecord({
