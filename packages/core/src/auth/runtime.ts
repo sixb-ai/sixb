@@ -15,12 +15,13 @@ import type {
   AuthenticatedAuthSession,
   AuthSessionResult,
   AuthStrategy,
+  InvitationDeliveryAuthStrategy,
+  InviteDeliveryResult,
+  InviteDeliveryStatus,
   InviteUserInput,
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
-  MagicLinkAuthStrategy,
-  MagicLinkRequestStatus,
   ParioAuthConfig,
   Principal,
   ResolvedAuthConfig,
@@ -30,7 +31,7 @@ import type {
 } from "./types"
 import {
   assertNonEmpty,
-  isMagicLinkAuthStrategy,
+  isInvitationDeliveryAuthStrategy,
   normalizePagination,
   resolveAuthConfig,
   resolveInvitationExpiresAt,
@@ -210,7 +211,7 @@ export class ParioAuthRuntime {
     this.assertCanManageInvitationGroups(session.groupIds, groupIds)
 
     const strategy = this.getStrategy()
-    if (!isMagicLinkAuthStrategy(strategy)) {
+    if (!isInvitationDeliveryAuthStrategy(strategy)) {
       throw new AuthRuntimeError(
         "invalid_auth_config",
         "[Pario] The active auth strategy does not support invitation email delivery."
@@ -231,12 +232,12 @@ export class ParioAuthRuntime {
       expiresAt: resolveInvitationExpiresAt(input.expiresAt, now),
     })
 
-    let delivery: Awaited<ReturnType<MagicLinkAuthStrategy["requestMagicLink"]>>
+    let delivery: InviteDeliveryResult
     try {
-      delivery = await strategy.requestMagicLink({
+      delivery = await strategy.deliverInvitation({
         projectId: this.projectId,
         authStorage,
-        email: invitation.email,
+        invitation,
         returnTo: sanitizeReturnTo(input.returnTo),
         requestOrigin: new URL(request.url).origin,
         now,
@@ -360,7 +361,7 @@ export class ParioAuthRuntime {
   }
 
   private async assertCanDeliverInvitation(
-    strategy: MagicLinkAuthStrategy,
+    strategy: InvitationDeliveryAuthStrategy,
     authStorage: AuthStorage,
     email: string,
     now: Date
@@ -383,7 +384,7 @@ export class ParioAuthRuntime {
     if (result.status === "rate_limited") {
       throw new AuthRuntimeError(
         "rate_limited",
-        "[Pario] Invitation magic-link delivery is rate limited. Try again later."
+        "[Pario] Invitation delivery is rate limited. Try again later."
       )
     }
 
@@ -418,17 +419,24 @@ export class ParioAuthRuntime {
     })
   }
 
-  private createInvitationDeliveryError(status: Exclude<MagicLinkRequestStatus, "sent">) {
+  private createInvitationDeliveryError(status: Exclude<InviteDeliveryStatus, "sent">) {
     if (status === "rate_limited") {
       return new AuthRuntimeError(
         "rate_limited",
-        "[Pario] Invitation magic-link delivery is rate limited. Try again later."
+        "[Pario] Invitation delivery is rate limited. Try again later."
+      )
+    }
+
+    if (status === "not_supported") {
+      return new AuthRuntimeError(
+        "invalid_auth_config",
+        "[Pario] The active auth strategy does not support invitation email delivery."
       )
     }
 
     return new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation magic-link delivery was skipped by the active auth strategy."
+      "[Pario] Invitation delivery was skipped by the active auth strategy."
     )
   }
 

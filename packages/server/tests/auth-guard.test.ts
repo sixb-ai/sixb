@@ -302,11 +302,13 @@ describe("server auth guard", () => {
     try {
       const baseUrl = `http://127.0.0.1:${port}`
       const staticResponse = await fetch(`${baseUrl}/favicon.svg`)
+      const fallbackIconResponse = await fetch(`${baseUrl}/favicon.ico`)
       const htmlResponse = await fetch(`${baseUrl}/dashboard/devices`, {
         redirect: "manual",
       })
 
       expect(staticResponse.status).toBe(200)
+      expect(fallbackIconResponse.status).toBe(204)
       expect(htmlResponse.status).toBe(302)
       expect(htmlResponse.headers.get("location")).toBe(
         "/auth/sign-in?returnTo=%2Fdashboard%2Fdevices"

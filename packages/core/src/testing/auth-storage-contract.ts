@@ -826,8 +826,16 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("creates new OIDC users and identities when no local user exists", async () => {
+    test("creates new OIDC users through active invitations and applies groups", async () => {
       await withStorage(async (storage) => {
+        await storage.invitations.createOrUpdateActive({
+          id: "inv_oidc",
+          projectId,
+          email: "ava@acme.com",
+          groupIds: ["commercial"],
+          createdAt: at("2026-05-14T09:59:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
         await storage.oidcAuthorizationAttempts.create({
           id: "oidc_1",
           projectId,
@@ -857,11 +865,89 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           email: "ava@acme.com",
           displayName: "Ava Chen",
         })
+        expect(result.invitation).toMatchObject({
+          id: "inv_oidc",
+          status: "accepted",
+        })
         expect(result.identity).toMatchObject({
           strategyId: "okta",
           subject: "00u1",
           userId: "usr_oidc",
         })
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_oidc" })
+        ).resolves.toMatchObject([{ groupId: "commercial", source: "invitation" }])
+      })
+    })
+
+    test("does not create new OIDC users without invitation or bootstrap eligibility", async () => {
+      await withStorage(async (storage) => {
+        await storage.oidcAuthorizationAttempts.create({
+          id: "oidc_1",
+          projectId,
+          strategyId: "okta",
+          stateHash: "state-hash",
+          nonceHash: "nonce-hash",
+          codeVerifier: "verifier",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-14T10:10:00.000Z"),
+        })
+
+        await expectAuthError(
+          storage.completeOidcSignIn({
+            projectId,
+            oidcAuthorizationAttemptId: "oidc_1",
+            stateHash: "state-hash",
+            completedAt: at("2026-05-14T10:01:00.000Z"),
+            subject: "00u1",
+            email: "ava@acme.com",
+            emailVerified: true,
+            newUserId: "usr_oidc",
+            session: sessionInput("ses_oidc"),
+          }),
+          "user_creation_not_allowed"
+        )
+        await expect(
+          storage.users.getByEmail({ projectId, email: "ava@acme.com" })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("allows first OIDC bootstrap user creation with manual groups", async () => {
+      await withStorage(async (storage) => {
+        await storage.oidcAuthorizationAttempts.create({
+          id: "oidc_bootstrap",
+          projectId,
+          strategyId: "okta",
+          stateHash: "bootstrap-state",
+          nonceHash: "nonce-hash",
+          codeVerifier: "verifier",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-14T10:10:00.000Z"),
+        })
+
+        const result = await storage.completeOidcSignIn({
+          projectId,
+          oidcAuthorizationAttemptId: "oidc_bootstrap",
+          stateHash: "bootstrap-state",
+          completedAt: at("2026-05-14T10:01:00.000Z"),
+          subject: "00u1",
+          email: "founder@acme.com",
+          emailVerified: true,
+          allowUserCreationWithoutInvitation: true,
+          requireNoActiveUsersForUserCreation: true,
+          manualGroupIds: ["security-admins"],
+          newUserId: "usr_founder",
+          session: sessionInput("ses_oidc_bootstrap"),
+        })
+
+        expect(result.user).toMatchObject({
+          id: "usr_founder",
+          email: "founder@acme.com",
+        })
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_founder" })
+        ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
       })
     })
 

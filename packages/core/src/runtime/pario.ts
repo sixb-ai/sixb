@@ -11,6 +11,7 @@ import type { ActionDefinition } from "../actions/types"
 import {
   AuthRuntimeError,
   isMagicLinkAuthStrategy,
+  isOidcAuthStrategy,
   type ParioAuthConfig,
   ParioAuthRuntime,
 } from "../auth"
@@ -608,7 +609,7 @@ function validateAuthStrategySecurityReferences(
   strategy: ReturnType<ParioAuthRuntime["getStrategy"]>,
   security: SecurityRegistry
 ): void {
-  if (!isMagicLinkAuthStrategy(strategy)) {
+  if (!isMagicLinkAuthStrategy(strategy) && !isOidcAuthStrategy(strategy)) {
     return
   }
 
@@ -616,7 +617,7 @@ function validateAuthStrategySecurityReferences(
     if (!security.getGroupById(groupId)) {
       throw new AuthRuntimeError(
         "invalid_auth_config",
-        `[Pario] Magic-link auth bootstrapGroups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
+        `[Pario] Auth bootstrapGroups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
       )
     }
   }

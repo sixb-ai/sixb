@@ -3,6 +3,8 @@ import type {
   AuthStorage,
   CompleteSignInResult,
   GroupDefinition,
+  InvitationDeliveryInput,
+  InviteDeliveryResult,
   MagicLinkAuthStrategy,
   MagicLinkCallbackInput,
   MagicLinkInvitationRecipientInput,
@@ -131,6 +133,17 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     }
 
     return { status: "sent" }
+  }
+
+  async deliverInvitation(input: InvitationDeliveryInput): Promise<InviteDeliveryResult> {
+    return this.requestMagicLink({
+      projectId: input.projectId,
+      authStorage: input.authStorage,
+      email: input.invitation.email,
+      returnTo: input.returnTo,
+      requestOrigin: input.requestOrigin,
+      now: input.now,
+    })
   }
 
   async validateInvitationRecipient(

@@ -39,7 +39,6 @@ import {
   getOidcAttemptRowById,
   getUserRowByEmail,
   getUserRowById,
-  listMembershipsForUser,
   mapUniqueConstraintError,
   normalizeEmail,
   normalizeGroupIds,
@@ -291,6 +290,8 @@ export class PgAuthStorage implements AuthStorage {
         const subject = assertNonEmpty(input.subject, "Subject")
         const email = normalizeEmail(input.email)
         await lockAdvisoryKeys(tx, [
+          authLockKey("bootstrap", projectId),
+          authLockKey("invitations", projectId, email),
           authLockKey("identities", projectId, attempt.strategy_id, subject),
           authLockKey("users", projectId, email),
         ])
@@ -304,10 +305,22 @@ export class PgAuthStorage implements AuthStorage {
           },
           { forUpdate: true }
         )
+        const activeInvitation = identity
+          ? null
+          : await getActiveInvitationByEmail(
+              tx,
+              {
+                projectId,
+                email,
+                now: completedAt,
+              },
+              { forUpdate: true }
+            )
         let userRow = identity
           ? await getUserRowById(tx, { projectId, id: identity.user_id }, { forUpdate: true })
           : await getUserRowByEmail(tx, { projectId, email }, { forUpdate: true })
         const shouldCreateUser = !identity && !userRow
+        const manualGroupIds = normalizeGroupIds(input.manualGroupIds)
 
         if (identity && !userRow) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
@@ -335,6 +348,42 @@ export class PgAuthStorage implements AuthStorage {
             error: new AuthStorageError(
               "suspended_user",
               `[Pario] User '${userRow.id}' is suspended for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (shouldCreateUser && !input.emailVerified) {
+          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
+          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+            ),
+          }
+        }
+
+        if (
+          shouldCreateUser &&
+          !activeInvitation &&
+          input.allowUserCreationWithoutInvitation &&
+          input.requireNoActiveUsersForUserCreation &&
+          (await hasActiveUsers(tx, projectId))
+        ) {
+          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
+          return {
+            error: new AuthStorageError(
+              "user_creation_not_allowed",
+              `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
           }
         }
@@ -381,6 +430,19 @@ export class PgAuthStorage implements AuthStorage {
           user = rowToUserRecord(userRow)
         }
 
+        const invitation = await this.acceptInvitationAndApplyGroups(tx, {
+          activeInvitation,
+          completedAt,
+          projectId,
+          user,
+        })
+        const groupMemberships = await this.applyManualGroups(tx, {
+          completedAt,
+          existing: invitation.groupMemberships,
+          groupIds: manualGroupIds,
+          projectId,
+          userId: user.id,
+        })
         const nextIdentity = await this.upsertIdentity(tx, {
           projectId,
           strategyId: attempt.strategy_id,
@@ -401,10 +463,8 @@ export class PgAuthStorage implements AuthStorage {
           user,
           session,
           identity: nextIdentity,
-          groupMemberships: await listMembershipsForUser(tx, {
-            projectId,
-            userId: user.id,
-          }),
+          invitation: invitation.invitation,
+          groupMemberships,
         }
       }
     )
