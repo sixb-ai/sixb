@@ -1,0 +1,13 @@
+services:
+  redis:
+    image: redis:7.2-alpine
+    # Custom port (46380) so local dev Redis instances and the BullMQ test
+    # Redis on 46379 do not collide with this broker test server.
+    command: ["redis-server", "--port", "46380"]
+    ports:
+      - "46380:46380"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "46380", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
