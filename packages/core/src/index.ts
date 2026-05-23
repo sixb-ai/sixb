@@ -251,6 +251,7 @@ export type {
   AuthCookieOptions,
   AuthenticatedAuthSession,
   AuthRuntimeErrorCode,
+  AuthRuntimeOptions,
   AuthSessionAudience,
   AuthSessionAudienceOptions,
   AuthSessionFailureReason,
@@ -293,6 +294,7 @@ export type {
 } from "./auth"
 export {
   AUTH_SESSION_AUDIENCE_PATTERN,
+  AuthRuntime,
   AuthRuntimeError,
   CSRF_HEADER_NAME,
   clearCsrfCookieHeader,
@@ -316,7 +318,6 @@ export {
   isOidcAuthStrategy,
   isValidAuthSessionAudience,
   MAX_AUTH_INVITATION_TTL_MS,
-  ParioAuthRuntime,
   parseCookieHeader,
   parseSessionCookieValue,
   resolveAuthConfig,

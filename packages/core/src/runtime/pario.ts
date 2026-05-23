@@ -9,11 +9,11 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import {
+  AuthRuntime,
   AuthRuntimeError,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
   type ParioAuthConfig,
-  ParioAuthRuntime,
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
@@ -114,7 +114,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   readonly queues: Queues
   readonly rules: readonly RuleDefinition[]
   readonly security: SecurityRegistry
-  readonly auth: ParioAuthRuntime
+  readonly auth: AuthRuntime
   private functionRuntime: FunctionRuntime | null = null
   private schedulerRuntime: SchedulerRuntime | null = null
 
@@ -133,7 +133,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       groups: options.groups ?? [],
       invitePolicies: options.invitePolicies ?? [],
     })
-    this.auth = new ParioAuthRuntime({
+    this.auth = new AuthRuntime({
       projectId: this.projectId,
       storage: this.storage,
       security: this.security,
@@ -606,7 +606,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
 }
 
 function validateAuthStrategySecurityReferences(
-  strategy: ReturnType<ParioAuthRuntime["getStrategy"]>,
+  strategy: ReturnType<AuthRuntime["getStrategy"]>,
   security: SecurityRegistry
 ): void {
   if (!isMagicLinkAuthStrategy(strategy) && !isOidcAuthStrategy(strategy)) {

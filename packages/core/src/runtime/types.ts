@@ -6,7 +6,7 @@
  */
 
 import type { ActionDefinition, ActionRegistry, InferActionParams } from "../actions"
-import type { ParioAuthRuntime } from "../auth"
+import type { AuthRuntime } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
@@ -309,7 +309,7 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
   readonly queues: Queues
   readonly rules?: readonly RuleDefinition[]
   readonly security: SecurityRegistry
-  readonly auth: ParioAuthRuntime
+  readonly auth: AuthRuntime
 
   /** All registered object types. */
   listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]

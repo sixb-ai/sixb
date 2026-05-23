@@ -51,20 +51,20 @@ export {
   resolveAuthConfig,
 } from "./validation"
 
-export interface ParioAuthRuntimeOptions {
+export interface AuthRuntimeOptions {
   readonly projectId: string
   readonly storage: Storage
   readonly security: SecurityRegistry
   readonly config?: ParioAuthConfig
 }
 
-export class ParioAuthRuntime {
+export class AuthRuntime {
   private readonly projectId: string
   private readonly storage: Storage
   private readonly security: SecurityRegistry
   private readonly config: ResolvedAuthConfig
 
-  constructor(options: ParioAuthRuntimeOptions) {
+  constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
     this.storage = options.storage
     this.security = options.security
