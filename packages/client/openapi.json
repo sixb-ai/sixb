@@ -11,7 +11,7 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-pario-csrf",
-        "description": "Required for authenticated mutating requests. Copy the value from the pario_csrf cookie."
+        "description": "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session."
       }
     },
     "schemas": {}
@@ -109,6 +109,9 @@
                           "type": "boolean",
                           "enum": [true]
                         },
+                        "csrfToken": {
+                          "type": "string"
+                        },
                         "user": {
                           "type": "object",
                           "properties": {
@@ -148,7 +151,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["authenticated", "user", "session"],
+                      "required": ["authenticated", "csrfToken", "user", "session"],
                       "additionalProperties": false
                     }
                   ]

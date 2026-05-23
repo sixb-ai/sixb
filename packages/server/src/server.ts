@@ -3,6 +3,7 @@ import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import {
   type AuthSessionAudience,
+  CSRF_HEADER_NAME,
   type OntologySource,
   type Pario,
   resolveAuthSessionAudience,
@@ -10,6 +11,17 @@ import {
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
+import {
+  BrowserOriginError,
+  createBrowserApiAuthContextResolver,
+  createFixedAuthContextResolver,
+  isAllowedBrowserApiOrigin,
+  type ParioApiBrowserPolicy,
+  type RequestAuthContext,
+  type ResolvedParioApiBrowserPolicy,
+  type ResolveRequestAuthContext,
+  resolveBrowserApiPolicy,
+} from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
 import { PARIO_CSRF_SECURITY_SCHEME, PARIO_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
 import { registerHttpRoutes } from "./registerRoutes"
@@ -19,6 +31,13 @@ import { registerWsRoutes } from "./routes/ws"
 import { ensureBuiltInUiBundle, renderBuiltInUiShell } from "./ui/assets"
 import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./ui/css"
 
+// Browser deployments are split by visible surface: UI surfaces serve public shells,
+// while browserApi owns API/auth/ws/docs and resolves the session audience from Origin.
+export type ParioServerSurface =
+  | { readonly kind: "builtInUi" }
+  | { readonly kind: "apiOnly"; readonly audience?: AuthSessionAudience }
+  | { readonly kind: "browserApi"; readonly browser: ParioApiBrowserPolicy }
+
 export interface ParioServerOptions {
   pario: Pario<readonly OntologySource[]>
   port?: number
@@ -26,6 +45,7 @@ export interface ParioServerOptions {
   quiet?: boolean
   ui?: boolean
   sessionAudience?: AuthSessionAudience
+  surface?: ParioServerSurface
 }
 
 export function createParioServer(options: ParioServerOptions): ParioServer {
@@ -37,8 +57,10 @@ export class ParioServer {
   private readonly port: number
   private readonly host: string
   private readonly quiet: boolean
-  private readonly ui: boolean
+  private readonly surface: ParioServerSurface
   private readonly sessionAudience: AuthSessionAudience
+  private readonly browserApiPolicy: ResolvedParioApiBrowserPolicy | null
+  private readonly authContextResolver: ResolveRequestAuthContext
   private app: ParioApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private uiCss: BuiltInUiCssHandle | null = null
@@ -48,8 +70,17 @@ export class ParioServer {
     this.port = options.port ?? 3000
     this.host = options.host ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
-    this.ui = options.ui ?? true
-    this.sessionAudience = resolveAuthSessionAudience(options.sessionAudience)
+    this.surface = resolveServerSurface(options)
+    this.sessionAudience = resolveAuthSessionAudience(
+      this.surface.kind === "apiOnly"
+        ? (this.surface.audience ?? options.sessionAudience)
+        : options.sessionAudience
+    )
+    this.browserApiPolicy =
+      this.surface.kind === "browserApi" ? resolveBrowserApiPolicy(this.surface.browser) : null
+    this.authContextResolver = this.browserApiPolicy
+      ? createBrowserApiAuthContextResolver(this.browserApiPolicy)
+      : createFixedAuthContextResolver(this.sessionAudience)
   }
 
   getPario(): Pario<readonly OntologySource[]> {
@@ -64,6 +95,14 @@ export class ParioServer {
     return this.sessionAudience
   }
 
+  resolveAuthContext(request: Request): RequestAuthContext {
+    return this.authContextResolver(request)
+  }
+
+  getBrowserApiPolicy(): ResolvedParioApiBrowserPolicy | null {
+    return this.browserApiPolicy
+  }
+
   private isDevelopmentMode(): boolean {
     return process.env.NODE_ENV === "development"
   }
@@ -72,7 +111,7 @@ export class ParioServer {
     this.app = createParioApi(this)
 
     try {
-      if (this.ui) {
+      if (this.surface.kind === "builtInUi") {
         this.uiCss = await ensureBuiltInUiCss({
           watch: this.isDevelopmentMode(),
         })
@@ -95,7 +134,7 @@ export class ParioServer {
       const base = `http://${this.host}:${this.port}`
       console.log(`Pario server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
-      if (this.ui) {
+      if (this.surface.kind === "builtInUi") {
         console.log(`Built-in UI at ${base}/`)
       }
     }
@@ -150,10 +189,35 @@ export class ParioServer {
 
 export function createParioApi(server: ParioServer) {
   const pario = server.getPario()
-  const guard = new ServerAuthGuard({ pario, audience: server.getSessionAudience() })
+  const guard = new ServerAuthGuard({
+    pario,
+    resolveAuthContext: (request) => server.resolveAuthContext(request),
+  })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
+  const browserApiPolicy = server.getBrowserApiPolicy()
 
-  const app = new Elysia().use(cors()).use(
+  const app = new Elysia()
+
+  if (browserApiPolicy) {
+    app.onRequest(({ request }) => {
+      const response = rejectDisallowedBrowserOrigin(request, browserApiPolicy)
+      if (response) {
+        return response
+      }
+    })
+    app.use(
+      cors({
+        origin: (request) => isAllowedBrowserApiOrigin(browserApiPolicy, request),
+        credentials: true,
+        methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allowedHeaders: ["content-type", CSRF_HEADER_NAME],
+        exposeHeaders: [],
+        maxAge: 600,
+      })
+    )
+  }
+
+  app.use(
     openapi({
       path: "/docs",
       provider: "swagger-ui",
@@ -197,12 +261,53 @@ export function createParioApi(server: ParioServer) {
   )
 
   app.onBeforeHandle(({ request }) => guard.handle(request))
-  registerAuthRoutes(app, pario, { audience: server.getSessionAudience() })
+  registerAuthRoutes(app, pario, {
+    resolveAuthContext: (request) => server.resolveAuthContext(request),
+  })
   registerHttpRoutes(app, pario)
   registerWebhookRoutes(app, pario)
   registerWsRoutes(app, server)
 
   return app
+}
+
+function resolveServerSurface(options: ParioServerOptions): ParioServerSurface {
+  if (options.surface) {
+    return options.surface
+  }
+
+  if (options.ui === false) {
+    return { kind: "apiOnly", audience: options.sessionAudience }
+  }
+
+  return { kind: "builtInUi" }
+}
+
+function rejectDisallowedBrowserOrigin(
+  request: Request,
+  policy: ResolvedParioApiBrowserPolicy
+): Response | undefined {
+  if (!request.headers.has("origin")) {
+    return undefined
+  }
+
+  try {
+    if (isAllowedBrowserApiOrigin(policy, request)) {
+      return undefined
+    }
+  } catch (error) {
+    if (!(error instanceof BrowserOriginError)) {
+      throw error
+    }
+  }
+
+  return new Response(JSON.stringify({ error: "Browser origin is not allowed" }), {
+    status: 403,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  })
 }
 
 export const createApp = createParioApi

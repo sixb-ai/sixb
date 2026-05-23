@@ -177,6 +177,7 @@ describe("server auth guard", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       authenticated: true,
+      csrfToken: expect.any(String),
       user: {
         id: "usr_1",
         email: "ava@acme.com",
@@ -188,6 +189,7 @@ describe("server auth guard", () => {
         expiresAt: "2099-05-16T10:00:00.000Z",
       },
     })
+    expect(response.headers.get("set-cookie")).toContain("pario_csrf=")
   })
 
   test("resolves sessions with the server audience cookie names", async () => {
@@ -214,6 +216,159 @@ describe("server auth guard", () => {
       session: { id: "ses_1" },
     })
     expect(adminCookie.status).toBe(401)
+  })
+
+  test("resolves browser API sessions from the allowed origin audience", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        surface: {
+          kind: "browserApi",
+          browser: {
+            publicOrigin: "http://api.localhost",
+            allowedOrigins: [
+              { origin: "http://admin.localhost", audience: "admin", kind: "admin" },
+              { origin: "http://app.localhost", audience: "app", kind: "app" },
+            ],
+          },
+        },
+      })
+    )
+
+    const accepted = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: seeded.cookie,
+        },
+      })
+    )
+    const wrongCookieName = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: `pario_session=${seeded.credential.cookieValue}`,
+        },
+      })
+    )
+
+    expect(accepted.status).toBe(200)
+    expect(accepted.headers.get("access-control-allow-origin")).toBe("http://app.localhost")
+    expect(accepted.headers.get("access-control-allow-credentials")).toBe("true")
+    expect(accepted.headers.get("vary")).toBe("Origin")
+    expect(await accepted.json()).toMatchObject({
+      authenticated: true,
+      csrfToken: expect.any(String),
+      session: { id: "ses_1" },
+    })
+    expect(await wrongCookieName.json()).toEqual({ authenticated: false })
+  })
+
+  test("rejects browser API requests from unknown origins", async () => {
+    const { pario } = createRuntime({ auth: true })
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        surface: {
+          kind: "browserApi",
+          browser: {
+            publicOrigin: "http://api.localhost",
+            allowedOrigins: [{ origin: "http://admin.localhost", audience: "admin" }],
+          },
+        },
+      })
+    )
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: { origin: "http://evil.localhost" },
+      })
+    )
+
+    expect(response.status).toBe(403)
+    expect(response.headers.get("access-control-allow-origin")).toBeNull()
+    expect(await response.json()).toEqual({ error: "Browser origin is not allowed" })
+  })
+
+  test("handles browser API preflights with an exact origin allowlist", async () => {
+    const { pario } = createRuntime({ auth: true })
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        surface: {
+          kind: "browserApi",
+          browser: {
+            publicOrigin: "http://api.localhost",
+            allowedOrigins: [{ origin: "http://admin.localhost", audience: "admin" }],
+          },
+        },
+      })
+    )
+
+    const allowed = await app.fetch(
+      new Request("http://api.localhost/api/objects/device/fan-1", {
+        method: "OPTIONS",
+        headers: {
+          origin: "http://admin.localhost",
+          "access-control-request-method": "PUT",
+          "access-control-request-headers": "content-type,x-pario-csrf",
+        },
+      })
+    )
+    const rejected = await app.fetch(
+      new Request("http://api.localhost/api/objects/device/fan-1", {
+        method: "OPTIONS",
+        headers: {
+          origin: "http://evil.localhost",
+          "access-control-request-method": "PUT",
+        },
+      })
+    )
+
+    expect(allowed.status).toBe(204)
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://admin.localhost")
+    expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
+    expect(allowed.headers.get("access-control-allow-headers")).toBe("content-type, x-pario-csrf")
+    expect(rejected.status).toBe(403)
+  })
+
+  test("uses the browser origin audience for CSRF-protected API mutations", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        surface: {
+          kind: "browserApi",
+          browser: {
+            publicOrigin: "http://api.localhost",
+            allowedOrigins: [{ origin: "http://app.localhost", audience: "app" }],
+          },
+        },
+      })
+    )
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/objects/device/fan-1", {
+        method: "PUT",
+        headers: {
+          origin: "http://app.localhost",
+          "content-type": "application/json",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+          ...seeded.csrfHeader,
+        },
+        body: JSON.stringify({ properties: { name: "Fan" } }),
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("access-control-allow-origin")).toBe("http://app.localhost")
   })
 
   test("requires CSRF only after authentication for mutations", async () => {

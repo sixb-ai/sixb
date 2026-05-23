@@ -8,6 +8,10 @@ export function jsonCsrfFailedResponse(): Response {
   return jsonResponse({ error: "CSRF verification failed" }, 403)
 }
 
+export function jsonForbiddenResponse(message = "Forbidden"): Response {
+  return jsonResponse({ error: message }, 403)
+}
+
 export function htmlAuthRedirectResponse(request: Request): Response {
   const returnTo = encodeURIComponent(returnToForRequest(request))
   return new Response(null, {

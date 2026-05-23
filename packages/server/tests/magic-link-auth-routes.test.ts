@@ -151,8 +151,14 @@ describe("magic-link auth routes", () => {
       })
     )
 
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("/dashboard")
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("location")).toBeNull()
+    expect(callback.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self'"
+    )
+    expect(await callback.clone().text()).toContain(
+      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+    )
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "pario_session")
     const csrfCookie = cookieValue(setCookie, "pario_csrf")
@@ -209,8 +215,9 @@ describe("magic-link auth routes", () => {
       })
     )
 
-    expect(callback.status).toBe(303)
-    expect(callback.headers.get("location")).toBe("/")
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("location")).toBeNull()
+    expect(await callback.text()).toContain('<meta http-equiv="refresh" content="0;url=/">')
   })
 
   test("sign-out revokes the magic-link-created session and clears cookies", async () => {

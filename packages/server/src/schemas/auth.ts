@@ -58,6 +58,7 @@ export const AuthSessionResponseSchema = z.union([
   }),
   z.object({
     authenticated: z.literal(true),
+    csrfToken: z.string(),
     user: z.object({
       id: z.string(),
       email: z.string(),

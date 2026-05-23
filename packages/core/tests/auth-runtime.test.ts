@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   type AuthStrategy,
+  createCsrfCookieHeader,
+  createSessionCookieHeader,
   createSessionCredential,
   defineGroup,
   defineInvitePolicy,
@@ -9,6 +11,7 @@ import {
   type MagicLinkAuthStrategy,
   Pario,
   parseSessionCookieValue,
+  resolveAuthCookieOptions,
   verifyDoubleSubmitCsrf,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -568,5 +571,67 @@ describe("Pario auth runtime", () => {
         cookieName: "pario_csrf",
       })
     ).toBe(true)
+  })
+
+  test("serializes auth cookies with strict same-site defaults", () => {
+    const options = resolveAuthCookieOptions(undefined)
+    const request = new Request("http://localhost/api/auth/session")
+
+    expect(
+      createSessionCookieHeader({
+        request,
+        value: "ses_1.secret",
+        maxAgeSeconds: 60,
+        options,
+      })
+    ).toContain("SameSite=Strict")
+    expect(
+      createCsrfCookieHeader({
+        request,
+        value: "csrf_1",
+        maxAgeSeconds: 60,
+        options,
+      })
+    ).toContain("SameSite=Strict")
+  })
+
+  test("supports HttpOnly CSRF cookies and validates host-prefixed cookie config", () => {
+    const request = new Request("https://api.example.com/api/auth/session")
+    const options = resolveAuthCookieOptions({
+      sessionCookieName: "__Host-pario_session",
+      csrfCookieName: "__Host-pario_csrf",
+      csrfHttpOnly: true,
+    })
+
+    expect(
+      createCsrfCookieHeader({
+        request,
+        value: "csrf_1",
+        maxAgeSeconds: 60,
+        options,
+      })
+    ).toContain("HttpOnly")
+    expect(
+      createSessionCookieHeader({
+        request,
+        value: "ses_1.secret",
+        maxAgeSeconds: 60,
+        options,
+      })
+    ).toContain("Secure")
+    expect(() =>
+      resolveAuthCookieOptions({
+        sessionCookieName: "__Host-pario_session",
+        csrfCookieName: "__Host-pario_csrf",
+        cookieDomain: ".example.com",
+      })
+    ).toThrow("__Host- auth cookies cannot be configured with cookieDomain")
+    expect(() =>
+      resolveAuthCookieOptions({
+        sessionCookieName: "__Host-pario_session",
+        csrfCookieName: "__Host-pario_csrf",
+        secure: false,
+      })
+    ).toThrow("__Host- auth cookies require secure cookies")
   })
 })

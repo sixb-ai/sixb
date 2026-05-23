@@ -59,7 +59,7 @@ describe("OpenAPI docs", () => {
       in: "header",
       name: "x-pario-csrf",
       description:
-        "Required for authenticated mutating requests. Copy the value from the pario_csrf cookie.",
+        "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session.",
     })
 
     const csrfRoutes = [

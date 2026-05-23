@@ -29,6 +29,10 @@ export function classifyRoute(request: Request): RouteAccess {
 export function isPublicRoute(pathname: string, method: string): boolean {
   const normalizedMethod = method.toUpperCase()
 
+  if (normalizedMethod === "OPTIONS") {
+    return true
+  }
+
   if ((pathname === "/favicon.svg" || pathname === "/favicon.ico") && normalizedMethod === "GET") {
     return true
   }

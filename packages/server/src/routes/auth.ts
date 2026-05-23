@@ -9,6 +9,7 @@ import {
   createSessionCookieHeader,
   createSessionCredential,
   generateCsrfToken,
+  getCookie,
   type InvitationRecord,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
@@ -17,6 +18,7 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
 import { type Elysia, t } from "elysia"
+import type { ResolveRequestAuthContext } from "../auth/browser-origin"
 import { sanitizeReturnTo } from "../auth/return-to"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
@@ -32,8 +34,25 @@ import {
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
+type ResolvedCookieOptions = Parameters<typeof createCsrfCookieHeader>[0]["options"]
+type AuthenticatedAuthSessionResponse = {
+  readonly authenticated: true
+  readonly csrfToken: string
+  readonly user: {
+    readonly id: string
+    readonly email: string
+    readonly displayName?: string
+    readonly avatarUrl?: string
+    readonly groupIds: readonly string[]
+  }
+  readonly session: {
+    readonly id: string
+    readonly expiresAt: string
+  }
+}
+
 export interface AuthRoutesOptions {
-  readonly audience: AuthSessionAudience
+  readonly resolveAuthContext: ResolveRequestAuthContext
 }
 
 export function registerAuthRoutes(
@@ -41,30 +60,36 @@ export function registerAuthRoutes(
   pario: Pario<readonly OntologySource[]>,
   options: AuthRoutesOptions
 ) {
-  const authOptions = { audience: options.audience }
   return app
     .get(
       "/api/auth/session",
       async ({ request }) => {
+        const authOptions = resolveAuthOptions(options, request)
         const session = await pario.auth.getSession(request, authOptions)
         if (!session.authenticated) {
-          return { authenticated: false as const }
+          return jsonResponse({ authenticated: false as const }, 200)
         }
 
-        return {
-          authenticated: true as const,
-          user: {
-            id: session.user.id,
-            email: session.user.email,
-            displayName: session.user.displayName,
-            avatarUrl: session.user.avatarUrl,
-            groupIds: [...session.groupIds],
+        const cookieOptions = pario.auth.getCookieOptions(authOptions)
+        const csrf = resolveSessionCsrfToken({ pario, request, cookieOptions })
+        return authSessionJsonResponse(
+          {
+            authenticated: true as const,
+            csrfToken: csrf.token,
+            user: {
+              id: session.user.id,
+              email: session.user.email,
+              displayName: session.user.displayName,
+              avatarUrl: session.user.avatarUrl,
+              groupIds: [...session.groupIds],
+            },
+            session: {
+              id: session.session.id,
+              expiresAt: toIsoString(session.session.expiresAt),
+            },
           },
-          session: {
-            id: session.session.id,
-            expiresAt: toIsoString(session.session.expiresAt),
-          },
-        }
+          csrf.setCookie
+        )
       },
       {
         response: { 200: AuthSessionResponseSchema },
@@ -78,6 +103,7 @@ export function registerAuthRoutes(
     .post(
       "/api/auth/sign-out",
       async ({ request }) => {
+        const authOptions = resolveAuthOptions(options, request)
         const session = await pario.auth.getSession(request, authOptions)
         const cookieOptions = pario.auth.getCookieOptions(authOptions)
         if (
@@ -123,6 +149,7 @@ export function registerAuthRoutes(
       "/api/auth/invitations",
       async ({ request, body }) => {
         try {
+          const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthInvitationBodySchema.parse(body)
           const result = await pario.auth.invite(
             request,
@@ -169,6 +196,7 @@ export function registerAuthRoutes(
       "/api/auth/invitations",
       async ({ request, query }) => {
         try {
+          const authOptions = resolveAuthOptions(options, request)
           const parsed = ListAuthInvitationsQuerySchema.parse(query)
           const result = await pario.auth.listInvitations(
             request,
@@ -215,6 +243,7 @@ export function registerAuthRoutes(
       "/api/auth/invitations/:invitationId/revoke",
       async ({ request, params }) => {
         try {
+          const authOptions = resolveAuthOptions(options, request)
           const parsed = RevokeAuthInvitationParamsSchema.parse(params)
           const result = await pario.auth.revokeInvitation(
             request,
@@ -325,6 +354,7 @@ export function registerAuthRoutes(
         const sessionCredential = createSessionCredential()
 
         if (isMagicLinkAuthStrategy(strategy)) {
+          const authOptions = resolveAuthOptions(options, request)
           const url = new URL(request.url)
           const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
           const token = url.searchParams.get("token")?.trim()
@@ -342,7 +372,7 @@ export function registerAuthRoutes(
               token,
               session: {
                 id: sessionCredential.sessionId,
-                audience: options.audience,
+                audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
@@ -352,17 +382,18 @@ export function registerAuthRoutes(
             return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
           }
 
-          return sessionRedirectResponse({
+          return sessionCallbackCompletionResponse({
             pario,
             request,
             sessionCredential,
-            audience: options.audience,
+            audience: authOptions.audience,
             returnTo,
           })
         }
 
         if (isOidcAuthStrategy(strategy)) {
           try {
+            const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
               projectId: pario.id,
               authStorage: requireAuthStorage(pario),
@@ -370,18 +401,18 @@ export function registerAuthRoutes(
               requestOrigin: new URL(request.url).origin,
               session: {
                 id: sessionCredential.sessionId,
-                audience: options.audience,
+                audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
               },
             })
 
-            return sessionRedirectResponse({
+            return sessionCallbackCompletionResponse({
               pario,
               request,
               sessionCredential,
-              audience: options.audience,
+              audience: authOptions.audience,
               returnTo: result.returnTo,
             })
           } catch (error) {
@@ -396,7 +427,7 @@ export function registerAuthRoutes(
     )
 }
 
-function sessionRedirectResponse(input: {
+function sessionCallbackCompletionResponse(input: {
   readonly pario: Pario<readonly OntologySource[]>
   readonly request: Request
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
@@ -405,7 +436,6 @@ function sessionRedirectResponse(input: {
 }): Response {
   const cookieOptions = input.pario.auth.getCookieOptions({ audience: input.audience })
   const headers = new Headers({
-    location: input.returnTo,
     "cache-control": "no-store",
   })
   headers.append(
@@ -427,7 +457,89 @@ function sessionRedirectResponse(input: {
     })
   )
 
-  return new Response(null, { status: 303, headers })
+  return authCallbackCompletionResponse(input.returnTo, headers)
+}
+
+// OAuth and magic-link callbacks arrive from a cross-site navigation. A direct 3xx after
+// setting SameSite=Strict cookies can keep the next request in that cross-site redirect
+// chain. Finish on a Pario document first, then navigate to the sanitized return path.
+function authCallbackCompletionResponse(returnTo: string, headers: Headers): Response {
+  headers.set("content-type", "text/html; charset=utf-8")
+  headers.set(
+    "content-security-policy",
+    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self'"
+  )
+  headers.set("referrer-policy", "no-referrer")
+  headers.set("x-content-type-options", "nosniff")
+
+  return new Response(
+    [
+      "<!doctype html>",
+      '<html lang="en">',
+      "<head>",
+      '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width, initial-scale=1">',
+      '<meta name="referrer" content="no-referrer">',
+      `<meta http-equiv="refresh" content="0;url=${escapeHtml(returnTo)}">`,
+      "<title>Signing in</title>",
+      "</head>",
+      "<body>",
+      "<main>",
+      "<p>Signing you in...</p>",
+      `<p><a href="${escapeHtml(returnTo)}">Continue</a></p>`,
+      "</main>",
+      "</body>",
+      "</html>",
+    ].join(""),
+    {
+      status: 200,
+      headers,
+    }
+  )
+}
+
+function resolveAuthOptions(
+  options: AuthRoutesOptions,
+  request: Request
+): {
+  readonly audience: AuthSessionAudience
+} {
+  return { audience: options.resolveAuthContext(request).audience }
+}
+
+function resolveSessionCsrfToken(input: {
+  readonly pario: Pario<readonly OntologySource[]>
+  readonly request: Request
+  readonly cookieOptions: ResolvedCookieOptions
+}): { readonly token: string; readonly setCookie?: string } {
+  const existing = getCookie(input.request, input.cookieOptions.csrfCookieName)
+  if (existing) {
+    return { token: existing }
+  }
+
+  const token = generateCsrfToken()
+  return {
+    token,
+    setCookie: createCsrfCookieHeader({
+      request: input.request,
+      value: token,
+      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      options: input.cookieOptions,
+    }),
+  }
+}
+
+function authSessionJsonResponse(
+  body: AuthenticatedAuthSessionResponse,
+  csrfSetCookie: string | undefined
+): Response {
+  if (!csrfSetCookie) {
+    return jsonResponse(body, 200)
+  }
+
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
+  headers.append("set-cookie", csrfSetCookie)
+  return jsonResponse(body, 200, headers)
 }
 
 function redirectResponse(location: string): Response {
@@ -595,12 +707,13 @@ function logAuthCallbackError(kind: string, error: unknown): void {
   console.error(`[ParioServer] ${kind} auth callback failed: ${detail}`)
 }
 
-function jsonResponse(body: unknown, status: number): Response {
+function jsonResponse(body: unknown, status: number, headersInit?: HeadersInit): Response {
+  const headers = new Headers(headersInit)
+  headers.set("content-type", headers.get("content-type") ?? "application/json; charset=utf-8")
+  headers.set("cache-control", headers.get("cache-control") ?? "no-store")
+
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
+    headers,
   })
 }

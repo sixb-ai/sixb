@@ -10,6 +10,8 @@ export interface ResolvedAuthCookieOptions {
   readonly csrfCookieName: string
   readonly domain?: string
   readonly secure: boolean | "auto"
+  readonly sameSite: "strict"
+  readonly csrfHttpOnly: boolean
 }
 
 interface CookieSerializationOptions {
@@ -20,17 +22,23 @@ interface CookieSerializationOptions {
   readonly expires?: Date
   readonly domain?: string
   readonly secure?: boolean
+  readonly sameSite: "strict"
 }
 
 export function resolveAuthCookieOptions(
   options: AuthCookieOptions | undefined
 ): ResolvedAuthCookieOptions {
-  return {
+  const resolved = {
     sessionCookieName: options?.sessionCookieName ?? DEFAULT_SESSION_COOKIE_NAME,
     csrfCookieName: options?.csrfCookieName ?? DEFAULT_CSRF_COOKIE_NAME,
     domain: options?.cookieDomain,
     secure: options?.secure ?? "auto",
+    sameSite: options?.sameSite ?? "strict",
+    csrfHttpOnly: options?.csrfHttpOnly ?? false,
   }
+
+  assertValidCookieOptions(resolved)
+  return resolved
 }
 
 export function resolveAuthCookieOptionsForAudience(
@@ -81,7 +89,7 @@ export function serializeCookie(options: CookieSerializationOptions): string {
   const parts = [`${options.name}=${options.value}`]
 
   parts.push("Path=/")
-  parts.push("SameSite=Lax")
+  parts.push("SameSite=Strict")
 
   if (options.domain) {
     parts.push(`Domain=${options.domain}`)
@@ -110,6 +118,13 @@ export function shouldUseSecureCookies(
   request: Request,
   options: ResolvedAuthCookieOptions
 ): boolean {
+  if (
+    requiresSecureCookieName(options.sessionCookieName) ||
+    requiresSecureCookieName(options.csrfCookieName)
+  ) {
+    return true
+  }
+
   if (typeof options.secure === "boolean") {
     return options.secure
   }
@@ -135,6 +150,7 @@ export function createSessionCookieHeader(params: {
     maxAge: params.maxAgeSeconds,
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
+    sameSite: params.options.sameSite,
   })
 }
 
@@ -147,9 +163,11 @@ export function createCsrfCookieHeader(params: {
   return serializeCookie({
     name: params.options.csrfCookieName,
     value: params.value,
+    httpOnly: params.options.csrfHttpOnly,
     maxAge: params.maxAgeSeconds,
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
+    sameSite: params.options.sameSite,
   })
 }
 
@@ -165,6 +183,7 @@ export function clearSessionCookieHeader(params: {
     expires: new Date(0),
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
+    sameSite: params.options.sameSite,
   })
 }
 
@@ -179,9 +198,49 @@ export function clearCsrfCookieHeader(params: {
     expires: new Date(0),
     domain: params.options.domain,
     secure: shouldUseSecureCookies(params.request, params.options),
+    sameSite: params.options.sameSite,
   })
 }
 
 function isLocalhost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
+}
+
+function assertValidCookieOptions(options: ResolvedAuthCookieOptions): void {
+  assertValidCookieName(options.sessionCookieName, "sessionCookieName")
+  assertValidCookieName(options.csrfCookieName, "csrfCookieName")
+
+  if (options.sameSite !== "strict") {
+    throw new Error("[Pario] Auth cookie sameSite must be 'strict'.")
+  }
+
+  if (
+    options.domain &&
+    (isHostPrefixedCookieName(options.sessionCookieName) ||
+      isHostPrefixedCookieName(options.csrfCookieName))
+  ) {
+    throw new Error("[Pario] __Host- auth cookies cannot be configured with cookieDomain.")
+  }
+
+  if (
+    options.secure === false &&
+    (requiresSecureCookieName(options.sessionCookieName) ||
+      requiresSecureCookieName(options.csrfCookieName))
+  ) {
+    throw new Error("[Pario] __Host- auth cookies require secure cookies.")
+  }
+}
+
+function assertValidCookieName(name: string, label: string): void {
+  if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) {
+    throw new Error(`[Pario] Auth cookie ${label} '${name}' is not a valid cookie name.`)
+  }
+}
+
+function isHostPrefixedCookieName(name: string): boolean {
+  return name.startsWith("__Host-")
+}
+
+function requiresSecureCookieName(name: string): boolean {
+  return isHostPrefixedCookieName(name) || name.startsWith("__Secure-")
 }
