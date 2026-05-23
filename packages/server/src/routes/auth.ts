@@ -14,9 +14,9 @@ import {
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
   type OntologySource,
-  type Pario,
+  type Sixb,
   verifyDoubleSubmitCsrf,
-} from "@pario/core"
+} from "@sixb/core"
 import { type Elysia, t } from "elysia"
 import {
   type AuthRedirectContext,
@@ -24,7 +24,7 @@ import {
   type ResolveAuthRedirectContext,
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
@@ -64,7 +64,7 @@ export interface AuthRoutesOptions {
 
 export function registerAuthRoutes(
   app: Elysia,
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   options: AuthRoutesOptions
 ) {
   return app
@@ -72,13 +72,13 @@ export function registerAuthRoutes(
       "/api/auth/session",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await pario.auth.getSession(request, authOptions)
+        const session = await sixb.auth.getSession(request, authOptions)
         if (!session.authenticated) {
           return jsonResponse({ authenticated: false as const }, 200)
         }
 
-        const cookieOptions = pario.auth.getCookieOptions(authOptions)
-        const csrf = resolveSessionCsrfToken({ pario, request, cookieOptions })
+        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        const csrf = resolveSessionCsrfToken({ sixb, request, cookieOptions })
         return authSessionJsonResponse(
           {
             authenticated: true as const,
@@ -111,8 +111,8 @@ export function registerAuthRoutes(
       "/api/auth/sign-out",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await pario.auth.getSession(request, authOptions)
-        const cookieOptions = pario.auth.getCookieOptions(authOptions)
+        const session = await sixb.auth.getSession(request, authOptions)
+        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
         if (
           session.authenticated &&
           !verifyDoubleSubmitCsrf(request, {
@@ -123,8 +123,8 @@ export function registerAuthRoutes(
         }
 
         if (session.authenticated) {
-          await pario.storage.auth?.sessions.revoke({
-            projectId: pario.id,
+          await sixb.storage.auth?.sessions.revoke({
+            projectId: sixb.id,
             id: session.session.id,
             revokedAt: new Date(),
           })
@@ -148,7 +148,7 @@ export function registerAuthRoutes(
           summary: "Sign out current auth session",
           tags: ["Auth"],
           operationId: "signOut",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -168,7 +168,7 @@ export function registerAuthRoutes(
             return deliveryContext
           }
 
-          const result = await pario.auth.invite(
+          const result = await sixb.auth.invite(
             request,
             {
               email: parsed.email,
@@ -211,7 +211,7 @@ export function registerAuthRoutes(
           summary: "Create an auth invitation",
           tags: ["Auth"],
           operationId: "createAuthInvitation",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -220,7 +220,7 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          return jsonResponse(await pario.auth.getInvitationOptions(request, authOptions), 200)
+          return jsonResponse(await sixb.auth.getInvitationOptions(request, authOptions), 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -244,7 +244,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = ListAuthInvitationsQuerySchema.parse(query)
-          const result = await pario.auth.listInvitations(
+          const result = await sixb.auth.listInvitations(
             request,
             {
               email: parsed.email,
@@ -291,7 +291,7 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = RevokeAuthInvitationParamsSchema.parse(params)
-          const result = await pario.auth.revokeInvitation(
+          const result = await sixb.auth.revokeInvitation(
             request,
             {
               invitationId: parsed.invitationId,
@@ -323,14 +323,14 @@ export function registerAuthRoutes(
           summary: "Revoke an auth invitation",
           tags: ["Auth"],
           operationId: "revokeAuthInvitation",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )
     .post(
       "/auth/sign-in",
       async ({ body, request }) => {
-        const strategy = pario.auth.getStrategy()
+        const strategy = sixb.auth.getStrategy()
         const authRedirect = resolveAuthRedirectContext(options, request, {
           audience: body.audience,
           returnTo: body.returnTo,
@@ -339,11 +339,11 @@ export function registerAuthRoutes(
           return authRedirect
         }
 
-        const authStorage = requireAuthStorage(pario)
+        const authStorage = requireAuthStorage(sixb)
 
         if (isMagicLinkAuthStrategy(strategy)) {
           await strategy.requestMagicLink({
-            projectId: pario.id,
+            projectId: sixb.id,
             authStorage,
             email: body.email ?? "",
             audience: authRedirect.audience,
@@ -360,7 +360,7 @@ export function registerAuthRoutes(
 
         if (isOidcAuthStrategy(strategy)) {
           const result = await strategy.startOidcSignIn({
-            projectId: pario.id,
+            projectId: sixb.id,
             authStorage,
             audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
@@ -384,7 +384,7 @@ export function registerAuthRoutes(
     .get(
       "/auth/sign-in",
       async ({ request }) => {
-        const strategy = pario.auth.getStrategy()
+        const strategy = sixb.auth.getStrategy()
         const url = new URL(request.url)
         const authRedirect = resolveAuthRedirectContext(options, request, {
           audience: url.searchParams.get("audience"),
@@ -400,8 +400,8 @@ export function registerAuthRoutes(
 
         if (isOidcAuthStrategy(strategy)) {
           const result = await strategy.startOidcSignIn({
-            projectId: pario.id,
-            authStorage: requireAuthStorage(pario),
+            projectId: sixb.id,
+            authStorage: requireAuthStorage(sixb),
             audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
@@ -416,7 +416,7 @@ export function registerAuthRoutes(
     .get(
       "/auth/callback",
       async ({ request }) => {
-        const strategy = pario.auth.getStrategy()
+        const strategy = sixb.auth.getStrategy()
         const now = new Date()
         const sessionCredential = createSessionCredential()
 
@@ -432,8 +432,8 @@ export function registerAuthRoutes(
 
           try {
             const result = await strategy.completeMagicLinkSignIn({
-              projectId: pario.id,
-              authStorage: requireAuthStorage(pario),
+              projectId: sixb.id,
+              authStorage: requireAuthStorage(sixb),
               magicLinkId,
               token,
               session: {
@@ -441,12 +441,12 @@ export function registerAuthRoutes(
                 audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
-                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
+                expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
               },
             })
 
             return sessionCallbackCompletionResponse({
-              pario,
+              sixb,
               request,
               sessionCredential,
               audience: result.session.audience,
@@ -461,8 +461,8 @@ export function registerAuthRoutes(
           try {
             const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
-              projectId: pario.id,
-              authStorage: requireAuthStorage(pario),
+              projectId: sixb.id,
+              authStorage: requireAuthStorage(sixb),
               requestUrl: request.url,
               requestOrigin: options.resolveAuthRequestOrigin(request),
               session: {
@@ -470,12 +470,12 @@ export function registerAuthRoutes(
                 audience: authOptions.audience,
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
-                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
+                expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
               },
             })
 
             return sessionCallbackCompletionResponse({
-              pario,
+              sixb,
               request,
               sessionCredential,
               audience: result.session.audience,
@@ -494,13 +494,13 @@ export function registerAuthRoutes(
 }
 
 function sessionCallbackCompletionResponse(input: {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly request: Request
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
   readonly audience: AuthSessionAudience
   readonly returnTo: string
 }): Response {
-  const cookieOptions = input.pario.auth.getCookieOptions({ audience: input.audience })
+  const cookieOptions = input.sixb.auth.getCookieOptions({ audience: input.audience })
   const headers = new Headers({
     "cache-control": "no-store",
   })
@@ -509,7 +509,7 @@ function sessionCallbackCompletionResponse(input: {
     createSessionCookieHeader({
       request: input.request,
       value: input.sessionCredential.cookieValue,
-      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
       options: cookieOptions,
     })
   )
@@ -518,7 +518,7 @@ function sessionCallbackCompletionResponse(input: {
     createCsrfCookieHeader({
       request: input.request,
       value: generateCsrfToken(),
-      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
       options: cookieOptions,
     })
   )
@@ -528,7 +528,7 @@ function sessionCallbackCompletionResponse(input: {
 
 // OAuth and magic-link callbacks arrive from a cross-site navigation. A direct 3xx after
 // setting SameSite=Strict cookies can keep the next request in that cross-site redirect
-// chain. Finish on a Pario document first, then navigate to the sanitized return path.
+// chain. Finish on a Sixb document first, then navigate to the sanitized return path.
 function authCallbackCompletionResponse(returnTo: string, headers: Headers): Response {
   headers.set("content-type", "text/html; charset=utf-8")
   headers.set(
@@ -611,7 +611,7 @@ function resolveInvitationDeliveryContext(
 }
 
 function resolveSessionCsrfToken(input: {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly request: Request
   readonly cookieOptions: ResolvedCookieOptions
 }): { readonly token: string; readonly setCookie?: string } {
@@ -626,7 +626,7 @@ function resolveSessionCsrfToken(input: {
     setCookie: createCsrfCookieHeader({
       request: input.request,
       value: token,
-      maxAgeSeconds: Math.trunc(input.pario.auth.getSessionTtlMs() / 1000),
+      maxAgeSeconds: Math.trunc(input.sixb.auth.getSessionTtlMs() / 1000),
       options: input.cookieOptions,
     }),
   }
@@ -827,12 +827,12 @@ function htmlMessageResponse(message: string, status = 200, heading?: string): R
   )
 }
 
-function requireAuthStorage(pario: Pario<readonly OntologySource[]>): AuthStorage {
-  if (!pario.storage.auth) {
-    throw new Error("[ParioServer] Auth storage is required for auth routes.")
+function requireAuthStorage(sixb: Sixb<readonly OntologySource[]>): AuthStorage {
+  if (!sixb.storage.auth) {
+    throw new Error("[SixbServer] Auth storage is required for auth routes.")
   }
 
-  return pario.storage.auth
+  return sixb.storage.auth
 }
 
 function serializeInvitation(invitation: InvitationRecord) {
@@ -898,7 +898,7 @@ function authRouteErrorResponse(error: unknown): Response {
 }
 
 function logAuthCallbackError(kind: string, error: unknown): void {
-  if (process.env.NODE_ENV !== "development" && process.env.PARIO_AUTH_DEBUG !== "1") {
+  if (process.env.NODE_ENV !== "development" && process.env.SIXB_AUTH_DEBUG !== "1") {
     return
   }
 
@@ -909,7 +909,7 @@ function logAuthCallbackError(kind: string, error: unknown): void {
         ? `${error.name}: ${error.message}`
         : String(error)
 
-  console.error(`[ParioServer] ${kind} auth callback failed: ${detail}`)
+  console.error(`[SixbServer] ${kind} auth callback failed: ${detail}`)
 }
 
 function jsonResponse(body: unknown, status: number, headersInit?: HeadersInit): Response {

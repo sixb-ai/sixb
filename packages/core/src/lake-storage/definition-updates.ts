@@ -72,7 +72,7 @@ export function mergeStrictDatasetDefinition(options: {
   const plan = planDatasetDefinitionUpdate(options.existing, options.next)
   if (plan.schema.kind !== "none") {
     throw new LakeStorageError(
-      `[ParioLake] Dataset '${options.next.id}' cannot be redefined with an incompatible schema.`
+      `[SixbLake] Dataset '${options.next.id}' cannot be redefined with an incompatible schema.`
     )
   }
 
@@ -100,7 +100,7 @@ export async function assertLakeDatasetDefinitionsCompatible(
   if (failures.length > 0) {
     const details = failures.join("\n")
     throw new LakeStorageError(
-      `[ParioLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
+      `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
     )
   }
 }
@@ -108,7 +108,7 @@ export async function assertLakeDatasetDefinitionsCompatible(
 function assertSameDataset(existing: DatasetDefinition, requested: DatasetDefinition): void {
   if (existing.id !== requested.id) {
     throw new LakeStorageError(
-      `[ParioLake] Cannot update dataset '${existing.id}' with definition for '${requested.id}'.`
+      `[SixbLake] Cannot update dataset '${existing.id}' with definition for '${requested.id}'.`
     )
   }
 }
@@ -235,7 +235,7 @@ function assertCompatibleMetadataField(
   }
 
   throw new LakeStorageError(
-    `[ParioLake] Dataset '${datasetId}' cannot be redefined with an incompatible ${field}.`
+    `[SixbLake] Dataset '${datasetId}' cannot be redefined with an incompatible ${field}.`
   )
 }
 
@@ -273,7 +273,7 @@ function cloneColumns(
 
 function throwUnsupportedSchemaUpdate(datasetId: string, detail: string): never {
   throw new LakeStorageError(
-    `[ParioLake] Dataset '${datasetId}' cannot apply schema update because ${detail}. ${SCHEMA_UPDATE_V1_POLICY}`
+    `[SixbLake] Dataset '${datasetId}' cannot apply schema update because ${detail}. ${SCHEMA_UPDATE_V1_POLICY}`
   )
 }
 

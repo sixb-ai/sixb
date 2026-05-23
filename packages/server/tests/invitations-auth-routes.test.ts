@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { magicLink, type SendMagicLinkInput } from "@pario/auth-magic-link"
-import { oidc, type SendOidcInvitationInput } from "@pario/auth-oidc"
+import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
+import { oidc, type SendOidcInvitationInput } from "@sixb/auth-oidc"
 import {
   type AuthStrategy,
   createSessionCredential,
@@ -14,11 +14,11 @@ import {
   InMemoryStorage,
   type InvitePolicyDefinition,
   type OntologySource,
-  Pario,
-  type ParioAuthConfig,
   prop,
-} from "@pario/core"
-import { createParioApi, ParioServer } from "../src/server"
+  Sixb,
+  type SixbAuthConfig,
+} from "@sixb/core"
+import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
@@ -47,7 +47,7 @@ function createSender() {
 
 function createRuntime(
   options: {
-    readonly auth?: ParioAuthConfig
+    readonly auth?: SixbAuthConfig
     readonly invitePolicies?: readonly InvitePolicyDefinition[]
   } = {}
 ) {
@@ -57,7 +57,7 @@ function createRuntime(
     allowedDomains: ["acme.com"],
     sendMagicLink,
   })
-  const pario = new Pario<readonly OntologySource[]>({
+  const sixb = new Sixb<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -77,15 +77,15 @@ function createRuntime(
   })
 
   return {
-    app: createParioApi(
-      new ParioServer({
-        pario,
+    app: createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
     ),
     messages,
-    pario,
+    sixb,
     storage,
   }
 }
@@ -120,8 +120,8 @@ async function seedAdminSession(
   })
 
   return {
-    cookie: `pario_session${cookieSuffix}=${credential.cookieValue}; pario_csrf${cookieSuffix}=csrf_1`,
-    csrfHeader: { "x-pario-csrf": "csrf_1" },
+    cookie: `sixb_session${cookieSuffix}=${credential.cookieValue}; sixb_csrf${cookieSuffix}=csrf_1`,
+    csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
 }
 
@@ -207,9 +207,9 @@ describe("auth invitation routes", () => {
   })
 
   test("creates invitations on the browser origin audience", async () => {
-    const { pario, storage } = createRuntime()
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const { sixb, storage } = createRuntime()
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
     const admin = await seedAdminSession(storage, { audience: "app" })
 
@@ -410,7 +410,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error:
-        "[Pario] Invitation email 'oidc-user@example.com' is not allowed by the active auth strategy.",
+        "[Sixb] Invitation email 'oidc-user@example.com' is not allowed by the active auth strategy.",
     })
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })
   })
@@ -563,7 +563,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error:
-        "[Pario] Invitation email 'ava@example.com' is not allowed by the active auth strategy.",
+        "[Sixb] Invitation email 'ava@example.com' is not allowed by the active auth strategy.",
     })
     expect(messages).toHaveLength(0)
     await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })

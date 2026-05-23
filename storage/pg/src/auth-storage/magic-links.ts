@@ -1,5 +1,5 @@
-import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@pario/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@pario/core"
+import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@sixb/core"
+import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
 import type { SQL } from "bun"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthMagicLinkRow } from "./rows"
@@ -31,7 +31,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
       if (await getMagicLinkRowById(tx, { projectId, id })) {
         throw new AuthStorageError(
           "duplicate_magic_link",
-          `[Pario] Magic link '${id}' already exists for project '${projectId}'.`
+          `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
         )
       }
 
@@ -72,7 +72,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
         mapUniqueConstraintError(
           error,
           "duplicate_magic_link",
-          `[Pario] Magic link '${id}' already exists for project '${projectId}'.`
+          `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
         )
       }
     })

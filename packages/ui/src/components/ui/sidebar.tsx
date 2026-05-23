@@ -1,24 +1,24 @@
 "use client"
 
-import { Button } from "@pario/ui/components/ui/button"
-import { Input } from "@pario/ui/components/ui/input"
-import { Separator } from "@pario/ui/components/ui/separator"
+import { Button } from "@sixb/ui/components/ui/button"
+import { Input } from "@sixb/ui/components/ui/input"
+import { Separator } from "@sixb/ui/components/ui/separator"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@pario/ui/components/ui/sheet"
-import { Skeleton } from "@pario/ui/components/ui/skeleton"
+} from "@sixb/ui/components/ui/sheet"
+import { Skeleton } from "@sixb/ui/components/ui/skeleton"
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@pario/ui/components/ui/tooltip"
-import { useIsMobile } from "@pario/ui/hooks/use-mobile"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components/ui/tooltip"
+import { useIsMobile } from "@sixb/ui/hooks/use-mobile"
+import { cn } from "@sixb/ui/lib/utils"
 import { cva, type VariantProps } from "class-variance-authority"
 import { PanelLeftIcon } from "lucide-react"
 import { Slot } from "radix-ui"

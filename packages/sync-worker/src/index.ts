@@ -5,5 +5,5 @@ export type {
   SyncRunResult,
   SyncWorkerContext,
 } from "./types"
-export type { SyncWorkerPario } from "./worker"
+export type { SyncWorkerSixb } from "./worker"
 export { SyncWorker } from "./worker"

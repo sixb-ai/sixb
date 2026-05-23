@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto"
-import type { ClaimedQueueJob, NewQueueJob, QueueJob } from "@pario/core"
+import type { ClaimedQueueJob, NewQueueJob, QueueJob } from "@sixb/core"
 import type { Job as BullJob } from "bullmq"
 import { parseTimestamp } from "./validation"
 
 /**
- * Stored in `job.data` — the serialized Pario queue-job envelope.
+ * Stored in `job.data` — the serialized Sixb queue-job envelope.
  *
  * `attempt` is deliberately excluded: BullMQ tracks it at runtime via `attemptsStarted`
  * on the job handle, and reading a stale snapshot from `data.attempt` would lie to the
@@ -48,9 +48,9 @@ export function buildEnvelope<TQueueJob extends QueueJob>(
 }
 
 /**
- * Converts a BullMQ `Job` in active state into a Pario `ClaimedQueueJob`.
+ * Converts a BullMQ `Job` in active state into a Sixb `ClaimedQueueJob`.
  *
- * Pario's `attempt` counts how many times a job has been claimed (including redelivery after
+ * Sixb's `attempt` counts how many times a job has been claimed (including redelivery after
  * retry or stall). That maps to BullMQ's `attemptsStarted`, which the `moveToActive` Lua
  * script increments on every fetch; `attemptsMade` is a different counter that only
  * increments on failure and is not used here.

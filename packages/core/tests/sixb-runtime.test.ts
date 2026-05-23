@@ -11,8 +11,8 @@ import {
   link,
   ObjectNotFoundError,
   OntologyValidationError,
-  Pario,
   prop,
+  Sixb,
   valueTypeRef,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -45,11 +45,11 @@ const Document = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("file", "fileRef")],
 })
 
-describe("Pario runtime", () => {
+describe("Sixb runtime", () => {
   test("upserts an object using object-type tokens", async () => {
-    const pario = new Pario({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
-    const room = await pario.objects(Room).upsert({
+    const room = await sixb.objects(Room).upsert({
       properties: {
         id: "room:101",
         externalId: "RM-101",
@@ -62,14 +62,14 @@ describe("Pario runtime", () => {
     expect(room.properties.externalId).toBe("RM-101")
     expect(room.properties.name).toBe("Conference 101")
 
-    const found = await pario.objects(Room).findFirst({
+    const found = await sixb.objects(Room).findFirst({
       where: (r) => r.p.externalId.eq("RM-101"),
     })
 
     expect(found?.primaryId).toBe("room:101")
 
     await expect(
-      pario.objects(Room).upsert({
+      sixb.objects(Room).upsert({
         properties: {
           id: "room:invalid",
           externalId: "RM-INVALID",
@@ -78,7 +78,7 @@ describe("Pario runtime", () => {
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(Room).upsert({
+      sixb.objects(Room).upsert({
         properties: {
           id: "room:invalid",
           externalId: "RM-INVALID",
@@ -90,37 +90,37 @@ describe("Pario runtime", () => {
 
   test("exposes configured lakeStorage on the runtime", () => {
     const lakeStorage = new InMemoryLakeStorage()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       lakeStorage,
     })
 
-    expect(pario.lakeStorage).toBe(lakeStorage)
+    expect(sixb.lakeStorage).toBe(lakeStorage)
   })
 
   test("exposes the configured blobStorage on the runtime", () => {
     const blobStorage = new InMemoryBlobStorage()
     const lakeStorage = new InMemoryLakeStorage()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       lakeStorage,
       blobStorage,
     })
 
-    expect(pario.blobStorage).toBe(blobStorage)
+    expect(sixb.blobStorage).toBe(blobStorage)
   })
 
   test("upserts objects with fileRef properties", async () => {
-    const pario = new Pario({ ontology: [Document], ...createTestRuntimeDeps() })
-    const file = await pario.blobStorage.put({
+    const sixb = new Sixb({ ontology: [Document], ...createTestRuntimeDeps() })
+    const file = await sixb.blobStorage.put({
       body: new TextEncoder().encode("document bytes"),
       fileName: "document.pdf",
       mediaType: "application/pdf",
     })
 
-    const document = await pario.objects(Document).upsert({
+    const document = await sixb.objects(Document).upsert({
       properties: {
         id: "doc:1",
         file,
@@ -130,7 +130,7 @@ describe("Pario runtime", () => {
     expect(document.properties.file).toEqual(file)
 
     await expect(
-      pario.objects(Document).upsert({
+      sixb.objects(Document).upsert({
         properties: {
           id: "doc:2",
           file: { blobId: "blob_missing" } as unknown as typeof file,
@@ -138,7 +138,7 @@ describe("Pario runtime", () => {
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(Document).upsert({
+      sixb.objects(Document).upsert({
         properties: {
           id: "doc:2",
           file: { blobId: "blob_missing" } as unknown as typeof file,
@@ -149,25 +149,25 @@ describe("Pario runtime", () => {
 
   test("exposes configured queues on the runtime", () => {
     const queues = new InMemoryQueues()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       queues,
     })
 
-    expect(pario.queues).toBe(queues)
+    expect(sixb.queues).toBe(queues)
   })
 
   test("exposes projection run storage from in-memory storage", () => {
-    const pario = new Pario({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
-    expect(pario.storage.projectionRuns).toBeDefined()
+    expect(sixb.storage.projectionRuns).toBeDefined()
   })
 
   test("appends telemetry with unit validation", async () => {
-    const pario = new Pario({ ontology: [Room], ...createTestRuntimeDeps() })
+    const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: {
         id: "room:101",
         externalId: "RM-101",
@@ -175,14 +175,14 @@ describe("Pario runtime", () => {
       },
     })
 
-    await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+    await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
       value: 22.4,
       unit: "degreeCelsius",
       at: new Date(),
     })
 
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .telemetry(Room.p.currentTemperature)
@@ -193,7 +193,7 @@ describe("Pario runtime", () => {
         })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .telemetry(Room.p.currentTemperature)
@@ -205,7 +205,7 @@ describe("Pario runtime", () => {
     ).rejects.toThrow("must be numeric")
 
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .telemetry(Room.p.currentTemperature)
@@ -216,7 +216,7 @@ describe("Pario runtime", () => {
         })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .telemetry(Room.p.currentTemperature)
@@ -231,13 +231,13 @@ describe("Pario runtime", () => {
   test("emits typed events and projects through the runtime dependencies", async () => {
     const runtimeDeps = createTestRuntimeDeps()
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "project-a",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: {
         id: "room:101",
         externalId: "RM-101",
@@ -245,7 +245,7 @@ describe("Pario runtime", () => {
       },
     })
 
-    await pario
+    await sixb
       .objects(Room)
       .byId("room:101")
       .telemetry(Room.p.currentTemperature)
@@ -255,7 +255,7 @@ describe("Pario runtime", () => {
         at: new Date("2026-01-01T10:00:00.000Z"),
       })
 
-    const tstat = await pario.objects(Thermostat).upsert({
+    const tstat = await sixb.objects(Thermostat).upsert({
       properties: {
         id: "tstat:abc",
         externalId: "device-123",
@@ -263,10 +263,10 @@ describe("Pario runtime", () => {
       },
     })
 
-    await pario.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
+    await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
 
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .link(Room.l.hasThermostat, tstat, {
@@ -274,7 +274,7 @@ describe("Pario runtime", () => {
         })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario
+      sixb
         .objects(Room)
         .byId("room:101")
         .link(Room.l.hasThermostat, tstat, {
@@ -282,7 +282,7 @@ describe("Pario runtime", () => {
         })
     ).rejects.toThrow("does not define link properties")
 
-    const stream = await pario.events.read()
+    const stream = await sixb.events.read()
     expect(stream).toHaveLength(4)
     expect(stream[0]?.type).toBe("object.upserted")
     expect(stream[0]?.topic).toBe("objects")
@@ -322,58 +322,58 @@ describe("Pario runtime", () => {
   })
 
   test("lists objects with pagination and filters", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "list-test",
       ontology: [Room, Thermostat],
       ...createTestRuntimeDeps(),
     })
 
     // Create multiple rooms
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
     })
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
     })
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:103", externalId: "RM-103", name: "Conference 103" },
     })
-    await pario.objects(Thermostat).upsert({
+    await sixb.objects(Thermostat).upsert({
       properties: { id: "tstat:abc", externalId: "device-123", name: "Tstat 101" },
     })
 
     // Test type-scoped list
-    const rooms = await pario.objects(Room).list({ limit: 2 })
+    const rooms = await sixb.objects(Room).list({ limit: 2 })
     expect(rooms.objects).toHaveLength(2)
     expect(rooms.total).toBe(3)
     expect(rooms.hasMore).toBe(true)
 
     // Test pagination
-    const page2 = await pario.objects(Room).list({ limit: 2, offset: 2 })
+    const page2 = await sixb.objects(Room).list({ limit: 2, offset: 2 })
     expect(page2.objects).toHaveLength(1)
     expect(page2.hasMore).toBe(false)
 
     // Test id prefix filter
-    const prefixRooms = await pario.objects(Room).list({ idPrefix: "room:10" })
+    const prefixRooms = await sixb.objects(Room).list({ idPrefix: "room:10" })
     expect(prefixRooms.objects).toHaveLength(3)
 
     // Test type-safe where filter
-    const filteredRooms = await pario.objects(Room).list({
+    const filteredRooms = await sixb.objects(Room).list({
       where: (r) => r.p.externalId.eq("RM-101"),
     })
     expect(filteredRooms.objects).toHaveLength(1)
     expect(filteredRooms.objects[0]?.properties.externalId).toBe("RM-101")
 
     // Test global list
-    const allObjects = await pario.list({ limit: 10 })
+    const allObjects = await sixb.list({ limit: 10 })
     expect(allObjects.objects).toHaveLength(4)
 
     // Test global list with type filter
-    const roomObjects = await pario.list({ objectTypeIds: ["Room"], limit: 10 })
+    const roomObjects = await sixb.list({ objectTypeIds: ["Room"], limit: 10 })
     expect(roomObjects.objects).toHaveLength(3)
 
     // Test ordering
-    const orderedByKey = await pario.objects(Room).list({
+    const orderedByKey = await sixb.objects(Room).list({
       orderBy: "primaryId",
       order: "asc",
       limit: 10,
@@ -384,22 +384,22 @@ describe("Pario runtime", () => {
 
   test("appendTelemetryBatch writes multiple objects and properties in one call", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "batch-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
     })
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
     })
 
     const now = new Date("2026-03-01T12:00:00.000Z")
 
-    await pario.objects(Room).appendTelemetryBatch([
+    await sixb.objects(Room).appendTelemetryBatch([
       {
         id: "room:101",
         properties: {
@@ -450,26 +450,26 @@ describe("Pario runtime", () => {
     expect(room102?.properties.currentTemperature).toBe(19.8)
 
     // Verify all telemetry events were written
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["telemetry.appended"],
     })
     expect(events).toHaveLength(2)
   })
 
   test("appendTelemetryBatch validates all inputs before writing", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "batch-validate-test",
       ontology: [Room],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
     })
 
     // Non-existent object should fail
     await expect(
-      pario.objects(Room).appendTelemetryBatch([
+      sixb.objects(Room).appendTelemetryBatch([
         {
           id: "room:999",
           properties: { currentTemperature: { value: 22.5, unit: "degreeCelsius" } },
@@ -477,7 +477,7 @@ describe("Pario runtime", () => {
       ])
     ).rejects.toBeInstanceOf(ObjectNotFoundError)
     await expect(
-      pario.objects(Room).appendTelemetryBatch([
+      sixb.objects(Room).appendTelemetryBatch([
         {
           id: "room:999",
           properties: { currentTemperature: { value: 22.5, unit: "degreeCelsius" } },
@@ -487,7 +487,7 @@ describe("Pario runtime", () => {
 
     // Invalid unit should fail
     await expect(
-      pario.objects(Room).appendTelemetryBatch([
+      sixb.objects(Room).appendTelemetryBatch([
         {
           id: "room:101",
           properties: {
@@ -497,7 +497,7 @@ describe("Pario runtime", () => {
       ])
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(Room).appendTelemetryBatch([
+      sixb.objects(Room).appendTelemetryBatch([
         {
           id: "room:101",
           properties: {
@@ -510,35 +510,35 @@ describe("Pario runtime", () => {
 
   test("removes a link via unlink", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "unlink-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
     })
-    await pario.objects(Thermostat).upsert({
+    await sixb.objects(Thermostat).upsert({
       properties: { id: "tstat:abc", externalId: "device-123", name: "Tstat 101" },
     })
 
     const tstat = { objectTypeId: "Thermostat" as const, primaryId: "tstat:abc" }
-    await pario.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
+    await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
 
     // Verify link exists
-    const linksBefore = await pario.objects(Room).byId("room:101").listLinks(Room.l.hasThermostat)
+    const linksBefore = await sixb.objects(Room).byId("room:101").listLinks(Room.l.hasThermostat)
     expect(linksBefore).toHaveLength(1)
 
     // Unlink
-    await pario.objects(Room).byId("room:101").unlink(Room.l.hasThermostat, tstat)
+    await sixb.objects(Room).byId("room:101").unlink(Room.l.hasThermostat, tstat)
 
     // Verify link removed
-    const linksAfter = await pario.objects(Room).byId("room:101").listLinks(Room.l.hasThermostat)
+    const linksAfter = await sixb.objects(Room).byId("room:101").listLinks(Room.l.hasThermostat)
     expect(linksAfter).toHaveLength(0)
 
     // Verify link.removed event was emitted
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["link.removed"],
     })
     expect(events).toHaveLength(1)
@@ -546,20 +546,20 @@ describe("Pario runtime", () => {
 
   test("removes a link via ObjectSet.removeLink", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "remove-link-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:201", externalId: "RM-201", name: "Room 201" },
     })
-    await pario.objects(Thermostat).upsert({
+    await sixb.objects(Thermostat).upsert({
       properties: { id: "tstat:xyz", externalId: "device-xyz", name: "Tstat XYZ" },
     })
 
-    await pario.objects(Room).upsertLink({
+    await sixb.objects(Room).upsertLink({
       sourceId: "room:201",
       linkId: "hasThermostat",
       targetTypeId: "Thermostat",
@@ -573,7 +573,7 @@ describe("Pario runtime", () => {
     })
     expect(linksBefore).toHaveLength(1)
 
-    await pario.objects(Room).removeLink({
+    await sixb.objects(Room).removeLink({
       sourceId: "room:201",
       linkId: "hasThermostat",
       targetTypeId: "Thermostat",
@@ -603,18 +603,18 @@ describe("Pario runtime", () => {
       .run(async () => {})
 
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "bykey-action-test",
       ontology: [ActionType],
       actions: [reboot],
       ...runtimeDeps,
     })
 
-    await pario.objects(ActionType).upsert({
+    await sixb.objects(ActionType).upsert({
       properties: { id: "dev:1", name: "Device 1" },
     })
 
-    await pario
+    await sixb
       .objects(ActionType)
       .byId("dev:1")
       .requestAction({
@@ -622,7 +622,7 @@ describe("Pario runtime", () => {
         params: { force: true },
       })
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(events).toHaveLength(1)
@@ -635,36 +635,36 @@ describe("Pario runtime", () => {
 
   test("supports typed API and direct runtime access for server usage", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "server-api-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    expect(pario.id).toBe("server-api-test")
+    expect(sixb.id).toBe("server-api-test")
     expect(
-      pario
+      sixb
         .listObjectTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:900", externalId: "RM-900", name: "Lab 900" },
     })
 
-    await pario.objects(Thermostat).upsert({
+    await sixb.objects(Thermostat).upsert({
       properties: { id: "tstat:900", externalId: "TS-900", name: "Thermostat 900" },
     })
 
-    await pario.objects(Room).upsertLink({
+    await sixb.objects(Room).upsertLink({
       sourceId: "room:900",
       linkId: "hasThermostat",
       targetTypeId: "Thermostat",
       targetId: "tstat:900",
     })
 
-    await pario.objects(Room).appendTelemetryBatch([
+    await sixb.objects(Room).appendTelemetryBatch([
       {
         id: "room:900",
         properties: { currentTemperature: { value: 21.2, unit: "degreeCelsius" } },
@@ -672,13 +672,13 @@ describe("Pario runtime", () => {
       },
     ])
 
-    const room = await pario.objects(Room).get("room:900")
+    const room = await sixb.objects(Room).get("room:900")
     expect(room?.properties.currentTemperature).toBe(21.2)
 
-    const links = await pario.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
+    const links = await sixb.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
     expect(links).toHaveLength(1)
 
-    const latest = await pario.storage.timeseries.getLatest({
+    const latest = await sixb.storage.timeseries.getLatest({
       projectId: "server-api-test",
       objectTypeId: "Room",
       objectId: "room:900",
@@ -686,7 +686,7 @@ describe("Pario runtime", () => {
     })
     expect(latest?.value).toBe(21.2)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       topics: ["objects", "telemetry", "links"],
     })
     expect(events.length).toBeGreaterThanOrEqual(4)
@@ -719,9 +719,9 @@ describe("Pario runtime", () => {
 
     test("auto-discovers ValueTypes from ObjectType properties", async () => {
       // Pass only the ObjectType — no explicit OntologyDocumentInput
-      const pario = new Pario({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
-      const sensor = await pario.upsertObject("Sensor", {
+      const sensor = await sixb.upsertObject("Sensor", {
         id: "sensor:1",
         name: "Temp-1",
         reading: { value: 22.5, unit: "C" },
@@ -731,17 +731,17 @@ describe("Pario runtime", () => {
     })
 
     test("rejects values that do not conform to the ValueType schema", async () => {
-      const pario = new Pario({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        pario.upsertObject("Sensor", {
+        sixb.upsertObject("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        pario.upsertObject("Sensor", {
+        sixb.upsertObject("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: "hot", unit: "C" },
@@ -750,17 +750,17 @@ describe("Pario runtime", () => {
     })
 
     test("rejects enum values outside the allowed set", async () => {
-      const pario = new Pario({ ontology: [Sensor], ...createTestRuntimeDeps() })
+      const sixb = new Sixb({ ontology: [Sensor], ...createTestRuntimeDeps() })
 
       await expect(
-        pario.upsertObject("Sensor", {
+        sixb.upsertObject("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       await expect(
-        pario.upsertObject("Sensor", {
+        sixb.upsertObject("Sensor", {
           id: "sensor:bad",
           name: "Temp-bad",
           reading: { value: 22.5, unit: "Rankine" },
@@ -784,8 +784,8 @@ describe("Pario runtime", () => {
       })
 
       // Should not throw "Duplicate value type id"
-      const pario = new Pario({ ontology: [ontologyDoc], ...createTestRuntimeDeps() })
-      expect(pario.listObjectTypes()).toHaveLength(1)
+      const sixb = new Sixb({ ontology: [ontologyDoc], ...createTestRuntimeDeps() })
+      expect(sixb.listObjectTypes()).toHaveLength(1)
     })
 
     test("throws for valueTypeRef without _resolved and no explicit registration", () => {
@@ -799,17 +799,17 @@ describe("Pario runtime", () => {
         ],
       })
 
-      const pario = new Pario({ ontology: [Orphan], ...createTestRuntimeDeps() })
+      const sixb = new Sixb({ ontology: [Orphan], ...createTestRuntimeDeps() })
 
       expect(
-        pario.upsertObject("Orphan", {
+        sixb.upsertObject("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
         })
       ).rejects.toBeInstanceOf(OntologyValidationError)
       expect(
-        pario.upsertObject("Orphan", {
+        sixb.upsertObject("Orphan", {
           id: "orphan:1",
           name: "test",
           data: { foo: "bar" },
@@ -820,36 +820,36 @@ describe("Pario runtime", () => {
 
   test("supports id-based runtime APIs for server usage", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "server-api-test",
       ontology: [Room, Thermostat],
       ...runtimeDeps,
     })
 
-    expect(pario.id).toBe("server-api-test")
+    expect(sixb.id).toBe("server-api-test")
     expect(
-      pario
+      sixb
         .listObjectTypes()
         .map((objectType) => objectType.id)
         .sort()
     ).toEqual(["Room", "Thermostat"])
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:900", externalId: "RM-900", name: "Lab 900" },
     })
 
-    await pario.objects(Thermostat).upsert({
+    await sixb.objects(Thermostat).upsert({
       properties: { id: "tstat:900", externalId: "TS-900", name: "Thermostat 900" },
     })
 
-    await pario.objects(Room).upsertLink({
+    await sixb.objects(Room).upsertLink({
       sourceId: "room:900",
       linkId: "hasThermostat",
       targetTypeId: "Thermostat",
       targetId: "tstat:900",
     })
 
-    await pario.objects(Room).appendTelemetryBatch([
+    await sixb.objects(Room).appendTelemetryBatch([
       {
         id: "room:900",
         properties: { currentTemperature: { value: 21.2, unit: "degreeCelsius" } },
@@ -857,13 +857,13 @@ describe("Pario runtime", () => {
       },
     ])
 
-    const room = await pario.objects(Room).get("room:900")
+    const room = await sixb.objects(Room).get("room:900")
     expect(room?.properties.currentTemperature).toBe(21.2)
 
-    const links = await pario.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
+    const links = await sixb.objects(Room).byId("room:900").listLinks(Room.l.hasThermostat)
     expect(links).toHaveLength(1)
 
-    const latest = await pario.storage.timeseries.getLatest({
+    const latest = await sixb.storage.timeseries.getLatest({
       projectId: "server-api-test",
       objectTypeId: "Room",
       objectId: "room:900",
@@ -871,7 +871,7 @@ describe("Pario runtime", () => {
     })
     expect(latest?.value).toBe(21.2)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       topics: ["objects", "telemetry", "links"],
     })
     expect(events.length).toBeGreaterThanOrEqual(4)

@@ -1,4 +1,4 @@
-import { cn } from "@pario/ui/lib/utils"
+import { cn } from "@sixb/ui/lib/utils"
 
 interface TelemetryValueProps {
   value: number | string | boolean | null | undefined

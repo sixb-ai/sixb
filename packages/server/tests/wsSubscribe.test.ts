@@ -7,11 +7,11 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
-  type ParioOptions,
-} from "@pario/core"
+  Sixb,
+  type SixbOptions,
+} from "@sixb/core"
 import { parseSubscriptionMessage } from "../src/routes/ws"
-import { ParioServer } from "../src/server"
+import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const WORKFLOW_EVENT_TYPES = [
@@ -96,13 +96,13 @@ describe("parseSubscriptionMessage", () => {
 
 describe("/ws/events subscriptions", () => {
   test("streams after subscribe and keeps events emitted after open", async () => {
-    await withWsServer(async ({ baseUrl, pario }) => {
+    await withWsServer(async ({ baseUrl, sixb }) => {
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
 
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
 
-        const [stored] = await pario.events.append({
+        const [stored] = await sixb.events.append({
           events: [
             {
               type: "telemetry.appended",
@@ -147,22 +147,22 @@ describe("/ws/events subscriptions", () => {
   })
 })
 
-function createParioInstance<TOntologySources extends readonly OntologySource[]>(
-  options: ParioOptions<TOntologySources>
-): Pario<TOntologySources> {
-  const ParioConstructor = Pario as unknown as new (
-    options: ParioOptions<TOntologySources>
-  ) => Pario<TOntologySources>
+function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
+  options: SixbOptions<TOntologySources>
+): Sixb<TOntologySources> {
+  const SixbConstructor = Sixb as unknown as new (
+    options: SixbOptions<TOntologySources>
+  ) => Sixb<TOntologySources>
 
-  return new ParioConstructor(options)
+  return new SixbConstructor(options)
 }
 
 async function withWsServer(
-  run: (context: { baseUrl: string; pario: Pario<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>
 ): Promise<void> {
   const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
-  const pario = createParioInstance<readonly OntologySource[]>({
+  const sixb = createSixbInstance<readonly OntologySource[]>({
     id: "ws-test-project",
     ontology: [],
     broker: new InMemoryBroker(),
@@ -171,8 +171,8 @@ async function withWsServer(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
-  const server = new ParioServer({
-    pario,
+  const server = new SixbServer({
+    sixb,
     host: "127.0.0.1",
     port,
     quiet: true,
@@ -181,7 +181,7 @@ async function withWsServer(
 
   await server.start()
   try {
-    await run({ baseUrl, pario })
+    await run({ baseUrl, sixb })
   } finally {
     await server.stop()
   }

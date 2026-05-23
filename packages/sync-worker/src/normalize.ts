@@ -1,4 +1,4 @@
-import type { DatasetRow, SyncReadResult } from "@pario/core"
+import type { DatasetRow, SyncReadResult } from "@sixb/core"
 
 function isPlainObject(value: unknown): value is DatasetRow {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -33,7 +33,7 @@ function toAbortError(signal: AbortSignal): Error {
   const message =
     typeof signal.reason === "string" && signal.reason.length > 0
       ? signal.reason
-      : "[ParioSyncWorker] Operation was cancelled."
+      : "[SixbSyncWorker] Operation was cancelled."
 
   const error = new Error(message)
   error.name = "AbortError"
@@ -52,7 +52,7 @@ export function assertDatasetRow(value: unknown, syncId: string, itemIndex: numb
   }
 
   throw new Error(
-    `[ParioSyncWorker] Sync '${syncId}' returned an invalid row at item ${itemIndex}. Dataset rows must be plain objects.`
+    `[SixbSyncWorker] Sync '${syncId}' returned an invalid row at item ${itemIndex}. Dataset rows must be plain objects.`
   )
 }
 
@@ -78,6 +78,6 @@ export async function* normalizeReadResult(
   }
 
   throw new Error(
-    `[ParioSyncWorker] Sync '${syncId}' returned an unsupported read result. Expected a row object, iterable, or async iterable.`
+    `[SixbSyncWorker] Sync '${syncId}' returned an unsupported read result. Expected a row object, iterable, or async iterable.`
   )
 }

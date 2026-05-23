@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { dirname } from "node:path"
 import { fileURLToPath } from "node:url"
-import { createCustomApp } from "@pario/app"
+import { createCustomApp } from "@sixb/app"
 
 const acmeRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 

@@ -1,6 +1,6 @@
-# Contributing to Pario
+# Contributing to Sixb
 
-Pario uses a lightweight, proposal-first workflow for both human contributors and AI-assisted contributors.
+Sixb uses a lightweight, proposal-first workflow for both human contributors and AI-assisted contributors.
 
 The aim is simple:
 
@@ -48,9 +48,9 @@ Issue titles:
 
 Examples:
 
-- `Proposal: simplify createPario auto-discovery`
+- `Proposal: simplify createSixb auto-discovery`
 - `Proposal: add a clearer object action API`
-- `Task: add tests for createPario auto-discovery`
+- `Task: add tests for createSixb auto-discovery`
 - `Task: document action request examples`
 
 PR titles:
@@ -59,7 +59,7 @@ PR titles:
 
 Examples:
 
-- `core: simplify createPario auto-discovery`
+- `core: simplify createSixb auto-discovery`
 - `server: add tests for object action routes`
 - `docs: clarify proposal approval flow`
 
@@ -155,7 +155,7 @@ If an AI author is working inside the repository, it should also follow [AGENTS.
 
 ## Repository expectations
 
-Pario uses Bun, strict TypeScript, and Biome. Follow the repo guidance in [AGENTS.md](./AGENTS.md) and the nearest package.
+Sixb uses Bun, strict TypeScript, and Biome. Follow the repo guidance in [AGENTS.md](./AGENTS.md) and the nearest package.
 
 Before marking a PR ready for review, run the checks that match your change. Common commands are:
 

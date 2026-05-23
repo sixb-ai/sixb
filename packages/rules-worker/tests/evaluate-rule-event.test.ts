@@ -5,8 +5,8 @@ import type {
   StoredLinkRemovedEvent,
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
-} from "@pario/core"
-import { EventsRuntime, InMemoryBroker, InMemoryStorage } from "@pario/core"
+} from "@sixb/core"
+import { EventsRuntime, InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import {
   buildRuleDependencyIndex,
   evaluateRuleEvents,

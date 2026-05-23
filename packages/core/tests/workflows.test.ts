@@ -11,10 +11,10 @@ import {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
-  Pario,
   prop,
   RuntimeError,
   ref,
+  Sixb,
   stringEnum,
   validateWorkflowDefinition,
   type WorkflowDefinition,
@@ -411,7 +411,7 @@ describe("validateWorkflowDefinition", () => {
   })
 })
 
-describe("Pario workflow registration", () => {
+describe("Sixb workflow registration", () => {
   test("exposes registered workflow definitions and lookup by id", () => {
     const daily = defineSchedule("daily-reconciliation").cron("0 6 * * *")
     const workflow = defineWorkflow("reconcile-transaction")
@@ -427,7 +427,7 @@ describe("Pario workflow registration", () => {
         },
       }))
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Transaction, Invoice],
       actions: [attachInvoice],
       schedules: [daily],
@@ -435,9 +435,9 @@ describe("Pario workflow registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.workflows.list()).toEqual([workflow])
-    expect(pario.workflows.getById("reconcile-transaction")).toBe(workflow)
-    expect(pario.workflows.getById("missing-workflow")).toBeNull()
+    expect(sixb.workflows.list()).toEqual([workflow])
+    expect(sixb.workflows.getById("reconcile-transaction")).toBe(workflow)
+    expect(sixb.workflows.getById("missing-workflow")).toBeNull()
   })
 
   test("accepts workflows with intervention nodes during startup validation", () => {
@@ -448,13 +448,13 @@ describe("Pario workflow registration", () => {
       .then(findBestInvoice)
       .then(approveInvoiceMatch)
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Transaction, Invoice],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.workflows.getById("review-match")).toBe(workflow)
+    expect(sixb.workflows.getById("review-match")).toBe(workflow)
   })
 
   test("rejects duplicate workflow ids", () => {
@@ -471,14 +471,14 @@ describe("Pario workflow registration", () => {
     const workflows: readonly WorkflowDefinition[] = [first, second]
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows,
         ...createTestRuntimeDeps(),
       })
     }).toThrow(RuntimeError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows,
         ...createTestRuntimeDeps(),
@@ -496,14 +496,14 @@ describe("Pario workflow registration", () => {
     } satisfies WorkflowDefinition
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
@@ -521,14 +521,14 @@ describe("Pario workflow registration", () => {
       .then(findBestInvoice)
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
@@ -550,14 +550,14 @@ describe("Pario workflow registration", () => {
       }))
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Transaction, Invoice],
         workflows: [workflow],
         ...createTestRuntimeDeps(),

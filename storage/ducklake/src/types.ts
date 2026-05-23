@@ -2,13 +2,13 @@
  * DuckLake catalog connection settings.
  *
  * The catalog stores DuckLake metadata. Physical table data still lives under
- * `dataPath` and is managed by DuckLake, not by Pario sidecar tables.
+ * `dataPath` and is managed by DuckLake, not by Sixb sidecar tables.
  */
 export type DuckLakeCatalogOptions =
   | { readonly type: "duckdb"; readonly path: string }
   | { readonly type: "sqlite"; readonly path: string }
   | PostgresDuckLakeCatalogOptions
-  /** Escape hatch for DuckLake catalog URI forms Pario does not model yet. */
+  /** Escape hatch for DuckLake catalog URI forms Sixb does not model yet. */
   | {
       readonly type: "custom"
       readonly uri: string
@@ -122,7 +122,7 @@ export type DuckDbSecretOptions =
  * Public provider configuration for `new DuckLakeStorage(...)`.
  *
  * Defaults:
- * - `alias`: "pario_lake"
+ * - `alias`: "sixb_lake"
  * - `createIfNotExists`: true
  * - `readOnly`: false
  * - `duckdb.path`: ":memory:"

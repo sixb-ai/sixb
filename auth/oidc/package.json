@@ -1,5 +1,5 @@
 {
-  "name": "@pario/auth-oidc",
+  "name": "@sixb/auth-oidc",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,7 +13,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@pario/core": "workspace:*",
+    "@sixb/core": "workspace:*",
     "openid-client": "^6.8.4"
   },
   "devDependencies": {

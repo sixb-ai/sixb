@@ -1,4 +1,4 @@
-import type { DatasetColumnDefinition, Schema } from "@pario/core"
+import type { DatasetColumnDefinition, Schema } from "@sixb/core"
 import { isIntegerEnumSchema } from "./projection-schema"
 
 export type ProjectedValueCoercionResult =

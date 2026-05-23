@@ -6,8 +6,8 @@ import {
   defineObjectType,
   defineSchedule,
   defineSync,
-  Pario,
   prop,
+  Sixb,
   type SyncDefinition,
   type SyncReadContext,
   syncFinished,
@@ -202,23 +202,23 @@ describe("defineSync", () => {
   })
 })
 
-describe("Pario sync registration", () => {
+describe("Sixb sync registration", () => {
   test("exposes sync definitions and lookup by id", () => {
     const sync = defineSync("sync-orders")
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       datasets: [rawOrdersDataset],
       syncs: [sync],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getSyncDefinitions().map((definition) => definition.id)).toEqual(["sync-orders"])
-    expect(pario.getSyncById("sync-orders")).toBe(sync)
-    expect(pario.getSyncById("missing-sync")).toBeNull()
+    expect(sixb.getSyncDefinitions().map((definition) => definition.id)).toEqual(["sync-orders"])
+    expect(sixb.getSyncById("sync-orders")).toBe(sync)
+    expect(sixb.getSyncById("missing-sync")).toBeNull()
   })
 
   test("rejects duplicate sync ids", () => {
@@ -235,7 +235,7 @@ describe("Pario sync registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset, rawOrdersCopyDataset],
           syncs,

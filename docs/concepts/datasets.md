@@ -1,6 +1,6 @@
 # Dataset
 
-A dataset is Pario's definition for a table of rows.
+A dataset is Sixb's definition for a table of rows.
 
 It gives a table a stable id, a required schema, and optional metadata such as partitioning
 and description.
@@ -8,7 +8,7 @@ and description.
 Syncs write datasets. Pipelines read datasets and produce new datasets. Storage versions a
 dataset's contents over time.
 
-If ontology types are Pario's model for objects, datasets are Pario's model for tables and rows.
+If ontology types are Sixb's model for objects, datasets are Sixb's model for tables and rows.
 
 ## What It Is
 
@@ -24,7 +24,7 @@ That contract includes:
 The important idea is that you define this contract once, then reuse it everywhere that table
 appears.
 
-In Pario, datasets are always schema-first. A dataset is not just "some rows with a name". It
+In Sixb, datasets are always schema-first. A dataset is not just "some rows with a name". It
 is a named table with an explicit shape, and there is no schemaless dataset write path.
 
 ## What It Gives You
@@ -51,7 +51,7 @@ is a named table with an explicit shape, and there is no schemaless dataset writ
 File: `datasets/orders.ts`
 
 ```ts
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 
 export const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [
@@ -78,7 +78,7 @@ set of columns, derive the output schema from the parent dataset instead of rest
 column:
 
 ```ts
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import { rawProjectsDataset } from "./projects"
 
 export const activeProjectsDataset = defineDataset("erp.active_projects").derive(
@@ -118,7 +118,7 @@ Use `nullable: true` when a column may be `null` or omitted.
 ## Use datasets from syncs
 
 ```ts
-import { defineSync } from "@pario/core"
+import { defineSync } from "@sixb/core"
 import { erpDb } from "../connectors/erpDb"
 import { rawOrdersDataset } from "../datasets/orders"
 
@@ -134,7 +134,7 @@ against the same schema.
 ## Use datasets from pipelines
 
 ```ts
-import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@pario/core"
+import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@sixb/core"
 import { rawOrdersDataset } from "../datasets/orders"
 
 export const canonicalOrdersDataset = defineDataset("canonical.orders", {
@@ -180,15 +180,15 @@ your-project/
     syncOrders.ts
   pipelines/
     normalizeOrders.ts
-  pario.config.ts
+  sixb.config.ts
 ```
 
-`createPario()` scans `datasets/` and registers exported dataset definitions automatically.
+`createSixb()` scans `datasets/` and registers exported dataset definitions automatically.
 
 You can also register them explicitly with:
 
 ```ts
-createPario({
+createSixb({
   datasets: [rawOrdersDataset],
   // ...
 })
@@ -196,11 +196,11 @@ createPario({
 
 ## Runtime lookups
 
-Pario exposes dataset definitions through the runtime:
+Sixb exposes dataset definitions through the runtime:
 
 ```ts
-pario.getDatasetDefinitions()
-pario.getDatasetById("raw.erp.orders")
+sixb.getDatasetDefinitions()
+sixb.getDatasetById("raw.erp.orders")
 ```
 
 Startup rejects:

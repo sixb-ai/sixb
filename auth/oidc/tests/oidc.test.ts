@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAuthStorage } from "@pario/core"
+import { InMemoryAuthStorage } from "@sixb/core"
 import { OidcAuthError, type OidcClientAdapter, type OidcTokenResponse, oidc } from "../src"
 
 const projectId = "project-a"

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { CreateWorkflowInterventionInput } from "@pario/core"
-import { WorkflowInterventionError } from "@pario/core"
+import type { CreateWorkflowInterventionInput } from "@sixb/core"
+import { WorkflowInterventionError } from "@sixb/core"
 import { SqliteStorage, SqliteWorkflowInterventionStorage } from "../src"
 
 describe("SqliteWorkflowInterventionStorage", () => {

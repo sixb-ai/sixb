@@ -1,4 +1,4 @@
-import { cn } from "@pario/ui/lib/utils"
+import { cn } from "@sixb/ui/lib/utils"
 import { Progress as ProgressPrimitive } from "radix-ui"
 import type * as React from "react"
 

@@ -1,5 +1,5 @@
 {
-  "name": "@pario/sync-worker",
+  "name": "@sixb/sync-worker",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,10 +13,10 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@pario/core": "workspace:*"
+    "@sixb/core": "workspace:*"
   },
   "devDependencies": {
-    "@pario/lake-local": "workspace:*",
+    "@sixb/lake-local": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   }

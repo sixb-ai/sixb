@@ -7,7 +7,7 @@ import type {
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import type { SQL } from "bun"
 
 /**
@@ -56,7 +56,7 @@ function valuesJoin(
  * Stores object projections and links with full query support.
  * Uses JSONB for properties with GIN indexes for efficient `findFirst()` queries.
  *
- * Requires `search_path` to be set to the Pario schema on the connection.
+ * Requires `search_path` to be set to the Sixb schema on the connection.
  *
  * JSONB handling notes (Bun SQL specifics):
  * - Writes use `${JSON.stringify(v)}::text::jsonb`.  The `::text` forces the

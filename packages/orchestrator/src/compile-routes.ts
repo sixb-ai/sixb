@@ -1,4 +1,4 @@
-import type { DomainEvent, ProjectionDefinition, RunTrigger } from "@pario/core"
+import type { DomainEvent, ProjectionDefinition, RunTrigger } from "@sixb/core"
 import type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,

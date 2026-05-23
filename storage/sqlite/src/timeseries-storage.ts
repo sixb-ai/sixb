@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
-import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@pario/core"
+import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteTimeseriesStorageOptions {

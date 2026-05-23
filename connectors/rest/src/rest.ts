@@ -1,4 +1,4 @@
-import type { ConnectorContext } from "@pario/core"
+import type { ConnectorContext } from "@sixb/core"
 import type {
   RestClient,
   RestConnector,
@@ -234,7 +234,7 @@ function serializeBody(body: unknown, headers: Headers): BodyInit | undefined {
 
 function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
-    throw new Error(`[ParioRest] ${field} must not be empty.`)
+    throw new Error(`[SixbRest] ${field} must not be empty.`)
   }
 }
 

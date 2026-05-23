@@ -3,14 +3,14 @@ import { randomUUID } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import { SQL } from "bun"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
   test("uses a PostgreSQL catalog with a local data path", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-pg-local-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-local-"))
     const dataset = defineDataset(`raw.pg.local.${randomId()}`, {
       schema: [col("orderId", "string")],
     })
@@ -91,7 +91,7 @@ describe("DuckLakeStorage remote catalogs", () => {
   }, 60_000)
 
   test("allows two provider instances to commit to one PostgreSQL catalog", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-pg-shared-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-shared-"))
     const dataset = defineDataset(`raw.pg.shared.${randomId()}`, {
       schema: [col("orderId", "string")],
     })
@@ -126,11 +126,11 @@ describe("DuckLakeStorage remote catalogs", () => {
 
   test("operates within a constrained PostgreSQL catalog connection budget", async () => {
     const catalogConnectionBudget = 4
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-pg-budget-"))
-    const roleName = `pario_limited_${randomId()}`
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-budget-"))
+    const roleName = `sixb_limited_${randomId()}`
     const password = `pw_${randomId()}`
-    const metadataSchema = `pario_${randomId()}`
-    const applicationName = `pario_budget_${randomId()}`
+    const metadataSchema = `sixb_${randomId()}`
+    const applicationName = `sixb_budget_${randomId()}`
     const adminSql = createAdminSql()
     const dataset = defineDataset(`raw.pg.budget.${randomId()}`, {
       schema: [col("orderId", "string")],
@@ -140,7 +140,7 @@ describe("DuckLakeStorage remote catalogs", () => {
     })
     const catalog = postgresCatalog()
     if (catalog.type !== "postgres") {
-      throw new Error("[ParioDuckLake] Expected PostgreSQL catalog test configuration.")
+      throw new Error("[SixbDuckLake] Expected PostgreSQL catalog test configuration.")
     }
 
     const storage = new DuckLakeStorage({
@@ -329,22 +329,22 @@ describe("DuckLakeStorage remote catalogs", () => {
 function postgresCatalog(): DuckLakeStorageOptions["catalog"] {
   return {
     type: "postgres",
-    host: process.env.PARIO_DUCKLAKE_POSTGRES_HOST ?? "127.0.0.1",
-    port: Number(process.env.PARIO_DUCKLAKE_POSTGRES_PORT ?? "54331"),
-    database: process.env.PARIO_DUCKLAKE_POSTGRES_DATABASE ?? "postgres",
-    user: process.env.PARIO_DUCKLAKE_POSTGRES_USER ?? "postgres",
-    password: process.env.PARIO_DUCKLAKE_POSTGRES_PASSWORD ?? "test",
-    metadataSchema: `pario_${randomId()}`,
+    host: process.env.SIXB_DUCKLAKE_POSTGRES_HOST ?? "127.0.0.1",
+    port: Number(process.env.SIXB_DUCKLAKE_POSTGRES_PORT ?? "54331"),
+    database: process.env.SIXB_DUCKLAKE_POSTGRES_DATABASE ?? "postgres",
+    user: process.env.SIXB_DUCKLAKE_POSTGRES_USER ?? "postgres",
+    password: process.env.SIXB_DUCKLAKE_POSTGRES_PASSWORD ?? "test",
+    metadataSchema: `sixb_${randomId()}`,
   }
 }
 
 function minioSecret(): DuckDbSecretOptions {
   return {
     type: "s3",
-    keyId: process.env.PARIO_DUCKLAKE_S3_KEY_ID ?? "pario",
-    secret: process.env.PARIO_DUCKLAKE_S3_SECRET ?? "pario-secret",
+    keyId: process.env.SIXB_DUCKLAKE_S3_KEY_ID ?? "sixb",
+    secret: process.env.SIXB_DUCKLAKE_S3_SECRET ?? "sixb-secret",
     region: "us-east-1",
-    endpoint: process.env.PARIO_DUCKLAKE_S3_ENDPOINT ?? "127.0.0.1:19000",
+    endpoint: process.env.SIXB_DUCKLAKE_S3_ENDPOINT ?? "127.0.0.1:19000",
     urlStyle: "path",
     useSsl: false,
     scope: `s3://${s3Bucket()}`,
@@ -352,7 +352,7 @@ function minioSecret(): DuckDbSecretOptions {
 }
 
 function s3Bucket(): string {
-  return process.env.PARIO_DUCKLAKE_S3_BUCKET ?? "pario-ducklake"
+  return process.env.SIXB_DUCKLAKE_S3_BUCKET ?? "sixb-ducklake"
 }
 
 function randomId(): string {
@@ -361,12 +361,12 @@ function randomId(): string {
 
 function createAdminSql(): SQL {
   const url = new URL(
-    `postgres://${process.env.PARIO_DUCKLAKE_POSTGRES_HOST ?? "127.0.0.1"}:${
-      process.env.PARIO_DUCKLAKE_POSTGRES_PORT ?? "54331"
-    }/${process.env.PARIO_DUCKLAKE_POSTGRES_DATABASE ?? "postgres"}`
+    `postgres://${process.env.SIXB_DUCKLAKE_POSTGRES_HOST ?? "127.0.0.1"}:${
+      process.env.SIXB_DUCKLAKE_POSTGRES_PORT ?? "54331"
+    }/${process.env.SIXB_DUCKLAKE_POSTGRES_DATABASE ?? "postgres"}`
   )
-  url.username = process.env.PARIO_DUCKLAKE_POSTGRES_USER ?? "postgres"
-  url.password = process.env.PARIO_DUCKLAKE_POSTGRES_PASSWORD ?? "test"
+  url.username = process.env.SIXB_DUCKLAKE_POSTGRES_USER ?? "postgres"
+  url.password = process.env.SIXB_DUCKLAKE_POSTGRES_PASSWORD ?? "test"
 
   return new SQL({ url: url.toString(), max: 1 })
 }
@@ -391,7 +391,7 @@ async function expectCatalogConnectionsAtMost(
   }
 
   throw new Error(
-    `[ParioDuckLake] Expected at most ${maxConnections} PostgreSQL catalog connection(s) for role '${roleName}' ${step}, found ${connections.length}: ${JSON.stringify(
+    `[SixbDuckLake] Expected at most ${maxConnections} PostgreSQL catalog connection(s) for role '${roleName}' ${step}, found ${connections.length}: ${JSON.stringify(
       connections
     )}`
   )
@@ -429,7 +429,7 @@ async function runBudgetStep<T>(step: string, run: () => Promise<T>): Promise<T>
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(
-      `[ParioDuckLake] Constrained connection budget test failed during ${step}: ${message}`
+      `[SixbDuckLake] Constrained connection budget test failed during ${step}: ${message}`
     )
   }
 }

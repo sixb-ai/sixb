@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { readFile, rename, stat, writeFile } from "node:fs/promises"
-import { type DatasetRow, type DatasetVersion, LakeStorageError } from "@pario/core"
+import { type DatasetRow, type DatasetVersion, LakeStorageError } from "@sixb/core"
 import type { StoredDatasetVersionManifest, StoredManifestInput } from "./types"
 
 export function encodeSegment(value: string): string {

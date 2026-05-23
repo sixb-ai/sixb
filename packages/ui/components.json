@@ -11,10 +11,10 @@
   },
   "iconLibrary": "lucide",
   "aliases": {
-    "components": "@pario/ui/components",
-    "utils": "@pario/ui/lib/utils",
-    "hooks": "@pario/ui/hooks",
-    "lib": "@pario/ui/lib",
-    "ui": "@pario/ui/components/ui"
+    "components": "@sixb/ui/components",
+    "utils": "@sixb/ui/lib/utils",
+    "hooks": "@sixb/ui/hooks",
+    "lib": "@sixb/ui/lib",
+    "ui": "@sixb/ui/components/ui"
   }
 }

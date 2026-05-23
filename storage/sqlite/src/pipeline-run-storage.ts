@@ -15,8 +15,8 @@ import type {
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
-} from "@pario/core"
-import { PipelineRunError } from "@pario/core"
+} from "@sixb/core"
+import { PipelineRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -64,7 +64,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -74,7 +74,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new PipelineRunError(
-        `[ParioSqlite] Failed to load pipeline run '${input.id}' for project '${input.projectId}'.`
+        `[SixbSqlite] Failed to load pipeline run '${input.id}' for project '${input.projectId}'.`
       )
     }
 
@@ -89,13 +89,13 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbSqlite] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
@@ -140,19 +140,19 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
       if (!pipelineRun) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (pipelineRun.status !== "running") {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
+          `[SixbSqlite] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (pipelineRun.pipeline_id !== input.pipelineId) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
+          `[SixbSqlite] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
         )
       }
 
@@ -191,7 +191,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new PipelineRunError(
-            `[ParioSqlite] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbSqlite] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -204,7 +204,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
       if (!row) {
         throw new PipelineRunError(
-          `[ParioSqlite] Failed to load pipeline step run '${input.id}' for project '${input.projectId}'.`
+          `[SixbSqlite] Failed to load pipeline step run '${input.id}' for project '${input.projectId}'.`
         )
       }
 
@@ -222,19 +222,19 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbSqlite] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
         throw new PipelineRunError(
-          `[ParioSqlite] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          `[SixbSqlite] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
       }
 
@@ -439,7 +439,7 @@ function rowToPipelineStepRunRecord(row: PipelineStepRunDatabaseRow): PipelineSt
 function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
     throw new PipelineRunError(
-      `[ParioSqlite] Pipeline run ${fieldName} must be a non-negative integer.`
+      `[SixbSqlite] Pipeline run ${fieldName} must be a non-negative integer.`
     )
   }
 }

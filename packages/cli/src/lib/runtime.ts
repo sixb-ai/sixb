@@ -1,17 +1,17 @@
 import { appendFileSync } from "node:fs"
-import { ActionWorker } from "@pario/action-worker"
-import { assertLakeDatasetDefinitionsCompatible, migrateStorage } from "@pario/core"
+import { ActionWorker } from "@sixb/action-worker"
+import { assertLakeDatasetDefinitionsCompatible, migrateStorage } from "@sixb/core"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,
   OrchestratorWorker,
-} from "@pario/orchestrator"
-import { PipelineWorker } from "@pario/pipeline-worker"
-import { ProjectionWorker } from "@pario/projection-worker"
-import { RulesWorker } from "@pario/rules-worker"
-import { SyncWorker } from "@pario/sync-worker"
-import { WorkflowWorker } from "@pario/workflow-worker"
-import type { LoadedPario } from "./loadPario"
+} from "@sixb/orchestrator"
+import { PipelineWorker } from "@sixb/pipeline-worker"
+import { ProjectionWorker } from "@sixb/projection-worker"
+import { RulesWorker } from "@sixb/rules-worker"
+import { SyncWorker } from "@sixb/sync-worker"
+import { WorkflowWorker } from "@sixb/workflow-worker"
+import type { LoadedSixb } from "./loadSixb"
 
 export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | null): Promise<void> {
   if (!stopFn) return
@@ -24,7 +24,7 @@ async function closeProvider(provider: unknown): Promise<void> {
   await close.call(provider)
 }
 
-export interface RunningParioRuntime {
+export interface RunningSixbRuntime {
   readonly rulesWorker: RulesWorker | null
   readonly syncWorker: SyncWorker | null
   readonly actionWorker: ActionWorker | null
@@ -36,7 +36,7 @@ export interface RunningParioRuntime {
   stop(): Promise<void>
 }
 
-export interface StartParioRuntimeOptions {
+export interface StartSixbRuntimeOptions {
   readonly cohostWorkers?: boolean
 }
 
@@ -59,31 +59,31 @@ export interface RunningOrchestratorRuntime {
   stop(): Promise<void>
 }
 
-export async function migrateRuntimeStorage(pario: LoadedPario): Promise<void> {
-  await migrateStorage(pario.storage)
+export async function migrateRuntimeStorage(sixb: LoadedSixb): Promise<void> {
+  await migrateStorage(sixb.storage)
 }
 
-export async function checkRuntimeLakeDefinitions(pario: LoadedPario): Promise<void> {
+export async function checkRuntimeLakeDefinitions(sixb: LoadedSixb): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
-    lakeStorage: pario.lakeStorage,
-    definitions: pario.getDatasetDefinitions(),
+    lakeStorage: sixb.lakeStorage,
+    definitions: sixb.getDatasetDefinitions(),
   })
 }
 
-export async function stopParioProviders(pario: LoadedPario): Promise<void> {
-  await stopQuietly(() => pario.disconnectConnectors())
-  await stopQuietly(() => closeProvider(pario.queues))
-  await stopQuietly(() => closeProvider(pario.storage))
-  await stopQuietly(() => closeProvider(pario.lakeStorage))
-  await stopQuietly(() => closeProvider(pario.blobStorage))
-  await stopQuietly(() => pario.closeBroker())
+export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
+  await stopQuietly(() => sixb.disconnectConnectors())
+  await stopQuietly(() => closeProvider(sixb.queues))
+  await stopQuietly(() => closeProvider(sixb.storage))
+  await stopQuietly(() => closeProvider(sixb.lakeStorage))
+  await stopQuietly(() => closeProvider(sixb.blobStorage))
+  await stopQuietly(() => sixb.closeBroker())
 }
 
-export async function startRulesRuntime(pario: LoadedPario): Promise<RunningRulesRuntime> {
+export async function startRulesRuntime(sixb: LoadedSixb): Promise<RunningRulesRuntime> {
   let rulesWorker: RulesWorker | null = null
 
-  if (pario.getRuleDefinitions().length > 0) {
-    rulesWorker = new RulesWorker(pario)
+  if (sixb.getRuleDefinitions().length > 0) {
+    rulesWorker = new RulesWorker(sixb)
     await rulesWorker.start()
   }
 
@@ -95,43 +95,43 @@ export async function startRulesRuntime(pario: LoadedPario): Promise<RunningRule
   }
 }
 
-export async function startFunctionsRuntime(pario: LoadedPario): Promise<RunningFunctionsRuntime> {
-  await pario.startFunctions()
+export async function startFunctionsRuntime(sixb: LoadedSixb): Promise<RunningFunctionsRuntime> {
+  await sixb.startFunctions()
 
   return {
     async stop() {
-      await stopQuietly(() => pario.stopFunctions())
+      await stopQuietly(() => sixb.stopFunctions())
     },
   }
 }
 
-export async function startSchedulerRuntime(pario: LoadedPario): Promise<RunningSchedulerRuntime> {
-  await pario.startScheduler()
+export async function startSchedulerRuntime(sixb: LoadedSixb): Promise<RunningSchedulerRuntime> {
+  await sixb.startScheduler()
 
   return {
     async stop() {
-      await stopQuietly(() => pario.stopScheduler())
+      await stopQuietly(() => sixb.stopScheduler())
     },
   }
 }
 
 export async function startOrchestratorRuntime(
-  pario: LoadedPario
+  sixb: LoadedSixb
 ): Promise<RunningOrchestratorRuntime> {
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
-    syncs: pario.getSyncDefinitions(),
-    pipelines: pario.getPipelineDefinitions(),
-    projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
-    workflows: pario.workflows.list(),
+    syncs: sixb.getSyncDefinitions(),
+    pipelines: sixb.getPipelineDefinitions(),
+    projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
+    workflows: sixb.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
 
   if (routes.size > 0) {
     orchestratorWorker = new OrchestratorWorker({
-      projectId: pario.id,
-      events: pario.events,
-      queues: pario.queues,
+      projectId: sixb.id,
+      events: sixb.events,
+      queues: sixb.queues,
       routes,
     })
     await orchestratorWorker.start()
@@ -172,12 +172,12 @@ export async function startOrchestratorRuntime(
  *   9. RulesWorker (drains pending evaluations)
  *   10. Runtime providers (connectors, broker)
  */
-export async function startParioRuntime(
-  pario: LoadedPario,
-  options: StartParioRuntimeOptions = {}
-): Promise<RunningParioRuntime> {
-  await migrateRuntimeStorage(pario)
-  await checkRuntimeLakeDefinitions(pario)
+export async function startSixbRuntime(
+  sixb: LoadedSixb,
+  options: StartSixbRuntimeOptions = {}
+): Promise<RunningSixbRuntime> {
+  await migrateRuntimeStorage(sixb)
+  await checkRuntimeLakeDefinitions(sixb)
 
   let rulesRuntime: RunningRulesRuntime | null = null
   let functionsRuntime: RunningFunctionsRuntime | null = null
@@ -202,48 +202,47 @@ export async function startParioRuntime(
     await stopQuietly(() => actionWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => functionsRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => rulesRuntime?.stop() ?? Promise.resolve())
-    await stopParioProviders(pario)
+    await stopSixbProviders(sixb)
   }
 
   try {
-    rulesRuntime = await startRulesRuntime(pario)
+    rulesRuntime = await startRulesRuntime(sixb)
     rulesWorker = rulesRuntime.rulesWorker
 
-    functionsRuntime = await startFunctionsRuntime(pario)
+    functionsRuntime = await startFunctionsRuntime(sixb)
 
     if (options.cohostWorkers) {
-      if (pario.getActionDefinitions().length > 0) {
-        actionWorker = new ActionWorker(pario)
+      if (sixb.getActionDefinitions().length > 0) {
+        actionWorker = new ActionWorker(sixb)
         await actionWorker.start()
       }
 
-      const projectionCount =
-        pario.getObjectProjections().length + pario.getLinkProjections().length
+      const projectionCount = sixb.getObjectProjections().length + sixb.getLinkProjections().length
       if (projectionCount > 0) {
-        projectionWorker = new ProjectionWorker(pario)
+        projectionWorker = new ProjectionWorker(sixb)
         await projectionWorker.start()
       }
 
-      if (pario.getPipelineDefinitions().length > 0) {
-        pipelineWorker = new PipelineWorker(pario)
+      if (sixb.getPipelineDefinitions().length > 0) {
+        pipelineWorker = new PipelineWorker(sixb)
         await pipelineWorker.start()
       }
 
-      if (pario.workflows.list().length > 0) {
-        workflowWorker = new WorkflowWorker(pario)
+      if (sixb.workflows.list().length > 0) {
+        workflowWorker = new WorkflowWorker(sixb)
         await workflowWorker.start()
       }
 
-      if (pario.getSyncDefinitions().length > 0) {
-        syncWorker = new SyncWorker(pario)
+      if (sixb.getSyncDefinitions().length > 0) {
+        syncWorker = new SyncWorker(sixb)
         await syncWorker.start()
       }
 
-      orchestratorRuntime = await startOrchestratorRuntime(pario)
+      orchestratorRuntime = await startOrchestratorRuntime(sixb)
       orchestratorWorker = orchestratorRuntime.orchestratorWorker
       warnings.push(...orchestratorRuntime.warnings)
 
-      schedulerRuntime = await startSchedulerRuntime(pario)
+      schedulerRuntime = await startSchedulerRuntime(sixb)
     }
   } catch (error) {
     await stop()
@@ -266,7 +265,7 @@ export async function startParioRuntime(
 function formatRouteDiagnosticWarning(diagnostic: CompileRoutesDiagnostic): string {
   switch (diagnostic.type) {
     case "workflow.schedule.input-required":
-      return `[Pario] Workflow '${diagnostic.workflowId}' is scheduled but has non-empty input (${diagnostic.inputFields.join(", ")}); it was not auto-routed.`
+      return `[Sixb] Workflow '${diagnostic.workflowId}' is scheduled but has non-empty input (${diagnostic.inputFields.join(", ")}); it was not auto-routed.`
   }
 }
 
@@ -275,7 +274,7 @@ export async function runUntilSignal(onShutdown: () => Promise<void>): Promise<v
   // starting by watching for this marker. It avoids depending on Ink's rendered
   // output, which is suppressed when stdout is not a TTY (e.g. under CI). Unset in
   // production, so this is a no-op there.
-  const readyLog = process.env.PARIO_CLI_TEST_READY_LOG
+  const readyLog = process.env.SIXB_CLI_TEST_READY_LOG
   if (readyLog) {
     appendFileSync(readyLog, `${JSON.stringify({ type: "role:ready" })}\n`, "utf-8")
   }

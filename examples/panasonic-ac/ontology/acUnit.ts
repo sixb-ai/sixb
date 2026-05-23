@@ -1,4 +1,4 @@
-import { defineObjectType, prop } from "@pario/core"
+import { defineObjectType, prop } from "@sixb/core"
 
 export function acUnitKeyFromName(name: string): string {
   const normalized = name

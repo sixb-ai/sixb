@@ -1,14 +1,14 @@
-import { defineFunction } from "@pario/core"
+import { defineFunction } from "@sixb/core"
 import { TEMPERATURE_UNAVAILABLE } from "../lib/panasonic/schema"
 import { getPanasonicApi } from "../lib/panasonicApi"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
 export const pollPanasonicState = defineFunction("poll-panasonic-state")
   .cron("* * * * *")
-  .run(async ({ pario }) => {
-    const api = await getPanasonicApi(pario)
+  .run(async ({ sixb }) => {
+    const api = await getPanasonicApi(sixb)
 
-    const { objects } = await pario.objects(PanasonicAcUnit).list({
+    const { objects } = await sixb.objects(PanasonicAcUnit).list({
       limit: 200,
       orderBy: "updatedAt",
       order: "desc",
@@ -51,12 +51,12 @@ export const pollPanasonicState = defineFunction("poll-panasonic-state")
           }
         }
 
-        await pario.appendTelemetry(PanasonicAcUnit.id, [
+        await sixb.appendTelemetry(PanasonicAcUnit.id, [
           { id: object.primaryId, properties: telemetry, at: now },
         ])
       } catch (error) {
         console.error(
-          `[Pario] Failed to poll Panasonic AC ${object.primaryId}:`,
+          `[Sixb] Failed to poll Panasonic AC ${object.primaryId}:`,
           error instanceof Error ? error.message : String(error)
         )
       }

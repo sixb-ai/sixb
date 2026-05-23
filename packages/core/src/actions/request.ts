@@ -8,7 +8,7 @@ import {
 import { requireObject } from "../objects/helpers"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import type { ParioRuntimeContext } from "../runtime/types"
+import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   ActionDefinition,
   ActionSubject,
@@ -51,7 +51,7 @@ const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
 function createActionRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new OntologyValidationError("[Pario] Action run id must not be empty")
+      throw new OntologyValidationError("[Sixb] Action run id must not be empty")
     }
     return runId
   }
@@ -65,7 +65,7 @@ function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
   }
 }
 
-function getActionDefinition(runtime: ParioRuntimeContext, actionId: string): ActionDefinition {
+function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): ActionDefinition {
   const action = runtime.actionRegistry.getById(actionId)
   if (!action) {
     throw new OntologyValidationError(`Unknown action '${actionId}'`)
@@ -87,7 +87,7 @@ function toActionTargetObject(
 }
 
 async function loadActionTarget(params: {
-  readonly runtime: ParioRuntimeContext
+  readonly runtime: SixbRuntimeContext
   readonly action: ObjectActionDefinition
   readonly objectType: ObjectTypeWithPropertyTokens
   readonly subject: Extract<ActionSubject, { kind: "object" }>
@@ -112,7 +112,7 @@ function isTerminalActionEvent(
 }
 
 export async function requestAction(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   input: RequestActionInput
 ): Promise<{ runId: string }> {
   const action = getActionDefinition(runtime, input.actionId)
@@ -172,7 +172,7 @@ export async function requestAction(
 }
 
 export async function requestActionAndWait(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   input: RequestActionAndWaitInput
 ): Promise<{ runId: string }> {
   const runId = createActionRunId(input.runId)

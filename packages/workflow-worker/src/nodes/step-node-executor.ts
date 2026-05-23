@@ -1,10 +1,10 @@
-import type { WorkflowStepNodeDefinition } from "@pario/core"
+import type { WorkflowStepNodeDefinition } from "@sixb/core"
 import {
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
-} from "@pario/core"
+} from "@sixb/core"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
@@ -57,7 +57,7 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
     context.markSideEffectBoundaryPassed()
     const rawOutput = await node.step.handler({
       input: stepInput,
-      pario: context.runtime.pario,
+      sixb: context.runtime.sixb,
     })
     throwIfAborted(context.signal)
 

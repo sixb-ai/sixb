@@ -12,7 +12,7 @@ export function registerWebhooks(connectors: readonly ConnectorDefinition[]): {
     const webhooks = connector.adapter.webhooks ?? []
     if (!Array.isArray(webhooks)) {
       throw new WebhookValidationError(
-        `[Pario] Connector '${connector.id}' webhooks must be an array when provided.`
+        `[Sixb] Connector '${connector.id}' webhooks must be an array when provided.`
       )
     }
 
@@ -22,7 +22,7 @@ export function registerWebhooks(connectors: readonly ConnectorDefinition[]): {
 
       if (ids.has(webhook.id)) {
         throw new WebhookValidationError(
-          `[Pario] Duplicate webhook id '${webhook.id}' for connector '${connector.id}'.`
+          `[Sixb] Duplicate webhook id '${webhook.id}' for connector '${connector.id}'.`
         )
       }
       ids.add(webhook.id)
@@ -31,7 +31,7 @@ export function registerWebhooks(connectors: readonly ConnectorDefinition[]): {
       const duplicate = routes.get(route)
       if (duplicate) {
         throw new WebhookValidationError(
-          `[Pario] Duplicate webhook route '${route}' for connectors '${duplicate.connector.id}' and '${connector.id}'.`
+          `[Sixb] Duplicate webhook route '${route}' for connectors '${duplicate.connector.id}' and '${connector.id}'.`
         )
       }
 
@@ -60,30 +60,30 @@ function assertValidWebhook(
   webhook: unknown
 ): asserts webhook is WebhookDefinition {
   if (!isRecord(webhook)) {
-    throw new WebhookValidationError(`[Pario] Connector '${connectorId}' has an invalid webhook.`)
+    throw new WebhookValidationError(`[Sixb] Connector '${connectorId}' has an invalid webhook.`)
   }
 
   if (webhook.kind !== "webhook") {
     throw new WebhookValidationError(
-      `[Pario] Connector '${connectorId}' webhook must be created with defineWebhook(...).`
+      `[Sixb] Connector '${connectorId}' webhook must be created with defineWebhook(...).`
     )
   }
 
   if (typeof webhook.id !== "string" || !webhook.id.trim()) {
     throw new WebhookValidationError(
-      `[Pario] Connector '${connectorId}' webhook id must not be empty.`
+      `[Sixb] Connector '${connectorId}' webhook id must not be empty.`
     )
   }
 
   if (webhook.method !== "POST") {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' must use method POST.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' must use method POST.`
     )
   }
 
   if (!isRecord(webhook.body)) {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' body is required.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' body is required.`
     )
   }
 
@@ -93,31 +93,31 @@ function assertValidWebhook(
     webhook.body.format !== "raw"
   ) {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' body format must be json, text, or raw.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' body format must be json, text, or raw.`
     )
   }
 
   if (typeof webhook.body.parse !== "function") {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' body parser must provide parse(value).`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' body parser must provide parse(value).`
     )
   }
 
   if (webhook.verify !== undefined && typeof webhook.verify !== "function") {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' verify must be a function.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' verify must be a function.`
     )
   }
 
   if (webhook.idempotencyKey !== undefined && typeof webhook.idempotencyKey !== "function") {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' idempotencyKey must be a function.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' idempotencyKey must be a function.`
     )
   }
 
   if (typeof webhook.handle !== "function") {
     throw new WebhookValidationError(
-      `[Pario] Webhook '${connectorId}/${webhook.id}' handle must be a function.`
+      `[Sixb] Webhook '${connectorId}/${webhook.id}' handle must be a function.`
     )
   }
 }

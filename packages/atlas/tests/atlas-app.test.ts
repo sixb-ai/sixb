@@ -32,7 +32,7 @@ async function getFreePort(): Promise<number> {
 
 describe("createAtlasApp", () => {
   beforeAll(async () => {
-    assetsRoot = await mkdtemp(join(tmpdir(), "pario-atlas-assets-"))
+    assetsRoot = await mkdtemp(join(tmpdir(), "sixb-atlas-assets-"))
     assetsOutdir = join(assetsRoot, "atlas")
     await buildAtlasAssets({ outdir: assetsOutdir })
   })
@@ -73,8 +73,8 @@ describe("createAtlasApp", () => {
 
       expect(html).toContain('"api":{"baseUrl":"http://api.localhost"}')
       expect(html).toContain('"auth":{"audience":"atlas","enabled":true}')
-      expect(scriptPath).toMatch(/^\/__pario\/main-[^.]+\.js$/)
-      expect(stylesheetPath).toMatch(/^\/__pario\/main-[^.]+\.css$/)
+      expect(scriptPath).toMatch(/^\/__sixb\/main-[^.]+\.js$/)
+      expect(stylesheetPath).toMatch(/^\/__sixb\/main-[^.]+\.css$/)
       expect(html).toContain('<div id="root"></div>')
       expect(dottedRouteHtml).toContain('<div id="root"></div>')
 
@@ -86,7 +86,7 @@ describe("createAtlasApp", () => {
         )
       }
 
-      const stableAssetResponse = await fetch(`${baseUrl}/__pario/main.js`)
+      const stableAssetResponse = await fetch(`${baseUrl}/__sixb/main.js`)
       expect(stableAssetResponse.status).toBe(404)
     } finally {
       await server.stop()
@@ -134,7 +134,7 @@ describe("createAtlasApp", () => {
       const rootResponse = await fetch(`${baseUrl}/`)
       const routeResponse = await fetch(`${baseUrl}/devices`)
       const faviconResponse = await fetch(`${baseUrl}/favicon.svg`)
-      const runtimeResponse = await fetch(`${baseUrl}/__pario/runtime.json`)
+      const runtimeResponse = await fetch(`${baseUrl}/__sixb/runtime.json`)
       const apiResponse = await fetch(`${baseUrl}/api/project`)
 
       expect(rootResponse.status).toBe(200)
@@ -151,7 +151,7 @@ describe("createAtlasApp", () => {
     }
   })
 
-  test("does not serve Pario API-owned routes from the Atlas origin", async () => {
+  test("does not serve Sixb API-owned routes from the Atlas origin", async () => {
     const port = await getFreePort()
     const atlas = createAtlasApp({
       apiBaseUrl: "http://api.localhost",
@@ -189,7 +189,7 @@ describe("createAtlasApp", () => {
         development: false,
         outdir: join(assetsRoot, "missing"),
       })
-    ).rejects.toThrow("Run `pario build`")
+    ).rejects.toThrow("Run `sixb build`")
   })
 })
 

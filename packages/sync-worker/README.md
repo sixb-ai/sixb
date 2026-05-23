@@ -1,6 +1,6 @@
-# @pario/sync-worker
+# @sixb/sync-worker
 
-Queue worker helpers for running Pario sync jobs.
+Queue worker helpers for running Sixb sync jobs.
 
 The sync worker turns one queued sync job into one sync run record and one lake dataset
 version. It is intentionally small: queue polling, retries, scheduling, and run-id
@@ -18,17 +18,17 @@ generation belong to the caller.
 ## Usage
 
 ```ts
-import { runSyncJob, type SyncWorkerContext } from "@pario/sync-worker"
+import { runSyncJob, type SyncWorkerContext } from "@sixb/sync-worker"
 
 const runtime: SyncWorkerContext = {
-  id: pario.id,
+  id: sixb.id,
   syncRunsStorage,
   lakeStorage,
   getSyncById(syncId) {
-    return pario.getSyncById(syncId)
+    return sixb.getSyncById(syncId)
   },
   connector(definition) {
-    return pario.connector(definition)
+    return sixb.connector(definition)
   },
 }
 
@@ -53,7 +53,7 @@ row count, and committed `DatasetVersion`.
 - `job.expectedLatestVersionId` is forwarded to the lake commit for optimistic
   concurrency checks.
 - a failed sync-run finalization after a successful lake commit throws a
-  `[ParioSyncWorker]` bookkeeping error so the durable dataset version can be
+  `[SixbSyncWorker]` bookkeeping error so the durable dataset version can be
   repaired or reconciled.
 - supported sync read results are a single row object, an iterable, or an async
   iterable.
@@ -61,7 +61,7 @@ row count, and committed `DatasetVersion`.
 ## Development
 
 ```bash
-bun --filter @pario/sync-worker typecheck
+bun --filter @sixb/sync-worker typecheck
 bun test packages/sync-worker/tests/run-sync-job.test.ts
-bun --filter @pario/sync-worker build
+bun --filter @sixb/sync-worker build
 ```

@@ -24,7 +24,7 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
       throw new WebhookRunError(
-        `[Pario] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -104,12 +104,12 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
   private requireRunningWebhookRun(projectId: string, id: string): WebhookRunRecord {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
-      throw new WebhookRunError(`[Pario] Webhook run '${id}' not found for project '${projectId}'.`)
+      throw new WebhookRunError(`[Sixb] Webhook run '${id}' not found for project '${projectId}'.`)
     }
 
     if (record.status !== "running") {
       throw new WebhookRunError(
-        `[Pario] Webhook run '${id}' for project '${projectId}' is already terminal.`
+        `[Sixb] Webhook run '${id}' for project '${projectId}' is already terminal.`
       )
     }
 

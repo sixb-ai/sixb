@@ -1,4 +1,4 @@
-import { defineObjectType, prop } from "@pario/core"
+import { defineObjectType, prop } from "@sixb/core"
 
 export const Counter = defineObjectType({
   id: "Counter",

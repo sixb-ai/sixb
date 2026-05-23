@@ -6,7 +6,7 @@ import {
   defineProjection,
   OntologyRegistry,
   prop,
-} from "@pario/core"
+} from "@sixb/core"
 import { buildObjectProjectionPlan, projectObjectRow } from "../src/object-projection-plan"
 
 describe("object projection plan", () => {

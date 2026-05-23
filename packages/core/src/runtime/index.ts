@@ -29,11 +29,11 @@ export type { SyncDefinition } from "../syncs"
 export { SyncValidationError } from "../syncs"
 export type { RegisteredWebhook } from "../webhooks"
 export { WebhookValidationError } from "../webhooks"
-export type { CreateParioOptions } from "./create"
-export { createPario } from "./create"
+export type { CreateSixbOptions } from "./create"
+export { createSixb } from "./create"
 export { RuntimeError } from "./errors"
-export type { ParioOptions } from "./pario"
-export { Pario } from "./pario"
+export type { SixbOptions } from "./sixb"
+export { Sixb } from "./sixb"
 export type {
   BatchItemResult,
   ListResult,
@@ -43,10 +43,10 @@ export type {
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
-  ParioInstance,
-  ParioRuntimeContext,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SixbInstance,
+  SixbRuntimeContext,
   TelemetryAppender,
   TelemetryAppendInput,
   TelemetryPropertyToken,

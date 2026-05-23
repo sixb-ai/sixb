@@ -7,20 +7,20 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
-  type ParioOptions,
-} from "@pario/core"
-import { ParioServer } from "../src/server"
+  Sixb,
+  type SixbOptions,
+} from "@sixb/core"
+import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createParioInstance<TOntologySources extends readonly OntologySource[]>(
-  options: ParioOptions<TOntologySources>
-): Pario<TOntologySources> {
-  const ParioConstructor = Pario as unknown as new (
-    options: ParioOptions<TOntologySources>
-  ) => Pario<TOntologySources>
+function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
+  options: SixbOptions<TOntologySources>
+): Sixb<TOntologySources> {
+  const SixbConstructor = Sixb as unknown as new (
+    options: SixbOptions<TOntologySources>
+  ) => Sixb<TOntologySources>
 
-  return new ParioConstructor(options)
+  return new SixbConstructor(options)
 }
 
 async function getFreePort(): Promise<number> {
@@ -96,14 +96,14 @@ async function waitForWsMessages(
   })
 }
 
-describe("ParioServer API serving", () => {
+describe("SixbServer API serving", () => {
   async function withUnifiedServer(
     run: (context: { baseUrl: string }) => Promise<void>
   ): Promise<void> {
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
 
-    const pario = createParioInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance<readonly OntologySource[]>({
       id: "test-project",
       ontology: [],
       broker: new InMemoryBroker(),
@@ -113,7 +113,7 @@ describe("ParioServer API serving", () => {
       queues: new InMemoryQueues(),
     })
 
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "telemetry.appended",
@@ -129,8 +129,8 @@ describe("ParioServer API serving", () => {
       ],
     })
 
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,

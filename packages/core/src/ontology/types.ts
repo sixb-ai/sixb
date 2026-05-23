@@ -1,7 +1,7 @@
 /**
  * Core schema language for ontology modeling.
  *
- * In Pario, an Object Type ontology is built from:
+ * In Sixb, an Object Type ontology is built from:
  * - scalar values (for simple facts),
  * - structured values (for nested records), and
  * - links (for relationships between object types).
@@ -288,7 +288,7 @@ export interface Interface {
 /**
  * Canonical ontology node for a real-world asset, system, concept, or process.
  *
- * `ObjectType` is the primary modeling unit in Pario ontology design.
+ * `ObjectType` is the primary modeling unit in Sixb ontology design.
  * It combines:
  * - `properties` for intrinsic attributes,
  * - `links` for relationships,

@@ -1,16 +1,16 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Pario API",
+    "title": "Sixb API",
     "description": "Ontology-first digital twins runtime API",
     "version": "0.1.0"
   },
   "components": {
     "securitySchemes": {
-      "parioCsrf": {
+      "sixbCsrf": {
         "type": "apiKey",
         "in": "header",
-        "name": "x-pario-csrf",
+        "name": "x-sixb-csrf",
         "description": "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session."
       }
     },
@@ -177,7 +177,7 @@
         "operationId": "signOut",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "responses": {
@@ -225,7 +225,7 @@
         "operationId": "createAuthInvitation",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -819,7 +819,7 @@
         "operationId": "revokeAuthInvitation",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -2895,7 +2895,7 @@
         "operationId": "requestSyncRun",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -4125,7 +4125,7 @@
         "operationId": "requestPipelineRun",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -5026,7 +5026,7 @@
         "operationId": "submitWorkflowIntervention",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -5300,7 +5300,7 @@
         "operationId": "cancelWorkflowIntervention",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -5897,7 +5897,7 @@
         "operationId": "requestWorkflowRun",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -7885,7 +7885,7 @@
         "operationId": "upsertObject",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -8232,7 +8232,7 @@
         "operationId": "requestAction",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -8584,7 +8584,7 @@
         "operationId": "upsertObjectLink",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -8744,7 +8744,7 @@
         "operationId": "removeObjectLink",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -8856,7 +8856,7 @@
         "operationId": "appendTelemetry",
         "security": [
           {
-            "parioCsrf": []
+            "sixbCsrf": []
           }
         ],
         "parameters": [

@@ -9,7 +9,7 @@ import type {
   PipelineStepRunRecord,
   Queues,
   Storage,
-} from "@pario/core"
+} from "@sixb/core"
 
 export interface PipelineWorkerContext {
   readonly id: string
@@ -19,7 +19,7 @@ export interface PipelineWorkerContext {
   getPipelineById(pipelineId: string): PipelineDefinition | null
 }
 
-export interface PipelineWorkerPario {
+export interface PipelineWorkerSixb {
   readonly id: string
   readonly events?: EventsRuntime
   readonly lakeStorage: LakeStorage

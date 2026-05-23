@@ -1,4 +1,4 @@
-const recentAssetsPrefix = "pario:recent-assets:"
+const recentAssetsPrefix = "sixb:recent-assets:"
 
 function readStringArray(key: string): string[] {
   if (typeof window === "undefined") return []
@@ -36,9 +36,9 @@ export function getRecentObjectIds(projectName: string, limit = 5): string[] {
   return readStringArray(recentsKey(projectName)).slice(0, limit)
 }
 
-const viewStyleKey = "pario:asset-view-style"
-const objectSortKey = "pario:object-sort"
-const collectionViewStylePrefix = "pario:collection-view-style:"
+const viewStyleKey = "sixb:asset-view-style"
+const objectSortKey = "sixb:object-sort"
+const collectionViewStylePrefix = "sixb:collection-view-style:"
 
 export type ObjectSortPreference = "primaryId" | "updatedAt"
 

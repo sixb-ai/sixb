@@ -6,7 +6,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { ArrowRight } from "lucide-react"
 import { Link } from "react-router-dom"
 import {

@@ -1,5 +1,5 @@
-import { client, type ProjectInfo } from "@pario/client"
-import { getAuthSessionOptions, signOutMutation } from "@pario/client/hooks"
+import { client, type ProjectInfo } from "@sixb/client"
+import { getAuthSessionOptions, signOutMutation } from "@sixb/client/hooks"
 import {
   Sidebar as ShadcnSidebar,
   SidebarCollapseToggle,
@@ -14,7 +14,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
   SidebarUserMenu,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Box,

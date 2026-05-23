@@ -1,10 +1,10 @@
-import type { GetSyncResponse, ListSyncRunsResponse, ListSyncsResponse } from "@pario/client"
+import type { GetSyncResponse, ListSyncRunsResponse, ListSyncsResponse } from "@sixb/client"
 import {
   getSyncOptions,
   listSyncRunsOptions,
   listSyncsOptions,
   requestSyncRunMutation,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -21,8 +21,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Ban,
@@ -745,7 +745,7 @@ export function SyncDetailPage() {
           <EmptyState
             icon={<RefreshCw className="h-10 w-10" />}
             title="Sync not found"
-            description="This sync is not registered in the active Pario runtime."
+            description="This sync is not registered in the active Sixb runtime."
           />
         </div>
       </div>

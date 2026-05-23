@@ -1,4 +1,4 @@
-import type { Schema, ValueType } from "@pario/core"
+import type { Schema, ValueType } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 
 export function resolveProjectionSchema(
@@ -16,7 +16,7 @@ export function resolveProjectionSchema(
 
   if (seen.has(schema.valueTypeId)) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`
+      `[SixbProjectionWorker] Circular valueTypeRef '${schema.valueTypeId}' in projection schema.`
     )
   }
 
@@ -30,7 +30,7 @@ export function resolveProjectionSchema(
   const valueType = valueTypesById.get(schema.valueTypeId)
   if (!valueType) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`
+      `[SixbProjectionWorker] Unknown valueTypeRef '${schema.valueTypeId}' in projection schema.`
     )
   }
 

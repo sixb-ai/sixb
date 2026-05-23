@@ -243,7 +243,7 @@ export function defineProjection<const TObjectType extends ObjectType>(
  * - `TTargetObjectTypeId` (inferred from the link token) constrains `target`
  *   to an ObjectType whose `id` or `extends` matches the link's declared target.
  *   This covers exact type match and direct subtypes. Multi-level inheritance
- *   is validated at Pario startup when the full type graph is available.
+ *   is validated at Sixb startup when the full type graph is available.
  *
  * ```ts
  * fromForeignKey({

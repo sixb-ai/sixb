@@ -5,8 +5,8 @@ import type {
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
-} from "@pario/core"
-import { LakeStorageError } from "@pario/core"
+} from "@sixb/core"
+import { LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -15,10 +15,10 @@ import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { encodeDatasetTableName } from "./names"
 import { duckLakeMetadataTableName, qualifiedTableName, quoteSqlString } from "./sql"
 import {
-  type ParioCommitMetadata,
   parseCommitMetadata,
   parseInlineDataChange,
   parseVersionId,
+  type SixbCommitMetadata,
   toVersionId,
 } from "./versions"
 
@@ -27,7 +27,7 @@ interface DatasetSnapshotRow {
   readonly createdAt: Date
   readonly mode: DatasetVersionMode
   readonly parentSnapshotId?: string
-  readonly metadata?: ParioCommitMetadata
+  readonly metadata?: SixbCommitMetadata
 }
 
 interface DatasetSnapshotCandidateRow {
@@ -36,7 +36,7 @@ interface DatasetSnapshotCandidateRow {
   readonly changesMade: string
   readonly hasFileChange: boolean
   readonly hasFileDeleteChange: boolean
-  readonly metadata?: ParioCommitMetadata
+  readonly metadata?: SixbCommitMetadata
 }
 
 interface SnapshotCandidateQueryInput {
@@ -65,7 +65,7 @@ interface CatalogScanSnapshot {
   readonly snapshotId: string
   readonly createdAt: Date
   readonly changesMade: string
-  readonly metadata?: ParioCommitMetadata
+  readonly metadata?: SixbCommitMetadata
 }
 
 /** Per (snapshot, table) file-change flags merged into the catalog scan. */
@@ -84,16 +84,16 @@ const SNAPSHOT_ROW_BATCH_SIZE = 128
 const CATALOG_SNAPSHOT_SCAN_LIMIT = 512
 
 /**
- * Reconstructs Pario DatasetVersion objects from DuckLake snapshots.
+ * Reconstructs Sixb DatasetVersion objects from DuckLake snapshots.
  *
  * DuckLake remains the source of truth for version ids, commit times, and
- * historical reads. Pario commit metadata only hydrates fields DuckLake does
+ * historical reads. Sixb commit metadata only hydrates fields DuckLake does
  * not know about, such as producer info and declared inputs.
  *
  * This class intentionally reads DuckLake metadata directly. The provider does
- * not keep a Pario side table for versions; a Pario version is a DuckLake
+ * not keep a Sixb side table for versions; a Sixb version is a DuckLake
  * snapshot that either changed the dataset table or was explicitly tagged with
- * Pario dataset metadata.
+ * Sixb dataset metadata.
  */
 export class DuckLakeSnapshotReader {
   constructor(
@@ -234,7 +234,7 @@ export class DuckLakeSnapshotReader {
   /**
    * Resolve each dataset's latest snapshot row with one shared descending walk.
    *
-   * The walk reuses {@link candidateToSnapshotRow} so Pario visibility, mode
+   * The walk reuses {@link candidateToSnapshotRow} so Sixb visibility, mode
    * derivation, and the loud conflict rule match exact version hydration. Cost
    * is bounded by the snapshot window, not by the number of datasets.
    */
@@ -399,11 +399,11 @@ export class DuckLakeSnapshotReader {
   private assertNoMetadataConflict(
     snapshotId: string,
     datasetId: string,
-    metadata: ParioCommitMetadata | undefined
+    metadata: SixbCommitMetadata | undefined
   ): void {
     if (metadata !== undefined && metadata.datasetId !== datasetId) {
       throw new LakeStorageError(
-        `[ParioDuckLake] DuckLake snapshot '${snapshotId}' changed dataset '${datasetId}' but Pario commit metadata references dataset '${metadata.datasetId}'.`
+        `[SixbDuckLake] DuckLake snapshot '${snapshotId}' changed dataset '${datasetId}' but Sixb commit metadata references dataset '${metadata.datasetId}'.`
       )
     }
   }
@@ -632,7 +632,7 @@ export class DuckLakeSnapshotReader {
 
     const rows = await runtime.query(`
       WITH candidate_snapshots AS (
-        -- Recent DuckLake snapshots to inspect; Pario visibility is filtered later.
+        -- Recent DuckLake snapshots to inspect; Sixb visibility is filtered later.
         SELECT
           snapshot.snapshot_id,
           snapshot.snapshot_time,
@@ -677,7 +677,7 @@ export class DuckLakeSnapshotReader {
         GROUP BY snapshot_id
       )
       SELECT
-        -- Keep metadata-only candidates; Pario filters them with commit_extra_info.
+        -- Keep metadata-only candidates; Sixb filters them with commit_extra_info.
         candidate.snapshot_id,
         candidate.snapshot_time,
         candidate.changes_made,
@@ -727,7 +727,7 @@ export class DuckLakeSnapshotReader {
 
     // Metadata-only snapshots are common for table comments, schema changes,
     // and other catalog operations. Treat them as dataset versions only when
-    // their Pario metadata names this dataset.
+    // their Sixb metadata names this dataset.
     if (!hasDataChange) {
       const metadata = candidate.metadata
       if (!metadata || metadata.datasetId !== datasetId) {
@@ -743,7 +743,7 @@ export class DuckLakeSnapshotReader {
     }
 
     // A real data-change snapshot belongs to this dataset because DuckLake's
-    // change metadata touched this table id. If Pario metadata is present but
+    // change metadata touched this table id. If Sixb metadata is present but
     // points elsewhere, fail loudly rather than hydrating the wrong lineage.
     this.assertNoMetadataConflict(candidate.snapshotId, datasetId, candidate.metadata)
 
@@ -766,9 +766,9 @@ export class DuckLakeSnapshotReader {
       row.snapshotId
     )
 
-    // DuckLake gives us version id, timestamp, and time travel. Pario metadata
+    // DuckLake gives us version id, timestamp, and time travel. Sixb metadata
     // fills in caller intent such as append vs snapshot and producer lineage.
-    // New Pario commits include exact row counts to avoid full table counts on
+    // New Sixb commits include exact row counts to avoid full table counts on
     // the write hot path; legacy or external snapshots still fall back to
     // DuckLake time travel.
     const rowCount =
@@ -824,7 +824,7 @@ export class DuckLakeSnapshotReader {
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
 }
 

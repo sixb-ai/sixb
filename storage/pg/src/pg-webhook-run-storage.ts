@@ -5,8 +5,8 @@ import type {
   StartWebhookRunInput,
   WebhookRunRecord,
   WebhookRunStorage,
-} from "@pario/core"
-import { WebhookRunError } from "@pario/core"
+} from "@sixb/core"
+import { WebhookRunError } from "@sixb/core"
 import type { SQL } from "bun"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
@@ -43,7 +43,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WebhookRunError(
-          `[ParioPg] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -61,13 +61,13 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
 
       if (!existing) {
         throw new WebhookRunError(
-          `[ParioPg] Webhook run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WebhookRunError(
-          `[ParioPg] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 

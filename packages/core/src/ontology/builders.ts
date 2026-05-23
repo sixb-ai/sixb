@@ -6,7 +6,7 @@
  * defaults so you can focus on the semantics rather than boilerplate.
  *
  * ```ts
- * import { defineObjectType, prop, link, stringEnum } from "@pario/core"
+ * import { defineObjectType, prop, link, stringEnum } from "@sixb/core"
  *
  * const thermostat = defineObjectType({
  *   id: "thermostat",

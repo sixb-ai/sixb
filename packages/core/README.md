@@ -1,20 +1,20 @@
-# @pario/core
+# @sixb/core
 
-The ontology-first runtime for Pario digital twins. Define your domain model in TypeScript, get a fully typed API for managing objects, links, telemetry, and actions.
+The ontology-first runtime for Sixb digital twins. Define your domain model in TypeScript, get a fully typed API for managing objects, links, telemetry, and actions.
 
 ## Install
 
 ```bash
-bun add @pario/core
+bun add @sixb/core
 ```
 
 ## Key Concepts
 
 **Ontology** -- Define your domain as object types with typed properties, links between types, and actions. Everything is expressed in TypeScript with full inference.
 
-**Runtime** -- `Pario` is the main entry point. It registers your ontology and exposes a typed SDK (`pario.objects(MyType)`) for reads, writes, telemetry, and links.
+**Runtime** -- `Sixb` is the main entry point. It registers your ontology and exposes a typed SDK (`sixb.objects(MyType)`) for reads, writes, telemetry, and links.
 
-**Storage** -- Pluggable backends for persistence and coordination. A Pario runtime needs a `Broker`, `Storage`, `LakeStorage`, `BlobStorage`, and `Queues`. In-memory defaults are included for development and testing.
+**Storage** -- Pluggable backends for persistence and coordination. A Sixb runtime needs a `Broker`, `Storage`, `LakeStorage`, `BlobStorage`, and `Queues`. In-memory defaults are included for development and testing.
 
 **Lake Storage** -- Versioned datasets for table-shaped batch assets such as raw sync outputs, projections, and pipeline inputs/outputs. Lake providers store `fileRef` values as row metadata; blob payload bytes live in `BlobStorage`.
 
@@ -24,17 +24,17 @@ bun add @pario/core
 
 **Functions** -- Scheduled and reactive logic that runs against the twin graph. Triggered by cron expressions, intervals, or action requests.
 
-**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `pario.connector(...)`.
+**Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
 
 **Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot` and `append` modes with optional triggers and typed source checkpoints.
 
-**Queues** -- Typed durable work lanes for executable jobs such as sync runs, pipeline runs, and projection runs. App setup passes one `Queues` provider, while workers claim from lanes like `pario.queues.syncRuns`.
+**Queues** -- Typed durable work lanes for executable jobs such as sync runs, pipeline runs, and projection runs. App setup passes one `Queues` provider, while workers claim from lanes like `sixb.queues.syncRuns`.
 
 ## Quick Start
 
 ```ts
 import {
-  Pario,
+  Sixb,
   defineObjectType,
   defineOntology,
   InMemoryBlobStorage,
@@ -45,7 +45,7 @@ import {
   InMemoryBroker,
   InMemoryQueues,
   InMemoryStorage,
-} from "@pario/core"
+} from "@sixb/core"
 
 // 1. Define object types
 
@@ -85,7 +85,7 @@ const Buildings = defineOntology({
 
 // 3. Create the runtime
 
-const pario = new Pario({
+const sixb = new Sixb({
   id: "building-a",
   ontology: [Buildings],
   broker: new InMemoryBroker(),
@@ -97,7 +97,7 @@ const pario = new Pario({
 
 // 4. Use the typed SDK
 
-const room = await pario.objects(Room).upsert({
+const room = await sixb.objects(Room).upsert({
   properties: {
     id: "room:101",
     externalId: "RM-101",
@@ -105,7 +105,7 @@ const room = await pario.objects(Room).upsert({
   },
 })
 
-const tstat = await pario.objects(Thermostat).upsert({
+const tstat = await sixb.objects(Thermostat).upsert({
   properties: {
     id: "tstat:abc",
     externalId: "device-123",
@@ -114,17 +114,17 @@ const tstat = await pario.objects(Thermostat).upsert({
 })
 
 // Link objects
-await pario.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
+await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
 
 // Append telemetry (unit is required because of semanticType: "Temperature")
-await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
   value: 22.4,
   unit: "degreeCelsius",
   at: new Date(),
 })
 
 // Query
-const found = await pario.objects(Room).findFirst({
+const found = await sixb.objects(Room).findFirst({
   where: (r) => r.p.externalId.eq("RM-101"),
 })
 ```
@@ -136,17 +136,17 @@ Functions define scheduled and reactive logic that operates on the twin graph.
 ```ts
 const pollWeather = defineFunction("poll-weather")
   .cron("*/5 * * * *")
-  .run(async ({ pario }) => {
+  .run(async ({ sixb }) => {
     const res = await fetch("https://api.weather.example/current")
     const data = (await res.json()) as { tempF: number }
-    await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+    await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
       value: data.tempF,
       unit: "degreeFahrenheit",
       at: new Date(),
     })
   })
 
-const pario = new Pario({
+const sixb = new Sixb({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
@@ -154,7 +154,7 @@ const pario = new Pario({
   functions: [pollWeather],
 })
 
-await pario.startFunctions()
+await sixb.startFunctions()
 ```
 
 Trigger types: `cron(expression)`, `interval(ms)`.
@@ -175,8 +175,8 @@ const setTemperature = defineAction("setTemperature")
       return { error: "Temperature is too low" }
     }
   })
-  .run(async ({ params, target, pario }) => {
-    await pario.objects(Room).appendTelemetryBatch([
+  .run(async ({ params, target, sixb }) => {
+    await sixb.objects(Room).appendTelemetryBatch([
       { id: target.primaryId, properties: { currentTemperature: params.value }, at: new Date() },
     ])
   })
@@ -187,10 +187,10 @@ const setTemperature = defineAction("setTemperature")
 
 ## Connectors
 
-Connectors are registered definitions. The runtime only creates the client when you resolve one with `pario.connector(...)`.
+Connectors are registered definitions. The runtime only creates the client when you resolve one with `sixb.connector(...)`.
 
 ```ts
-import { defineConnector } from "@pario/core"
+import { defineConnector } from "@sixb/core"
 
 const erpDb = defineConnector("erpDb", {
   type: "sql",
@@ -203,7 +203,7 @@ const erpDb = defineConnector("erpDb", {
   },
 })
 
-const pario = new Pario({
+const sixb = new Sixb({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
@@ -211,16 +211,16 @@ const pario = new Pario({
   connectors: [erpDb],
 })
 
-const db = await pario.connector(erpDb)
+const db = await sixb.connector(erpDb)
 await db.query("select 1")
 ```
 
 Connector adapters can also expose inbound webhooks. Webhooks are connector-scoped, discovered
-with their connector from `connectors/`, and served by `@pario/server` at
+with their connector from `connectors/`, and served by `@sixb/server` at
 `POST /api/webhooks/:connectorId/:webhookId`.
 
 ```ts
-import { defineConnector, defineWebhook, webhookConnector } from "@pario/core"
+import { defineConnector, defineWebhook, webhookConnector } from "@sixb/core"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -249,8 +249,8 @@ const edgeGateway = defineConnector(
           },
         })
         .idempotencyKey(({ request }) => request.headers.get("x-delivery-id"))
-        .handle(async ({ body, pario }) => {
-          await pario.upsertObject("Device", {
+        .handle(async ({ body, sixb }) => {
+          await sixb.upsertObject("Device", {
             id: body.deviceId,
             temperature: body.temperature,
           })
@@ -265,10 +265,10 @@ Use `.json(schema)` for JSON bodies so payloads are validated at runtime. Omit
 
 ## Syncs
 
-Syncs are declarative definitions in `@pario/core` v1. They do not start background work on their own; they just declare how to read from a connector into a dataset.
+Syncs are declarative definitions in `@sixb/core` v1. They do not start background work on their own; they just declare how to read from a connector into a dataset.
 
 ```ts
-import { col, defineDataset, defineSync } from "@pario/core"
+import { col, defineDataset, defineSync } from "@sixb/core"
 
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [
@@ -296,7 +296,7 @@ const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
   })
   .intoDataset(rawOrderEventsDataset)
 
-const pario = new Pario({
+const sixb = new Sixb({
   ontology: [Room],
   broker: myBroker,
   storage: myStorage,
@@ -306,8 +306,8 @@ const pario = new Pario({
   syncs: [syncOrders, syncOrderEvents],
 })
 
-pario.getSyncDefinitions()
-pario.getSyncById("sync-orders")
+sixb.getSyncDefinitions()
+sixb.getSyncById("sync-orders")
 ```
 
 Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and
@@ -316,12 +316,12 @@ latest successful run and stores the next checkpoint only after the dataset comm
 
 ## Convention-based Setup
 
-`createPario` auto-discovers ontology from `./ontology/`, datasets from `./datasets/`, functions from `./functions/`, syncs from `./syncs/`, and connectors from `./connectors/` in your project directory. Webhooks are discovered through their connector definitions.
+`createSixb` auto-discovers ontology from `./ontology/`, datasets from `./datasets/`, functions from `./functions/`, syncs from `./syncs/`, and connectors from `./connectors/` in your project directory. Webhooks are discovered through their connector definitions.
 
 ```ts
-import { createPario } from "@pario/core"
+import { createSixb } from "@sixb/core"
 
-const pario = await createPario({
+const sixb = await createSixb({
   id: "building-a",
   broker: myBroker,
   storage: myStorage,
@@ -333,10 +333,10 @@ const pario = await createPario({
 
 ## Migrations
 
-`@pario/core` provides the storage-provider migration model used by the CLI and durable adapters:
+`@sixb/core` provides the storage-provider migration model used by the CLI and durable adapters:
 
 ```ts
-import { defineMigrations, migrateStorage, runMigrationSet, step } from "@pario/core"
+import { defineMigrations, migrateStorage, runMigrationSet, step } from "@sixb/core"
 
 export const objectStorageMigrations = defineMigrations({
   adapterId: "MyObjectStorage",
@@ -368,7 +368,7 @@ src/
   queues/           -- Queues, typed queue lanes, and in-memory implementation
   connectors/       -- defineConnector, connector types, connector runtime
   syncs/            -- defineSync and sync types
-  pario/            -- Pario runtime, ObjectSet, ObjectByIdHandle, createPario
+  sixb/            -- Sixb runtime, ObjectSet, ObjectByIdHandle, createSixb
   actions/          -- defineAction, actionParam, ActionRegistry
   functions/        -- defineFunction, FunctionRuntime, cron matcher
 ```
@@ -400,8 +400,8 @@ src/
 
 | Export | Description |
 |---|---|
-| `Pario` | Main runtime class |
-| `createPario(options)` | Convention-based factory with auto-discovery |
+| `Sixb` | Main runtime class |
+| `createSixb(options)` | Convention-based factory with auto-discovery |
 | `InMemoryQueues` | In-memory `Queues` provider with typed sync and pipeline lanes |
 | `InMemoryBlobStorage` | In-memory `BlobStorage` provider for `fileRef` payloads |
 | `migrateStorage(storage)` | Run configured storage migrations when supported |
@@ -411,7 +411,7 @@ src/
 | `webhookConnector(options)` | Define an inbound-only connector adapter |
 | `defineSync(id, options?)` | Define a batch sync from a connector into a dataset |
 
-### ObjectSet API (`pario.objects(Type)`)
+### ObjectSet API (`sixb.objects(Type)`)
 
 | Method | Description |
 |---|---|
@@ -423,7 +423,7 @@ src/
 | `.appendTelemetryBatch(items)` | Batch append telemetry for multiple objects |
 | `.requestAction({ id, actionId, params })` | Request an action on an object |
 
-### ObjectByIdHandle API (`pario.objects(Type).byId(id)`)
+### ObjectByIdHandle API (`sixb.objects(Type).byId(id)`)
 
 | Method | Description |
 |---|---|
@@ -460,7 +460,7 @@ All domain events: `object.upserted`, `telemetry.appended`, `link.upserted`, `li
 Built-in quantitative type and unit registry. Use `semanticType` on properties to constrain valid units.
 
 ```ts
-import { isValidUnit, getUnit, quantitativeTypes } from "@pario/core"
+import { isValidUnit, getUnit, quantitativeTypes } from "@sixb/core"
 
 isValidUnit("Temperature", "degreeCelsius") // true
 getUnit("degreeCelsius")?.symbol            // "°C"

@@ -1,4 +1,4 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { registerActionRoutes } from "./routes/actions"
 import { registerConnectorRoutes } from "./routes/connectors"
@@ -17,23 +17,23 @@ import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
-  registerProjectRoutes(app, pario)
-  registerStatusRoutes(app, pario)
-  registerConnectorRoutes(app, pario)
-  registerDatasetRoutes(app, pario)
-  registerSyncRoutes(app, pario)
-  registerPipelineRoutes(app, pario)
-  registerWorkflowRoutes(app, pario)
-  registerRuleRoutes(app, pario)
-  registerOntologyRoutes(app, pario)
-  registerObjectRoutes(app, pario)
-  registerActionRoutes(app, pario)
-  registerLinkRoutes(app, pario)
-  registerTelemetryRoutes(app, pario)
-  registerEventRoutes(app, pario)
-  registerProjectionRoutes(app, pario)
-  registerWebhookRunRoutes(app, pario)
+export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+  registerProjectRoutes(app, sixb)
+  registerStatusRoutes(app, sixb)
+  registerConnectorRoutes(app, sixb)
+  registerDatasetRoutes(app, sixb)
+  registerSyncRoutes(app, sixb)
+  registerPipelineRoutes(app, sixb)
+  registerWorkflowRoutes(app, sixb)
+  registerRuleRoutes(app, sixb)
+  registerOntologyRoutes(app, sixb)
+  registerObjectRoutes(app, sixb)
+  registerActionRoutes(app, sixb)
+  registerLinkRoutes(app, sixb)
+  registerTelemetryRoutes(app, sixb)
+  registerEventRoutes(app, sixb)
+  registerProjectionRoutes(app, sixb)
+  registerWebhookRunRoutes(app, sixb)
 
   return app
 }

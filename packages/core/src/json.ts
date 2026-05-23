@@ -10,7 +10,7 @@ export function isJsonValue(value: unknown): value is JsonValue {
 export function assertJsonValue(value: unknown, label = "value"): asserts value is JsonValue {
   const reason = getInvalidJsonValueReason(value, label)
   if (reason) {
-    throw new Error(`[Pario] ${label} must be a JSON value; ${reason}`)
+    throw new Error(`[Sixb] ${label} must be a JSON value; ${reason}`)
   }
 }
 

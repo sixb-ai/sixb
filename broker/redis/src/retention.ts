@@ -1,4 +1,4 @@
-import type { BrokerRetention, BrokerStreamDefinition } from "@pario/core"
+import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core"
 import { RedisBrokerError } from "./errors"
 
 export interface NormalizedRetention {

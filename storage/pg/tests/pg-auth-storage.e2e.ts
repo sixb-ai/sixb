@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runAuthStorageContractSuite } from "@pario/core/testing"
+import { runAuthStorageContractSuite } from "@sixb/core/testing"
 import type { PostgresStorage } from "../src"
 import { PgAuthStorage } from "../src"
 import { createTestStorage } from "./helpers"

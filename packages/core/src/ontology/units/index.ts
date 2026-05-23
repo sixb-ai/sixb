@@ -1,12 +1,12 @@
 /**
- * Pario Quantitative Types — public API.
+ * Sixb Quantitative Types — public API.
  *
  * Two concepts:
  * - **QuantitativeType** — a physical quantity with its valid units.
  * - **Unit** — a specific unit of measurement.
  *
  * ```ts
- * import { quantitativeTypes, getUnit, isValidUnit } from "@pario/core"
+ * import { quantitativeTypes, getUnit, isValidUnit } from "@sixb/core"
  *
  * // Browse what's available
  * quantitativeTypes.Temperature.units.degreeCelsius.symbol // "°C"

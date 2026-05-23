@@ -20,8 +20,8 @@ import type {
   WorkflowRunRecord,
   WorkflowRunSource,
   WorkflowRunStorage,
-} from "@pario/core"
-import { WorkflowRunError } from "@pario/core"
+} from "@sixb/core"
+import { WorkflowRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -85,7 +85,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -106,13 +106,13 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       if (existing) {
         if (existing.status !== "queued") {
           throw new WorkflowRunError(
-            `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
         if (existing.workflow_id !== input.workflowId) {
           throw new WorkflowRunError(
-            `[ParioSqlite] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
+            `[SixbSqlite] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
           )
         }
 
@@ -165,7 +165,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new WorkflowRunError(
-            `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -184,13 +184,13 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (!canFinishWorkflowRun(existing.status, input.status)) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
+          `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
 
@@ -229,13 +229,13 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
+          `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
 
@@ -264,13 +264,13 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "waiting") {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
+          `[SixbSqlite] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
         )
       }
 
@@ -346,7 +346,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
     if (!record) {
       throw new WorkflowRunError(
-        `[ParioSqlite] Failed to load workflow run '${id}' for project '${projectId}'.`
+        `[SixbSqlite] Failed to load workflow run '${id}' for project '${projectId}'.`
       )
     }
 
@@ -367,19 +367,19 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!workflowRun) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (workflowRun.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
+          `[SixbSqlite] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
       }
 
       if (workflowRun.workflow_id !== input.workflowId) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
+          `[SixbSqlite] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
         )
       }
 
@@ -420,7 +420,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           throw new WorkflowRunError(
-            `[ParioSqlite] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbSqlite] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -433,7 +433,7 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!row) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Failed to load workflow node run '${input.id}' for project '${input.projectId}'.`
+          `[SixbSqlite] Failed to load workflow node run '${input.id}' for project '${input.projectId}'.`
         )
       }
 
@@ -449,13 +449,13 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running" && existing.status !== "waiting") {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbSqlite] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
@@ -496,13 +496,13 @@ export class SqliteWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
+          `[SixbSqlite] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
 
@@ -638,7 +638,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new WorkflowRunError(
-      `[ParioSqlite] Workflow run ${fieldName} must be a non-negative integer.`
+      `[SixbSqlite] Workflow run ${fieldName} must be a non-negative integer.`
     )
   }
 }

@@ -3,8 +3,8 @@ import type {
   QueueWorkerFailureDecision,
   WorkflowQueueJob,
   WorkflowRunStorage,
-} from "@pario/core"
-import { QueueWorker } from "@pario/core"
+} from "@sixb/core"
+import { QueueWorker } from "@sixb/core"
 import { EventsRuntimeWorkflowRunObserver } from "./events"
 import { runWorkflowJob, runWorkflowResumeJob } from "./run-workflow-job"
 import type {
@@ -12,37 +12,37 @@ import type {
   WorkflowResumeJob,
   WorkflowRunObserver,
   WorkflowWorkerContext,
-  WorkflowWorkerPario,
+  WorkflowWorkerSixb,
 } from "./types"
 
 export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   private readonly context: WorkflowWorkerContext
   private readonly observer: WorkflowRunObserver
 
-  constructor(pario: WorkflowWorkerPario) {
-    if (pario.workflows.list().length === 0) {
-      throw new Error("[ParioWorkflowWorker] No workflow definitions are registered.")
+  constructor(sixb: WorkflowWorkerSixb) {
+    if (sixb.workflows.list().length === 0) {
+      throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
     }
 
-    const workflowRuns = pario.storage.workflowRuns
+    const workflowRuns = sixb.storage.workflowRuns
     if (!workflowRuns) {
-      throw new Error("[ParioWorkflowWorker] Workflow workers require storage.workflowRuns.")
+      throw new Error("[SixbWorkflowWorker] Workflow workers require storage.workflowRuns.")
     }
 
-    if (requiresWorkflowInterventionStorage(pario) && !pario.storage.workflowInterventions) {
+    if (requiresWorkflowInterventionStorage(sixb) && !sixb.storage.workflowInterventions) {
       throw new Error(
-        "[ParioWorkflowWorker] Workflow workers with intervention nodes require storage.workflowInterventions."
+        "[SixbWorkflowWorker] Workflow workers with intervention nodes require storage.workflowInterventions."
       )
     }
 
     super({
-      projectId: pario.projectId,
-      queue: pario.queues.workflows,
-      workerId: `workflow-worker-${pario.id}`,
+      projectId: sixb.projectId,
+      queue: sixb.queues.workflows,
+      workerId: `workflow-worker-${sixb.id}`,
     })
 
-    this.context = buildWorkflowContext(pario, workflowRuns)
-    this.observer = new EventsRuntimeWorkflowRunObserver(pario.events)
+    this.context = buildWorkflowContext(sixb, workflowRuns)
+    this.observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
   }
 
   protected async execute(
@@ -84,8 +84,8 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
   }
 }
 
-function requiresWorkflowInterventionStorage(pario: WorkflowWorkerPario): boolean {
-  return pario.workflows
+function requiresWorkflowInterventionStorage(sixb: WorkflowWorkerSixb): boolean {
+  return sixb.workflows
     .list()
     .some((workflow) => workflow.nodes.some((node) => node.type === "intervention"))
 }
@@ -93,7 +93,7 @@ function requiresWorkflowInterventionStorage(pario: WorkflowWorkerPario): boolea
 function workflowJobFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): WorkflowJob {
   const { job } = claimed
   if (job.type !== "workflow.run.requested") {
-    throw new Error(`[ParioWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
+    throw new Error(`[SixbWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
   }
 
   return {
@@ -108,7 +108,7 @@ function workflowResumeJobFromClaimed(
 ): WorkflowResumeJob {
   const { job } = claimed
   if (job.type !== "workflow.run.resume.requested") {
-    throw new Error(`[ParioWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
+    throw new Error(`[SixbWorkflowWorker] Unsupported workflow job type '${job.type}'.`)
   }
 
   return {
@@ -119,23 +119,23 @@ function workflowResumeJobFromClaimed(
 }
 
 function buildWorkflowContext(
-  pario: WorkflowWorkerPario,
+  sixb: WorkflowWorkerSixb,
   workflowRuns: WorkflowRunStorage
 ): WorkflowWorkerContext {
   return {
-    projectId: pario.projectId,
-    ontology: pario.ontology,
-    actionRegistry: pario.actionRegistry,
-    events: pario.events,
-    storage: pario.storage,
-    lakeStorage: pario.lakeStorage,
-    blobStorage: pario.blobStorage,
-    queues: pario.queues,
-    rules: pario.rules,
+    projectId: sixb.projectId,
+    ontology: sixb.ontology,
+    actionRegistry: sixb.actionRegistry,
+    events: sixb.events,
+    storage: sixb.storage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobStorage,
+    queues: sixb.queues,
+    rules: sixb.rules,
     workflowRuns,
-    pario: pario as unknown as WorkflowWorkerContext["pario"],
+    sixb: sixb as unknown as WorkflowWorkerContext["sixb"],
     getWorkflowById(workflowId) {
-      return pario.workflows.getById(workflowId)
+      return sixb.workflows.getById(workflowId)
     },
   }
 }

@@ -3,7 +3,7 @@ import {
   type AuthSessionAudience,
   DEFAULT_AUTH_SESSION_AUDIENCE,
   resolveAuthSessionAudience,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   buildBuiltInUiBundle,
   ensureBuiltInUiDevBundle,
@@ -76,7 +76,7 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
 
       try {
         // Development compiles and watches CSS in-process. Production serves the
-        // prebuilt assets produced by `pario build` and never compiles at startup.
+        // prebuilt assets produced by `sixb build` and never compiles at startup.
         let server: ReturnType<typeof Bun.serve>
         if (development) {
           css = await ensureBuiltInUiCss({ watch: true })
@@ -105,7 +105,7 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
       } catch (error) {
         await css?.stop().catch(() => {})
         const message = error instanceof Error ? error.message : String(error)
-        throw new Error(`[ParioAtlas] Failed to listen on ${host}:${port}: ${message}`)
+        throw new Error(`[SixbAtlas] Failed to listen on ${host}:${port}: ${message}`)
       }
     },
   }
@@ -124,8 +124,8 @@ async function startDevelopmentServer(
       console: true,
     },
     routes: {
-      ...reservedParioRoutes(),
-      "/__pario/runtime.json": getHeadRoute((request) => runtimeConfigResponse(request, input)),
+      ...reservedSixbRoutes(),
+      "/__sixb/runtime.json": getHeadRoute((request) => runtimeConfigResponse(request, input)),
       "/favicon.svg": getHeadRoute((request) => fileResponse(request, faviconPath)),
       "/favicon.ico": getHeadRoute(() => new Response(null, { status: 204 })),
       "/": htmlBundleRoute(bundle.html),
@@ -163,7 +163,7 @@ async function atlasResponse(
 ): Promise<Response> {
   const url = new URL(request.url)
 
-  if (isReservedParioRoute(url.pathname)) {
+  if (isReservedSixbRoute(url.pathname)) {
     return notFoundResponse()
   }
 
@@ -179,8 +179,8 @@ async function atlasResponse(
     return new Response(null, { status: 204 })
   }
 
-  if (url.pathname.startsWith("/__pario/")) {
-    const relativePath = url.pathname.slice("/__pario/".length)
+  if (url.pathname.startsWith("/__sixb/")) {
+    const relativePath = url.pathname.slice("/__sixb/".length)
     if (!relativePath || relativePath.includes("\0") || relativePath.includes("..")) {
       return notFoundResponse()
     }
@@ -242,7 +242,7 @@ function notFoundResponse(): Response {
   })
 }
 
-function isReservedParioRoute(pathname: string): boolean {
+function isReservedSixbRoute(pathname: string): boolean {
   return (
     pathname === "/api" ||
     pathname.startsWith("/api/") ||
@@ -255,7 +255,7 @@ function isReservedParioRoute(pathname: string): boolean {
   )
 }
 
-function reservedParioRoutes(): BunServeRoutes {
+function reservedSixbRoutes(): BunServeRoutes {
   const handler = () => notFoundResponse()
   return {
     "/api": allMethodsRoute(handler),
@@ -324,11 +324,11 @@ function normalizeOrigin(value: string, label: string): string {
   try {
     url = new URL(value)
   } catch {
-    throw new Error(`[ParioAtlas] Invalid ${label}: '${value}'.`)
+    throw new Error(`[SixbAtlas] Invalid ${label}: '${value}'.`)
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`[ParioAtlas] ${label} must use http or https.`)
+    throw new Error(`[SixbAtlas] ${label} must use http or https.`)
   }
 
   return url.origin

@@ -5,7 +5,7 @@ import type {
   LakeStorageWithSql,
   PipelineDefinition,
   PipelineStepDefinition,
-} from "@pario/core"
+} from "@sixb/core"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import type { ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineWorkerContext } from "./types"
@@ -31,13 +31,13 @@ export async function executeSqlStep(input: {
 
   if (step.executor.kind !== "sql") {
     throw new PipelineWorkerError(
-      `[ParioPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses run execution, which is not supported by the SQL step executor.`
+      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses run execution, which is not supported by the SQL step executor.`
     )
   }
 
   if (!hasSqlExecutor(runtime.lakeStorage)) {
     throw new PipelineWorkerError(
-      `[ParioPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).`
+      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...).`
     )
   }
 

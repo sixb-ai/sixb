@@ -1,5 +1,5 @@
 {
-  "name": "@pario/ducklake",
+  "name": "@sixb/ducklake",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@duckdb/node-api": "^1.5.2-r.1",
-    "@pario/core": "workspace:*"
+    "@sixb/core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

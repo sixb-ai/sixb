@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["bun", "node"]
   },
-  "include": ["ontology/**/*.ts", "security/**/*.ts", "pario.config.ts"]
+  "include": ["ontology/**/*.ts", "security/**/*.ts", "sixb.config.ts"]
 }

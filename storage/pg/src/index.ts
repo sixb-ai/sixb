@@ -2,7 +2,7 @@
 // source.
 /// <reference path="./sql.d.ts" />
 
-import type { MigrationCapableStorage, StorageMigrator } from "@pario/core"
+import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
 import { SQL } from "bun"
 import { createPostgresStorageMigrators, dropSchema, quoteIdent } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
@@ -38,7 +38,7 @@ export interface PostgresStorageOptions {
   /** Idle connection timeout in milliseconds. Defaults to 30000. */
   idleTimeoutMillis?: number
 
-  /** PostgreSQL schema name for all Pario tables. Defaults to 'pario'. */
+  /** PostgreSQL schema name for all Sixb tables. Defaults to 'sixb'. */
   schemaName?: string
 
   /** SSL configuration. */
@@ -46,13 +46,13 @@ export interface PostgresStorageOptions {
 }
 
 /**
- * PostgreSQL storage provider for Pario.
+ * PostgreSQL storage provider for Sixb.
  *
- * Bundles Pario storage adapters backed by a shared PostgreSQL connection pool using Bun's
+ * Bundles Sixb storage adapters backed by a shared PostgreSQL connection pool using Bun's
  * native SQL client.
  *
- * The storage exposes a core `StorageMigrator`. Pario CLI startup and
- * `pario db migrate` run it automatically through `migrateStorage(storage)`.
+ * The storage exposes a core `StorageMigrator`. Sixb CLI startup and
+ * `sixb db migrate` run it automatically through `migrateStorage(storage)`.
  *
  * Usage:
  * ```ts
@@ -60,7 +60,7 @@ export interface PostgresStorageOptions {
  *   connectionString: process.env.DATABASE_URL!,
  * })
  *
- * export const pario = createPario({
+ * export const sixb = createSixb({
  *   broker: myBroker,
  *   storage: pg,
  * })
@@ -85,7 +85,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   private readonly schemaName: string
 
   constructor(options: PostgresStorageOptions) {
-    this.schemaName = options.schemaName ?? "pario"
+    this.schemaName = options.schemaName ?? "sixb"
 
     const quotedSchemaName = quoteIdent(this.schemaName)
 
@@ -150,7 +150,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   }
 
   /**
-   * Drop all Pario tables and schema. Useful for test cleanup.
+   * Drop all Sixb tables and schema. Useful for test cleanup.
    * WARNING: This permanently deletes all data.
    */
   async dropSchema(): Promise<void> {

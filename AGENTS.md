@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Repo-wide agent instructions for `pario`.
+Repo-wide agent instructions for `sixb`.
 
 ## Scope
 
@@ -12,7 +12,7 @@ Repo-wide agent instructions for `pario`.
 - `packages/core`: runtime, ontology builders, providers, validation, and functions
 - `packages/server`: Elysia HTTP/WebSocket API, OpenAPI generation, and built-in React UI under `packages/server/src/ui`
 - `packages/client`: generated typed client artifacts
-- `packages/cli`: CLI entrypoints for `pario` and `create-pario`
+- `packages/cli`: CLI entrypoints for `sixb` and `create-sixb`
 - `packages/app`: custom app integration
 - `connectors/`, `storage/`, `broker/`: integrations and infrastructure providers
 - `examples/`: runnable sample projects
@@ -38,16 +38,16 @@ bun run test:all
 bun run check
 bun run check:fix
 bun run generate:client
-bun pario dev
-bun create-pario
+bun sixb dev
+bun create-sixb
 ```
 
 Targeted:
 
 ```bash
-bun --filter @pario/core build
-bun --filter @pario/core typecheck
-bun test packages/core/tests/create-pario.test.ts
+bun --filter @sixb/core build
+bun --filter @sixb/core typecheck
+bun test packages/core/tests/create-sixb.test.ts
 bun test packages/server/tests/
 ```
 
@@ -65,9 +65,9 @@ CI currently runs:
 ## Architecture
 
 - Define ontology types with `defineObjectType`, `prop`, `link`, `action`, and `defineValueType`.
-- Most runtimes start with `createPario()`.
-- `createPario()` auto-discovers `ontology/`, `datasets/`, `functions/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, and `connectors/`.
-- `pario.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
+- Most runtimes start with `createSixb()`.
+- `createSixb()` auto-discovers `ontology/`, `datasets/`, `functions/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, and `connectors/`.
+- `sixb.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
 - Functions are defined with `defineFunction(id)` and chained with `.interval(...)`, `.cron(...)`, `.broker(...)`, or `.onAction(...)`.
 - Important domain events include `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested`.
 - Convention-based discovery is the normal registration model.
@@ -78,10 +78,10 @@ CI currently runs:
 
 - Biome uses 2 spaces, LF endings, 100 column width, double quotes, ES5 trailing commas, and no semicolons unless required.
 - Use `import type` and `export type` for type-only imports and re-exports.
-- Prefer explicit public types, but preserve inference where Pario's typed APIs are designed to carry it.
+- Prefer explicit public types, but preserve inference where Sixb's typed APIs are designed to carry it.
 - Avoid `any`; narrow `unknown` instead of unchecked casts.
 - Validate inputs early and throw clear, actionable errors.
-- Package-prefixed error messages such as `[Pario] ...`, `[ParioServer] ...`, or `[RokuTV] ...` are preferred.
+- Package-prefixed error messages such as `[Sixb] ...`, `[SixbServer] ...`, or `[RokuTV] ...` are preferred.
 - Keep builders and definitions declarative; avoid unnecessary indirection around ontology setup.
 - Preserve the existing visual language in `packages/server/src/ui` and keep both desktop and mobile behavior working.
 

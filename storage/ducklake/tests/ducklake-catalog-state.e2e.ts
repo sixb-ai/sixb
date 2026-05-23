@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
@@ -50,7 +50,7 @@ describe("DuckLakeStorage bulk catalog state", () => {
   })
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-catalog-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-catalog-"))
     storage = createLocalDuckLakeStorage(rootDir)
   })
 
@@ -119,13 +119,13 @@ describe("DuckLakeStorage bulk catalog state", () => {
     }
   }, 30_000)
 
-  test("carries row counts from Pario commit metadata, omitting unguarded appends", async () => {
+  test("carries row counts from Sixb commit metadata, omitting unguarded appends", async () => {
     await storage.createDataset(ordersDataset)
     const snapshot = await storage.beginWrite({ dataset: ordersDataset, mode: "snapshot" })
     await snapshot.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
     const snapshotVersion = await snapshot.commit()
 
-    // A guarded append commits an exact row count in its Pario metadata.
+    // A guarded append commits an exact row count in its Sixb metadata.
     const append = await storage.beginWrite({ dataset: ordersDataset, mode: "append" })
     await append.writeRows([{ orderId: "ord_2", customerName: "Grace", orderCount: 2 }])
     await append.commit({ expectedLatestVersionId: snapshotVersion.versionId })
@@ -175,7 +175,7 @@ describe("DuckLakeStorage bulk catalog state", () => {
     expect(item?.latestVersion?.rowCount).toBeUndefined()
   })
 
-  test("fails loudly on conflicting Pario metadata", async () => {
+  test("fails loudly on conflicting Sixb metadata", async () => {
     await storage.createDataset(ordersDataset)
     await storage.close()
 
@@ -184,11 +184,11 @@ describe("DuckLakeStorage bulk catalog state", () => {
       await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
       const tableName = encodeDatasetTableName(ordersDataset.id)
       await runtime.run("BEGIN TRANSACTION")
-      await runtime.run(`INSERT INTO pario_lake.main.${tableName} VALUES ('raw_1', 'External', 1)`)
+      await runtime.run(`INSERT INTO sixb_lake.main.${tableName} VALUES ('raw_1', 'External', 1)`)
       await runtime.run(
-        `CALL pario_lake.set_commit_message('Pario', 'wrong dataset metadata', extra_info => ${quoteSqlString(
+        `CALL sixb_lake.set_commit_message('Sixb', 'wrong dataset metadata', extra_info => ${quoteSqlString(
           JSON.stringify({
-            pario: {
+            sixb: {
               kind: "datasetVersion",
               datasetId: "other.dataset",
               mode: "append",

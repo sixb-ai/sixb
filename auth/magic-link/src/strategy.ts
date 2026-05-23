@@ -11,7 +11,7 @@ import type {
   MagicLinkInvitationRecipientResult,
   MagicLinkRequestInput,
   MagicLinkRequestResult,
-} from "@pario/core"
+} from "@sixb/core"
 import { createMagicLinkEmail, type SendMagicLinkInput } from "./email"
 import {
   MagicLinkRateLimiter,
@@ -46,7 +46,7 @@ export class MagicLinkError extends Error {
   readonly name = "MagicLinkError"
 
   constructor(message: string) {
-    super(`[Pario] ${message}`)
+    super(`[Sixb] ${message}`)
   }
 }
 
@@ -78,7 +78,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     this.rateLimiter = new MagicLinkRateLimiter(resolveRateLimitOptions(options.rateLimit))
     this.sendMagicLink = options.sendMagicLink
     this.from = options.from
-    this.subject = options.subject ?? "Sign in to Pario"
+    this.subject = options.subject ?? "Sign in to Sixb"
   }
 
   async requestMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkRequestResult> {

@@ -7,8 +7,8 @@ import type {
   SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
-} from "@pario/core"
-import { SyncRunError } from "@pario/core"
+} from "@sixb/core"
+import { SyncRunError } from "@sixb/core"
 import type { SQL } from "bun"
 
 export class PgSyncRunStorage implements SyncRunStorage {
@@ -45,7 +45,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new SyncRunError(
-          `[ParioPg] Sync run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -62,13 +62,13 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
       if (!existing) {
         throw new SyncRunError(
-          `[ParioPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Sync run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
         throw new SyncRunError(
-          `[ParioPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          `[SixbPg] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
       }
 

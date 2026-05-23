@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ObjectListResponseSchema,
@@ -27,14 +27,14 @@ function serializeObject(row: {
   }
 }
 
-export function registerObjectRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/objects",
       async ({ query, set }) => {
         try {
           const parsed = ObjectsQuerySchema.parse(query)
-          const result = await pario.list({
+          const result = await sixb.list({
             objectTypeIds: parsed.objectTypeId ? [parsed.objectTypeId] : undefined,
             idPrefix: parsed.idPrefix,
             idSuffix: parsed.idSuffix,
@@ -71,8 +71,8 @@ export function registerObjectRoutes(app: Elysia, pario: Pario<readonly Ontology
     .get(
       "/api/objects/:objectTypeId/:objectId",
       async ({ params, set }) => {
-        const row = await pario.storage.objects.getByPrimaryId({
-          projectId: pario.id,
+        const row = await sixb.storage.objects.getByPrimaryId({
+          projectId: sixb.id,
           objectTypeId: params.objectTypeId,
           primaryId: params.objectId,
         })
@@ -99,9 +99,9 @@ export function registerObjectRoutes(app: Elysia, pario: Pario<readonly Ontology
       async ({ params, body, set }) => {
         try {
           const parsedBody = UpsertObjectBodySchema.parse(body)
-          const primaryPropertyId = pario.getPrimaryPropertyId(params.objectTypeId)
+          const primaryPropertyId = sixb.getPrimaryPropertyId(params.objectTypeId)
           const properties = { ...parsedBody.properties, [primaryPropertyId]: params.objectId }
-          const object = await pario.upsertObject(params.objectTypeId, properties)
+          const object = await sixb.upsertObject(params.objectTypeId, properties)
           return serializeObject(object)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -117,7 +117,7 @@ export function registerObjectRoutes(app: Elysia, pario: Pario<readonly Ontology
           summary: "Create or update object",
           tags: ["Objects"],
           operationId: "upsertObject",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

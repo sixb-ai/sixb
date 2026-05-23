@@ -6,8 +6,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@pario/ui/components/ui/dialog"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components/ui/dialog"
+import { cn } from "@sixb/ui/lib/utils"
 import { Command as CommandPrimitive } from "cmdk"
 import { SearchIcon } from "lucide-react"
 import type * as React from "react"

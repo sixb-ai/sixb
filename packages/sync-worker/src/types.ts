@@ -10,7 +10,7 @@ import type {
   SyncDefinition,
   SyncRunRecord,
   SyncRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 
 export interface SyncWorkerContext {
   readonly id: string

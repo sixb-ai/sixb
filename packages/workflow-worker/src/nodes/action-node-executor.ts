@@ -1,5 +1,5 @@
-import type { WorkflowActionNodeDefinition } from "@pario/core"
-import { objectService, snapshotWorkflowActionInput } from "@pario/core"
+import type { WorkflowActionNodeDefinition } from "@sixb/core"
+import { objectService, snapshotWorkflowActionInput } from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"
@@ -72,20 +72,20 @@ function normalizeActionMapperResult(input: {
 }): ActionMapperResult {
   if (!isRecord(input.value)) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return an object.`
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return an object.`
     )
   }
 
   const { target, params } = input.value
   if (!isObjectRef(target)) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return a valid target object ref.`
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return a valid target object ref.`
     )
   }
 
   if (!isRecord(params)) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return params as an object.`
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' action node '${input.nodeId}' mapper must return params as an object.`
     )
   }
 

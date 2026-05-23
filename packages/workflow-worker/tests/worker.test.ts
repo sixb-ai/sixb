@@ -11,11 +11,11 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
   ref,
+  Sixb,
   type WorkflowDefinition,
-} from "@pario/core"
+} from "@sixb/core"
 import { WorkflowWorker } from "../src"
 
 const Transaction = defineObjectType({
@@ -95,11 +95,11 @@ afterEach(async () => {
   workers.length = 0
 })
 
-function createPario(options: {
+function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly actions?: readonly (typeof attachInvoice)[]
 }) {
-  return new Pario({
+  return new Sixb({
     id: "workflow-worker-tests",
     ontology: [Transaction, Invoice],
     broker: new InMemoryBroker(),
@@ -133,28 +133,28 @@ async function waitFor<T>(
 
 describe("WorkflowWorker", () => {
   test("requires registered workflows and workflow storage", () => {
-    expect(() => new WorkflowWorker(createPario({}))).toThrow("No workflow definitions")
+    expect(() => new WorkflowWorker(createSixb({}))).toThrow("No workflow definitions")
 
     const workflow = defineWorkflow("reconcile-transaction")
       .input({
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
     const withoutWorkflowRuns = {
-      id: pario.id,
-      projectId: pario.projectId,
-      ontology: pario.ontology,
-      actionRegistry: pario.actionRegistry,
-      events: pario.events,
+      id: sixb.id,
+      projectId: sixb.projectId,
+      ontology: sixb.ontology,
+      actionRegistry: sixb.actionRegistry,
+      events: sixb.events,
       storage: {
-        ...pario.storage,
+        ...sixb.storage,
         workflowRuns: undefined,
       },
-      lakeStorage: pario.lakeStorage,
-      blobStorage: pario.blobStorage,
-      queues: pario.queues,
-      workflows: pario.workflows,
+      lakeStorage: sixb.lakeStorage,
+      blobStorage: sixb.blobStorage,
+      queues: sixb.queues,
+      workflows: sixb.workflows,
     }
 
     expect(() => new WorkflowWorker(withoutWorkflowRuns)).toThrow("storage.workflowRuns")
@@ -165,21 +165,21 @@ describe("WorkflowWorker", () => {
       })
       .then(findBestInvoice)
       .then(reviewInvoice)
-    const parioWithIntervention = createPario({ workflows: [interventionWorkflow] })
+    const sixbWithIntervention = createSixb({ workflows: [interventionWorkflow] })
     const withoutWorkflowInterventions = {
-      id: parioWithIntervention.id,
-      projectId: parioWithIntervention.projectId,
-      ontology: parioWithIntervention.ontology,
-      actionRegistry: parioWithIntervention.actionRegistry,
-      events: parioWithIntervention.events,
+      id: sixbWithIntervention.id,
+      projectId: sixbWithIntervention.projectId,
+      ontology: sixbWithIntervention.ontology,
+      actionRegistry: sixbWithIntervention.actionRegistry,
+      events: sixbWithIntervention.events,
       storage: {
-        ...parioWithIntervention.storage,
+        ...sixbWithIntervention.storage,
         workflowInterventions: undefined,
       },
-      lakeStorage: parioWithIntervention.lakeStorage,
-      blobStorage: parioWithIntervention.blobStorage,
-      queues: parioWithIntervention.queues,
-      workflows: parioWithIntervention.workflows,
+      lakeStorage: sixbWithIntervention.lakeStorage,
+      blobStorage: sixbWithIntervention.blobStorage,
+      queues: sixbWithIntervention.queues,
+      workflows: sixbWithIntervention.workflows,
     }
 
     expect(() => new WorkflowWorker(withoutWorkflowInterventions)).toThrow(
@@ -193,9 +193,9 @@ describe("WorkflowWorker", () => {
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    const sixb = createSixb({ workflows: [workflow] })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.requested",
@@ -210,14 +210,14 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(pario)
+    const worker = new WorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
     const run = await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_success",
         }),
       (value) => value?.status === "succeeded"
@@ -226,7 +226,7 @@ describe("WorkflowWorker", () => {
 
     const events = await waitFor(
       () =>
-        pario.events.read({
+        sixb.events.read({
           types: [
             "workflow.run.started",
             "workflow.run.node.started",
@@ -265,8 +265,8 @@ describe("WorkflowWorker", () => {
       finishedAt: expect.any(String),
     })
 
-    const claimed = await pario.queues.workflows.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)
@@ -278,9 +278,9 @@ describe("WorkflowWorker", () => {
         transaction: ref(Transaction),
       })
       .then(failingStep)
-    const pario = createPario({ workflows: [workflow] })
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    const sixb = createSixb({ workflows: [workflow] })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.requested",
@@ -295,14 +295,14 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(pario)
+    const worker = new WorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
     const run = await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_failed",
         }),
       (value) => value?.status === "failed"
@@ -311,7 +311,7 @@ describe("WorkflowWorker", () => {
 
     const events = await waitFor(
       () =>
-        pario.events.read({
+        sixb.events.read({
           types: [
             "workflow.run.started",
             "workflow.run.node.started",
@@ -342,8 +342,8 @@ describe("WorkflowWorker", () => {
       error: "workflow exploded",
     })
 
-    const claimed = await pario.queues.workflows.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)
@@ -358,9 +358,9 @@ describe("WorkflowWorker", () => {
       .then(reviewInvoice, ({ steps }) => ({
         invoice: steps.findBestInvoice.invoice,
       }))
-    const pario = createPario({ workflows: [workflow] })
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    const sixb = createSixb({ workflows: [workflow] })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.requested",
@@ -375,29 +375,29 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(pario)
+    const worker = new WorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
     const run = await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_waiting",
         }),
       (value) => value?.status === "waiting"
     )
     const interventions = await waitFor(
       () =>
-        pario.storage.workflowInterventions!.list({
-          projectId: pario.id,
+        sixb.storage.workflowInterventions!.list({
+          projectId: sixb.id,
           workflowRunId: "wfrun_worker_waiting",
         }),
       (value) => value.total === 1
     )
     const events = await waitFor(
       () =>
-        pario.events.read({
+        sixb.events.read({
           types: [
             "workflow.run.started",
             "workflow.run.node.started",
@@ -429,8 +429,8 @@ describe("WorkflowWorker", () => {
       "workflow.run.waiting",
     ])
 
-    const claimed = await pario.queues.workflows.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)
@@ -448,10 +448,10 @@ describe("WorkflowWorker", () => {
       .then(finalizeInvoice, ({ steps }) => ({
         approvedInvoice: steps.reviewInvoice.approvedInvoice,
       }))
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.requested",
@@ -466,28 +466,28 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(pario)
+    const worker = new WorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
     await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_resume",
         }),
       (value) => value?.status === "waiting"
     )
 
-    await pario.storage.workflowInterventions!.submit({
-      projectId: pario.id,
+    await sixb.storage.workflowInterventions!.submit({
+      projectId: sixb.id,
       id: "wfrun_worker_resume:intervention:1",
       response: {
         approvedInvoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
       },
     })
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.resume.requested",
@@ -502,20 +502,20 @@ describe("WorkflowWorker", () => {
 
     const run = await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_resume",
         }),
       (value) => value?.status === "succeeded"
     )
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_worker_resume",
       order: "asc",
     })
     const events = await waitFor(
       () =>
-        pario.events.read({
+        sixb.events.read({
           types: [
             "workflow.run.node.finished",
             "workflow.run.node.started",
@@ -536,8 +536,8 @@ describe("WorkflowWorker", () => {
     })
     expect(events.at(-1)?.type).toBe("workflow.run.finished")
 
-    const claimed = await pario.queues.workflows.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)
@@ -545,9 +545,9 @@ describe("WorkflowWorker", () => {
 
   test("cancels the run and fails the queue job on worker shutdown", async () => {
     const workflow = defineWorkflow("cancel-workflow").input({}).then(slowStep)
-    const pario = createPario({ workflows: [workflow] })
-    await pario.queues.workflows.enqueue({
-      projectId: pario.id,
+    const sixb = createSixb({ workflows: [workflow] })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "workflow.run.requested",
@@ -560,14 +560,14 @@ describe("WorkflowWorker", () => {
       ],
     })
 
-    const worker = new WorkflowWorker(pario)
+    const worker = new WorkflowWorker(sixb)
     workers.push(worker)
     await worker.start()
 
     await waitFor(
       () =>
-        pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: "wfrun_worker_cancelled",
         }),
       (value) => value?.status === "running"
@@ -575,13 +575,13 @@ describe("WorkflowWorker", () => {
 
     await worker.stop()
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_worker_cancelled",
     })
     expect(run?.status).toBe("cancelled")
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: [
         "workflow.run.started",
         "workflow.run.node.started",
@@ -609,8 +609,8 @@ describe("WorkflowWorker", () => {
       error: "Workflow worker aborted.",
     })
 
-    const claimed = await pario.queues.workflows.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.workflows.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
     expect(claimed).toHaveLength(0)

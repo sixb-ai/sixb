@@ -1,19 +1,19 @@
 /**
  * Leaf operation: batch upsert links.
  *
- * Takes ParioRuntimeContext (shared infra) + per-item pre-resolved data,
+ * Takes SixbRuntimeContext (shared infra) + per-item pre-resolved data,
  * because each item can target a different objectType + linkDefinition.
  */
 
 import type { NewDomainEvent } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
-import type { BatchItemResult, ParioRuntimeContext } from "../../runtime/types"
+import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import { ObjectNotFoundError } from "../../storage/errors"
 import type { ResolvedLinkBatchItem } from "../context"
 
 export async function upsertLinkBatch(
-  ctx: ParioRuntimeContext,
+  ctx: SixbRuntimeContext,
   items: readonly ResolvedLinkBatchItem[]
 ): Promise<readonly BatchItemResult<void>[]> {
   const { events: eventsRuntime, storage, projectId, ontology } = ctx

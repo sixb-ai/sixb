@@ -12,7 +12,7 @@ Use SQL steps for dataset-to-dataset transforms that can be expressed by the lak
 engine.
 
 ```ts
-import { datasetUpdated, definePipeline, definePipelineStep } from "@pario/core"
+import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
 import { customersDataset, rawCustomersDataset } from "../datasets/customers"
 
 export const cleanCustomersStep = definePipelineStep("clean-customers")
@@ -31,7 +31,7 @@ export const customersPipeline = definePipeline("customers")
   .then(cleanCustomersStep)
 ```
 
-SQL steps require a lake storage provider with SQL transform support. Pario does not fall back to
+SQL steps require a lake storage provider with SQL transform support. Sixb does not fall back to
 JavaScript execution when SQL support is missing.
 
 `definePipelineStep(...)` is inert by itself. Exporting a standalone step does not register work
@@ -78,12 +78,12 @@ handler writes through a worker-owned output writer.
 
 ## Running Pipelines
 
-`pario dev` co-hosts `PipelineWorker` automatically when pipelines are registered.
+`sixb dev` co-hosts `PipelineWorker` automatically when pipelines are registered.
 
 For a separate worker process:
 
 ```bash
-pario worker pipeline
+sixb worker pipeline
 ```
 
-To co-host every registered queue worker type in one process, use `pario worker-group`.
+To co-host every registered queue worker type in one process, use `sixb worker-group`.

@@ -8,9 +8,9 @@ import {
   definePipeline,
   definePipelineStep,
   defineSync,
-  Pario,
   prop,
   RuntimeError,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -126,26 +126,26 @@ describe("defineDataset", () => {
   })
 })
 
-describe("Pario dataset registration", () => {
+describe("Sixb dataset registration", () => {
   test("exposes dataset definitions and lookup by id", () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual([
+    expect(sixb.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual([
       "raw.erp.orders",
       "canonical.orders",
     ])
-    expect(pario.getDatasetById("raw.erp.orders")).toBe(rawOrdersDataset)
-    expect(pario.getDatasetById("missing-dataset")).toBeNull()
+    expect(sixb.getDatasetById("raw.erp.orders")).toBe(rawOrdersDataset)
+    expect(sixb.getDatasetById("missing-dataset")).toBeNull()
   })
 
   test("rejects duplicate dataset ids", () => {
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [
             rawOrdersDataset,
@@ -166,7 +166,7 @@ describe("Pario dataset registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           syncs: [sync],
           ...createTestRuntimeDeps(),
@@ -174,7 +174,7 @@ describe("Pario dataset registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           syncs: [sync],
           ...createTestRuntimeDeps(),
@@ -191,7 +191,7 @@ describe("Pario dataset registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset],
           pipelines: [pipeline],
@@ -200,7 +200,7 @@ describe("Pario dataset registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset],
           pipelines: [pipeline],

@@ -9,14 +9,14 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   snapshotWorkflowInput,
   snapshotWorkflowInterventionResponse,
   validateWorkflowInput,
   validateWorkflowInterventionResponse,
   validateWorkflowStepOutput,
-} from "@pario/core"
+} from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import { statusForFailure, throwIfAborted, toWorkflowRunError } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
@@ -108,7 +108,7 @@ export class WorkflowRunSession {
 
     if (!workflowInterventions) {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`
+        `[SixbWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`
       )
     }
 
@@ -157,19 +157,19 @@ export class WorkflowRunSession {
 
     if (run.status !== "waiting") {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`
+        `[SixbWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`
       )
     }
 
     if (waitingNode.status !== "waiting") {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`
+        `[SixbWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`
       )
     }
 
     if (intervention.status !== "submitted" || !intervention.response) {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`
+        `[SixbWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`
       )
     }
 
@@ -375,7 +375,7 @@ function requireWorkflow(
   job: { readonly workflowId: string }
 ): WorkflowDefinition {
   if (!workflow) {
-    throw new WorkflowWorkerError(`[ParioWorkflowWorker] Unknown workflow '${job.workflowId}'.`)
+    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Unknown workflow '${job.workflowId}'.`)
   }
 
   return workflow
@@ -393,7 +393,7 @@ async function requireInterventionRecord(input: {
 
   if (!intervention) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow intervention '${input.id}' not found.`
+      `[SixbWorkflowWorker] Workflow intervention '${input.id}' not found.`
     )
   }
 
@@ -411,7 +411,7 @@ async function requireWorkflowRun(input: {
   })
 
   if (!run) {
-    throw new WorkflowWorkerError(`[ParioWorkflowWorker] Workflow run '${input.id}' not found.`)
+    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow run '${input.id}' not found.`)
   }
 
   return run
@@ -428,9 +428,7 @@ async function requireWorkflowNodeRun(input: {
   })
 
   if (!node) {
-    throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow node run '${input.id}' not found.`
-    )
+    throw new WorkflowWorkerError(`[SixbWorkflowWorker] Workflow node run '${input.id}' not found.`)
   }
 
   return node
@@ -445,7 +443,7 @@ function assertResumeMatchesRun(input: {
 }): void {
   if (input.run.workflowId !== input.workflow.id || input.job.workflowId !== input.workflow.id) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`
+      `[SixbWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`
     )
   }
 
@@ -454,7 +452,7 @@ function assertResumeMatchesRun(input: {
     input.intervention.workflowRunId !== input.job.id
   ) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`
+      `[SixbWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`
     )
   }
 
@@ -464,7 +462,7 @@ function assertResumeMatchesRun(input: {
     input.waitingNode.id !== input.intervention.nodeRunId
   ) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`
+      `[SixbWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`
     )
   }
 }
@@ -482,7 +480,7 @@ function requireInterventionNode(
     node.key !== intervention.nodeKey
   ) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`
+      `[SixbWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`
     )
   }
 
@@ -513,7 +511,7 @@ function reconstructWorkflowState(input: {
     const nodeRun = nodeRunsByIndex.get(nodeIndex)
     if (!node || !nodeRun) {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`
+        `[SixbWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`
       )
     }
 
@@ -538,7 +536,7 @@ function applyCompletedNodeToState(input: {
 }): void {
   if (input.nodeRun.status !== "succeeded") {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`
+      `[SixbWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`
     )
   }
 
@@ -573,7 +571,7 @@ function createWorkflowBookkeepingError(input: {
   readonly cause: unknown
 }): Error {
   return new WorkflowWorkerError(
-    `[ParioWorkflowWorker] Workflow '${input.workflowId}' executed side effects, but failed to finalize workflow run '${input.runId}'. The workflow state may need repair.`,
+    `[SixbWorkflowWorker] Workflow '${input.workflowId}' executed side effects, but failed to finalize workflow run '${input.runId}'. The workflow state may need repair.`,
     { cause: input.cause }
   )
 }

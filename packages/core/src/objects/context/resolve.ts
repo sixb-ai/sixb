@@ -8,7 +8,7 @@
 import type { ObjectLink } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import type { ParioRuntimeContext } from "../../runtime/types"
+import type { SixbRuntimeContext } from "../../runtime/types"
 import type { ResolvedLinkContext, ResolvedObjectContext } from "./types"
 
 /** Look up a link definition on an object type, throwing if not found. */
@@ -28,7 +28,7 @@ export function requireLinkDefinition(
  * are structural resolution calls that belong in factories, not leaf functions.
  */
 export function resolveObjectContext(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string
 ): ResolvedObjectContext {
   const objectType = runtime.ontology.resolveObjectType(objectTypeId)

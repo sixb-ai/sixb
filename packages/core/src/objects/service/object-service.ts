@@ -4,7 +4,7 @@
  * Resolves objectTypeId to a typed context and delegates to leaf functions.
  */
 import { OntologyValidationError } from "../../ontology/errors"
-import type { BatchItemResult, ParioRuntimeContext } from "../../runtime/types"
+import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
 import { resolveObjectContext } from "../context"
 import {
@@ -13,7 +13,7 @@ import {
 } from "../object"
 
 export async function upsertObject(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   properties: Record<string, unknown>
 ): Promise<ObjectRow> {
@@ -28,7 +28,7 @@ export async function upsertObject(
 }
 
 export async function upsertObjectBatch(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   items: readonly { properties: Record<string, unknown> }[]
 ): Promise<readonly BatchItemResult<ObjectRow>[]> {

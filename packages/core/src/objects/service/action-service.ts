@@ -3,7 +3,7 @@
  *
  * Resolves objectTypeId to a typed context and delegates to the leaf function.
  */
-import type { ParioRuntimeContext } from "../../runtime/types"
+import type { SixbRuntimeContext } from "../../runtime/types"
 import {
   type RequestActionAndWaitOptions,
   type RequestActionOptions,
@@ -13,7 +13,7 @@ import {
 import { resolveObjectContext } from "../context"
 
 export async function requestAction(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   primaryId: string,
   actionId: string,
@@ -25,7 +25,7 @@ export async function requestAction(
 }
 
 export async function requestActionAndWait(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   primaryId: string,
   actionId: string,

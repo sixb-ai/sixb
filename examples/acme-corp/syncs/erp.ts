@@ -1,4 +1,4 @@
-import { defineSync, syncFinished } from "@pario/core"
+import { defineSync, syncFinished } from "@sixb/core"
 import { acmeErpConnector } from "../connectors/acme-erp"
 import {
   erpCustomersDataset,

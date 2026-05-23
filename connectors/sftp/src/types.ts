@@ -1,4 +1,4 @@
-import type { ConnectorAdapter } from "@pario/core"
+import type { ConnectorAdapter } from "@sixb/core"
 import type { ConnectConfig, FileEntryWithStats, Stats } from "ssh2"
 
 export type SftpConnection = ConnectConfig

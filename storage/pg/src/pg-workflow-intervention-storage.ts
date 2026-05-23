@@ -9,8 +9,8 @@ import type {
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
   WorkflowIOSnapshot,
-} from "@pario/core"
-import { WorkflowInterventionError } from "@pario/core"
+} from "@sixb/core"
+import { WorkflowInterventionError } from "@sixb/core"
 import type { SQL } from "bun"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -60,7 +60,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowInterventionError(
-          `[ParioPg] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -240,13 +240,13 @@ async function requirePendingIntervention(
 
   if (!row) {
     throw new WorkflowInterventionError(
-      `[ParioPg] Workflow intervention '${id}' not found for project '${projectId}'.`
+      `[SixbPg] Workflow intervention '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.status !== "pending") {
     throw new WorkflowInterventionError(
-      `[ParioPg] Workflow intervention '${id}' for project '${projectId}' is not pending.`
+      `[SixbPg] Workflow intervention '${id}' for project '${projectId}' is not pending.`
     )
   }
 
@@ -303,7 +303,7 @@ function rowToWorkflowInterventionRecord(
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new WorkflowInterventionError(
-      `[ParioPg] Workflow intervention ${fieldName} must be a non-negative integer.`
+      `[SixbPg] Workflow intervention ${fieldName} must be a non-negative integer.`
     )
   }
 }

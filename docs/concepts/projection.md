@@ -2,8 +2,8 @@
 
 A projection maps committed dataset versions into typed objects and links in the twin graph.
 
-Projection authoring lives in `@pario/core`. Projection execution lives in
-`@pario/projection-worker`.
+Projection authoring lives in `@sixb/core`. Projection execution lives in
+`@sixb/projection-worker`.
 
 ## What It Does
 
@@ -30,7 +30,7 @@ Projection authoring lives in `@pario/core`. Projection execution lives in
 File: `datasets/erp.ts`
 
 ```ts
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 
 export const erpCustomersDataset = defineDataset("erp.customers", {
   schema: [
@@ -52,7 +52,7 @@ Projection builders receive the dataset definition directly, not a string id. Th
 File: `projections/customer-projection.ts`
 
 ```ts
-import { defineProjection, fromForeignKey } from "@pario/core"
+import { defineProjection, fromForeignKey } from "@sixb/core"
 import { erpCustomersDataset } from "../datasets/erp"
 import { Customer } from "../ontology/customer"
 import { Employee } from "../ontology/employee"
@@ -96,7 +96,7 @@ At runtime, the FK column value is used as the target object's primary id.
 For many-to-many relationships stored in a join dataset:
 
 ```ts
-import { defineLinkProjection } from "@pario/core"
+import { defineLinkProjection } from "@sixb/core"
 import { erpProjectMembersDataset } from "../datasets/erp"
 import { Project } from "../ontology/project"
 
@@ -126,29 +126,29 @@ The Orchestrator matches projections by `projection.datasetId`. The Projection W
 
 ## Hosting Workers
 
-`pario dev` starts the projection worker automatically when projection definitions are registered.
+`sixb dev` starts the projection worker automatically when projection definitions are registered.
 No manual worker setup is needed for normal local development.
 
 Custom hosts can still start both workers explicitly:
 
 ```ts
-import { compileRoutes, OrchestratorWorker } from "@pario/orchestrator"
-import { ProjectionWorker } from "@pario/projection-worker"
+import { compileRoutes, OrchestratorWorker } from "@sixb/orchestrator"
+import { ProjectionWorker } from "@sixb/projection-worker"
 
 const routes = compileRoutes({
-  syncs: pario.getSyncDefinitions(),
-  pipelines: pario.getPipelineDefinitions(),
-  projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
+  syncs: sixb.getSyncDefinitions(),
+  pipelines: sixb.getPipelineDefinitions(),
+  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
 })
 
 const orchestrator = new OrchestratorWorker({
-  projectId: pario.id,
-  events: pario.events,
-  queues: pario.queues,
+  projectId: sixb.id,
+  events: sixb.events,
+  queues: sixb.queues,
   routes,
 })
 
-const projectionWorker = new ProjectionWorker(pario)
+const projectionWorker = new ProjectionWorker(sixb)
 
 await orchestrator.start()
 await projectionWorker.start()
@@ -161,8 +161,8 @@ Start the orchestrator before emitting dataset commit events. The V1 orchestrato
 Projection runs are stored by `ProjectionRunStorage`:
 
 ```ts
-const result = await pario.storage.projectionRuns?.list({
-  projectId: pario.id,
+const result = await sixb.storage.projectionRuns?.list({
+  projectId: sixb.id,
   projectionId: "customer-proj",
   statuses: ["succeeded", "failed"],
   limit: 20,
@@ -205,15 +205,15 @@ your-project/
     customer-projection.ts
     project-projection.ts
     project-members-projection.ts
-  pario.config.ts
+  sixb.config.ts
 ```
 
-`createPario()` scans `datasets/` and `projections/` and registers exported definitions automatically.
+`createSixb()` scans `datasets/` and `projections/` and registers exported definitions automatically.
 
 You can also register projections explicitly:
 
 ```ts
-createPario({
+createSixb({
   datasets: [erpCustomersDataset],
   projections: [customerProjection],
 })

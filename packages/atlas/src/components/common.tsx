@@ -1,5 +1,5 @@
-import { Button } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import { Button } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { ChevronLeft, Loader2 } from "lucide-react"
 import type { ReactNode } from "react"
 import { useNavigate } from "react-router-dom"

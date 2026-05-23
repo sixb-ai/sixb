@@ -1,4 +1,4 @@
-import { defineAction } from "@pario/core"
+import { defineAction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 export const markPaid = defineAction("markPaid", {
@@ -6,8 +6,8 @@ export const markPaid = defineAction("markPaid", {
 })
   .target(Invoice)
   .params({})
-  .run(async ({ target, pario }) => {
-    await pario.objects(Invoice).upsert({
+  .run(async ({ target, sixb }) => {
+    await sixb.objects(Invoice).upsert({
       properties: {
         ...target.properties,
         id: target.primaryId,

@@ -5,7 +5,7 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepRunContext,
-} from "@pario/core"
+} from "@sixb/core"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineWorkerContext } from "./types"
@@ -23,7 +23,7 @@ export async function executeRunStep(input: {
 
   if (step.executor.kind !== "run") {
     throw new PipelineWorkerError(
-      `[ParioPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses SQL execution, which is not supported by the run step executor.`
+      `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' uses SQL execution, which is not supported by the run step executor.`
     )
   }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { DatasetDefinition, DatasetRow, PipelineDefinition } from "@pario/core"
+import type { DatasetDefinition, DatasetRow, PipelineDefinition } from "@sixb/core"
 import {
   col,
   defineDataset,
@@ -11,9 +11,9 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
-} from "@pario/core"
+  Sixb,
+} from "@sixb/core"
 import { PipelineWorker } from "../src"
 
 const Room = defineObjectType({
@@ -49,11 +49,11 @@ async function waitFor<T>(
   throw new Error("Timed out waiting for condition.")
 }
 
-function createParioForPipeline(options: {
+function createSixbForPipeline(options: {
   readonly pipeline: PipelineDefinition
   readonly datasets: readonly DatasetDefinition[]
 }) {
-  return new Pario({
+  return new Sixb({
     id: "pipeline-worker-tests",
     ontology: [Room],
     broker: new InMemoryBroker(),
@@ -79,7 +79,7 @@ async function seedDatasetVersion(
 
 describe("PipelineWorker", () => {
   test("requires registered pipelines and pipeline run storage", () => {
-    const emptyPario = new Pario({
+    const emptySixb = new Sixb({
       id: "pipeline-worker-tests",
       ontology: [Room],
       broker: new InMemoryBroker(),
@@ -89,29 +89,29 @@ describe("PipelineWorker", () => {
       queues: new InMemoryQueues(),
       datasets: [rawCustomersDataset],
     })
-    expect(() => new PipelineWorker(emptyPario)).toThrow("No pipeline definitions")
+    expect(() => new PipelineWorker(emptySixb)).toThrow("No pipeline definitions")
 
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)
       .run(async () => {})
     const pipeline = definePipeline("customers").then(cleanStep)
-    const pario = createParioForPipeline({
+    const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset],
     })
     const withoutPipelineRuns = {
-      id: pario.id,
-      events: pario.events,
-      lakeStorage: pario.lakeStorage,
-      queues: pario.queues,
+      id: sixb.id,
+      events: sixb.events,
+      lakeStorage: sixb.lakeStorage,
+      queues: sixb.queues,
       storage: {
-        ...pario.storage,
+        ...sixb.storage,
         pipelineRuns: undefined,
       },
-      getPipelineDefinitions: () => pario.getPipelineDefinitions(),
-      getPipelineById: (pipelineId: string) => pario.getPipelineById(pipelineId),
-      getDatasetById: (datasetId: string) => pario.getDatasetById(datasetId),
+      getPipelineDefinitions: () => sixb.getPipelineDefinitions(),
+      getPipelineById: (pipelineId: string) => sixb.getPipelineById(pipelineId),
+      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
     }
 
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
@@ -125,18 +125,18 @@ describe("PipelineWorker", () => {
         await output.writeRows(inputs.rawCustomers.readRows())
       })
     const pipeline = definePipeline("customers").then(cleanStep)
-    const pario = createParioForPipeline({
+    const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset],
     })
-    await seedDatasetVersion(pario.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
+    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
       { id: "cust_2", name: "Grace" },
     ])
 
-    const worker = new PipelineWorker(pario)
-    await pario.queues.pipelines.enqueue({
-      projectId: pario.id,
+    const worker = new PipelineWorker(sixb)
+    await sixb.queues.pipelines.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "pipeline.run.requested",
@@ -152,14 +152,14 @@ describe("PipelineWorker", () => {
 
     try {
       const run = await waitFor(
-        () => pario.storage.pipelineRuns!.getById({ projectId: pario.id, id: "run-queued" }),
+        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-queued" }),
         (value) => value?.status === "succeeded"
       )
 
       expect(run?.output?.datasetId).toBe("customers")
 
-      const claimed = await pario.queues.pipelines.claim({
-        projectId: pario.id,
+      const claimed = await sixb.queues.pipelines.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
@@ -167,7 +167,7 @@ describe("PipelineWorker", () => {
       await worker.stop()
     }
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: [
         "pipeline.run.started",
         "pipeline.run.step.started",
@@ -252,17 +252,17 @@ describe("PipelineWorker", () => {
         throw new Error("nope")
       })
     const pipeline = definePipeline("customers").then(cleanStep).then(failingStep)
-    const pario = createParioForPipeline({
+    const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset, failingStep.output],
     })
-    await seedDatasetVersion(pario.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
+    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
     ])
 
-    const worker = new PipelineWorker(pario)
-    await pario.queues.pipelines.enqueue({
-      projectId: pario.id,
+    const worker = new PipelineWorker(sixb)
+    await sixb.queues.pipelines.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "pipeline.run.requested",
@@ -278,12 +278,12 @@ describe("PipelineWorker", () => {
 
     try {
       await waitFor(
-        () => pario.storage.pipelineRuns!.getById({ projectId: pario.id, id: "run-fails-late" }),
+        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-fails-late" }),
         (value) => value?.status === "failed"
       )
 
-      const claimed = await pario.queues.pipelines.claim({
-        projectId: pario.id,
+      const claimed = await sixb.queues.pipelines.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
@@ -291,7 +291,7 @@ describe("PipelineWorker", () => {
       await worker.stop()
     }
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: [
         "pipeline.run.started",
         "pipeline.run.step.started",
@@ -366,17 +366,17 @@ describe("PipelineWorker", () => {
         throw error
       })
     const pipeline = definePipeline("customers").then(firstStep).then(abortingStep)
-    const pario = createParioForPipeline({
+    const sixb = createSixbForPipeline({
       pipeline,
       datasets: [rawCustomersDataset, customersDataset, abortingStep.output],
     })
-    await seedDatasetVersion(pario.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
+    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
       { id: "cust_1", name: "Ada" },
     ])
 
-    const worker = new PipelineWorker(pario)
-    await pario.queues.pipelines.enqueue({
-      projectId: pario.id,
+    const worker = new PipelineWorker(sixb)
+    await sixb.queues.pipelines.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "pipeline.run.requested",
@@ -392,12 +392,12 @@ describe("PipelineWorker", () => {
 
     try {
       await waitFor(
-        () => pario.storage.pipelineRuns!.getById({ projectId: pario.id, id: "run-aborts-late" }),
+        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-aborts-late" }),
         (value) => value?.status === "cancelled"
       )
 
-      const claimed = await pario.queues.pipelines.claim({
-        projectId: pario.id,
+      const claimed = await sixb.queues.pipelines.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
@@ -405,7 +405,7 @@ describe("PipelineWorker", () => {
       await worker.stop()
     }
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: [
         "pipeline.run.started",
         "pipeline.run.step.started",

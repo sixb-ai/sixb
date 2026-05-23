@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ObjectLinkRow, ObjectRow, RulePredicate } from "@pario/core"
+import type { ObjectLinkRow, ObjectRow, RulePredicate } from "@sixb/core"
 import type { RuleLinkMap } from "../src"
 import { evaluateRulePredicate } from "../src"
 

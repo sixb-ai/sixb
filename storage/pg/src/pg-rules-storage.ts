@@ -6,7 +6,7 @@ import type {
   RulesStorage,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import type { SQL } from "bun"
 
 export class PgRulesStorage implements RulesStorage {

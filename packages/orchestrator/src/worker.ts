@@ -1,5 +1,5 @@
-import type { DomainEvent, StoredDomainEvent } from "@pario/core"
-import { Worker } from "@pario/core"
+import type { DomainEvent, StoredDomainEvent } from "@sixb/core"
+import { Worker } from "@sixb/core"
 import { OrchestratorError } from "./errors"
 import { routeKeyForEvent } from "./route-key"
 import type { OrchestratorJob, OrchestratorRoutes, OrchestratorRuntimeOptions } from "./types"
@@ -35,7 +35,7 @@ export class OrchestratorWorker extends Worker {
         .then(() => dispatch(options, events))
         .catch((error) => {
           // Never crash the subscribe loop — log and keep consuming.
-          console.error("[ParioOrchestrator] Dispatch failed:", error)
+          console.error("[SixbOrchestrator] Dispatch failed:", error)
         })
     })
 
@@ -67,7 +67,7 @@ async function dispatch(
       } catch (error) {
         // Best-effort: an error on one fan-out sibling must not drop the rest.
         console.error(
-          `[ParioOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
+          `[SixbOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
           error
         )
       }

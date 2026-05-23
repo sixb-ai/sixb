@@ -9,7 +9,7 @@ export function assertObjectTypeRegistered(
 ): void {
   if (!objectTypesById.has(objectType.id)) {
     throw new OntologyValidationError(
-      `[Pario] Object type is not registered in this runtime: ${objectType.id}`
+      `[Sixb] Object type is not registered in this runtime: ${objectType.id}`
     )
   }
 }
@@ -20,7 +20,7 @@ export function assertPropertyTokenBelongsToObjectType(
 ): void {
   if (property.objectTypeId !== objectType.id) {
     throw new OntologyValidationError(
-      `[Pario] Property token ${property.objectTypeId}.${property.id} cannot be used with ${objectType.id}`
+      `[Sixb] Property token ${property.objectTypeId}.${property.id} cannot be used with ${objectType.id}`
     )
   }
 }
@@ -31,7 +31,7 @@ export function assertLinkTokenBelongsToObjectType(
 ): void {
   if (link.objectTypeId !== objectType.id) {
     throw new OntologyValidationError(
-      `[Pario] Link token ${link.objectTypeId}.${link.id} cannot be used with ${objectType.id}`
+      `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${objectType.id}`
     )
   }
 }
@@ -44,7 +44,7 @@ export function assertKnownProperties(
   for (const propertyId of Object.keys(properties)) {
     if (!knownIds.has(propertyId)) {
       throw new OntologyValidationError(
-        `[Pario] Unknown property '${propertyId}' for object type '${objectType.id}'`
+        `[Sixb] Unknown property '${propertyId}' for object type '${objectType.id}'`
       )
     }
   }
@@ -57,7 +57,7 @@ export function assertRequiredProperties(
   for (const property of objectType.properties) {
     if (property.required && properties[property.id] === undefined) {
       throw new OntologyValidationError(
-        `[Pario] Missing required property '${property.id}' for object type '${objectType.id}'`
+        `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
       )
     }
   }
@@ -94,25 +94,25 @@ export function validatePrimaryProperties(
 
     if (primaries.length === 0) {
       throw new OntologyValidationError(
-        `[Pario] Object type '${typeId}' has no primary property. ` +
+        `[Sixb] Object type '${typeId}' has no primary property. ` +
           `Define one with prop("id", "string", { required: true, primary: true }).`
       )
     }
     if (primaries.length > 1) {
       throw new OntologyValidationError(
-        `[Pario] Object type '${typeId}' has ${primaries.length} primary properties, expected 1`
+        `[Sixb] Object type '${typeId}' has ${primaries.length} primary properties, expected 1`
       )
     }
 
     const primary = primaries[0]
     if (!primary.required) {
       throw new OntologyValidationError(
-        `[Pario] Primary property '${primary.id}' on '${typeId}' must be required`
+        `[Sixb] Primary property '${primary.id}' on '${typeId}' must be required`
       )
     }
     if (primary.schema !== "string") {
       throw new OntologyValidationError(
-        `[Pario] Primary property '${primary.id}' on '${typeId}' must have schema "string", got "${String(primary.schema)}"`
+        `[Sixb] Primary property '${primary.id}' on '${typeId}' must have schema "string", got "${String(primary.schema)}"`
       )
     }
 
@@ -131,7 +131,7 @@ export function validatePropertyDefinitions(
       // Telemetry stores time-series samples, not blob references, even when fileRef is nested.
       if (property.mode === "telemetry" && schemaContainsFileRef(property.schema, valueTypesById)) {
         throw new OntologyValidationError(
-          `[Pario] Telemetry property '${property.id}' on '${typeId}' cannot use fileRef`
+          `[Sixb] Telemetry property '${property.id}' on '${typeId}' cannot use fileRef`
         )
       }
     }
@@ -145,14 +145,14 @@ export function validatePropertyValue(
   valueTypesById: ReadonlyMap<string, ValueType>
 ): void {
   if (value === undefined) {
-    throw new OntologyValidationError(`[Pario] Property ${path} cannot be undefined`)
+    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be undefined`)
   }
 
   if (value === null) {
     if (property.nullable) {
       return
     }
-    throw new OntologyValidationError(`[Pario] Property ${path} cannot be null`)
+    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be null`)
   }
 
   validateSchemaValue(property.schema, value, path, valueTypesById)

@@ -8,7 +8,7 @@ function runCheckFixture(fixtureName: string): {
 } {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "pario.config.ts")
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
 
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, "check", "--entry", fixtureEntry],
@@ -24,12 +24,12 @@ function runCheckFixture(fixtureName: string): {
   }
 }
 
-describe("pario check", () => {
+describe("sixb check", () => {
   test("passes for a valid project", () => {
     const result = runCheckFixture("valid-project")
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout).toContain("Pario is healthy")
+    expect(result.stdout).toContain("Sixb is healthy")
     expect(result.stdout).toContain("Project")
     expect(result.stdout).not.toContain("validation error(s)")
     expect(result.stderr).toBe("")

@@ -1,11 +1,11 @@
-# @pario/client
+# @sixb/client
 
-Type-safe API client for Pario, auto-generated from the server's OpenAPI spec. Provides a fetch-based SDK for all REST endpoints, TanStack Query hooks, and a core-typed real-time domain event hook.
+Type-safe API client for Sixb, auto-generated from the server's OpenAPI spec. Provides a fetch-based SDK for all REST endpoints, TanStack Query hooks, and a core-typed real-time domain event hook.
 
 ## Installation
 
 ```bash
-bun add @pario/client
+bun add @sixb/client
 ```
 
 For React hooks, also install the peer dependencies:
@@ -27,7 +27,7 @@ bun generate:client
 ### SDK (direct fetch)
 
 ```typescript
-import { client, listObjects, getObject, getTelemetryHistory, listObjectTypes } from "@pario/client"
+import { client, listObjects, getObject, getTelemetryHistory, listObjectTypes } from "@sixb/client"
 
 // Configure the base URL
 client.setConfig({ baseUrl: "http://localhost:3002" })
@@ -52,7 +52,7 @@ const { data: history } = await getTelemetryHistory({
 })
 
 // Request an action on an object
-import { requestAction } from "@pario/client"
+import { requestAction } from "@sixb/client"
 
 await requestAction({
   path: { actionId: "setTemperature" },
@@ -71,7 +71,7 @@ import {
   listObjectsOptions,
   getObjectOptions,
   getTelemetryHistoryOptions,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 
 // List objects with automatic caching and refetching
 const { data: objects } = useQuery(listObjectsOptions())
@@ -93,10 +93,10 @@ const { data: history } = useQuery(
 ### Domain events
 
 ```typescript
-import { useParioEvents } from "@pario/client"
+import { useSixbEvents } from "@sixb/client"
 
 function LiveDashboard() {
-  const { connected } = useParioEvents({
+  const { connected } = useSixbEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     onEvent(event) {
@@ -111,8 +111,8 @@ function LiveDashboard() {
 ### UI models
 
 ```typescript
-import type { ObjectSummary, ObjectDetail, TelemetryHistory } from "@pario/client/models"
-import { toObjectSummary, toObjectDetail, executeAction } from "@pario/client/models"
+import type { ObjectSummary, ObjectDetail, TelemetryHistory } from "@sixb/client/models"
+import { toObjectSummary, toObjectDetail, executeAction } from "@sixb/client/models"
 ```
 
 The models module provides normalized types and adapter functions that transform raw API responses into UI-friendly shapes with merged telemetry properties, parsed actions, and computed fields.
@@ -121,6 +121,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@pario/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, UI model types/adapters, `useParioEvents` hook |
-| `@pario/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useParioEvents` |
-| `@pario/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |
+| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, UI model types/adapters, `useSixbEvents` hook |
+| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useSixbEvents` |
+| `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

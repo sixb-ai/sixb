@@ -1,5 +1,5 @@
 {
-  "name": "@pario/server",
+  "name": "@sixb/server",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,15 +13,15 @@
   "dependencies": {
     "@elysiajs/cors": "^1.2.0",
     "@elysiajs/openapi": "^1.4.0",
-    "@pario/core": "workspace:*",
+    "@sixb/core": "workspace:*",
     "elysia": "^1.2.0",
     "zod": "^3.24.0",
     "zod-to-json-schema": "^3.24.0"
   },
   "devDependencies": {
-    "@pario/auth-magic-link": "workspace:*",
-    "@pario/auth-oidc": "workspace:*",
-    "@pario/sqlite": "workspace:*",
+    "@sixb/auth-magic-link": "workspace:*",
+    "@sixb/auth-oidc": "workspace:*",
+    "@sixb/sqlite": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   }

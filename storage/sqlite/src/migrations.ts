@@ -9,12 +9,12 @@ import type {
   MigrationStep,
   MigrationStepOptions,
   StorageMigrator,
-} from "@pario/core"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@pario/core"
+} from "@sixb/core"
+import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS pario_migrations (
+  CREATE TABLE IF NOT EXISTS sixb_migrations (
     adapter_id TEXT NOT NULL,
     version INTEGER NOT NULL,
     id TEXT NOT NULL,
@@ -26,7 +26,7 @@ const MIGRATIONS_TABLE_SQL = `
   );
 `
 
-export const SQLITE_STORAGE_ADAPTER_ID = "ParioSqliteStorage"
+export const SQLITE_STORAGE_ADAPTER_ID = "SixbSqliteStorage"
 export const SQLITE_STORAGE_FILE = "storage.sqlite"
 
 export const sqliteStorageMigrations = defineMigrations({
@@ -122,13 +122,13 @@ function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
     },
     readHistory(adapterId) {
       return db
-        .query("SELECT * FROM pario_migrations WHERE adapter_id = ? ORDER BY version")
+        .query("SELECT * FROM sixb_migrations WHERE adapter_id = ? ORDER BY version")
         .all(adapterId)
         .map(rowToMigrationRecord)
     },
     markStarted(adapterId, migration, at) {
       db.query(`
-        INSERT INTO pario_migrations (
+        INSERT INTO sixb_migrations (
           adapter_id, version, id, checksum, status, started_at, finished_at
         ) VALUES (?, ?, ?, ?, 'started', ?, NULL)
         ON CONFLICT(adapter_id, version) DO UPDATE SET
@@ -141,7 +141,7 @@ function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
     },
     markApplied(adapterId, migration, at) {
       db.query(`
-        UPDATE pario_migrations
+        UPDATE sixb_migrations
         SET status = 'applied', finished_at = ?
         WHERE adapter_id = ? AND version = ?
       `).run(at, adapterId, migration.version)

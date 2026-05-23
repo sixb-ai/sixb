@@ -34,14 +34,14 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     if (this.state.users.has(key)) {
       throw new AuthStorageError(
         "duplicate_user",
-        `[Pario] User '${id}' already exists for project '${projectId}'.`
+        `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
 
     if (getUserByEmail(this.state, projectId, email)) {
       throw new AuthStorageError(
         "duplicate_user",
-        `[Pario] User email '${email}' already exists for project '${projectId}'.`
+        `[Sixb] User email '${email}' already exists for project '${projectId}'.`
       )
     }
 
@@ -83,7 +83,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 
@@ -104,7 +104,7 @@ export class InMemoryAuthUserStore implements AuthUserStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 

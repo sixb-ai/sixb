@@ -4,7 +4,7 @@ import {
   type OidcTokenResponse,
   oidc,
   type SendOidcInvitationInput,
-} from "@pario/auth-oidc"
+} from "@sixb/auth-oidc"
 import {
   createSessionCredential,
   defineGroup,
@@ -16,10 +16,10 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
   prop,
-} from "@pario/core"
-import { createParioApi, ParioServer } from "../src/server"
+  Sixb,
+} from "@sixb/core"
+import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
@@ -90,7 +90,7 @@ function createRuntime(options: { readonly failInvitationDelivery?: boolean } = 
   const storage = new InMemoryStorage()
   const client = new FakeOidcClient()
   const invitationMessages: SendOidcInvitationInput[] = []
-  const pario = new Pario<readonly OntologySource[]>({
+  const sixb = new Sixb<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -124,16 +124,16 @@ function createRuntime(options: { readonly failInvitationDelivery?: boolean } = 
   })
 
   return {
-    app: createParioApi(
-      new ParioServer({
-        pario,
+    app: createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
     ),
     client,
     invitationMessages,
-    pario,
+    sixb,
     storage,
   }
 }
@@ -163,8 +163,8 @@ async function seedAdminSession(storage: InMemoryStorage) {
   })
 
   return {
-    cookie: `pario_session=${credential.cookieValue}; pario_csrf=csrf_1`,
-    csrfHeader: { "x-pario-csrf": "csrf_1" },
+    cookie: `sixb_session=${credential.cookieValue}; sixb_csrf=csrf_1`,
+    csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
 }
 
@@ -220,15 +220,15 @@ describe("oidc auth routes", () => {
       '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "pario_session")
-    const csrfCookie = cookieValue(setCookie, "pario_csrf")
+    const sessionCookie = cookieValue(setCookie, "sixb_session")
+    const csrfCookie = cookieValue(setCookie, "sixb_csrf")
     expect(sessionCookie).toContain(".")
     expect(csrfCookie).toBeTruthy()
 
     const sessionResponse = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
         headers: {
-          cookie: `pario_session=${sessionCookie}`,
+          cookie: `sixb_session=${sessionCookie}`,
         },
       })
     )
@@ -275,7 +275,7 @@ describe("oidc auth routes", () => {
       '<meta http-equiv="refresh" content="0;url=http://app.localhost/dashboard">'
     )
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "pario_session_app")
+    const sessionCookie = cookieValue(setCookie, "sixb_session_app")
     expect(sessionCookie).toContain(".")
   })
 
@@ -340,7 +340,7 @@ describe("oidc auth routes", () => {
     const invitationUrl = new URL(invitationMessages[0]?.url ?? "")
     expect(invitationMessages[0]).toMatchObject({
       email: "ava@acme.com",
-      subject: "You are invited to Pario",
+      subject: "You are invited to Sixb",
     })
     expect(invitationUrl.pathname).toBe("/auth/sign-in")
     expect(invitationUrl.searchParams.get("audience")).toBe("atlas")

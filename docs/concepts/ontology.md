@@ -33,7 +33,7 @@ and actions.
 File: `ontology/customer.ts`
 
 ```ts
-import { defineObjectType, prop, link, stringEnum } from "@pario/core"
+import { defineObjectType, prop, link, stringEnum } from "@sixb/core"
 import { Organization } from "./organization"
 
 export const Customer = defineObjectType({
@@ -70,7 +70,7 @@ prop("id", "string", { required: true, primary: true })
 
 ### Schemas
 
-Pario supports several schema types for property values:
+Sixb supports several schema types for property values:
 
 | Schema | Example |
 | --- | --- |
@@ -88,7 +88,7 @@ prop("pdf", "fileRef", { nullable: true })
 ```
 
 Object upserts store only the `FileRef` metadata. Upload and download bytes through
-`pario.blobStorage`; `fileRef` properties cannot use `mode: "telemetry"`.
+`sixb.blobStorage`; `fileRef` properties cannot use `mode: "telemetry"`.
 
 ### Property mode
 
@@ -125,7 +125,7 @@ When you upsert an object, the primary property value is extracted automatically
 properties you provide. There is no separate `key` parameter:
 
 ```ts
-await pario.objects(Customer).upsert({
+await sixb.objects(Customer).upsert({
   properties: { id: "cust-001", name: "Acme Corp" },
 })
 // customer.id === "cust-001" (the primary value)
@@ -134,7 +134,7 @@ await pario.objects(Customer).upsert({
 Retrieval uses the primary value directly:
 
 ```ts
-const customer = await pario.objects(Customer).get("cust-001")
+const customer = await sixb.objects(Customer).get("cust-001")
 ```
 
 
@@ -186,7 +186,7 @@ An action models a command that can be dispatched against an object instance, su
 a credit or cancelling an order.
 
 ```ts
-import { actionParam, defineAction } from "@pario/core"
+import { actionParam, defineAction } from "@sixb/core"
 import { Customer } from "../ontology/customer"
 
 export const issueCredit = defineAction("issueCredit")
@@ -194,8 +194,8 @@ export const issueCredit = defineAction("issueCredit")
   .params({
     amount: actionParam("double", { required: true, semanticType: "Currency" }),
   })
-  .run(async ({ params, target, pario }) => {
-    const billing = await pario.connector(billingConnector)
+  .run(async ({ params, target, sixb }) => {
+    const billing = await sixb.connector(billingConnector)
     await billing.issueCredit(target.primaryId, params.amount)
   })
 ```
@@ -211,7 +211,7 @@ A value type is a reusable named schema shared across properties. Use it when mu
 properties need the same structure.
 
 ```ts
-import { defineValueType } from "@pario/core"
+import { defineValueType } from "@sixb/core"
 
 export const Money = defineValueType({
   id: "money",
@@ -296,17 +296,17 @@ classification for subtype queries.
 - `Customer.l` — link tokens keyed by link id
 
 Tokens carry type information about the object type, property, or link they refer to. They are
-used throughout the Pario API for type-safe operations:
+used throughout the Sixb API for type-safe operations:
 
 ```ts
 // Telemetry with compile-time unit checking
-await pario.objects(Customer).byId("cust-001").telemetry(Customer.p.monthlySpend).append({
+await sixb.objects(Customer).byId("cust-001").telemetry(Customer.p.monthlySpend).append({
   value: 1250.00,
   unit: "USD",
 })
 
 // Linking with type-safe tokens
-await pario.objects(Customer).byId("cust-001").link(Customer.l.belongsTo, {
+await sixb.objects(Customer).byId("cust-001").link(Customer.l.belongsTo, {
   objectTypeId: "Organization",
   primaryId: "org-1",
 })
@@ -330,13 +330,13 @@ your-project/
     organization.ts
     customer.ts
     order.ts
-  pario.config.ts
+  sixb.config.ts
 ```
 
-`createPario()` scans `ontology/` and registers exported object types and value types
+`createSixb()` scans `ontology/` and registers exported object types and value types
 automatically.
 
-You can also register types explicitly with `createPario({ ontology: [Customer, Organization] })`.
+You can also register types explicitly with `createSixb({ ontology: [Customer, Organization] })`.
 
 
 ## Typed API
@@ -344,7 +344,7 @@ You can also register types explicitly with `createPario({ ontology: [Customer, 
 Once registered, access objects through the typed API:
 
 ```ts
-const customers = pario.objects(Customer)
+const customers = sixb.objects(Customer)
 
 // Create or update
 const customer = await customers.upsert({
@@ -404,10 +404,10 @@ All write operations emit typed events through the events runtime:
 
 1. Define object types with `defineObjectType()`, using `prop()` and `link()`.
 2. Optionally define value types with `defineValueType()`.
-3. Define actions with `defineAction()` in `actions/` or pass them to `createPario()`.
-4. Export definitions from `ontology/` or pass them to `createPario()`.
-5. Pario validates types at startup: primaries, extends chains, link targets, action targets.
-6. Use `pario.objects(Type)` for typed CRUD, telemetry, links, and action requests.
+3. Define actions with `defineAction()` in `actions/` or pass them to `createSixb()`.
+4. Export definitions from `ontology/` or pass them to `createSixb()`.
+5. Sixb validates types at startup: primaries, extends chains, link targets, action targets.
+6. Use `sixb.objects(Type)` for typed CRUD, telemetry, links, and action requests.
 
 
 ## Guidelines

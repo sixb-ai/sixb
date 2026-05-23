@@ -1,4 +1,4 @@
-import type { ParioBrowserOrigin } from "@pario/server"
+import type { SixbBrowserOrigin } from "@sixb/server"
 
 export interface BrowserTopologyOptions {
   readonly mode: "development" | "production"
@@ -28,7 +28,7 @@ export interface BrowserTopology {
   readonly atlasPublicOrigin: string | null
   readonly sentinelPublicOrigin: string | null
   readonly appPublicOrigin: string | null
-  readonly allowedBrowserOrigins: readonly ParioBrowserOrigin[]
+  readonly allowedBrowserOrigins: readonly SixbBrowserOrigin[]
 }
 
 interface BrowserHosts {
@@ -101,7 +101,7 @@ function resolveBrowserPublicOrigins(
 ): BrowserPublicOrigins {
   const apiPublicOrigin = resolvePublicOrigin({
     value: options.apiPublicOrigin,
-    envName: "PARIO_API_PUBLIC_ORIGIN",
+    envName: "SIXB_API_PUBLIC_ORIGIN",
     label: "API public origin",
     localDefault: `http://localhost:${ports.apiPort}`,
     mode: options.mode,
@@ -111,7 +111,7 @@ function resolveBrowserPublicOrigins(
   const atlasPublicOrigin = includeAtlas
     ? resolvePublicOrigin({
         value: options.atlasPublicOrigin,
-        envName: "PARIO_ATLAS_PUBLIC_ORIGIN",
+        envName: "SIXB_ATLAS_PUBLIC_ORIGIN",
         label: "Atlas public origin",
         localDefault: `http://localhost:${ports.atlasPort}`,
         mode: options.mode,
@@ -120,7 +120,7 @@ function resolveBrowserPublicOrigins(
   const sentinelPublicOrigin = includeSentinel
     ? resolvePublicOrigin({
         value: options.sentinelPublicOrigin,
-        envName: "PARIO_SENTINEL_PUBLIC_ORIGIN",
+        envName: "SIXB_SENTINEL_PUBLIC_ORIGIN",
         label: "Sentinel public origin",
         localDefault: `http://localhost:${ports.sentinelPort}`,
         mode: options.mode,
@@ -129,7 +129,7 @@ function resolveBrowserPublicOrigins(
   const appPublicOrigin = options.includeCustomApp
     ? resolvePublicOrigin({
         value: options.appPublicOrigin,
-        envName: "PARIO_APP_PUBLIC_ORIGIN",
+        envName: "SIXB_APP_PUBLIC_ORIGIN",
         label: "custom app public origin",
         localDefault: `http://localhost:${ports.appPort}`,
         mode: options.mode,
@@ -144,8 +144,8 @@ function resolveBrowserPublicOrigins(
   }
 }
 
-function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly ParioBrowserOrigin[] {
-  const allowedOrigins: ParioBrowserOrigin[] = []
+function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly SixbBrowserOrigin[] {
+  const allowedOrigins: SixbBrowserOrigin[] = []
 
   if (origins.atlasPublicOrigin) {
     allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" })
@@ -197,7 +197,7 @@ function resolvePublicOrigin(input: {
   }
 
   throw new Error(
-    `[ParioCLI] Production serving requires ${input.envName} or --${toKebabCase(input.envName.replace(/^PARIO_/, "").toLowerCase())}.`
+    `[SixbCLI] Production serving requires ${input.envName} or --${toKebabCase(input.envName.replace(/^SIXB_/, "").toLowerCase())}.`
   )
 }
 
@@ -208,7 +208,7 @@ function parsePort(value: string | undefined, label: string, fallback: number): 
 
   const port = Number.parseInt(value, 10)
   if (!Number.isInteger(port) || port <= 0 || port > 65535 || String(port) !== value.trim()) {
-    throw new Error(`[ParioCLI] --${label} must be a valid TCP port.`)
+    throw new Error(`[SixbCLI] --${label} must be a valid TCP port.`)
   }
 
   return port
@@ -219,15 +219,15 @@ function normalizeOrigin(value: string, label: string): string {
   try {
     url = new URL(value)
   } catch {
-    throw new Error(`[ParioCLI] Invalid ${label}: '${value}'.`)
+    throw new Error(`[SixbCLI] Invalid ${label}: '${value}'.`)
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`[ParioCLI] ${label} must use http or https.`)
+    throw new Error(`[SixbCLI] ${label} must use http or https.`)
   }
 
   if (url.pathname !== "/" || url.search || url.hash) {
-    throw new Error(`[ParioCLI] ${label} must be an origin, not a full URL.`)
+    throw new Error(`[SixbCLI] ${label} must be an origin, not a full URL.`)
   }
 
   return url.origin

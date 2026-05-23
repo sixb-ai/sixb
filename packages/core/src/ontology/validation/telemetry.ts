@@ -6,7 +6,7 @@ import { resolveValueTypeRef } from "./schema"
 
 export function assertTelemetryProperty(property: Property): void {
   if (property.mode !== "telemetry") {
-    throw new OntologyValidationError(`[Pario] Property ${property.id} is not telemetry-enabled`)
+    throw new OntologyValidationError(`[Sixb] Property ${property.id} is not telemetry-enabled`)
   }
 }
 
@@ -37,17 +37,17 @@ export function validateTelemetryUnit(
   if (semanticType) {
     if (!unit) {
       throw new OntologyValidationError(
-        `[Pario] Missing unit for telemetry property ${propertyPath}`
+        `[Sixb] Missing unit for telemetry property ${propertyPath}`
       )
     }
     if (!isValidUnit(semanticType, unit)) {
       throw new OntologyValidationError(
-        `[Pario] Invalid unit '${unit}' for ${propertyPath} (${semanticType})`
+        `[Sixb] Invalid unit '${unit}' for ${propertyPath} (${semanticType})`
       )
     }
   } else if (unit) {
     throw new OntologyValidationError(
-      `[Pario] Property ${propertyPath} does not define semanticType and cannot accept a unit`
+      `[Sixb] Property ${propertyPath} does not define semanticType and cannot accept a unit`
     )
   }
 }

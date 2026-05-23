@@ -1,6 +1,6 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
-import type { ParioAuthConfig } from "../auth"
+import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import {
   discoverActions,
@@ -32,10 +32,10 @@ import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
 import { RuntimeError } from "./errors"
-import { Pario } from "./pario"
+import { Sixb } from "./sixb"
 import type { OntologySource } from "./types"
 
-export interface CreateParioOptions {
+export interface CreateSixbOptions {
   id?: string
   broker: Broker
   storage: Storage
@@ -56,19 +56,19 @@ export interface CreateParioOptions {
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
   invitePolicies?: readonly InvitePolicyDefinition[]
-  auth?: ParioAuthConfig
+  auth?: SixbAuthConfig
   projectRoot?: string
 }
 
 /**
- * Create a Pario runtime using convention-based discovery.
+ * Create a Sixb runtime using convention-based discovery.
  *
- * Pario auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
+ * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
  * `syncs/`, `rules/`, `workflows/`, and `connectors/` relative to `projectRoot`.
  */
-export async function createPario(
-  options: CreateParioOptions
-): Promise<Pario<readonly OntologySource[]>> {
+export async function createSixb(
+  options: CreateSixbOptions
+): Promise<Sixb<readonly OntologySource[]>> {
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
   const discovered = await discoverOntologySources(projectRoot)
@@ -76,7 +76,7 @@ export async function createPario(
 
   if (allSources.length === 0) {
     throw new RuntimeError(
-      "No ontology found. Create an 'ontology/' folder or pass 'ontologies' to createPario()."
+      "No ontology found. Create an 'ontology/' folder or pass 'ontologies' to createSixb()."
     )
   }
 
@@ -109,8 +109,8 @@ export async function createPario(
   ])
 
   // Explicit definitions come first so local setup can override ordering while
-  // duplicate ids are still rejected by the Pario constructor.
-  return new Pario<readonly OntologySource[]>({
+  // duplicate ids are still rejected by the Sixb constructor.
+  return new Sixb<readonly OntologySource[]>({
     id: options.id,
     ontology: allSources,
     broker: options.broker,

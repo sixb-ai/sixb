@@ -1,4 +1,4 @@
-import type { ParioRuntimeContext } from "../runtime/types"
+import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type RequestActionAndWaitInput,
   type RequestActionInput,
@@ -7,9 +7,9 @@ import {
 } from "./request"
 
 export class ActionsRuntime {
-  private readonly runtime: ParioRuntimeContext
+  private readonly runtime: SixbRuntimeContext
 
-  constructor(runtime: ParioRuntimeContext) {
+  constructor(runtime: SixbRuntimeContext) {
     this.runtime = runtime
   }
 

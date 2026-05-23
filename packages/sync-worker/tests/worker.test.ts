@@ -10,10 +10,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
+  Sixb,
   type SyncDefinition,
-} from "@pario/core"
+} from "@sixb/core"
 import { SyncWorker } from "../src"
 
 const Room = defineObjectType({
@@ -54,10 +54,10 @@ async function waitFor<T>(
   throw new Error("Timed out waiting for condition.")
 }
 
-function createParioForSync(sync: SyncDefinition) {
+function createSixbForSync(sync: SyncDefinition) {
   const storage = new InMemoryStorage()
 
-  return new Pario({
+  return new Sixb({
     id: "sync-worker-tests",
     ontology: [Room],
     connectors: [erpDb],
@@ -78,11 +78,11 @@ describe("SyncWorker", () => {
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }, { orderId: "ord_2" }])
       .intoDataset(rawOrdersDataset)
-    const pario = createParioForSync(sync)
-    const worker = new SyncWorker(pario)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
 
-    await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -97,15 +97,15 @@ describe("SyncWorker", () => {
     await worker.start()
 
     const run = await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-1" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-1" }),
       (value) => value?.status === "succeeded"
     )
 
     expect(run?.rowsRead).toBe(2)
     expect(run?.output?.datasetId).toBe("raw.erp.orders")
 
-    const claimed = await pario.queues.syncRuns.claim({
-      projectId: pario.id,
+    const claimed = await sixb.queues.syncRuns.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
 
@@ -120,11 +120,11 @@ describe("SyncWorker", () => {
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
-    const pario = createParioForSync(sync)
-    const worker = new SyncWorker(pario)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
 
-    const [queued] = await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    const [queued] = await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -139,7 +139,7 @@ describe("SyncWorker", () => {
 
     const fallbackRunId = `${queued!.id}:attempt:1`
     const run = await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: fallbackRunId }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: fallbackRunId }),
       (value) => value?.status === "succeeded"
     )
 
@@ -167,11 +167,11 @@ describe("SyncWorker", () => {
         return []
       })
       .intoDataset(rawOrdersDataset)
-    const pario = createParioForSync(sync)
-    const worker = new SyncWorker(pario)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
 
-    const [queued] = await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    const [queued] = await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -186,21 +186,21 @@ describe("SyncWorker", () => {
     await worker.start()
 
     await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-retry" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-retry" }),
       (value) => value?.status === "running"
     )
 
     await worker.stop()
 
     const cancelledRun = await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-retry" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-retry" }),
       (value) => value?.status === "cancelled"
     )
 
     expect(cancelledRun?.status).toBe("cancelled")
 
-    const [retried] = await pario.queues.syncRuns.claim({
-      projectId: pario.id,
+    const [retried] = await sixb.queues.syncRuns.claim({
+      projectId: sixb.id,
       workerId: "observer",
     })
 
@@ -214,11 +214,11 @@ describe("SyncWorker", () => {
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
       .intoDataset(rawOrdersDataset)
-    const pario = createParioForSync(sync)
+    const sixb = createSixbForSync(sync)
 
     let claimCallCount = 0
-    const originalClaim = pario.queues.syncRuns.claim.bind(pario.queues.syncRuns)
-    pario.queues.syncRuns.claim = async (params) => {
+    const originalClaim = sixb.queues.syncRuns.claim.bind(sixb.queues.syncRuns)
+    sixb.queues.syncRuns.claim = async (params) => {
       claimCallCount++
       if (claimCallCount === 1) {
         throw new Error("Transient network failure")
@@ -226,8 +226,8 @@ describe("SyncWorker", () => {
       return originalClaim(params)
     }
 
-    await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -236,11 +236,11 @@ describe("SyncWorker", () => {
       ],
     })
 
-    const worker = new SyncWorker(pario)
+    const worker = new SyncWorker(sixb)
     await worker.start()
 
     const run = await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-after-error" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-after-error" }),
       (value) => value?.status === "succeeded"
     )
 
@@ -255,11 +255,11 @@ describe("SyncWorker", () => {
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
       .intoDataset(defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] }))
-    const pario = createParioForSync(sync)
-    const worker = new SyncWorker(pario)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
 
-    await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -271,7 +271,7 @@ describe("SyncWorker", () => {
     await worker.start()
 
     await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-emit" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-emit" }),
       (value) => value?.status === "succeeded"
     )
 
@@ -279,7 +279,7 @@ describe("SyncWorker", () => {
     await Bun.sleep(50)
     await worker.stop()
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["sync.run.started", "dataset.version.committed", "sync.run.finished"],
     })
 
@@ -342,14 +342,14 @@ describe("SyncWorker", () => {
         return []
       })
       .intoDataset(rawOrdersDataset)
-    const pario = createParioForSync(sync)
+    const sixb = createSixbForSync(sync)
 
-    pario.queues.syncRuns.retry = async () => {
+    sixb.queues.syncRuns.retry = async () => {
       throw new Error("Lease already expired")
     }
 
-    await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -358,11 +358,11 @@ describe("SyncWorker", () => {
       ],
     })
 
-    const worker = new SyncWorker(pario)
+    const worker = new SyncWorker(sixb)
     await worker.start()
 
     await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "run-expired-lease" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-expired-lease" }),
       (value) => value?.status === "running"
     )
 

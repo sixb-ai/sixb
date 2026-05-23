@@ -1,6 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import { CSRF_HEADER_NAME, type OntologySource, type Pario } from "@pario/core"
+import { CSRF_HEADER_NAME, type OntologySource, type Sixb } from "@sixb/core"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -9,46 +9,46 @@ import {
   createApiBrowserAuthContextResolver,
   createApiBrowserAuthRedirectContextResolver,
   isAllowedApiBrowserOrigin,
-  type ParioApiBrowserPolicy,
   type RequestAuthContext,
   type ResolveAuthRedirectContext,
-  type ResolvedParioApiBrowserPolicy,
+  type ResolvedSixbApiBrowserPolicy,
   type ResolveRequestAuthContext,
   resolveApiBrowserPolicy,
   resolveApiBrowserPublicOrigin,
+  type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
-import { PARIO_CSRF_SECURITY_SCHEME, PARIO_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
+import { SIXB_CSRF_SECURITY_SCHEME, SIXB_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
 import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWsRoutes } from "./routes/ws"
 
-export interface ParioServerOptions {
-  pario: Pario<readonly OntologySource[]>
+export interface SixbServerOptions {
+  sixb: Sixb<readonly OntologySource[]>
   port?: number
   host?: string
   quiet?: boolean
-  browser: ParioApiBrowserPolicy
+  browser: SixbApiBrowserPolicy
 }
 
-export function createParioServer(options: ParioServerOptions): ParioServer {
-  return new ParioServer(options)
+export function createSixbServer(options: SixbServerOptions): SixbServer {
+  return new SixbServer(options)
 }
 
-export class ParioServer {
-  private readonly pario: Pario<readonly OntologySource[]>
+export class SixbServer {
+  private readonly sixb: Sixb<readonly OntologySource[]>
   private readonly port: number
   private readonly host: string
   private readonly quiet: boolean
-  private readonly apiBrowserPolicy: ResolvedParioApiBrowserPolicy
+  private readonly apiBrowserPolicy: ResolvedSixbApiBrowserPolicy
   private readonly authContextResolver: ResolveRequestAuthContext
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
-  private app: ParioApp | null = null
+  private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
 
-  constructor(options: ParioServerOptions) {
-    this.pario = options.pario
+  constructor(options: SixbServerOptions) {
+    this.sixb = options.sixb
     this.port = options.port ?? 3000
     this.host = options.host ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
@@ -59,8 +59,8 @@ export class ParioServer {
     )
   }
 
-  getPario(): Pario<readonly OntologySource[]> {
-    return this.pario
+  getSixb(): Sixb<readonly OntologySource[]> {
+    return this.sixb
   }
 
   getPort(): number {
@@ -82,12 +82,12 @@ export class ParioServer {
     return resolveApiBrowserPublicOrigin(this.apiBrowserPolicy, request)
   }
 
-  getApiBrowserPolicy(): ResolvedParioApiBrowserPolicy {
+  getApiBrowserPolicy(): ResolvedSixbApiBrowserPolicy {
     return this.apiBrowserPolicy
   }
 
   async start(): Promise<void> {
-    this.app = createParioApi(this)
+    this.app = createSixbApi(this)
 
     try {
       this.bunServer = startApiServer(this.app, {
@@ -98,12 +98,12 @@ export class ParioServer {
       this.app = null
       this.bunServer = null
       const message = error instanceof Error ? error.message : String(error)
-      throw new Error(`[ParioServer] Failed to listen on ${this.host}:${this.port}: ${message}`)
+      throw new Error(`[SixbServer] Failed to listen on ${this.host}:${this.port}: ${message}`)
     }
 
     if (!this.quiet) {
       const base = `http://${this.host}:${this.port}`
-      console.log(`Pario server running at ${base}`)
+      console.log(`Sixb server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
     }
   }
@@ -121,10 +121,10 @@ export class ParioServer {
   }
 }
 
-export function createParioApi(server: ParioServer) {
-  const pario = server.getPario()
+export function createSixbApi(server: SixbServer) {
+  const sixb = server.getSixb()
   const guard = new ServerAuthGuard({
-    pario,
+    sixb,
     resolveAuthContext: (request) => server.resolveAuthContext(request),
   })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
@@ -157,13 +157,13 @@ export function createParioApi(server: ParioServer) {
       provider: "swagger-ui",
       documentation: {
         info: {
-          title: "Pario API",
+          title: "Sixb API",
           version: "0.1.0",
           description: "Ontology-first digital twins runtime API",
         },
         components: {
           securitySchemes: {
-            [PARIO_CSRF_SECURITY_SCHEME_ID]: PARIO_CSRF_SECURITY_SCHEME,
+            [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
           },
         },
         tags: [
@@ -196,14 +196,14 @@ export function createParioApi(server: ParioServer) {
     })
   )
 
-  registerAuthRoutes(app, pario, {
+  registerAuthRoutes(app, sixb, {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
       server.resolveAuthRedirectContext(request, input),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
   })
-  registerHttpRoutes(app, pario)
-  registerWebhookRoutes(app, pario)
+  registerHttpRoutes(app, sixb)
+  registerWebhookRoutes(app, sixb)
   registerWsRoutes(app, server)
 
   return app
@@ -211,7 +211,7 @@ export function createParioApi(server: ParioServer) {
 
 function rejectDisallowedBrowserOrigin(
   request: Request,
-  policy: ResolvedParioApiBrowserPolicy
+  policy: ResolvedSixbApiBrowserPolicy
 ): Response | undefined {
   if (!request.headers.has("origin")) {
     return undefined
@@ -236,10 +236,10 @@ function rejectDisallowedBrowserOrigin(
   })
 }
 
-export type ParioApp = ReturnType<typeof createParioApi>
+export type SixbApp = ReturnType<typeof createSixbApi>
 
 function startApiServer(
-  app: ParioApp,
+  app: SixbApp,
   options: {
     readonly host: string
     readonly port: number
@@ -256,7 +256,7 @@ function startApiServer(
   return bunServer
 }
 
-function getElysiaWsHandler(app: ParioApp) {
+function getElysiaWsHandler(app: SixbApp) {
   const cfg = (app as unknown as { config?: { websocket?: Record<string, unknown> } }).config
   return {
     ...elysiaWebSocket,
@@ -264,6 +264,6 @@ function getElysiaWsHandler(app: ParioApp) {
   } as Parameters<typeof Bun.serve>[0]["websocket"]
 }
 
-function attachBunServer(app: ParioApp, bunServer: ReturnType<typeof Bun.serve>) {
+function attachBunServer(app: SixbApp, bunServer: ReturnType<typeof Bun.serve>) {
   ;(app as unknown as { server: typeof bunServer }).server = bunServer
 }

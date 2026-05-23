@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -49,7 +49,7 @@ export class DuckLakeConnectionManager {
 
   assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[ParioDuckLake] DuckLakeStorage is closed.")
+      throw new LakeStorageError("[SixbDuckLake] DuckLakeStorage is closed.")
     }
   }
 
@@ -88,7 +88,7 @@ export class DuckLakeConnectionManager {
     this.assertOpen()
 
     // The lease is intentionally wider than one DuckDB queue operation. It
-    // covers the full Pario read/commit boundary for local catalogs while
+    // covers the full Sixb read/commit boundary for local catalogs while
     // remaining a no-op for PostgreSQL catalogs.
     const releaseLock = await this.acquireLocalAttachmentLock()
     let released = false
@@ -487,7 +487,7 @@ export class DuckLakeConnectionManager {
 
 // Local catalog tests commonly create multiple DuckLakeStorage instances in one
 // process. DuckLake/Postgres handles cross-connection visibility itself; local
-// file catalogs need this in-process signal so peers refresh after Pario writes.
+// file catalogs need this in-process signal so peers refresh after Sixb writes.
 const localCatalogGenerations = new Map<string, number>()
 
 function currentLocalCatalogGeneration(options: DuckLakeStorageOptions): number {

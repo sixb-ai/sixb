@@ -10,7 +10,7 @@ import {
   type LakeSqlExecutor,
   LakeStorageError,
   type PreviewSqlTransformInput,
-} from "@pario/core"
+} from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import {
   type ApplyDatasetRowsResult,
@@ -152,7 +152,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
       throw new LakeStorageError(
-        `[ParioDuckLake] Unknown SQL transform source dataset '${dataset.id}'.`
+        `[SixbDuckLake] Unknown SQL transform source dataset '${dataset.id}'.`
       )
     }
 
@@ -166,7 +166,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
       throw new LakeStorageError(
-        `[ParioDuckLake] Unknown SQL transform target dataset '${dataset.id}'.`
+        `[SixbDuckLake] Unknown SQL transform target dataset '${dataset.id}'.`
       )
     }
 
@@ -203,7 +203,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     sql: string
   ): Promise<void> {
     const rows = await runtime.query(
-      `DESCRIBE SELECT * FROM (${sql}) AS pario_sql_transform_result_schema`
+      `DESCRIBE SELECT * FROM (${sql}) AS sixb_sql_transform_result_schema`
     )
     const actualColumns = rows.map((row) => resultColumnFromDescribeRow(row))
     const expectedColumns = target.schema.columns
@@ -236,11 +236,11 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   }
 
   private async applySqlTransform(input: ApplySqlTransformInput): Promise<ApplyDatasetRowsResult> {
-    const tempTableName = `pario_sql_transform_${randomUUID().replaceAll("-", "")}`
+    const tempTableName = `sixb_sql_transform_${randomUUID().replaceAll("-", "")}`
     const tempTable = quoteIdentifier(tempTableName)
 
     await input.runtime.run(
-      `CREATE TEMP TABLE ${tempTable} AS SELECT * FROM (${input.sql}) AS pario_sql_transform_result`
+      `CREATE TEMP TABLE ${tempTable} AS SELECT * FROM (${input.sql}) AS sixb_sql_transform_result`
     )
 
     try {
@@ -267,7 +267,7 @@ function previewLimit(limit: number | undefined): number {
 }
 
 function buildPreviewSql(sql: string, limit: number): string {
-  return `SELECT * FROM (${sql}) AS pario_sql_transform_preview LIMIT ${limit}`
+  return `SELECT * FROM (${sql}) AS sixb_sql_transform_preview LIMIT ${limit}`
 }
 
 function resultColumnFromDescribeRow(
@@ -315,12 +315,12 @@ function normalizePreviewValue(value: unknown): unknown {
 
 function throwNoCommittedSourceVersion(datasetId: string): never {
   throw new LakeStorageError(
-    `[ParioDuckLake] No committed version found for SQL transform source dataset '${datasetId}'.`
+    `[SixbDuckLake] No committed version found for SQL transform source dataset '${datasetId}'.`
   )
 }
 
 function throwResultSchemaMismatch(datasetId: string, detail: string): never {
   throw new LakeStorageError(
-    `[ParioDuckLake] SQL transform result schema does not match target dataset '${datasetId}': ${detail}.`
+    `[SixbDuckLake] SQL transform result schema does not match target dataset '${datasetId}': ${detail}.`
   )
 }

@@ -1,4 +1,4 @@
-import { listObjectsInfiniteOptions } from "@pario/client/hooks"
+import { listObjectsInfiniteOptions } from "@sixb/client/hooks"
 import {
   Combobox,
   Input,
@@ -8,7 +8,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { SchemaChip } from "./nodes/SchemaShape"
 

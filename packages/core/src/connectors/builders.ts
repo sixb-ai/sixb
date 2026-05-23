@@ -11,7 +11,7 @@ function assertNonEmpty(value: string, field: string): void {
  * Define a connector instance for an external system.
  *
  * The returned definition is inert and can be exported from a project-level
- * `connectors/` module. Use `await pario.connector(definition)` at runtime to
+ * `connectors/` module. Use `await sixb.connector(definition)` at runtime to
  * resolve it to a connected client.
  */
 export function defineConnector<TId extends string, TAdapter extends ConnectorAdapter>(

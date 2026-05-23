@@ -1,5 +1,5 @@
-import type { ListWorkflowInterventionsResponse } from "@pario/client"
-import { listWorkflowInterventionsOptions } from "@pario/client/hooks"
+import type { ListWorkflowInterventionsResponse } from "@sixb/client"
+import { listWorkflowInterventionsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 
 type WorkflowIntervention = ListWorkflowInterventionsResponse["interventions"][number]

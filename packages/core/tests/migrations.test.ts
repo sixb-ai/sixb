@@ -49,7 +49,7 @@ function createMigrationHarness(initialRows: readonly MigrationRecord[] = []) {
 
   const state: MigrationHistoryStore = {
     ensure() {
-      ensureTable(db, "pario_migrations", [
+      ensureTable(db, "sixb_migrations", [
         "adapter_id",
         "version",
         "id",
@@ -104,7 +104,7 @@ function createMigrationHarness(initialRows: readonly MigrationRecord[] = []) {
 
 function appliedRow(version: number, id: string, checksum?: string): MigrationRecord {
   return {
-    adapterId: "ParioFakeStorage",
+    adapterId: "SixbFakeStorage",
     version,
     id,
     checksum,
@@ -118,7 +118,7 @@ describe("runMigrationSet", () => {
   test("applies pending schema changes and records migration history", async () => {
     const harness = createMigrationHarness()
     const migrations = defineMigrations({
-      adapterId: "ParioFakeStorage",
+      adapterId: "SixbFakeStorage",
       steps: [
         step<FakeStorageDb>("001-create-objects", (db) => {
           ensureTable(db, "objects", ["project_id", "object_type_id", "primary_id"])
@@ -136,7 +136,7 @@ describe("runMigrationSet", () => {
       now: harness.now,
     })
 
-    expect([...harness.db.tables].sort()).toEqual(["objects", "pario_migrations"])
+    expect([...harness.db.tables].sort()).toEqual(["objects", "sixb_migrations"])
     expect(getTableColumns(harness.db, "objects")).toEqual([
       "object_type_id",
       "primary_id",
@@ -149,7 +149,7 @@ describe("runMigrationSet", () => {
     ])
     expect(harness.db.operations).toEqual(["tx:start", "tx:commit", "tx:start", "tx:commit"])
     expect(report).toEqual({
-      adapterId: "ParioFakeStorage",
+      adapterId: "SixbFakeStorage",
       latestVersion: 2,
       status: "migrated",
       applied: ["001-create-objects", "002-add-source-event-id"],
@@ -161,7 +161,7 @@ describe("runMigrationSet", () => {
     const harness = createMigrationHarness([appliedRow(1, "001-create-objects")])
     ensureTable(harness.db, "objects", ["project_id", "object_type_id", "primary_id"])
     const migrations = defineMigrations({
-      adapterId: "ParioFakeStorage",
+      adapterId: "SixbFakeStorage",
       steps: [
         step<FakeStorageDb>("001-create-objects", () => {
           throw new Error("version 1 should not run again")
@@ -206,7 +206,7 @@ describe("runMigrationSet", () => {
       runMigrationSet({
         context: harness.db,
         migrations: defineMigrations({
-          adapterId: "ParioFakeStorage",
+          adapterId: "SixbFakeStorage",
           steps: [step<FakeStorageDb>("001-create-objects", () => {})],
         }),
         state: harness.state,
@@ -221,12 +221,12 @@ describe("runMigrationSet", () => {
       runMigrationSet({
         context: harness.db,
         migrations: defineMigrations({
-          adapterId: "ParioFakeStorage",
+          adapterId: "SixbFakeStorage",
           steps: [],
         }),
         state: harness.state,
       })
-    ).rejects.toThrow("Database schema is newer than this Pario version")
+    ).rejects.toThrow("Database schema is newer than this Sixb version")
   })
 
   test("fails when an applied migration checksum changes", async () => {
@@ -236,7 +236,7 @@ describe("runMigrationSet", () => {
       runMigrationSet({
         context: harness.db,
         migrations: defineMigrations({
-          adapterId: "ParioFakeStorage",
+          adapterId: "SixbFakeStorage",
           steps: [step<FakeStorageDb>("001-create-objects", () => {}, { checksum: "new" })],
         }),
         state: harness.state,
@@ -249,7 +249,7 @@ describe("migrateStorage", () => {
   test("runs storage migrators when supported", async () => {
     const calls: string[] = []
     const migrator: StorageMigrator = {
-      adapterId: "ParioFakeStorage",
+      adapterId: "SixbFakeStorage",
       latestVersion: 1,
       async plan() {
         throw new Error("plan should not be called")
@@ -257,7 +257,7 @@ describe("migrateStorage", () => {
       async migrate() {
         calls.push("storage")
         return {
-          adapterId: "ParioFakeStorage",
+          adapterId: "SixbFakeStorage",
           latestVersion: 1,
           status: "migrated",
           applied: ["001-create-objects"],
@@ -274,7 +274,7 @@ describe("migrateStorage", () => {
       status: "migrated",
       reports: [
         {
-          adapterId: "ParioFakeStorage",
+          adapterId: "SixbFakeStorage",
           latestVersion: 1,
           status: "migrated",
           applied: ["001-create-objects"],

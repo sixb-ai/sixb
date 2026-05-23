@@ -4,7 +4,7 @@ import type {
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import type { SQL } from "bun"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
@@ -57,7 +57,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
       }
 
       if (existing?.status !== "failed") {
-        throw new Error("[ParioPg] Webhook delivery row disappeared during claim.")
+        throw new Error("[SixbPg] Webhook delivery row disappeared during claim.")
       }
 
       // Failed deliveries are intentionally claimable so provider retries can run again.
@@ -77,7 +77,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
 
       if (!updated) {
         throw new Error(
-          `[ParioPg] Missing webhook delivery row after claim for ${serializeKey(input)}.`
+          `[SixbPg] Missing webhook delivery row after claim for ${serializeKey(input)}.`
         )
       }
 
@@ -103,7 +103,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
 
     if (!updated) {
       throw new Error(
-        `[ParioPg] Missing webhook delivery row after complete for ${serializeKey(input)}.`
+        `[SixbPg] Missing webhook delivery row after complete for ${serializeKey(input)}.`
       )
     }
 
@@ -127,7 +127,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
 
     if (!updated) {
       throw new Error(
-        `[ParioPg] Missing webhook delivery row after fail for ${serializeKey(input)}.`
+        `[SixbPg] Missing webhook delivery row after fail for ${serializeKey(input)}.`
       )
     }
 

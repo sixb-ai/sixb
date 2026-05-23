@@ -25,7 +25,7 @@ export function resolveAuthSessionAudience(
   if (!isValidAuthSessionAudience(audience)) {
     throw new AuthRuntimeError(
       "invalid_auth_config",
-      `[Pario] Auth session audience '${audience}' is invalid. Use a lower-case slug matching ${AUTH_SESSION_AUDIENCE_PATTERN.source}.`
+      `[Sixb] Auth session audience '${audience}' is invalid. Use a lower-case slug matching ${AUTH_SESSION_AUDIENCE_PATTERN.source}.`
     )
   }
 

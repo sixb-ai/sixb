@@ -1,12 +1,12 @@
-# @pario/broker-redis
+# @sixb/broker-redis
 
-Redis Streams-backed implementation of the Pario `Broker` interface. Use it
+Redis Streams-backed implementation of the Sixb `Broker` interface. Use it
 for deployments that want a durable multi-process broker backed by Redis.
 
 ## Installation
 
 ```bash
-bun add @pario/broker-redis
+bun add @sixb/broker-redis
 ```
 
 Requires Redis 7.2 or newer.
@@ -16,10 +16,10 @@ This package uses Bun's native Redis client.
 ## Usage
 
 ```typescript
-import { createPario, InMemoryQueues } from "@pario/core"
-import { RedisBroker } from "@pario/broker-redis"
+import { createSixb, InMemoryQueues } from "@sixb/core"
+import { RedisBroker } from "@sixb/broker-redis"
 
-export const pario = createPario({
+export const sixb = createSixb({
   id: "my-project",
   broker: new RedisBroker({
     connection: { url: "redis://localhost:6379" },
@@ -41,7 +41,7 @@ default Redis URL.
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `connection` | `RedisBrokerConnectionOptions` | `undefined` | Bun Redis URL/options. Supports `url`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
-| `prefix` | `string` | `"pario:broker"` | Redis key prefix. |
+| `prefix` | `string` | `"sixb:broker"` | Redis key prefix. |
 | `dedupeTtlMs` | `number` | `120000` | Retry dedupe window for `idempotencyKey`. |
 | `readBatchSize` | `number` | `1000` | `XRANGE COUNT` page size for retained reads. |
 | `subscribeBatchSize` | `number` | `100` | `XREAD COUNT` page size for subscriptions. |
@@ -57,7 +57,7 @@ new RedisBroker({ connection: { url: "rediss://redis.example.com:6379", tls: tru
 
 ## Redis Key Scheme
 
-The provider stores one Redis Stream plus one metadata hash per Pario project
+The provider stores one Redis Stream plus one metadata hash per Sixb project
 and broker stream id:
 
 | Concept | Shape |
@@ -95,7 +95,7 @@ is retried within `dedupeTtlMs`.
 
 ### Subscribe
 
-`subscribe()` uses plain `XREAD`, not consumer groups. That preserves the Pario
+`subscribe()` uses plain `XREAD`, not consumer groups. That preserves the Sixb
 broker contract: every subscriber receives every matching record independently.
 
 By default subscriptions start at the latest retained cursor and receive only

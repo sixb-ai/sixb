@@ -1,76 +1,76 @@
-import { ActionWorker } from "@pario/action-worker"
-import { InMemoryQueues, type Worker } from "@pario/core"
-import { PipelineWorker } from "@pario/pipeline-worker"
-import { ProjectionWorker } from "@pario/projection-worker"
-import { SyncWorker } from "@pario/sync-worker"
-import { WorkflowWorker } from "@pario/workflow-worker"
-import type { LoadedPario } from "./loadPario"
+import { ActionWorker } from "@sixb/action-worker"
+import { InMemoryQueues, type Worker } from "@sixb/core"
+import { PipelineWorker } from "@sixb/pipeline-worker"
+import { ProjectionWorker } from "@sixb/projection-worker"
+import { SyncWorker } from "@sixb/sync-worker"
+import { WorkflowWorker } from "@sixb/workflow-worker"
+import type { LoadedSixb } from "./loadSixb"
 
 interface WorkerFactory {
-  readonly create: (pario: LoadedPario) => Worker
+  readonly create: (sixb: LoadedSixb) => Worker
 }
 
 const workerFactories: Record<string, WorkerFactory> = {
   sync: {
-    create: (pario) => new SyncWorker(pario),
+    create: (sixb) => new SyncWorker(sixb),
   },
   action: {
-    create: (pario) => new ActionWorker(pario),
+    create: (sixb) => new ActionWorker(sixb),
   },
   pipeline: {
-    create: (pario) => new PipelineWorker(pario),
+    create: (sixb) => new PipelineWorker(sixb),
   },
   projection: {
-    create: (pario) => new ProjectionWorker(pario),
+    create: (sixb) => new ProjectionWorker(sixb),
   },
   workflow: {
-    create: (pario) => new WorkflowWorker(pario),
+    create: (sixb) => new WorkflowWorker(sixb),
   },
 }
 
-export function createWorkerForType(pario: LoadedPario, workerType: string): Worker {
+export function createWorkerForType(sixb: LoadedSixb, workerType: string): Worker {
   const factory = workerFactories[workerType]
   if (!factory) {
-    throw new Error(`[ParioWorker] Unknown worker '${workerType}'. Available: ${knownWorkers()}`)
+    throw new Error(`[SixbWorker] Unknown worker '${workerType}'. Available: ${knownWorkers()}`)
   }
 
-  return factory.create(pario)
+  return factory.create(sixb)
 }
 
 export function resolveWorkerTypeToStart(requestedWorker?: string): string {
   if (!requestedWorker) {
-    throw new Error(`[ParioWorker] Usage: pario worker <${knownWorkers().replaceAll(", ", "|")}>`)
+    throw new Error(`[SixbWorker] Usage: sixb worker <${knownWorkers().replaceAll(", ", "|")}>`)
   }
 
   if (!workerFactories[requestedWorker]) {
     throw new Error(
-      `[ParioWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
+      `[SixbWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
     )
   }
 
   return requestedWorker
 }
 
-export function resolveRegisteredWorkerTypes(pario: LoadedPario): readonly string[] {
+export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[] {
   const workerTypes: string[] = []
 
-  if (pario.getSyncDefinitions().length > 0) {
+  if (sixb.getSyncDefinitions().length > 0) {
     workerTypes.push("sync")
   }
 
-  if (pario.getPipelineDefinitions().length > 0) {
+  if (sixb.getPipelineDefinitions().length > 0) {
     workerTypes.push("pipeline")
   }
 
-  if (pario.getObjectProjections().length + pario.getLinkProjections().length > 0) {
+  if (sixb.getObjectProjections().length + sixb.getLinkProjections().length > 0) {
     workerTypes.push("projection")
   }
 
-  if (pario.getActionDefinitions().length > 0) {
+  if (sixb.getActionDefinitions().length > 0) {
     workerTypes.push("action")
   }
 
-  if (pario.workflows.list().length > 0) {
+  if (sixb.workflows.list().length > 0) {
     workerTypes.push("workflow")
   }
 
@@ -81,7 +81,7 @@ function knownWorkers(): string {
   return Object.keys(workerFactories).join(", ")
 }
 
-export function usesInMemoryQueues(pario: LoadedPario): boolean {
-  const queues = pario.queues as { provider?: unknown }
-  return pario.queues instanceof InMemoryQueues || queues.provider === "in-memory"
+export function usesInMemoryQueues(sixb: LoadedSixb): boolean {
+  const queues = sixb.queues as { provider?: unknown }
+  return sixb.queues instanceof InMemoryQueues || queues.provider === "in-memory"
 }

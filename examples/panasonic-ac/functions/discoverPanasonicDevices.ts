@@ -1,12 +1,12 @@
-import { defineFunction } from "@pario/core"
+import { defineFunction } from "@sixb/core"
 import { TEMPERATURE_UNAVAILABLE } from "../lib/panasonic/schema"
 import { getPanasonicApi } from "../lib/panasonicApi"
 import { acUnitKeyFromName, PanasonicAcUnit } from "../ontology/acUnit"
 
 export const discoverPanasonicDevices = defineFunction("discover-panasonic-devices")
   .cron("*/5 * * * *")
-  .run(async ({ pario }) => {
-    const api = await getPanasonicApi(pario)
+  .run(async ({ sixb }) => {
+    const api = await getPanasonicApi(sixb)
     const groups = await api.getDeviceGroups()
 
     for (const group of groups) {
@@ -18,7 +18,7 @@ export const discoverPanasonicDevices = defineFunction("discover-panasonic-devic
           const params = status.parameters
           const now = new Date()
 
-          await pario.upsertObject(PanasonicAcUnit.id, {
+          await sixb.upsertObject(PanasonicAcUnit.id, {
             id: acKey,
             guid: device.deviceGuid,
             deviceName: device.deviceName,
@@ -50,12 +50,12 @@ export const discoverPanasonicDevices = defineFunction("discover-panasonic-devic
             }
           }
 
-          await pario.appendTelemetry(PanasonicAcUnit.id, [
+          await sixb.appendTelemetry(PanasonicAcUnit.id, [
             { id: acKey, properties: telemetry, at: now },
           ])
         } catch (error) {
           console.error(
-            `[Pario] Failed to onboard Panasonic device ${device.deviceName}:`,
+            `[Sixb] Failed to onboard Panasonic device ${device.deviceName}:`,
             error instanceof Error ? error.message : String(error)
           )
         }

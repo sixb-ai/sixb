@@ -1,7 +1,7 @@
-import type { DomainEvent, RuleDefinition, StoredDomainEvent } from "@pario/core"
-import { Worker } from "@pario/core"
+import type { DomainEvent, RuleDefinition, StoredDomainEvent } from "@sixb/core"
+import { Worker } from "@sixb/core"
 import { buildRuleDependencyIndex, evaluateRuleEvents } from "./evaluate-rule-event"
-import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerPario } from "./types"
+import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerSixb } from "./types"
 
 const ontologyEventTypes = [
   "object.upserted",
@@ -16,18 +16,18 @@ const ontologyEventTypes = [
  * dependency index says they can be affected by the event payload.
  */
 export class RulesWorker extends Worker {
-  private readonly runtime: RulesWorkerPario
+  private readonly runtime: RulesWorkerSixb
   private readonly rules: readonly RuleDefinition[]
   private readonly index: RuleDependencyIndex
 
-  constructor(runtime: RulesWorkerPario) {
+  constructor(runtime: RulesWorkerSixb) {
     const rules = runtime.getRuleDefinitions()
     if (rules.length === 0) {
-      throw new Error("[ParioRulesWorker] Rules workers require at least one registered rule.")
+      throw new Error("[SixbRulesWorker] Rules workers require at least one registered rule.")
     }
 
     if (!runtime.storage.rules) {
-      throw new Error("[ParioRulesWorker] Rules workers require storage.rules support.")
+      throw new Error("[SixbRulesWorker] Rules workers require storage.rules support.")
     }
 
     super()
@@ -68,7 +68,7 @@ export class RulesWorker extends Worker {
           )
           .then(() => undefined)
           .catch((error) => {
-            console.error("[ParioRulesWorker] Evaluation failed:", error)
+            console.error("[SixbRulesWorker] Evaluation failed:", error)
           })
       }
     )

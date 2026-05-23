@@ -5,8 +5,8 @@ import type {
   DatasetRow,
   DatasetVersion,
   LakeWriteSession,
-} from "@pario/core"
-import { getDatasetRowValidationError, LakeStorageError } from "@pario/core"
+} from "@sixb/core"
+import { getDatasetRowValidationError, LakeStorageError } from "@sixb/core"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"
@@ -30,7 +30,7 @@ interface CreateDuckLakeWriteSessionInput {
 export async function createDuckLakeWriteSession(
   input: CreateDuckLakeWriteSessionInput
 ): Promise<LakeWriteSession> {
-  const stagingTableName = `pario_write_${randomUUID().replaceAll("-", "")}`
+  const stagingTableName = `sixb_write_${randomUUID().replaceAll("-", "")}`
 
   // The temp table lives only on this runtime connection. That keeps
   // partially written rows invisible until DuckLakeStorage commits them into
@@ -70,7 +70,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
       for await (const row of rows) {
         const validationError = getDatasetRowValidationError(row, this.input.dataset)
         if (validationError) {
-          throw new LakeStorageError(`[ParioDuckLake] ${validationError}`)
+          throw new LakeStorageError(`[SixbDuckLake] ${validationError}`)
         }
 
         appendDatasetRow(appender, this.input.dataset.schema, row)
@@ -115,7 +115,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
 
   private assertOpen(): void {
     if (this.closed) {
-      throw new LakeStorageError("[ParioDuckLake] Write session is already closed.")
+      throw new LakeStorageError("[SixbDuckLake] Write session is already closed.")
     }
   }
 

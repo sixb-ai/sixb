@@ -70,6 +70,6 @@ async function failQueuedRun(input: RunWorkflowJobInput, error: unknown): Promis
   try {
     await input.observer?.onRunFinished(failed)
   } catch (observerError) {
-    console.error("[ParioWorkflowWorker] Failed to emit workflow lifecycle event:", observerError)
+    console.error("[SixbWorkflowWorker] Failed to emit workflow lifecycle event:", observerError)
   }
 }

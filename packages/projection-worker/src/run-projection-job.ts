@@ -4,7 +4,7 @@ import type {
   ProjectionDefinition,
   ProjectionRunCounters,
   ProjectionRunRecord,
-} from "@pario/core"
+} from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { runLinkProjection } from "./run-link-projection"
 import { runObjectProjection } from "./run-object-projection"
@@ -95,7 +95,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       })
       finished = true
       throw new ProjectionWorkerError(
-        `[ParioProjectionWorker] Projection run '${run.id}' failed. ${execution.firstErrorMessage}`
+        `[SixbProjectionWorker] Projection run '${run.id}' failed. ${execution.firstErrorMessage}`
       )
     }
 
@@ -176,20 +176,20 @@ function requireProjection(
 ): ProjectionDefinition {
   if (!projection) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Unknown projection '${job.projectionId}'.`
+      `[SixbProjectionWorker] Unknown projection '${job.projectionId}'.`
     )
   }
 
   const actualKind = projectionKindOf(projection)
   if (actualKind !== job.projectionKind) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${job.projectionId}' has kind '${actualKind}', job requested '${job.projectionKind}'.`
+      `[SixbProjectionWorker] Projection '${job.projectionId}' has kind '${actualKind}', job requested '${job.projectionKind}'.`
     )
   }
 
   if (projection.datasetId !== job.datasetId) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${job.projectionId}' targets dataset '${projection.datasetId}', job requested '${job.datasetId}'.`
+      `[SixbProjectionWorker] Projection '${job.projectionId}' targets dataset '${projection.datasetId}', job requested '${job.datasetId}'.`
     )
   }
 
@@ -202,7 +202,7 @@ function requireRegisteredDataset(
 ): DatasetDefinition {
   if (!dataset) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection job '${job.id}' references unknown dataset '${job.datasetId}'.`
+      `[SixbProjectionWorker] Projection job '${job.id}' references unknown dataset '${job.datasetId}'.`
     )
   }
   return dataset
@@ -215,7 +215,7 @@ async function assertLakeDatasetExists(
   const lakeDataset = await lakeStorage.getDataset(job.datasetId)
   if (!lakeDataset) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Dataset '${job.datasetId}' is not registered in lake storage.`
+      `[SixbProjectionWorker] Dataset '${job.datasetId}' is not registered in lake storage.`
     )
   }
 }
@@ -227,7 +227,7 @@ async function requireDatasetVersion(
   const version = await lakeStorage.getVersion(job.datasetId, job.versionId)
   if (!version) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Dataset '${job.datasetId}' version '${job.versionId}' was not found.`
+      `[SixbProjectionWorker] Dataset '${job.datasetId}' version '${job.versionId}' was not found.`
     )
   }
   return version
@@ -323,7 +323,7 @@ function createBookkeepingError(input: {
   readonly cause: unknown
 }): Error {
   return new ProjectionWorkerError(
-    `[ParioProjectionWorker] Projection '${input.projectionId}' materialized dataset version '${input.datasetVersionId}', but failed to finalize projection run '${input.runId}'. The materialized object/link state may need repair.`,
+    `[SixbProjectionWorker] Projection '${input.projectionId}' materialized dataset version '${input.datasetVersionId}', but failed to finalize projection run '${input.runId}'. The materialized object/link state may need repair.`,
     { cause: input.cause }
   )
 }

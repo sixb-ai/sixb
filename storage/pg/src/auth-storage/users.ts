@@ -6,8 +6,8 @@ import type {
   UpdateAuthUserProfileInput,
   UpdateAuthUserStatusInput,
   UserRecord,
-} from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import type { SQL } from "bun"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
@@ -34,14 +34,14 @@ export class PgAuthUserStore implements AuthUserStore {
     if (await getUserRowById(this.sql, { projectId, id })) {
       throw new AuthStorageError(
         "duplicate_user",
-        `[Pario] User '${id}' already exists for project '${projectId}'.`
+        `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
 
     if (await getUserRowByEmail(this.sql, { projectId, email })) {
       throw new AuthStorageError(
         "duplicate_user",
-        `[Pario] User email '${email}' already exists for project '${projectId}'.`
+        `[Sixb] User email '${email}' already exists for project '${projectId}'.`
       )
     }
 
@@ -77,7 +77,7 @@ export class PgAuthUserStore implements AuthUserStore {
       mapUniqueConstraintError(
         error,
         "duplicate_user",
-        `[Pario] User '${id}' already exists for project '${projectId}'.`
+        `[Sixb] User '${id}' already exists for project '${projectId}'.`
       )
     }
   }
@@ -107,7 +107,7 @@ export class PgAuthUserStore implements AuthUserStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 
@@ -134,7 +134,7 @@ export class PgAuthUserStore implements AuthUserStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] User '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 

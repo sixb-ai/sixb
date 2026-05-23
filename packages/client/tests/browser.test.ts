@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
-  configureParioBrowserClient,
-  createParioSignInUrl,
-  type ParioBrowserRuntimeConfig,
+  configureSixbBrowserClient,
+  createSixbSignInUrl,
+  type SixbBrowserRuntimeConfig,
 } from "../src/browser"
 import { client } from "../src/generated/client.gen"
 import { requestSyncRun } from "../src/generated/sdk.gen"
-import { createParioEventsWebSocketUrl } from "../src/useParioEvents"
+import { createSixbEventsWebSocketUrl } from "../src/useSixbEvents"
 
-const runtimeConfig: ParioBrowserRuntimeConfig = {
+const runtimeConfig: SixbBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
   auth: { audience: "app", enabled: true },
 }
@@ -19,15 +19,15 @@ afterEach(() => {
 })
 
 describe("event websocket URLs", () => {
-  test("defaults to the local Pario API websocket origin", () => {
-    expect(createParioEventsWebSocketUrl()).toBe("ws://localhost:3002/ws/events")
+  test("defaults to the local Sixb API websocket origin", () => {
+    expect(createSixbEventsWebSocketUrl()).toBe("ws://localhost:3002/ws/events")
   })
 
   test("derives the events websocket URL from an API base URL", () => {
-    expect(createParioEventsWebSocketUrl("http://localhost:3002/api")).toBe(
+    expect(createSixbEventsWebSocketUrl("http://localhost:3002/api")).toBe(
       "ws://localhost:3002/ws/events"
     )
-    expect(createParioEventsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
+    expect(createSixbEventsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
       "wss://api.example.com/ws/events"
     )
   })
@@ -35,7 +35,7 @@ describe("event websocket URLs", () => {
 
 describe("browser client auth", () => {
   test("creates API-origin sign-in URLs with audience and return target", () => {
-    const url = new URL(createParioSignInUrl(runtimeConfig, "http://localhost:3001/devices"))
+    const url = new URL(createSixbSignInUrl(runtimeConfig, "http://localhost:3001/devices"))
 
     expect(url.origin).toBe("http://localhost:3002")
     expect(url.pathname).toBe("/auth/sign-in")
@@ -44,7 +44,7 @@ describe("browser client auth", () => {
   })
 
   test("sends credentials and CSRF from memory for mutating requests", async () => {
-    const controller = configureParioBrowserClient(runtimeConfig)
+    const controller = configureSixbBrowserClient(runtimeConfig)
     controller.setCsrfToken("csrf_1")
     const observedRequests: Request[] = []
     const fetchMock = Object.assign(
@@ -67,6 +67,6 @@ describe("browser client auth", () => {
     expect(observedRequest).toBeInstanceOf(Request)
     expect(observedRequest.url).toBe("http://localhost:3002/api/syncs/sync_1/runs")
     expect(observedRequest.credentials).toBe("include")
-    expect(observedRequest.headers.get("x-pario-csrf")).toBe("csrf_1")
+    expect(observedRequest.headers.get("x-sixb-csrf")).toBe("csrf_1")
   })
 })

@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto"
 import type { JetStreamClient, OrderedConsumerOptions, StreamInfo } from "@nats-io/jetstream"
 import { DeliverPolicy, jetstream } from "@nats-io/jetstream"
 import type { ConnectionOptions } from "@nats-io/nats-core"
-import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@pario/core"
-import { cloneJsonValue } from "@pario/core"
+import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@sixb/core"
+import { cloneJsonValue } from "@sixb/core"
 import { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"
@@ -12,7 +12,7 @@ import { StreamManager } from "./stream"
 import { assertNamespace, buildNameFilters, buildRecordSubject } from "./subjects"
 import { type ActiveSubscription, SubscriptionRegistry } from "./subscription-registry"
 
-const DEFAULT_NAMESPACE = "pario_broker"
+const DEFAULT_NAMESPACE = "sixb_broker"
 const DEFAULT_FETCH_BATCH_SIZE = 1_000
 
 export interface NatsBrokerOptions {
@@ -24,7 +24,7 @@ export interface NatsBrokerOptions {
   readonly connection: ConnectionOptions
   /**
    * Prefix used in stream names and subjects. Useful for isolating tests or
-   * multiple Pario deployments on one NATS account.
+   * multiple Sixb deployments on one NATS account.
    */
   readonly namespace?: string
 }
@@ -32,7 +32,7 @@ export interface NatsBrokerOptions {
 /**
  * NATS JetStream-backed Broker provider.
  *
- * Implements the @pario/core Broker contract. Each Pario project and broker
+ * Implements the @sixb/core Broker contract. Each Sixb project and broker
  * stream id maps to a dedicated JetStream stream so retention, replay, and
  * purging stay isolated by logical stream. Records are addressed by NATS
  * subject tokens that include the broker record name, which lets consumers
@@ -429,7 +429,7 @@ export class NatsBroker implements Broker {
         filter_subjects,
         deliver_policy: DeliverPolicy.StartSequence,
         opt_start_seq: Number(BigInt(params.afterCursor) + 1n),
-        name_prefix: params.live ? `pario-brk-${randomUUID().slice(0, 8)}` : undefined,
+        name_prefix: params.live ? `sixb-brk-${randomUUID().slice(0, 8)}` : undefined,
       }
     }
 
@@ -438,14 +438,14 @@ export class NatsBroker implements Broker {
         filter_subjects,
         deliver_policy: DeliverPolicy.StartSequence,
         opt_start_seq: 1,
-        name_prefix: params.live ? `pario-brk-${randomUUID().slice(0, 8)}` : undefined,
+        name_prefix: params.live ? `sixb-brk-${randomUUID().slice(0, 8)}` : undefined,
       }
     }
 
     return {
       filter_subjects,
       deliver_policy: DeliverPolicy.New,
-      name_prefix: `pario-brk-${randomUUID().slice(0, 8)}`,
+      name_prefix: `sixb-brk-${randomUUID().slice(0, 8)}`,
     }
   }
 

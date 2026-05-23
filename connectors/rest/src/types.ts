@@ -1,4 +1,4 @@
-import type { ConnectorAdapter, ConnectorContext, WebhookDefinition } from "@pario/core"
+import type { ConnectorAdapter, ConnectorContext, WebhookDefinition } from "@sixb/core"
 
 export interface RestRequestContext {
   readonly projectId: ConnectorContext["projectId"]

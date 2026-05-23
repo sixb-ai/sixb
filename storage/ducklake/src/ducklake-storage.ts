@@ -7,7 +7,7 @@ import type {
   LakeStorageWithSql,
   LakeWriteSession,
   ReadDatasetRowsInput,
-} from "@pario/core"
+} from "@sixb/core"
 import { DuckLakeConnectionManager } from "./internal/ducklake-connection-manager"
 import { DuckLakeDatasetCatalog } from "./internal/ducklake-dataset-catalog"
 import { DuckLakeRowReader } from "./internal/ducklake-row-reader"
@@ -17,11 +17,11 @@ import { DuckLakeWriteCoordinator } from "./internal/ducklake-write-coordinator"
 import type { DuckLakeStorageOptions } from "./types"
 
 /**
- * DuckLake-backed implementation of Pario's LakeStorage API.
+ * DuckLake-backed implementation of Sixb's LakeStorage API.
  *
  * The public surface stays aligned with core LakeStorage while DuckLake owns
  * physical tables, schemas, snapshots, and transactions behind the provider.
- * Pario-specific metadata is only used to reconstruct DatasetVersion shape.
+ * Sixb-specific metadata is only used to reconstruct DatasetVersion shape.
  */
 export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   readonly standard = { id: "ducklake", version: "1.0" } as const
@@ -36,7 +36,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   constructor(options: DuckLakeStorageOptions) {
     const normalizedOptions: DuckLakeStorageOptions = {
       ...options,
-      alias: options.alias ?? "pario_lake",
+      alias: options.alias ?? "sixb_lake",
       createIfNotExists: options.createIfNotExists ?? true,
       readOnly: options.readOnly ?? false,
       duckdb: {

@@ -2,7 +2,7 @@ import type { Callback, SFTPWrapper } from "ssh2"
 import { Client } from "ssh2"
 import type { SftpClient, SftpConnection, SftpConnector, SftpWriteData } from "./types"
 
-const CONNECTION = Symbol("ParioSftpConnection")
+const CONNECTION = Symbol("SixbSftpConnection")
 
 type InternalSftpClient = SftpClient & {
   [CONNECTION]: {
@@ -24,7 +24,7 @@ export function sftp(connection: SftpConnection): SftpConnector {
     type: "sftp",
     async connect(context) {
       if (context.signal.aborted) {
-        throw new Error("[ParioSftp] Connection aborted before it started.")
+        throw new Error("[SixbSftp] Connection aborted before it started.")
       }
 
       const client = new Client()
@@ -69,7 +69,7 @@ async function connectSftpClient(
     }
 
     const onAbort = () => {
-      fail(new Error("[ParioSftp] Connection aborted."))
+      fail(new Error("[SixbSftp] Connection aborted."))
     }
 
     const onError = (error: Error) => {
@@ -77,7 +77,7 @@ async function connectSftpClient(
     }
 
     const onClose = () => {
-      fail(new Error("[ParioSftp] Connection closed before the SFTP session was ready."))
+      fail(new Error("[SixbSftp] Connection closed before the SFTP session was ready."))
     }
 
     const onReady = () => {
@@ -87,7 +87,7 @@ async function connectSftpClient(
         }
 
         if (error || !sftpClient) {
-          fail(error ?? new Error("[ParioSftp] Failed to start SFTP session."))
+          fail(error ?? new Error("[SixbSftp] Failed to start SFTP session."))
           return
         }
 
@@ -212,10 +212,10 @@ async function closeClient(state: InternalSftpClient[typeof CONNECTION]): Promis
 
 function assertConnection(connection: SftpConnection): void {
   if (!connection.username?.trim()) {
-    throw new Error("[ParioSftp] username must not be empty.")
+    throw new Error("[SixbSftp] username must not be empty.")
   }
 
   if (!connection.host?.trim() && !connection.sock) {
-    throw new Error("[ParioSftp] host must not be empty when sock is not provided.")
+    throw new Error("[SixbSftp] host must not be empty when sock is not provided.")
   }
 }

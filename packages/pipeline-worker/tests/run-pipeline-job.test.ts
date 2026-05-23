@@ -8,7 +8,7 @@ import type {
   LakeStorageWithSql,
   PipelineDefinition,
   PipelineRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   col,
   defineDataset,
@@ -16,7 +16,7 @@ import {
   definePipelineStep,
   InMemoryLakeStorage,
   InMemoryPipelineRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import { type PipelineWorkerContext, runPipelineJob } from "../src"
 
 const rawCustomersDataset = defineDataset("raw.customers", {
@@ -123,7 +123,7 @@ describe("runPipelineJob", () => {
           pipelineId: "missing",
         },
       })
-    ).rejects.toThrow("[ParioPipelineWorker] Unknown pipeline 'missing'.")
+    ).rejects.toThrow("[SixbPipelineWorker] Unknown pipeline 'missing'.")
   })
 
   test("fails clearly when an input has no committed version", async () => {
@@ -148,7 +148,7 @@ describe("runPipelineJob", () => {
         },
       })
     ).rejects.toThrow(
-      "[ParioPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version."
+      "[SixbPipelineWorker] Pipeline 'customers' step 'clean-customers' input 'rawCustomers' dataset 'raw.customers' has no committed version."
     )
 
     const run = await pipelineRunsStorage.getById({
@@ -470,7 +470,7 @@ describe("runPipelineJob", () => {
         },
       })
     ).rejects.toThrow(
-      "[ParioPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...)."
+      "[SixbPipelineWorker] Pipeline 'customers' step 'customer-stats' requires SQL transform support, but lake storage does not provide lakeStorage.sql.execute(...)."
     )
 
     const run = await pipelineRunsStorage.getById({

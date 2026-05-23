@@ -6,7 +6,7 @@ import type {
   WorkflowNodeDefinition,
   WorkflowNodeRunRecord,
   WorkflowStepOutputs,
-} from "@pario/core"
+} from "@sixb/core"
 import type { WorkflowJob, WorkflowWorkerContext } from "../types"
 
 export interface WorkflowExecutionState {

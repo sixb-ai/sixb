@@ -1,5 +1,5 @@
-import type { ActionRunFailure } from "@pario/core"
-import { WorkerAbortError } from "@pario/core"
+import type { ActionRunFailure } from "@sixb/core"
+import { WorkerAbortError } from "@sixb/core"
 
 export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {

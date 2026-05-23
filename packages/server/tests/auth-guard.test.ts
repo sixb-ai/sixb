@@ -11,10 +11,10 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
   prop,
-} from "@pario/core"
-import { createParioApi, ParioServer } from "../src/server"
+  Sixb,
+} from "@sixb/core"
+import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const authStrategy = {
@@ -71,7 +71,7 @@ function createRuntime(options: { readonly auth?: boolean; readonly connector?: 
     },
   })
 
-  const pario = new Pario<readonly OntologySource[]>({
+  const sixb = new Sixb<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -83,7 +83,7 @@ function createRuntime(options: { readonly auth?: boolean; readonly connector?: 
     auth: options.auth ? authStrategy : undefined,
   })
 
-  return { pario, storage }
+  return { sixb, storage }
 }
 
 async function seedSession(
@@ -119,17 +119,17 @@ async function seedSession(
 
   return {
     credential,
-    cookie: `pario_session${cookieSuffix}=${credential.cookieValue}`,
-    csrfCookie: `pario_csrf${cookieSuffix}=csrf_1`,
-    csrfHeader: { "x-pario-csrf": "csrf_1" },
+    cookie: `sixb_session${cookieSuffix}=${credential.cookieValue}`,
+    csrfCookie: `sixb_csrf${cookieSuffix}=csrf_1`,
+    csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
 }
 
 describe("server auth guard", () => {
   test("leaves routes open when auth is not configured outside production", async () => {
-    const { pario } = createRuntime()
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const { sixb } = createRuntime()
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
@@ -143,9 +143,9 @@ describe("server auth guard", () => {
     process.env.NODE_ENV = "production"
 
     try {
-      const { pario } = createRuntime()
+      const { sixb } = createRuntime()
       expect(() =>
-        createParioApi(new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() }))
+        createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() }))
       ).toThrow("Auth is required in production")
     } finally {
       if (previous === undefined) {
@@ -157,9 +157,9 @@ describe("server auth guard", () => {
   })
 
   test("protects API routes with generic JSON 401", async () => {
-    const { pario } = createRuntime({ auth: true })
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
@@ -169,10 +169,10 @@ describe("server auth guard", () => {
   })
 
   test("returns a safe session shape", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -196,14 +196,14 @@ describe("server auth guard", () => {
         expiresAt: "2099-05-16T10:00:00.000Z",
       },
     })
-    expect(response.headers.get("set-cookie")).toContain("pario_csrf=")
+    expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
   })
 
   test("resolves sessions with the app audience cookie names", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const accepted = await app.fetch(
@@ -215,7 +215,7 @@ describe("server auth guard", () => {
       new Request("http://api.localhost/api/project", {
         headers: {
           origin: "http://app.localhost",
-          cookie: `pario_session=${seeded.credential.cookieValue}`,
+          cookie: `sixb_session=${seeded.credential.cookieValue}`,
         },
       })
     )
@@ -229,11 +229,11 @@ describe("server auth guard", () => {
   })
 
   test("resolves API browser sessions from the allowed origin audience", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
@@ -251,7 +251,7 @@ describe("server auth guard", () => {
       new Request("http://api.localhost/api/auth/session", {
         headers: {
           origin: "http://app.localhost",
-          cookie: `pario_session=${seeded.credential.cookieValue}`,
+          cookie: `sixb_session=${seeded.credential.cookieValue}`,
         },
       })
     )
@@ -269,10 +269,10 @@ describe("server auth guard", () => {
   })
 
   test("rejects API browser requests from unknown origins", async () => {
-    const { pario } = createRuntime({ auth: true })
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -290,10 +290,10 @@ describe("server auth guard", () => {
   })
 
   test("handles API browser preflights with an exact origin allowlist", async () => {
-    const { pario } = createRuntime({ auth: true })
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -305,7 +305,7 @@ describe("server auth guard", () => {
         headers: {
           origin: "http://atlas.localhost",
           "access-control-request-method": "PUT",
-          "access-control-request-headers": "content-type,x-pario-csrf",
+          "access-control-request-headers": "content-type,x-sixb-csrf",
         },
       })
     )
@@ -322,16 +322,16 @@ describe("server auth guard", () => {
     expect(allowed.status).toBe(204)
     expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
-    expect(allowed.headers.get("access-control-allow-headers")).toBe("content-type, x-pario-csrf")
+    expect(allowed.headers.get("access-control-allow-headers")).toBe("content-type, x-sixb-csrf")
     expect(rejected.status).toBe(403)
   })
 
   test("uses the browser origin audience for CSRF-protected API mutations", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
@@ -355,10 +355,10 @@ describe("server auth guard", () => {
   })
 
   test("requires CSRF only after authentication for mutations", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
     const body = JSON.stringify({ properties: { name: "Fan" } })
 
@@ -397,10 +397,10 @@ describe("server auth guard", () => {
   })
 
   test("sign-out revokes the session and clears cookies", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -415,7 +415,7 @@ describe("server auth guard", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ success: true })
-    expect(response.headers.get("set-cookie")).toContain("pario_session=")
+    expect(response.headers.get("set-cookie")).toContain("sixb_session=")
     await expect(
       storage.auth.sessions.getById({ projectId: "test-project", id: "ses_1" })
     ).resolves.toMatchObject({
@@ -424,9 +424,9 @@ describe("server auth guard", () => {
   })
 
   test("keeps webhooks public while connector verification remains authoritative", async () => {
-    const { pario } = createRuntime({ auth: true, connector: true })
-    const app = createParioApi(
-      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    const { sixb } = createRuntime({ auth: true, connector: true })
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const response = await app.fetch(
@@ -442,10 +442,10 @@ describe("server auth guard", () => {
   })
 
   test("rejects WebSocket route access before subscription handling", async () => {
-    const { pario } = createRuntime({ auth: true })
+    const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,
@@ -462,12 +462,12 @@ describe("server auth guard", () => {
   })
 
   test("accepts WebSocket connections from allowed origins with the matching audience", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,
@@ -487,7 +487,7 @@ describe("server auth guard", () => {
       await expect(
         connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
           origin: "http://app.localhost",
-          cookie: `pario_session=${seeded.credential.cookieValue}`,
+          cookie: `sixb_session=${seeded.credential.cookieValue}`,
         })
       ).rejects.toThrow()
     } finally {
@@ -496,12 +496,12 @@ describe("server auth guard", () => {
   })
 
   test("rejects WebSocket connections from unknown browser origins", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
     const port = await getFreePort()
     const apiOrigin = `http://127.0.0.1:${port}`
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,
@@ -523,10 +523,10 @@ describe("server auth guard", () => {
   })
 
   test("does not serve Atlas shell or assets from the API server", async () => {
-    const { pario } = createRuntime({ auth: true })
+    const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,
@@ -552,10 +552,10 @@ describe("server auth guard", () => {
   })
 
   test("redirects API-owned HTML routes with API-origin auth context", async () => {
-    const { pario } = createRuntime({ auth: true })
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })
@@ -576,11 +576,11 @@ describe("server auth guard", () => {
   })
 
   test("allows API-owned docs mutations with the API-origin session and CSRF token", async () => {
-    const { pario, storage } = createRuntime({ auth: true })
+    const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(
-      new ParioServer({
-        pario,
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy({ includeApp: false }),
       })

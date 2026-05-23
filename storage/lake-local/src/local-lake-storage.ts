@@ -24,7 +24,7 @@ import {
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
-} from "@pario/core"
+} from "@sixb/core"
 import type {
   CommitWriteInput,
   DatasetState,
@@ -117,7 +117,7 @@ export class LocalLakeStorage implements LakeStorage {
   private readonly rootPath: string
 
   constructor(options: LocalLakeStorageOptions) {
-    this.rootPath = resolve(options.path ?? ".pario/lake")
+    this.rootPath = resolve(options.path ?? ".sixb/lake")
   }
 
   async createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {

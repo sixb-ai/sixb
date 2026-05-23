@@ -1,10 +1,10 @@
 import { stat } from "node:fs/promises"
 import { resolve } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@pario/app"
+import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { resolveBrowserTopology } from "../lib/browser-topology"
-import type { LoadedPario } from "../lib/loadPario"
-import { builtAppOutdir, loadProductionPario } from "../lib/production"
-import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
+import type { LoadedSixb } from "../lib/loadSixb"
+import { builtAppOutdir, loadProductionSixb } from "../lib/production"
+import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface AppOptions {
@@ -18,13 +18,13 @@ export interface AppOptions {
 export async function runApp(options: AppOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionPario({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry })
   const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
-    <LoadingView title="Starting pario app" subtitle={loaded.entry} status="Starting app" />
+    <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />
   )
 
-  let pario: LoadedPario | null = loaded.pario
+  let sixb: LoadedSixb | null = loaded.sixb
   let customAppServer: CustomAppDevServer | null = null
 
   try {
@@ -35,7 +35,7 @@ export async function runApp(options: AppOptions = {}) {
 
     if (!hasBuiltCustomApp) {
       throw new Error(
-        `[ParioCustomApp] No built app found in ${appOutdir}. Run \`pario build\` before \`pario app\`.`
+        `[SixbCustomApp] No built app found in ${appOutdir}. Run \`sixb build\` before \`sixb app\`.`
       )
     }
 
@@ -50,14 +50,14 @@ export async function runApp(options: AppOptions = {}) {
       includeCustomApp: true,
     })
     if (!topology.appPublicOrigin) {
-      throw new Error("[ParioCLI] Custom app public origin was not resolved.")
+      throw new Error("[SixbCLI] Custom app public origin was not resolved.")
     }
 
     const customApp = await createCustomApp({
       rootDir: loaded.projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: pario.auth.isEnabled(),
+      authEnabled: sixb.auth.isEnabled(),
     })
     customAppServer = await customApp.start({
       host: topology.host,
@@ -65,13 +65,13 @@ export async function runApp(options: AppOptions = {}) {
       outdir: appOutdir,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: pario.auth.isEnabled(),
+      authEnabled: sixb.auth.isEnabled(),
     })
 
     app.rerender(
       <RoleView
-        title="Pario app started"
-        name={pario.id}
+        title="Sixb app started"
+        name={sixb.id}
         serviceName="Custom app"
         items={[{ label: "URL", value: topology.appPublicOrigin }]}
       />
@@ -81,16 +81,16 @@ export async function runApp(options: AppOptions = {}) {
       app.unmount()
       console.log("\nShutting down app...")
       await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-      if (pario) {
-        await stopParioProviders(pario)
+      if (sixb) {
+        await stopSixbProviders(sixb)
       }
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)

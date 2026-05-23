@@ -7,7 +7,7 @@ import type {
   WebhookDeliveryKey,
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteWebhookDeliveryStorageOptions {
@@ -79,7 +79,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
       }
 
       if (existing?.status !== "failed") {
-        throw new Error("[ParioSqlite] Webhook delivery row disappeared during claim.")
+        throw new Error("[SixbSqlite] Webhook delivery row disappeared during claim.")
       }
 
       // Failed deliveries are intentionally claimable so provider retries can run again.
@@ -218,7 +218,7 @@ export class SqliteWebhookDeliveryStorage implements WebhookDeliveryStorage {
 
     if (!record) {
       throw new Error(
-        `[ParioSqlite] Missing webhook delivery row after ${action} for ${serializeKey(key)}.`
+        `[SixbSqlite] Missing webhook delivery row after ${action} for ${serializeKey(key)}.`
       )
     }
 

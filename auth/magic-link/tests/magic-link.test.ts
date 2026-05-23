@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type CompleteAuthSessionInput, InMemoryAuthStorage } from "@pario/core"
+import { type CompleteAuthSessionInput, InMemoryAuthStorage } from "@sixb/core"
 import { magicLink, type SendMagicLinkInput } from "../src"
 import { hashMagicLinkToken } from "../src/tokens"
 

@@ -4,8 +4,8 @@ import type {
   InvitationRecord,
   ListAuthInvitationsInput,
   ListAuthInvitationsResult,
-} from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import type { SQL } from "bun"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthInvitationRow } from "./rows"
@@ -79,7 +79,7 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
       if (await getInvitationById(tx, { projectId, id })) {
         throw new AuthStorageError(
           "duplicate_invitation",
-          `[Pario] Invitation '${id}' already exists but is not active for project '${projectId}'.`
+          `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
         )
       }
 
@@ -116,7 +116,7 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
         mapUniqueConstraintError(
           error,
           "duplicate_invitation",
-          `[Pario] Invitation '${id}' already exists for project '${projectId}'.`
+          `[Sixb] Invitation '${id}' already exists for project '${projectId}'.`
         )
       }
 

@@ -9,11 +9,11 @@ import {
   defineSchedule,
   isPipelineDefinition,
   isPipelineStepDefinition,
-  Pario,
   type PipelineDefinition,
   PipelineError,
   prop,
   RuntimeError,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -213,20 +213,20 @@ describe("isPipelineDefinition", () => {
   })
 })
 
-describe("Pario pipeline registration", () => {
+describe("Sixb pipeline registration", () => {
   test("exposes pipeline definitions and lookup by id", () => {
     const pipeline = definePipeline("normalize-orders").then(makeRunStep())
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
       pipelines: [pipeline],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getPipelineDefinitions().map((d) => d.id)).toEqual(["normalize-orders"])
-    expect(pario.getPipelineById("normalize-orders")).toBe(pipeline)
-    expect(pario.getPipelineById("missing-pipeline")).toBeNull()
+    expect(sixb.getPipelineDefinitions().map((d) => d.id)).toEqual(["normalize-orders"])
+    expect(sixb.getPipelineById("normalize-orders")).toBe(pipeline)
+    expect(sixb.getPipelineById("missing-pipeline")).toBeNull()
   })
 
   test("rejects duplicate pipeline ids", () => {
@@ -242,7 +242,7 @@ describe("Pario pipeline registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [
             rawOrdersDataset,
@@ -256,7 +256,7 @@ describe("Pario pipeline registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [
             rawOrdersDataset,
@@ -275,7 +275,7 @@ describe("Pario pipeline registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset, canonicalOrdersDataset],
           pipelines: [pipeline],
@@ -284,7 +284,7 @@ describe("Pario pipeline registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset, canonicalOrdersDataset],
           pipelines: [pipeline],
@@ -303,7 +303,7 @@ describe("Pario pipeline registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
           pipelines: [pipeline],
@@ -312,7 +312,7 @@ describe("Pario pipeline registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
           pipelines: [pipeline],
@@ -333,7 +333,7 @@ describe("Pario pipeline registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [canonicalOrdersDataset],
           pipelines: [pipeline],
@@ -342,7 +342,7 @@ describe("Pario pipeline registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [canonicalOrdersDataset],
           pipelines: [pipeline],
@@ -358,7 +358,7 @@ describe("Pario pipeline registration", () => {
 
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset],
           pipelines: [pipeline],
@@ -367,7 +367,7 @@ describe("Pario pipeline registration", () => {
     ).toThrow(RuntimeError)
     expect(
       () =>
-        new Pario<readonly []>({
+        new Sixb<readonly []>({
           ontology: [],
           datasets: [rawOrdersDataset],
           pipelines: [pipeline],

@@ -1,8 +1,8 @@
-import { createSentinelApp, type SentinelAppServer } from "@pario/sentinel"
+import { createSentinelApp, type SentinelAppServer } from "@sixb/sentinel"
 import { resolveBrowserTopology } from "../lib/browser-topology"
-import type { LoadedPario } from "../lib/loadPario"
-import { builtSentinelOutdir, loadProductionPario } from "../lib/production"
-import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
+import type { LoadedSixb } from "../lib/loadSixb"
+import { builtSentinelOutdir, loadProductionSixb } from "../lib/production"
+import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface SentinelOptions {
@@ -16,17 +16,17 @@ export interface SentinelOptions {
 export async function runSentinel(options: SentinelOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionPario({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry })
   const host = options.host ?? "0.0.0.0"
   const app = renderPersistent(
     <LoadingView
-      title="Starting pario sentinel"
+      title="Starting sixb sentinel"
       subtitle={loaded.entry}
       status="Starting Sentinel"
     />
   )
 
-  let pario: LoadedPario | null = loaded.pario
+  let sixb: LoadedSixb | null = loaded.sixb
   let sentinelServer: SentinelAppServer | null = null
 
   try {
@@ -41,13 +41,13 @@ export async function runSentinel(options: SentinelOptions = {}) {
       includeCustomApp: false,
     })
     if (!topology.sentinelPublicOrigin) {
-      throw new Error("[ParioCLI] Sentinel public origin was not resolved.")
+      throw new Error("[SixbCLI] Sentinel public origin was not resolved.")
     }
 
     const sentinel = createSentinelApp({
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "sentinel",
-      authEnabled: pario.auth.isEnabled(),
+      authEnabled: sixb.auth.isEnabled(),
     })
     sentinelServer = await sentinel.start({
       host: topology.host,
@@ -58,8 +58,8 @@ export async function runSentinel(options: SentinelOptions = {}) {
 
     app.rerender(
       <RoleView
-        title="Pario Sentinel started"
-        name={pario.id}
+        title="Sixb Sentinel started"
+        name={sixb.id}
         serviceName="Sentinel"
         items={[{ label: "URL", value: topology.sentinelPublicOrigin }]}
       />
@@ -69,16 +69,16 @@ export async function runSentinel(options: SentinelOptions = {}) {
       app.unmount()
       console.log("\nShutting down sentinel...")
       await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
-      if (pario) {
-        await stopParioProviders(pario)
+      if (sixb) {
+        await stopSixbProviders(sixb)
       }
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)

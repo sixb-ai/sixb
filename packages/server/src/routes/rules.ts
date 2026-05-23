@@ -1,10 +1,10 @@
 import {
   deriveRuleEventDependencies,
   type OntologySource,
-  type Pario,
   type RuleDefinition,
   type RuleStateRecord,
-} from "@pario/core"
+  type Sixb,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -27,12 +27,12 @@ function serializeRuleState(state: RuleStateRecord): ReturnType<typeof RuleState
   return RuleStateSchema.parse(state)
 }
 
-export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/rules",
       () => {
-        return pario.getRuleDefinitions().map(serializeRule)
+        return sixb.getRuleDefinitions().map(serializeRule)
       },
       {
         response: { 200: RuleSchema.array() },
@@ -46,7 +46,7 @@ export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySo
     .get(
       "/api/rules/:ruleId",
       ({ params, set }) => {
-        const rule = pario.getRuleById(params.ruleId)
+        const rule = sixb.getRuleById(params.ruleId)
         if (!rule) {
           set.status = 404
           return { error: "Rule not found" }
@@ -69,7 +69,7 @@ export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ query, set }) => {
         try {
           const parsed = RuleStatesQuerySchema.parse(query)
-          const storage = pario.storage.rules
+          const storage = sixb.storage.rules
           if (!storage) {
             return {
               states: [],
@@ -79,7 +79,7 @@ export function registerRuleRoutes(app: Elysia, pario: Pario<readonly OntologySo
           }
 
           const result = await storage.listActive({
-            projectId: pario.id,
+            projectId: sixb.id,
             ruleId: parsed.ruleId,
             objectTypeId: parsed.objectTypeId,
             primaryId: parsed.primaryId,

@@ -1,7 +1,7 @@
-import type { Worker } from "@pario/core"
-import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
+import type { Worker } from "@sixb/core"
+import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
+import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import {
   createWorkerForType,
   resolveRegisteredWorkerTypes,
@@ -19,41 +19,41 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
   process.env.NODE_ENV = "production"
 
   // Validate explicit worker types before loading the runtime so an unknown type
-  // fails fast, just like `pario worker`.
+  // fails fast, just like `sixb worker`.
   const requestedTypes = (options.workerTypes ?? []).map(resolveWorkerTypeToStart)
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
-    <LoadingView title="Starting pario worker group" subtitle={entry} status="Loading runtime" />
+    <LoadingView title="Starting sixb worker group" subtitle={entry} status="Loading runtime" />
   )
 
-  let pario: LoadedPario | null = null
+  let sixb: LoadedSixb | null = null
   let workers: Worker[] = []
 
   async function stopWorkersAndProviders() {
     await Promise.all(workers.map((worker) => stopQuietly(() => worker.stop())))
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
   }
 
   try {
-    pario = await loadParioFromEntry(entry)
+    sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(pario)) {
+    if (usesInMemoryQueues(sixb)) {
       throw new Error(
-        "[ParioWorkerGroup] `pario worker-group` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `pario dev` only."
+        "[SixbWorkerGroup] `sixb worker-group` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
       )
     }
 
     const workerTypes =
-      requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(pario)
+      requestedTypes.length > 0 ? requestedTypes : resolveRegisteredWorkerTypes(sixb)
 
     app.rerender(
-      <LoadingView title="Starting pario worker group" subtitle={entry} status="Starting workers" />
+      <LoadingView title="Starting sixb worker group" subtitle={entry} status="Starting workers" />
     )
 
-    workers = workerTypes.map((workerType) => createWorkerForType(pario as LoadedPario, workerType))
+    workers = workerTypes.map((workerType) => createWorkerForType(sixb as LoadedSixb, workerType))
     await Promise.all(workers.map((worker) => worker.start()))
 
     const warnings =
@@ -61,13 +61,13 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
         ? ["No queue worker types are registered; the worker group process is idle."]
         : []
 
-    app.rerender(<WorkerGroupView name={pario.id} workerTypes={workerTypes} warnings={warnings} />)
+    app.rerender(<WorkerGroupView name={sixb.id} workerTypes={workerTypes} warnings={warnings} />)
 
     await runUntilSignal(async () => {
       app.unmount()
       console.log("\nShutting down worker group...")
       await stopWorkersAndProviders()
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()

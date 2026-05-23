@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthSessionRow } from "./rows"
 import { rowToSessionRecord } from "./rows"
@@ -90,7 +90,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       if (!existing) {
         throw new AuthStorageError(
           "missing_session",
-          `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+          `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )
       }
 
@@ -144,7 +144,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       if (!updated) {
         throw new AuthStorageError(
           "missing_session",
-          `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+          `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )
       }
       return updated

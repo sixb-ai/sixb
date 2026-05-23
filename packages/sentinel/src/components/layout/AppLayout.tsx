@@ -2,7 +2,7 @@ import {
   getProjectInfoOptions,
   listWorkflowRunsOptions,
   listWorkflowsOptions,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
 import { AppShell } from "./AppShell"

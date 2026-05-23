@@ -8,8 +8,8 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
   StartActionRunInput,
-} from "@pario/core"
-import { ActionRunError } from "@pario/core"
+} from "@sixb/core"
+import { ActionRunError } from "@sixb/core"
 import type { SQL } from "bun"
 
 export class PgActionRunStorage implements ActionRunStorage {
@@ -48,7 +48,7 @@ export class PgActionRunStorage implements ActionRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ActionRunError(
-          `[ParioPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -65,7 +65,7 @@ export class PgActionRunStorage implements ActionRunStorage {
 
       if (!existing) {
         throw new ActionRunError(
-          `[ParioPg] Action run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
@@ -259,7 +259,7 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
   }
 
   if (!row.object_type_id || !row.primary_id) {
-    throw new ActionRunError(`[ParioPg] Action run '${row.id}' has an invalid object subject.`)
+    throw new ActionRunError(`[SixbPg] Action run '${row.id}' has an invalid object subject.`)
   }
 
   return {

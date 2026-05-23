@@ -28,10 +28,10 @@ import {
   interventionField,
   link,
   type OntologySource,
-  Pario,
-  type ParioOptions,
   prop,
-} from "@pario/core"
+  Sixb,
+  type SixbOptions,
+} from "@sixb/core"
 import {
   SqliteObjectStorage,
   SqlitePipelineRunStorage,
@@ -41,18 +41,18 @@ import {
   SqliteWebhookRunStorage,
   SqliteWorkflowInterventionStorage,
   SqliteWorkflowRunStorage,
-} from "@pario/sqlite"
-import { ParioServer } from "../src/server"
+} from "@sixb/sqlite"
+import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createParioInstance<TOntologySources extends readonly OntologySource[]>(
-  options: ParioOptions<TOntologySources>
-): Pario<TOntologySources> {
-  const ParioConstructor = Pario as unknown as new (
-    options: ParioOptions<TOntologySources>
-  ) => Pario<TOntologySources>
+function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
+  options: SixbOptions<TOntologySources>
+): Sixb<TOntologySources> {
+  const SixbConstructor = Sixb as unknown as new (
+    options: SixbOptions<TOntologySources>
+  ) => Sixb<TOntologySources>
 
-  return new ParioConstructor(options)
+  return new SixbConstructor(options)
 }
 
 const Space = defineObjectType({
@@ -190,11 +190,11 @@ async function getFreePort(): Promise<number> {
 }
 
 async function seedPendingReviewIntervention(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   suffix: string
 ) {
-  const workflowRuns = pario.storage.workflowRuns
-  const workflowInterventions = pario.storage.workflowInterventions
+  const workflowRuns = sixb.storage.workflowRuns
+  const workflowInterventions = sixb.storage.workflowInterventions
   if (!workflowRuns || !workflowInterventions) {
     throw new Error("Expected workflow run and intervention storage in test runtime.")
   }
@@ -207,14 +207,14 @@ async function seedPendingReviewIntervention(
 
   await workflowRuns.start({
     id: runId,
-    projectId: pario.id,
+    projectId: sixb.id,
     workflowId: "review-device-health-workflow",
     input: { deviceId: "fan-1" },
     startedAt: new Date("2026-02-18T09:20:00.000Z"),
   })
   await workflowRuns.nodes.start({
     id: stepNodeRunId,
-    projectId: pario.id,
+    projectId: sixb.id,
     workflowRunId: runId,
     workflowId: "review-device-health-workflow",
     nodeIndex: 0,
@@ -226,14 +226,14 @@ async function seedPendingReviewIntervention(
   })
   await workflowRuns.nodes.finish({
     id: stepNodeRunId,
-    projectId: pario.id,
+    projectId: sixb.id,
     status: "succeeded",
     finishedAt: new Date("2026-02-18T09:20:02.000Z"),
     output: stepOutput,
   })
   await workflowRuns.nodes.start({
     id: interventionNodeRunId,
-    projectId: pario.id,
+    projectId: sixb.id,
     workflowRunId: runId,
     workflowId: "review-device-health-workflow",
     nodeIndex: 1,
@@ -245,18 +245,18 @@ async function seedPendingReviewIntervention(
   })
   await workflowRuns.nodes.wait({
     id: interventionNodeRunId,
-    projectId: pario.id,
+    projectId: sixb.id,
     waitingAt: new Date("2026-02-18T09:20:04.000Z"),
   })
   await workflowRuns.wait({
     id: runId,
-    projectId: pario.id,
+    projectId: sixb.id,
     waitingAt: new Date("2026-02-18T09:20:04.000Z"),
   })
 
   return await workflowInterventions.create({
     id: pendingInterventionId,
-    projectId: pario.id,
+    projectId: sixb.id,
     workflowId: "review-device-health-workflow",
     workflowRunId: runId,
     nodeRunId: interventionNodeRunId,
@@ -270,18 +270,18 @@ async function seedPendingReviewIntervention(
   })
 }
 
-describe("ParioServer HTTP contract", () => {
+describe("SixbServer HTTP contract", () => {
   async function withHttpContractServer(
     run: (context: {
       baseUrl: string
       events: EventsRuntime
-      pario: Pario<readonly OntologySource[]>
+      sixb: Sixb<readonly OntologySource[]>
     }) => Promise<void>
   ): Promise<void> {
-    const tempRoot = await mkdtemp(join(tmpdir(), "pario-http-contract-"))
+    const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
 
     const lakeStorage = new InMemoryLakeStorage()
-    const pario = createParioInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance<readonly OntologySource[]>({
       id: "contract-project",
       ontology: [Space, Device],
       actions: [setSpeed, createMaintenanceRun],
@@ -308,14 +308,14 @@ describe("ParioServer HTTP contract", () => {
       rules: [highRpmRule],
     })
 
-    await pario.upsertObject("space", { id: "system", name: "System" })
-    await pario.upsertObject("device", { id: "fan-1", label: "Fan 1" })
-    await pario.upsertLink("space", "system", "contains", {
+    await sixb.upsertObject("space", { id: "system", name: "System" })
+    await sixb.upsertObject("device", { id: "fan-1", label: "Fan 1" })
+    await sixb.upsertLink("space", "system", "contains", {
       targetTypeId: "device",
       targetId: "fan-1",
     })
 
-    await pario.appendTelemetry("device", [
+    await sixb.appendTelemetry("device", [
       {
         id: "fan-1",
         properties: { rpm: 1100 },
@@ -328,7 +328,7 @@ describe("ParioServer HTTP contract", () => {
       },
     ])
 
-    await pario.storage.rules!.applyTriggered({
+    await sixb.storage.rules!.applyTriggered({
       id: "rule-state-event-1",
       cursor: "1",
       schemaVersion: 1,
@@ -365,7 +365,7 @@ describe("ParioServer HTTP contract", () => {
     ])
     const committedVersion = await write.commit({ commitMessage: "previous import" })
 
-    await pario.storage.syncRuns!.start({
+    await sixb.storage.syncRuns!.start({
       id: "run-previous",
       projectId: "contract-project",
       syncId: "sync-github-events",
@@ -374,7 +374,7 @@ describe("ParioServer HTTP contract", () => {
       startedAt: new Date("2026-02-18T09:00:00.000Z"),
       commitMessage: "previous import",
     })
-    await pario.storage.syncRuns!.finish({
+    await sixb.storage.syncRuns!.finish({
       id: "run-previous",
       projectId: "contract-project",
       status: "succeeded",
@@ -387,13 +387,13 @@ describe("ParioServer HTTP contract", () => {
       checkpoint: { cursor: "secret-sync-cursor" },
     })
 
-    await pario.storage.pipelineRuns!.start({
+    await sixb.storage.pipelineRuns!.start({
       id: "pipeline-run-previous",
       projectId: "contract-project",
       pipelineId: "github-events-pipeline",
       startedAt: new Date("2026-02-18T09:05:00.000Z"),
     })
-    await pario.storage.pipelineRuns!.startStep({
+    await sixb.storage.pipelineRuns!.startStep({
       id: "pipeline-step-run-previous",
       projectId: "contract-project",
       pipelineRunId: "pipeline-run-previous",
@@ -404,7 +404,7 @@ describe("ParioServer HTTP contract", () => {
       startedAt: new Date("2026-02-18T09:05:00.500Z"),
       inputs: [{ datasetId: "raw.github.events", versionId: "ver_previous" }],
     })
-    await pario.storage.pipelineRuns!.finishStep({
+    await sixb.storage.pipelineRuns!.finishStep({
       id: "pipeline-step-run-previous",
       projectId: "contract-project",
       status: "succeeded",
@@ -415,7 +415,7 @@ describe("ParioServer HTTP contract", () => {
       },
       rowsWritten: 3,
     })
-    await pario.storage.pipelineRuns!.finish({
+    await sixb.storage.pipelineRuns!.finish({
       id: "pipeline-run-previous",
       projectId: "contract-project",
       status: "succeeded",
@@ -426,14 +426,14 @@ describe("ParioServer HTTP contract", () => {
       },
     })
 
-    await pario.storage.workflowRuns!.start({
+    await sixb.storage.workflowRuns!.start({
       id: "workflow-run-previous",
       projectId: "contract-project",
       workflowId: "inspect-device-workflow",
       input: { deviceId: "fan-1" },
       startedAt: new Date("2026-02-18T09:07:00.000Z"),
     })
-    await pario.storage.workflowRuns!.nodes.start({
+    await sixb.storage.workflowRuns!.nodes.start({
       id: "workflow-node-run-previous",
       projectId: "contract-project",
       workflowRunId: "workflow-run-previous",
@@ -445,21 +445,21 @@ describe("ParioServer HTTP contract", () => {
       input: { deviceId: "fan-1" },
       startedAt: new Date("2026-02-18T09:07:00.500Z"),
     })
-    await pario.storage.workflowRuns!.nodes.finish({
+    await sixb.storage.workflowRuns!.nodes.finish({
       id: "workflow-node-run-previous",
       projectId: "contract-project",
       status: "succeeded",
       finishedAt: new Date("2026-02-18T09:07:01.000Z"),
       output: { deviceId: "fan-1", healthy: true },
     })
-    await pario.storage.workflowRuns!.finish({
+    await sixb.storage.workflowRuns!.finish({
       id: "workflow-run-previous",
       projectId: "contract-project",
       status: "succeeded",
       finishedAt: new Date("2026-02-18T09:07:02.000Z"),
     })
 
-    await pario.storage.webhookRuns!.start({
+    await sixb.storage.webhookRuns!.start({
       id: "webhook-run-previous",
       projectId: "contract-project",
       connectorId: "github",
@@ -468,7 +468,7 @@ describe("ParioServer HTTP contract", () => {
       route: "/api/webhooks/github/events",
       startedAt: new Date("2026-02-18T09:10:00.000Z"),
     })
-    await pario.storage.webhookRuns!.finish({
+    await sixb.storage.webhookRuns!.finish({
       id: "webhook-run-previous",
       projectId: "contract-project",
       status: "succeeded",
@@ -480,8 +480,8 @@ describe("ParioServer HTTP contract", () => {
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
 
-    const server = new ParioServer({
-      pario,
+    const server = new SixbServer({
+      sixb,
       host: "127.0.0.1",
       port,
       quiet: true,
@@ -491,7 +491,7 @@ describe("ParioServer HTTP contract", () => {
     await server.start()
 
     try {
-      await run({ baseUrl, events: pario.events, pario })
+      await run({ baseUrl, events: sixb.events, sixb })
     } finally {
       await server.stop()
       await rm(tempRoot, { recursive: true, force: true })
@@ -1200,8 +1200,8 @@ describe("ParioServer HTTP contract", () => {
   })
 
   test("supports workflow intervention review endpoints", async () => {
-    await withHttpContractServer(async ({ baseUrl, events, pario }) => {
-      const pending = await seedPendingReviewIntervention(pario, "submit")
+    await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
+      const pending = await seedPendingReviewIntervention(sixb, "submit")
 
       const listResponse = await fetch(
         `${baseUrl}/api/workflow-interventions?status=pending&workflowId=review-device-health-workflow`
@@ -1274,14 +1274,14 @@ describe("ParioServer HTTP contract", () => {
         submittedBy: { principalType: "user", principalId: "reviewer-1" },
       })
 
-      const [resumeJob] = await pario.queues.workflows.claim({
-        projectId: pario.id,
+      const [resumeJob] = await sixb.queues.workflows.claim({
+        projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(resumeJob?.job.id).toBe(validSubmitBody.jobId)
       expect(resumeJob?.job).toEqual({
         id: validSubmitBody.jobId,
-        projectId: pario.id,
+        projectId: sixb.id,
         createdAt: expect.any(String),
         availableAt: expect.any(String),
         attempt: 1,
@@ -1304,8 +1304,8 @@ describe("ParioServer HTTP contract", () => {
       )
       expect(duplicateSubmitResponse.status).toBe(400)
 
-      const duplicateResumeJobs = await pario.queues.workflows.claim({
-        projectId: pario.id,
+      const duplicateResumeJobs = await sixb.queues.workflows.claim({
+        projectId: sixb.id,
         workerId: "contract-test-duplicate",
       })
       expect(duplicateResumeJobs).toEqual([])
@@ -1331,8 +1331,8 @@ describe("ParioServer HTTP contract", () => {
   })
 
   test("cancels pending workflow interventions and waiting runs", async () => {
-    await withHttpContractServer(async ({ baseUrl, events, pario }) => {
-      const pending = await seedPendingReviewIntervention(pario, "cancel")
+    await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
+      const pending = await seedPendingReviewIntervention(sixb, "cancel")
 
       const cancelResponse = await fetch(
         `${baseUrl}/api/workflow-interventions/${pending.id}/cancel`,
@@ -1353,8 +1353,8 @@ describe("ParioServer HTTP contract", () => {
         },
       })
 
-      const cancelledRun = await pario.storage.workflowRuns!.getById({
-        projectId: pario.id,
+      const cancelledRun = await sixb.storage.workflowRuns!.getById({
+        projectId: sixb.id,
         id: pending.workflowRunId,
       })
       expect(cancelledRun).toMatchObject({
@@ -1363,8 +1363,8 @@ describe("ParioServer HTTP contract", () => {
         error: "Workflow intervention cancelled.",
       })
 
-      const cancelledNode = await pario.storage.workflowRuns!.nodes.getById({
-        projectId: pario.id,
+      const cancelledNode = await sixb.storage.workflowRuns!.nodes.getById({
+        projectId: sixb.id,
         id: pending.nodeRunId,
       })
       expect(cancelledNode).toMatchObject({
@@ -1399,7 +1399,7 @@ describe("ParioServer HTTP contract", () => {
   })
 
   test("supports documented write endpoints", async () => {
-    await withHttpContractServer(async ({ baseUrl, events, pario }) => {
+    await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
       const upsertObjectResponse = await fetch(`${baseUrl}/api/objects/device/fan-2`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -1534,8 +1534,8 @@ describe("ParioServer HTTP contract", () => {
       expect(requestSyncRunBody.jobId).toBeTruthy()
       expect(requestSyncRunBody.syncId).toBe("sync-github-events")
 
-      const [queuedSyncRun] = await pario.queues.syncRuns.claim({
-        projectId: pario.id,
+      const [queuedSyncRun] = await sixb.queues.syncRuns.claim({
+        projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedSyncRun?.job.payload).toEqual({
@@ -1559,8 +1559,8 @@ describe("ParioServer HTTP contract", () => {
       expect(requestPipelineRunBody.jobId).toBeTruthy()
       expect(requestPipelineRunBody.pipelineId).toBe("github-events-pipeline")
 
-      const [queuedPipelineRun] = await pario.queues.pipelines.claim({
-        projectId: pario.id,
+      const [queuedPipelineRun] = await sixb.queues.pipelines.claim({
+        projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedPipelineRun?.job.payload).toEqual({
@@ -1586,8 +1586,8 @@ describe("ParioServer HTTP contract", () => {
       expect(requestWorkflowRunBody.jobId).toBeTruthy()
       expect(requestWorkflowRunBody.workflowId).toBe("inspect-device-workflow")
 
-      const queuedWorkflowRunRecord = await pario.storage.workflowRuns!.getById({
-        projectId: pario.id,
+      const queuedWorkflowRunRecord = await sixb.storage.workflowRuns!.getById({
+        projectId: sixb.id,
         id: requestWorkflowRunBody.runId,
       })
       expect(queuedWorkflowRunRecord).toMatchObject({
@@ -1597,8 +1597,8 @@ describe("ParioServer HTTP contract", () => {
         input: { deviceId: "fan-2" },
       })
 
-      const [queuedWorkflowRun] = await pario.queues.workflows.claim({
-        projectId: pario.id,
+      const [queuedWorkflowRun] = await sixb.queues.workflows.claim({
+        projectId: sixb.id,
         workerId: "contract-test",
       })
       expect(queuedWorkflowRun?.job.payload).toEqual({

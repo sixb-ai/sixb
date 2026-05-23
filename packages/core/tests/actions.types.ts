@@ -6,9 +6,9 @@ import {
   type InferSchemaOrRef,
   type ObjectRef,
   type ObjectRefSchema,
-  Pario,
   prop,
   ref,
+  Sixb,
   stringEnum,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -45,11 +45,11 @@ const setTemperature = defineAction("setTemperature")
     void mode
     void primaryId
   })
-  .run(async ({ params, target, pario }) => {
+  .run(async ({ params, target, sixb }) => {
     const targetValue: number = params.target
     const name: string = target.properties.name
     const objectTypeId: string = target.objectTypeId
-    pario.objects(Room)
+    sixb.objects(Room)
 
     // @ts-expect-error "bogus" does not exist on params
     const bogus = params.bogus
@@ -110,10 +110,10 @@ const createRoom = defineAction("createRoom")
     void id
     void primaryId
   })
-  .run(({ params, pario }) => {
+  .run(({ params, sixb }) => {
     const id: string = params.id
     const name: string = params.name
-    pario.objects(Room)
+    sixb.objects(Room)
 
     // @ts-expect-error global action handlers do not expose target
     const primaryId = target.primaryId
@@ -123,7 +123,7 @@ const createRoom = defineAction("createRoom")
     void primaryId
   })
 
-const pario = new Pario({
+const sixb = new Sixb({
   ontology: [Room],
   actions: [setTemperature, reboot, setRequestTemperature, assignRelatedRoom, createRoom],
   ...createTestRuntimeDeps(),
@@ -143,34 +143,34 @@ const invalidAssignRelatedRoomParams: AssignRelatedRoomParams = {
   },
 }
 
-void pario
-pario.actions.request({
+void sixb
+sixb.actions.request({
   actionId: "createRoom",
   params: {
     id: "room:1",
     name: "Room 1",
   },
 })
-pario.actions.request({
+sixb.actions.request({
   actionId: "setTemperature",
   subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
   params: { target: 22 },
 })
-pario.actions.request({
+sixb.actions.request({
   // @ts-expect-error global action request API is actionId-based
   action: createRoom,
   params: {
     id: "room:1",
   },
 })
-pario
+sixb
   .objects(Room)
   .byId("room:1")
   .requestAction({
     action: setRequestTemperature,
     params: { target: 22 },
   })
-pario.objects(Room).requestAction({
+sixb.objects(Room).requestAction({
   id: "room:1",
   action: setRequestTemperature,
   params: { target: 22 },

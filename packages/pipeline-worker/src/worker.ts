@@ -3,8 +3,8 @@ import type {
   PipelineRunRequestedQueueJob,
   PipelineRunStorage,
   QueueWorkerFailureDecision,
-} from "@pario/core"
-import { QueueWorker } from "@pario/core"
+} from "@sixb/core"
+import { QueueWorker } from "@sixb/core"
 import {
   emitDatasetVersionCommitted,
   emitPipelineRunFinished,
@@ -13,32 +13,30 @@ import {
   emitPipelineRunStepStarted,
 } from "./events"
 import { runPipelineJob } from "./run-pipeline-job"
-import type { PipelineJob, PipelineWorkerContext, PipelineWorkerPario } from "./types"
+import type { PipelineJob, PipelineWorkerContext, PipelineWorkerSixb } from "./types"
 
 export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly context: PipelineWorkerContext
-  private readonly pario: PipelineWorkerPario
+  private readonly sixb: PipelineWorkerSixb
 
-  constructor(pario: PipelineWorkerPario) {
-    if (pario.getPipelineDefinitions().length === 0) {
-      throw new Error("[ParioPipelineWorker] No pipeline definitions are registered.")
+  constructor(sixb: PipelineWorkerSixb) {
+    if (sixb.getPipelineDefinitions().length === 0) {
+      throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
     }
 
-    const pipelineRunsStorage = pario.storage.pipelineRuns
+    const pipelineRunsStorage = sixb.storage.pipelineRuns
     if (!pipelineRunsStorage) {
-      throw new Error(
-        "[ParioPipelineWorker] Pipeline workers require storage.pipelineRuns support."
-      )
+      throw new Error("[SixbPipelineWorker] Pipeline workers require storage.pipelineRuns support.")
     }
 
     super({
-      projectId: pario.id,
-      queue: pario.queues.pipelines,
-      workerId: `pipeline-worker-${pario.id}`,
+      projectId: sixb.id,
+      queue: sixb.queues.pipelines,
+      workerId: `pipeline-worker-${sixb.id}`,
     })
 
-    this.context = buildPipelineContext(pario, pipelineRunsStorage)
-    this.pario = pario
+    this.context = buildPipelineContext(sixb, pipelineRunsStorage)
+    this.sixb = sixb
   }
 
   protected async execute(
@@ -55,15 +53,14 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       runtime: this.context,
       job: pipelineJob,
       signal,
-      onRunStarted: (run) => emitPipelineRunStarted(this.pario.events, run),
-      onStepStarted: (step, context) =>
-        emitPipelineRunStepStarted(this.pario.events, step, context),
+      onRunStarted: (run) => emitPipelineRunStarted(this.sixb.events, run),
+      onStepStarted: (step, context) => emitPipelineRunStepStarted(this.sixb.events, step, context),
       onStepFinished: (step, context) =>
-        emitPipelineRunStepFinished(this.pario.events, step, context),
-      onStepCommitted: (step) => emitDatasetVersionCommitted(this.pario, pipelineJob, step),
+        emitPipelineRunStepFinished(this.sixb.events, step, context),
+      onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb, pipelineJob, step),
     })
 
-    await emitPipelineRunFinished(this.pario.events, {
+    await emitPipelineRunFinished(this.sixb.events, {
       id: pipelineJob.id,
       pipelineId: pipelineJob.pipelineId,
       status: "succeeded",
@@ -77,7 +74,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
     const { job } = claimed
-    await emitPipelineRunFinished(this.pario.events, {
+    await emitPipelineRunFinished(this.sixb.events, {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
       pipelineId: job.payload.pipelineId,
       status: "failed",
@@ -103,7 +100,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     }
 
     // After a step commit, rerunning the whole pipeline could duplicate append outputs.
-    await emitPipelineRunFinished(this.pario.events, {
+    await emitPipelineRunFinished(this.sixb.events, {
       id: pipelineJob.id,
       pipelineId: pipelineJob.pipelineId,
       status: "cancelled",
@@ -114,18 +111,18 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
 }
 
 function buildPipelineContext(
-  pario: PipelineWorkerPario,
+  sixb: PipelineWorkerSixb,
   pipelineRunsStorage: PipelineRunStorage
 ): PipelineWorkerContext {
   return {
-    id: pario.id,
+    id: sixb.id,
     pipelineRunsStorage,
-    lakeStorage: pario.lakeStorage,
+    lakeStorage: sixb.lakeStorage,
     getPipelineById(pipelineId) {
-      return pario.getPipelineById(pipelineId)
+      return sixb.getPipelineById(pipelineId)
     },
     getDatasetById(datasetId) {
-      return pario.getDatasetById(datasetId)
+      return sixb.getDatasetById(datasetId)
     },
   }
 }

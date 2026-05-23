@@ -9,7 +9,7 @@ import type {
   RulesStorage,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteRulesStorageOptions {

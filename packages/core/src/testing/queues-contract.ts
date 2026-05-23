@@ -27,7 +27,7 @@ export interface QueueContractSuiteOptions {
  * Runs the shared `Queues` contract against any provider.
  *
  * Every provider must exhibit the same enqueue/claim/complete/retry/fail/renewLease behavior
- * described here, which is the authoritative specification for Pario queues — each test is
+ * described here, which is the authoritative specification for Sixb queues — each test is
  * written in Arrange/Act/Assert form, with timing parameters exposed for providers that need
  * them (short lease durations, periodic checker intervals).
  */

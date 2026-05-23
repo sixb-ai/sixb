@@ -4,7 +4,7 @@
  * Types define the schema language; helpers provide ergonomic builders.
  *
  * ```ts
- * import { defineObjectType, prop, link, stringEnum } from "@pario/core"
+ * import { defineObjectType, prop, link, stringEnum } from "@sixb/core"
  * ```
  */
 

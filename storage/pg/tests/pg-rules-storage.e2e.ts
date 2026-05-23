@@ -3,7 +3,7 @@ import type {
   RuleEventSubject,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

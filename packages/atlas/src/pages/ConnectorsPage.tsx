@@ -2,12 +2,12 @@ import type {
   GetConnectorResponse,
   ListConnectorsResponse,
   ListWebhookRunsResponse,
-} from "@pario/client"
+} from "@sixb/client"
 import {
   getConnectorOptions,
   listConnectorsOptions,
   listWebhookRunsOptions,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -24,8 +24,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
   Cable,
@@ -768,7 +768,7 @@ export function ConnectorDetailPage() {
           <EmptyState
             icon={<Cable className="h-10 w-10" />}
             title="Connector not found"
-            description="This connector is not registered in the active Pario runtime."
+            description="This connector is not registered in the active Sixb runtime."
           />
         </div>
       </div>

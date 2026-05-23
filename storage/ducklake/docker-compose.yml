@@ -16,8 +16,8 @@ services:
     image: minio/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
-      MINIO_ROOT_USER: pario
-      MINIO_ROOT_PASSWORD: pario-secret
+      MINIO_ROOT_USER: sixb
+      MINIO_ROOT_PASSWORD: sixb-secret
     ports:
       - "19000:9000"
       - "19001:9001"
@@ -36,5 +36,5 @@ services:
       [
         "/bin/sh",
         "-c",
-        "mc alias set local http://minio:9000 pario pario-secret && mc mb -p local/pario-ducklake",
+        "mc alias set local http://minio:9000 sixb sixb-secret && mc mb -p local/sixb-ducklake",
       ]

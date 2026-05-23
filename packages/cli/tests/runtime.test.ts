@@ -21,20 +21,20 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type LakeStorage,
-  Pario,
   prop,
   type RuleDefinition,
+  Sixb,
   type StorageMigrator,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   checkRuntimeLakeDefinitions,
   migrateRuntimeStorage,
   startFunctionsRuntime,
   startOrchestratorRuntime,
-  startParioRuntime,
   startRulesRuntime,
   startSchedulerRuntime,
-  stopParioProviders,
+  startSixbRuntime,
+  stopSixbProviders,
 } from "../src/lib/runtime"
 
 const Zone = defineObjectType({
@@ -122,11 +122,11 @@ async function waitFor<T>(
 }
 
 async function appendScheduleTriggered(
-  pario: { readonly id: string; readonly events: EventsRuntime },
+  sixb: { readonly id: string; readonly events: EventsRuntime },
   scheduleId: string
 ) {
   const occurrenceAt = "2026-04-18T02:00:00.000Z"
-  await pario.events.append({
+  await sixb.events.append({
     events: [
       {
         type: "schedule.triggered",
@@ -141,7 +141,7 @@ async function appendScheduleTriggered(
   })
 }
 
-describe("startParioRuntime", () => {
+describe("startSixbRuntime", () => {
   test("runs adapter migrations before starting background runtimes", async () => {
     const calls: string[] = []
     const migrator: StorageMigrator = {
@@ -163,7 +163,7 @@ describe("startParioRuntime", () => {
     }
     const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-migrations",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -173,7 +173,7 @@ describe("startParioRuntime", () => {
       queues: new InMemoryQueues(),
     })
 
-    const runtime = await startParioRuntime(pario)
+    const runtime = await startSixbRuntime(sixb)
 
     expect(calls).toEqual(["storage"])
 
@@ -181,7 +181,7 @@ describe("startParioRuntime", () => {
   })
 
   test("skips workers when cohostWorkers is true but no definitions are registered", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-no-workers",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -191,7 +191,7 @@ describe("startParioRuntime", () => {
       queues: new InMemoryQueues(),
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: true })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
@@ -210,7 +210,7 @@ describe("startParioRuntime", () => {
       .from(erpDb)
       .read(() => [])
       .intoDataset(rawOrdersDataset)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-no-sync-worker",
       ontology: [Zone],
       connectors: [erpDb],
@@ -223,7 +223,7 @@ describe("startParioRuntime", () => {
       syncs: [sync],
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: false })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
 
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
@@ -241,7 +241,7 @@ describe("startParioRuntime", () => {
         col("currency", "string", { nullable: true }),
       ],
     })
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-lake-definition-drift",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -252,13 +252,13 @@ describe("startParioRuntime", () => {
       datasets: [changedDataset],
     })
 
-    await expect(startParioRuntime(pario, { cohostWorkers: true })).rejects.toThrow(
+    await expect(startSixbRuntime(sixb, { cohostWorkers: true })).rejects.toThrow(
       "Lake dataset definition check failed"
     )
   })
 
   test("skips the projection worker when cohostWorkers is true but no projections are registered", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-no-projections",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -268,7 +268,7 @@ describe("startParioRuntime", () => {
       queues: new InMemoryQueues(),
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: true })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
     expect(runtime.projectionWorker).toBeNull()
 
@@ -279,7 +279,7 @@ describe("startParioRuntime", () => {
     const projection = defineProjection("zone-proj", Zone)
       .fromDataset(rawOrdersDataset)
       .properties({ id: "orderId" })
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-no-projection-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -291,7 +291,7 @@ describe("startParioRuntime", () => {
       projections: [projection],
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: false })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
 
     expect(runtime.projectionWorker).toBeNull()
 
@@ -300,7 +300,7 @@ describe("startParioRuntime", () => {
 
   test("does not co-host the workflow worker unless explicitly enabled", async () => {
     const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-no-workflow-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -311,7 +311,7 @@ describe("startParioRuntime", () => {
       workflows: [workflow],
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: false })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
 
     expect(runtime.workflowWorker).toBeNull()
 
@@ -323,7 +323,7 @@ describe("startParioRuntime", () => {
       .from(erpDb)
       .read(() => [{ orderId: "ord_1" }])
       .intoDataset(rawOrdersDataset)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-sync-worker",
       ontology: [Zone],
       connectors: [erpDb],
@@ -336,12 +336,12 @@ describe("startParioRuntime", () => {
       syncs: [sync],
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: true })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
     expect(runtime.syncWorker).not.toBeNull()
 
-    await pario.queues.syncRuns.enqueue({
-      projectId: pario.id,
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "sync.run.requested",
@@ -354,7 +354,7 @@ describe("startParioRuntime", () => {
     })
 
     const run = await waitFor(
-      () => pario.storage.syncRuns!.getById({ projectId: pario.id, id: "runtime-sync-1" }),
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "runtime-sync-1" }),
       (value) => value?.status === "succeeded"
     )
 
@@ -382,7 +382,7 @@ describe("startParioRuntime", () => {
     const pipeline = definePipeline("normalize-orders")
       .when(datasetUpdated(rawOrdersDataset.id))
       .then(normalizeStep)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-pipeline-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -394,15 +394,15 @@ describe("startParioRuntime", () => {
       pipelines: [pipeline],
     })
 
-    let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
     try {
-      runtime = await startParioRuntime(pario, { cohostWorkers: true })
+      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
       expect(runtime.pipelineWorker).not.toBeNull()
       expect(runtime.warnings).toHaveLength(0)
 
-      await pario.queues.pipelines.enqueue({
-        projectId: pario.id,
+      await sixb.queues.pipelines.enqueue({
+        projectId: sixb.id,
         jobs: [
           {
             type: "pipeline.run.requested",
@@ -416,8 +416,8 @@ describe("startParioRuntime", () => {
 
       const run = await waitFor(
         () =>
-          pario.storage.pipelineRuns!.getById({
-            projectId: pario.id,
+          sixb.storage.pipelineRuns!.getById({
+            projectId: sixb.id,
             id: "runtime-pipeline-1",
           }),
         (value) => value?.status === "succeeded"
@@ -433,7 +433,7 @@ describe("startParioRuntime", () => {
     const projection = defineProjection("zone-proj", Zone)
       .fromDataset(rawOrdersDataset)
       .properties({ id: "orderId" })
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-projection-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -444,16 +444,16 @@ describe("startParioRuntime", () => {
       datasets: [rawOrdersDataset],
       projections: [projection],
     })
-    const version = await seedDatasetVersion(pario.lakeStorage, rawOrdersDataset, [
+    const version = await seedDatasetVersion(sixb.lakeStorage, rawOrdersDataset, [
       { orderId: "ord_1" },
     ])
 
-    let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
     try {
-      runtime = await startParioRuntime(pario, { cohostWorkers: true })
+      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
       expect(runtime.projectionWorker).not.toBeNull()
 
-      await pario.events.append({
+      await sixb.events.append({
         events: [
           {
             type: "dataset.version.committed",
@@ -468,8 +468,8 @@ describe("startParioRuntime", () => {
 
       const object = await waitFor(
         () =>
-          pario.storage.objects.getByPrimaryId({
-            projectId: pario.id,
+          sixb.storage.objects.getByPrimaryId({
+            projectId: sixb.id,
             objectTypeId: "Zone",
             primaryId: "ord_1",
           }),
@@ -480,8 +480,8 @@ describe("startParioRuntime", () => {
 
       const projectionRuns = await waitFor(
         () =>
-          pario.storage.projectionRuns!.list({
-            projectId: pario.id,
+          sixb.storage.projectionRuns!.list({
+            projectId: sixb.id,
             projectionId: "zone-proj",
             datasetVersionId: version.versionId,
             statuses: ["succeeded"],
@@ -490,8 +490,8 @@ describe("startParioRuntime", () => {
       )
       expect(projectionRuns.runs[0]?.objectsUpserted).toBe(1)
 
-      const projectionJobs = await pario.queues.projections.claim({
-        projectId: pario.id,
+      const projectionJobs = await sixb.queues.projections.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(projectionJobs).toHaveLength(0)
@@ -520,7 +520,7 @@ describe("startParioRuntime", () => {
     const pipeline = definePipeline("normalize-orders")
       .when(datasetUpdated("raw.erp.orders"))
       .then(normalizeOrders)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-pipeline-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -532,15 +532,15 @@ describe("startParioRuntime", () => {
       pipelines: [pipeline],
     })
 
-    let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
     try {
-      runtime = await startParioRuntime(pario, { cohostWorkers: true })
+      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
       expect(runtime.pipelineWorker).not.toBeNull()
       expect(runtime.orchestratorWorker).not.toBeNull()
       expect(runtime.warnings).toHaveLength(0)
 
-      await pario.events.append({
+      await sixb.events.append({
         events: [
           {
             type: "dataset.version.committed",
@@ -555,8 +555,8 @@ describe("startParioRuntime", () => {
 
       const runs = await waitFor(
         () =>
-          pario.storage.pipelineRuns!.list({
-            projectId: pario.id,
+          sixb.storage.pipelineRuns!.list({
+            projectId: sixb.id,
             pipelineId: "normalize-orders",
             statuses: ["succeeded"],
           }),
@@ -570,7 +570,7 @@ describe("startParioRuntime", () => {
 
   test("co-hosts the workflow worker when enabled and workflows are registered", async () => {
     const workflow = defineWorkflow("runtime-manual-workflow").input({}).then(workflowStep)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-workflow-worker",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -581,7 +581,7 @@ describe("startParioRuntime", () => {
       workflows: [workflow],
     })
 
-    const runtime = await startParioRuntime(pario, { cohostWorkers: true })
+    const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
     expect(runtime.workflowWorker).not.toBeNull()
 
@@ -594,7 +594,7 @@ describe("startParioRuntime", () => {
       .input({})
       .when(daily)
       .then(workflowStep)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-workflow-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -606,19 +606,19 @@ describe("startParioRuntime", () => {
       workflows: [workflow],
     })
 
-    let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
     try {
-      runtime = await startParioRuntime(pario, { cohostWorkers: true })
+      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
       expect(runtime.workflowWorker).not.toBeNull()
       expect(runtime.orchestratorWorker).not.toBeNull()
       expect(runtime.warnings).toHaveLength(0)
 
-      await appendScheduleTriggered(pario, daily.id)
+      await appendScheduleTriggered(sixb, daily.id)
 
       const workflowRuns = await waitFor(
         () =>
-          pario.storage.workflowRuns!.list({
-            projectId: pario.id,
+          sixb.storage.workflowRuns!.list({
+            projectId: sixb.id,
             workflowId: workflow.id,
             statuses: ["succeeded"],
           }),
@@ -627,8 +627,8 @@ describe("startParioRuntime", () => {
 
       expect(workflowRuns.runs[0]?.input).toEqual({})
 
-      const workflowJobs = await pario.queues.workflows.claim({
-        projectId: pario.id,
+      const workflowJobs = await sixb.queues.workflows.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(workflowJobs).toHaveLength(0)
@@ -643,7 +643,7 @@ describe("startParioRuntime", () => {
       .input({ accountId: "string" })
       .when(daily)
       .then(workflowStep, () => ({}))
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-skipped-workflow-route",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -655,20 +655,20 @@ describe("startParioRuntime", () => {
       workflows: [workflow],
     })
 
-    let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
     try {
-      runtime = await startParioRuntime(pario, { cohostWorkers: true })
+      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
       expect(runtime.workflowWorker).not.toBeNull()
       expect(runtime.orchestratorWorker).toBeNull()
       expect(runtime.warnings).toContain(
-        "[Pario] Workflow 'runtime-required-workflow' is scheduled but has non-empty input (accountId); it was not auto-routed."
+        "[Sixb] Workflow 'runtime-required-workflow' is scheduled but has non-empty input (accountId); it was not auto-routed."
       )
 
-      await appendScheduleTriggered(pario, daily.id)
+      await appendScheduleTriggered(sixb, daily.id)
 
-      const workflowJobs = await pario.queues.workflows.claim({
-        projectId: pario.id,
+      const workflowJobs = await sixb.queues.workflows.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(workflowJobs).toHaveLength(0)
@@ -679,7 +679,7 @@ describe("startParioRuntime", () => {
 
   test("co-hosts the rules worker when rules are registered", async () => {
     const broker = new InMemoryBroker()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-with-rules-worker",
       ontology: [Transaction],
       broker,
@@ -690,11 +690,11 @@ describe("startParioRuntime", () => {
       rules: [postedRule],
     })
 
-    const runtime = await startParioRuntime(pario)
+    const runtime = await startSixbRuntime(sixb)
 
     expect(runtime.rulesWorker).not.toBeNull()
 
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "object.upserted",
@@ -708,7 +708,7 @@ describe("startParioRuntime", () => {
     })
 
     const events = await waitFor(
-      () => pario.events.read({ topics: ["rules"] }),
+      () => sixb.events.read({ topics: ["rules"] }),
       (value) => value.length === 1
     )
 
@@ -720,7 +720,7 @@ describe("startParioRuntime", () => {
   test("stops the rules worker after functions and closes runtime providers", async () => {
     const calls: string[] = []
     const broker = new LifecycleBroker(calls)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-rules-lifecycle-order",
       ontology: [Transaction],
       broker,
@@ -730,17 +730,17 @@ describe("startParioRuntime", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    pario.startFunctions = async () => {
+    sixb.startFunctions = async () => {
       calls.push("functions:start")
     }
-    pario.stopFunctions = async () => {
+    sixb.stopFunctions = async () => {
       calls.push("functions:stop")
     }
-    pario.disconnectConnectors = async () => {
+    sixb.disconnectConnectors = async () => {
       calls.push("connectors:stop")
     }
 
-    const runtime = await startParioRuntime(pario)
+    const runtime = await startSixbRuntime(sixb)
 
     expect(calls).toEqual(["rules:start", "functions:start"])
 
@@ -758,7 +758,7 @@ describe("startParioRuntime", () => {
 
   test("closes optional provider handles during runtime cleanup", async () => {
     const calls: string[] = []
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-provider-cleanup",
       ontology: [Transaction],
       broker: new LifecycleBroker(calls),
@@ -767,11 +767,11 @@ describe("startParioRuntime", () => {
       blobStorage: new ClosableBlobStorage(calls),
       queues: new ClosableQueues(calls),
     })
-    pario.disconnectConnectors = async () => {
+    sixb.disconnectConnectors = async () => {
       calls.push("connectors:stop")
     }
 
-    await stopParioProviders(pario)
+    await stopSixbProviders(sixb)
 
     expect(calls).toEqual([
       "connectors:stop",
@@ -787,7 +787,7 @@ describe("startParioRuntime", () => {
 describe("split production runtime roles", () => {
   test("starts only registered functions for the functions role", async () => {
     const calls: string[] = []
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-functions-role",
       ontology: [Transaction],
       broker: new InMemoryBroker(),
@@ -797,17 +797,17 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    pario.startFunctions = async () => {
+    sixb.startFunctions = async () => {
       calls.push("functions:start")
     }
-    pario.stopFunctions = async () => {
+    sixb.stopFunctions = async () => {
       calls.push("functions:stop")
     }
-    pario.startScheduler = async () => {
+    sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
 
-    const runtime = await startFunctionsRuntime(pario)
+    const runtime = await startFunctionsRuntime(sixb)
 
     expect(calls).toEqual(["functions:start"])
 
@@ -818,7 +818,7 @@ describe("split production runtime roles", () => {
 
   test("starts only the scheduler for the scheduler role", async () => {
     const calls: string[] = []
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-scheduler-role",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -828,17 +828,17 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       schedules: [defineSchedule("role-daily").cron("0 2 * * *")],
     })
-    pario.startScheduler = async () => {
+    sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
-    pario.stopScheduler = async () => {
+    sixb.stopScheduler = async () => {
       calls.push("scheduler:stop")
     }
-    pario.startFunctions = async () => {
+    sixb.startFunctions = async () => {
       calls.push("functions:start")
     }
 
-    const runtime = await startSchedulerRuntime(pario)
+    const runtime = await startSchedulerRuntime(sixb)
 
     expect(calls).toEqual(["scheduler:start"])
 
@@ -849,7 +849,7 @@ describe("split production runtime roles", () => {
 
   test("starts only rules evaluation for the rules role", async () => {
     const calls: string[] = []
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-rules-role",
       ontology: [Transaction],
       broker: new LifecycleBroker(calls),
@@ -859,14 +859,14 @@ describe("split production runtime roles", () => {
       queues: new InMemoryQueues(),
       rules: [postedRule],
     })
-    pario.startFunctions = async () => {
+    sixb.startFunctions = async () => {
       calls.push("functions:start")
     }
-    pario.startScheduler = async () => {
+    sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
 
-    const runtime = await startRulesRuntime(pario)
+    const runtime = await startRulesRuntime(sixb)
 
     expect(runtime.rulesWorker).not.toBeNull()
     expect(calls).toEqual(["rules:start"])
@@ -883,7 +883,7 @@ describe("split production runtime roles", () => {
       .input({})
       .when(daily)
       .then(workflowStep)
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-orchestrator-role",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -894,14 +894,14 @@ describe("split production runtime roles", () => {
       schedules: [daily],
       workflows: [workflow],
     })
-    pario.startFunctions = async () => {
+    sixb.startFunctions = async () => {
       calls.push("functions:start")
     }
-    pario.startScheduler = async () => {
+    sixb.startScheduler = async () => {
       calls.push("scheduler:start")
     }
 
-    const runtime = await startOrchestratorRuntime(pario)
+    const runtime = await startOrchestratorRuntime(sixb)
 
     expect(runtime.orchestratorWorker).not.toBeNull()
     expect(runtime.warnings).toHaveLength(0)
@@ -936,7 +936,7 @@ describe("split runtime preparation", () => {
     const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
     const lakeStorage = new LakeAccessTrackingStorage(calls)
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-migrate-runtime-storage",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -947,7 +947,7 @@ describe("split runtime preparation", () => {
       datasets: [rawOrdersDataset],
     })
 
-    await migrateRuntimeStorage(pario)
+    await migrateRuntimeStorage(sixb)
 
     expect(calls).toEqual(["storage"])
   })
@@ -962,7 +962,7 @@ describe("split runtime preparation", () => {
         col("currency", "string", { nullable: true }),
       ],
     })
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-check-lake-definitions-drift",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -973,7 +973,7 @@ describe("split runtime preparation", () => {
       datasets: [changedDataset],
     })
 
-    await expect(checkRuntimeLakeDefinitions(pario)).rejects.toThrow(
+    await expect(checkRuntimeLakeDefinitions(sixb)).rejects.toThrow(
       "Lake dataset definition check failed"
     )
   })
@@ -982,7 +982,7 @@ describe("split runtime preparation", () => {
     const lakeStorage = createLakeStorage()
     await lakeStorage.createDataset(rawOrdersDataset)
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-check-lake-definitions-ok",
       ontology: [Zone],
       broker: new InMemoryBroker(),
@@ -993,12 +993,12 @@ describe("split runtime preparation", () => {
       datasets: [rawOrdersDataset],
     })
 
-    await checkRuntimeLakeDefinitions(pario)
+    await checkRuntimeLakeDefinitions(sixb)
   })
 
   test("service startup helpers can start without calling lake storage", async () => {
     const calls: string[] = []
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "cli-startup-without-lake-access",
       ontology: [Transaction],
       broker: new InMemoryBroker(),
@@ -1009,10 +1009,10 @@ describe("split runtime preparation", () => {
       rules: [postedRule],
     })
 
-    const rules = await startRulesRuntime(pario)
-    const functions = await startFunctionsRuntime(pario)
-    const scheduler = await startSchedulerRuntime(pario)
-    const orchestrator = await startOrchestratorRuntime(pario)
+    const rules = await startRulesRuntime(sixb)
+    const functions = await startFunctionsRuntime(sixb)
+    const scheduler = await startSchedulerRuntime(sixb)
+    const orchestrator = await startOrchestratorRuntime(sixb)
 
     expect(calls).toEqual([])
 

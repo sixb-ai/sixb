@@ -4,8 +4,8 @@ import type {
   DatasetLatestVersionSummary,
   DatasetVersion,
   OntologySource,
-  Pario,
-} from "@pario/core"
+  Sixb,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -75,7 +75,7 @@ const EMPTY_DATASET_REFERENCES: DatasetReferences = {
  * syncs, pipelines, and projections once per dataset.
  */
 function buildDatasetReferenceIndex(
-  pario: Pario<readonly OntologySource[]>
+  sixb: Sixb<readonly OntologySource[]>
 ): Map<string, DatasetReferences> {
   const index = new Map<string, DatasetReferences>()
   const referencesFor = (datasetId: string): DatasetReferences => {
@@ -87,11 +87,11 @@ function buildDatasetReferenceIndex(
     return references
   }
 
-  for (const sync of pario.getSyncDefinitions()) {
+  for (const sync of sixb.getSyncDefinitions()) {
     referencesFor(sync.target.dataset.id).syncIds.push(sync.id)
   }
 
-  for (const pipeline of pario.getPipelineDefinitions()) {
+  for (const pipeline of sixb.getPipelineDefinitions()) {
     const sourceDatasetIds = new Set<string>()
     const targetDatasetIds = new Set<string>()
     for (const node of pipeline.graph.nodes) {
@@ -108,7 +108,7 @@ function buildDatasetReferenceIndex(
     }
   }
 
-  for (const projection of [...pario.getObjectProjections(), ...pario.getLinkProjections()]) {
+  for (const projection of [...sixb.getObjectProjections(), ...sixb.getLinkProjections()]) {
     referencesFor(projection.datasetId).projectionIds.push(projection.id)
   }
 
@@ -141,10 +141,10 @@ function serializeDatasetCatalogItem(
   })
 }
 
-async function serializeDatasetCatalogItems(pario: Pario<readonly OntologySource[]>) {
-  const definitions = pario.getDatasetDefinitions()
-  const references = buildDatasetReferenceIndex(pario)
-  const states = await pario.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
+async function serializeDatasetCatalogItems(sixb: Sixb<readonly OntologySource[]>) {
+  const definitions = sixb.getDatasetDefinitions()
+  const references = buildDatasetReferenceIndex(sixb)
+  const states = await sixb.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
   const stateByDatasetId = new Map(states.map((state) => [state.datasetId, state]))
 
   return definitions.map((definition) =>
@@ -156,8 +156,8 @@ async function serializeDatasetCatalogItems(pario: Pario<readonly OntologySource
   )
 }
 
-function requireDataset(pario: Pario<readonly OntologySource[]>, datasetId: string) {
-  const dataset = pario.getDatasetById(datasetId)
+function requireDataset(sixb: Sixb<readonly OntologySource[]>, datasetId: string) {
+  const dataset = sixb.getDatasetById(datasetId)
   if (!dataset) {
     throw new Error("Dataset not found")
   }
@@ -198,13 +198,13 @@ async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>
   return collected
 }
 
-export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/datasets",
       async ({ set }) => {
         try {
-          return await serializeDatasetCatalogItems(pario)
+          return await serializeDatasetCatalogItems(sixb)
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
@@ -223,9 +223,9 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       "/api/datasets/:datasetId",
       async ({ params, set }) => {
         try {
-          const dataset = requireDataset(pario, params.datasetId)
-          const [state] = await pario.lakeStorage.listDatasetCatalogState([dataset.id])
-          const references = buildDatasetReferenceIndex(pario).get(dataset.id)
+          const dataset = requireDataset(sixb, params.datasetId)
+          const [state] = await sixb.lakeStorage.listDatasetCatalogState([dataset.id])
+          const references = buildDatasetReferenceIndex(sixb).get(dataset.id)
           return serializeDatasetCatalogItem(dataset, state, references ?? EMPTY_DATASET_REFERENCES)
         } catch (error) {
           return handleRouteError(error, set)
@@ -249,10 +249,10 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       "/api/datasets/:datasetId/versions",
       async ({ params, query, set }) => {
         try {
-          requireDataset(pario, params.datasetId)
+          requireDataset(sixb, params.datasetId)
           const parsed = DatasetVersionsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT)
-          const versions = await pario.lakeStorage.listVersions(params.datasetId, limit)
+          const versions = await sixb.lakeStorage.listVersions(params.datasetId, limit)
 
           return DatasetVersionListResponseSchema.parse({
             versions: versions.map(serializeDatasetVersion),
@@ -281,8 +281,8 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       "/api/datasets/:datasetId/versions/:versionId",
       async ({ params, set }) => {
         try {
-          requireDataset(pario, params.datasetId)
-          const version = await pario.lakeStorage.getVersion(params.datasetId, params.versionId)
+          requireDataset(sixb, params.datasetId)
+          const version = await sixb.lakeStorage.getVersion(params.datasetId, params.versionId)
           if (!version) {
             set.status = 404
             return { error: "Dataset version not found" }
@@ -311,13 +311,13 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       "/api/datasets/:datasetId/rows",
       async ({ params, query, set }) => {
         try {
-          requireDataset(pario, params.datasetId)
+          requireDataset(sixb, params.datasetId)
           const parsed = DatasetRowsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT)
           const offset = parseOffset(parsed.offset)
           const version = parsed.versionId
-            ? await pario.lakeStorage.getVersion(params.datasetId, parsed.versionId)
-            : await pario.lakeStorage.getLatestVersion(params.datasetId)
+            ? await sixb.lakeStorage.getVersion(params.datasetId, parsed.versionId)
+            : await sixb.lakeStorage.getLatestVersion(params.datasetId)
 
           if (!version) {
             set.status = 404
@@ -327,7 +327,7 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
           const requestedColumns = parseColumns(parsed.columns)
           const columns = resolveColumns(version, requestedColumns)
           const rows = await collectRows(
-            pario.lakeStorage.readRows({
+            sixb.lakeStorage.readRows({
               datasetId: params.datasetId,
               versionId: version.versionId,
               columns: requestedColumns,

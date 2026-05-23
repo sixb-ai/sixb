@@ -4,7 +4,7 @@ import {
   type DuckDBValue,
   type DuckDBAppender as NodeDuckDBAppender,
 } from "@duckdb/node-api"
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
 import {
   buildAttachSql,
@@ -200,13 +200,13 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
 
   private assertAcceptingOperations(): void {
     if (this.closing || this.closed) {
-      throw new LakeStorageError("[ParioDuckLake] DuckDB runtime is closed.")
+      throw new LakeStorageError("[SixbDuckLake] DuckDB runtime is closed.")
     }
   }
 
   private assertNotClosed(): void {
     if (this.closed) {
-      throw new LakeStorageError("[ParioDuckLake] DuckDB runtime is closed.")
+      throw new LakeStorageError("[SixbDuckLake] DuckDB runtime is closed.")
     }
   }
 }

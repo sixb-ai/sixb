@@ -1,6 +1,6 @@
-import type { TelemetryProperty } from "@pario/client"
-import { Badge } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import type { TelemetryProperty } from "@sixb/client"
+import { Badge } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMemo } from "react"
 import { TelemetryTile } from "./TelemetryTile"
 

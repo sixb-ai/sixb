@@ -1,4 +1,4 @@
-import { actionParam, defineAction } from "@pario/core"
+import { actionParam, defineAction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 export const sendReminder = defineAction("sendReminder", {
@@ -10,13 +10,13 @@ export const sendReminder = defineAction("sendReminder", {
     message: actionParam("string", { required: true }),
     reviewerNote: actionParam("string"),
   })
-  .run(async ({ params, target, pario }) => {
+  .run(async ({ params, target, sixb }) => {
     const reviewedAt = new Date().toISOString()
 
     if (!params.approved) {
       console.log(`[AcmeCorp] Reminder changes requested for invoice ${target.properties.number}.`)
 
-      await pario.objects(Invoice).upsert({
+      await sixb.objects(Invoice).upsert({
         properties: {
           ...target.properties,
           id: target.primaryId,
@@ -32,7 +32,7 @@ export const sendReminder = defineAction("sendReminder", {
       `[AcmeCorp] Reminder approved for invoice ${target.properties.number}: ${params.message}`
     )
 
-    await pario.objects(Invoice).upsert({
+    await sixb.objects(Invoice).upsert({
       properties: {
         ...target.properties,
         id: target.primaryId,

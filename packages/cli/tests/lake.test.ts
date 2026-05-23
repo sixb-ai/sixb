@@ -25,8 +25,8 @@ async function runLakeCommand(
 }> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", "lake-project", "pario.config.ts")
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-lake-"))
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", "lake-project", "sixb.config.ts")
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-lake-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
@@ -35,8 +35,8 @@ async function runLakeCommand(
     cwd: repoRoot,
     env: {
       ...process.env,
-      PARIO_CLI_TEST_LOG: logPath,
-      ...(options.drift ? { PARIO_CLI_TEST_LAKE_DRIFT: "1" } : {}),
+      SIXB_CLI_TEST_LOG: logPath,
+      ...(options.drift ? { SIXB_CLI_TEST_LAKE_DRIFT: "1" } : {}),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -56,7 +56,7 @@ async function runLakeCommand(
   }
 }
 
-describe("pario lake check", () => {
+describe("sixb lake check", () => {
   test("exits successfully when lake definitions are compatible", async () => {
     const result = await runLakeCommand("check")
 

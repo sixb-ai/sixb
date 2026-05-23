@@ -1,11 +1,11 @@
 /**
- * Generates the OpenAPI spec JSON by starting a temporary Pario server,
+ * Generates the OpenAPI spec JSON by starting a temporary Sixb server,
  * fetching /docs/json, and writing it to packages/client/openapi.json.
  */
 
 import { createServer } from "node:net"
 import { resolve } from "node:path"
-import type { OntologySource } from "@pario/core"
+import type { OntologySource } from "@sixb/core"
 import {
   defineObjectType,
   InMemoryBlobStorage,
@@ -13,10 +13,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
-} from "@pario/core"
-import { ParioServer } from "../src/server"
+  Sixb,
+} from "@sixb/core"
+import { SixbServer } from "../src/server"
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -48,7 +48,7 @@ async function main() {
     properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
   })
 
-  const pario: Pario<readonly OntologySource[]> = new Pario<readonly OntologySource[]>({
+  const sixb: Sixb<readonly OntologySource[]> = new Sixb<readonly OntologySource[]>({
     id: "openapi-gen",
     ontology: [System] as readonly OntologySource[],
     broker: new InMemoryBroker(),
@@ -60,8 +60,8 @@ async function main() {
 
   const port = await getFreePort()
   const publicOrigin = `http://127.0.0.1:${port}`
-  const server = new ParioServer({
-    pario,
+  const server = new SixbServer({
+    sixb,
     host: "127.0.0.1",
     port,
     quiet: true,

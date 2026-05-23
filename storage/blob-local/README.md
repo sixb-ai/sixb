@@ -1,22 +1,22 @@
-# @pario/blob-local
+# @sixb/blob-local
 
-Local filesystem `BlobStorage` provider for Pario `fileRef` payloads.
+Local filesystem `BlobStorage` provider for Sixb `fileRef` payloads.
 
-Use `@pario/blob-local` when you want durable content-addressed blobs backed by plain files on disk.
+Use `@sixb/blob-local` when you want durable content-addressed blobs backed by plain files on disk.
 
 ## Install
 
 ```bash
-bun add @pario/blob-local
+bun add @sixb/blob-local
 ```
 
 ## Usage
 
 ```ts
-import { LocalBlobStorage } from "@pario/blob-local"
+import { LocalBlobStorage } from "@sixb/blob-local"
 
 const blobStorage = new LocalBlobStorage({
-  basePath: ".pario",
+  basePath: ".sixb",
 })
 
 const fileRef = await blobStorage.put({
@@ -32,10 +32,10 @@ const stream = await blobStorage.open(fileRef.blobId)
 
 ## What Gets Stored On Disk
 
-Given `basePath: ".pario"`, blobs are stored at:
+Given `basePath: ".sixb"`, blobs are stored at:
 
 ```text
-.pario/
+.sixb/
   blobs/
     sha256/
       <sha256 hex>

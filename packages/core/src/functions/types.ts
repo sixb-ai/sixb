@@ -1,4 +1,4 @@
-import type { Pario } from "../runtime/pario"
+import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 
 // ── Context ──────────────────────────────────────────────────
@@ -9,7 +9,7 @@ export interface FunctionMetadata {
 }
 
 export interface FunctionContext {
-  pario: Pario<readonly OntologySource[]>
+  sixb: Sixb<readonly OntologySource[]>
   fn: FunctionMetadata
 }
 

@@ -5,8 +5,8 @@ import type {
   DatasetVersion,
   DatasetWriteMode,
   LakeWriteSession,
-} from "@pario/core"
-import { LakeStorageError } from "@pario/core"
+} from "@sixb/core"
+import { LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -22,7 +22,7 @@ import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import type { DuckLakeSnapshotReader, DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
 import { createDuckLakeWriteSession, type DuckLakeCommitWriteInput } from "./ducklake-write-session"
 import { duckLakeAlias, duckLakeMetadataTableName, quoteIdentifier, quoteSqlString } from "./sql"
-import { type ParioCommitMetadata, parseCommitMetadata } from "./versions"
+import { parseCommitMetadata, type SixbCommitMetadata } from "./versions"
 
 export interface DuckLakeCommitDatasetVersionInput {
   readonly dataset: DatasetDefinition
@@ -46,7 +46,7 @@ export interface DuckLakeApplyChangesContext {
 }
 
 /**
- * Owns the durable DuckLake transaction for a staged Pario write.
+ * Owns the durable DuckLake transaction for a staged Sixb write.
  *
  * Write sessions keep validation and temp staging table mechanics close to the
  * caller. This coordinator handles everything that changes shared DuckLake
@@ -66,7 +66,7 @@ export class DuckLakeWriteCoordinator {
 
     const definition = await this.datasets.getDataset(input.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.dataset.id}'.`)
+      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.dataset.id}'.`)
     }
 
     this.datasets.assertSchema(definition)
@@ -92,7 +92,7 @@ export class DuckLakeWriteCoordinator {
   private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetVersion> {
     const definition = await this.datasets.getDataset(input.write.dataset.id)
     if (!definition) {
-      throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
+      throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
     }
 
     const mode = input.write.mode ?? "snapshot"
@@ -146,7 +146,7 @@ export class DuckLakeWriteCoordinator {
       return run()
     }
 
-    // DuckLake can retry transactions internally. Guarded Pario commits need a
+    // DuckLake can retry transactions internally. Guarded Sixb commits need a
     // strict compare-and-swap check, so disable retries only for this exclusive
     // commit and always restore the runtime setting before releasing the queue.
     await input.runtime.run("SET ducklake_max_retry_count = 0")
@@ -192,7 +192,7 @@ export class DuckLakeWriteCoordinator {
     await input.runtime.run("BEGIN TRANSACTION")
     let committed = false
     try {
-      // Guarded Pario commits need compare-and-swap semantics. DuckLake can
+      // Guarded Sixb commits need compare-and-swap semantics. DuckLake can
       // automatically retry non-conflicting commits, so guarded transactions
       // disable retries and re-check the dataset head after BEGIN.
       const latestVersion = await this.latestVersionForCommit(input)
@@ -267,7 +267,7 @@ export class DuckLakeWriteCoordinator {
       }
 
       throw new LakeStorageError(
-        `[ParioDuckLake] DuckLake committed snapshot '${ownSnapshotId}' for dataset '${input.dataset.id}', but Pario could not hydrate it as a dataset version.`
+        `[SixbDuckLake] DuckLake committed snapshot '${ownSnapshotId}' for dataset '${input.dataset.id}', but Sixb could not hydrate it as a dataset version.`
       )
     }
 
@@ -277,12 +277,12 @@ export class DuckLakeWriteCoordinator {
 
     if (input.committedWriteSnapshotId === input.previousWriteSnapshotId) {
       throw new LakeStorageError(
-        `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed without producing a snapshot for this non-empty write.`
+        `[SixbDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed without producing a snapshot for this non-empty write.`
       )
     }
 
     throw new LakeStorageError(
-      `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed, but Pario could not find a matching snapshot for this write.`
+      `[SixbDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed, but Sixb could not find a matching snapshot for this write.`
     )
   }
 
@@ -304,7 +304,7 @@ export class DuckLakeWriteCoordinator {
 
     if (input.rowsWritten > 0 && !result.dataChangeExpected) {
       throw new LakeStorageError(
-        `[ParioDuckLake] Staged write for dataset '${input.write.dataset.id}' accepted ${input.rowsWritten} row(s), but DuckLake did not apply any row changes.`
+        `[SixbDuckLake] Staged write for dataset '${input.write.dataset.id}' accepted ${input.rowsWritten} row(s), but DuckLake did not apply any row changes.`
       )
     }
 
@@ -320,7 +320,7 @@ export class DuckLakeWriteCoordinator {
     // transaction. Version id, timestamp, and data-change detection still come
     // from DuckLake itself. commitId is only a transaction correlation token so
     // concurrent writers do not accidentally hydrate each other's snapshots.
-    const metadata: ParioCommitMetadata = {
+    const metadata: SixbCommitMetadata = {
       kind: "datasetVersion",
       datasetId: input.dataset.id,
       commitId,
@@ -332,9 +332,9 @@ export class DuckLakeWriteCoordinator {
 
     await input.runtime.run(
       `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString(
-        "Pario"
+        "Sixb"
       )}, ${quoteSqlString(input.commitMessage)}, extra_info => ${quoteSqlString(
-        JSON.stringify({ pario: metadata })
+        JSON.stringify({ sixb: metadata })
       )})`
     )
   }
@@ -349,7 +349,7 @@ export class DuckLakeWriteCoordinator {
     }
 
     throw new LakeStorageError(
-      `[ParioDuckLake] No DuckLake changes were committed for dataset '${definition.id}', and no previous version exists.`
+      `[SixbDuckLake] No DuckLake changes were committed for dataset '${definition.id}', and no previous version exists.`
     )
   }
 
@@ -454,7 +454,7 @@ export class DuckLakeWriteCoordinator {
 
     if (input.actualLatestVersionId !== input.expectedLatestVersionId) {
       throw new LakeStorageError(
-        `[ParioDuckLake] Optimistic commit failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId}', found '${input.actualLatestVersionId ?? "none"}'.`
+        `[SixbDuckLake] Optimistic commit failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId}', found '${input.actualLatestVersionId ?? "none"}'.`
       )
     }
   }
@@ -486,7 +486,7 @@ function commitRowCount(
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
 }
 

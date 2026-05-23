@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { ObjectType } from "../src"
-import { defineObjectType, link, OntologyValidationError, Pario, prop } from "../src"
+import { defineObjectType, link, OntologyValidationError, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 // ── Fixtures ────────────────────────────────────────────────
@@ -213,12 +213,12 @@ describe("defineObjectType with parents (multi-parent)", () => {
   })
 })
 
-// ── Pario runtime validation ────────────────────────────────
+// ── Sixb runtime validation ────────────────────────────────
 
-describe("Pario extends validation", () => {
+describe("Sixb extends validation", () => {
   test("constructs successfully with valid extends chain", () => {
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Equipment, HVACEquipment, AHU, Location],
         ...createTestRuntimeDeps(),
       })
@@ -233,13 +233,13 @@ describe("Pario extends validation", () => {
     })
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
@@ -255,17 +255,17 @@ describe("Pario extends validation", () => {
     })
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Orphan],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow("add it to 'ontologies' in createPario()")
+    }).toThrow("add it to 'ontologies' in createSixb()")
   })
 
   test("throws on circular extends chain", () => {
@@ -285,13 +285,13 @@ describe("Pario extends validation", () => {
     })
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [A, B],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [A, B],
         ...createTestRuntimeDeps(),
       })
@@ -303,25 +303,25 @@ describe("Pario extends validation", () => {
 
 describe("getSubTypes", () => {
   test("returns direct and transitive sub-types", () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    const subTypes = pario.getSubTypes("Equipment")
+    const subTypes = sixb.getSubTypes("Equipment")
     expect(subTypes).toContain("HVACEquipment")
     expect(subTypes).toContain("AHU")
     expect(subTypes).not.toContain("Location")
   })
 
   test("returns empty array for leaf types", () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getSubTypes("AHU")).toEqual([])
-    expect(pario.getSubTypes("Location")).toEqual([])
+    expect(sixb.getSubTypes("AHU")).toEqual([])
+    expect(sixb.getSubTypes("Location")).toEqual([])
   })
 })
 
@@ -330,16 +330,16 @@ describe("getSubTypes", () => {
 describe("subclass-aware list", () => {
   test("listing by parent type includes sub-type objects", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...runtimeDeps,
     })
 
-    await pario.objects(Equipment).upsert({ properties: { id: "eq-1", name: "Generic Equip" } })
-    await pario.objects(HVACEquipment).upsert({ properties: { id: "hvac-1", name: "HVAC Unit" } })
-    await pario.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU Unit" } })
+    await sixb.objects(Equipment).upsert({ properties: { id: "eq-1", name: "Generic Equip" } })
+    await sixb.objects(HVACEquipment).upsert({ properties: { id: "hvac-1", name: "HVAC Unit" } })
+    await sixb.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU Unit" } })
 
-    const result = await pario.list({ objectTypeIds: ["Equipment"] })
+    const result = await sixb.list({ objectTypeIds: ["Equipment"] })
 
     const ids = result.objects.map((o) => o.primaryId)
     expect(ids).toContain("eq-1")
@@ -350,15 +350,15 @@ describe("subclass-aware list", () => {
 
   test("listing by leaf type returns only that type", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...runtimeDeps,
     })
 
-    await pario.objects(Equipment).upsert({ properties: { id: "eq-1", name: "Generic" } })
-    await pario.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU" } })
+    await sixb.objects(Equipment).upsert({ properties: { id: "eq-1", name: "Generic" } })
+    await sixb.objects(AHU).upsert({ properties: { id: "ahu-1", name: "AHU" } })
 
-    const result = await pario.list({ objectTypeIds: ["AHU"] })
+    const result = await sixb.list({ objectTypeIds: ["AHU"] })
     expect(result.objects).toHaveLength(1)
     expect(result.objects[0].primaryId).toBe("ahu-1")
   })
@@ -368,32 +368,32 @@ describe("subclass-aware list", () => {
 
 describe("multi-parent subtype queries", () => {
   test("getSubTypes includes types registered via parents", () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, WaterHeater, Boiler],
       ...createTestRuntimeDeps(),
     })
 
-    const waterHeaterSubs = pario.getSubTypes("WaterHeater")
+    const waterHeaterSubs = sixb.getSubTypes("WaterHeater")
     expect(waterHeaterSubs).toContain("Boiler")
 
     // Also a sub-type of HVACEquipment via extends
-    const hvacSubs = pario.getSubTypes("HVACEquipment")
+    const hvacSubs = sixb.getSubTypes("HVACEquipment")
     expect(hvacSubs).toContain("Boiler")
   })
 
   test("listing by additional parent includes the type", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, WaterHeater, Boiler],
       ...runtimeDeps,
     })
 
-    await pario.objects(Boiler).upsert({ properties: { id: "boiler-1", name: "Main Boiler" } })
-    await pario.objects(WaterHeater).upsert({
+    await sixb.objects(Boiler).upsert({ properties: { id: "boiler-1", name: "Main Boiler" } })
+    await sixb.objects(WaterHeater).upsert({
       properties: { id: "wh-1", name: "Basic Heater" },
     })
 
-    const result = await pario.list({ objectTypeIds: ["WaterHeater"] })
+    const result = await sixb.list({ objectTypeIds: ["WaterHeater"] })
     const ids = result.objects.map((o) => o.primaryId)
     expect(ids).toContain("wh-1")
     expect(ids).toContain("boiler-1")
@@ -408,13 +408,13 @@ describe("multi-parent subtype queries", () => {
     })
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [BadParent],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [BadParent],
         ...createTestRuntimeDeps(),
       })
@@ -431,17 +431,17 @@ describe("multi-parent subtype queries", () => {
     })
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [BadParent2],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(OntologyValidationError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [BadParent2],
         ...createTestRuntimeDeps(),
       })
-    }).toThrow("add it to 'ontologies' in createPario()")
+    }).toThrow("add it to 'ontologies' in createSixb()")
   })
 })
 
@@ -499,17 +499,17 @@ describe("quantityKind", () => {
 
 describe("link target validation", () => {
   test("upsertLink with string target: accepts exact match", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("Equipment", { id: "eq-1", name: "E" })
-    await pario.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.upsertObject("Equipment", { id: "eq-1", name: "E" })
+    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
 
     // Equipment has link "locatedIn" targeting "Location" — exact match
     await expect(
-      pario.upsertLink("Equipment", "eq-1", "locatedIn", {
+      sixb.upsertLink("Equipment", "eq-1", "locatedIn", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -517,17 +517,17 @@ describe("link target validation", () => {
   })
 
   test("upsertLink with string target: accepts sub-type", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
-    await pario.upsertObject("AHU", { id: "ahu-1", name: "A" })
+    await sixb.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
+    await sixb.upsertObject("AHU", { id: "ahu-1", name: "A" })
 
     // HVACEquipment has link "feeds" targeting "Equipment" — AHU is sub-type of Equipment
     await expect(
-      pario.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "AHU",
         targetId: "ahu-1",
       })
@@ -535,23 +535,23 @@ describe("link target validation", () => {
   })
 
   test("upsertLink with string target: rejects unrelated type", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
-    await pario.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.upsertObject("HVACEquipment", { id: "hvac-1", name: "H" })
+    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
 
     // HVACEquipment.feeds targets Equipment — Location is not a sub-type
     await expect(
-      pario.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.upsertLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.upsertLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -576,24 +576,24 @@ describe("link target validation", () => {
       links: [link("rel", ["TypeA", "TypeB"])],
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [TypeA, TypeB, Source],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("Source", { id: "s-1" })
-    await pario.upsertObject("TypeA", { id: "a-1" })
-    await pario.upsertObject("TypeB", { id: "b-1" })
+    await sixb.upsertObject("Source", { id: "s-1" })
+    await sixb.upsertObject("TypeA", { id: "a-1" })
+    await sixb.upsertObject("TypeB", { id: "b-1" })
 
     await expect(
-      pario.upsertLink("Source", "s-1", "rel", {
+      sixb.upsertLink("Source", "s-1", "rel", {
         targetTypeId: "TypeA",
         targetId: "a-1",
       })
     ).resolves.toBeUndefined()
 
     await expect(
-      pario.upsertLink("Source", "s-1", "rel", {
+      sixb.upsertLink("Source", "s-1", "rel", {
         targetTypeId: "TypeB",
         targetId: "b-1",
       })
@@ -608,17 +608,17 @@ describe("link target validation", () => {
       links: [link("rel", ["Equipment"])],
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location, Source],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("Src", { id: "s-1" })
-    await pario.upsertObject("AHU", { id: "ahu-1", name: "A" })
+    await sixb.upsertObject("Src", { id: "s-1" })
+    await sixb.upsertObject("AHU", { id: "ahu-1", name: "A" })
 
     // AHU is sub-type of Equipment
     await expect(
-      pario.upsertLink("Src", "s-1", "rel", {
+      sixb.upsertLink("Src", "s-1", "rel", {
         targetTypeId: "AHU",
         targetId: "ahu-1",
       })
@@ -633,16 +633,16 @@ describe("link target validation", () => {
       links: [link("anything", "*")],
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, Location, Source],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.upsertObject("WildSrc", { id: "s-1" })
-    await pario.upsertObject("Location", { id: "loc-1", address: "A" })
+    await sixb.upsertObject("WildSrc", { id: "s-1" })
+    await sixb.upsertObject("Location", { id: "loc-1", address: "A" })
 
     await expect(
-      pario.upsertLink("WildSrc", "s-1", "anything", {
+      sixb.upsertLink("WildSrc", "s-1", "anything", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -650,19 +650,19 @@ describe("link target validation", () => {
   })
 
   test("removeLink with string target: rejects unrelated type", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
     await expect(
-      pario.removeLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.removeLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.removeLink("HVACEquipment", "hvac-1", "feeds", {
+      sixb.removeLink("HVACEquipment", "hvac-1", "feeds", {
         targetTypeId: "Location",
         targetId: "loc-1",
       })
@@ -674,20 +674,20 @@ describe("link target validation", () => {
 
 describe("upsert with inherited properties", () => {
   test("validates required properties from parent", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
     // HVACEquipment inherits required `name` from Equipment
     await expect(
-      pario.objects(HVACEquipment).upsert({
+      sixb.objects(HVACEquipment).upsert({
         // @ts-expect-error intentionally missing required 'name' property
         properties: { id: "hvac-1", capacity: 100 },
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(HVACEquipment).upsert({
+      sixb.objects(HVACEquipment).upsert({
         // @ts-expect-error intentionally missing required 'name' property
         properties: { id: "hvac-1", capacity: 100 },
       })
@@ -695,12 +695,12 @@ describe("upsert with inherited properties", () => {
   })
 
   test("accepts inherited + own properties together", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Equipment, HVACEquipment, AHU, Location],
       ...createTestRuntimeDeps(),
     })
 
-    const result = await pario.objects(HVACEquipment).upsert({
+    const result = await sixb.objects(HVACEquipment).upsert({
       properties: { id: "hvac-1", name: "My HVAC", capacity: 100 },
     })
 

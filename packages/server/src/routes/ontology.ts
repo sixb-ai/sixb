@@ -1,11 +1,11 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
 function serializeObjectType(
-  pario: Pario<readonly OntologySource[]>,
-  objectType: ReturnType<Pario<readonly OntologySource[]>["listObjectTypes"]>[number]
+  sixb: Sixb<readonly OntologySource[]>,
+  objectType: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number]
 ) {
   return {
     id: objectType.id,
@@ -22,7 +22,7 @@ function serializeObjectType(
       cardinality: link.cardinality,
       properties: link.properties,
     })),
-    actions: pario.getActionsForType(objectType).map((action) => ({
+    actions: sixb.getActionsForType(objectType).map((action) => ({
       id: action.id,
       name: action.id,
       description: action.description,
@@ -38,12 +38,12 @@ function serializeObjectType(
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/object-types",
       async () => {
-        return pario.listObjectTypes().map((objectType) => serializeObjectType(pario, objectType))
+        return sixb.listObjectTypes().map((objectType) => serializeObjectType(sixb, objectType))
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -57,13 +57,13 @@ export function registerOntologyRoutes(app: Elysia, pario: Pario<readonly Ontolo
     .get(
       "/api/object-types/:objectTypeId",
       async ({ params, set }) => {
-        const objectType = pario.getObjectTypeById(params.objectTypeId)
+        const objectType = sixb.getObjectTypeById(params.objectTypeId)
         if (!objectType) {
           set.status = 404
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(pario, objectType)
+        return serializeObjectType(sixb, objectType)
       },
       {
         params: ObjectTypeParamsSchema,

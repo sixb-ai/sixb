@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto"
 import { RedisBroker } from "../src"
 
 export function requireRedisUrl(): string {
-  const url = process.env["PARIO_REDIS_BROKER_URL"]
+  const url = process.env["SIXB_REDIS_BROKER_URL"]
   if (!url) {
     throw new Error(
-      "[RedisBroker test] PARIO_REDIS_BROKER_URL is required. Run `bun run test:e2e` from the @pario/broker-redis package."
+      "[RedisBroker test] SIXB_REDIS_BROKER_URL is required. Run `bun run test:e2e` from the @sixb/broker-redis package."
     )
   }
   return url
@@ -24,7 +24,7 @@ export function createTestBroker(): {
   const suffix = randomUUID().slice(0, 8)
   const broker = new RedisBroker({
     connection: { url: requireRedisUrl() },
-    prefix: `pario:test:broker:${suffix}`,
+    prefix: `sixb:test:broker:${suffix}`,
     subscribeBlockMs: 100,
   })
 

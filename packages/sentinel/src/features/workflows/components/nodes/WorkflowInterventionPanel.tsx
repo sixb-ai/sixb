@@ -8,8 +8,8 @@ import {
   listWorkflowRunsQueryKey,
   listWorkflowsQueryKey,
   submitWorkflowInterventionMutation,
-} from "@pario/client/hooks"
-import { Alert, AlertDescription, AlertTitle, Button, CardTitle } from "@pario/ui/components"
+} from "@sixb/client/hooks"
+import { Alert, AlertDescription, AlertTitle, Button, CardTitle } from "@sixb/ui/components"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Loader2, Send, UserCheck } from "lucide-react"
 import { type SubmitEvent, useEffect, useState } from "react"

@@ -1,4 +1,4 @@
-import { defineFunction, defineObjectType, Pario, prop } from "../src"
+import { defineFunction, defineObjectType, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -18,8 +18,8 @@ const Room = defineObjectType({
 // Cron handler receives FunctionContext
 const pullWeather = defineFunction("pull-weather")
   .cron("*/5 * * * *")
-  .run(async ({ pario }) => {
-    await pario.objects(Room).upsert({
+  .run(async ({ sixb }) => {
+    await sixb.objects(Room).upsert({
       properties: {
         id: "room:101",
         externalId: "RM-101",
@@ -27,20 +27,20 @@ const pullWeather = defineFunction("pull-weather")
       },
     })
 
-    await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+    await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
       value: 72,
       unit: "degreeFahrenheit",
       at: new Date(),
     })
 
     // @ts-expect-error non-telemetry property tokens are rejected
-    pario.objects(Room).byId("room:101").telemetry(Room.p.name)
+    sixb.objects(Room).byId("room:101").telemetry(Room.p.name)
   })
 
-const pario = new Pario({
+const sixb = new Sixb({
   ontology: [Room],
   ...createTestRuntimeDeps(),
   functions: [pullWeather],
 })
 
-void pario
+void sixb

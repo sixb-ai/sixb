@@ -106,7 +106,7 @@ export function validateWorkflowsAtStartup(options: {
     for (const node of workflow.nodes) {
       if (node.type === "action" && !options.registeredActionIds.has(node.action.id)) {
         throw new WorkflowDefinitionError(
-          `Workflow "${workflow.id}" references unknown action "${node.action.id}". Add it to 'actions' in createPario() or export it from 'actions/'.`
+          `Workflow "${workflow.id}" references unknown action "${node.action.id}". Add it to 'actions' in createSixb() or export it from 'actions/'.`
         )
       }
     }
@@ -219,7 +219,7 @@ function validateWorkflowTriggerAtStartup(
 
   if (!registeredScheduleIds.has(trigger.scheduleId)) {
     throw new WorkflowDefinitionError(
-      `Workflow "${workflowId}" references unknown schedule "${trigger.scheduleId}". Add it to 'schedules' in createPario() or export it from 'schedules/'.`
+      `Workflow "${workflowId}" references unknown schedule "${trigger.scheduleId}". Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
     )
   }
 }
@@ -354,22 +354,20 @@ function validateWorkflowContractRecord(params: {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(params.value)) {
-    throw new WorkflowValidationError(`[Pario] ${params.path} must be an object`)
+    throw new WorkflowValidationError(`[Sixb] ${params.path} must be an object`)
   }
 
   const fieldIds = new Set(Object.keys(params.shape))
   for (const fieldId of Object.keys(params.value)) {
     if (!fieldIds.has(fieldId)) {
-      throw new WorkflowValidationError(`[Pario] Unknown field '${params.path}.${fieldId}'`)
+      throw new WorkflowValidationError(`[Sixb] Unknown field '${params.path}.${fieldId}'`)
     }
   }
 
   for (const [fieldId, schema] of Object.entries(params.shape)) {
     const fieldValue = params.value[fieldId]
     if (fieldValue === undefined) {
-      throw new WorkflowValidationError(
-        `[Pario] Missing required field '${params.path}.${fieldId}'`
-      )
+      throw new WorkflowValidationError(`[Sixb] Missing required field '${params.path}.${fieldId}'`)
     }
 
     try {
@@ -395,13 +393,13 @@ function validateWorkflowInterventionResponseRecord(params: {
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(params.value)) {
-    throw new WorkflowValidationError(`[Pario] ${params.path} must be an object`)
+    throw new WorkflowValidationError(`[Sixb] ${params.path} must be an object`)
   }
 
   const fieldIds = new Set(Object.keys(params.response))
   for (const fieldId of Object.keys(params.value)) {
     if (!fieldIds.has(fieldId)) {
-      throw new WorkflowValidationError(`[Pario] Unknown field '${params.path}.${fieldId}'`)
+      throw new WorkflowValidationError(`[Sixb] Unknown field '${params.path}.${fieldId}'`)
     }
   }
 
@@ -410,7 +408,7 @@ function validateWorkflowInterventionResponseRecord(params: {
     if (fieldValue === undefined) {
       if (!params.partial && isInterventionResponseFieldRequired(field)) {
         throw new WorkflowValidationError(
-          `[Pario] Missing required field '${params.path}.${fieldId}'`
+          `[Sixb] Missing required field '${params.path}.${fieldId}'`
         )
       }
       continue

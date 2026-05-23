@@ -1,31 +1,31 @@
-# @pario/lake-local
+# @sixb/lake-local
 
-Local filesystem `LakeStorage` provider for Pario V1 datasets.
+Local filesystem `LakeStorage` provider for Sixb V1 datasets.
 
-Use `@pario/lake-local` when you want versioned datasets backed by plain files on disk. Blob payloads are handled by a separate `BlobStorage`, such as `@pario/blob-local`.
+Use `@sixb/lake-local` when you want versioned datasets backed by plain files on disk. Blob payloads are handled by a separate `BlobStorage`, such as `@sixb/blob-local`.
 
 ## Install
 
 ```bash
-bun add @pario/lake-local
+bun add @sixb/lake-local
 ```
 
 ## Usage
 
 ```ts
-import { createPario } from "@pario/core"
-import { LocalBlobStorage } from "@pario/blob-local"
-import { LocalLakeStorage } from "@pario/lake-local"
+import { createSixb } from "@sixb/core"
+import { LocalBlobStorage } from "@sixb/blob-local"
+import { LocalLakeStorage } from "@sixb/lake-local"
 
 const blobStorage = new LocalBlobStorage({
-  basePath: ".pario",
+  basePath: ".sixb",
 })
 
 const lakeStorage = new LocalLakeStorage({
-  path: ".pario/lake",
+  path: ".sixb/lake",
 })
 
-const pario = await createPario({
+const sixb = await createSixb({
   id: "my-app",
   broker: myBroker,
   storage: myStorage,
@@ -38,12 +38,12 @@ const pario = await createPario({
 You can also use the provider directly:
 
 ```ts
-import { col, defineDataset } from "@pario/core"
-import { LocalBlobStorage } from "@pario/blob-local"
-import { LocalLakeStorage } from "@pario/lake-local"
+import { col, defineDataset } from "@sixb/core"
+import { LocalBlobStorage } from "@sixb/blob-local"
+import { LocalLakeStorage } from "@sixb/lake-local"
 
-const blobs = new LocalBlobStorage({ basePath: ".pario" })
-const lake = new LocalLakeStorage({ path: ".pario/lake" })
+const blobs = new LocalBlobStorage({ basePath: ".sixb" })
+const lake = new LocalLakeStorage({ path: ".sixb/lake" })
 
 const invoicesDataset = defineDataset("raw.accounting.invoices", {
   schema: [
@@ -79,10 +79,10 @@ await write.commit()
 
 ## What Gets Stored On Disk
 
-Given `path: ".pario/lake"` and a dataset id of `raw.erp.orders`, the provider creates a layout like this:
+Given `path: ".sixb/lake"` and a dataset id of `raw.erp.orders`, the provider creates a layout like this:
 
 ```text
-.pario/lake/
+.sixb/lake/
   datasets/
     raw.erp.orders/
       definition.json

@@ -1,9 +1,9 @@
 /**
- * Pario is the main runtime entry point.
+ * Sixb is the main runtime entry point.
  *
  * It provides a typed API (`objects(MyType)`) returning ObjectSet with full compile-time inference.
  * For direct runtime access (broker records, events, storage, queued work), use
- * `pario.broker`, `pario.events`, `pario.storage`, and `pario.queues`.
+ * `sixb.broker`, `sixb.events`, `sixb.storage`, and `sixb.queues`.
  */
 
 import { ActionRegistry, ActionsRuntime } from "../actions"
@@ -13,7 +13,7 @@ import {
   AuthRuntimeError,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
-  type ParioAuthConfig,
+  type SixbAuthConfig,
 } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
@@ -55,13 +55,13 @@ import type {
   ListResult,
   ObjectSet,
   OntologySource,
-  ParioInstance,
-  ParioRuntimeContext,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SixbInstance,
+  SixbRuntimeContext,
 } from "./types"
 
-export interface ParioOptions<TOntologySources extends readonly OntologySource[]> {
+export interface SixbOptions<TOntologySources extends readonly OntologySource[]> {
   id?: string
   ontology: TOntologySources
   broker: Broker
@@ -82,11 +82,11 @@ export interface ParioOptions<TOntologySources extends readonly OntologySource[]
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
   invitePolicies?: readonly InvitePolicyDefinition[]
-  auth?: ParioAuthConfig
+  auth?: SixbAuthConfig
 }
 
-export class Pario<TOntologySources extends readonly OntologySource[]>
-  implements ParioInstance<TOntologySources>
+export class Sixb<TOntologySources extends readonly OntologySource[]>
+  implements SixbInstance<TOntologySources>
 {
   readonly projectId: string
   private readonly ontologySources: TOntologySources
@@ -99,7 +99,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   private readonly connectorRuntime: ConnectorRuntime
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
-  private readonly runtimeContext: ParioRuntimeContext
+  private readonly runtimeContext: SixbRuntimeContext
   private readonly objectProjections: readonly ObjectProjectionDefinition[]
   private readonly linkProjections: readonly LinkProjectionDefinition[]
   private readonly projectionsById = new Map<string, ProjectionDefinition>()
@@ -119,7 +119,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   private functionRuntime: FunctionRuntime | null = null
   private schedulerRuntime: SchedulerRuntime | null = null
 
-  constructor(options: ParioOptions<TOntologySources>) {
+  constructor(options: SixbOptions<TOntologySources>) {
     this.projectId = options.id ?? "default"
     this.ontologySources = options.ontology
     this.functions = options.functions ?? []
@@ -177,7 +177,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       const dataset = this.datasetsById.get(sync.target.dataset.id)
       if (!dataset) {
         throw new RuntimeError(
-          `Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'. Add it to 'datasets' in createPario() or export it from 'datasets/'.`
+          `Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
         )
       }
 
@@ -206,14 +206,14 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
         for (const [inputName, dataset] of Object.entries(step.inputs)) {
           if (!this.datasetsById.has(dataset.id)) {
             throw new RuntimeError(
-              `Pipeline '${pipeline.id}' step '${step.id}' input '${inputName}' references unknown dataset '${dataset.id}'. Add it to 'datasets' in createPario() or export it from 'datasets/'.`
+              `Pipeline '${pipeline.id}' step '${step.id}' input '${inputName}' references unknown dataset '${dataset.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
             )
           }
         }
 
         if (!this.datasetsById.has(step.output.id)) {
           throw new RuntimeError(
-            `Pipeline '${pipeline.id}' step '${step.id}' outputs unknown dataset '${step.output.id}'. Add it to 'datasets' in createPario() or export it from 'datasets/'.`
+            `Pipeline '${pipeline.id}' step '${step.id}' outputs unknown dataset '${step.output.id}'. Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
           )
         }
       }
@@ -384,10 +384,10 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
     }
 
     const runtime = new FunctionRuntime({
-      // Boundary cast: TS class generic invariance — `Pario<TOntologySources>` is not
-      // assignable to `Pario<readonly OntologySource[]>`, even though the runtime is
+      // Boundary cast: TS class generic invariance — `Sixb<TOntologySources>` is not
+      // assignable to `Sixb<readonly OntologySource[]>`, even though the runtime is
       // structurally compatible.
-      pario: this as unknown as Pario<readonly OntologySource[]>,
+      sixb: this as unknown as Sixb<readonly OntologySource[]>,
       functions: this.functions,
     })
 
@@ -521,7 +521,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
 
   /**
    * Global list for cross-type queries (e.g., dashboards, search).
-   * Use pario.objects(Type).list() for type-safe property filtering.
+   * Use sixb.objects(Type).list() for type-safe property filtering.
    */
   async list(params: {
     objectTypeIds?: readonly string[]
@@ -583,7 +583,7 @@ function validateAuthStrategySecurityReferences(
     if (!security.getGroupById(groupId)) {
       throw new AuthRuntimeError(
         "invalid_auth_config",
-        `[Pario] Auth bootstrapGroups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
+        `[Sixb] Auth bootstrapGroups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
       )
     }
   }
@@ -605,7 +605,7 @@ function assertWebhookDeliveryStorage(
 
     if (webhooks.some((webhook) => webhook.idempotencyKey !== undefined)) {
       throw new WebhookValidationError(
-        "[Pario] Webhook idempotency requires storage.webhookDeliveries to be configured."
+        "[Sixb] Webhook idempotency requires storage.webhookDeliveries to be configured."
       )
     }
   }

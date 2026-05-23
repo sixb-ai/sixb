@@ -9,7 +9,7 @@ import type {
   StoredLinkRemovedEvent,
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
-} from "@pario/core"
+} from "@sixb/core"
 
 export type OntologyRuleEvent =
   | StoredObjectUpsertedEvent
@@ -20,12 +20,12 @@ export type OntologyRuleEvent =
 export type RuleLinkMap = ReadonlyMap<string, readonly ObjectLinkRow[]>
 
 /**
- * Minimal Pario runtime shape needed by the live rules worker.
+ * Minimal Sixb runtime shape needed by the live rules worker.
  *
  * The worker intentionally avoids depending on queues, orchestrator routes,
  * lake storage, connectors, or other host-only concerns.
  */
-export interface RulesWorkerPario {
+export interface RulesWorkerSixb {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: Storage

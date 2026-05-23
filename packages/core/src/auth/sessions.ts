@@ -22,7 +22,7 @@ export function hashSessionSecret(secret: string): string {
 
 export function formatSessionCookieValue(sessionId: string, sessionSecret: string): string {
   if (!sessionId || !sessionSecret || sessionId.includes(".") || sessionSecret.includes(".")) {
-    throw new Error("[Pario] Session cookie values must be non-empty and must not contain '.'.")
+    throw new Error("[Sixb] Session cookie values must be non-empty and must not contain '.'.")
   }
 
   return `${sessionId}.${sessionSecret}`

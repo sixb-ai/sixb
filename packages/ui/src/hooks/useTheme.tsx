@@ -10,7 +10,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-const STORAGE_KEY = "pario-theme"
+const STORAGE_KEY = "sixb-theme"
 
 function getSystemTheme(): "light" | "dark" {
   if (typeof window === "undefined") return "dark"

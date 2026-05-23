@@ -1,4 +1,4 @@
-import { BrokerError } from "@pario/core"
+import { BrokerError } from "@sixb/core"
 
 /** Error class for Redis Streams-backed broker failures. */
 export class RedisBrokerError extends BrokerError {

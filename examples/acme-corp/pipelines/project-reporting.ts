@@ -1,5 +1,5 @@
-import type { DatasetRow } from "@pario/core"
-import { datasetUpdated, definePipeline, definePipelineStep } from "@pario/core"
+import type { DatasetRow } from "@sixb/core"
+import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
 import {
   erpActiveProjectsDataset,
   erpProjectSummariesDataset,

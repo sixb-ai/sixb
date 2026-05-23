@@ -1,5 +1,5 @@
 import type { DuckDBValue } from "@duckdb/node-api"
-import type { DatasetColumnDefinition, DatasetRow, DatasetSchema, FileRef } from "@pario/core"
+import type { DatasetColumnDefinition, DatasetRow, DatasetSchema, FileRef } from "@sixb/core"
 import type { DuckDbAppender } from "./duckdb-runtime"
 
 /**

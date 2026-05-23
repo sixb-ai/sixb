@@ -1,12 +1,12 @@
 # Connector
 
-A connector gives Pario access to an external system.
+A connector gives Sixb access to an external system.
 
 ## What it does
 
-- handles how Pario connects: auth, config, transport, retries, lifecycle
+- handles how Sixb connects: auth, config, transport, retries, lifecycle
 - returns a connected client from `connect()`
-- connects only when resolved with `pario.connector(...)`
+- connects only when resolved with `sixb.connector(...)`
 - can clean up with `disconnect()`
 
 ## Parts
@@ -45,7 +45,7 @@ const adapter = {
 File: `connectors/erpDb.ts`
 
 ```ts
-import { defineConnector } from "@pario/core"
+import { defineConnector } from "@sixb/core"
 
 const adapter = {
   type: "sql",
@@ -69,9 +69,9 @@ export const erpDb = defineConnector("erpDb", adapter)
 ### Use an adapter package
 
 ```ts
-import { defineConnector } from "@pario/core"
-import { rest } from "@pario/connector-rest"
-import { sql } from "@pario/connector-sql"
+import { defineConnector } from "@sixb/core"
+import { rest } from "@sixb/connector-rest"
+import { sql } from "@sixb/connector-sql"
 
 export const billingApi = defineConnector(
   "billingApi",
@@ -90,7 +90,7 @@ Use this when the connection needs project-specific auth, headers, client setup,
 protocol behavior.
 
 ```ts
-import { defineConnector } from "@pario/core"
+import { defineConnector } from "@sixb/core"
 
 export const billingApi = defineConnector("billingApi", {
   type: "rest",
@@ -109,13 +109,13 @@ your-project/
   connectors/
     billingApi.ts
     erpDb.ts
-  pario.config.ts
+  sixb.config.ts
 ```
 
-`createPario()` scans `connectors/` and registers exported connector definitions
+`createSixb()` scans `connectors/` and registers exported connector definitions
 automatically.
 
-You can also register connectors explicitly with `createPario({ connectors: [erpDb] })`.
+You can also register connectors explicitly with `createSixb({ connectors: [erpDb] })`.
 
 ## Resolve a connector
 
@@ -123,10 +123,10 @@ File: `lib/loadOrders.ts`
 
 ```ts
 import { erpDb } from "../connectors/erpDb"
-import { pario } from "../pario.config"
+import { sixb } from "../sixb.config"
 
 export async function loadOrders() {
-  const runtime = await pario
+  const runtime = await sixb
   const db = await runtime.connector(erpDb)
   return db.query("select * from orders")
 }
@@ -140,9 +140,9 @@ runtime.
 1. Define an adapter.
 2. Wrap it with `defineConnector(id, adapter)`.
 3. Register it explicitly or export it from `connectors/`.
-4. Resolve it with `pario.connector(definition)`.
-5. Pario caches the connected client.
-6. `pario.disconnectConnectors()` calls `disconnect(client)` if present.
+4. Resolve it with `sixb.connector(definition)`.
+5. Sixb caches the connected client.
+6. `sixb.disconnectConnectors()` calls `disconnect(client)` if present.
 
 ## Guidelines
 

@@ -1,4 +1,4 @@
-import { QueueError } from "@pario/core"
+import { QueueError } from "@sixb/core"
 
 export { QueueError }
 
@@ -11,7 +11,7 @@ export { QueueError }
 export function wrapLeaseError(error: unknown, jobId: string): QueueError {
   if (error instanceof QueueError) return error
   const message = error instanceof Error ? error.message : String(error)
-  return new QueueError(`[Pario] Lease mismatch or expired for queue job '${jobId}': ${message}`, {
+  return new QueueError(`[Sixb] Lease mismatch or expired for queue job '${jobId}': ${message}`, {
     cause: error instanceof Error ? error : undefined,
   })
 }

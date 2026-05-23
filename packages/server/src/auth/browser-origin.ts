@@ -3,30 +3,30 @@ import {
   DEFAULT_AUTH_SESSION_AUDIENCE,
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
-} from "@pario/core"
+} from "@sixb/core"
 
-export interface ParioBrowserOrigin {
+export interface SixbBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
   readonly kind?: "atlas" | "sentinel" | "app"
 }
 
-export interface ParioApiBrowserPolicy {
+export interface SixbApiBrowserPolicy {
   readonly publicOrigin?: string
-  readonly allowedOrigins: readonly ParioBrowserOrigin[]
+  readonly allowedOrigins: readonly SixbBrowserOrigin[]
   readonly apiOriginAudience?: AuthSessionAudience
 }
 
-export interface ResolvedParioBrowserOrigin {
+export interface ResolvedSixbBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
   readonly kind?: "atlas" | "sentinel" | "app"
 }
 
-export interface ResolvedParioApiBrowserPolicy {
+export interface ResolvedSixbApiBrowserPolicy {
   readonly publicOrigin?: string
   readonly apiOriginAudience: AuthSessionAudience
-  readonly allowedOrigins: readonly ResolvedParioBrowserOrigin[]
+  readonly allowedOrigins: readonly ResolvedSixbBrowserOrigin[]
 }
 
 export interface RequestAuthContext {
@@ -59,12 +59,12 @@ export class BrowserOriginError extends Error {
 }
 
 export function resolveApiBrowserPolicy(
-  policy: ParioApiBrowserPolicy
-): ResolvedParioApiBrowserPolicy {
+  policy: SixbApiBrowserPolicy
+): ResolvedSixbApiBrowserPolicy {
   const apiOriginAudience = resolveAuthSessionAudience(
     policy.apiOriginAudience ?? DEFAULT_AUTH_SESSION_AUDIENCE
   )
-  const origins = new Map<string, ResolvedParioBrowserOrigin>()
+  const origins = new Map<string, ResolvedSixbBrowserOrigin>()
 
   for (const entry of policy.allowedOrigins) {
     const origin = normalizeHttpOrigin(entry.origin, "browser origin")
@@ -73,7 +73,7 @@ export function resolveApiBrowserPolicy(
     if (existing) {
       if (existing.audience !== audience) {
         throw new Error(
-          `[ParioServer] Browser origin '${origin}' is mapped to multiple auth audiences.`
+          `[SixbServer] Browser origin '${origin}' is mapped to multiple auth audiences.`
         )
       }
       continue
@@ -87,7 +87,7 @@ export function resolveApiBrowserPolicy(
   }
 
   if (origins.size === 0) {
-    throw new Error("[ParioServer] API browser policy requires at least one allowed origin.")
+    throw new Error("[SixbServer] API browser policy requires at least one allowed origin.")
   }
 
   return {
@@ -100,19 +100,19 @@ export function resolveApiBrowserPolicy(
 }
 
 export function createApiBrowserAuthContextResolver(
-  policy: ResolvedParioApiBrowserPolicy
+  policy: ResolvedSixbApiBrowserPolicy
 ): ResolveRequestAuthContext {
   return (request) => resolveApiBrowserAuthContext(policy, request)
 }
 
 export function createApiBrowserAuthRedirectContextResolver(
-  policy: ResolvedParioApiBrowserPolicy
+  policy: ResolvedSixbApiBrowserPolicy
 ): ResolveAuthRedirectContext {
   return (request, input) => resolveApiBrowserAuthRedirectContext(policy, request, input)
 }
 
 export function resolveApiBrowserAuthContext(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request
 ): RequestAuthContext {
   const origin = normalizeRequestOrigin(request)
@@ -129,11 +129,11 @@ export function resolveApiBrowserAuthContext(
     return { audience: policy.apiOriginAudience, browserOrigin: origin, absoluteReturnTo: true }
   }
 
-  throw new BrowserOriginError(`[ParioServer] Browser origin '${origin}' is not allowed.`)
+  throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
 }
 
 export function isAllowedApiBrowserOrigin(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request
 ): boolean {
   const origin = normalizeRequestOrigin(request)
@@ -148,7 +148,7 @@ export function isAllowedApiBrowserOrigin(
 }
 
 export function resolveApiBrowserAuthRedirectContext(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request,
   input: AuthRedirectInput
 ): AuthRedirectContext {
@@ -163,21 +163,21 @@ export function resolveApiBrowserAuthRedirectContext(
 }
 
 export function resolveApiBrowserPublicOrigin(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request
 ): string {
   return policy.publicOrigin ?? new URL(request.url).origin
 }
 
 function findAllowedBrowserOrigin(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   origin: string
-): ResolvedParioBrowserOrigin | null {
+): ResolvedSixbBrowserOrigin | null {
   return policy.allowedOrigins.find((entry) => entry.origin === origin) ?? null
 }
 
 function isSameOriginApiRequest(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   origin: string,
   request: Request
 ): boolean {
@@ -188,14 +188,14 @@ function isSameOriginApiRequest(
 function resolveRequiredAuthAudience(value: string | null | undefined): AuthSessionAudience {
   const audience = value?.trim()
   if (!audience || !isValidAuthSessionAudience(audience)) {
-    throw new BrowserOriginError("[ParioServer] Auth audience is invalid or missing.")
+    throw new BrowserOriginError("[SixbServer] Auth audience is invalid or missing.")
   }
 
   return audience
 }
 
 function resolveApiBrowserReturnTo(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request,
   input: AuthRedirectInput,
   audience: AuthSessionAudience
@@ -209,30 +209,30 @@ function resolveApiBrowserReturnTo(
       : "")
 
   if (!value) {
-    throw new BrowserOriginError("[ParioServer] Auth return target is required.")
+    throw new BrowserOriginError("[SixbServer] Auth return target is required.")
   }
 
   let url: URL
   try {
     url = new URL(value)
   } catch {
-    throw new BrowserOriginError("[ParioServer] Auth return target must be an absolute URL.")
+    throw new BrowserOriginError("[SixbServer] Auth return target must be an absolute URL.")
   }
 
   if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-    throw new BrowserOriginError("[ParioServer] Auth return target is not allowed.")
+    throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
   }
 
   const returnAudience = resolveReturnToAudience(policy, request, url.origin)
   if (returnAudience !== audience) {
-    throw new BrowserOriginError("[ParioServer] Auth return target is not allowed.")
+    throw new BrowserOriginError("[SixbServer] Auth return target is not allowed.")
   }
 
   return url.toString()
 }
 
 function resolveReturnToAudience(
-  policy: ResolvedParioApiBrowserPolicy,
+  policy: ResolvedSixbApiBrowserPolicy,
   request: Request,
   origin: string
 ): AuthSessionAudience | null {
@@ -257,7 +257,7 @@ function normalizeRequestOrigin(request: Request): string | null {
   try {
     return normalizeHttpOrigin(origin, "Origin header")
   } catch {
-    throw new BrowserOriginError("[ParioServer] Origin header is not allowed.")
+    throw new BrowserOriginError("[SixbServer] Origin header is not allowed.")
   }
 }
 
@@ -266,15 +266,15 @@ function normalizeHttpOrigin(value: string, label: string): string {
   try {
     url = new URL(value)
   } catch {
-    throw new Error(`[ParioServer] Invalid ${label}: '${value}'.`)
+    throw new Error(`[SixbServer] Invalid ${label}: '${value}'.`)
   }
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error(`[ParioServer] ${label} must use http or https.`)
+    throw new Error(`[SixbServer] ${label} must use http or https.`)
   }
 
   if (url.pathname !== "/" || url.search || url.hash) {
-    throw new Error(`[ParioServer] ${label} must be an origin, not a full URL.`)
+    throw new Error(`[SixbServer] ${label} must be an origin, not a full URL.`)
   }
 
   return url.origin

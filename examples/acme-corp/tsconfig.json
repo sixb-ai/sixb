@@ -21,6 +21,6 @@
     "syncs/**/*.ts",
     "tests/**/*.ts",
     "workflows/**/*.ts",
-    "pario.config.ts"
+    "sixb.config.ts"
   ]
 }

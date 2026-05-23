@@ -58,7 +58,7 @@ export type SyncReadHandler<TAdapter extends ConnectorAdapter, TCheckpoint = nev
 }["bivarianceHack"]
 
 /**
- * Inert sync definition registered with Pario.
+ * Inert sync definition registered with Sixb.
  *
  * V1 supports batch syncs only. Definitions are declarative metadata and do not
  * start any background work on their own.

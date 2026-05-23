@@ -12,8 +12,8 @@ import type {
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
   WorkflowIOSnapshot,
-} from "@pario/core"
-import { WorkflowInterventionError } from "@pario/core"
+} from "@sixb/core"
+import { WorkflowInterventionError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import { isUniqueConstraintError } from "./storage-errors"
 
@@ -79,7 +79,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new WorkflowInterventionError(
-          `[ParioSqlite] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -283,13 +283,13 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
 
     if (!row) {
       throw new WorkflowInterventionError(
-        `[ParioSqlite] Workflow intervention '${id}' not found for project '${projectId}'.`
+        `[SixbSqlite] Workflow intervention '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (row.status !== "pending") {
       throw new WorkflowInterventionError(
-        `[ParioSqlite] Workflow intervention '${id}' for project '${projectId}' is not pending.`
+        `[SixbSqlite] Workflow intervention '${id}' for project '${projectId}' is not pending.`
       )
     }
 
@@ -303,7 +303,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
 
     if (!row) {
       throw new WorkflowInterventionError(
-        `[ParioSqlite] Failed to load workflow intervention '${id}' for project '${projectId}'.`
+        `[SixbSqlite] Failed to load workflow intervention '${id}' for project '${projectId}'.`
       )
     }
 
@@ -359,7 +359,7 @@ function rowToWorkflowInterventionRecord(
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new WorkflowInterventionError(
-      `[ParioSqlite] Workflow intervention ${fieldName} must be a non-negative integer.`
+      `[SixbSqlite] Workflow intervention ${fieldName} must be a non-negative integer.`
     )
   }
 }

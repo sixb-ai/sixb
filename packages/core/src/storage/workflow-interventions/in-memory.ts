@@ -14,7 +14,7 @@ import type {
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new WorkflowInterventionError(
-      `[Pario] Workflow intervention ${fieldName} must be a non-negative integer.`
+      `[Sixb] Workflow intervention ${fieldName} must be a non-negative integer.`
     )
   }
 }
@@ -28,7 +28,7 @@ export class InMemoryWorkflowInterventionStorage implements WorkflowIntervention
     const key = storageKey(input.projectId, input.id)
     if (this.interventions.has(key)) {
       throw new WorkflowInterventionError(
-        `[Pario] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Workflow intervention '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -145,13 +145,13 @@ export class InMemoryWorkflowInterventionStorage implements WorkflowIntervention
     const record = this.interventions.get(storageKey(projectId, id))
     if (!record) {
       throw new WorkflowInterventionError(
-        `[Pario] Workflow intervention '${id}' not found for project '${projectId}'.`
+        `[Sixb] Workflow intervention '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "pending") {
       throw new WorkflowInterventionError(
-        `[Pario] Workflow intervention '${id}' for project '${projectId}' is not pending.`
+        `[Sixb] Workflow intervention '${id}' for project '${projectId}' is not pending.`
       )
     }
 

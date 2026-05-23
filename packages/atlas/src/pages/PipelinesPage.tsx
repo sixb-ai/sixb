@@ -3,7 +3,7 @@ import type {
   GetPipelineResponse,
   ListDatasetRowsResponse,
   ListPipelinesResponse,
-} from "@pario/client"
+} from "@sixb/client"
 import {
   getDatasetOptions,
   getPipelineOptions,
@@ -11,7 +11,7 @@ import {
   listPipelineRunsOptions,
   listPipelinesOptions,
   requestPipelineRunMutation,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -28,8 +28,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Background,
@@ -1087,7 +1087,7 @@ export function PipelineDetailPage() {
           <EmptyState
             icon={<Workflow className="h-10 w-10" />}
             title="Pipeline not found"
-            description="This pipeline is not registered in the active Pario runtime."
+            description="This pipeline is not registered in the active Sixb runtime."
           />
         </div>
       </div>

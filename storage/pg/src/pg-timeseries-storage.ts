@@ -1,4 +1,4 @@
-import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@pario/core"
+import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@sixb/core"
 import type { SQL } from "bun"
 
 /**
@@ -7,7 +7,7 @@ import type { SQL } from "bun"
  * Stores time-series data with JSONB values and TIMESTAMPTZ timestamps
  * for efficient querying of history and latest values.
  *
- * Requires `search_path` to be set to the Pario schema on the connection.
+ * Requires `search_path` to be set to the Sixb schema on the connection.
  */
 export class PgTimeseriesStorage implements TimeseriesStorage {
   constructor(private readonly sql: SQL) {}

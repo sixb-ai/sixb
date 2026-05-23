@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { runBrokerContractSuite } from "@pario/core/testing"
+import { runBrokerContractSuite } from "@sixb/core/testing"
 import { RedisBroker } from "../src"
 import { createTestBroker, requireRedisUrl } from "./helpers"
 
@@ -33,7 +33,7 @@ describe("RedisBroker", () => {
 
     const suffix = randomUUID().slice(0, 8)
     const broker = new RedisBroker({
-      prefix: `pario:test:broker:${suffix}`,
+      prefix: `sixb:test:broker:${suffix}`,
       subscribeBlockMs: 100,
     })
     const projectId = `project-${suffix}`

@@ -1,6 +1,6 @@
-import { loadParioFromEntry } from "../lib/loadPario"
+import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { checkRuntimeLakeDefinitions, stopParioProviders } from "../lib/runtime"
+import { checkRuntimeLakeDefinitions, stopSixbProviders } from "../lib/runtime"
 import { LakeCheckView, renderStatic } from "../ui"
 
 export interface LakeCheckOptions {
@@ -9,12 +9,12 @@ export interface LakeCheckOptions {
 
 export async function runLakeCheck(options: LakeCheckOptions = {}) {
   const entry = await resolveRuntimeEntry({ entry: options.entry })
-  const pario = await loadParioFromEntry(entry)
+  const sixb = await loadSixbFromEntry(entry)
 
   try {
-    await checkRuntimeLakeDefinitions(pario)
-    await renderStatic(<LakeCheckView projectId={pario.id} status="ok" />)
+    await checkRuntimeLakeDefinitions(sixb)
+    await renderStatic(<LakeCheckView projectId={sixb.id} status="ok" />)
   } finally {
-    await stopParioProviders(pario)
+    await stopSixbProviders(sixb)
   }
 }

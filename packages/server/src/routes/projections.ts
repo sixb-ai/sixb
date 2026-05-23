@@ -1,4 +1,4 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -7,14 +7,14 @@ import {
   ProjectionResponseSchema,
 } from "../schemas/projections"
 
-export function registerProjectionRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/projections",
       () => {
         return {
-          objectProjections: [...pario.getObjectProjections()],
-          linkProjections: [...pario.getLinkProjections()],
+          objectProjections: [...sixb.getObjectProjections()],
+          linkProjections: [...sixb.getLinkProjections()],
         }
       },
       {
@@ -29,7 +29,7 @@ export function registerProjectionRoutes(app: Elysia, pario: Pario<readonly Onto
     .get(
       "/api/projections/:projectionId",
       ({ params, set }) => {
-        const all = [...pario.getObjectProjections(), ...pario.getLinkProjections()]
+        const all = [...sixb.getObjectProjections(), ...sixb.getLinkProjections()]
         const found = all.find((p) => p.id === params.projectionId)
         if (!found) {
           set.status = 404

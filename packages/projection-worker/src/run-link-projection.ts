@@ -5,7 +5,7 @@ import {
   type LinkProjectionDefinition,
   ObjectNotFoundError,
   objectService,
-} from "@pario/core"
+} from "@sixb/core"
 import type {
   ProjectionExecutionResult,
   ProjectionProgressReporter,

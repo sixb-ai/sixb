@@ -1,5 +1,5 @@
-import type { ObjectProjectionDefinition } from "@pario/core"
-import { defineProjection } from "@pario/core"
+import type { ObjectProjectionDefinition } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpDepartmentsDataset } from "../datasets/erp"
 import { Department } from "../ontology/department"
 

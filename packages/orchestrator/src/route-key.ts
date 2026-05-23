@@ -1,4 +1,4 @@
-import type { StoredDomainEvent } from "@pario/core"
+import type { StoredDomainEvent } from "@sixb/core"
 import type { OrchestratorRouteKey } from "./types"
 
 /**

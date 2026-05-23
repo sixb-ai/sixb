@@ -33,7 +33,7 @@ async function writeTemplateProject(targetDir: string): Promise<string[]> {
   packageJson.name = projectName
   await writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
 
-  const configPath = join(targetDir, "pario.config.ts")
+  const configPath = join(targetDir, "sixb.config.ts")
   const configSource = await Bun.file(configPath).text()
   const updatedConfig = configSource.replace(/id:\s*"[^"]+"/, `id: "${projectName}"`)
   await writeFile(configPath, updatedConfig)

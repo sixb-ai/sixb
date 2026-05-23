@@ -19,7 +19,7 @@ export function createOidcInvitationEmail(input: {
     from: input.from,
     subject: input.subject,
     text: [
-      "You have been invited to Pario.",
+      "You have been invited to Sixb.",
       "",
       "Use this link to sign in with your identity provider:",
       "",
@@ -28,8 +28,8 @@ export function createOidcInvitationEmail(input: {
       "If you were not expecting this invitation, you can ignore this email.",
     ].join("\n"),
     html: [
-      "<p>You have been invited to Pario.</p>",
-      `<p><a href="${escapeHtml(input.url)}">Sign in to Pario</a></p>`,
+      "<p>You have been invited to Sixb.</p>",
+      `<p><a href="${escapeHtml(input.url)}">Sign in to Sixb</a></p>`,
       "<p>If you were not expecting this invitation, you can ignore this email.</p>",
     ].join(""),
   }

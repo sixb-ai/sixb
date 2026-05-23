@@ -7,9 +7,9 @@ import {
   defineObjectType,
   ObjectNotFoundError,
   OntologyValidationError,
-  Pario,
   prop,
   ref,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -105,26 +105,26 @@ describe("defineAction", () => {
 
 describe("ActionRegistry", () => {
   test("lists actions by id and by inherited target type", () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-registry-test",
       ontology: [Room, SuiteRoom],
       actions: [setTemperature, reboot, prepareSuite, createRoom],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getActionDefinitions().map((action) => action.id)).toEqual([
+    expect(sixb.getActionDefinitions().map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
       "prepareSuite",
       "createRoom",
     ])
-    expect(pario.getActionById("reboot")?.id).toBe(reboot.id)
-    expect(pario.getGlobalActions().map((action) => action.id)).toEqual(["createRoom"])
-    expect(pario.getActionsForType(Room).map((action) => action.id)).toEqual([
+    expect(sixb.getActionById("reboot")?.id).toBe(reboot.id)
+    expect(sixb.getGlobalActions().map((action) => action.id)).toEqual(["createRoom"])
+    expect(sixb.getActionsForType(Room).map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
     ])
-    expect(pario.getActionsForType(SuiteRoom).map((action) => action.id)).toEqual([
+    expect(sixb.getActionsForType(SuiteRoom).map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
       "prepareSuite",
@@ -138,14 +138,14 @@ describe("ActionRegistry", () => {
       .run(async () => {})
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Room],
         actions: [reboot, duplicate],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Room],
         actions: [reboot, duplicate],
         ...createTestRuntimeDeps(),
@@ -160,7 +160,7 @@ describe("ActionRegistry", () => {
       .run(async () => {})
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Room, SuiteRoom],
         actions: [setTemperature, suiteOverride],
         ...createTestRuntimeDeps(),
@@ -182,7 +182,7 @@ describe("ActionRegistry", () => {
       .run(async () => {})
 
     expect(() => {
-      new Pario({
+      new Sixb({
         ontology: [Room],
         actions: [unknownAction],
         ...createTestRuntimeDeps(),
@@ -193,25 +193,25 @@ describe("ActionRegistry", () => {
 
 describe("requestAction", () => {
   test("rejects unknown action", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [setTemperature, reboot],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "nonexistent",
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "nonexistent",
       })
@@ -219,19 +219,19 @@ describe("requestAction", () => {
   })
 
   test("rejects actions that are not valid for the object type", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
       actions: [setTemperature, prepareSuite],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "prepareSuite",
       })
@@ -239,26 +239,26 @@ describe("requestAction", () => {
   })
 
   test("rejects missing required param", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [setTemperature],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "setTemperature",
         params: {},
       })
     ).rejects.toBeInstanceOf(OntologyValidationError)
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "setTemperature",
         params: {},
@@ -267,19 +267,19 @@ describe("requestAction", () => {
   })
 
   test("rejects unknown param", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [setTemperature],
       ...createTestRuntimeDeps(),
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "setTemperature",
         params: { target: 72, bogus: "nope" },
@@ -289,7 +289,7 @@ describe("requestAction", () => {
 
   test("accepts object ref params", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [attachRelatedRoom],
@@ -301,11 +301,11 @@ describe("requestAction", () => {
       objectTypeId: "Room",
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
-    await pario.objects(Room).requestAction({
+    await sixb.objects(Room).requestAction({
       id: "room:1",
       actionId: "attachRelatedRoom",
       params: {
@@ -313,7 +313,7 @@ describe("requestAction", () => {
       },
     })
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(events.length).toBe(1)
@@ -325,7 +325,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params with the wrong object type", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [attachRelatedRoom],
@@ -333,7 +333,7 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "attachRelatedRoom",
         params: {
@@ -344,7 +344,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params without a string primary id", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [attachRelatedRoom],
@@ -352,7 +352,7 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "attachRelatedRoom",
         params: {
@@ -363,7 +363,7 @@ describe("requestAction", () => {
   })
 
   test("rejects object ref params with unknown fields", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
       actions: [attachRelatedRoom],
@@ -371,7 +371,7 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "attachRelatedRoom",
         params: {
@@ -382,7 +382,7 @@ describe("requestAction", () => {
   })
 
   test("rejects missing object", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [setTemperature],
@@ -390,14 +390,14 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:missing",
         actionId: "setTemperature",
         params: { target: 72 },
       })
     ).rejects.toBeInstanceOf(ObjectNotFoundError)
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:missing",
         actionId: "setTemperature",
         params: { target: 72 },
@@ -414,23 +414,23 @@ describe("requestAction", () => {
       .run(() => {
         invoked += 1
       })
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [counted],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
-    const result = await pario.objects(Room).requestAction({
+    const result = await sixb.objects(Room).requestAction({
       id: "room:1",
       actionId: "counted",
     })
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(invoked).toBe(0)
@@ -451,26 +451,26 @@ describe("requestAction", () => {
 
   test("runs validators request-side and emits no event when validation fails", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
       actions: [setTemperature],
       ...runtimeDeps,
     })
 
-    await pario.objects(Room).upsert({
+    await sixb.objects(Room).upsert({
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
     await expect(
-      pario.objects(Room).requestAction({
+      sixb.objects(Room).requestAction({
         id: "room:1",
         actionId: "setTemperature",
         params: { target: 5 },
       })
     ).rejects.toBeInstanceOf(ActionValidationError)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(events).toHaveLength(0)
@@ -478,24 +478,24 @@ describe("requestAction", () => {
 
   test("allows inherited actions on subtypes", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
       actions: [setTemperature],
       ...runtimeDeps,
     })
 
-    await pario.objects(SuiteRoom).upsert({
+    await sixb.objects(SuiteRoom).upsert({
       properties: { id: "suite:1", externalId: "S1", name: "Suite 1", tier: "vip" },
     })
 
-    await pario.objects(SuiteRoom).requestAction({
+    await sixb.objects(SuiteRoom).requestAction({
       id: "suite:1",
       actionId: "setTemperature",
       params: { target: 72 },
     })
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(events.length).toBe(1)
@@ -509,21 +509,21 @@ describe("requestAction", () => {
     }
   })
 
-  test("requests global actions through pario.actions", async () => {
+  test("requests global actions through sixb.actions", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [createRoom],
       ...runtimeDeps,
     })
 
-    const result = await pario.actions.request({
+    const result = await sixb.actions.request({
       actionId: "createRoom",
       params: { id: "room:1", name: "Room 1" },
     })
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(result.runId.startsWith("act_")).toBe(true)
@@ -540,7 +540,7 @@ describe("requestAction", () => {
 
   test("rejects invalid global action params before emitting an event", async () => {
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [createRoom],
@@ -548,20 +548,20 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.actions.request({
+      sixb.actions.request({
         actionId: "createRoom",
         params: { id: "bad", name: "Room 1" },
       })
     ).rejects.toBeInstanceOf(ActionValidationError)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(events).toHaveLength(0)
   })
 
   test("rejects object-scoped actions without an object subject", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [setTemperature],
@@ -569,7 +569,7 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.actions.request({
+      sixb.actions.request({
         actionId: "setTemperature",
         params: { target: 72 },
       })
@@ -577,7 +577,7 @@ describe("requestAction", () => {
   })
 
   test("rejects global actions with an object subject", async () => {
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
       actions: [createRoom],
@@ -585,7 +585,7 @@ describe("requestAction", () => {
     })
 
     await expect(
-      pario.actions.request({
+      sixb.actions.request({
         actionId: "createRoom",
         subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
         params: { id: "room:2", name: "Room 2" },

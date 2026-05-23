@@ -1,4 +1,4 @@
-import type { RestClient } from "@pario/connector-rest"
+import type { RestClient } from "@sixb/connector-rest"
 import { DeviceStatusSchema, GroupResponseSchema, TEMPERATURE_UNAVAILABLE } from "./schema"
 import type { ControlParameters, DeviceGroup, DeviceListItem, DeviceStatus } from "./types"
 

@@ -10,16 +10,16 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ObjectRow,
-  ParioRuntimeContext,
   PipelineDefinition,
   ProjectionDefinition,
   RuleDefinition,
   ScheduleDefinition,
+  SixbRuntimeContext,
   SyncDefinition,
   WorkflowsRuntime,
-} from "@pario/core"
+} from "@sixb/core"
 
-export interface LoadedPario extends ParioRuntimeContext {
+export interface LoadedSixb extends SixbRuntimeContext {
   readonly id: string
   readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
@@ -60,7 +60,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return !!value && typeof value === "object" && "then" in value
 }
 
-function isParioInstance(value: unknown): value is LoadedPario {
+function isSixbInstance(value: unknown): value is LoadedSixb {
   return (
     !!value &&
     typeof value === "object" &&
@@ -103,30 +103,30 @@ function isParioInstance(value: unknown): value is LoadedPario {
   )
 }
 
-export async function loadParioFromEntry(entry: string): Promise<LoadedPario> {
+export async function loadSixbFromEntry(entry: string): Promise<LoadedSixb> {
   const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>
-  const candidate = module.pario ?? module.default
+  const candidate = module.sixb ?? module.default
 
-  if (isParioInstance(candidate)) {
+  if (isSixbInstance(candidate)) {
     return candidate
   }
 
   if (typeof candidate === "function") {
     const created = (candidate as () => unknown)()
     const resolved = isPromiseLike(created) ? await created : created
-    if (isParioInstance(resolved)) {
+    if (isSixbInstance(resolved)) {
       return resolved
     }
   }
 
   if (isPromiseLike(candidate)) {
     const resolved = await candidate
-    if (isParioInstance(resolved)) {
+    if (isSixbInstance(resolved)) {
       return resolved
     }
   }
 
   throw new Error(
-    "Could not load Pario runtime from entry. Export `pario` (or default) as a Pario instance or Promise<Pario>."
+    "Could not load Sixb runtime from entry. Export `sixb` (or default) as a Sixb instance or Promise<Sixb>."
   )
 }

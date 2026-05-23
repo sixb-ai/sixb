@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Pario counter icon">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sixb counter icon">
   <defs>
-    <linearGradient id="pario-counter" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="sixb-counter" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#7dd3fc"/>
       <stop offset="100%" stop-color="#38bdf8"/>
     </linearGradient>
   </defs>
   <rect x="8" y="8" width="48" height="48" rx="16" fill="#0b0b0f"/>
-  <rect x="12" y="12" width="40" height="40" rx="12" fill="url(#pario-counter)" opacity="0.2"/>
-  <path d="M24 32h16" stroke="url(#pario-counter)" stroke-linecap="round" stroke-width="6"/>
-  <path d="M32 24v16" stroke="url(#pario-counter)" stroke-linecap="round" stroke-width="6"/>
+  <rect x="12" y="12" width="40" height="40" rx="12" fill="url(#sixb-counter)" opacity="0.2"/>
+  <path d="M24 32h16" stroke="url(#sixb-counter)" stroke-linecap="round" stroke-width="6"/>
+  <path d="M32 24v16" stroke="url(#sixb-counter)" stroke-linecap="round" stroke-width="6"/>
 </svg>

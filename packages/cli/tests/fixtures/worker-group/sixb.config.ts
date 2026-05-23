@@ -13,11 +13,11 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
   type Queues,
+  Sixb,
   type StorageMigrator,
-} from "@pario/core"
+} from "@sixb/core"
 
 const Order = defineObjectType({
   id: "Order",
@@ -57,7 +57,7 @@ const orderProjection = defineProjection("order-proj", Order)
   .properties({ id: "orderId" })
 
 function logFixtureEvent(entry: Record<string, unknown>): void {
-  const logPath = process.env.PARIO_CLI_TEST_LOG
+  const logPath = process.env.SIXB_CLI_TEST_LOG
   if (!logPath) return
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf-8")
 }
@@ -126,7 +126,7 @@ function loggingStorage() {
   return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 }
 
-export const pario = new Pario({
+export const sixb = new Sixb({
   id: "cli-worker-group",
   ontology: [Order],
   connectors: [erpDb],

@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   LinkParamsSchema,
@@ -12,15 +12,15 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
-export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",
       async ({ params, query, set }) => {
         try {
           const parsedQuery = LinkQuerySchema.parse(query)
-          const links = await pario.storage.objects.listLinks({
-            projectId: pario.id,
+          const links = await sixb.storage.objects.listLinks({
+            projectId: sixb.id,
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             linkId: parsedQuery.linkId,
@@ -53,7 +53,7 @@ export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ params, body, set }) => {
         try {
           const parsedBody = UpsertLinkBodySchema.parse(body)
-          await pario.upsertLink(params.objectTypeId, params.objectId, params.linkId, {
+          await sixb.upsertLink(params.objectTypeId, params.objectId, params.linkId, {
             targetTypeId: parsedBody.targetTypeId,
             targetId: parsedBody.targetId,
             properties: parsedBody.properties,
@@ -76,7 +76,7 @@ export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySo
           summary: "Create or update object link",
           tags: ["Links"],
           operationId: "upsertObjectLink",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -85,7 +85,7 @@ export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ params, query, set }) => {
         try {
           const parsedQuery = RemoveLinkQuerySchema.parse(query)
-          await pario.removeLink(params.objectTypeId, params.objectId, params.linkId, {
+          await sixb.removeLink(params.objectTypeId, params.objectId, params.linkId, {
             targetTypeId: parsedQuery.targetTypeId,
             targetId: parsedQuery.targetId,
           })
@@ -107,7 +107,7 @@ export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySo
           summary: "Remove object link",
           tags: ["Links"],
           operationId: "removeObjectLink",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

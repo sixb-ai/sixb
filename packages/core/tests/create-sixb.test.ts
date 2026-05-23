@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   col,
-  createPario,
+  createSixb,
   defineConnector,
   defineDataset,
   defineLinkProjection,
@@ -48,7 +48,7 @@ afterEach(async () => {
   tempRoots.clear()
 })
 
-describe("createPario", () => {
+describe("createSixb", () => {
   test("discovers ontology, actions, syncs, and connectors from project folders", async () => {
     const projectRoot = await createTempProjectRoot()
 
@@ -122,23 +122,23 @@ export const syncOrders = defineSync("sync-orders")
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
     const { erpDb } = await import(pathToFileURL(join(projectRoot, "connectors", "erpDb.ts")).href)
     await import(pathToFileURL(join(projectRoot, "ontology", "room.ts")).href)
-    const client = await pario.connector(erpDb)
+    const client = await sixb.connector(erpDb)
 
-    expect(pario.getActionDefinitions().map((action) => action.id)).toEqual(["setTemperature"])
-    expect(pario.getActionsForType(pario.listObjectTypes()[0]).map((action) => action.id)).toEqual([
+    expect(sixb.getActionDefinitions().map((action) => action.id)).toEqual(["setTemperature"])
+    expect(sixb.getActionsForType(sixb.listObjectTypes()[0]).map((action) => action.id)).toEqual([
       "setTemperature",
     ])
-    expect(pario.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
-    expect(pario.getSyncDefinitions().map((sync) => sync.id)).toEqual(["sync-orders"])
-    expect(pario.getSyncById("sync-orders")?.target.dataset.id).toBe("raw.erp.orders")
-    expect(pario.listConnectors().map((connector) => connector.id)).toEqual(["erpDb"])
+    expect(sixb.getDatasetDefinitions().map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
+    expect(sixb.getSyncDefinitions().map((sync) => sync.id)).toEqual(["sync-orders"])
+    expect(sixb.getSyncById("sync-orders")?.target.dataset.id).toBe("raw.erp.orders")
+    expect(sixb.listConnectors().map((connector) => connector.id)).toEqual(["erpDb"])
     expect(client).toEqual({ source: "discovered" })
   })
 
@@ -166,16 +166,16 @@ export const syncOrders = defineSync("sync-orders")
       })
       .then(normalizeTransaction)
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Transaction],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.workflows.list()).toEqual([workflow])
-    expect(pario.workflows.getById("explicit-transaction-workflow")).toBe(workflow)
-    expect(pario.workflows.getById("missing-workflow")).toBeNull()
+    expect(sixb.workflows.list()).toEqual([workflow])
+    expect(sixb.workflows.getById("explicit-transaction-workflow")).toBe(workflow)
+    expect(sixb.workflows.getById("missing-workflow")).toBeNull()
   })
 
   test("discovers workflows from workflows directory", async () => {
@@ -262,16 +262,16 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.workflows.list().map((workflow) => workflow.id)).toEqual(["reconcile-transaction"])
-    expect(pario.workflows.getById("reconcile-transaction")?.triggers).toEqual([
+    expect(sixb.workflows.list().map((workflow) => workflow.id)).toEqual(["reconcile-transaction"])
+    expect(sixb.workflows.getById("reconcile-transaction")?.triggers).toEqual([
       { type: "schedule", scheduleId: "daily-reconciliation" },
     ])
-    expect(pario.workflows.getById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
+    expect(sixb.workflows.getById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
       "find-best-invoice",
       "attach-invoice",
     ])
@@ -290,13 +290,13 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     })
 
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       ...runtimeDeps,
     })
 
-    const room = await pario.objects(Room).upsert({
+    const room = await sixb.objects(Room).upsert({
       properties: {
         id: "room:102",
         externalId: "RM-102",
@@ -305,7 +305,7 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     })
 
     expect(room.primaryId).toBe("room:102")
-    expect(pario.blobStorage).toBe(runtimeDeps.blobStorage)
+    expect(sixb.blobStorage).toBe(runtimeDeps.blobStorage)
   })
 
   test("wires broker-backed events through runtime writes and schedules", async () => {
@@ -322,7 +322,7 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     })
     const hourly = defineSchedule("hourly").cron("0 * * * *")
     const runtimeDeps = createTestRuntimeDeps()
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       id: "broker-backed-runtime",
       ontologies: [Room],
@@ -331,10 +331,10 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     })
 
     try {
-      await pario.objects(Room).upsert({
+      await sixb.objects(Room).upsert({
         properties: { id: "room:broker" },
       })
-      await pario
+      await sixb
         .objects(Room)
         .byId("room:broker")
         .telemetry(Room.p.temperature)
@@ -344,11 +344,11 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
           at: new Date("2026-05-20T10:00:00.000Z"),
         })
 
-      await pario.startScheduler()
+      await sixb.startScheduler()
       jest.advanceTimersByTime(60 * 60_000)
-      await pario.stopScheduler()
+      await sixb.stopScheduler()
 
-      const eventTypes = (await pario.events.read()).map((event) => event.type)
+      const eventTypes = (await sixb.events.read()).map((event) => event.type)
       expect(eventTypes).toEqual(
         expect.arrayContaining(["object.upserted", "telemetry.appended", "schedule.triggered"])
       )
@@ -361,7 +361,7 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
       ).map((record) => record.name)
       expect(brokerRecordNames).toEqual(eventTypes)
     } finally {
-      await pario.stopScheduler()
+      await sixb.stopScheduler()
       jest.useRealTimers()
     }
   })
@@ -370,7 +370,7 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     const projectRoot = await createTempProjectRoot()
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ...createTestRuntimeDeps(),
       })
@@ -397,16 +397,16 @@ export const Room = defineObjectType({
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getActionDefinitions()).toEqual([])
-    expect(pario.getSyncDefinitions()).toEqual([])
-    expect(pario.listConnectors()).toEqual([])
-    await expect(pario.startFunctions()).resolves.toBeUndefined()
-    await expect(pario.stopFunctions()).resolves.toBeUndefined()
+    expect(sixb.getActionDefinitions()).toEqual([])
+    expect(sixb.getSyncDefinitions()).toEqual([])
+    expect(sixb.listConnectors()).toEqual([])
+    await expect(sixb.startFunctions()).resolves.toBeUndefined()
+    await expect(sixb.stopFunctions()).resolves.toBeUndefined()
   })
 
   test("merges explicit connectors with auto-discovery", async () => {
@@ -439,14 +439,14 @@ export const erpDb = defineConnector("erpDb", {
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       connectors: [hubspot],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.listConnectors().map((connector) => connector.id)).toEqual(["hubspot", "erpDb"])
+    expect(sixb.listConnectors().map((connector) => connector.id)).toEqual(["hubspot", "erpDb"])
   })
 
   test("rejects duplicate connector ids across explicit and discovered connectors", async () => {
@@ -480,7 +480,7 @@ export const erpDb = defineConnector("erpDb", {
     )
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         connectors: [duplicate],
@@ -549,7 +549,7 @@ export const syncOrders = defineSync("sync-orders")
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       datasets: [rawHubspotCompaniesDataset],
@@ -558,7 +558,7 @@ export const syncOrders = defineSync("sync-orders")
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getSyncDefinitions().map((sync) => sync.id)).toEqual([
+    expect(sixb.getSyncDefinitions().map((sync) => sync.id)).toEqual([
       "sync-hubspot",
       "sync-orders",
     ])
@@ -625,7 +625,7 @@ export const syncOrders = defineSync("sync-orders")
     )
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [rawHubspotOrdersDataset],
@@ -650,7 +650,7 @@ describe("ontologies", () => {
       ],
     })
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [
         {
@@ -662,7 +662,7 @@ describe("ontologies", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectTypeById("Sensor")).not.toBeNull()
+    expect(sixb.getObjectTypeById("Sensor")).not.toBeNull()
   })
 
   test("merges ontologies with auto-discovery", async () => {
@@ -687,14 +687,14 @@ export const Room = defineObjectType({
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Equipment],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectTypeById("Equipment")).not.toBeNull()
-    expect(pario.getObjectTypeById("Room")).not.toBeNull()
+    expect(sixb.getObjectTypeById("Equipment")).not.toBeNull()
+    expect(sixb.getObjectTypeById("Room")).not.toBeNull()
   })
 
   test("resolves extends cross-source (auto-discovered extends ontologies type)", async () => {
@@ -720,13 +720,13 @@ export const MyEquipment = defineObjectType({
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Equipment],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getSubTypes("Equipment")).toContain("MyEquipment")
+    expect(sixb.getSubTypes("Equipment")).toContain("MyEquipment")
   })
 
   test("loads ValueTypes from OntologyDocumentInput", async () => {
@@ -744,7 +744,7 @@ export const MyEquipment = defineObjectType({
       properties: [prop("id", "string", { required: true, primary: true })],
     })
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [
         MyType,
@@ -758,7 +758,7 @@ export const MyEquipment = defineObjectType({
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectTypeById("MyType")).not.toBeNull()
+    expect(sixb.getObjectTypeById("MyType")).not.toBeNull()
     // ValueTypes are loaded (no error thrown)
   })
 
@@ -791,13 +791,13 @@ export const Sensor = defineObjectType({
     const { Sensor } = await import(pathToFileURL(join(projectRoot, "shared", "sensor.ts")).href)
 
     // Same JS reference in both — collectOntology deduplicates by ref identity
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Sensor],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectTypeById("Sensor")).not.toBeNull()
+    expect(sixb.getObjectTypeById("Sensor")).not.toBeNull()
   })
 
   test("ontologies alone is sufficient (no ontology folder needed)", async () => {
@@ -809,13 +809,13 @@ export const Sensor = defineObjectType({
       properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
     })
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectTypeById("Room")).not.toBeNull()
+    expect(sixb.getObjectTypeById("Room")).not.toBeNull()
   })
 })
 
@@ -889,16 +889,16 @@ export const roomProjection = defineProjection("room-proj", Room)
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectProjections()).toHaveLength(1)
-    expect(pario.getObjectProjections()[0].id).toBe("room-proj")
-    expect(pario.getObjectProjections()[0].objectTypeId).toBe("Room")
-    expect(pario.getObjectProjections()[0].datasetId).toBe("canonical.rooms")
-    expect(pario.getLinkProjections()).toHaveLength(0)
+    expect(sixb.getObjectProjections()).toHaveLength(1)
+    expect(sixb.getObjectProjections()[0].id).toBe("room-proj")
+    expect(sixb.getObjectProjections()[0].objectTypeId).toBe("Room")
+    expect(sixb.getObjectProjections()[0].datasetId).toBe("canonical.rooms")
+    expect(sixb.getLinkProjections()).toHaveLength(0)
   })
 
   test("uses explicit projections when provided", async () => {
@@ -914,7 +914,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       .fromDataset(canonicalRoomsDataset)
       .properties({ id: "room_id", name: "room_name" })
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room],
       datasets: [canonicalRoomsDataset],
@@ -922,8 +922,8 @@ export const roomProjection = defineProjection("room-proj", Room)
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectProjections()).toHaveLength(1)
-    expect(pario.getObjectProjections()[0].id).toBe("room-proj")
+    expect(sixb.getObjectProjections()).toHaveLength(1)
+    expect(sixb.getObjectProjections()[0].id).toBe("room-proj")
   })
 
   test("looks up object and link projections by id", async () => {
@@ -952,7 +952,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       .sourceField("room_id")
       .targetField("sensor_id")
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Room, Sensor],
       datasets: [canonicalRoomsDataset, roomSensorsDataset],
@@ -960,9 +960,9 @@ export const roomProjection = defineProjection("room-proj", Room)
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getProjectionById("room-proj")).toBe(roomProjection)
-    expect(pario.getProjectionById("room-sensor-proj")).toBe(roomSensorProjection)
-    expect(pario.getProjectionById("missing")).toBeNull()
+    expect(sixb.getProjectionById("room-proj")).toBe(roomProjection)
+    expect(sixb.getProjectionById("room-sensor-proj")).toBe(roomSensorProjection)
+    expect(sixb.getProjectionById("missing")).toBeNull()
   })
 
   test("rejects duplicate projection ids", async () => {
@@ -982,7 +982,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       .properties({ id: "room_id" })
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -991,7 +991,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       })
     ).rejects.toBeInstanceOf(RuntimeError)
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -1015,7 +1015,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       .properties({ id: "room_id", name: "room_name" })
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         projections: [roomProjection],
@@ -1023,7 +1023,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       })
     ).rejects.toBeInstanceOf(ProjectionValidationError)
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         projections: [roomProjection],
@@ -1051,7 +1051,7 @@ export const roomProjection = defineProjection("room-proj", Room)
     }
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -1060,7 +1060,7 @@ export const roomProjection = defineProjection("room-proj", Room)
       })
     ).rejects.toBeInstanceOf(ProjectionValidationError)
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -1086,13 +1086,13 @@ export const Room = defineObjectType({
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getObjectProjections()).toEqual([])
-    expect(pario.getLinkProjections()).toEqual([])
+    expect(sixb.getObjectProjections()).toEqual([])
+    expect(sixb.getLinkProjections()).toEqual([])
   })
 
   test("validates projection referencing unknown type", async () => {
@@ -1116,7 +1116,7 @@ export const Room = defineObjectType({
     })
 
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Other],
         datasets: [canonicalRoomsDataset],
@@ -1125,7 +1125,7 @@ export const Room = defineObjectType({
       })
     ).rejects.toBeInstanceOf(ProjectionValidationError)
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Other],
         datasets: [canonicalRoomsDataset],
@@ -1168,7 +1168,7 @@ export const Room = defineObjectType({
 
     // Register Room but not Building → FK target unknown
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -1177,7 +1177,7 @@ export const Room = defineObjectType({
       })
     ).rejects.toBeInstanceOf(ProjectionValidationError)
     await expect(
-      createPario({
+      createSixb({
         projectRoot,
         ontologies: [Room],
         datasets: [canonicalRoomsDataset],
@@ -1189,7 +1189,7 @@ export const Room = defineObjectType({
 })
 
 async function createTempProjectRoot(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "pario-core-create-pario-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-create-sixb-"))
   tempRoots.add(projectRoot)
   return projectRoot
 }

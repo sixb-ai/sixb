@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import { getCookie } from "./cookies"
 
-export const CSRF_HEADER_NAME = "x-pario-csrf"
+export const CSRF_HEADER_NAME = "x-sixb-csrf"
 
 export function generateCsrfToken(): string {
   return randomBytes(32).toString("base64url")

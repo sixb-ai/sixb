@@ -7,7 +7,7 @@ import type {
   PipelineStepInput,
   PipelineStepRunContext,
   ReadDatasetRowsInput,
-} from "@pario/core"
+} from "@sixb/core"
 import { PipelineWorkerError, requireRegisteredDataset } from "./errors"
 import type { PipelineWorkerContext } from "./types"
 
@@ -39,7 +39,7 @@ export async function resolveStepInputs(input: {
     const version = await runtime.lakeStorage.getLatestVersion(dataset.id)
     if (!version) {
       throw new PipelineWorkerError(
-        `[ParioPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' input '${name}' dataset '${dataset.id}' has no committed version.`
+        `[SixbPipelineWorker] Pipeline '${pipeline.id}' step '${step.id}' input '${name}' dataset '${dataset.id}' has no committed version.`
       )
     }
 

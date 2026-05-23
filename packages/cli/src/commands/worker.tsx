@@ -1,7 +1,7 @@
-import type { Worker } from "@pario/core"
-import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
+import type { Worker } from "@sixb/core"
+import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
+import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import {
   createWorkerForType,
   resolveWorkerTypeToStart,
@@ -21,45 +21,45 @@ export async function runWorker(options: WorkerOptions = {}) {
   const entry = await resolveRuntimeEntry({ entry: options.entry })
 
   const app = renderPersistent(
-    <LoadingView title="Starting pario worker" subtitle={entry} status="Loading runtime" />
+    <LoadingView title="Starting sixb worker" subtitle={entry} status="Loading runtime" />
   )
 
-  let pario: LoadedPario | null = null
+  let sixb: LoadedSixb | null = null
   let worker: Worker | null = null
 
   try {
-    pario = await loadParioFromEntry(entry)
+    sixb = await loadSixbFromEntry(entry)
 
-    if (usesInMemoryQueues(pario)) {
+    if (usesInMemoryQueues(sixb)) {
       throw new Error(
-        "[ParioWorker] `pario worker` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `pario dev` only."
+        "[SixbWorker] `sixb worker` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `sixb dev` only."
       )
     }
 
     app.rerender(
-      <LoadingView title="Starting pario worker" subtitle={entry} status="Starting worker" />
+      <LoadingView title="Starting sixb worker" subtitle={entry} status="Starting worker" />
     )
 
-    worker = createWorkerForType(pario, workerType)
+    worker = createWorkerForType(sixb, workerType)
     await worker.start()
 
-    const workerId = `${workerType}-worker-${pario.id}`
-    app.rerender(<WorkerView name={pario.id} workerId={workerId} />)
+    const workerId = `${workerType}-worker-${sixb.id}`
+    app.rerender(<WorkerView name={sixb.id} workerId={workerId} />)
 
     await runUntilSignal(async () => {
       app.unmount()
       console.log("\nShutting down worker...")
       await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-      if (pario) {
-        await stopParioProviders(pario)
+      if (sixb) {
+        await stopSixbProviders(sixb)
       }
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)

@@ -3,8 +3,8 @@ import {
   type GetRuleResponse,
   type ListRuleStatesResponse,
   type ListRulesResponse,
-} from "@pario/client"
-import { getRuleOptions, listRuleStatesOptions, listRulesOptions } from "@pario/client/hooks"
+} from "@sixb/client"
+import { getRuleOptions, listRuleStatesOptions, listRulesOptions } from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -21,8 +21,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -696,7 +696,7 @@ export function RuleDetailPage() {
           <EmptyState
             icon={<ListChecks className="h-10 w-10" />}
             title="Rule not found"
-            description="This rule is not registered in the active Pario runtime."
+            description="This rule is not registered in the active Sixb runtime."
           />
         </div>
       </div>

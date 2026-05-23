@@ -1,5 +1,5 @@
-import { useParioEvents } from "@pario/client"
-import { listObjectsOptions } from "@pario/client/hooks"
+import { useSixbEvents } from "@sixb/client"
+import { listObjectsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { acUnitObjectTypeId, acUnitProps, MODE_NAMES } from "../lib/acUnitConstants"
@@ -72,7 +72,7 @@ export default function DevicePicker() {
     }))
   }, [])
 
-  const { connected } = useParioEvents({
+  const { connected } = useSixbEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     onEvent(event) {
@@ -88,7 +88,7 @@ export default function DevicePicker() {
     return (
       <div className="page-root page-center">
         <div className="panel-glass loading-panel reveal">
-          <p className="eyebrow">Pario AC Twin</p>
+          <p className="eyebrow">Sixb AC Twin</p>
           <p className="loading-title">Discovering AC units...</p>
         </div>
       </div>

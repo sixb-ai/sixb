@@ -5,16 +5,16 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   canInviteGroupIds,
-  createPario,
+  createSixb,
   defineGroup,
   defineInvitePolicy,
   defineObjectType,
   type GroupDefinition,
   type InvitePolicyDefinition,
-  Pario,
   prop,
   resolveInvitePolicyScope,
   SecurityValidationError,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -113,7 +113,7 @@ describe("security definitions", () => {
     expect(canInviteGroupIds(scope, ["engineering"])).toBe(false)
   })
 
-  test("createPario discovers groups and invite policies from security folders", async () => {
+  test("createSixb discovers groups and invite policies from security folders", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -141,18 +141,18 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ontologies: [Account],
       ...createTestRuntimeDeps(),
     })
 
-    expect(new Set(pario.security.getGroupDefinitions().map((group) => group.id))).toEqual(
+    expect(new Set(sixb.security.getGroupDefinitions().map((group) => group.id))).toEqual(
       new Set(["security-admins", "commercial", "finance"])
     )
-    expect(pario.security.getGroupById("commercial")?.id).toBe("commercial")
-    expect(pario.security.getGroupById("missing")).toBeNull()
-    expect(pario.security.getInvitePolicyById("default-invites")).toEqual({
+    expect(sixb.security.getGroupById("commercial")?.id).toBe("commercial")
+    expect(sixb.security.getGroupById("missing")).toBeNull()
+    expect(sixb.security.getInvitePolicyById("default-invites")).toEqual({
       kind: "invitePolicy",
       id: "default-invites",
       grantedToGroupIds: ["security-admins"],
@@ -171,7 +171,7 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
       canInviteToGroupIds: ["commercial"],
     }
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot: await createTempProjectRoot(),
       ontologies: [Account],
       groups: [securityAdmins, commercial],
@@ -179,8 +179,8 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.security.getGroupDefinitions()).toEqual([securityAdmins, commercial])
-    expect(pario.security.getInvitePolicyDefinitions()).toEqual([invitePolicy])
+    expect(sixb.security.getGroupDefinitions()).toEqual([securityAdmins, commercial])
+    expect(sixb.security.getInvitePolicyDefinitions()).toEqual([invitePolicy])
   })
 
   test("runtime registration rejects duplicate group ids", () => {
@@ -248,15 +248,15 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
   })
 
   test("empty security definitions remain allowed at the definition layer", () => {
-    const pario = createRuntime()
+    const sixb = createRuntime()
 
-    expect(pario.security.getGroupDefinitions()).toEqual([])
-    expect(pario.security.getInvitePolicyDefinitions()).toEqual([])
+    expect(sixb.security.getGroupDefinitions()).toEqual([])
+    expect(sixb.security.getInvitePolicyDefinitions()).toEqual([])
   })
 })
 
 async function createTempProjectRoot(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "pario-core-security-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-security-"))
   tempRoots.add(projectRoot)
   return projectRoot
 }
@@ -266,8 +266,8 @@ function createRuntime(
     groups?: readonly GroupDefinition[]
     invitePolicies?: readonly InvitePolicyDefinition[]
   } = {}
-): Pario<readonly [typeof Account]> {
-  return new Pario<readonly [typeof Account]>({
+): Sixb<readonly [typeof Account]> {
+  return new Sixb<readonly [typeof Account]>({
     ontology: [Account],
     ...options,
     ...createTestRuntimeDeps(),

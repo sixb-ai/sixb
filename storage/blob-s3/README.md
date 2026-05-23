@@ -1,6 +1,6 @@
-# @pario/blob-s3
+# @sixb/blob-s3
 
-S3-compatible `BlobStorage` provider for Pario `fileRef` payloads.
+S3-compatible `BlobStorage` provider for Sixb `fileRef` payloads.
 
 This package uses Bun's native `S3Client`, so it does not need the AWS SDK or another object storage
 dependency. It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean
@@ -9,18 +9,18 @@ Spaces, Backblaze B2, and Google Cloud Storage's S3-compatible API.
 ## Install
 
 ```bash
-bun add @pario/blob-s3
+bun add @sixb/blob-s3
 ```
 
 ## Usage
 
 ```ts
-import { S3BlobStorage } from "@pario/blob-s3"
+import { S3BlobStorage } from "@sixb/blob-s3"
 
 const blobStorage = new S3BlobStorage({
   bucket: "company-lake",
   region: "us-east-1",
-  basePath: "pario",
+  basePath: "sixb",
 })
 
 const fileRef = await blobStorage.put({
@@ -38,11 +38,11 @@ For S3-compatible providers, pass an `endpoint`:
 
 ```ts
 const blobStorage = new S3BlobStorage({
-  bucket: "pario",
+  bucket: "sixb",
   endpoint: "http://localhost:9000",
   accessKeyId: "minioadmin",
   secretAccessKey: "minioadmin",
-  basePath: "pario",
+  basePath: "sixb",
 })
 ```
 
@@ -51,11 +51,11 @@ when the runtime environment is already configured.
 
 ## Object Layout
 
-Given `basePath: "pario"`, blobs are stored at:
+Given `basePath: "sixb"`, blobs are stored at:
 
 ```text
 s3://<bucket>/
-  pario/
+  sixb/
     blobs/
       sha256/
         <sha256 hex>

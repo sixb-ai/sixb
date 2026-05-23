@@ -1,11 +1,11 @@
-import type { LoadedPario } from "../lib/loadPario"
-import { loadProductionPario } from "../lib/production"
+import type { LoadedSixb } from "../lib/loadSixb"
+import { loadProductionSixb } from "../lib/production"
 import {
   type RunningOrchestratorRuntime,
   runUntilSignal,
   startOrchestratorRuntime,
-  stopParioProviders,
   stopQuietly,
+  stopSixbProviders,
 } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
@@ -16,20 +16,20 @@ export interface OrchestratorOptions {
 export async function runOrchestrator(options: OrchestratorOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionPario({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry })
   const app = renderPersistent(
     <LoadingView
-      title="Starting pario orchestrator"
+      title="Starting sixb orchestrator"
       subtitle={loaded.entry}
       status="Starting orchestrator"
     />
   )
 
-  let pario: LoadedPario | null = loaded.pario
+  let sixb: LoadedSixb | null = loaded.sixb
   let runtime: RunningOrchestratorRuntime | null = null
 
   try {
-    runtime = await startOrchestratorRuntime(pario)
+    runtime = await startOrchestratorRuntime(sixb)
 
     const warnings = [...runtime.warnings]
     if (runtime.orchestratorWorker === null) {
@@ -38,8 +38,8 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
 
     app.rerender(
       <RoleView
-        title="Pario orchestrator started"
-        name={pario.id}
+        title="Sixb orchestrator started"
+        name={sixb.id}
         serviceName="Orchestrator"
         items={[{ label: "Role", value: "event-to-queue dispatcher" }]}
         warnings={warnings}
@@ -50,16 +50,16 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
       app.unmount()
       console.log("\nShutting down orchestrator...")
       await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-      if (pario) {
-        await stopParioProviders(pario)
+      if (sixb) {
+        await stopSixbProviders(sixb)
       }
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)

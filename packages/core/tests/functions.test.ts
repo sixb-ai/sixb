@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { defineFunction, defineObjectType, FunctionValidationError, Pario, prop } from "../src"
+import { defineFunction, defineObjectType, FunctionValidationError, prop, Sixb } from "../src"
 import { createCronMatcher } from "../src/schedules"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -32,14 +32,14 @@ describe("function runtime", () => {
       .cron("*/5 * * * *")
       .run(async () => {})
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       ...createTestRuntimeDeps(),
       functions: [fn1, fn2],
     })
 
-    await expect(pario.startFunctions()).rejects.toBeInstanceOf(FunctionValidationError)
-    await expect(pario.startFunctions()).rejects.toThrow("Duplicate function id 'duplicate-id'")
+    await expect(sixb.startFunctions()).rejects.toBeInstanceOf(FunctionValidationError)
+    await expect(sixb.startFunctions()).rejects.toThrow("Duplicate function id 'duplicate-id'")
   })
 
   test("validates empty function id", () => {

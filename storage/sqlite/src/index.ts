@@ -2,7 +2,7 @@
 // source.
 /// <reference path="./sql.d.ts" />
 
-import type { MigrationCapableStorage, StorageMigrator } from "@pario/core"
+import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { createSqliteStorageMigrators, sqliteStoragePath } from "./migrations"
@@ -23,16 +23,16 @@ export interface SqliteStorageOptions {
 }
 
 /**
- * SQLite storage provider for Pario.
+ * SQLite storage provider for Sixb.
  *
  * Bundles object, timeseries, auth, sync run, pipeline run, projection run, workflow run, webhook
  * run, and webhook delivery storage backed by SQLite.
  *
  * Usage:
  * ```ts
- * const storage = new SqliteStorage({ path: ".pario" })
+ * const storage = new SqliteStorage({ path: ".sixb" })
  *
- * export const pario = createPario({
+ * export const sixb = createSixb({
  *   broker: new InMemoryBroker(),
  *   storage,
  * })

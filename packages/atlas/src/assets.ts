@@ -1,7 +1,7 @@
 import { access, mkdir, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { renderParioBrowserRuntimeScript } from "@pario/client/browser"
-import type { AuthSessionAudience } from "@pario/core"
+import { renderSixbBrowserRuntimeScript } from "@sixb/client/browser"
+import type { AuthSessionAudience } from "@sixb/core"
 
 export interface BuiltInUiBundle {
   outdir: string
@@ -31,7 +31,7 @@ export interface BuiltInUiShellConfig extends BuiltInUiRuntimeConfig {
 let readyBundle: Promise<BuiltInUiBundle> | null = null
 const packageRoot = join(import.meta.dir, "..")
 const sourceDir = join(packageRoot, "src")
-const generatedDir = join(packageRoot, ".pario")
+const generatedDir = join(packageRoot, ".sixb")
 
 export async function ensureBuiltInUiBundle(
   options: BuiltInUiBundleOptions = {}
@@ -89,7 +89,7 @@ export async function buildBuiltInUiBundle(
   const exitCode = await proc.exited
   if (exitCode !== 0) {
     const stderr = await new Response(proc.stderr).text()
-    throw new Error(`[ParioAtlas] Failed to build built-in UI bundle: ${stderr.trim()}`)
+    throw new Error(`[SixbAtlas] Failed to build built-in UI bundle: ${stderr.trim()}`)
   }
 
   return await resolveBuiltInUiBundle(outdir)
@@ -104,7 +104,7 @@ export async function loadBuiltInUiBundle(
     await access(outdir)
   } catch {
     throw new Error(
-      `[ParioAtlas] Built Atlas UI assets are missing in ${outdir}. Run \`pario build\` before serving Atlas in production.`
+      `[SixbAtlas] Built Atlas UI assets are missing in ${outdir}. Run \`sixb build\` before serving Atlas in production.`
     )
   }
 
@@ -112,7 +112,7 @@ export async function loadBuiltInUiBundle(
 }
 
 export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
-  const runtimeConfigScript = renderParioBrowserRuntimeScript({
+  const runtimeConfigScript = renderSixbBrowserRuntimeScript({
     api: { baseUrl: config.apiBaseUrl },
     auth: { audience: config.audience, enabled: config.authEnabled },
   })
@@ -126,7 +126,7 @@ export function renderBuiltInUiShell(config: BuiltInUiShellConfig): string {
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
-    <title>Pario Atlas</title>
+    <title>Sixb Atlas</title>
     <link rel="stylesheet" href="${config.stylesheetPath}" />
     ${runtimeConfigScript}
     <script type="module" src="${config.scriptPath}"></script>
@@ -144,8 +144,8 @@ async function resolveBuiltInUiBundle(outdir: string): Promise<BuiltInUiBundle> 
 
   return {
     outdir,
-    scriptPath: `/__pario/${scriptFile}`,
-    stylesheetPath: `/__pario/${stylesheetFile}`,
+    scriptPath: `/__sixb/${scriptFile}`,
+    stylesheetPath: `/__sixb/${stylesheetFile}`,
   }
 }
 
@@ -155,7 +155,7 @@ function findBuiltAsset(files: readonly string[], entryName: string, extension: 
 
   if (matches.length !== 1) {
     throw new Error(
-      `[ParioAtlas] Expected one ${entryName}.${extension} bundle in the built Atlas UI output, found ${matches.length}. Run \`pario build\`.`
+      `[SixbAtlas] Expected one ${entryName}.${extension} bundle in the built Atlas UI output, found ${matches.length}. Run \`sixb build\`.`
     )
   }
 

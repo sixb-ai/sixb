@@ -1,5 +1,5 @@
 {
-  "name": "@pario/example-panasonic-ac",
+  "name": "@sixb/example-panasonic-ac",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,14 +9,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pario/app": "workspace:*",
-    "@pario/blob-local": "workspace:*",
-    "@pario/broker-nats": "workspace:*",
-    "@pario/client": "workspace:*",
-    "@pario/core": "workspace:*",
-    "@pario/connector-rest": "workspace:*",
-    "@pario/lake-local": "workspace:*",
-    "@pario/pg": "workspace:*",
+    "@sixb/app": "workspace:*",
+    "@sixb/blob-local": "workspace:*",
+    "@sixb/broker-nats": "workspace:*",
+    "@sixb/client": "workspace:*",
+    "@sixb/core": "workspace:*",
+    "@sixb/connector-rest": "workspace:*",
+    "@sixb/lake-local": "workspace:*",
+    "@sixb/pg": "workspace:*",
     "@tanstack/react-query": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

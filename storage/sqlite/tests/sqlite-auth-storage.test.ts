@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runAuthStorageContractSuite } from "@pario/core/testing"
+import { runAuthStorageContractSuite } from "@sixb/core/testing"
 import { SqliteAuthStorage, SqliteStorage } from "../src"
 
 runAuthStorageContractSuite("SqliteAuthStorage", {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 import { renderDuckLakeSqlTransformSql } from "../src/internal/sql-transform-relations"
 
 describe("DuckLake SQL transform relations", () => {
@@ -16,7 +16,7 @@ describe("DuckLake SQL transform relations", () => {
     })
 
     expect(sql).toBe(
-      'select * from (SELECT * FROM "lake".main."pario__ds__raw__crm__customers" AT (VERSION => 42)) c'
+      'select * from (SELECT * FROM "lake".main."sixb__ds__raw__crm__customers" AT (VERSION => 42)) c'
     )
   })
 
@@ -33,14 +33,14 @@ describe("DuckLake SQL transform relations", () => {
       },
       sql: ({ orders }) => {
         placeholder = String(orders)
-        expect(placeholder).toStartWith("__pario_sql_transform_relation_")
-        expect(placeholder).not.toContain("pario__ds__raw__erp__orders")
+        expect(placeholder).toStartWith("__sixb_sql_transform_relation_")
+        expect(placeholder).not.toContain("sixb__ds__raw__erp__orders")
         return `select * from ${orders}`
       },
     })
 
     expect(sql).toBe(
-      'select * from (SELECT * FROM "pario_lake".main."pario__ds__raw__erp__orders" AT (VERSION => 7))'
+      'select * from (SELECT * FROM "sixb_lake".main."sixb__ds__raw__erp__orders" AT (VERSION => 7))'
     )
     expect(sql).not.toContain(placeholder)
   })
@@ -60,7 +60,7 @@ describe("DuckLake SQL transform relations", () => {
     })
 
     expect(sql).toBe(
-      'select * from (SELECT * FROM "pario_lake".main."pario__ds__raw__crm__customers" AT (VERSION => 8))'
+      'select * from (SELECT * FROM "sixb_lake".main."sixb__ds__raw__crm__customers" AT (VERSION => 8))'
     )
     expect(sql).not.toContain(sourceName)
   })
@@ -80,7 +80,7 @@ describe("DuckLake SQL transform relations", () => {
     })
 
     expect(sql).toBe(
-      'select * from (SELECT * FROM "pario_lake".main."pario__ds__raw__crm__customers" AT (VERSION => 9))'
+      'select * from (SELECT * FROM "sixb_lake".main."sixb__ds__raw__crm__customers" AT (VERSION => 9))'
     )
   })
 
@@ -104,7 +104,7 @@ describe("DuckLake SQL transform relations", () => {
       renderDuckLakeSqlTransformSql({
         options: {},
         sources: {},
-        sql: () => "select * from __pario_sql_transform_relation_not_real__",
+        sql: () => "select * from __sixb_sql_transform_relation_not_real__",
       })
     ).toThrow("unresolved relation placeholder")
   })

@@ -42,8 +42,8 @@ export async function startRoleUntilReadyThenStop(options: {
     cwd: options.cwd,
     env: {
       ...process.env,
-      PARIO_CLI_TEST_LOG: options.logPath,
-      PARIO_CLI_TEST_READY_LOG: options.logPath,
+      SIXB_CLI_TEST_LOG: options.logPath,
+      SIXB_CLI_TEST_READY_LOG: options.logPath,
     },
     stdout: "pipe",
     stderr: "pipe",

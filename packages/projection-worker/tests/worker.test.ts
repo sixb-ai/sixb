@@ -12,11 +12,11 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type LakeStorage,
-  Pario,
   type ProjectionDefinition,
   type ProjectionRunStorage,
   prop,
-} from "@pario/core"
+  Sixb,
+} from "@sixb/core"
 import { ProjectionWorker } from "../src"
 
 const Room = defineObjectType({
@@ -43,12 +43,12 @@ function createDeps() {
   }
 }
 
-function createPario(options: {
+function createSixb(options: {
   datasets?: readonly DatasetDefinition[]
   projections?: readonly ProjectionDefinition[]
 }) {
   const deps = createDeps()
-  return new Pario({
+  return new Sixb({
     id: "projection-worker-tests",
     ontology: [Room],
     ...deps,
@@ -102,15 +102,15 @@ async function waitFor<T>(
 
 describe("ProjectionWorker", () => {
   test("processes queued projection jobs end-to-end", async () => {
-    const pario = createPario({
+    const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],
     })
-    const version = await commitDatasetVersion(pario.lakeStorage, roomsDataset, [
+    const version = await commitDatasetVersion(sixb.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen" },
     ])
-    const [queued] = await pario.queues.projections.enqueue({
-      projectId: pario.id,
+    const [queued] = await sixb.queues.projections.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "projection.run.requested",
@@ -124,27 +124,27 @@ describe("ProjectionWorker", () => {
       ],
     })
 
-    const worker = new ProjectionWorker(pario)
+    const worker = new ProjectionWorker(sixb)
     await worker.start()
 
     try {
       const runId = `${queued!.id}:attempt:1`
-      const projectionRunsStorage = requireProjectionRunsStorage(pario)
+      const projectionRunsStorage = requireProjectionRunsStorage(sixb)
       const run = await waitFor(
-        () => projectionRunsStorage.getById({ projectId: pario.id, id: runId }),
+        () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
         (value) => value?.status === "succeeded"
       )
       expect(run?.objectsUpserted).toBe(1)
 
-      const room = await pario.storage.objects.getByPrimaryId({
-        projectId: pario.id,
+      const room = await sixb.storage.objects.getByPrimaryId({
+        projectId: sixb.id,
         objectTypeId: "Room",
         primaryId: "r1",
       })
       expect(room?.properties.name).toBe("Kitchen")
 
-      const claimed = await pario.queues.projections.claim({
-        projectId: pario.id,
+      const claimed = await sixb.queues.projections.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
@@ -154,13 +154,13 @@ describe("ProjectionWorker", () => {
   })
 
   test("fails the queue job and run when execution fails", async () => {
-    const pario = createPario({
+    const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],
     })
-    await pario.lakeStorage.createDataset(roomsDataset)
-    const [queued] = await pario.queues.projections.enqueue({
-      projectId: pario.id,
+    await sixb.lakeStorage.createDataset(roomsDataset)
+    const [queued] = await sixb.queues.projections.enqueue({
+      projectId: sixb.id,
       jobs: [
         {
           type: "projection.run.requested",
@@ -174,20 +174,20 @@ describe("ProjectionWorker", () => {
       ],
     })
 
-    const worker = new ProjectionWorker(pario)
+    const worker = new ProjectionWorker(sixb)
     await worker.start()
 
     try {
       const runId = `${queued!.id}:attempt:1`
-      const projectionRunsStorage = requireProjectionRunsStorage(pario)
+      const projectionRunsStorage = requireProjectionRunsStorage(sixb)
       const run = await waitFor(
-        () => projectionRunsStorage.getById({ projectId: pario.id, id: runId }),
+        () => projectionRunsStorage.getById({ projectId: sixb.id, id: runId }),
         (value) => value?.status === "failed"
       )
       expect(run?.errorMessage).toContain("was not found")
 
-      const claimed = await pario.queues.projections.claim({
-        projectId: pario.id,
+      const claimed = await sixb.queues.projections.claim({
+        projectId: sixb.id,
         workerId: "observer",
       })
       expect(claimed).toHaveLength(0)
@@ -197,31 +197,31 @@ describe("ProjectionWorker", () => {
   })
 
   test("requires registered projections and projection run storage", () => {
-    expect(() => new ProjectionWorker(createPario({ datasets: [roomsDataset] }))).toThrow(
+    expect(() => new ProjectionWorker(createSixb({ datasets: [roomsDataset] }))).toThrow(
       "No projection definitions"
     )
 
-    const pario = createPario({
+    const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],
     })
     const withoutProjectionRuns = {
-      id: pario.id,
-      projectId: pario.projectId,
-      ontology: pario.ontology,
-      actionRegistry: pario.actionRegistry,
-      events: pario.events,
+      id: sixb.id,
+      projectId: sixb.projectId,
+      ontology: sixb.ontology,
+      actionRegistry: sixb.actionRegistry,
+      events: sixb.events,
       storage: {
-        ...pario.storage,
+        ...sixb.storage,
         projectionRuns: undefined,
       },
-      lakeStorage: pario.lakeStorage,
-      blobStorage: pario.blobStorage,
-      queues: pario.queues,
-      getObjectProjections: () => pario.getObjectProjections(),
-      getLinkProjections: () => pario.getLinkProjections(),
-      getDatasetById: (datasetId: string) => pario.getDatasetById(datasetId),
-      getProjectionById: (projectionId: string) => pario.getProjectionById(projectionId),
+      lakeStorage: sixb.lakeStorage,
+      blobStorage: sixb.blobStorage,
+      queues: sixb.queues,
+      getObjectProjections: () => sixb.getObjectProjections(),
+      getLinkProjections: () => sixb.getLinkProjections(),
+      getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
+      getProjectionById: (projectionId: string) => sixb.getProjectionById(projectionId),
     }
 
     expect(() => new ProjectionWorker(withoutProjectionRuns)).toThrow("storage.projectionRuns")

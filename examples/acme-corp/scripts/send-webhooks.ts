@@ -84,8 +84,7 @@ function argValue(name: string): string | undefined {
 }
 
 function apiBaseUrl(): string {
-  const raw =
-    argValue("url") ?? process.env.PARIO_API_URL ?? process.env.PARIO_URL ?? DEFAULT_API_URL
+  const raw = argValue("url") ?? process.env.SIXB_API_URL ?? process.env.SIXB_URL ?? DEFAULT_API_URL
   const url = raw.replace(/\/+$/, "")
   return url.endsWith("/api") ? url : `${url}/api`
 }

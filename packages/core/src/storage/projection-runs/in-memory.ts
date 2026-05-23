@@ -29,14 +29,14 @@ function cloneProjectionRunRecord(record: ProjectionRunRecord): ProjectionRunRec
 
 function assertNonEmpty(value: string, fieldName: string): void {
   if (value.trim().length === 0) {
-    throw new ProjectionRunError(`[Pario] Projection run ${fieldName} must not be empty.`)
+    throw new ProjectionRunError(`[Sixb] Projection run ${fieldName} must not be empty.`)
   }
 }
 
 function assertCounter(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new ProjectionRunError(
-      `[Pario] Projection run ${fieldName} must be a non-negative integer.`
+      `[Sixb] Projection run ${fieldName} must be a non-negative integer.`
     )
   }
 }
@@ -49,7 +49,7 @@ function assertOptionalCounter(value: number | undefined, fieldName: string): vo
 
 function assertOptionalWindowValue(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new ProjectionRunError(`[Pario] Projection run list ${fieldName} must be >= 0.`)
+    throw new ProjectionRunError(`[Sixb] Projection run list ${fieldName} must be >= 0.`)
   }
 }
 
@@ -96,7 +96,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     const key = projectionRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
       throw new ProjectionRunError(
-        `[Pario] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Projection run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -196,13 +196,13 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     const record = this.rows.get(projectionRunKey(projectId, id))
     if (!record) {
       throw new ProjectionRunError(
-        `[Pario] Projection run '${id}' not found for project '${projectId}'.`
+        `[Sixb] Projection run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
       throw new ProjectionRunError(
-        `[Pario] Projection run '${id}' for project '${projectId}' is already terminal.`
+        `[Sixb] Projection run '${id}' for project '${projectId}' is already terminal.`
       )
     }
 

@@ -29,7 +29,7 @@ import type {
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowRunError(`[Pario] Workflow run ${fieldName} must be a non-negative integer.`)
+    throw new WorkflowRunError(`[Sixb] Workflow run ${fieldName} must be a non-negative integer.`)
   }
 }
 
@@ -49,7 +49,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
       throw new WorkflowRunError(
-        `[Pario] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -75,13 +75,13 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     if (existing) {
       if (existing.status !== "queued") {
         throw new WorkflowRunError(
-          `[Pario] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          `[Sixb] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
       if (existing.workflowId !== input.workflowId) {
         throw new WorkflowRunError(
-          `[Pario] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflowId}'.`
+          `[Sixb] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflowId}'.`
         )
       }
 
@@ -201,7 +201,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const record = this.runs.get(storageKey(projectId, id))
     if (!record) {
       throw new WorkflowRunError(
-        `[Pario] Workflow run '${id}' not found for project '${projectId}'.`
+        `[Sixb] Workflow run '${id}' not found for project '${projectId}'.`
       )
     }
 
@@ -212,7 +212,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "running") {
       throw new WorkflowRunError(
-        `[Pario] Workflow run '${id}' for project '${projectId}' must be running.`
+        `[Sixb] Workflow run '${id}' for project '${projectId}' must be running.`
       )
     }
 
@@ -223,7 +223,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "waiting") {
       throw new WorkflowRunError(
-        `[Pario] Workflow run '${id}' for project '${projectId}' must be waiting.`
+        `[Sixb] Workflow run '${id}' for project '${projectId}' must be waiting.`
       )
     }
 
@@ -234,7 +234,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "running" && record.status !== "waiting") {
       throw new WorkflowRunError(
-        `[Pario] Workflow run '${id}' for project '${projectId}' is already terminal.`
+        `[Sixb] Workflow run '${id}' for project '${projectId}' is already terminal.`
       )
     }
 
@@ -256,7 +256,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     }
 
     throw new WorkflowRunError(
-      `[Pario] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${record.status}'.`
+      `[Sixb] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${record.status}'.`
     )
   }
 }
@@ -280,14 +280,14 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     )
     if (workflowRun.workflowId !== input.workflowId) {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflowId}'.`
+        `[Sixb] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflowId}'.`
       )
     }
 
     const key = storageKey(input.projectId, input.id)
     if (this.nodes.has(key)) {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -397,13 +397,13 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     const record = this.nodes.get(storageKey(projectId, id))
     if (!record) {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${id}' not found for project '${projectId}'.`
+        `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running") {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${id}' for project '${projectId}' must be running.`
+        `[Sixb] Workflow node run '${id}' for project '${projectId}' must be running.`
       )
     }
 
@@ -414,13 +414,13 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     const record = this.nodes.get(storageKey(projectId, id))
     if (!record) {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${id}' not found for project '${projectId}'.`
+        `[Sixb] Workflow node run '${id}' not found for project '${projectId}'.`
       )
     }
 
     if (record.status !== "running" && record.status !== "waiting") {
       throw new WorkflowRunError(
-        `[Pario] Workflow node run '${id}' for project '${projectId}' is already terminal.`
+        `[Sixb] Workflow node run '${id}' for project '${projectId}' is already terminal.`
       )
     }
 

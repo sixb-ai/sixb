@@ -6,10 +6,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
+  Sixb,
   type StorageMigrator,
-} from "@pario/core"
+} from "@sixb/core"
 
 const Room = defineObjectType({
   id: "Room",
@@ -21,13 +21,13 @@ const Room = defineObjectType({
   ],
 })
 
-interface FixtureParioOptions {
+interface FixtureSixbOptions {
   projectId: string
   logStorageMigrate?: boolean
 }
 
 function logFixtureEvent(entry: Record<string, unknown>): void {
-  const logPath = process.env.PARIO_CLI_TEST_LOG
+  const logPath = process.env.SIXB_CLI_TEST_LOG
   if (!logPath) return
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf-8")
 }
@@ -58,8 +58,8 @@ function createFixtureStorage(logStorageMigrate: boolean) {
   return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 }
 
-export function createFixturePario(options: FixtureParioOptions) {
-  return new Pario({
+export function createFixtureSixb(options: FixtureSixbOptions) {
+  return new Sixb({
     id: options.projectId,
     ontology: [Room],
     broker: new InMemoryBroker(),

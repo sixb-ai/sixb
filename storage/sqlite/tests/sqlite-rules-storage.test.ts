@@ -3,7 +3,7 @@ import type {
   RuleEventSubject,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import { SqliteRulesStorage, SqliteStorage } from "../src"
 
 const defaultSubject: RuleEventSubject = {

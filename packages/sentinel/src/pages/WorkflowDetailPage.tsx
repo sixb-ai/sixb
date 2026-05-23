@@ -1,4 +1,4 @@
-import { getWorkflowOptions, listWorkflowRunsInfiniteOptions } from "@pario/client/hooks"
+import { getWorkflowOptions, listWorkflowRunsInfiniteOptions } from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -14,7 +14,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { CalendarClock, GitBranch, History, Play, Webhook } from "lucide-react"
 import type { Ref } from "react"

@@ -1,8 +1,8 @@
-import { LocalBlobStorage } from "@pario/blob-local"
-import { NatsBroker } from "@pario/broker-nats"
-import { createPario, InMemoryQueues } from "@pario/core"
-import { LocalLakeStorage } from "@pario/lake-local"
-import { PostgresStorage } from "@pario/pg"
+import { LocalBlobStorage } from "@sixb/blob-local"
+import { NatsBroker } from "@sixb/broker-nats"
+import { createSixb, InMemoryQueues } from "@sixb/core"
+import { LocalLakeStorage } from "@sixb/lake-local"
+import { PostgresStorage } from "@sixb/pg"
 
 // Required environment variables:
 //   PANASONIC_EMAIL    — Panasonic ID email
@@ -13,15 +13,15 @@ import { PostgresStorage } from "@pario/pg"
 const pg = new PostgresStorage({
   connectionString: process.env.DATABASE_URL!,
 })
-const blobStorage = new LocalBlobStorage({ basePath: ".pario" })
+const blobStorage = new LocalBlobStorage({ basePath: ".sixb" })
 
-export const pario = createPario({
+export const sixb = createSixb({
   id: "panasonic-ac",
   broker: new NatsBroker({
     connection: { servers: process.env.NATS_URL ?? "nats://localhost:4222" },
   }),
   storage: pg,
-  lakeStorage: new LocalLakeStorage({ path: ".pario/lake" }),
+  lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
   blobStorage,
   queues: new InMemoryQueues(),
 })

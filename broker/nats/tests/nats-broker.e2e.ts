@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runBrokerContractSuite } from "@pario/core/testing"
+import { runBrokerContractSuite } from "@sixb/core/testing"
 import { createTestBroker } from "./helpers"
 
 runBrokerContractSuite("NatsBroker", {

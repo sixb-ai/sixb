@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { runLakeStorageContractSuite } from "@pario/core/testing"
+import { runLakeStorageContractSuite } from "@sixb/core/testing"
 import type { DuckLakeStorage } from "../src"
 import { createLocalDuckLakeStorage } from "./test-utils"
 
@@ -11,7 +11,7 @@ runLakeStorageContractSuite("DuckLakeStorage LakeStorage contract", {
   schemaEvolution: "addNullableColumns",
   missingVersionId: "ducklake:999999",
   async createStorage() {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-contract-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-contract-"))
     const storage = createLocalDuckLakeStorage(rootDir)
     roots.set(storage, rootDir)
     return storage

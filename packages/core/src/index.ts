@@ -317,12 +317,12 @@ export type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
-  ParioAuthConfig,
   Principal,
   ResolvedAuthConfig,
   RevokeInvitationInput,
   RevokeInvitationResult,
   SecurityContext,
+  SixbAuthConfig,
   UnauthenticatedAuthSession,
 } from "./auth"
 export {
@@ -822,7 +822,7 @@ export {
 
 export type {
   BatchItemResult,
-  CreateParioOptions,
+  CreateSixbOptions,
   ListResult,
   ObjectByIdHandle,
   ObjectSet,
@@ -830,11 +830,11 @@ export type {
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
-  ParioInstance,
-  ParioOptions,
-  ParioRuntimeContext,
   RegisteredObjectType,
   RegisteredValueTypes,
+  SixbInstance,
+  SixbOptions,
+  SixbRuntimeContext,
   TelemetryAppender,
   TelemetryAppendInput,
   TelemetryPropertyToken,
@@ -843,15 +843,15 @@ export type {
 export {
   ConnectorError,
   ConnectorNotFoundError,
-  createPario,
+  createSixb,
   FunctionError,
   FunctionValidationError,
   ObjectError,
   ObjectNotFoundError,
   OntologyValidationError,
-  Pario,
   ProjectionValidationError,
   RuntimeError,
+  Sixb,
   SyncValidationError,
 } from "./runtime"
 

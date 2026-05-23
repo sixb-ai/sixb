@@ -35,17 +35,17 @@ describe("DuckLake SQL rendering", () => {
         host: "db.example.com",
         port: 5432,
         database: "duck lake",
-        user: "pario",
+        user: "sixb",
         password: "pa'ss\\word",
         sslMode: "require",
-        applicationName: "pario worker",
+        applicationName: "sixb worker",
         connectTimeoutSeconds: 10,
         parameters: {
           keepalives: true,
         },
       })
     ).toBe(
-      "dbname='duck lake' host='db.example.com' port='5432' user='pario' password='pa\\'ss\\\\word' sslmode='require' application_name='pario worker' connect_timeout='10' keepalives='true'"
+      "dbname='duck lake' host='db.example.com' port='5432' user='sixb' password='pa\\'ss\\\\word' sslmode='require' application_name='sixb worker' connect_timeout='10' keepalives='true'"
     )
 
     expect(() =>
@@ -69,14 +69,14 @@ describe("DuckLake SQL rendering", () => {
           database: "ducklake",
           user: "postgres",
           password: "test",
-          metadataSchema: "pario_meta",
+          metadataSchema: "sixb_meta",
         },
         dataPath: "s3://bucket/lake",
         createIfNotExists: false,
         readOnly: true,
       })
     ).toBe(
-      "ATTACH 'ducklake:postgres:dbname=''ducklake'' host=''127.0.0.1'' port=''5432'' user=''postgres'' password=''test''' AS \"lake\" (DATA_PATH 's3://bucket/lake', CREATE_IF_NOT_EXISTS false, READ_ONLY, METADATA_SCHEMA 'pario_meta')"
+      "ATTACH 'ducklake:postgres:dbname=''ducklake'' host=''127.0.0.1'' port=''5432'' user=''postgres'' password=''test''' AS \"lake\" (DATA_PATH 's3://bucket/lake', CREATE_IF_NOT_EXISTS false, READ_ONLY, METADATA_SCHEMA 'sixb_meta')"
     )
 
     expect(
@@ -84,11 +84,11 @@ describe("DuckLake SQL rendering", () => {
         catalog: {
           type: "custom",
           uri: "custom:catalog",
-          metadataParameters: { sslmode: "require", application_name: "pario" },
+          metadataParameters: { sslmode: "require", application_name: "sixb" },
         },
       })
     ).toBe(
-      "ATTACH 'ducklake:custom:catalog' AS \"pario_lake\" (CREATE_IF_NOT_EXISTS true, METADATA_PARAMETERS MAP {'sslmode': 'require', 'application_name': 'pario'})"
+      "ATTACH 'ducklake:custom:catalog' AS \"sixb_lake\" (CREATE_IF_NOT_EXISTS true, METADATA_PARAMETERS MAP {'sslmode': 'require', 'application_name': 'sixb'})"
     )
   })
 
@@ -100,7 +100,7 @@ describe("DuckLake SQL rendering", () => {
         },
         "ducklake_table"
       )
-    ).toBe('"__ducklake_metadata_pario_lake"."main"."ducklake_table"')
+    ).toBe('"__ducklake_metadata_sixb_lake"."main"."ducklake_table"')
 
     expect(
       duckLakeMetadataTableName(
@@ -110,12 +110,12 @@ describe("DuckLake SQL rendering", () => {
             type: "postgres",
             host: "127.0.0.1",
             database: "postgres",
-            metadataSchema: "pario_meta",
+            metadataSchema: "sixb_meta",
           },
         },
         "ducklake_snapshot"
       )
-    ).toBe('"__ducklake_metadata_lake"."pario_meta"."ducklake_snapshot"')
+    ).toBe('"__ducklake_metadata_lake"."sixb_meta"."ducklake_snapshot"')
   })
 
   test("builds PostgreSQL metadata pool configuration SQL", () => {
@@ -183,8 +183,8 @@ describe("DuckLake SQL rendering", () => {
       buildCreateSecretSql({
         type: "s3",
         name: "minio",
-        keyId: "pario",
-        secret: "pario-secret",
+        keyId: "sixb",
+        secret: "sixb-secret",
         region: "us-east-1",
         endpoint: "127.0.0.1:9000",
         urlStyle: "path",
@@ -192,7 +192,7 @@ describe("DuckLake SQL rendering", () => {
         scope: "s3://bucket",
       })
     ).toBe(
-      "CREATE OR REPLACE TEMPORARY SECRET \"minio\" (TYPE s3, KEY_ID 'pario', SECRET 'pario-secret', REGION 'us-east-1', ENDPOINT '127.0.0.1:9000', URL_STYLE 'path', USE_SSL false, SCOPE 's3://bucket')"
+      "CREATE OR REPLACE TEMPORARY SECRET \"minio\" (TYPE s3, KEY_ID 'sixb', SECRET 'sixb-secret', REGION 'us-east-1', ENDPOINT '127.0.0.1:9000', URL_STYLE 'path', USE_SSL false, SCOPE 's3://bucket')"
     )
 
     expect(
@@ -245,7 +245,7 @@ describe("DuckLake SQL rendering", () => {
   })
 
   test("normalizes local catalog coordination keys", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-catalog-key-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-catalog-key-"))
 
     try {
       await mkdir(join(rootDir, "alias"))

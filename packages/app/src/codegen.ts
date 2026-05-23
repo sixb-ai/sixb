@@ -4,7 +4,7 @@ import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
 /**
- * Generates `.pario/generated/routes.ts` with lazy-loaded route imports.
+ * Generates `.sixb/generated/routes.ts` with lazy-loaded route imports.
  */
 export async function generateRouteManifest(
   routes: PageRoute[],
@@ -33,8 +33,8 @@ ${imports}
 
 /**
  * Generates the app entry files:
- * - `.pario/generated/index.html` — HTML shell
- * - `.pario/generated/main.tsx` — React entry with BrowserRouter
+ * - `.sixb/generated/index.html` — HTML shell
+ * - `.sixb/generated/main.tsx` — React entry with BrowserRouter
  */
 export async function generateAppEntry(
   projectRoot: string,
@@ -77,18 +77,18 @@ import { createRoot } from "react-dom/client"
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
-  configureParioBrowserClient,
-  readParioBrowserRuntimeConfig,
-  requireParioBrowserAuthSession,
-} from "@pario/client/browser"
+  configureSixbBrowserClient,
+  readSixbBrowserRuntimeConfig,
+  requireSixbBrowserAuthSession,
+} from "@sixb/client/browser"
 import { routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
-const runtimeConfig = readParioBrowserRuntimeConfig({ audience: "app" })
-const browserClient = configureParioBrowserClient(runtimeConfig)
+const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
+const browserClient = configureSixbBrowserClient(runtimeConfig)
 const authSession = runtimeConfig.auth.enabled
-  ? await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+  ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
   : null
 const canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
 
@@ -102,7 +102,7 @@ const queryClient = new QueryClient({
 })
 
 const appMetadata = {
-  title: "Pario",
+  title: "Sixb",
   description: "",
   favicon: "",
   ${metadataSpread}
@@ -171,7 +171,7 @@ if (canRenderApp) {
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Pario</title>
+    <title>Sixb</title>
     ${runtimeConfigScript}
     <style>
       :root {

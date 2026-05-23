@@ -1,4 +1,4 @@
-import { actionParam, defineAction } from "@pario/core"
+import { actionParam, defineAction } from "@sixb/core"
 import { getRokuApi } from "../lib/rokuApi"
 import { Television } from "../ontology/television"
 
@@ -12,11 +12,11 @@ export const launchApp = defineAction("launchApp", {
       return { error: "launchApp requires params.appId" }
     }
   })
-  .run(async ({ params, target, pario }) => {
-    const client = await getRokuApi(pario, target.properties.controlHost)
+  .run(async ({ params, target, sixb }) => {
+    const client = await getRokuApi(sixb, target.properties.controlHost)
     await client.launch(params.appId)
 
-    await pario.objects(Television).upsert({
+    await sixb.objects(Television).upsert({
       properties: {
         ...target.properties,
         id: target.primaryId,

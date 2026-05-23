@@ -8,7 +8,7 @@ const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
 function fixtureEntry(name: string): string {
-  return resolve(import.meta.dir, "fixtures", name, "pario.config.ts")
+  return resolve(import.meta.dir, "fixtures", name, "sixb.config.ts")
 }
 
 const tempDirs: string[] = []
@@ -23,7 +23,7 @@ afterEach(async () => {
 })
 
 async function tempLogPath(): Promise<string> {
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-wg-"))
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-wg-"))
   tempDirs.push(tempDir)
   return join(tempDir, "operations.log")
 }
@@ -40,7 +40,7 @@ async function runOnce(
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
     cwd: repoRoot,
-    env: { ...process.env, PARIO_CLI_TEST_LOG: logPath },
+    env: { ...process.env, SIXB_CLI_TEST_LOG: logPath },
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -52,7 +52,7 @@ async function runOnce(
   }
 }
 
-describe("pario worker-group", () => {
+describe("sixb worker-group", () => {
   test("rejects unknown worker types", async () => {
     const result = await runOnce(["worker-group", "missing"], "valid-project")
 
@@ -60,7 +60,7 @@ describe("pario worker-group", () => {
     expect(result.stdout).toContain("Unknown worker 'missing'")
   })
 
-  test("rejects InMemoryQueues like pario worker", async () => {
+  test("rejects InMemoryQueues like sixb worker", async () => {
     const result = await runOnce(["worker-group"], "valid-project")
 
     expect(result.exitCode).toBe(1)

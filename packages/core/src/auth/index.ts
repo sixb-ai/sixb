@@ -83,12 +83,12 @@ export type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
-  ParioAuthConfig,
   Principal,
   ResolvedAuthConfig,
   RevokeInvitationInput,
   RevokeInvitationResult,
   SecurityContext,
+  SixbAuthConfig,
   UnauthenticatedAuthSession,
 } from "./types"
 export {

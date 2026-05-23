@@ -5,15 +5,15 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   type ConnectorDefinition,
-  createPario,
+  createSixb,
   defineConnector,
   defineWebhook,
   InMemoryObjectStorage,
   InMemoryStorage,
   InMemoryTimeseriesStorage,
   type OntologySource,
-  Pario,
-  type ParioOptions,
+  Sixb,
+  type SixbOptions,
   type Storage,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -54,12 +54,12 @@ describe("webhooks", () => {
   })
 
   test("rejects invalid webhook builders early", () => {
-    expect(() => defineWebhook("")).toThrow("[Pario] Webhook id must not be empty.")
+    expect(() => defineWebhook("")).toThrow("[Sixb] Webhook id must not be empty.")
     expect(() =>
       defineWebhook("events")
         .post()
         .json({ parse: "nope" } as never)
-    ).toThrow("[Pario] Webhook JSON schema must provide parse(value).")
+    ).toThrow("[Sixb] Webhook JSON schema must provide parse(value).")
   })
 
   test("lists and resolves connector-scoped webhooks", () => {
@@ -75,16 +75,16 @@ describe("webhooks", () => {
       },
     })
 
-    const pario = createRuntime([connector])
-    const [registered] = pario.listWebhooks()
+    const sixb = createRuntime([connector])
+    const [registered] = sixb.listWebhooks()
 
     expect(registered).toEqual({
       connector,
       webhook,
       route: "/api/webhooks/github/events",
     })
-    expect(pario.getWebhookById("github", "events")).toBe(registered)
-    expect(pario.getWebhookById("github", "missing")).toBeNull()
+    expect(sixb.getWebhookById("github", "events")).toBe(registered)
+    expect(sixb.getWebhookById("github", "missing")).toBeNull()
   })
 
   test("fails startup on duplicate webhook ids per connector", () => {
@@ -106,7 +106,7 @@ describe("webhooks", () => {
     })
 
     expect(() => createRuntime([connector])).toThrow(
-      "[Pario] Duplicate webhook id 'events' for connector 'github'."
+      "[Sixb] Duplicate webhook id 'events' for connector 'github'."
     )
   })
 
@@ -137,7 +137,7 @@ describe("webhooks", () => {
     })
 
     expect(() => createRuntime([first, second])).toThrow(
-      "[Pario] Duplicate webhook route '/api/webhooks/edge/gateway/telemetry'"
+      "[Sixb] Duplicate webhook route '/api/webhooks/edge/gateway/telemetry'"
     )
   })
 
@@ -161,7 +161,7 @@ describe("webhooks", () => {
         objects: new InMemoryObjectStorage(),
         timeseries: new InMemoryTimeseriesStorage(),
       })
-    ).toThrow("[Pario] Webhook idempotency requires storage.webhookDeliveries")
+    ).toThrow("[Sixb] Webhook idempotency requires storage.webhookDeliveries")
   })
 
   test("discovers webhooks through discovered connectors", async () => {
@@ -194,28 +194,28 @@ export const edgeGateway = defineConnector(
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.listWebhooks().map((webhook) => webhook.route)).toEqual([
+    expect(sixb.listWebhooks().map((webhook) => webhook.route)).toEqual([
       "/api/webhooks/edgeGateway/telemetry",
     ])
-    expect(pario.getWebhookById("edgeGateway", "telemetry")?.webhook.id).toBe("telemetry")
+    expect(sixb.getWebhookById("edgeGateway", "telemetry")?.webhook.id).toBe("telemetry")
   })
 })
 
 function createRuntime(
   connectors: readonly ConnectorDefinition[],
   storage: Storage = new InMemoryStorage()
-): Pario<readonly OntologySource[]> {
-  const ParioConstructor = Pario as unknown as new (
-    options: ParioOptions<readonly OntologySource[]>
-  ) => Pario<readonly OntologySource[]>
+): Sixb<readonly OntologySource[]> {
+  const SixbConstructor = Sixb as unknown as new (
+    options: SixbOptions<readonly OntologySource[]>
+  ) => Sixb<readonly OntologySource[]>
 
   const runtimeDeps = createTestRuntimeDeps()
-  return new ParioConstructor({
+  return new SixbConstructor({
     ontology: [],
     connectors,
     ...runtimeDeps,
@@ -224,7 +224,7 @@ function createRuntime(
 }
 
 async function createTempProjectRoot(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "pario-core-webhooks-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-webhooks-"))
   tempRoots.add(projectRoot)
   return projectRoot
 }

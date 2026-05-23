@@ -1,14 +1,14 @@
-import { CSRF_HEADER_NAME } from "@pario/core"
+import { CSRF_HEADER_NAME } from "@sixb/core"
 
-export const PARIO_CSRF_SECURITY_SCHEME_ID = "parioCsrf"
+export const SIXB_CSRF_SECURITY_SCHEME_ID = "sixbCsrf"
 
-export const PARIO_CSRF_SECURITY_REQUIREMENT = [
+export const SIXB_CSRF_SECURITY_REQUIREMENT = [
   {
-    [PARIO_CSRF_SECURITY_SCHEME_ID]: [] as string[],
+    [SIXB_CSRF_SECURITY_SCHEME_ID]: [] as string[],
   },
 ]
 
-export const PARIO_CSRF_SECURITY_SCHEME = {
+export const SIXB_CSRF_SECURITY_SCHEME = {
   type: "apiKey",
   in: "header",
   name: CSRF_HEADER_NAME,
