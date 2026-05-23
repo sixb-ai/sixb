@@ -83,7 +83,7 @@ export interface PipelineSequenceGraph {
 export type PipelineGraph = PipelineSequenceGraph
 
 /**
- * Inert pipeline definition registered with Pario.
+ * Inert pipeline definition registered with Sixb.
  *
  * V1 executes a single sequential graph. The graph shape leaves room for
  * parallel nodes later without changing step definitions.

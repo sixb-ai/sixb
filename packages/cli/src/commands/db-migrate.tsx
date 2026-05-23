@@ -1,7 +1,7 @@
-import { migrateStorage } from "@pario/core"
-import { loadParioFromEntry } from "../lib/loadPario"
+import { migrateStorage } from "@sixb/core"
+import { loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
-import { stopParioProviders } from "../lib/runtime"
+import { stopSixbProviders } from "../lib/runtime"
 import { DbMigrateView, renderStatic } from "../ui"
 
 export interface DbMigrateOptions {
@@ -10,12 +10,12 @@ export interface DbMigrateOptions {
 
 export async function runDbMigrate(options: DbMigrateOptions = {}) {
   const entry = await resolveRuntimeEntry({ entry: options.entry })
-  const pario = await loadParioFromEntry(entry)
+  const sixb = await loadSixbFromEntry(entry)
 
   try {
-    const result = await migrateStorage(pario.storage)
-    await renderStatic(<DbMigrateView projectId={pario.id} status={result.status} />)
+    const result = await migrateStorage(sixb.storage)
+    await renderStatic(<DbMigrateView projectId={sixb.id} status={result.status} />)
   } finally {
-    await stopParioProviders(pario)
+    await stopSixbProviders(sixb)
   }
 }

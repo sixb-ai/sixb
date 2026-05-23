@@ -1,9 +1,9 @@
-import type { WorkflowInterventionNodeDefinition } from "@pario/core"
+import type { WorkflowInterventionNodeDefinition } from "@sixb/core"
 import {
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
   validateWorkflowInterventionInput,
-} from "@pario/core"
+} from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { throwIfAborted } from "../normalize"
@@ -72,7 +72,7 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
     const workflowInterventions = context.runtime.storage.workflowInterventions
     if (!workflowInterventions) {
       throw new WorkflowWorkerError(
-        `[ParioWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`
+        `[SixbWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`
       )
     }
 

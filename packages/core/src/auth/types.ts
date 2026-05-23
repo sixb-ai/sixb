@@ -238,7 +238,7 @@ export interface AuthCookieOptions {
   readonly csrfHttpOnly?: boolean
 }
 
-export type ParioAuthConfig =
+export type SixbAuthConfig =
   | AuthStrategy
   | {
       readonly strategy: AuthStrategy

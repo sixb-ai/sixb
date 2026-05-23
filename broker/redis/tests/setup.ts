@@ -7,7 +7,7 @@ const composeFile = `${import.meta.dir}/../docker-compose.yml`
 // pulled/started concurrently — keep the margin generous to avoid flakes.
 beforeAll(async () => {
   await Bun.$`docker compose -f ${composeFile} up -d --wait`.quiet()
-  process.env.PARIO_REDIS_BROKER_URL = "redis://127.0.0.1:46380"
+  process.env.SIXB_REDIS_BROKER_URL = "redis://127.0.0.1:46380"
 }, 60_000)
 
 afterAll(async () => {

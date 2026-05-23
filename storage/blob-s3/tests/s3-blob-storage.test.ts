@@ -7,9 +7,9 @@ import {
 
 describe("S3 blob storage internals", () => {
   test("normalizes base paths", () => {
-    expect(normalizeS3BlobBasePath("pario")).toBe("pario")
-    expect(normalizeS3BlobBasePath("/company-lake/pario/")).toBe("company-lake/pario")
-    expect(normalizeS3BlobBasePath(" company-lake / pario ")).toBe("company-lake/pario")
+    expect(normalizeS3BlobBasePath("sixb")).toBe("sixb")
+    expect(normalizeS3BlobBasePath("/company-lake/sixb/")).toBe("company-lake/sixb")
+    expect(normalizeS3BlobBasePath(" company-lake / sixb ")).toBe("company-lake/sixb")
     expect(normalizeS3BlobBasePath("")).toBe("")
     expect(normalizeS3BlobBasePath("///")).toBe("")
   })
@@ -17,10 +17,8 @@ describe("S3 blob storage internals", () => {
   test("builds blob keys under the configured base path", () => {
     const hex = "a".repeat(64)
 
-    expect(s3BlobKeyForHex("pario", hex)).toBe(`pario/blobs/sha256/${hex}`)
-    expect(s3BlobKeyForHex("company-lake/pario", hex)).toBe(
-      `company-lake/pario/blobs/sha256/${hex}`
-    )
+    expect(s3BlobKeyForHex("sixb", hex)).toBe(`sixb/blobs/sha256/${hex}`)
+    expect(s3BlobKeyForHex("company-lake/sixb", hex)).toBe(`company-lake/sixb/blobs/sha256/${hex}`)
     expect(s3BlobKeyForHex("", hex)).toBe(`blobs/sha256/${hex}`)
   })
 

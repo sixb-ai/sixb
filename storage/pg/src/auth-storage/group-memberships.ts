@@ -2,7 +2,7 @@ import type {
   AuthGroupMembershipStore,
   GroupMembershipRecord,
   UpsertAuthGroupMembershipInput,
-} from "@pario/core"
+} from "@sixb/core"
 import type { SQL } from "bun"
 import type { PgAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"

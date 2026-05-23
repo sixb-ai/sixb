@@ -191,7 +191,7 @@ export const signOut = <ThrowOnError extends boolean = false>(
   options?: Options<SignOutData, ThrowOnError>
 ) =>
   (options?.client ?? client).post<SignOutResponses, SignOutErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/sign-out",
     ...options,
   })
@@ -219,7 +219,7 @@ export const createAuthInvitation = <ThrowOnError extends boolean = false>(
     CreateAuthInvitationErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/invitations",
     ...options,
     headers: {
@@ -251,7 +251,7 @@ export const revokeAuthInvitation = <ThrowOnError extends boolean = false>(
     RevokeAuthInvitationErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/invitations/{invitationId}/revoke",
     ...options,
   })
@@ -395,7 +395,7 @@ export const requestSyncRun = <ThrowOnError extends boolean = false>(
   options: Options<RequestSyncRunData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestSyncRunResponses, RequestSyncRunErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/syncs/{syncId}/runs",
     ...options,
     headers: {
@@ -459,7 +459,7 @@ export const requestPipelineRun = <ThrowOnError extends boolean = false>(
     RequestPipelineRunErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/pipelines/{pipelineId}/runs",
     ...options,
   })
@@ -521,7 +521,7 @@ export const submitWorkflowIntervention = <ThrowOnError extends boolean = false>
     SubmitWorkflowInterventionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/workflow-interventions/{interventionId}/submit",
     ...options,
     headers: {
@@ -541,7 +541,7 @@ export const cancelWorkflowIntervention = <ThrowOnError extends boolean = false>
     CancelWorkflowInterventionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/workflow-interventions/{interventionId}/cancel",
     ...options,
     headers: {
@@ -583,7 +583,7 @@ export const requestWorkflowRun = <ThrowOnError extends boolean = false>(
     RequestWorkflowRunErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/workflows/{workflowId}/runs",
     ...options,
     headers: {
@@ -676,7 +676,7 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
   options: Options<UpsertObjectData, ThrowOnError>
 ) =>
   (options.client ?? client).put<UpsertObjectResponses, UpsertObjectErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/{objectTypeId}/{objectId}",
     ...options,
     headers: {
@@ -714,7 +714,7 @@ export const requestAction = <ThrowOnError extends boolean = false>(
   options: Options<RequestActionData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestActionResponses, RequestActionErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/actions/{actionId}",
     ...options,
     headers: {
@@ -745,7 +745,7 @@ export const removeObjectLink = <ThrowOnError extends boolean = false>(
     RemoveObjectLinkErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
     ...options,
   })
@@ -757,7 +757,7 @@ export const upsertObjectLink = <ThrowOnError extends boolean = false>(
   options: Options<UpsertObjectLinkData, ThrowOnError>
 ) =>
   (options.client ?? client).put<UpsertObjectLinkResponses, UpsertObjectLinkErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
     ...options,
     headers: {
@@ -773,7 +773,7 @@ export const appendTelemetry = <ThrowOnError extends boolean = false>(
   options: Options<AppendTelemetryData, ThrowOnError>
 ) =>
   (options.client ?? client).post<AppendTelemetryResponses, AppendTelemetryErrors, ThrowOnError>({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}",
     ...options,
     headers: {

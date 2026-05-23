@@ -1,4 +1,4 @@
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 
 export const erpDepartmentsDataset = defineDataset("erp.departments", {
   schema: [col("dept_id", "string"), col("dept_name", "string"), col("dept_code", "string")],

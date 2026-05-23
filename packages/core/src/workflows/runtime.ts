@@ -1,4 +1,4 @@
-import type { ParioRuntimeContext } from "../runtime/types"
+import type { SixbRuntimeContext } from "../runtime/types"
 import { WorkflowValidationError } from "./errors"
 import {
   type RequestWorkflowRunInput,
@@ -9,16 +9,16 @@ import type { InferWorkflowInput, WorkflowDefinition, WorkflowRunSource } from "
 
 /**
  * Typed entry point for workflow definitions and runs, exposed as
- * `pario.workflows`.
+ * `sixb.workflows`.
  *
  * Owns the registered workflow definitions and implements lookup directly,
  * then delegates run requests to {@link requestWorkflowRun}.
  */
 export class WorkflowsRuntime {
-  private readonly runtime: ParioRuntimeContext
+  private readonly runtime: SixbRuntimeContext
   private readonly workflowsById: ReadonlyMap<string, WorkflowDefinition>
 
-  constructor(runtime: ParioRuntimeContext, workflows: readonly WorkflowDefinition[]) {
+  constructor(runtime: SixbRuntimeContext, workflows: readonly WorkflowDefinition[]) {
     this.runtime = runtime
     this.workflowsById = new Map(workflows.map((workflow) => [workflow.id, workflow]))
   }
@@ -49,7 +49,7 @@ export class WorkflowsRuntime {
   async requestById(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult> {
     const workflow = this.getById(input.workflowId)
     if (!workflow) {
-      throw new WorkflowValidationError(`[Pario] Unknown workflow '${input.workflowId}'`)
+      throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
     }
 
     return requestWorkflowRun(this.runtime, workflow, input)

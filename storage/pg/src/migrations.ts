@@ -6,8 +6,8 @@ import type {
   MigrationStep,
   MigrationStepOptions,
   StorageMigrator,
-} from "@pario/core"
-import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@pario/core"
+} from "@sixb/core"
+import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core"
 import type { SQL } from "bun"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
 
@@ -15,7 +15,7 @@ export interface PostgresMigrationContext {
   exec(sqlText: string): Promise<void>
 }
 
-export const POSTGRES_STORAGE_ADAPTER_ID = "ParioPostgresStorage"
+export const POSTGRES_STORAGE_ADAPTER_ID = "SixbPostgresStorage"
 
 export function pgSql(id: string, sqlText: string): MigrationStep<PostgresMigrationContext> {
   return pgStep(id, (context) => context.exec(sqlText), { checksum: checksum(sqlText) })
@@ -86,7 +86,7 @@ export async function dropSchema(sql: SQL, schemaName: string): Promise<void> {
 
 export function quoteIdent(identifier: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(identifier)) {
-    throw new Error(`[ParioPg] Invalid identifier: ${identifier}`)
+    throw new Error(`[SixbPg] Invalid identifier: ${identifier}`)
   }
   return `"${identifier}"`
 }
@@ -96,7 +96,7 @@ function postgresMigrationSession(
   schemaName: string
 ): { context: PostgresMigrationContext; state: MigrationHistoryStore } {
   const schema = quoteIdent(schemaName)
-  const migrationsTable = `${schema}.pario_migrations`
+  const migrationsTable = `${schema}.sixb_migrations`
   // Migration steps receive a stable context; route exec() through the active transaction.
   let active: SQL | null = null
   const connection = () => active ?? sql

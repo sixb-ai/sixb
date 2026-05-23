@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from "react"
 
 export const metadata = {
-  title: "Pario AC Twin",
+  title: "Sixb AC Twin",
   description: "Realtime air conditioning digital twin dashboard and controls.",
   favicon: "/favicon.svg",
 }

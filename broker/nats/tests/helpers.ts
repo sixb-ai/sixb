@@ -13,12 +13,12 @@ export function createTestBroker(): {
   const natsUrl = process.env.NATS_URL
   if (!natsUrl) {
     throw new Error(
-      "[NatsBroker test] NATS_URL is required. Run `bun run test:e2e` from the @pario/broker-nats package."
+      "[NatsBroker test] NATS_URL is required. Run `bun run test:e2e` from the @sixb/broker-nats package."
     )
   }
 
   const suffix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  const namespace = `pario_test_${suffix}`
+  const namespace = `sixb_test_${suffix}`
   const projectId = `project_${suffix}`
   const broker = new NatsBroker({
     connection: { servers: natsUrl },

@@ -1,4 +1,4 @@
-import { migrateStorage } from "@pario/core"
+import { migrateStorage } from "@sixb/core"
 import { PostgresStorage } from "../src"
 
 export interface TestStorageOptions {
@@ -16,12 +16,12 @@ export async function createTestStorage(
   const connectionString = process.env.DATABASE_URL
   if (!connectionString) {
     throw new Error(
-      "[ParioPg] DATABASE_URL is required. Run `bun run test:e2e` from the @pario/pg package."
+      "[SixbPg] DATABASE_URL is required. Run `bun run test:e2e` from the @sixb/pg package."
     )
   }
 
   // Use a unique schema per test to avoid collisions
-  const schemaName = `pario_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
   const storage = new PostgresStorage({
     connectionString,

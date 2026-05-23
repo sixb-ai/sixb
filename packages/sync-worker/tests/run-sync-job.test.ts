@@ -13,7 +13,7 @@ import type {
   LakeWriteSession,
   SyncDefinition,
   SyncRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   col,
   defineConnector,
@@ -23,8 +23,8 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
   InMemorySyncRunStorage,
-} from "@pario/core"
-import { LocalLakeStorage } from "@pario/lake-local"
+} from "@sixb/core"
+import { LocalLakeStorage } from "@sixb/lake-local"
 import { runSyncJob, type SyncWorkerContext } from "../src"
 
 const tempDirs: string[] = []
@@ -557,7 +557,7 @@ describe("runSyncJob", () => {
       rowsRead: 1,
       error: {
         message:
-          "[ParioSyncWorker] Sync 'sync-orders' returned an invalid row at item 2. Dataset rows must be plain objects.",
+          "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 2. Dataset rows must be plain objects.",
       },
     })
   })
@@ -591,7 +591,7 @@ describe("runSyncJob", () => {
       rowsRead: 0,
       error: {
         message:
-          "[ParioSyncWorker] Sync 'sync-orders' returned an unsupported read result. Expected a row object, iterable, or async iterable.",
+          "[SixbSyncWorker] Sync 'sync-orders' returned an unsupported read result. Expected a row object, iterable, or async iterable.",
       },
     })
   })
@@ -625,7 +625,7 @@ describe("runSyncJob", () => {
       rowsRead: 0,
       error: {
         message:
-          "[ParioSyncWorker] Sync 'sync-orders' returned an invalid row at item 1. Dataset 'raw.erp.orders' row contains unknown column 'unexpected'.",
+          "[SixbSyncWorker] Sync 'sync-orders' returned an invalid row at item 1. Dataset 'raw.erp.orders' row contains unknown column 'unexpected'.",
       },
     })
   })
@@ -668,7 +668,7 @@ describe("runSyncJob", () => {
       rowsRead: 0,
       error: {
         message:
-          "[ParioSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
+          "[SixbSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
       },
     })
   })
@@ -802,7 +802,7 @@ describe("runSyncJob", () => {
   })
 
   test("works against LocalLakeStorage", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-sync-worker-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-"))
     tempDirs.push(rootDir)
 
     const lakeStorage = new LocalLakeStorage({ path: rootDir })
@@ -836,7 +836,7 @@ describe("runSyncJob", () => {
   })
 
   test("preserves heterogeneous row shapes when committing to lake storage", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-sync-worker-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-sync-worker-"))
     tempDirs.push(rootDir)
 
     const lakeStorage = new LocalLakeStorage({ path: rootDir })

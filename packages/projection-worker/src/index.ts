@@ -6,7 +6,7 @@ export type {
   ProjectionJobResult,
   ProjectionProgressReporter,
   ProjectionWorkerContext,
-  ProjectionWorkerPario,
+  ProjectionWorkerSixb,
   RunProjectionJobInput,
 } from "./types"
 export { ProjectionWorker } from "./worker"

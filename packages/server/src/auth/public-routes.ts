@@ -1,4 +1,4 @@
-import { isCsrfExemptMethod } from "@pario/core"
+import { isCsrfExemptMethod } from "@sixb/core"
 
 export type RouteAccessKind = "public" | "api" | "html" | "websocket"
 
@@ -41,7 +41,7 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
-  if (pathname.startsWith("/__pario/") && normalizedMethod === "GET") {
+  if (pathname.startsWith("/__sixb/") && normalizedMethod === "GET") {
     return true
   }
 

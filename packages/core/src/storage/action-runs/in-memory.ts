@@ -58,7 +58,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const key = actionRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
       throw new ActionRunError(
-        `[Pario] Action run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Action run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -83,7 +83,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
 
     if (!existing) {
       throw new ActionRunError(
-        `[Pario] Action run '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] Action run '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 

@@ -1,6 +1,6 @@
-import { useParioEvents } from "@pario/client"
-import { getObjectOptions, getObjectTypeOptions, requestActionMutation } from "@pario/client/hooks"
-import { encodeObjectId } from "@pario/client/models"
+import { useSixbEvents } from "@sixb/client"
+import { getObjectOptions, getObjectTypeOptions, requestActionMutation } from "@sixb/client/hooks"
+import { encodeObjectId } from "@sixb/client/models"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
@@ -123,7 +123,7 @@ export default function RemoteControl() {
     [objectKey]
   )
 
-  const { connected } = useParioEvents({
+  const { connected } = useSixbEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     onEvent(event) {

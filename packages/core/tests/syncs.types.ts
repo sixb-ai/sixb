@@ -31,8 +31,8 @@ const syncOrders = defineSync("sync-orders")
     // @ts-expect-error checkpoint setters are only exposed after .checkpoint<T>()
     context.setCheckpoint({ cursor: "next" })
 
-    // @ts-expect-error sync read context should not expose the Pario runtime
-    context.pario
+    // @ts-expect-error sync read context should not expose the Sixb runtime
+    context.sixb
 
     return [{ id: 1 }]
   })

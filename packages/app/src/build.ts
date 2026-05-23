@@ -4,7 +4,7 @@ import { join } from "node:path"
 export interface BuildAppOptions {
   /** Path to the generated index.html entry point */
   entryPath: string
-  /** Output directory, defaults to `.pario/dist/app` */
+  /** Output directory, defaults to `.sixb/dist/app` */
   outdir?: string
 }
 
@@ -19,7 +19,7 @@ export interface BuildAppResult {
  * Outputs a production-ready static bundle.
  */
 export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult> {
-  const outdir = options.outdir ?? join(process.cwd(), ".pario", "dist", "app")
+  const outdir = options.outdir ?? join(process.cwd(), ".sixb", "dist", "app")
   await mkdir(outdir, { recursive: true })
 
   const result = await Bun.build({

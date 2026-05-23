@@ -1,5 +1,5 @@
-import { getWorkflowOptions, getWorkflowRunOptions } from "@pario/client/hooks"
-import { Badge, Button, Card, CardContent, CardTitle, EmptyState } from "@pario/ui/components"
+import { getWorkflowOptions, getWorkflowRunOptions } from "@sixb/client/hooks"
+import { Badge, Button, Card, CardContent, CardTitle, EmptyState } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Check, Copy, GitBranch, Play } from "lucide-react"
 import type { ReactNode } from "react"

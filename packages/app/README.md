@@ -1,11 +1,11 @@
-# @pario/app
+# @sixb/app
 
-Reusable toolkit for project-specific Pario apps. It owns custom app route scanning, entry generation, Bun dev serving, production builds, and serving built custom apps in production.
+Reusable toolkit for project-specific Sixb apps. It owns custom app route scanning, entry generation, Bun dev serving, production builds, and serving built custom apps in production.
 
 ## Installation
 
 ```bash
-bun add @pario/app
+bun add @sixb/app
 ```
 
 ## How It Works
@@ -25,27 +25,27 @@ app/
 
 ### 2. Codegen
 
-Two functions generate the entry point files into `.pario/generated/`:
+Two functions generate the entry point files into `.sixb/generated/`:
 
 - **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with lazy-loaded imports for each scanned page.
-- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell) and `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@pario/client` SDK).
+- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell) and `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK).
 
 If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`) that is applied to the document at runtime. An `app/globals.css` file is imported automatically when present.
 
 ### 3. Build
 
-`buildApp(options)` runs `Bun.build()` on the generated HTML entry point to produce a minified, browser-targeted bundle with external source maps in `.pario/dist/app/`.
+`buildApp(options)` runs `Bun.build()` on the generated HTML entry point to produce a minified, browser-targeted bundle with external source maps in `.sixb/dist/app/`.
 
 ### 4. Start
 
-`createCustomApp().start(options)` serves the built app from `.pario/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Pario API origin with credentials.
+`createCustomApp().start(options)` serves the built app from `.sixb/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Sixb API origin with credentials.
 
 ## Usage
 
 Preferred high-level API:
 
 ```typescript
-import { createCustomApp } from "@pario/app"
+import { createCustomApp } from "@sixb/app"
 
 const app = await createCustomApp({
   rootDir: process.cwd(),
@@ -54,8 +54,8 @@ const app = await createCustomApp({
 })
 
 await app.dev({ port: 3001 })
-await app.build({ outdir: ".pario/dist/app" })
-await app.start({ port: 3001, outdir: ".pario/dist/app", apiBaseUrl: "http://localhost:3000" })
+await app.build({ outdir: ".sixb/dist/app" })
+await app.start({ port: 3001, outdir: ".sixb/dist/app", apiBaseUrl: "http://localhost:3000" })
 ```
 
 Low-level pipeline:
@@ -66,10 +66,10 @@ import {
   generateAppEntry,
   generateRouteManifest,
   scanPages,
-} from "@pario/app"
+} from "@sixb/app"
 
 const appDir = "./app"
-const generatedDir = "./.pario/generated"
+const generatedDir = "./.sixb/generated"
 
 const routes = await scanPages(appDir)
 await generateRouteManifest(routes, generatedDir)
@@ -84,7 +84,7 @@ Static files in `app/public/` are served at root-relative paths:
 - `app/public/logo.svg` serves at `/logo.svg`
 - `app/public/models/macbook.glb` serves at `/models/macbook.glb`
 
-In dev mode the Bun server serves them directly; in production they are copied into `.pario/dist/app/`.
+In dev mode the Bun server serves them directly; in production they are copied into `.sixb/dist/app/`.
 
 ## Exports
 

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, type DatasetRow, defineDataset } from "@pario/core"
+import { col, type DatasetRow, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { duckLakeMetadataTableName } from "../src/internal/sql"
@@ -35,7 +35,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
   })
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-writes-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-writes-"))
     storage = createLocalDuckLakeStorage(rootDir)
     await storage.createDataset(ordersDataset)
   })
@@ -116,7 +116,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     )
     const snapshotMetadata = parseCommitMetadata(snapshotExtraInfo)
     expect(snapshotMetadata?.rowCount).toBe(1)
-    expect(JSON.parse(String(snapshotExtraInfo)).pario.rowCount).toBe(1)
+    expect(JSON.parse(String(snapshotExtraInfo)).sixb.rowCount).toBe(1)
 
     const appendWrite = await storage.beginWrite({
       dataset: ordersDataset,
@@ -142,7 +142,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
       rootDir,
       appendVersion.versionId
     )
-    expect(JSON.parse(String(appendExtraInfo)).pario).not.toHaveProperty("rowCount")
+    expect(JSON.parse(String(appendExtraInfo)).sixb).not.toHaveProperty("rowCount")
   })
 
   test("supports projected latest reads with limits", async () => {

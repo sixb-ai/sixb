@@ -9,8 +9,8 @@ import type {
   ProjectionRunStorage,
   StartProjectionRunInput,
   UpdateProjectionRunInput,
-} from "@pario/core"
-import { ProjectionRunError } from "@pario/core"
+} from "@sixb/core"
+import { ProjectionRunError } from "@sixb/core"
 import type { SQL } from "bun"
 
 type CounterKey = keyof ProjectionRunCounters
@@ -68,7 +68,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ProjectionRunError(
-          `[ParioPg] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Projection run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -229,13 +229,13 @@ async function requireRunning(sql: SQL, projectId: string, id: string): Promise<
 
   if (!row) {
     throw new ProjectionRunError(
-      `[ParioPg] Projection run '${id}' not found for project '${projectId}'.`
+      `[SixbPg] Projection run '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.status !== "running") {
     throw new ProjectionRunError(
-      `[ParioPg] Projection run '${id}' for project '${projectId}' is already terminal.`
+      `[SixbPg] Projection run '${id}' for project '${projectId}' is already terminal.`
     )
   }
 
@@ -285,14 +285,14 @@ function rowToProjectionRunRecord(row: DatabaseRow): ProjectionRunRecord {
 
 function assertNonEmpty(value: string, fieldName: string): void {
   if (value.trim().length === 0) {
-    throw new ProjectionRunError(`[ParioPg] Projection run ${fieldName} must not be empty.`)
+    throw new ProjectionRunError(`[SixbPg] Projection run ${fieldName} must not be empty.`)
   }
 }
 
 function assertCounter(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
     throw new ProjectionRunError(
-      `[ParioPg] Projection run ${fieldName} must be a non-negative integer.`
+      `[SixbPg] Projection run ${fieldName} must be a non-negative integer.`
     )
   }
 }
@@ -305,7 +305,7 @@ function assertOptionalCounter(value: number | undefined, fieldName: string): vo
 
 function assertOptionalWindowValue(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new ProjectionRunError(`[ParioPg] Projection run list ${fieldName} must be >= 0.`)
+    throw new ProjectionRunError(`[SixbPg] Projection run list ${fieldName} must be >= 0.`)
   }
 }
 

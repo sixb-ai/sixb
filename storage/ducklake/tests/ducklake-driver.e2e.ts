@@ -7,14 +7,14 @@ import { localDuckLakeOptions } from "./test-utils"
 
 describe("DuckLake driver e2e", () => {
   test("loads ducklake and attaches a local catalog", async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-e2e-"))
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-e2e-"))
     const runtime = await createDuckDbRuntime()
 
     try {
       await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
 
-      await runtime.run("CREATE TABLE pario_lake.main.pario__sys__driver_e2e (id INTEGER)")
-      await runtime.run("INSERT INTO pario_lake.main.pario__sys__driver_e2e VALUES (1)")
+      await runtime.run("CREATE TABLE sixb_lake.main.sixb__sys__driver_e2e (id INTEGER)")
+      await runtime.run("INSERT INTO sixb_lake.main.sixb__sys__driver_e2e VALUES (1)")
       expect(true).toBe(true)
     } finally {
       await runtime.close()

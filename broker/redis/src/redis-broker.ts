@@ -1,5 +1,5 @@
-import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@pario/core"
-import { cloneJsonValue } from "@pario/core"
+import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@sixb/core"
+import { cloneJsonValue } from "@sixb/core"
 import {
   type RedisBrokerClient,
   type RedisBrokerConnectionOptions,
@@ -24,7 +24,7 @@ import {
 } from "./stream-replies"
 import { type ActiveSubscription, SubscriptionRegistry } from "./subscription-registry"
 
-const DEFAULT_PREFIX = "pario:broker"
+const DEFAULT_PREFIX = "sixb:broker"
 const DEFAULT_DEDUPE_TTL_MS = 120_000
 const DEFAULT_READ_BATCH_SIZE = 1_000
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 100
@@ -45,7 +45,7 @@ interface AppendBatchResult {
 export interface RedisBrokerOptions {
   /** Bun Redis client options, commonly `{ url: "redis://localhost:6379" }`. */
   readonly connection?: RedisBrokerConnectionOptions
-  /** Redis key prefix. Defaults to `"pario:broker"`. */
+  /** Redis key prefix. Defaults to `"sixb:broker"`. */
   readonly prefix?: string
   /** Retry-deduplication window for `idempotencyKey`. Defaults to two minutes. */
   readonly dedupeTtlMs?: number
@@ -60,7 +60,7 @@ export interface RedisBrokerOptions {
 /**
  * Redis Streams-backed Broker provider.
  *
- * Each Pario project and broker stream id maps to a Redis Stream key, with a
+ * Each Sixb project and broker stream id maps to a Redis Stream key, with a
  * metadata hash marking the stream as ensured. Subscriptions use plain XREAD
  * so every subscriber receives every matching record independently.
  *
@@ -482,7 +482,7 @@ export class RedisBroker implements Broker {
     ensured: EnsuredStream
   ): Promise<void> {
     try {
-      // Age retention is a Pario-level policy. Redis Streams only trim when a
+      // Age retention is a Sixb-level policy. Redis Streams only trim when a
       // command asks them to, so reads/replays must also trim idle streams.
       await client.send("EVAL", [
         ENFORCE_AGE_RETENTION_SCRIPT,

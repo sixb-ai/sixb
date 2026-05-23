@@ -6,7 +6,7 @@ import type {
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
-} from "@pario/core"
+} from "@sixb/core"
 
 export interface LocalLakeStorageOptions {
   /** Base directory for lake metadata and row files. */

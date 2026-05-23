@@ -4,8 +4,8 @@ export function sanitizeReturnTo(value: string | null | undefined): string {
   }
 
   try {
-    const parsed = new URL(value, "http://pario.local")
-    if (parsed.origin !== "http://pario.local") {
+    const parsed = new URL(value, "http://sixb.local")
+    if (parsed.origin !== "http://sixb.local") {
       return "/"
     }
 

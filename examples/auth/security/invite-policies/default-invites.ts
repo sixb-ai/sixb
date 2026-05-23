@@ -1,4 +1,4 @@
-import { defineInvitePolicy } from "@pario/core"
+import { defineInvitePolicy } from "@sixb/core"
 import { securityAdmins } from "../groups/security-admins"
 import { teamMembers } from "../groups/team-members"
 

@@ -4,7 +4,7 @@ Use: `<area>: <what changed>`
 
 Examples:
 
-- `core: simplify createPario auto-discovery`
+- `core: simplify createSixb auto-discovery`
 - `server: add tests for object action routes`
 - `docs: clarify proposal approval flow`
 

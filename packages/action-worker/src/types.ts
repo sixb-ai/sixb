@@ -7,16 +7,16 @@ import type {
   EventsRuntime,
   ObjectRow,
   OntologySource,
-  Pario,
+  Sixb,
   Storage,
-} from "@pario/core"
+} from "@sixb/core"
 
 export interface ActionWorkerContext {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   getActionById(actionId: string): ActionDefinition | null
 }
 

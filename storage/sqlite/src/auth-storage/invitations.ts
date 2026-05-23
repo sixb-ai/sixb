@@ -5,8 +5,8 @@ import type {
   InvitationRecord,
   ListAuthInvitationsInput,
   ListAuthInvitationsResult,
-} from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthInvitationRow } from "./rows"
 import { rowToInvitationRecord } from "./rows"
@@ -78,7 +78,7 @@ export class SqliteAuthInvitationStore implements AuthInvitationStore {
       if (getInvitationById(this.db, { projectId, id })) {
         throw new AuthStorageError(
           "duplicate_invitation",
-          `[Pario] Invitation '${id}' already exists but is not active for project '${projectId}'.`
+          `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
         )
       }
 
@@ -116,7 +116,7 @@ export class SqliteAuthInvitationStore implements AuthInvitationStore {
         mapUniqueConstraintError(
           error,
           "duplicate_invitation",
-          `[Pario] Invitation '${id}' already exists for project '${projectId}'.`
+          `[Sixb] Invitation '${id}' already exists for project '${projectId}'.`
         )
       }
 

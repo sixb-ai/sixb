@@ -58,19 +58,19 @@ jobs:
       matrix:
         include:
           - name: cli
-            package: "@pario/cli"
+            package: "@sixb/cli"
           - name: blob-s3
-            package: "@pario/blob-s3"
+            package: "@sixb/blob-s3"
           - name: ducklake
-            package: "@pario/ducklake"
+            package: "@sixb/ducklake"
           - name: broker-nats
-            package: "@pario/broker-nats"
+            package: "@sixb/broker-nats"
           - name: broker-redis
-            package: "@pario/broker-redis"
+            package: "@sixb/broker-redis"
           - name: pg
-            package: "@pario/pg"
+            package: "@sixb/pg"
           - name: queues-bullmq
-            package: "@pario/queues-bullmq"
+            package: "@sixb/queues-bullmq"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

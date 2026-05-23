@@ -6,8 +6,8 @@ import type {
   InvitationDeliveryAuthStrategy,
   MagicLinkAuthStrategy,
   OidcAuthStrategy,
-  ParioAuthConfig,
   ResolvedAuthConfig,
+  SixbAuthConfig,
 } from "./types"
 
 export const DEFAULT_AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
@@ -16,7 +16,7 @@ export const MAX_AUTH_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 export { resolveAuthSessionAudience } from "./audience"
 
-export function resolveAuthConfig(config: ParioAuthConfig | undefined): ResolvedAuthConfig {
+export function resolveAuthConfig(config: SixbAuthConfig | undefined): ResolvedAuthConfig {
   if (!config) {
     return {
       strategy: null,
@@ -44,21 +44,21 @@ export function resolveInvitationExpiresAt(value: Date | undefined, now: Date): 
   if (!Number.isFinite(expiresAtTime)) {
     throw new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation expiresAt must be a valid date."
+      "[Sixb] Invitation expiresAt must be a valid date."
     )
   }
 
   if (expiresAtTime <= now.getTime()) {
     throw new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation expiresAt must be in the future."
+      "[Sixb] Invitation expiresAt must be in the future."
     )
   }
 
   if (expiresAtTime > now.getTime() + MAX_AUTH_INVITATION_TTL_MS) {
     throw new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation expiresAt must be no more than 30 days in the future."
+      "[Sixb] Invitation expiresAt must be no more than 30 days in the future."
     )
   }
 
@@ -71,8 +71,8 @@ export function sanitizeReturnTo(value: string | undefined): string {
   }
 
   try {
-    const parsed = new URL(value, "http://pario.local")
-    if (parsed.origin !== "http://pario.local") {
+    const parsed = new URL(value, "http://sixb.local")
+    if (parsed.origin !== "http://sixb.local") {
       return "/"
     }
 
@@ -85,7 +85,7 @@ export function sanitizeReturnTo(value: string | undefined): string {
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthRuntimeError("invalid_auth_input", `[Pario] ${label} must be a non-empty string.`)
+    throw new AuthRuntimeError("invalid_auth_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -97,14 +97,14 @@ export function normalizePagination(input: { readonly limit?: number; readonly o
   if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 0)) {
     throw new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation list limit must be a non-negative integer."
+      "[Sixb] Invitation list limit must be a non-negative integer."
     )
   }
 
   if (input.offset !== undefined && (!Number.isInteger(input.offset) || input.offset < 0)) {
     throw new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation list offset must be a non-negative integer."
+      "[Sixb] Invitation list offset must be a non-negative integer."
     )
   }
 
@@ -121,7 +121,7 @@ function resolveAuthSessionOptions(
   if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
     throw new AuthRuntimeError(
       "invalid_auth_config",
-      "[Pario] Auth session ttlMs must be a positive finite number."
+      "[Sixb] Auth session ttlMs must be a positive finite number."
     )
   }
 
@@ -178,6 +178,6 @@ export function isOidcAuthStrategy(strategy: AuthStrategy | null): strategy is O
 
 function assertValidStrategy(strategy: AuthStrategy): void {
   if (!strategy.id.trim()) {
-    throw new AuthRuntimeError("invalid_auth_config", "[Pario] Auth strategy id is required.")
+    throw new AuthRuntimeError("invalid_auth_config", "[Sixb] Auth strategy id is required.")
   }
 }

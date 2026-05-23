@@ -1,5 +1,5 @@
-import type { ObjectDetail, ObjectSummary } from "@pario/client"
-import { getObjectOptions } from "@pario/client/hooks"
+import type { ObjectDetail, ObjectSummary } from "@sixb/client"
+import { getObjectOptions } from "@sixb/client/hooks"
 import {
   Button,
   Card,
@@ -20,8 +20,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQueries } from "@tanstack/react-query"
 import { Box, ChevronLeft, ChevronRight, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"

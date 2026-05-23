@@ -1,11 +1,11 @@
-import { defineFunction } from "@pario/core"
+import { defineFunction } from "@sixb/core"
 import { getRokuApi } from "../lib/rokuApi"
 import { Television } from "../ontology/television"
 
 export const pollRokuState = defineFunction("poll-roku-state")
   .cron("* * * * *")
-  .run(async ({ pario }) => {
-    const { objects } = await pario.objects(Television).list({
+  .run(async ({ sixb }) => {
+    const { objects } = await sixb.objects(Television).list({
       limit: 200,
       orderBy: "updatedAt",
       order: "desc",
@@ -17,7 +17,7 @@ export const pollRokuState = defineFunction("poll-roku-state")
         continue
       }
 
-      const client = await getRokuApi(pario, host)
+      const client = await getRokuApi(sixb, host)
       const now = new Date()
 
       try {
@@ -27,7 +27,7 @@ export const pollRokuState = defineFunction("poll-roku-state")
         const activeApp = await client.getActiveApp().catch(() => null)
         const mediaPlayer = await client.getMediaPlayer().catch(() => null)
 
-        await pario.objects(Television).upsert({
+        await sixb.objects(Television).upsert({
           properties: {
             id: object.primaryId,
             name: info.friendlyName,
@@ -41,7 +41,7 @@ export const pollRokuState = defineFunction("poll-roku-state")
           },
         })
 
-        await pario.objects(Television).appendTelemetryBatch([
+        await sixb.objects(Television).appendTelemetryBatch([
           {
             id: object.primaryId,
             properties: {
@@ -55,7 +55,7 @@ export const pollRokuState = defineFunction("poll-roku-state")
         ])
       } catch (error) {
         console.error(
-          `[Pario] Failed to poll Roku TV ${object.primaryId}:`,
+          `[Sixb] Failed to poll Roku TV ${object.primaryId}:`,
           error instanceof Error ? error.message : String(error)
         )
       }

@@ -5,7 +5,7 @@ import {
   listWorkflowRunsQueryKey,
   listWorkflowsQueryKey,
   requestWorkflowRunMutation,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Alert,
   AlertDescription,
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Loader2, Play } from "lucide-react"
 import { type SubmitEvent, useState } from "react"

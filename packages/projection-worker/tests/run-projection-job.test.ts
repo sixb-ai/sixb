@@ -18,14 +18,14 @@ import {
   integerEnum,
   type LakeStorage,
   link,
-  Pario,
   type ProjectionDefinition,
   type ProjectionRunStorage,
   prop,
   type ReadDatasetRowsInput,
+  Sixb,
   stringEnum,
   valueTypeRef,
-} from "@pario/core"
+} from "@sixb/core"
 import { type ProjectionWorkerContext, ProjectionWorkerError, runProjectionJob } from "../src"
 
 const Building = defineObjectType({
@@ -200,34 +200,34 @@ function createFinishFailingProjectionRunStorage(
   }
 }
 
-function createRuntime(pario: ProjectionRuntimeSource) {
+function createRuntime(sixb: ProjectionRuntimeSource) {
   return {
-    projectId: pario.projectId,
-    ontology: pario.ontology,
-    actionRegistry: pario.actionRegistry,
-    events: pario.events,
-    storage: pario.storage,
-    lakeStorage: pario.lakeStorage,
-    blobStorage: pario.blobStorage,
-    queues: pario.queues,
-    projectionRunsStorage: requireProjectionRunsStorage(pario),
+    projectId: sixb.projectId,
+    ontology: sixb.ontology,
+    actionRegistry: sixb.actionRegistry,
+    events: sixb.events,
+    storage: sixb.storage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobStorage,
+    queues: sixb.queues,
+    projectionRunsStorage: requireProjectionRunsStorage(sixb),
     getDatasetById(datasetId: string) {
-      return pario.getDatasetById(datasetId)
+      return sixb.getDatasetById(datasetId)
     },
     getProjectionById(projectionId: string) {
-      return pario.getProjectionById(projectionId)
+      return sixb.getProjectionById(projectionId)
     },
   } satisfies ProjectionWorkerContext
 }
 
-function createPario(
+function createSixb(
   options: {
     datasets: readonly DatasetDefinition[]
     projections: readonly ProjectionDefinition[]
   },
   deps: Omit<TestRuntimeDeps, "lakeStorage"> & { readonly lakeStorage: LakeStorage } = createDeps()
 ) {
-  return new Pario({
+  return new Sixb({
     id: "projection-worker-tests",
     ontology: [Building, Room, Sensor],
     ...deps,
@@ -254,7 +254,7 @@ async function commitDatasetVersion(
 describe("runProjectionJob", () => {
   test("materializes an object projection from the exact dataset version", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
@@ -270,7 +270,7 @@ describe("runProjectionJob", () => {
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-1",
         projectionId: "room-proj",
@@ -285,7 +285,7 @@ describe("runProjectionJob", () => {
     expect(result.run.status).toBe("succeeded")
 
     const room = await deps.storage.objects.getByPrimaryId({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "Room",
       primaryId: "r1",
     })
@@ -306,7 +306,7 @@ describe("runProjectionJob", () => {
     const wideRoomProjection = defineProjection("wide-room-proj", Room)
       .fromDataset(wideRoomsDataset)
       .properties({ id: "room_id", name: "room_name" })
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [wideRoomsDataset],
         projections: [wideRoomProjection],
@@ -318,7 +318,7 @@ describe("runProjectionJob", () => {
     ])
 
     await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-column-pruning-object",
         projectionId: "wide-room-proj",
@@ -345,7 +345,7 @@ describe("runProjectionJob", () => {
     const requiredExtraRoomProjection = defineProjection("required-extra-room-proj", Room)
       .fromDataset(requiredExtraRoomsDataset)
       .properties({ id: "room_id", name: "room_name" })
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [requiredExtraRoomsDataset],
         projections: [requiredExtraRoomProjection],
@@ -357,7 +357,7 @@ describe("runProjectionJob", () => {
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-required-unmapped-object",
         projectionId: "required-extra-room-proj",
@@ -375,20 +375,20 @@ describe("runProjectionJob", () => {
 
   test("materializes FK links after object upserts", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjectionWithFk],
       },
       deps
     )
-    await pario.upsertObject("Building", { id: "b1", name: "HQ" })
+    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
       { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-fk",
         projectionId: "room-proj",
@@ -402,7 +402,7 @@ describe("runProjectionJob", () => {
     expect(result.linksUpserted).toBe(1)
 
     const links = await deps.storage.objects.listLinks({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "Room",
       objectId: "r1",
       linkId: "inBuilding",
@@ -413,7 +413,7 @@ describe("runProjectionJob", () => {
 
   test("keeps the run successful when an FK target is missing", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjectionWithFk],
@@ -425,7 +425,7 @@ describe("runProjectionJob", () => {
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-missing-fk-target",
         projectionId: "room-proj",
@@ -439,7 +439,7 @@ describe("runProjectionJob", () => {
     expect(result.linksUpserted).toBe(0)
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-missing-fk-target",
     })
     expect(run?.status).toBe("succeeded")
@@ -447,22 +447,22 @@ describe("runProjectionJob", () => {
 
   test("materializes a link projection from a join dataset", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomSensorsDataset],
         projections: [roomSensorProjection],
       },
       deps
     )
-    await pario.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await pario.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(deps.lakeStorage, roomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1" },
       { room_id: "r1", sensor_id: "s1" },
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-link",
         projectionId: "room-sensor-proj",
@@ -477,7 +477,7 @@ describe("runProjectionJob", () => {
     expect(result.linksUpserted).toBe(1)
 
     const links = await deps.storage.objects.listLinks({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "Room",
       objectId: "r1",
       linkId: "hasSensors",
@@ -503,21 +503,21 @@ describe("runProjectionJob", () => {
       .fromDataset(wideRoomSensorsDataset)
       .sourceField("room_id")
       .targetField("sensor_id")
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [wideRoomSensorsDataset],
         projections: [wideRoomSensorProjection],
       },
       { ...deps, lakeStorage }
     )
-    await pario.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await pario.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, wideRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", unused_weight: 0.75 },
     ])
 
     await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-column-pruning-link",
         projectionId: "wide-room-sensor-proj",
@@ -548,21 +548,21 @@ describe("runProjectionJob", () => {
       .fromDataset(requiredExtraRoomSensorsDataset)
       .sourceField("room_id")
       .targetField("sensor_id")
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [requiredExtraRoomSensorsDataset],
         projections: [requiredExtraRoomSensorProjection],
       },
       { ...deps, lakeStorage }
     )
-    await pario.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await pario.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    await sixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await sixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
     const version = await commitDatasetVersion(lakeStorage, requiredExtraRoomSensorsDataset, [
       { room_id: "r1", sensor_id: "s1", relationship_weight: 0.75 },
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-required-unmapped-link",
         projectionId: "required-extra-room-sensor-proj",
@@ -580,7 +580,7 @@ describe("runProjectionJob", () => {
 
   test("skips blank object primary values and blank link fields", async () => {
     const deps = createDeps()
-    const objectPario = createPario(
+    const objectSixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
@@ -593,7 +593,7 @@ describe("runProjectionJob", () => {
     ])
 
     const objectResult = await runProjectionJob({
-      runtime: createRuntime(objectPario),
+      runtime: createRuntime(objectSixb),
       job: {
         id: "projrun-blank-primary",
         projectionId: "room-proj",
@@ -607,9 +607,9 @@ describe("runProjectionJob", () => {
     expect(objectResult.rowsSkipped).toBe(1)
     expect(objectResult.objectsUpserted).toBe(1)
 
-    await objectPario.upsertObject("Room", { id: "r1", name: "Kitchen" })
-    await objectPario.upsertObject("Sensor", { id: "s1", name: "Motion" })
-    const linkPario = createPario(
+    await objectSixb.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await objectSixb.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    const linkSixb = createSixb(
       {
         datasets: [roomSensorsDataset],
         projections: [roomSensorProjection],
@@ -623,7 +623,7 @@ describe("runProjectionJob", () => {
     ])
 
     const linkResult = await runProjectionJob({
-      runtime: createRuntime(linkPario),
+      runtime: createRuntime(linkSixb),
       job: {
         id: "projrun-blank-link-fields",
         projectionId: "room-sensor-proj",
@@ -654,7 +654,7 @@ describe("runProjectionJob", () => {
       .fromDataset(devicesDataset)
       .properties({ id: "device_id", status: "device_status" })
     const deps = createDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -667,7 +667,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-invalid-property",
           projectionId: "device-proj",
@@ -679,7 +679,7 @@ describe("runProjectionJob", () => {
     ).rejects.toBeInstanceOf(ProjectionWorkerError)
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-invalid-property",
     })
     expect(run?.status).toBe("failed")
@@ -722,7 +722,7 @@ describe("runProjectionJob", () => {
         readingCount: "reading_count",
       })
     const deps = createDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -739,7 +739,7 @@ describe("runProjectionJob", () => {
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-int64-string",
         projectionId: "integer-device-proj",
@@ -751,7 +751,7 @@ describe("runProjectionJob", () => {
 
     expect(result.objectsUpserted).toBe(1)
     const device = await deps.storage.objects.getByPrimaryId({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "Device",
       primaryId: "d1",
     })
@@ -776,7 +776,7 @@ describe("runProjectionJob", () => {
       .fromDataset(devicesDataset)
       .properties({ id: "device_id", count: "device_count" })
     const deps = createDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "projection-worker-tests",
       ontology: [Device],
       ...deps,
@@ -789,7 +789,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-unsafe-int64-string",
           projectionId: "unsafe-integer-device-proj",
@@ -801,7 +801,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("cannot safely coerce")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-unsafe-int64-string",
     })
     expect(run?.status).toBe("failed")
@@ -827,7 +827,7 @@ describe("runProjectionJob", () => {
       .fromDataset(documentsDataset)
       .properties({ id: "document_id", attachment: "attachment" })
     const deps = createDeps()
-    const pario = new Pario({
+    const sixb = new Sixb({
       id: "projection-worker-tests",
       ontology: [Document],
       ...deps,
@@ -846,7 +846,7 @@ describe("runProjectionJob", () => {
     ])
 
     const result = await runProjectionJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "projrun-fileref",
         projectionId: "document-proj",
@@ -858,7 +858,7 @@ describe("runProjectionJob", () => {
 
     expect(result.objectsUpserted).toBe(1)
     const document = await deps.storage.objects.getByPrimaryId({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "Document",
       primaryId: "doc1",
     })
@@ -873,7 +873,7 @@ describe("runProjectionJob", () => {
     const version = await commitDatasetVersion(deps.lakeStorage, mismatchedRoomsDataset, [
       { room_id: "r1", name: "Kitchen", building_ref: "b1" },
     ])
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
@@ -883,7 +883,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-schema-mismatch",
           projectionId: "room-proj",
@@ -895,7 +895,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("schema mismatch")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-schema-mismatch",
     })
     expect(run?.status).toBe("failed")
@@ -904,7 +904,7 @@ describe("runProjectionJob", () => {
 
   test("marks the run failed when the projection id is unknown", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
@@ -917,7 +917,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-unknown",
           projectionId: "missing-proj",
@@ -929,7 +929,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("Unknown projection")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-unknown",
     })
     expect(run?.status).toBe("failed")
@@ -955,7 +955,7 @@ describe("runProjectionJob", () => {
         },
       },
     } satisfies ProjectionDefinition
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [invalidFkProjection],
@@ -968,7 +968,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-invalid-fk-target",
           projectionId: "room-invalid-fk-proj",
@@ -980,7 +980,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("not compatible")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-invalid-fk-target",
     })
     expect(run?.status).toBe("failed")
@@ -995,7 +995,7 @@ describe("runProjectionJob", () => {
       id: "room-sensor-invalid-target-proj",
       targetObjectTypeId: "Building",
     } satisfies ProjectionDefinition
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomSensorsDataset],
         projections: [invalidLinkProjection],
@@ -1008,7 +1008,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-invalid-link-target",
           projectionId: "room-sensor-invalid-target-proj",
@@ -1020,7 +1020,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("not compatible")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-invalid-link-target",
     })
     expect(run?.status).toBe("failed")
@@ -1031,16 +1031,16 @@ describe("runProjectionJob", () => {
   test("marks the run cancelled when the signal aborts during the final object flush", async () => {
     const deps = createDeps()
     const abortController = new AbortController()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
       },
       deps
     )
-    const originalAppend = pario.events.append.bind(pario.events)
+    const originalAppend = sixb.events.append.bind(sixb.events)
     let aborted = false
-    pario.events.append = async (params) => {
+    sixb.events.append = async (params) => {
       const events = await originalAppend(params)
       if (!aborted && params.events.some((event) => event.type === "object.upserted")) {
         aborted = true
@@ -1054,7 +1054,7 @@ describe("runProjectionJob", () => {
 
     await expect(
       runProjectionJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "projrun-abort-final-flush",
           projectionId: "room-proj",
@@ -1067,7 +1067,7 @@ describe("runProjectionJob", () => {
     ).rejects.toThrow("Projection worker aborted")
 
     const run = await deps.storage.projectionRuns.getById({
-      projectId: pario.id,
+      projectId: sixb.id,
       id: "projrun-abort-final-flush",
     })
     expect(run?.status).toBe("cancelled")
@@ -1076,7 +1076,7 @@ describe("runProjectionJob", () => {
 
   test("throws a repair-needed error when finalization fails after materialization", async () => {
     const deps = createDeps()
-    const pario = createPario(
+    const sixb = createSixb(
       {
         datasets: [roomsDataset],
         projections: [roomProjection],
@@ -1087,7 +1087,7 @@ describe("runProjectionJob", () => {
       { room_id: "r1", room_name: "Kitchen", building_ref: null },
     ])
     const finishCause = new Error("finish unavailable")
-    const runtime = createRuntime(pario)
+    const runtime = createRuntime(sixb)
 
     try {
       await runProjectionJob({

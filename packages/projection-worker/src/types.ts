@@ -2,21 +2,21 @@ import type {
   DatasetDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
-  ParioRuntimeContext,
   ProjectionDefinition,
   ProjectionKind,
   ProjectionRunCounters,
   ProjectionRunRecord,
   ProjectionRunStorage,
-} from "@pario/core"
+  SixbRuntimeContext,
+} from "@sixb/core"
 
-export interface ProjectionWorkerContext extends ParioRuntimeContext {
+export interface ProjectionWorkerContext extends SixbRuntimeContext {
   readonly projectionRunsStorage: ProjectionRunStorage
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
 
-export interface ProjectionWorkerPario extends ParioRuntimeContext {
+export interface ProjectionWorkerSixb extends SixbRuntimeContext {
   readonly id: string
   getObjectProjections(): readonly ObjectProjectionDefinition[]
   getLinkProjections(): readonly LinkProjectionDefinition[]

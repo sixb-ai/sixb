@@ -2,32 +2,32 @@ import type {
   ClaimedQueueJob,
   ProjectionRunRequestedQueueJob,
   ProjectionRunStorage,
-} from "@pario/core"
-import { QueueWorker } from "@pario/core"
+} from "@sixb/core"
+import { QueueWorker } from "@sixb/core"
 import { runProjectionJob } from "./run-projection-job"
-import type { ProjectionWorkerContext, ProjectionWorkerPario } from "./types"
+import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 
 export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
   private readonly context: ProjectionWorkerContext
 
-  constructor(pario: ProjectionWorkerPario) {
-    const projectionCount = pario.getObjectProjections().length + pario.getLinkProjections().length
+  constructor(sixb: ProjectionWorkerSixb) {
+    const projectionCount = sixb.getObjectProjections().length + sixb.getLinkProjections().length
     if (projectionCount === 0) {
-      throw new Error("[ParioProjectionWorker] No projection definitions are registered.")
+      throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
     }
 
-    const projectionRunsStorage = pario.storage.projectionRuns
+    const projectionRunsStorage = sixb.storage.projectionRuns
     if (!projectionRunsStorage) {
-      throw new Error("[ParioProjectionWorker] Projection workers require storage.projectionRuns.")
+      throw new Error("[SixbProjectionWorker] Projection workers require storage.projectionRuns.")
     }
 
     super({
-      projectId: pario.projectId,
-      queue: pario.queues.projections,
-      workerId: `projection-worker-${pario.id}`,
+      projectId: sixb.projectId,
+      queue: sixb.queues.projections,
+      workerId: `projection-worker-${sixb.id}`,
     })
 
-    this.context = buildProjectionContext(pario, projectionRunsStorage)
+    this.context = buildProjectionContext(sixb, projectionRunsStorage)
   }
 
   protected async execute(
@@ -51,24 +51,24 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
 }
 
 function buildProjectionContext(
-  pario: ProjectionWorkerPario,
+  sixb: ProjectionWorkerSixb,
   projectionRunsStorage: ProjectionRunStorage
 ): ProjectionWorkerContext {
   return {
-    projectId: pario.projectId,
-    ontology: pario.ontology,
-    actionRegistry: pario.actionRegistry,
-    events: pario.events,
-    storage: pario.storage,
-    lakeStorage: pario.lakeStorage,
-    blobStorage: pario.blobStorage,
-    queues: pario.queues,
+    projectId: sixb.projectId,
+    ontology: sixb.ontology,
+    actionRegistry: sixb.actionRegistry,
+    events: sixb.events,
+    storage: sixb.storage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobStorage,
+    queues: sixb.queues,
     projectionRunsStorage,
     getDatasetById(datasetId) {
-      return pario.getDatasetById(datasetId)
+      return sixb.getDatasetById(datasetId)
     },
     getProjectionById(projectionId) {
-      return pario.getProjectionById(projectionId)
+      return sixb.getProjectionById(projectionId)
     },
   }
 }

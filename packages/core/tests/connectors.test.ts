@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ConnectorNotFoundError, defineConnector, defineObjectType, Pario, prop } from "../src"
+import { ConnectorNotFoundError, defineConnector, defineObjectType, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -23,7 +23,7 @@ describe("connectors", () => {
       },
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
@@ -31,8 +31,8 @@ describe("connectors", () => {
 
     expect(connectCount).toBe(0)
 
-    const first = await pario.connector(erpDb)
-    const second = await pario.connector(erpDb)
+    const first = await sixb.connector(erpDb)
+    const second = await sixb.connector(erpDb)
 
     expect(connectCount).toBe(1)
     expect(first).toBe(second)
@@ -55,15 +55,15 @@ describe("connectors", () => {
       },
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),
     })
 
-    const first = await pario.connector(erpDb)
-    await pario.disconnectConnectors()
-    const second = await pario.connector(erpDb)
+    const first = await sixb.connector(erpDb)
+    await sixb.disconnectConnectors()
+    const second = await sixb.connector(erpDb)
 
     expect(disconnectCount).toBe(1)
     expect(connectCount).toBe(2)
@@ -85,15 +85,15 @@ describe("connectors", () => {
       },
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       connectors: [erpDb, hubspot],
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.listConnectors().map((connector) => connector.id)).toEqual(["erpDb", "hubspot"])
-    expect(pario.getConnectorById("erpDb")).toBe(erpDb)
-    expect(pario.getConnectorById("missing")).toBeNull()
+    expect(sixb.listConnectors().map((connector) => connector.id)).toEqual(["erpDb", "hubspot"])
+    expect(sixb.getConnectorById("erpDb")).toBe(erpDb)
+    expect(sixb.getConnectorById("missing")).toBeNull()
   })
 
   test("rejects an unknown connector with ConnectorNotFoundError", async () => {
@@ -104,14 +104,14 @@ describe("connectors", () => {
       },
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       connectors: [],
       ...createTestRuntimeDeps(),
     })
 
-    await expect(pario.connector(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
-    await expect(pario.connector(unknown)).rejects.toThrow("Unknown connector 'unknown'")
+    await expect(sixb.connector(unknown)).rejects.toBeInstanceOf(ConnectorNotFoundError)
+    await expect(sixb.connector(unknown)).rejects.toThrow("Unknown connector 'unknown'")
   })
 
   test("rejects an unregistered connector definition instance", async () => {
@@ -129,14 +129,12 @@ describe("connectors", () => {
       },
     })
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Room],
       connectors: [registered],
       ...createTestRuntimeDeps(),
     })
 
-    await expect(pario.connector(imposter)).rejects.toThrow(
-      "not the registered definition instance"
-    )
+    await expect(sixb.connector(imposter)).rejects.toThrow("not the registered definition instance")
   })
 })

@@ -103,7 +103,7 @@ export class SchedulerRuntime {
         })
       } catch (error) {
         console.error(
-          `[Pario] Scheduler failed to emit schedule.triggered for '${schedule.id}':`,
+          `[Sixb] Scheduler failed to emit schedule.triggered for '${schedule.id}':`,
           error
         )
       }
@@ -118,7 +118,7 @@ export class SchedulerRuntime {
         this.nextOccurrences.set(schedule.id, next)
       } catch (error) {
         console.error(
-          `[Pario] Scheduler failed to compute next occurrence for '${schedule.id}':`,
+          `[Sixb] Scheduler failed to compute next occurrence for '${schedule.id}':`,
           error
         )
         this.nextOccurrences.delete(schedule.id)

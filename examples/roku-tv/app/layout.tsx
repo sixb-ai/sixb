@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from "react"
 
 export const metadata = {
-  title: "Pario Television Twin",
+  title: "Sixb Television Twin",
   description: "Realtime television digital twin remote and telemetry dashboard.",
   favicon: "/favicon.svg",
 }

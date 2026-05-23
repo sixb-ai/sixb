@@ -1,4 +1,4 @@
-import type { ProjectionRunCounters } from "@pario/core"
+import type { ProjectionRunCounters } from "@sixb/core"
 
 export type MutableProjectionCounters = {
   rowsProcessed: number

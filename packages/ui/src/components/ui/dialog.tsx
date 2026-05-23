@@ -1,7 +1,7 @@
 "use client"
 
-import { Button } from "@pario/ui/components/ui/button"
-import { cn } from "@pario/ui/lib/utils"
+import { Button } from "@sixb/ui/components/ui/button"
+import { cn } from "@sixb/ui/lib/utils"
 import { XIcon } from "lucide-react"
 import { Dialog as DialogPrimitive } from "radix-ui"
 import type * as React from "react"

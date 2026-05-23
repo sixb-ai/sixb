@@ -3,8 +3,8 @@ import type {
   AuthOidcAuthorizationAttemptStore,
   CreateOidcAuthorizationAttemptInput,
   OidcAuthorizationAttemptRecord,
-} from "@pario/core"
-import { AuthStorageError, resolveAuthSessionAudience } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
 import { runImmediateTransaction } from "../transactions"
 import {
   assertNonEmpty,
@@ -33,7 +33,7 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
       if (getOidcAttemptRowById(this.db, { projectId, id })) {
         throw new AuthStorageError(
           "duplicate_oidc_attempt",
-          `[Pario] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
+          `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
         )
       }
 
@@ -71,7 +71,7 @@ export class SqliteAuthOidcAuthorizationAttemptStore implements AuthOidcAuthoriz
         mapUniqueConstraintError(
           error,
           "duplicate_oidc_attempt",
-          `[Pario] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
+          `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
         )
       }
 

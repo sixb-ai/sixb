@@ -35,7 +35,7 @@ export class InMemoryAuthOidcAuthorizationAttemptStore
     if (this.state.oidcAuthorizationAttempts.has(key)) {
       throw new AuthStorageError(
         "duplicate_oidc_attempt",
-        `[Pario] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${id}' already exists for project '${projectId}'.`
       )
     }
 

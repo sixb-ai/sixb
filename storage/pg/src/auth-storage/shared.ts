@@ -9,8 +9,8 @@ import type {
   SessionRecord,
   UpsertAuthGroupMembershipInput,
   UserRecord,
-} from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import type { SQL } from "bun"
 import { isUniqueViolation } from "../storage-errors"
 import type {
@@ -36,7 +36,7 @@ export type PgValue = string | number | Date | null
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthStorageError("invalid_input", `[Pario] ${label} must be a non-empty string.`)
+    throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -144,7 +144,7 @@ export async function requireUserById(
   if (!user) {
     throw new AuthStorageError(
       "missing_user",
-      `[Pario] User '${params.id}' not found for project '${params.projectId}'.`
+      `[Sixb] User '${params.id}' not found for project '${params.projectId}'.`
     )
   }
   return user
@@ -209,7 +209,7 @@ export async function requireSessionById(
   if (!session) {
     throw new AuthStorageError(
       "missing_session",
-      `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+      `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
     )
   }
   return session
@@ -258,7 +258,7 @@ export async function requireInvitationById(
   if (!invitation) {
     throw new AuthStorageError(
       "missing_invitation",
-      `[Pario] Invitation '${params.id}' not found for project '${params.projectId}'.`
+      `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
     )
   }
   return invitation
@@ -362,7 +362,7 @@ export async function consumeMagicLink(
   if (!row) {
     throw new AuthStorageError(
       "missing_magic_link",
-      `[Pario] Magic link '${id}' not found for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
     )
   }
 
@@ -425,7 +425,7 @@ export async function consumeOidcAttempt(
   if (!row) {
     throw new AuthStorageError(
       "missing_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
     )
   }
 
@@ -463,7 +463,7 @@ export async function assertSessionIdAvailable(
   if (await getSessionRowById(sql, { projectId, id: sessionId })) {
     throw new AuthStorageError(
       "duplicate_session",
-      `[Pario] Session '${sessionId}' already exists for project '${projectId}'.`
+      `[Sixb] Session '${sessionId}' already exists for project '${projectId}'.`
     )
   }
 }
@@ -517,7 +517,7 @@ export async function createSession(
     mapUniqueConstraintError(
       error,
       "duplicate_session",
-      `[Pario] Session '${id}' already exists for project '${projectId}'.`
+      `[Sixb] Session '${id}' already exists for project '${projectId}'.`
     )
   }
 }
@@ -615,7 +615,7 @@ export async function upsertGroupMembership(
   if (!membership) {
     throw new AuthStorageError(
       "missing_user",
-      `[Pario] Failed to load group membership '${groupId}' for user '${userId}'.`
+      `[Sixb] Failed to load group membership '${groupId}' for user '${userId}'.`
     )
   }
   return membership
@@ -708,14 +708,14 @@ export function assertMagicLinkUsable(
   if (row.token_hash !== tokenHash || row.consumed_at || row.revoked_at) {
     throw new AuthStorageError(
       "invalid_magic_link",
-      `[Pario] Magic link '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= at) {
     throw new AuthStorageError(
       "expired_magic_link",
-      `[Pario] Magic link '${id}' is expired for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
     )
   }
 }
@@ -730,14 +730,14 @@ export function assertOidcAttemptUsable(
   if (row.state_hash !== stateHash || row.consumed_at) {
     throw new AuthStorageError(
       "invalid_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= at) {
     throw new AuthStorageError(
       "expired_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
     )
   }
 }

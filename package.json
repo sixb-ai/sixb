@@ -1,5 +1,5 @@
 {
-  "name": "pario",
+  "name": "sixb",
   "private": true,
   "workspaces": [
     "auth/*",
@@ -11,20 +11,20 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "bun --filter '@pario/*' build",
-    "dev": "bun pario dev",
+    "build": "bun --filter '@sixb/*' build",
+    "dev": "bun sixb dev",
     "test": "bun test",
     "test:e2e": "bun run --workspaces --if-present test:e2e",
     "test:all": "bun run test && bun run test:e2e",
     "lint": "biome check auth/*/src packages/*/src connectors/*/src",
-    "typecheck": "bun --filter '@pario/*' typecheck",
-    "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/pario && echo 'Linked pario CLI to ~/.bun/bin/pario'",
-    "pario": "bun packages/cli/src/index.tsx",
-    "create-pario": "bun packages/cli/src/index.tsx create",
+    "typecheck": "bun --filter '@sixb/*' typecheck",
+    "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/sixb && echo 'Linked sixb CLI to ~/.bun/bin/sixb'",
+    "sixb": "bun packages/cli/src/index.tsx",
+    "create-sixb": "bun packages/cli/src/index.tsx create",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "generate:client": "bun --filter @pario/server generate:openapi && bun --filter @pario/client generate && bun check:fix",
-    "ui:dev": "bun --filter @pario/ui dev",
+    "generate:client": "bun --filter @sixb/server generate:openapi && bun --filter @sixb/client generate && bun check:fix",
+    "ui:dev": "bun --filter @sixb/ui dev",
     "ui:add": "bun --cwd packages/ui x shadcn@latest add"
   },
   "devDependencies": {

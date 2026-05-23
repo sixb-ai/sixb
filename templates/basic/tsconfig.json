@@ -17,6 +17,6 @@
     "app/**/*.tsx",
     "ontology/**/*.ts",
     "functions/**/*.ts",
-    "pario.config.ts"
+    "sixb.config.ts"
   ]
 }

@@ -1,10 +1,10 @@
 {
-  "name": "@pario/cli",
+  "name": "@sixb/cli",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "pario": "./src/index.tsx",
-    "create-pario": "./src/index.tsx"
+    "sixb": "./src/index.tsx",
+    "create-sixb": "./src/index.tsx"
   },
   "main": "./src/index.tsx",
   "types": "./src/index.tsx",
@@ -15,18 +15,18 @@
     "test:e2e": "bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts"
   },
   "dependencies": {
-    "@pario/app": "workspace:*",
-    "@pario/action-worker": "workspace:*",
-    "@pario/atlas": "workspace:*",
-    "@pario/core": "workspace:*",
-    "@pario/orchestrator": "workspace:*",
-    "@pario/pipeline-worker": "workspace:*",
-    "@pario/projection-worker": "workspace:*",
-    "@pario/rules-worker": "workspace:*",
-    "@pario/sentinel": "workspace:*",
-    "@pario/server": "workspace:*",
-    "@pario/sync-worker": "workspace:*",
-    "@pario/workflow-worker": "workspace:*",
+    "@sixb/app": "workspace:*",
+    "@sixb/action-worker": "workspace:*",
+    "@sixb/atlas": "workspace:*",
+    "@sixb/core": "workspace:*",
+    "@sixb/orchestrator": "workspace:*",
+    "@sixb/pipeline-worker": "workspace:*",
+    "@sixb/projection-worker": "workspace:*",
+    "@sixb/rules-worker": "workspace:*",
+    "@sixb/sentinel": "workspace:*",
+    "@sixb/server": "workspace:*",
+    "@sixb/sync-worker": "workspace:*",
+    "@sixb/workflow-worker": "workspace:*",
     "ink": "^6.0.0",
     "react": "^19.0.0",
     "react-devtools-core": "^4.19.1"

@@ -20,7 +20,7 @@ example, a finance application may require every transaction to be linked to a s
 File: `rules/transaction-requires-document.ts`
 
 ```ts
-import { defineRule } from "@pario/core"
+import { defineRule } from "@sixb/core"
 import { Transaction } from "../ontology/transaction"
 
 export const transactionRequiresDocument = defineRule("transaction.requires-document")
@@ -102,7 +102,7 @@ Empty `all()` and `any()` groups are rejected during runtime startup validation.
 
 ## Discovery
 
-`createPario()` discovers rule definitions exported from `rules/`:
+`createSixb()` discovers rule definitions exported from `rules/`:
 
 ```txt
 my-project/
@@ -115,10 +115,10 @@ my-project/
 You can also pass rules explicitly:
 
 ```ts
-import { createPario } from "@pario/core"
+import { createSixb } from "@sixb/core"
 import { transactionRequiresDocument } from "./rules/transaction-requires-document"
 
-const pario = await createPario({
+const sixb = await createSixb({
   ontologies: [Transaction],
   rules: [transactionRequiresDocument],
   broker,
@@ -132,8 +132,8 @@ const pario = await createPario({
 Registered rules can be inspected from the runtime:
 
 ```ts
-pario.getRuleDefinitions()
-pario.getRuleById("transaction.requires-document")
+sixb.getRuleDefinitions()
+sixb.getRuleById("transaction.requires-document")
 ```
 
 
@@ -144,7 +144,7 @@ Rules are reactive to ontology object events. A rule does not declare schedules.
 Use `deriveRuleEventDependencies()` to derive the domain events that can affect a rule:
 
 ```ts
-import { deriveRuleEventDependencies } from "@pario/core"
+import { deriveRuleEventDependencies } from "@sixb/core"
 
 const dependencies = deriveRuleEventDependencies(transactionRequiresDocument)
 ```
@@ -165,7 +165,7 @@ Property predicates are covered by `object.upserted`. Link predicates add `link.
 
 ## Runtime validation
 
-At startup, Pario rejects:
+At startup, Sixb rejects:
 
 - duplicate rule ids
 - rules whose subject object type is not registered

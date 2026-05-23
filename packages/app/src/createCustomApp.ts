@@ -55,7 +55,7 @@ type BunServeRoute = BunServeRoutes[string]
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
   const appDir = options.appDir ? resolve(rootDir, options.appDir) : resolve(rootDir, "app")
-  const generatedDir = resolve(rootDir, options.generatedDir ?? join(".pario", "generated"))
+  const generatedDir = resolve(rootDir, options.generatedDir ?? join(".sixb", "generated"))
   const publicDir = options.publicDir
     ? resolve(rootDir, options.publicDir)
     : resolve(appDir, "public")
@@ -74,7 +74,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   async function prepareGeneratedApp(): Promise<{ htmlPath: string; routes: PageRoute[] }> {
     const routes = await scanRoutes()
     if (routes.length === 0) {
-      throw new Error(`[ParioCustomApp] No app routes found in ${appDir}`)
+      throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
     await generateRouteManifest(routes, generatedDir)
@@ -109,7 +109,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         development: true,
         routes: {
           ...publicRoutes,
-          ...reservedParioRoutes(),
+          ...reservedSixbRoutes(),
           "/": htmlBundleRoute(htmlModule.default),
           "/*": htmlBundleRoute(htmlModule.default),
         },
@@ -140,7 +140,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     },
 
     async build(buildOptions: CustomAppBuildOptions = {}) {
-      const outdir = resolve(rootDir, buildOptions.outdir ?? join(".pario", "dist", "app"))
+      const outdir = resolve(rootDir, buildOptions.outdir ?? join(".sixb", "dist", "app"))
       const { htmlPath } = await prepareGeneratedApp()
       const result = await buildApp({
         entryPath: htmlPath,
@@ -160,11 +160,11 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async start(startOptions: CustomAppStartOptions = {}) {
       const host = startOptions.host ?? "0.0.0.0"
       const port = startOptions.port ?? 3001
-      const outdir = resolve(rootDir, startOptions.outdir ?? join(".pario", "dist", "app"))
+      const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
       const indexPath = join(outdir, "index.html")
 
       if (!(await pathExists(indexPath))) {
-        throw new Error(`[ParioCustomApp] No built app found in ${outdir}`)
+        throw new Error(`[SixbCustomApp] No built app found in ${outdir}`)
       }
 
       const indexHtml = injectRuntimeConfig(await Bun.file(indexPath).text(), {
@@ -178,7 +178,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         development: false,
         async fetch(req) {
           const url = new URL(req.url)
-          if (isReservedParioRoute(url.pathname)) {
+          if (isReservedSixbRoute(url.pathname)) {
             return notFoundResponse()
           }
 
@@ -254,7 +254,7 @@ async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
       .slice(publicDir.length + 1)
       .split("\\")
       .join("/")}`
-    if (isReservedParioRoute(routePath)) {
+    if (isReservedSixbRoute(routePath)) {
       continue
     }
     routes[routePath] = getHeadRoute((request) => filePathResponse(request, filePath))
@@ -263,7 +263,7 @@ async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
   return routes
 }
 
-function reservedParioRoutes(): BunServeRoutes {
+function reservedSixbRoutes(): BunServeRoutes {
   const handler = () => notFoundResponse()
   return {
     "/api": allMethodsRoute(handler),
@@ -277,7 +277,7 @@ function reservedParioRoutes(): BunServeRoutes {
   }
 }
 
-function isReservedParioRoute(pathname: string): boolean {
+function isReservedSixbRoute(pathname: string): boolean {
   return (
     pathname === "/api" ||
     pathname.startsWith("/api/") ||
@@ -331,7 +331,7 @@ function injectRuntimeConfig(
     api: { baseUrl: config.apiBaseUrl },
     auth: { audience: config.audience, enabled: config.authEnabled },
   })
-  const existingRuntimeScript = /<script>window\.__PARIO_RUNTIME__ = .*?;<\/script>/
+  const existingRuntimeScript = /<script>window\.__SIXB_RUNTIME__ = .*?;<\/script>/
   if (existingRuntimeScript.test(html)) {
     return html.replace(existingRuntimeScript, script)
   }

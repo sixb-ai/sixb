@@ -21,11 +21,11 @@ import {
 export * from "./events"
 export * from "./generated/@tanstack/react-query.gen"
 export {
-  createParioEventsWebSocketUrl,
-  type UseParioEventsOptions,
-  type UseParioEventsResult,
-  useParioEvents,
-} from "./useParioEvents"
+  createSixbEventsWebSocketUrl,
+  type UseSixbEventsOptions,
+  type UseSixbEventsResult,
+  useSixbEvents,
+} from "./useSixbEvents"
 
 type QueryKey = readonly [
   {

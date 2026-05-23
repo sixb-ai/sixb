@@ -1,6 +1,6 @@
 // shadcn primitives
 
-// Pario data-viz primitives
+// Sixb data-viz primitives
 export { MiniSparkline } from "./charts/MiniSparkline"
 export {
   CollectionCardButton,
@@ -30,7 +30,7 @@ export {
   CardTitle,
 } from "./ui/card"
 export { Checkbox } from "./ui/checkbox"
-// Pario shadcn-composed components
+// Sixb shadcn-composed components
 export { Combobox, type ComboboxOption } from "./ui/combobox"
 export {
   Command,

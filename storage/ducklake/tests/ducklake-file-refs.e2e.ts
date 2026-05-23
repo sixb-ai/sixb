@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset, type FileRef } from "@pario/core"
+import { col, defineDataset, type FileRef } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
 
@@ -24,7 +24,7 @@ describe("DuckLakeStorage fileRef rows", () => {
   let storage: DuckLakeStorage
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-file-refs-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-file-refs-"))
     storage = createLocalDuckLakeStorage(rootDir)
     await storage.createDataset(documentsDataset)
   })

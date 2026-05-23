@@ -15,7 +15,7 @@ import type {
   SyncRunRequestedQueueJob,
   WorkflowDefinition,
   WorkflowRunRequestedQueueJob,
-} from "@pario/core"
+} from "@sixb/core"
 
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`

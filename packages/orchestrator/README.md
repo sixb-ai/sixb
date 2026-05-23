@@ -1,6 +1,6 @@
-# @pario/orchestrator
+# @sixb/orchestrator
 
-Bridges runtime events to `ParioQueues` job lanes.
+Bridges runtime events to `SixbQueues` job lanes.
 V1 routes runtime facts into `syncRuns`, `pipelines`, and `projections` queue lanes.
 
 ## Delivery contract
@@ -12,26 +12,26 @@ If the append is rejected asynchronously, that specific occurrence is lost.
 The next cadence tick will produce a new event normally.
 This gap is a known upstream limitation to be addressed in a follow-up on the scheduler.
 
-## Usage (co-hosted in `pario dev`)
+## Usage (co-hosted in `sixb dev`)
 
-When `cohostWorkers` is enabled, `pario dev` automatically compiles routes from registered syncs,
+When `cohostWorkers` is enabled, `sixb dev` automatically compiles routes from registered syncs,
 pipelines, and projections, starts the orchestrator, co-hosts available workers, and starts the scheduler. No manual wiring is needed.
 
 For testing or custom setups:
 
 ```ts
-import { compileRoutes, OrchestratorWorker } from "@pario/orchestrator"
+import { compileRoutes, OrchestratorWorker } from "@sixb/orchestrator"
 
 const routes = compileRoutes({
-  syncs: pario.getSyncDefinitions(),
-  pipelines: pario.getPipelineDefinitions(),
-  projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
+  syncs: sixb.getSyncDefinitions(),
+  pipelines: sixb.getPipelineDefinitions(),
+  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
 })
 
 const worker = new OrchestratorWorker({
-  projectId: pario.id,
-  events: pario.events,
-  queues: pario.queues,
+  projectId: sixb.id,
+  events: sixb.events,
+  queues: sixb.queues,
   routes,
 })
 
@@ -43,7 +43,7 @@ await worker.stop()
 ## Standalone deployment
 
 Standalone deployment (running the orchestrator as a separate process) is **not supported in V1**.
-The orchestrator is designed to be co-hosted within `pario dev` alongside the scheduler and workers.
+The orchestrator is designed to be co-hosted within `sixb dev` alongside the scheduler and workers.
 
 ## Limitations (V1)
 

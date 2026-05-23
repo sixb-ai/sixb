@@ -1,4 +1,4 @@
-import type { WorkflowNodeDefinition, WorkflowRunRecord } from "@pario/core"
+import type { WorkflowNodeDefinition, WorkflowRunRecord } from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"
@@ -48,7 +48,7 @@ export class WorkflowNodeRunner {
     if (outcome.status === "waiting") {
       if (outcome.intervention.nodeRunId !== nodeRun.id) {
         throw new WorkflowWorkerError(
-          `[ParioWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
+          `[SixbWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
         )
       }
 

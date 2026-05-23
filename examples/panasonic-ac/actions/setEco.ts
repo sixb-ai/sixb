@@ -1,4 +1,4 @@
-import { actionParam, defineAction } from "@pario/core"
+import { actionParam, defineAction } from "@sixb/core"
 import { getPanasonicApi } from "../lib/panasonicApi"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
@@ -7,11 +7,11 @@ export const setEco = defineAction("setEco", {
 })
   .target(PanasonicAcUnit)
   .params({ enabled: actionParam("boolean", { required: true }) })
-  .run(async ({ params, target, pario }) => {
-    const api = await getPanasonicApi(pario)
+  .run(async ({ params, target, sixb }) => {
+    const api = await getPanasonicApi(sixb)
     await api.setEcoMode(target.properties.guid, params.enabled)
 
-    await pario
+    await sixb
       .objects(PanasonicAcUnit)
       .appendTelemetryBatch([
         { id: target.primaryId, properties: { ecoMode: params.enabled }, at: new Date() },

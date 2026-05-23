@@ -1,5 +1,5 @@
-import { Button, Card, CardContent, EmptyState } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import { Button, Card, CardContent, EmptyState } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { AlertCircle, Loader2 } from "lucide-react"
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"

@@ -1,5 +1,5 @@
-import { executeAction, useParioEvents } from "@pario/client"
-import { listObjectsOptions } from "@pario/client/hooks"
+import { executeAction, useSixbEvents } from "@sixb/client"
+import { listObjectsOptions } from "@sixb/client/hooks"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { startTransition } from "react"
 
@@ -29,7 +29,7 @@ export default function HomePage() {
   const currentValue = counter?.telemetry.value?.currentValue ?? counter?.properties.value ?? 0
   const counterValue = formatCounterValue(currentValue)
 
-  useParioEvents({
+  useSixbEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     onEvent() {
@@ -61,10 +61,10 @@ export default function HomePage() {
   return (
     <main className="shell">
       <section className="hero">
-        <p className="eyebrow">Pario starter</p>
+        <p className="eyebrow">Sixb starter</p>
         <h1>Counter</h1>
         <p className="lede">
-          The runtime is ticking in the background. This custom app reads from the Pario API and can
+          The runtime is ticking in the background. This custom app reads from the Sixb API and can
           send actions back to the server.
         </p>
       </section>

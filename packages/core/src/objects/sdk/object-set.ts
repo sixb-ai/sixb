@@ -1,6 +1,6 @@
 /**
  * ObjectSet provides a type-safe collection API for objects of a given type.
- * Created via `pario.objects(MyType)`, it exposes upsert, query, and telemetry batch operations
+ * Created via `sixb.objects(MyType)`, it exposes upsert, query, and telemetry batch operations
  * while preserving compile-time property types inferred from the ontology definition.
  */
 
@@ -202,7 +202,7 @@ export function createObjectSet<
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
         throw new OntologyValidationError(
-          "[Pario] requestAction requires either 'action' or 'actionId'"
+          "[Sixb] requestAction requires either 'action' or 'actionId'"
         )
       }
       return requestActionLeaf(resolvedCtx, {
@@ -224,7 +224,7 @@ export function createObjectSet<
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
         throw new OntologyValidationError(
-          "[Pario] requestActionAndWait requires either 'action' or 'actionId'"
+          "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
         )
       }
       return requestActionAndWaitLeaf(resolvedCtx, {

@@ -1,4 +1,4 @@
-import type { WorkflowRunStatus } from "@pario/core"
+import type { WorkflowRunStatus } from "@sixb/core"
 
 export function createAbortError(): Error {
   const error = new Error("Workflow worker aborted.")

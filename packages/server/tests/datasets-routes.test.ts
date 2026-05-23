@@ -4,9 +4,9 @@ import type {
   DatasetDefinition,
   LakeStorage,
   OntologySource,
-  Pario,
-} from "@pario/core"
-import { col, defineDataset } from "@pario/core"
+  Sixb,
+} from "@sixb/core"
+import { col, defineDataset } from "@sixb/core"
 import { Elysia } from "elysia"
 import { registerDatasetRoutes } from "../src/routes/datasets"
 
@@ -48,10 +48,10 @@ function createCatalogOnlyStorage(states: readonly DatasetCatalogState[]) {
   }
 }
 
-function createParioStub(
+function createSixbStub(
   lakeStorage: LakeStorage,
   definitions: readonly DatasetDefinition[]
-): Pario<readonly OntologySource[]> {
+): Sixb<readonly OntologySource[]> {
   return {
     lakeStorage,
     getDatasetDefinitions: () => definitions,
@@ -60,7 +60,7 @@ function createParioStub(
     getPipelineDefinitions: () => [],
     getObjectProjections: () => [],
     getLinkProjections: () => [],
-  } as unknown as Pario<readonly OntologySource[]>
+  } as unknown as Sixb<readonly OntologySource[]>
 }
 
 const definitions: DatasetDefinition[] = Array.from({ length: 5 }, (_, index) =>
@@ -82,7 +82,7 @@ const states: DatasetCatalogState[] = definitions.map((definition, index) => ({
 describe("dataset catalog routes", () => {
   test("list route reads bulk catalog state once, never per-dataset reads", async () => {
     const { storage, calls } = createCatalogOnlyStorage(states)
-    const app = registerDatasetRoutes(new Elysia(), createParioStub(storage, definitions))
+    const app = registerDatasetRoutes(new Elysia(), createSixbStub(storage, definitions))
 
     const response = await app.handle(new Request("http://localhost/api/datasets"))
     expect(response.status).toBe(200)
@@ -106,7 +106,7 @@ describe("dataset catalog routes", () => {
 
   test("single route reads catalog state without per-dataset reads", async () => {
     const { storage, calls } = createCatalogOnlyStorage(states)
-    const app = registerDatasetRoutes(new Elysia(), createParioStub(storage, definitions))
+    const app = registerDatasetRoutes(new Elysia(), createSixbStub(storage, definitions))
 
     const response = await app.handle(
       new Request(`http://localhost/api/datasets/${definitions[0].id}`)

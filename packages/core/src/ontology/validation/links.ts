@@ -24,7 +24,7 @@ export function assertLinkTargetType(
       ? linkDefinition.targetObjectTypeId.join(" | ")
       : linkDefinition.targetObjectTypeId
     throw new OntologyValidationError(
-      `[Pario] Link ${objectTypeId}.${linkId} must target '${expected}', got '${targetTypeId}'`
+      `[Sixb] Link ${objectTypeId}.${linkId} must target '${expected}', got '${targetTypeId}'`
     )
   }
 }
@@ -47,7 +47,7 @@ export function assertTargetTypeCompatible(
   }
   const expected = types.join(" | ")
   throw new OntologyValidationError(
-    `[Pario] ${context}: target type '${actualTarget}' is not compatible with declared target '${expected}'`
+    `[Sixb] ${context}: target type '${actualTarget}' is not compatible with declared target '${expected}'`
   )
 }
 
@@ -64,7 +64,7 @@ export function validateLinkProperties(
   if (linkProperties.length === 0) {
     if (Object.keys(provided).length > 0) {
       throw new OntologyValidationError(
-        `[Pario] Link ${objectType.id}.${link.id} does not define link properties`
+        `[Sixb] Link ${objectType.id}.${link.id} does not define link properties`
       )
     }
     return
@@ -74,7 +74,7 @@ export function validateLinkProperties(
   for (const propertyId of Object.keys(provided)) {
     if (!knownPropertyIds.has(propertyId)) {
       throw new OntologyValidationError(
-        `[Pario] Unknown link property '${propertyId}' for link '${objectType.id}.${link.id}'`
+        `[Sixb] Unknown link property '${propertyId}' for link '${objectType.id}.${link.id}'`
       )
     }
   }
@@ -102,7 +102,7 @@ export function validateLinkProperties(
   for (const property of linkProperties) {
     if (property.required && merged[property.id] === undefined) {
       throw new OntologyValidationError(
-        `[Pario] Missing required link property '${property.id}' for link '${objectType.id}.${link.id}'`
+        `[Sixb] Missing required link property '${property.id}' for link '${objectType.id}.${link.id}'`
       )
     }
   }

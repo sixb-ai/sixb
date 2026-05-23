@@ -74,7 +74,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_session",
-        `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+        `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
       )
     }
 
@@ -112,7 +112,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_session",
-        `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+        `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
       )
     }
 

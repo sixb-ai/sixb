@@ -12,6 +12,6 @@
     "functions/**/*.ts",
     "lib/**/*.ts",
     "connectors/**/*.ts",
-    "pario.config.ts"
+    "sixb.config.ts"
   ]
 }

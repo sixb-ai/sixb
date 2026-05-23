@@ -19,7 +19,7 @@ import {
   type RunTrigger,
   type ScheduleDefinition,
   syncFinished,
-} from "@pario/core"
+} from "@sixb/core"
 import { compileRoutes, compileRoutesWithDiagnostics } from "../src/compile-routes"
 import type { OrchestratorRouteKey, OrchestratorRoutes } from "../src/types"
 
@@ -329,7 +329,7 @@ describe("compileRoutes", () => {
   })
 
   test("duplicate sync ids with the same schedule accumulate in the same bucket", () => {
-    // This situation is impossible via Pario's constructor (it rejects duplicate ids),
+    // This situation is impossible via Sixb's constructor (it rejects duplicate ids),
     // but we document the behavior: compileRoutes is a pure function and does not validate.
     const syncA = makeSyncWithSchedule("sync-dup", daily)
     const syncB = makeSyncWithSchedule("sync-dup", daily)

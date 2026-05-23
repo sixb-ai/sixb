@@ -1,9 +1,9 @@
 // Generated SDK surface (modern)
 
 export type {
-  ParioBrowserClientController,
-  ParioBrowserRuntimeConfig,
-  ParioBrowserRuntimeDefaults,
+  SixbBrowserClientController,
+  SixbBrowserRuntimeConfig,
+  SixbBrowserRuntimeDefaults,
 } from "./browser"
 export * from "./events"
 export * from "./generated"
@@ -14,8 +14,8 @@ export * from "./models"
 
 // React hooks
 export {
-  createParioEventsWebSocketUrl,
-  type UseParioEventsOptions,
-  type UseParioEventsResult,
-  useParioEvents,
-} from "./useParioEvents"
+  createSixbEventsWebSocketUrl,
+  type UseSixbEventsOptions,
+  type UseSixbEventsResult,
+  useSixbEvents,
+} from "./useSixbEvents"

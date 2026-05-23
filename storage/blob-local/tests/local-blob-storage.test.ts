@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { BlobStorageError } from "@pario/core"
+import { BlobStorageError } from "@sixb/core"
 import { LocalBlobStorage } from "../src"
 
 const encoder = new TextEncoder()
@@ -12,7 +12,7 @@ describe("LocalBlobStorage", () => {
   let store: LocalBlobStorage
 
   beforeEach(async () => {
-    basePath = await mkdtemp(join(tmpdir(), "pario-blob-local-"))
+    basePath = await mkdtemp(join(tmpdir(), "sixb-blob-local-"))
     store = new LocalBlobStorage({ basePath })
   })
 

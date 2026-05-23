@@ -6,7 +6,7 @@ import {
   type ObjectProjectionDefinition,
   type OntologyRegistry,
   type Schema,
-} from "@pario/core"
+} from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
@@ -106,7 +106,7 @@ function buildProjectedPropertyPlans(input: {
   const objectType = ontology.getObjectTypeById(projection.objectTypeId)
   if (!objectType) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${projection.id}' references unknown object type '${projection.objectTypeId}'.`
+      `[SixbProjectionWorker] Projection '${projection.id}' references unknown object type '${projection.objectTypeId}'.`
     )
   }
 
@@ -119,14 +119,14 @@ function buildProjectedPropertyPlans(input: {
     const property = propertiesById.get(propertyId)
     if (!property) {
       throw new ProjectionWorkerError(
-        `[ParioProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
+        `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
       )
     }
 
     const column = columnsByName.get(columnName)
     if (!column) {
       throw new ProjectionWorkerError(
-        `[ParioProjectionWorker] Projection '${projection.id}' references unknown dataset column '${columnName}' on dataset '${dataset.id}'.`
+        `[SixbProjectionWorker] Projection '${projection.id}' references unknown dataset column '${columnName}' on dataset '${dataset.id}'.`
       )
     }
 
@@ -158,7 +158,7 @@ function collectProperties(
     if (!propertyPlan) {
       return {
         ok: false,
-        errorMessage: `[ParioProjectionWorker] Projection '${projection.id}' has no property plan for '${propertyId}'.`,
+        errorMessage: `[SixbProjectionWorker] Projection '${projection.id}' has no property plan for '${propertyId}'.`,
       }
     }
 
@@ -170,7 +170,7 @@ function collectProperties(
     if (!normalized.ok) {
       return {
         ok: false,
-        errorMessage: `[ParioProjectionWorker] Projection '${projection.id}' property '${propertyId}' from dataset column '${columnName}' (${propertyPlan.columnType}) ${normalized.errorMessage}.`,
+        errorMessage: `[SixbProjectionWorker] Projection '${projection.id}' property '${propertyId}' from dataset column '${columnName}' (${propertyPlan.columnType}) ${normalized.errorMessage}.`,
       }
     }
 

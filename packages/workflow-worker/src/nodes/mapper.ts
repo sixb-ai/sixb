@@ -1,4 +1,4 @@
-import type { WorkflowStepOutputs } from "@pario/core"
+import type { WorkflowStepOutputs } from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import { isRecord } from "../normalize"
 
@@ -16,7 +16,7 @@ export function callWorkflowMapper(input: {
 }): unknown {
   if (typeof input.mapper !== "function") {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' mapper must be a function.`
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' mapper must be a function.`
     )
   }
 
@@ -33,7 +33,7 @@ export function requireRecordInput(input: {
 }): Readonly<Record<string, unknown>> {
   if (!isRecord(input.value)) {
     throw new WorkflowWorkerError(
-      `[ParioWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' input must be an object.`
+      `[SixbWorkflowWorker] Workflow '${input.workflowId}' node '${input.nodeId}' input must be an object.`
     )
   }
 

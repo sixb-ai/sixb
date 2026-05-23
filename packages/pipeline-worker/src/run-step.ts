@@ -4,7 +4,7 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepRunRecord,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   createStepBookkeepingError,
   requireRegisteredDataset,

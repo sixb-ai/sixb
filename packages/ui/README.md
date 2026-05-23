@@ -1,9 +1,9 @@
-# @pario/ui
+# @sixb/ui
 
-Shared UI foundations for Pario apps.
+Shared UI foundations for Sixb apps.
 
 This package contains the design tokens, global CSS, React primitives, and small composed
-components used by the built-in Pario server UI. It is intentionally boring: consistent
+components used by the built-in Sixb server UI. It is intentionally boring: consistent
 surface colors, hairline borders, accessible Radix behavior, lucide icons, and a compact
 visual language that works for dense operational tools.
 
@@ -12,10 +12,10 @@ visual language that works for dense operational tools.
 - **Global styles** in `src/styles/globals.css`
   - Tailwind CSS v4 setup
   - light and dark CSS variables
-  - Pario typography, radius, border, scrollbar, and chart tokens
+  - Sixb typography, radius, border, scrollbar, and chart tokens
 - **shadcn/Radix primitives** in `src/components/ui`
   - buttons, inputs, dialogs, dropdowns, tables, tabs, sidebar, tooltips, and more
-- **Pario components** in `src/components`
+- **Sixb components** in `src/components`
   - collection headers, card grids, empty states, theme switching, and small charts
 - **Hooks and utilities** in `src/hooks` and `src/lib`
   - `ThemeProvider`, `useTheme`, `useIsMobile`, and `cn`
@@ -25,7 +25,7 @@ visual language that works for dense operational tools.
 Import the global stylesheet once at the app boundary:
 
 ```css
-@import "@pario/ui/globals.css";
+@import "@sixb/ui/globals.css";
 ```
 
 Wrap the app with the theme provider if it should support light, dark, and system theme
@@ -33,7 +33,7 @@ selection:
 
 ```tsx
 import type { ReactNode } from "react"
-import { ThemeProvider } from "@pario/ui/hooks"
+import { ThemeProvider } from "@sixb/ui/hooks"
 
 export function AppRoot({ children }: { children: ReactNode }) {
   return <ThemeProvider>{children}</ThemeProvider>
@@ -43,7 +43,7 @@ export function AppRoot({ children }: { children: ReactNode }) {
 Use components from the package-level component barrel:
 
 ```tsx
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@pario/ui/components"
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle } from "@sixb/ui/components"
 
 export function DatasetCard() {
   return (
@@ -63,8 +63,8 @@ export function DatasetCard() {
 For low-level imports, use the explicit subpaths:
 
 ```tsx
-import { Button } from "@pario/ui/components/ui/button"
-import { cn } from "@pario/ui/lib/utils"
+import { Button } from "@sixb/ui/components/ui/button"
+import { cn } from "@sixb/ui/lib/utils"
 ```
 
 ## Design Notes
@@ -88,7 +88,7 @@ bun run ui:dev
 Or run the package directly:
 
 ```bash
-bun --filter @pario/ui dev
+bun --filter @sixb/ui dev
 ```
 
 The preview server listens on `http://localhost:3010`.
@@ -96,7 +96,7 @@ The preview server listens on `http://localhost:3010`.
 Typecheck the package:
 
 ```bash
-bun --filter @pario/ui typecheck
+bun --filter @sixb/ui typecheck
 ```
 
 ## Adding Components
@@ -112,18 +112,18 @@ bun run ui:add button
 After adding a primitive:
 
 1. Export it from `src/components/index.ts`.
-2. Make sure it uses `@pario/ui/lib/utils` for `cn`.
+2. Make sure it uses `@sixb/ui/lib/utils` for `cn`.
 3. Keep styling aligned with the existing tokens and compact sizing.
 4. Add it to the preview app when seeing it in context would help future changes.
-5. Run `bun --filter @pario/ui typecheck`.
+5. Run `bun --filter @sixb/ui typecheck`.
 
 ## Public Exports
 
 ```ts
-import { Button, Card, EmptyState, MiniSparkline, ThemeSwitcher } from "@pario/ui/components"
-import { ThemeProvider, useTheme, useIsMobile } from "@pario/ui/hooks"
-import { cn } from "@pario/ui/lib"
+import { Button, Card, EmptyState, MiniSparkline, ThemeSwitcher } from "@sixb/ui/components"
+import { ThemeProvider, useTheme, useIsMobile } from "@sixb/ui/hooks"
+import { cn } from "@sixb/ui/lib"
 ```
 
 The package is currently private to the workspace, so treat it as an internal foundation for
-Pario-maintained apps and packages.
+Sixb-maintained apps and packages.

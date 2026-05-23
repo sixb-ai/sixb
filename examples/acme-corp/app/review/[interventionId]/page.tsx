@@ -1,11 +1,11 @@
-import type { GetWorkflowInterventionResponse } from "@pario/client"
+import type { GetWorkflowInterventionResponse } from "@sixb/client"
 import {
   cancelWorkflowInterventionMutation,
   getWorkflowInterventionOptions,
   getWorkflowInterventionQueryKey,
   listWorkflowInterventionsQueryKey,
   submitWorkflowInterventionMutation,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"

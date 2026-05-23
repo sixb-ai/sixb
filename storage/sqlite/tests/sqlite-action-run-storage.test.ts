@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { ActionRunError } from "@pario/core"
+import { ActionRunError } from "@sixb/core"
 import { SqliteActionRunStorage } from "../src"
 
 describe("SqliteActionRunStorage", () => {

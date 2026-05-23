@@ -1,4 +1,4 @@
-import type { OntologySource, Pario, WebhookRunRecord } from "@pario/core"
+import type { OntologySource, Sixb, WebhookRunRecord } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import { WebhookRunListResponseSchema, WebhookRunsQuerySchema } from "../schemas/webhook-runs"
@@ -23,13 +23,13 @@ function serializeWebhookRun(run: WebhookRunRecord) {
   }
 }
 
-export function registerWebhookRunRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerWebhookRunRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app.get(
     "/api/webhook-runs",
     async ({ query, set }) => {
       try {
         const parsed = WebhookRunsQuerySchema.parse(query)
-        const storage = pario.storage.webhookRuns
+        const storage = sixb.storage.webhookRuns
         if (!storage) {
           return {
             runs: [],
@@ -39,7 +39,7 @@ export function registerWebhookRunRoutes(app: Elysia, pario: Pario<readonly Onto
         }
 
         const result = await storage.list({
-          projectId: pario.id,
+          projectId: sixb.id,
           connectorId: parsed.connectorId,
           webhookId: parsed.webhookId,
           statuses: parsed.status ? [parsed.status] : undefined,

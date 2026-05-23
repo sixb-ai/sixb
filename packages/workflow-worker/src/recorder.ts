@@ -5,7 +5,7 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
 
 export const noopWorkflowRunObserver: WorkflowRunObserver = {
@@ -215,7 +215,7 @@ export class WorkflowRunRecorder {
     try {
       await fn()
     } catch (error) {
-      console.error("[ParioWorkflowWorker] Failed to emit workflow lifecycle event:", error)
+      console.error("[SixbWorkflowWorker] Failed to emit workflow lifecycle event:", error)
     }
   }
 }

@@ -1,5 +1,5 @@
-import { Badge } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import { Badge } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { Ban, CheckCircle2, CircleDashed, Hourglass, TimerReset, XCircle } from "lucide-react"
 import {
   nodeStatusClasses,

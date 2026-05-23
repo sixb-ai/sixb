@@ -1,29 +1,29 @@
-import { magicLink, type SendMagicLinkInput } from "@pario/auth-magic-link"
-import { oidc, type SendOidcInvitationInput } from "@pario/auth-oidc"
+import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
+import { oidc, type SendOidcInvitationInput } from "@sixb/auth-oidc"
 import {
-  createPario,
+  createSixb,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
-} from "@pario/core"
-import { SqliteStorage } from "@pario/sqlite"
+} from "@sixb/core"
+import { SqliteStorage } from "@sixb/sqlite"
 import { securityAdmins } from "./security/groups/security-admins"
 
-// Switch the auth strategy with PARIO_AUTH_MODE:
+// Switch the auth strategy with SIXB_AUTH_MODE:
 //   magic-link (default) — zero setup; the sign-in link is printed to this terminal.
-//   oidc                 — set PARIO_GOOGLE_CLIENT_ID and PARIO_GOOGLE_CLIENT_SECRET.
-// Set RESEND_API_KEY (+ PARIO_AUTH_EMAIL_FROM) to actually deliver the emails via Resend.
-const authMode = (process.env.PARIO_AUTH_MODE ?? "magic-link").trim()
-const fromEmail = process.env.PARIO_AUTH_EMAIL_FROM?.trim()
+//   oidc                 — set SIXB_GOOGLE_CLIENT_ID and SIXB_GOOGLE_CLIENT_SECRET.
+// Set RESEND_API_KEY (+ SIXB_AUTH_EMAIL_FROM) to actually deliver the emails via Resend.
+const authMode = (process.env.SIXB_AUTH_MODE ?? "magic-link").trim()
+const fromEmail = process.env.SIXB_AUTH_EMAIL_FROM?.trim()
 
-const allowedDomains = listEnv("PARIO_AUTH_ALLOWED_DOMAINS", ["example.com"])
-const bootstrapUsers = listEnv("PARIO_AUTH_BOOTSTRAP_USERS", ["admin@example.com"])
+const allowedDomains = listEnv("SIXB_AUTH_ALLOWED_DOMAINS", ["example.com"])
+const bootstrapUsers = listEnv("SIXB_AUTH_BOOTSTRAP_USERS", ["admin@example.com"])
 
-export const pario = createPario({
+export const sixb = createSixb({
   id: "auth-example",
   broker: new InMemoryBroker(),
-  storage: new SqliteStorage({ path: ".pario" }),
+  storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new InMemoryLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),
   queues: new InMemoryQueues(),
@@ -32,8 +32,8 @@ export const pario = createPario({
       ? oidc({
           id: "google-workspace",
           issuer: "https://accounts.google.com",
-          clientId: requiredEnv("PARIO_GOOGLE_CLIENT_ID"),
-          clientSecret: requiredEnv("PARIO_GOOGLE_CLIENT_SECRET"),
+          clientId: requiredEnv("SIXB_GOOGLE_CLIENT_ID"),
+          clientSecret: requiredEnv("SIXB_GOOGLE_CLIENT_SECRET"),
           allowedDomains,
           bootstrapUsers,
           bootstrapGroups: [securityAdmins],
@@ -96,7 +96,7 @@ async function sendResendEmail(input: {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      from: input.from ?? requiredEnv("PARIO_AUTH_EMAIL_FROM"),
+      from: input.from ?? requiredEnv("SIXB_AUTH_EMAIL_FROM"),
       to: [input.to],
       subject: input.subject,
       text: input.text,

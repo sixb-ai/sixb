@@ -4,7 +4,7 @@ import type {
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

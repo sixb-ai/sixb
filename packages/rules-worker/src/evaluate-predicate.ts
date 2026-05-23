@@ -1,4 +1,4 @@
-import type { RulePredicate } from "@pario/core"
+import type { RulePredicate } from "@sixb/core"
 import type { EvaluateRulePredicateInput } from "./types"
 
 type RulePropertyPredicate = Extract<RulePredicate, { kind: "property" }>

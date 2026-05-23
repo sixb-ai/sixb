@@ -1,4 +1,4 @@
-import { defineRule } from "@pario/core"
+import { defineRule } from "@sixb/core"
 import { Customer } from "../ontology/customer"
 import { Invoice } from "../ontology/invoice"
 import { Project } from "../ontology/project"

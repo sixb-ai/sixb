@@ -9,15 +9,15 @@ beforeAll(async () => {
   composeStarted = true
   await Bun.$`docker compose -f ${composeFile} run --rm createbuckets`.quiet()
 
-  process.env.PARIO_DUCKLAKE_POSTGRES_HOST = "127.0.0.1"
-  process.env.PARIO_DUCKLAKE_POSTGRES_PORT = "54331"
-  process.env.PARIO_DUCKLAKE_POSTGRES_DATABASE = "postgres"
-  process.env.PARIO_DUCKLAKE_POSTGRES_USER = "postgres"
-  process.env.PARIO_DUCKLAKE_POSTGRES_PASSWORD = "test"
-  process.env.PARIO_DUCKLAKE_S3_ENDPOINT = "127.0.0.1:19000"
-  process.env.PARIO_DUCKLAKE_S3_BUCKET = "pario-ducklake"
-  process.env.PARIO_DUCKLAKE_S3_KEY_ID = "pario"
-  process.env.PARIO_DUCKLAKE_S3_SECRET = "pario-secret"
+  process.env.SIXB_DUCKLAKE_POSTGRES_HOST = "127.0.0.1"
+  process.env.SIXB_DUCKLAKE_POSTGRES_PORT = "54331"
+  process.env.SIXB_DUCKLAKE_POSTGRES_DATABASE = "postgres"
+  process.env.SIXB_DUCKLAKE_POSTGRES_USER = "postgres"
+  process.env.SIXB_DUCKLAKE_POSTGRES_PASSWORD = "test"
+  process.env.SIXB_DUCKLAKE_S3_ENDPOINT = "127.0.0.1:19000"
+  process.env.SIXB_DUCKLAKE_S3_BUCKET = "sixb-ducklake"
+  process.env.SIXB_DUCKLAKE_S3_KEY_ID = "sixb"
+  process.env.SIXB_DUCKLAKE_S3_SECRET = "sixb-secret"
 }, 90_000)
 
 afterAll(async () => {

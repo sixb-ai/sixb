@@ -1,5 +1,5 @@
-import { rest } from "@pario/connector-rest"
-import { defineConnector } from "@pario/core"
+import { rest } from "@sixb/connector-rest"
+import { defineConnector } from "@sixb/core"
 import { PanasonicAuth } from "../lib/panasonic/auth"
 import { buildPanasonicHeaders } from "../lib/panasonic/headers"
 import { API_CONSTANTS } from "../lib/panasonic/types"
@@ -20,13 +20,13 @@ function getCredentials(): { email: string; password: string } {
 /**
  * Panasonic Comfort Cloud REST connector.
  *
- * Auto-discovered by `createPario()` from the `connectors/` directory.
- * On first use (`pario.connector(panasonicConnector)`), the adapter:
+ * Auto-discovered by `createSixb()` from the `connectors/` directory.
+ * On first use (`sixb.connector(panasonicConnector)`), the adapter:
  * 1. Authenticates via OAuth2 PKCE using credentials from environment variables
  * 2. Creates a `rest()` client configured with Panasonic-specific headers,
  *    rate-limiting, retry, and automatic token refresh on 401
  *
- * Tokens live in memory for the lifetime of the Pario runtime.
+ * Tokens live in memory for the lifetime of the Sixb runtime.
  * `PanasonicAuth.getAccessToken()` transparently refreshes tokens nearing expiry.
  * If a 401 still occurs (e.g. server-side revocation), a full re-authentication is performed.
  *

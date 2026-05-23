@@ -1,15 +1,15 @@
 /**
  * Resolved context types for object operations.
  *
- * Context hierarchy: ParioRuntimeContext → ResolvedObjectContext → ResolvedLinkContext
+ * Context hierarchy: SixbRuntimeContext → ResolvedObjectContext → ResolvedLinkContext
  */
 
 import type { ObjectLink } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import type { ParioRuntimeContext } from "../../runtime/types"
+import type { SixbRuntimeContext } from "../../runtime/types"
 
 /** Resolved context for object operations — extends runtime with resolved type info. */
-export interface ResolvedObjectContext extends ParioRuntimeContext {
+export interface ResolvedObjectContext extends SixbRuntimeContext {
   readonly objectType: ObjectTypeWithPropertyTokens
   readonly primaryPropertyId: string
 }

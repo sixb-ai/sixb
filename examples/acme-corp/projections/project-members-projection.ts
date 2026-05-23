@@ -1,4 +1,4 @@
-import { defineLinkProjection } from "@pario/core"
+import { defineLinkProjection } from "@sixb/core"
 import { erpProjectMembersDataset } from "../datasets/erp"
 import { Project } from "../ontology/project"
 

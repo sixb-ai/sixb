@@ -33,7 +33,7 @@ data passed between those stages typed.
 File: `workflows/reconcileTransaction.ts`
 
 ```ts
-import { defineWorkflowStep, ref } from "@pario/core"
+import { defineWorkflowStep, ref } from "@sixb/core"
 import { Invoice, Transaction } from "../ontology/transaction"
 
 export const findBestInvoice = defineWorkflowStep("find-best-invoice")
@@ -45,7 +45,7 @@ export const findBestInvoice = defineWorkflowStep("find-best-invoice")
     invoice: ref(Invoice),
     confidence: "double",
   })
-  .run(async ({ input, pario }) => {
+  .run(async ({ input, sixb }) => {
     return {
       transaction: input.transaction,
       invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
@@ -60,7 +60,7 @@ Step ids are also used to derive keys for `steps` data. For example, `find-best-
 ## Compose a Workflow
 
 ```ts
-import { actionParam, defineAction, defineWorkflow, ref } from "@pario/core"
+import { actionParam, defineAction, defineWorkflow, ref } from "@sixb/core"
 import { Invoice, Transaction } from "../ontology/transaction"
 import { findBestInvoice } from "./reconcileTransaction"
 
@@ -131,7 +131,7 @@ Later step outputs are not available yet, and action nodes do not expose step ou
 Workflows can attach schedule triggers:
 
 ```ts
-import { defineSchedule, defineWorkflow } from "@pario/core"
+import { defineSchedule, defineWorkflow } from "@sixb/core"
 
 export const daily = defineSchedule("daily-reconciliation").cron("0 6 * * *")
 
@@ -162,13 +162,13 @@ defineWorkflow("reconcile-transaction")
 Use `compileRoutesWithDiagnostics(...)` to see skipped scheduled workflows:
 
 ```ts
-import { compileRoutesWithDiagnostics } from "@pario/orchestrator"
+import { compileRoutesWithDiagnostics } from "@sixb/orchestrator"
 
 const { routes, diagnostics } = compileRoutesWithDiagnostics({
-  syncs: pario.getSyncDefinitions(),
-  pipelines: pario.getPipelineDefinitions(),
-  projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
-  workflows: pario.getWorkflowDefinitions(),
+  syncs: sixb.getSyncDefinitions(),
+  pipelines: sixb.getPipelineDefinitions(),
+  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
+  workflows: sixb.getWorkflowDefinitions(),
 })
 ```
 
@@ -197,15 +197,15 @@ your-project/
     daily.ts
   workflows/
     reconcileTransaction.ts
-  pario.config.ts
+  sixb.config.ts
 ```
 
-`createPario()` scans `workflows/` and registers exported workflow definitions automatically.
+`createSixb()` scans `workflows/` and registers exported workflow definitions automatically.
 
 You can also register workflows explicitly:
 
 ```ts
-createPario({
+createSixb({
   ontologies: [Transaction, Invoice],
   actions: [attachInvoice],
   schedules: [daily],
@@ -217,13 +217,13 @@ createPario({
 Registered workflows can be inspected from the runtime:
 
 ```ts
-pario.getWorkflowDefinitions()
-pario.getWorkflowById("reconcile-transaction")
+sixb.getWorkflowDefinitions()
+sixb.getWorkflowById("reconcile-transaction")
 ```
 
 ## Runtime Validation
 
-At startup, Pario rejects:
+At startup, Sixb rejects:
 
 - duplicate workflow ids
 - workflows with no nodes
@@ -266,10 +266,10 @@ The queued payload for an empty-input scheduled workflow looks like:
 
 Source event metadata is attached to the queue job envelope.
 
-In local development, `pario dev` co-hosts `WorkflowWorker` when workflows are registered:
+In local development, `sixb dev` co-hosts `WorkflowWorker` when workflows are registered:
 
 ```text
-pario dev
+sixb dev
   -> compile workflow routes
   -> start WorkflowWorker
   -> start OrchestratorWorker
@@ -279,7 +279,7 @@ pario dev
 For a dedicated process, use:
 
 ```bash
-pario worker workflow
+sixb worker workflow
 ```
 
 ## Current Scope

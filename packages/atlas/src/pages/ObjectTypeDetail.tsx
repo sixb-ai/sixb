@@ -2,7 +2,7 @@ import {
   getObjectTypeOptions,
   listObjectTypesOptions,
   listProjectionsOptions,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -17,8 +17,8 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { Fragment, type ReactNode, useMemo } from "react"

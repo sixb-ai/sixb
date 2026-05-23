@@ -11,8 +11,8 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
   StartActionRunInput,
-} from "@pario/core"
-import { ActionRunError } from "@pario/core"
+} from "@sixb/core"
+import { ActionRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteActionRunStorageOptions {
@@ -69,7 +69,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new ActionRunError(
-          `[ParioSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -79,7 +79,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new ActionRunError(
-        `[ParioSqlite] Failed to load action run '${input.id}' for project '${input.projectId}'.`
+        `[SixbSqlite] Failed to load action run '${input.id}' for project '${input.projectId}'.`
       )
     }
 
@@ -94,7 +94,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
 
       if (!existing) {
         throw new ActionRunError(
-          `[ParioSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
@@ -294,7 +294,7 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
   }
 
   if (!row.object_type_id || !row.primary_id) {
-    throw new ActionRunError(`[ParioSqlite] Action run '${row.id}' has an invalid object subject.`)
+    throw new ActionRunError(`[SixbSqlite] Action run '${row.id}' has an invalid object subject.`)
   }
 
   return {

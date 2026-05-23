@@ -48,7 +48,7 @@ const findBestInvoice = defineWorkflowStep("find-best-invoice")
   })
   .run(async (ctx) => {
     const transaction: ObjectRef<"Transaction"> = ctx.input.transaction
-    ctx.pario.objects(Transaction)
+    ctx.sixb.objects(Transaction)
 
     // @ts-expect-error step handlers only receive their own input
     ctx.input.invoice

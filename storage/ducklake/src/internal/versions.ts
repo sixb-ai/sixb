@@ -1,11 +1,11 @@
-import type { DatasetVersion } from "@pario/core"
-import { LakeStorageError } from "@pario/core"
+import type { DatasetVersion } from "@sixb/core"
+import { LakeStorageError } from "@sixb/core"
 
-export interface ParioSchemaChangeMetadata {
+export interface SixbSchemaChangeMetadata {
   readonly addColumns?: readonly string[]
 }
 
-export interface ParioCommitMetadata {
+export interface SixbCommitMetadata {
   readonly kind: "datasetVersion"
   readonly datasetId: string
   readonly commitId?: string
@@ -13,17 +13,17 @@ export interface ParioCommitMetadata {
   readonly producer?: DatasetVersion["producer"]
   readonly inputs?: DatasetVersion["inputs"]
   readonly rowCount?: number
-  readonly schemaChange?: ParioSchemaChangeMetadata
+  readonly schemaChange?: SixbSchemaChangeMetadata
 }
 
 export function parseVersionId(versionId: string): string {
   if (!versionId.startsWith("ducklake:")) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake version id '${versionId}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
   }
 
   const snapshotId = versionId.slice("ducklake:".length)
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake version id '${versionId}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake version id '${versionId}'.`)
   }
 
   return snapshotId
@@ -33,7 +33,7 @@ export function toVersionId(snapshotId: string): string {
   return `ducklake:${snapshotId}`
 }
 
-export function parseCommitMetadata(value: unknown): ParioCommitMetadata | undefined {
+export function parseCommitMetadata(value: unknown): SixbCommitMetadata | undefined {
   if (typeof value !== "string") {
     return undefined
   }
@@ -47,27 +47,27 @@ export function parseCommitMetadata(value: unknown): ParioCommitMetadata | undef
 
   if (
     !isRecord(parsed) ||
-    !isRecord(parsed.pario) ||
-    parsed.pario.kind !== "datasetVersion" ||
-    typeof parsed.pario.datasetId !== "string"
+    !isRecord(parsed.sixb) ||
+    parsed.sixb.kind !== "datasetVersion" ||
+    typeof parsed.sixb.datasetId !== "string"
   ) {
     return undefined
   }
 
-  const mode = parsed.pario.mode
-  const commitId = parsed.pario.commitId
-  const rowCount = parsed.pario.rowCount
+  const mode = parsed.sixb.mode
+  const commitId = parsed.sixb.commitId
+  const rowCount = parsed.sixb.rowCount
 
   return {
     kind: "datasetVersion",
-    datasetId: parsed.pario.datasetId,
+    datasetId: parsed.sixb.datasetId,
     ...(typeof commitId === "string" ? { commitId } : {}),
     ...(mode === "snapshot" || mode === "append" || mode === "schema" ? { mode } : {}),
-    ...(isDatasetProducer(parsed.pario.producer) ? { producer: parsed.pario.producer } : {}),
-    ...(isDatasetVersionRefs(parsed.pario.inputs) ? { inputs: parsed.pario.inputs } : {}),
+    ...(isDatasetProducer(parsed.sixb.producer) ? { producer: parsed.sixb.producer } : {}),
+    ...(isDatasetVersionRefs(parsed.sixb.inputs) ? { inputs: parsed.sixb.inputs } : {}),
     ...(typeof commitId === "string" && isRowCount(rowCount) ? { rowCount } : {}),
-    ...(isSchemaChangeMetadata(parsed.pario.schemaChange)
-      ? { schemaChange: parsed.pario.schemaChange }
+    ...(isSchemaChangeMetadata(parsed.sixb.schemaChange)
+      ? { schemaChange: parsed.sixb.schemaChange }
       : {}),
   }
 }
@@ -122,7 +122,7 @@ function isDatasetVersionRefs(value: unknown): value is NonNullable<DatasetVersi
   )
 }
 
-function isSchemaChangeMetadata(value: unknown): value is ParioSchemaChangeMetadata {
+function isSchemaChangeMetadata(value: unknown): value is SixbSchemaChangeMetadata {
   return (
     isRecord(value) &&
     (value.addColumns === undefined ||

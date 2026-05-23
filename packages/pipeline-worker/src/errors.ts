@@ -4,7 +4,7 @@ import type {
   PipelineDefinition,
   PipelineRunFailure,
   PipelineRunStatus,
-} from "@pario/core"
+} from "@sixb/core"
 import type { PipelineJob } from "./types"
 
 export class PipelineWorkerError extends Error {
@@ -43,7 +43,7 @@ export function requireFinishedAt(runId: string, finishedAt: Date | undefined): 
   }
 
   throw new PipelineWorkerError(
-    `[ParioPipelineWorker] Pipeline run '${runId}' finished without a finishedAt timestamp.`
+    `[SixbPipelineWorker] Pipeline run '${runId}' finished without a finishedAt timestamp.`
   )
 }
 
@@ -56,7 +56,7 @@ export function createStepBookkeepingError(options: {
 }): Error {
   // The dataset version is already durable; retrying the whole pipeline could duplicate appends.
   return new PipelineWorkerError(
-    `[ParioPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' committed dataset version '${options.version.versionId}', but failed to finalize step run '${options.runId}'. The dataset commit may already have succeeded and the step run record may need repair.`,
+    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' committed dataset version '${options.version.versionId}', but failed to finalize step run '${options.runId}'. The dataset commit may already have succeeded and the step run record may need repair.`,
     { cause: options.cause }
   )
 }
@@ -68,7 +68,7 @@ export function createPipelineBookkeepingError(options: {
   readonly cause: unknown
 }): Error {
   return new PipelineWorkerError(
-    `[ParioPipelineWorker] Pipeline '${options.pipelineId}' committed final dataset version '${options.version.versionId}', but failed to finalize pipeline run '${options.runId}'. The dataset commit may already have succeeded and the pipeline run record may need repair.`,
+    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' committed final dataset version '${options.version.versionId}', but failed to finalize pipeline run '${options.runId}'. The dataset commit may already have succeeded and the pipeline run record may need repair.`,
     { cause: options.cause }
   )
 }
@@ -78,7 +78,7 @@ export function requirePipeline(
   job: PipelineJob
 ): PipelineDefinition {
   if (!pipeline) {
-    throw new PipelineWorkerError(`[ParioPipelineWorker] Unknown pipeline '${job.pipelineId}'.`)
+    throw new PipelineWorkerError(`[SixbPipelineWorker] Unknown pipeline '${job.pipelineId}'.`)
   }
 
   return pipeline
@@ -99,7 +99,7 @@ export function requireRegisteredDataset(options: {
   const namedRole = options.role === "input" ? `input '${options.name ?? "unknown"}'` : "output"
 
   throw new PipelineWorkerError(
-    `[ParioPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' ${namedRole} references unknown dataset '${options.datasetId}'.`
+    `[SixbPipelineWorker] Pipeline '${options.pipelineId}' step '${options.stepId}' ${namedRole} references unknown dataset '${options.datasetId}'.`
   )
 }
 

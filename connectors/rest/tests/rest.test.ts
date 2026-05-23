@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { defineWebhook } from "@pario/core"
+import { defineWebhook } from "@sixb/core"
 import { rest } from "../src"
 
 function mockFetch(

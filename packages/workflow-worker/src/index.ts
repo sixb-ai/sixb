@@ -11,6 +11,6 @@ export type {
   WorkflowRunObserver,
   WorkflowRunResult,
   WorkflowWorkerContext,
-  WorkflowWorkerPario,
+  WorkflowWorkerSixb,
 } from "./types"
 export { WorkflowWorker } from "./worker"

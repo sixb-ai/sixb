@@ -183,7 +183,7 @@ const SAMPLE_DATA = [
   { id: "ds-004", name: "erp.projects", rows: 312, status: "synced", updated: "yesterday" },
 ]
 
-const COMMAND_PREVIEW_IDLE_VALUE = "__pario_command_preview_idle__"
+const COMMAND_PREVIEW_IDLE_VALUE = "__sixb_command_preview_idle__"
 
 function Showcase() {
   const [search, setSearch] = useState("")
@@ -199,13 +199,13 @@ function Showcase() {
           <div className="flex items-start justify-between gap-6">
             <div className="space-y-3">
               <Badge variant="outline" className="rounded-md">
-                @pario/ui
+                @sixb/ui
               </Badge>
               <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-foreground sm:text-5xl">
-                Pario design system
+                Sixb design system
               </h1>
               <p className="max-w-2xl text-[15px] leading-7 text-muted-foreground">
-                Shadcn-canonical primitives plus Pario&apos;s common components, restyled to a
+                Shadcn-canonical primitives plus Sixb&apos;s common components, restyled to a
                 pure-white surface, hairline-border aesthetic. Add new primitives with{" "}
                 <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[13px]">
                   bun ui:add &lt;name&gt;
@@ -671,7 +671,7 @@ function Showcase() {
           </Card>
         </Section>
 
-        <Section title="Collection view (Pario)">
+        <Section title="Collection view (Sixb)">
           <Card className="p-6">
             <div className="space-y-4">
               <CollectionHeader

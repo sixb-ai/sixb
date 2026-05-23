@@ -7,10 +7,10 @@ beforeAll(async () => {
   // Keep bucket creation explicit so the provider tests exercise normal S3 object APIs only.
   await Bun.$`docker compose -f ${composeFile} run --rm minio-mc`.quiet()
 
-  process.env.PARIO_S3_BUCKET = "pario-test"
-  process.env.PARIO_S3_ENDPOINT = "http://127.0.0.1:49000"
-  process.env.PARIO_S3_ACCESS_KEY_ID = "minioadmin"
-  process.env.PARIO_S3_SECRET_ACCESS_KEY = "minioadmin"
+  process.env.SIXB_S3_BUCKET = "sixb-test"
+  process.env.SIXB_S3_ENDPOINT = "http://127.0.0.1:49000"
+  process.env.SIXB_S3_ACCESS_KEY_ID = "minioadmin"
+  process.env.SIXB_S3_SECRET_ACCESS_KEY = "minioadmin"
 }, 60_000)
 
 afterAll(async () => {

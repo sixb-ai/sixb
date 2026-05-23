@@ -1,4 +1,4 @@
-@import "@pario/ui/globals.css";
+@import "@sixb/ui/globals.css";
 
 @source "./App.tsx";
 @source "./components/**/*.{ts,tsx}";

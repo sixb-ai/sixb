@@ -1,6 +1,6 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   AppendTelemetryBodySchema,
@@ -10,14 +10,14 @@ import {
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
 
-export function registerTelemetryRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .post(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId",
       async ({ params, body, set }) => {
         try {
           const parsedBody = AppendTelemetryBodySchema.parse(body)
-          await pario.appendTelemetry(params.objectTypeId, [
+          await sixb.appendTelemetry(params.objectTypeId, [
             {
               id: params.objectId,
               properties: {
@@ -46,7 +46,7 @@ export function registerTelemetryRoutes(app: Elysia, pario: Pario<readonly Ontol
           summary: "Append telemetry point",
           tags: ["Telemetry"],
           operationId: "appendTelemetry",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -55,8 +55,8 @@ export function registerTelemetryRoutes(app: Elysia, pario: Pario<readonly Ontol
       async ({ params, query, set }) => {
         try {
           const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
-          const history = await pario.storage.timeseries.getHistory({
-            projectId: pario.id,
+          const history = await sixb.storage.timeseries.getHistory({
+            projectId: sixb.id,
             objectTypeId: params.objectTypeId,
             objectId: params.objectId,
             propertyId: params.propertyId,
@@ -89,8 +89,8 @@ export function registerTelemetryRoutes(app: Elysia, pario: Pario<readonly Ontol
     .get(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
       async ({ params, set }) => {
-        const latest = await pario.storage.timeseries.getLatest({
-          projectId: pario.id,
+        const latest = await sixb.storage.timeseries.getLatest({
+          projectId: sixb.id,
           objectTypeId: params.objectTypeId,
           objectId: params.objectId,
           propertyId: params.propertyId,

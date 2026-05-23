@@ -28,7 +28,7 @@ function runBuildEntry(
   }
 }
 
-describe("pario build", () => {
+describe("sixb build", () => {
   const tempDirs: string[] = []
   const exampleEntry = resolve(
     import.meta.dir,
@@ -37,7 +37,7 @@ describe("pario build", () => {
     "..",
     "examples",
     "roku-tv",
-    "pario.config.ts"
+    "sixb.config.ts"
   )
 
   afterEach(async () => {
@@ -50,7 +50,7 @@ describe("pario build", () => {
   })
 
   test("builds the custom app from the entry project root", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-build-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-build-"))
     tempDirs.push(tempDir)
     const outdir = join(tempDir, "dist")
 
@@ -60,7 +60,7 @@ describe("pario build", () => {
     expect(result.stderr).toBe("")
     expect(result.stdout).toContain("Built")
 
-    await stat(join(outdir, "pario.config.js"))
+    await stat(join(outdir, "sixb.config.js"))
     await stat(join(outdir, "app", "index.html"))
     const atlasAssets = await readdir(join(outdir, "atlas"))
     const sentinelAssets = await readdir(join(outdir, "sentinel"))
@@ -76,15 +76,15 @@ describe("pario build", () => {
 
   test("externalizes DuckDB native bindings when bundling runtime config", async () => {
     const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-    const tempDir = await mkdtemp(join(repoRoot, ".tmp-pario-cli-build-duckdb-"))
+    const tempDir = await mkdtemp(join(repoRoot, ".tmp-sixb-cli-build-duckdb-"))
     tempDirs.push(tempDir)
-    const entry = join(tempDir, "pario.config.ts")
+    const entry = join(tempDir, "sixb.config.ts")
     const outdir = join(tempDir, "dist")
 
     await writeFile(
       entry,
       [
-        'import { DuckLakeStorage } from "@pario/ducklake"',
+        'import { DuckLakeStorage } from "@sixb/ducklake"',
         "",
         "export const duckLakeStorageConstructor = DuckLakeStorage",
       ].join("\n")
@@ -94,11 +94,11 @@ describe("pario build", () => {
 
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
-    const builtEntry = join(outdir, "pario.config.js")
+    const builtEntry = join(outdir, "sixb.config.js")
     await stat(builtEntry)
 
     const builtJs = await readFile(builtEntry, "utf-8")
-    expect(builtJs).toContain('"@pario/ducklake"')
+    expect(builtJs).toContain('"@sixb/ducklake"')
     expect(builtJs).not.toContain("@duckdb/node-api")
   })
 })

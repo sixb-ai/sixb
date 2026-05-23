@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { PipelineRunError } from "@pario/core"
+import { PipelineRunError } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { PgPipelineRunStorage } from "../src"
 import { createTestStorage } from "./helpers"

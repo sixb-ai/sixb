@@ -2,15 +2,15 @@ import type {
   ActionDefinition,
   EventsRuntime,
   OntologySource,
-  Pario,
+  Sixb,
   Storage,
   StoredActionRequestedEvent,
-} from "@pario/core"
-import { Worker } from "@pario/core"
+} from "@sixb/core"
+import { Worker } from "@sixb/core"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
-export interface ActionWorkerPario {
+export interface ActionWorkerSixb {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -26,25 +26,25 @@ const DEFAULT_MAX_CONCURRENCY = 16
 
 export class ActionWorker extends Worker {
   private readonly context: ActionWorkerContext | null
-  private readonly pario: ActionWorkerPario
+  private readonly sixb: ActionWorkerSixb
   private readonly actionIds: ReadonlySet<string>
   private readonly maxConcurrency: number
 
-  constructor(pario: ActionWorkerPario, options: ActionWorkerOptions = {}) {
+  constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
     super()
 
-    const actions = pario.getActionDefinitions()
+    const actions = sixb.getActionDefinitions()
     if (actions.length === 0) {
-      console.log("[ParioActionWorker] No action definitions registered; worker will idle.")
+      console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     }
 
-    this.context = actions.length > 0 ? buildActionContext(pario) : null
-    this.pario = pario
+    this.context = actions.length > 0 ? buildActionContext(sixb) : null
+    this.sixb = sixb
     this.actionIds = new Set(actions.map((action) => action.id))
     this.maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY
 
     if (this.maxConcurrency <= 0) {
-      throw new Error("[ParioActionWorker] maxConcurrency must be greater than 0.")
+      throw new Error("[SixbActionWorker] maxConcurrency must be greater than 0.")
     }
   }
 
@@ -60,7 +60,7 @@ export class ActionWorker extends Worker {
       inFlight.add(task)
     }
 
-    const unsubscribe = await this.pario.events.subscribe(
+    const unsubscribe = await this.sixb.events.subscribe(
       {
         types: ["action.requested"],
       },
@@ -122,22 +122,22 @@ export class ActionWorker extends Worker {
         return
       }
 
-      await emitActionTerminalEvent(this.pario, result)
+      await emitActionTerminalEvent(this.sixb, result)
     } catch (error) {
-      console.error("[ParioActionWorker] Failed to execute action run:", error)
+      console.error("[SixbActionWorker] Failed to execute action run:", error)
     }
   }
 }
 
 async function emitActionTerminalEvent(
-  pario: ActionWorkerPario,
+  sixb: ActionWorkerSixb,
   result: Exclude<ActionRunResult, { skipped: true }>
 ): Promise<void> {
   try {
     const finishedAt = result.finishedAt.toISOString()
 
     if (result.status === "succeeded") {
-      await pario.events.append({
+      await sixb.events.append({
         events: [
           {
             type: "action.completed",
@@ -154,7 +154,7 @@ async function emitActionTerminalEvent(
       return
     }
 
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "action.failed",
@@ -170,24 +170,24 @@ async function emitActionTerminalEvent(
       ],
     })
   } catch (error) {
-    console.error("[ParioActionWorker] Failed to emit action terminal event:", error)
+    console.error("[SixbActionWorker] Failed to emit action terminal event:", error)
   }
 }
 
-function buildActionContext(pario: ActionWorkerPario): ActionWorkerContext {
-  const actionRunsStorage = pario.storage.actionRuns
+function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
+  const actionRunsStorage = sixb.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new Error("[ParioActionWorker] Action workers require storage.actionRuns support.")
+    throw new Error("[SixbActionWorker] Action workers require storage.actionRuns support.")
   }
 
   return {
-    id: pario.id,
-    events: pario.events,
-    storage: pario.storage,
+    id: sixb.id,
+    events: sixb.events,
+    storage: sixb.storage,
     actionRunsStorage,
-    pario: pario as unknown as Pario<readonly OntologySource[]>,
+    sixb: sixb as unknown as Sixb<readonly OntologySource[]>,
     getActionById(actionId) {
-      return pario.getActionById(actionId)
+      return sixb.getActionById(actionId)
     },
   }
 }

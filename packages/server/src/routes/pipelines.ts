@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto"
 import type {
   OntologySource,
-  Pario,
   PipelineDefinition,
   PipelineRunRecord,
   PipelineStepExecutor,
   PipelineStepRunRecord,
-} from "@pario/core"
+  Sixb,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   PipelineParamsSchema,
@@ -68,15 +68,15 @@ function serializeExecutor(executor: PipelineStepExecutor) {
 }
 
 async function getLatestPipelineRun(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   pipelineId: string
 ): Promise<ReturnType<typeof serializePipelineRun> | null> {
-  if (!pario.storage.pipelineRuns) {
+  if (!sixb.storage.pipelineRuns) {
     return null
   }
 
-  const result = await pario.storage.pipelineRuns.list({
-    projectId: pario.id,
+  const result = await sixb.storage.pipelineRuns.list({
+    projectId: sixb.id,
     pipelineId,
     limit: 1,
     order: "desc",
@@ -87,7 +87,7 @@ async function getLatestPipelineRun(
 }
 
 async function serializePipeline(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   pipeline: PipelineDefinition
 ): Promise<ReturnType<typeof PipelineSchema.parse>> {
   return PipelineSchema.parse({
@@ -109,17 +109,17 @@ async function serializePipeline(
         },
       })),
     },
-    latestRun: await getLatestPipelineRun(pario, pipeline.id),
+    latestRun: await getLatestPipelineRun(sixb, pipeline.id),
   })
 }
 
-export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/pipelines",
       async () => {
         return await Promise.all(
-          pario.getPipelineDefinitions().map((pipeline) => serializePipeline(pario, pipeline))
+          sixb.getPipelineDefinitions().map((pipeline) => serializePipeline(sixb, pipeline))
         )
       },
       {
@@ -134,13 +134,13 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
     .get(
       "/api/pipelines/:pipelineId",
       async ({ params, set }) => {
-        const pipeline = pario.getPipelineById(params.pipelineId)
+        const pipeline = sixb.getPipelineById(params.pipelineId)
         if (!pipeline) {
           set.status = 404
           return { error: "Pipeline not found" }
         }
 
-        return await serializePipeline(pario, pipeline)
+        return await serializePipeline(sixb, pipeline)
       },
       {
         params: PipelineParamsSchema,
@@ -157,7 +157,7 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
       async ({ query, set }) => {
         try {
           const parsed = PipelineRunsQuerySchema.parse(query)
-          const storage = pario.storage.pipelineRuns
+          const storage = sixb.storage.pipelineRuns
           if (!storage) {
             return {
               runs: [],
@@ -167,7 +167,7 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
           }
 
           const result = await storage.list({
-            projectId: pario.id,
+            projectId: sixb.id,
             pipelineId: parsed.pipelineId,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
@@ -200,14 +200,14 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
       "/api/pipeline-runs/:runId",
       async ({ params, set }) => {
         try {
-          const storage = pario.storage.pipelineRuns
+          const storage = sixb.storage.pipelineRuns
           if (!storage) {
             set.status = 400
             return { error: "Pipeline run storage is not configured" }
           }
 
           const run = await storage.getById({
-            projectId: pario.id,
+            projectId: sixb.id,
             id: params.runId,
           })
           if (!run) {
@@ -216,7 +216,7 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
           }
 
           const steps = await storage.listSteps({
-            projectId: pario.id,
+            projectId: sixb.id,
             pipelineRunId: run.id,
             order: "asc",
           })
@@ -247,21 +247,21 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
       "/api/pipelines/:pipelineId/runs",
       async ({ params, set }) => {
         try {
-          const pipeline = pario.getPipelineById(params.pipelineId)
+          const pipeline = sixb.getPipelineById(params.pipelineId)
           if (!pipeline) {
             set.status = 404
             return { error: "Pipeline not found" }
           }
 
-          if (!pario.storage.pipelineRuns) {
+          if (!sixb.storage.pipelineRuns) {
             set.status = 400
             return { error: "Pipeline run storage is not configured" }
           }
 
           const runId = `run_${randomUUID()}`
           const queuedAt = new Date().toISOString()
-          const [job] = await pario.queues.pipelines.enqueue({
-            projectId: pario.id,
+          const [job] = await sixb.queues.pipelines.enqueue({
+            projectId: sixb.id,
             jobs: [
               {
                 type: "pipeline.run.requested",
@@ -295,7 +295,7 @@ export function registerPipelineRoutes(app: Elysia, pario: Pario<readonly Ontolo
           summary: "Request a pipeline run",
           tags: ["Pipelines"],
           operationId: "requestPipelineRun",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

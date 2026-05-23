@@ -1,4 +1,4 @@
-import { type DatasetDefinition, type DatasetWriteMode, LakeStorageError } from "@pario/core"
+import { type DatasetDefinition, type DatasetWriteMode, LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -22,7 +22,7 @@ export function assertDatasetWriteMode(
 ): asserts mode is DatasetWriteMode {
   if (mode !== "snapshot" && mode !== "append") {
     throw new LakeStorageError(
-      `[ParioDuckLake] Invalid ${operation} mode '${String(mode)}'. Expected 'snapshot' or 'append'.`
+      `[SixbDuckLake] Invalid ${operation} mode '${String(mode)}'. Expected 'snapshot' or 'append'.`
     )
   }
 }

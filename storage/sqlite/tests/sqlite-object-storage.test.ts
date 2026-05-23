@@ -5,7 +5,7 @@ import type {
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import { SqliteObjectStorage } from "../src"
 import { migrateSqliteDatabase } from "../src/migrations"
 

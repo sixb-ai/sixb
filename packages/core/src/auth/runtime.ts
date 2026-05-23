@@ -30,12 +30,12 @@ import type {
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
-  ParioAuthConfig,
   Principal,
   ResolvedAuthConfig,
   RevokeInvitationInput,
   RevokeInvitationResult,
   SecurityContext,
+  SixbAuthConfig,
 } from "./types"
 import {
   assertNonEmpty,
@@ -58,7 +58,7 @@ export interface AuthRuntimeOptions {
   readonly projectId: string
   readonly storage: Storage
   readonly security: SecurityRegistry
-  readonly config?: ParioAuthConfig
+  readonly config?: SixbAuthConfig
 }
 
 export class AuthRuntime {
@@ -76,7 +76,7 @@ export class AuthRuntime {
     if (this.isEnabled() && !this.storage.auth) {
       throw new AuthRuntimeError(
         "auth_storage_missing",
-        "[Pario] Auth is enabled but storage.auth is not configured."
+        "[Sixb] Auth is enabled but storage.auth is not configured."
       )
     }
   }
@@ -105,7 +105,7 @@ export class AuthRuntime {
       if (params.production) {
         throw new AuthRuntimeError(
           "production_auth_required",
-          "[ParioServer] Auth is required in production. Configure auth or use an explicit disabled auth strategy."
+          "[SixbServer] Auth is required in production. Configure auth or use an explicit disabled auth strategy."
         )
       }
       return
@@ -114,7 +114,7 @@ export class AuthRuntime {
     if (params.production && strategy.developmentOnly) {
       throw new AuthRuntimeError(
         "production_auth_required",
-        `[ParioServer] Auth strategy '${strategy.id}' is development-only and cannot be used in production.`
+        `[SixbServer] Auth strategy '${strategy.id}' is development-only and cannot be used in production.`
       )
     }
 
@@ -125,7 +125,7 @@ export class AuthRuntime {
     ) {
       throw new AuthRuntimeError(
         "production_auth_required",
-        "[ParioServer] Disabled auth in production requires allowDisabledInProduction: true."
+        "[SixbServer] Disabled auth in production requires allowDisabledInProduction: true."
       )
     }
   }
@@ -196,7 +196,7 @@ export class AuthRuntime {
   ): Promise<Principal> {
     const session = await this.getSession(request, options)
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Pario] Authentication is required.")
+      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     return session.principal
@@ -208,7 +208,7 @@ export class AuthRuntime {
   ): Promise<AuthenticatedAuthSession> {
     const session = await this.getSession(request, options)
     if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Pario] Authentication is required.")
+      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
 
     return session
@@ -269,7 +269,7 @@ export class AuthRuntime {
     if (!isInvitationDeliveryAuthStrategy(strategy)) {
       throw new AuthRuntimeError(
         "invalid_auth_config",
-        "[Pario] The active auth strategy does not support invitations."
+        "[Sixb] The active auth strategy does not support invitations."
       )
     }
 
@@ -358,7 +358,7 @@ export class AuthRuntime {
     if (!invitation) {
       throw new AuthStorageError(
         "missing_invitation",
-        `[Pario] Invitation '${invitationId}' not found for project '${this.projectId}'.`
+        `[Sixb] Invitation '${invitationId}' not found for project '${this.projectId}'.`
       )
     }
 
@@ -367,7 +367,7 @@ export class AuthRuntime {
     if (invitation.status !== "pending") {
       throw new AuthRuntimeError(
         "invalid_auth_input",
-        `[Pario] Invitation '${invitationId}' is already ${invitation.status} and cannot be revoked.`
+        `[Sixb] Invitation '${invitationId}' is already ${invitation.status} and cannot be revoked.`
       )
     }
 
@@ -384,7 +384,7 @@ export class AuthRuntime {
     if (!this.storage.auth) {
       throw new AuthRuntimeError(
         "auth_storage_missing",
-        "[Pario] Auth is enabled but storage.auth is not configured."
+        "[Sixb] Auth is enabled but storage.auth is not configured."
       )
     }
 
@@ -395,7 +395,7 @@ export class AuthRuntime {
     if (input.groups && input.groupIds) {
       throw new AuthRuntimeError(
         "invalid_auth_input",
-        "[Pario] Invitation input cannot provide both groups and groupIds."
+        "[Sixb] Invitation input cannot provide both groups and groupIds."
       )
     }
 
@@ -407,7 +407,7 @@ export class AuthRuntime {
       if (!this.security.getGroupById(groupId)) {
         throw new AuthRuntimeError(
           "invalid_auth_input",
-          `[Pario] Unknown invitation group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
+          `[Sixb] Unknown invitation group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
     }
@@ -479,13 +479,13 @@ export class AuthRuntime {
     if (status === "rate_limited") {
       return new AuthRuntimeError(
         "rate_limited",
-        "[Pario] Invitation delivery is rate limited. Try again later."
+        "[Sixb] Invitation delivery is rate limited. Try again later."
       )
     }
 
     return new AuthRuntimeError(
       "invalid_auth_input",
-      "[Pario] Invitation delivery was skipped by the active auth strategy."
+      "[Sixb] Invitation delivery was skipped by the active auth strategy."
     )
   }
 
@@ -502,14 +502,14 @@ export class AuthRuntime {
     if (groupIds.length === 0) {
       throw new AuthRuntimeError(
         "authorization_denied",
-        "[Pario] The current user is not allowed to create or manage invitations without groups."
+        "[Sixb] The current user is not allowed to create or manage invitations without groups."
       )
     }
 
     const missing = missingInviteGroupIds(scope, groupIds)
     throw new AuthRuntimeError(
       "authorization_denied",
-      `[Pario] The current user is not allowed to create or manage invitations for group(s): ${missing.join(", ")}.`
+      `[Sixb] The current user is not allowed to create or manage invitations for group(s): ${missing.join(", ")}.`
     )
   }
 }
@@ -527,23 +527,23 @@ function createInvitationRecipientError(
   if (status === "rate_limited") {
     return new AuthRuntimeError(
       "rate_limited",
-      "[Pario] Invitation delivery is rate limited. Try again later."
+      "[Sixb] Invitation delivery is rate limited. Try again later."
     )
   }
 
   if (status === "invalid_email") {
-    return new AuthRuntimeError("invalid_auth_input", "[Pario] Invitation email is invalid.")
+    return new AuthRuntimeError("invalid_auth_input", "[Sixb] Invitation email is invalid.")
   }
 
   if (status === "disallowed_domain") {
     return new AuthRuntimeError(
       "invalid_auth_input",
-      `[Pario] Invitation email '${email}' is not allowed by the active auth strategy.`
+      `[Sixb] Invitation email '${email}' is not allowed by the active auth strategy.`
     )
   }
 
   return new AuthRuntimeError(
     "invalid_auth_input",
-    `[Pario] Invitation email '${email}' belongs to a suspended user.`
+    `[Sixb] Invitation email '${email}' belongs to a suspended user.`
   )
 }

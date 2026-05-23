@@ -1,5 +1,5 @@
-import type { ActionParam, ObjectAction } from "@pario/client"
-import { executeAction as executeActionRequest } from "@pario/client"
+import type { ActionParam, ObjectAction } from "@sixb/client"
+import { executeAction as executeActionRequest } from "@sixb/client"
 import {
   Badge,
   Button,
@@ -16,8 +16,8 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { Loader2 } from "lucide-react"
 import { useState } from "react"
 

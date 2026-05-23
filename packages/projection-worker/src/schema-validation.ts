@@ -9,7 +9,7 @@ import type {
   Property,
   Schema,
   ValueType,
-} from "@pario/core"
+} from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { isIntegerEnumSchema, resolveProjectionSchema } from "./projection-schema"
 
@@ -27,7 +27,7 @@ export function assertDatasetVersionMatchesDefinition(input: {
 
   if (version.datasetId !== dataset.id) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Dataset version '${version.versionId}' belongs to dataset '${version.datasetId}', expected '${dataset.id}'.`
+      `[SixbProjectionWorker] Dataset version '${version.versionId}' belongs to dataset '${version.datasetId}', expected '${dataset.id}'.`
     )
   }
 
@@ -35,7 +35,7 @@ export function assertDatasetVersionMatchesDefinition(input: {
   const actualColumns = version.schema.columns
   if (expectedColumns.length !== actualColumns.length) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema has ${actualColumns.length} column(s), expected ${expectedColumns.length}.`
+      `[SixbProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema has ${actualColumns.length} column(s), expected ${expectedColumns.length}.`
     )
   }
 
@@ -48,7 +48,7 @@ export function assertDatasetVersionMatchesDefinition(input: {
       Boolean(expected.nullable) !== Boolean(actual.nullable)
     ) {
       throw new ProjectionWorkerError(
-        `[ParioProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema mismatch at column ${index}. Expected '${expected.name}:${expected.type}', got '${actual.name}:${actual.type}'.`
+        `[SixbProjectionWorker] Dataset '${dataset.id}' version '${version.versionId}' schema mismatch at column ${index}. Expected '${expected.name}:${expected.type}', got '${actual.name}:${actual.type}'.`
       )
     }
   }
@@ -77,7 +77,7 @@ export function assertProjectionCompatibleWithDataset(input: {
       const property = propertiesById.get(propertyId)
       if (!property) {
         throw new ProjectionWorkerError(
-          `[ParioProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
+          `[SixbProjectionWorker] Projection '${projection.id}' references unknown property '${propertyId}' on object type '${objectType.id}'.`
         )
       }
 
@@ -90,7 +90,7 @@ export function assertProjectionCompatibleWithDataset(input: {
         )
       ) {
         throw new ProjectionWorkerError(
-          `[ParioProjectionWorker] Projection '${projection.id}' maps dataset column '${column.name}' (${column.type}) to incompatible property '${propertyId}'.`
+          `[SixbProjectionWorker] Projection '${projection.id}' maps dataset column '${column.name}' (${column.type}) to incompatible property '${propertyId}'.`
         )
       }
     }
@@ -98,7 +98,7 @@ export function assertProjectionCompatibleWithDataset(input: {
     for (const [linkKey, descriptor] of Object.entries(projection.links)) {
       if (linkKey !== descriptor.linkId) {
         throw new ProjectionWorkerError(
-          `[ParioProjectionWorker] Projection '${projection.id}' FK link key '${linkKey}' does not match descriptor link '${descriptor.linkId}'.`
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link key '${linkKey}' does not match descriptor link '${descriptor.linkId}'.`
         )
       }
 
@@ -112,7 +112,7 @@ export function assertProjectionCompatibleWithDataset(input: {
 
       if (!(descriptor.sourcePropertyId in projection.properties)) {
         throw new ProjectionWorkerError(
-          `[ParioProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${descriptor.sourcePropertyId}' must be mapped as an object property.`
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${descriptor.sourcePropertyId}' must be mapped as an object property.`
         )
       }
 
@@ -162,7 +162,7 @@ export function assertProjectionCompatibleWithDataset(input: {
 
   if (sourceColumn.type !== "string" || targetColumn.type !== "string") {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Link projection '${projection.id}' source and target fields must be string dataset columns.`
+      `[SixbProjectionWorker] Link projection '${projection.id}' source and target fields must be string dataset columns.`
     )
   }
 }
@@ -176,7 +176,7 @@ function requireObjectType(
   const objectType = ontology.getObjectTypeById(objectTypeId)
   if (!objectType) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${projectionId}' references unknown ${role} '${objectTypeId}'.`
+      `[SixbProjectionWorker] Projection '${projectionId}' references unknown ${role} '${objectTypeId}'.`
     )
   }
   return objectType
@@ -191,7 +191,7 @@ function requireProperty(
   const property = objectType.properties.find((candidate) => candidate.id === propertyId)
   if (!property) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${projectionId}' references unknown ${role} '${propertyId}' on object type '${objectType.id}'.`
+      `[SixbProjectionWorker] Projection '${projectionId}' references unknown ${role} '${propertyId}' on object type '${objectType.id}'.`
     )
   }
   return property
@@ -205,7 +205,7 @@ function requireLink(
   const link = objectType.links.find((candidate) => candidate.id === linkId)
   if (!link) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${projectionId}' references unknown link '${linkId}' on object type '${objectType.id}'.`
+      `[SixbProjectionWorker] Projection '${projectionId}' references unknown link '${linkId}' on object type '${objectType.id}'.`
     )
   }
   return link
@@ -223,7 +223,7 @@ function assertLinkTargetCompatible(input: {
   }
 
   throw new ProjectionWorkerError(
-    `[ParioProjectionWorker] Projection '${projectionId}' link '${link.id}' target type '${actualTargetObjectTypeId}' is not compatible with declared target '${formatTarget(link.targetObjectTypeId)}'.`
+    `[SixbProjectionWorker] Projection '${projectionId}' link '${link.id}' target type '${actualTargetObjectTypeId}' is not compatible with declared target '${formatTarget(link.targetObjectTypeId)}'.`
   )
 }
 
@@ -240,7 +240,7 @@ function requireColumn(
   const column = columnsByName.get(columnName)
   if (!column) {
     throw new ProjectionWorkerError(
-      `[ParioProjectionWorker] Projection '${projectionId}' references unknown dataset column '${columnName}' on dataset '${datasetId}'.`
+      `[SixbProjectionWorker] Projection '${projectionId}' references unknown dataset column '${columnName}' on dataset '${datasetId}'.`
     )
   }
   return column

@@ -449,7 +449,7 @@ export class PanasonicAuth {
     const file = Bun.file(path)
     const exists = await file.exists()
     if (!exists) {
-      throw new Error(`Token file not found: ${path}. Run 'pario panasonic:login' first.`)
+      throw new Error(`Token file not found: ${path}. Run 'sixb panasonic:login' first.`)
     }
 
     const data = await file.json()

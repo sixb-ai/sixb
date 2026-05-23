@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, mock, test } from "bun:test"
-import { runQueueContractSuite } from "@pario/core/testing"
+import { runQueueContractSuite } from "@sixb/core/testing"
 import IORedis from "ioredis"
 import { BullMqQueues } from "../src"
 import {
@@ -72,7 +72,7 @@ describe("BullMqQueues (Redis-specific)", () => {
       const originalDuplicate = borrowed.duplicate.bind(borrowed)
       const duplicateSpy = mock(originalDuplicate)
       borrowed.duplicate = duplicateSpy as typeof borrowed.duplicate
-      const provider = new BullMqQueues({ connection: borrowed, prefix: "pario-test-borrowed" })
+      const provider = new BullMqQueues({ connection: borrowed, prefix: "sixb-test-borrowed" })
 
       try {
         await provider.syncRuns.enqueue({
@@ -89,7 +89,7 @@ describe("BullMqQueues (Redis-specific)", () => {
 
     test("borrowed IORedis client survives close()", async () => {
       const borrowed = createBorrowedConnection()
-      const provider = new BullMqQueues({ connection: borrowed, prefix: "pario-test-borrowed" })
+      const provider = new BullMqQueues({ connection: borrowed, prefix: "sixb-test-borrowed" })
 
       try {
         await provider.syncRuns.enqueue({

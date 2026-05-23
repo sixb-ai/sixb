@@ -11,9 +11,9 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type ObjectRow,
-  Pario,
   prop,
-} from "@pario/core"
+  Sixb,
+} from "@sixb/core"
 import { type ActionWorkerContext, runActionJob } from "../src"
 
 const Device = defineObjectType({
@@ -40,7 +40,7 @@ interface DeviceObjectSet {
   get(id: string): Promise<{ properties: Record<string, unknown> } | null>
 }
 
-interface TestPario {
+interface TestSixb {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: InMemoryStorage
@@ -48,19 +48,19 @@ interface TestPario {
   getActionById(actionId: string): ActionDefinition | null
 }
 
-const ParioConstructor = Pario as unknown as new (options: Record<string, unknown>) => TestPario
+const SixbConstructor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
 
-function deviceObjects(pario: TestPario): DeviceObjectSet {
-  return (pario as unknown as { objects(objectType: typeof Device): DeviceObjectSet }).objects(
+function deviceObjects(sixb: TestSixb): DeviceObjectSet {
+  return (sixb as unknown as { objects(objectType: typeof Device): DeviceObjectSet }).objects(
     Device
   )
 }
 
-function createPario(
+function createSixb(
   actions: readonly ActionDefinition[],
   ontology: readonly unknown[] = [Device]
-): TestPario {
-  return new ParioConstructor({
+): TestSixb {
+  return new SixbConstructor({
     id: "action-worker-tests",
     ontology,
     actions,
@@ -72,15 +72,15 @@ function createPario(
   })
 }
 
-function createContext(pario: TestPario): ActionWorkerContext {
+function createContext(sixb: TestSixb): ActionWorkerContext {
   return {
-    id: pario.id,
-    events: pario.events,
-    storage: pario.storage,
-    actionRunsStorage: pario.storage.actionRuns!,
-    pario: pario as unknown as ActionWorkerContext["pario"],
+    id: sixb.id,
+    events: sixb.events,
+    storage: sixb.storage,
+    actionRunsStorage: sixb.storage.actionRuns!,
+    sixb: sixb as unknown as ActionWorkerContext["sixb"],
     getActionById(actionId) {
-      return pario.getActionById(actionId)
+      return sixb.getActionById(actionId)
     },
   }
 }
@@ -90,9 +90,9 @@ describe("runActionJob", () => {
     const setStatus = defineAction("setStatus")
       .target(Device)
       .params({ status: actionParam("string", { required: true }) })
-      .run(async ({ params, target, pario, signal }) => {
+      .run(async ({ params, target, sixb, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        await pario.objects(Device).upsert({
+        await sixb.objects(Device).upsert({
           properties: {
             id: target.primaryId,
             name: target.properties.name,
@@ -101,14 +101,14 @@ describe("runActionJob", () => {
         })
       })
 
-    const pario = createPario([setStatus])
-    await pario.upsertObject("Device", {
+    const sixb = createSixb([setStatus])
+    await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
     })
 
     const result = await runActionJob({
-      runtime: createContext(pario),
+      runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -118,11 +118,11 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await pario.storage.actionRuns!.getById({ projectId: pario.id, id: "act_1" })
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
     expect(run?.params).toEqual({ status: "ready" })
 
-    const updated = await deviceObjects(pario).get("device-1")
+    const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("ready")
   })
 
@@ -130,8 +130,8 @@ describe("runActionJob", () => {
     const failAfterWrite = defineAction("failAfterWrite")
       .target(Device)
       .params({})
-      .run(async ({ target, pario }) => {
-        await pario.objects(Device).upsert({
+      .run(async ({ target, sixb }) => {
+        await sixb.objects(Device).upsert({
           properties: {
             id: target.primaryId,
             name: target.properties.name,
@@ -141,14 +141,14 @@ describe("runActionJob", () => {
         throw new Error("external API failed")
       })
 
-    const pario = createPario([failAfterWrite])
-    await pario.upsertObject("Device", {
+    const sixb = createSixb([failAfterWrite])
+    await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
     })
 
     const result = await runActionJob({
-      runtime: createContext(pario),
+      runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "failAfterWrite",
@@ -166,7 +166,7 @@ describe("runActionJob", () => {
       })
     }
 
-    const updated = await deviceObjects(pario).get("device-1")
+    const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("partially-updated")
   })
 
@@ -179,12 +179,12 @@ describe("runActionJob", () => {
         invoked += 1
       })
 
-    const pario = createPario([count])
-    await pario.upsertObject("Device", {
+    const sixb = createSixb([count])
+    await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
     })
-    const context = createContext(pario)
+    const context = createContext(sixb)
 
     await runActionJob({
       runtime: context,
@@ -213,9 +213,9 @@ describe("runActionJob", () => {
   test("runs global action handlers without loading a target", async () => {
     const createDevice = defineAction("createDevice")
       .params({ id: actionParam("string", { required: true }) })
-      .run(async ({ params, pario, signal }) => {
+      .run(async ({ params, sixb, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        await pario.objects(Device).upsert({
+        await sixb.objects(Device).upsert({
           properties: {
             id: params.id,
             name: "Created Device",
@@ -224,9 +224,9 @@ describe("runActionJob", () => {
         })
       })
 
-    const pario = createPario([createDevice])
+    const sixb = createSixb([createDevice])
     const result = await runActionJob({
-      runtime: createContext(pario),
+      runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "createDevice",
@@ -236,10 +236,10 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("succeeded")
-    const run = await pario.storage.actionRuns!.getById({ projectId: pario.id, id: "act_1" })
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.subject).toEqual({ kind: "none" })
 
-    const created = await deviceObjects(pario).get("device-1")
+    const created = await deviceObjects(sixb).get("device-1")
     expect(created?.properties.status).toBe("created")
   })
 
@@ -252,14 +252,14 @@ describe("runActionJob", () => {
         invoked += 1
       })
 
-    const pario = createPario([setStatus], [Device, Sensor])
-    await pario.upsertObject("Sensor", {
+    const sixb = createSixb([setStatus], [Device, Sensor])
+    await sixb.upsertObject("Sensor", {
       id: "sensor-1",
       name: "Sensor 1",
     })
 
     const result = await runActionJob({
-      runtime: createContext(pario),
+      runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "setStatus",
@@ -271,7 +271,7 @@ describe("runActionJob", () => {
     expect(result.status).toBe("failed")
     if ("error" in result) {
       expect(result.error.message).toBe(
-        "[ParioActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
+        "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
       )
     }
     expect(invoked).toBe(0)

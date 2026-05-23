@@ -7,8 +7,8 @@ import type {
   StoredDomainEvent,
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
-} from "@pario/core"
-import { deriveRuleEventDependencies } from "@pario/core"
+} from "@sixb/core"
+import { deriveRuleEventDependencies } from "@sixb/core"
 import { evaluateRulePredicate } from "./evaluate-predicate"
 import type {
   EvaluateRuleEventInput,
@@ -425,7 +425,7 @@ function requireRulesStorage(
   storage: EvaluateRuleForSubjectInput["runtime"]["storage"]
 ): RulesStorage {
   if (!storage.rules) {
-    throw new Error("[ParioRulesWorker] Rules workers require storage.rules support.")
+    throw new Error("[SixbRulesWorker] Rules workers require storage.rules support.")
   }
 
   return storage.rules
@@ -433,7 +433,7 @@ function requireRulesStorage(
 
 function requireRuleTriggeredEvent(event: StoredDomainEvent | undefined): StoredRuleTriggeredEvent {
   if (!event || event.type !== "rule.triggered") {
-    throw new Error("[ParioRulesWorker] Failed to append rule.triggered event.")
+    throw new Error("[SixbRulesWorker] Failed to append rule.triggered event.")
   }
 
   return event
@@ -441,7 +441,7 @@ function requireRuleTriggeredEvent(event: StoredDomainEvent | undefined): Stored
 
 function requireRuleResolvedEvent(event: StoredDomainEvent | undefined): StoredRuleResolvedEvent {
   if (!event || event.type !== "rule.resolved") {
-    throw new Error("[ParioRulesWorker] Failed to append rule.resolved event.")
+    throw new Error("[SixbRulesWorker] Failed to append rule.resolved event.")
   }
 
   return event

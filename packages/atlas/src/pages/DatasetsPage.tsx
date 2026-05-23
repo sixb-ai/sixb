@@ -3,13 +3,13 @@ import type {
   ListDatasetRowsResponse,
   ListDatasetsResponse,
   ListDatasetVersionsResponse,
-} from "@pario/client"
+} from "@sixb/client"
 import {
   getDatasetOptions,
   listDatasetRowsOptions,
   listDatasetsOptions,
   listDatasetVersionsOptions,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import {
   Button,
   Card,
@@ -31,8 +31,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import {
   ChevronLeft,
@@ -838,7 +838,7 @@ export function DatasetDetailPage() {
           <EmptyState
             icon={<Database className="h-10 w-10" />}
             title="Dataset not found"
-            description="This dataset is not registered in the active Pario runtime."
+            description="This dataset is not registered in the active Sixb runtime."
           />
         </div>
       </div>

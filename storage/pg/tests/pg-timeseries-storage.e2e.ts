@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { StoredTelemetryAppendedEvent } from "@pario/core"
+import type { StoredTelemetryAppendedEvent } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

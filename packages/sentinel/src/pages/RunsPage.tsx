@@ -1,5 +1,5 @@
-import { listWorkflowRunsInfiniteOptions, listWorkflowsOptions } from "@pario/client/hooks"
-import { Card, CardContent } from "@pario/ui/components"
+import { listWorkflowRunsInfiniteOptions, listWorkflowsOptions } from "@sixb/client/hooks"
+import { Card, CardContent } from "@sixb/ui/components"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { History } from "lucide-react"
 import { useEffect, useMemo, useRef } from "react"

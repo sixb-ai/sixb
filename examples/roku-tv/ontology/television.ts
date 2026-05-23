@@ -1,4 +1,4 @@
-import { defineObjectType, prop } from "@pario/core"
+import { defineObjectType, prop } from "@sixb/core"
 import { televisionObjectTypeId } from "../lib/televisionTwin"
 
 export const Television = defineObjectType({

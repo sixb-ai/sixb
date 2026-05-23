@@ -4,7 +4,7 @@ import type {
   Queues,
   SyncRunRequestedQueueJob,
   WorkflowRunRequestedQueueJob,
-} from "@pario/core"
+} from "@sixb/core"
 import type { KeepJobs } from "bullmq"
 import { type BullMqLaneShared, BullMqQueue } from "./bullmq-queue"
 import {
@@ -13,7 +13,7 @@ import {
   resolveConnections,
 } from "./connection"
 
-const DEFAULT_PREFIX = "pario"
+const DEFAULT_PREFIX = "sixb"
 const DEFAULT_LEASE_MS = 30_000
 const DEFAULT_STALLED_INTERVAL_MS = 30_000
 const DEFAULT_REMOVE_ON_COMPLETE: KeepJobs = { age: 86_400, count: 1_000 }
@@ -27,7 +27,7 @@ export interface BullMqQueuesOptions {
    */
   readonly connection: BullMqConnectionInput
 
-  /** BullMQ key prefix. Defaults to `"pario"`. */
+  /** BullMQ key prefix. Defaults to `"sixb"`. */
   readonly prefix?: string
 
   /** Default lease duration when callers do not pass `leaseMs` to `claim()`. Defaults to 30s. */
@@ -38,7 +38,7 @@ export interface BullMqQueuesOptions {
 
   /**
    * Max stalls before BullMQ moves a job to `failed`. Defaults to `Number.MAX_SAFE_INTEGER` so
-   * lease expiry always redelivers — the Pario contract leaves retry policy to the caller.
+   * lease expiry always redelivers — the Sixb contract leaves retry policy to the caller.
    */
   readonly maxStalledCount?: number
 
@@ -50,10 +50,10 @@ export interface BullMqQueuesOptions {
 }
 
 /**
- * Redis/BullMQ-backed implementation of Pario's `Queues` contract.
+ * Redis/BullMQ-backed implementation of Sixb's `Queues` contract.
  *
  * This is the provider (container) that users instantiate. It mirrors the `Queues` /
- * `Queue<T>` split from `@pario/core`:
+ * `Queue<T>` split from `@sixb/core`:
  *   - `BullMqQueues`      — the provider, holds the lanes (this class)
  *   - `BullMqQueue<T>`    — one lane, typed by its job payload, implements `Queue<T>`
  *

@@ -1,6 +1,6 @@
 # Sync
 
-A sync reads data from an external system through a connector and writes it into one Pario dataset.
+A sync reads data from an external system through a connector and writes it into one Sixb dataset.
 
 Use syncs for source data that should land in the lake first, then be cleaned up by pipelines or
 projected into objects later.
@@ -8,7 +8,7 @@ projected into objects later.
 ## Basic shape
 
 ```ts
-import { defineSync } from "@pario/core"
+import { defineSync } from "@sixb/core"
 import { erpDb } from "../connectors/erpDb"
 import { rawOrdersDataset } from "../datasets/orders"
 
@@ -172,7 +172,7 @@ export const syncFiles = defineSync("sync-files", { mode: "append" })
 Attach triggers with `.when(...)`.
 
 ```ts
-import { defineSchedule, defineSync } from "@pario/core"
+import { defineSchedule, defineSync } from "@sixb/core"
 
 export const hourly = defineSchedule("hourly-order-events").cron("0 * * * *")
 
@@ -199,10 +199,10 @@ your-project/
     orderEvents.ts
 ```
 
-`createPario()` discovers exported syncs automatically. You can also register syncs explicitly:
+`createSixb()` discovers exported syncs automatically. You can also register syncs explicitly:
 
 ```ts
-createPario({
+createSixb({
   datasets: [rawOrdersDataset],
   connectors: [erpDb],
   syncs: [syncOrders],

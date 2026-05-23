@@ -1,6 +1,6 @@
-# @pario/projection-worker
+# @sixb/projection-worker
 
-Queue worker helpers for materializing committed dataset versions into Pario objects and links.
+Queue worker helpers for materializing committed dataset versions into Sixb objects and links.
 
 The projection worker turns one queued `projection.run.requested` job into one projection run
 record and latest-state object/link writes through the core object service.
@@ -16,21 +16,21 @@ record and latest-state object/link writes through the core object service.
 
 ## Usage
 
-`pario dev` starts this worker automatically when projections are registered in the loaded runtime.
+`sixb dev` starts this worker automatically when projections are registered in the loaded runtime.
 
 For custom hosts or focused tests, start it explicitly:
 
 ```ts
-import { ProjectionWorker } from "@pario/projection-worker"
+import { ProjectionWorker } from "@sixb/projection-worker"
 
-const worker = new ProjectionWorker(pario)
+const worker = new ProjectionWorker(sixb)
 await worker.start()
 ```
 
 For lower-level tests, use the function form:
 
 ```ts
-import { runProjectionJob } from "@pario/projection-worker"
+import { runProjectionJob } from "@sixb/projection-worker"
 
 await runProjectionJob({
   runtime,
@@ -54,8 +54,8 @@ await runProjectionJob({
 ## Development
 
 ```bash
-bun --filter @pario/projection-worker typecheck
+bun --filter @sixb/projection-worker typecheck
 bun test packages/projection-worker/tests/run-projection-job.test.ts
 bun test packages/projection-worker/tests/worker.test.ts
-bun --filter @pario/projection-worker build
+bun --filter @sixb/projection-worker build
 ```

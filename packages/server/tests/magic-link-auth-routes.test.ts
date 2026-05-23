@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { magicLink, type SendMagicLinkInput } from "@pario/auth-magic-link"
+import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 import {
   defineGroup,
   defineObjectType,
@@ -9,10 +9,10 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
   prop,
-} from "@pario/core"
-import { createParioApi, ParioServer } from "../src/server"
+  Sixb,
+} from "@sixb/core"
+import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
@@ -45,7 +45,7 @@ function createRuntime(
 ) {
   const storage = new InMemoryStorage()
   const { messages, sendMagicLink } = createSender()
-  const pario = new Pario<readonly OntologySource[]>({
+  const sixb = new Sixb<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),
@@ -63,15 +63,15 @@ function createRuntime(
   })
 
   return {
-    app: createParioApi(
-      new ParioServer({
-        pario,
+    app: createSixbApi(
+      new SixbServer({
+        sixb,
         quiet: true,
         browser: createTestBrowserPolicy(),
       })
     ),
     messages,
-    pario,
+    sixb,
     storage,
   }
 }
@@ -86,7 +86,7 @@ function linkFromLatestMessage(messages: readonly { readonly text: string }[]): 
 }
 
 async function postSignIn(
-  app: ReturnType<typeof createParioApi>,
+  app: ReturnType<typeof createSixbApi>,
   input: { readonly email: string; readonly audience?: string; readonly returnTo?: string }
 ): Promise<Response> {
   const body = new URLSearchParams()
@@ -174,15 +174,15 @@ describe("magic-link auth routes", () => {
       '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "pario_session")
-    const csrfCookie = cookieValue(setCookie, "pario_csrf")
+    const sessionCookie = cookieValue(setCookie, "sixb_session")
+    const csrfCookie = cookieValue(setCookie, "sixb_csrf")
     expect(sessionCookie).toContain(".")
     expect(csrfCookie).toBeTruthy()
 
     const sessionResponse = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
         headers: {
-          cookie: `pario_session=${sessionCookie}`,
+          cookie: `sixb_session=${sessionCookie}`,
         },
       })
     )
@@ -264,12 +264,12 @@ describe("magic-link auth routes", () => {
     )
 
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "pario_session_app")
+    const sessionCookie = cookieValue(setCookie, "sixb_session_app")
     const sessionResponse = await app.fetch(
       new Request("http://api.localhost/api/auth/session", {
         headers: {
           origin: "http://app.localhost",
-          cookie: `pario_session_app=${sessionCookie}`,
+          cookie: `sixb_session_app=${sessionCookie}`,
         },
       })
     )
@@ -318,11 +318,11 @@ describe("magic-link auth routes", () => {
       })
     )
     const setCookie = callback.headers.get("set-cookie")
-    const sessionCookie = cookieValue(setCookie, "pario_session")
-    const csrfCookie = cookieValue(setCookie, "pario_csrf")
+    const sessionCookie = cookieValue(setCookie, "sixb_session")
+    const csrfCookie = cookieValue(setCookie, "sixb_csrf")
     const sessionResponse = await app.fetch(
       new Request("http://localhost/api/auth/session", {
-        headers: { cookie: `pario_session=${sessionCookie}` },
+        headers: { cookie: `sixb_session=${sessionCookie}` },
       })
     )
     const session = (await sessionResponse.json()) as {
@@ -334,14 +334,14 @@ describe("magic-link auth routes", () => {
       new Request("http://localhost/api/auth/sign-out", {
         method: "POST",
         headers: {
-          cookie: `pario_session=${sessionCookie}; pario_csrf=${csrfCookie}`,
-          "x-pario-csrf": csrfCookie,
+          cookie: `sixb_session=${sessionCookie}; sixb_csrf=${csrfCookie}`,
+          "x-sixb-csrf": csrfCookie,
         },
       })
     )
 
     expect(signOut.status).toBe(200)
-    expect(signOut.headers.get("set-cookie")).toContain("pario_session=")
+    expect(signOut.headers.get("set-cookie")).toContain("sixb_session=")
     await expect(
       storage.auth.sessions.getById({ projectId, id: session.session.id })
     ).resolves.toMatchObject({

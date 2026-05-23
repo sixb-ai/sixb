@@ -1,5 +1,5 @@
-import { encodeObjectId, useParioEvents } from "@pario/client"
-import { getObjectOptions, requestActionMutation } from "@pario/client/hooks"
+import { encodeObjectId, useSixbEvents } from "@sixb/client"
+import { getObjectOptions, requestActionMutation } from "@sixb/client/hooks"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
@@ -339,7 +339,7 @@ export default function UnitDetail() {
     [objectKey]
   )
 
-  const { connected } = useParioEvents({
+  const { connected } = useSixbEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     onEvent(event) {

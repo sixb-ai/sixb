@@ -1,5 +1,5 @@
 {
-  "name": "@pario/example-auth",
+  "name": "@sixb/example-auth",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pario/auth-magic-link": "workspace:*",
-    "@pario/auth-oidc": "workspace:*",
-    "@pario/core": "workspace:*",
-    "@pario/sqlite": "workspace:*"
+    "@sixb/auth-magic-link": "workspace:*",
+    "@sixb/auth-oidc": "workspace:*",
+    "@sixb/core": "workspace:*",
+    "@sixb/sqlite": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

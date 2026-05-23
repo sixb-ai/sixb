@@ -99,7 +99,7 @@ export interface LakeStorage {
    * Returns lightweight materialized + latest-version state for the requested
    * dataset ids using a bounded number of catalog calls, never a per-dataset
    * full version hydration or a count(*) over dataset contents. Row counts are
-   * only populated when storage already knows them cheaply (such as Pario commit
+   * only populated when storage already knows them cheaply (such as Sixb commit
    * metadata); otherwise `rowCount` is omitted.
    */
   listDatasetCatalogState(datasetIds: readonly string[]): Promise<readonly DatasetCatalogState[]>

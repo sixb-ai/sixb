@@ -4,8 +4,8 @@ import {
   link,
   ObjectNotFoundError,
   OntologyValidationError,
-  Pario,
   prop,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -42,9 +42,9 @@ const Sensor = defineObjectType({
 describe("upsertObjectBatch", () => {
   test("happy path — 3 objects, all ok", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await pario.upsertObjectBatch("room", [
+    const results = await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r2", name: "Bedroom" } },
       { properties: { id: "r3", name: "Bathroom" } },
@@ -59,7 +59,7 @@ describe("upsertObjectBatch", () => {
 
     // Verify storage
     const r1 = await deps.storage.objects.getByPrimaryId({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "room",
       primaryId: "r1",
     })
@@ -68,9 +68,9 @@ describe("upsertObjectBatch", () => {
 
   test("partial failure — mix valid/invalid", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await pario.upsertObjectBatch("room", [
+    const results = await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "Kitchen" } },
       { properties: { id: "r2", name: 12345 } }, // invalid type for "name"
       { properties: { id: "r3", name: "Bathroom" } },
@@ -88,9 +88,9 @@ describe("upsertObjectBatch", () => {
 
   test("all fail — no events created", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await pario.upsertObjectBatch("room", [
+    const results = await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1" } }, // missing required "name"
       { properties: { id: "r2" } }, // missing required "name"
     ])
@@ -99,26 +99,26 @@ describe("upsertObjectBatch", () => {
     expect(results.every((r) => !r.ok)).toBe(true)
 
     // No events should have been created
-    const events = await pario.events.read({ types: ["object.upserted"] })
+    const events = await sixb.events.read({ types: ["object.upserted"] })
     expect(events).toHaveLength(0)
   })
 
   test("empty batch returns empty array", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await pario.upsertObjectBatch("room", [])
+    const results = await sixb.upsertObjectBatch("room", [])
     expect(results).toEqual([])
   })
 
   test("merge with existing object", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Pre-create
-    await pario.upsertObject("room", { id: "r1", name: "Old Name" })
+    await sixb.upsertObject("room", { id: "r1", name: "Old Name" })
 
-    const results = await pario.upsertObjectBatch("room", [
+    const results = await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "New Name" } },
     ])
 
@@ -126,7 +126,7 @@ describe("upsertObjectBatch", () => {
     expect(results[0].ok).toBe(true)
 
     const obj = await deps.storage.objects.getByPrimaryId({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "room",
       primaryId: "r1",
     })
@@ -135,12 +135,12 @@ describe("upsertObjectBatch", () => {
 
   test("single events.append call", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
-    const originalAppend = pario.events.append.bind(pario.events)
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
+    const originalAppend = sixb.events.append.bind(sixb.events)
     const appendSpy = mock(originalAppend)
-    pario.events.append = appendSpy
+    sixb.events.append = appendSpy
 
-    await pario.upsertObjectBatch("room", [
+    await sixb.upsertObjectBatch("room", [
       { properties: { id: "r1", name: "A" } },
       { properties: { id: "r2", name: "B" } },
       { properties: { id: "r3", name: "C" } },
@@ -156,15 +156,15 @@ describe("upsertObjectBatch", () => {
 describe("upsertLinkBatch", () => {
   test("happy path — 3 links, all ok", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Pre-create objects
-    await pario.upsertObject("room", { id: "r1", name: "Room 1" })
-    await pario.upsertObject("room", { id: "r2", name: "Room 2" })
-    await pario.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await pario.upsertObject("sensor", { id: "s2", name: "Humidity" })
+    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.upsertObject("room", { id: "r2", name: "Room 2" })
+    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
 
-    const results = await pario.upsertLinkBatch([
+    const results = await sixb.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",
@@ -189,7 +189,7 @@ describe("upsertLinkBatch", () => {
     expect(results.every((r) => r.ok)).toBe(true)
 
     const links = await deps.storage.objects.listLinks({
-      projectId: pario.id,
+      projectId: sixb.id,
       objectTypeId: "room",
       objectId: "r1",
       linkId: "hasSensors",
@@ -199,13 +199,13 @@ describe("upsertLinkBatch", () => {
 
   test("ObjectNotFoundError per-item for missing source/target", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
     // Only create the sensor, not the room
-    await pario.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await pario.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
 
-    const results = await pario.upsertLinkBatch([
+    const results = await sixb.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "missing-room",
@@ -237,19 +237,19 @@ describe("upsertLinkBatch", () => {
 
   test("cardinality violation per-item", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    await pario.upsertObject("building", { id: "b1", name: "HQ" })
-    await pario.upsertObject("building", { id: "b2", name: "Branch" })
-    await pario.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.upsertObject("building", { id: "b1", name: "HQ" })
+    await sixb.upsertObject("building", { id: "b2", name: "Branch" })
+    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
 
     // Create existing cardinality:one link
-    await pario.upsertLink("room", "r1", "inBuilding", {
+    await sixb.upsertLink("room", "r1", "inBuilding", {
       targetTypeId: "building",
       targetId: "b1",
     })
 
-    const results = await pario.upsertLinkBatch([
+    const results = await sixb.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",
@@ -267,27 +267,27 @@ describe("upsertLinkBatch", () => {
 
   test("empty batch returns empty array", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
 
-    const results = await pario.upsertLinkBatch([])
+    const results = await sixb.upsertLinkBatch([])
     expect(results).toEqual([])
   })
 
   test("single events.append call", async () => {
     const deps = createTestRuntimeDeps()
-    const pario = new Pario({ ontology: [Building, Room, Sensor], ...deps })
-    const originalAppend = pario.events.append.bind(pario.events)
+    const sixb = new Sixb({ ontology: [Building, Room, Sensor], ...deps })
+    const originalAppend = sixb.events.append.bind(sixb.events)
     const appendSpy = mock(originalAppend)
-    pario.events.append = appendSpy
+    sixb.events.append = appendSpy
 
-    await pario.upsertObject("room", { id: "r1", name: "Room 1" })
-    await pario.upsertObject("sensor", { id: "s1", name: "Temp" })
-    await pario.upsertObject("sensor", { id: "s2", name: "Humidity" })
+    await sixb.upsertObject("room", { id: "r1", name: "Room 1" })
+    await sixb.upsertObject("sensor", { id: "s1", name: "Temp" })
+    await sixb.upsertObject("sensor", { id: "s2", name: "Humidity" })
 
     // Reset spy after setup objects
     appendSpy.mockClear()
 
-    await pario.upsertLinkBatch([
+    await sixb.upsertLinkBatch([
       {
         objectTypeId: "room",
         sourceId: "r1",

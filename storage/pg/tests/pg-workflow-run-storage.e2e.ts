@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { WorkflowRunError } from "@pario/core"
+import { WorkflowRunError } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { PgWorkflowRunStorage } from "../src"
 import { createTestStorage } from "./helpers"

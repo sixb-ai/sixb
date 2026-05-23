@@ -1,5 +1,5 @@
-import { listWorkflowsOptions } from "@pario/client/hooks"
-import { Card, EmptyState } from "@pario/ui/components"
+import { listWorkflowsOptions } from "@sixb/client/hooks"
+import { Card, EmptyState } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Workflow } from "lucide-react"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"

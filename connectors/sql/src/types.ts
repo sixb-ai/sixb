@@ -1,4 +1,4 @@
-import type { ConnectorAdapter } from "@pario/core"
+import type { ConnectorAdapter } from "@sixb/core"
 import type { SQL } from "bun"
 
 type SqlOptions = import("bun").SQL.Options

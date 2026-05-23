@@ -49,7 +49,7 @@ export function validateObjectBatch(
       const primaryId = properties[primaryPropertyId]
       if (primaryId === undefined || primaryId === null) {
         throw new OntologyValidationError(
-          `[Pario] Missing primary property '${primaryPropertyId}' in upsert for '${objectType.id}'`
+          `[Sixb] Missing primary property '${primaryPropertyId}' in upsert for '${objectType.id}'`
         )
       }
 
@@ -127,7 +127,7 @@ export function validateLinkBatch<
         )
         if (conflicting) {
           throw new OntologyValidationError(
-            `[Pario] Link ${item.objectType.id}.${item.linkId} has cardinality 'one'` +
+            `[Sixb] Link ${item.objectType.id}.${item.linkId} has cardinality 'one'` +
               ` and already points to ${conflicting.targetTypeId}:${conflicting.targetId}`
           )
         }

@@ -46,7 +46,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     const key = syncRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
       throw new SyncRunError(
-        `[Pario] Sync run '${input.id}' already exists for project '${input.projectId}'.`
+        `[Sixb] Sync run '${input.id}' already exists for project '${input.projectId}'.`
       )
     }
 
@@ -72,13 +72,13 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
 
     if (!existing) {
       throw new SyncRunError(
-        `[Pario] Sync run '${input.id}' not found for project '${input.projectId}'.`
+        `[Sixb] Sync run '${input.id}' not found for project '${input.projectId}'.`
       )
     }
 
     if (input.status === "succeeded" && input.output.datasetId !== existing.datasetId) {
       throw new SyncRunError(
-        `[Pario] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
+        `[Sixb] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.datasetId}'.`
       )
     }
 

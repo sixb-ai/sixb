@@ -38,7 +38,7 @@ describe("sql connector", () => {
   })
 
   test("rejects an empty connection string", () => {
-    expect(() => sql("   ")).toThrow("[ParioSql] connection must not be empty.")
+    expect(() => sql("   ")).toThrow("[SixbSql] connection must not be empty.")
   })
 
   test("closes the Bun SQL client on disconnect", async () => {

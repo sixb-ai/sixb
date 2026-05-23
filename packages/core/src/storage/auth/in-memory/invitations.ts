@@ -49,7 +49,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
     if (this.state.invitations.has(key)) {
       throw new AuthStorageError(
         "duplicate_invitation",
-        `[Pario] Invitation '${id}' already exists but is not active for project '${projectId}'.`
+        `[Sixb] Invitation '${id}' already exists but is not active for project '${projectId}'.`
       )
     }
 
@@ -124,7 +124,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_invitation",
-        `[Pario] Invitation '${params.id}' not found for project '${params.projectId}'.`
+        `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
       )
     }
 
@@ -149,7 +149,7 @@ export class InMemoryAuthInvitationStore implements AuthInvitationStore {
     if (!existing) {
       throw new AuthStorageError(
         "missing_invitation",
-        `[Pario] Invitation '${params.id}' not found for project '${params.projectId}'.`
+        `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
       )
     }
 

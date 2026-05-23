@@ -3,7 +3,7 @@
  *
  * Scans well-known directories (`ontology/`, `functions/`, etc.)
  * relative to a project root and returns typed definition arrays ready
- * for the `Pario` constructor.
+ * for the `Sixb` constructor.
  */
 
 import { readdir } from "node:fs/promises"
@@ -71,7 +71,7 @@ export async function discoverOntologySources(
   const discoveredSources: OntologySource[] = [...ontologyDocuments, ...objectTypes]
   if (valueTypes.length > 0) {
     discoveredSources.push({
-      id: "__pario.discovered.value-types__",
+      id: "__sixb.discovered.value-types__",
       version: "0.0.0",
       objectTypes: [],
       valueTypes,

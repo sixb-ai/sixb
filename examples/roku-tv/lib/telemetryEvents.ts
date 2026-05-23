@@ -1,4 +1,4 @@
-import type { ParioEventOfType } from "@pario/client"
+import type { SixbEventOfType } from "@sixb/client"
 
 export interface TelemetryUpdate {
   readonly type: "telemetryUpdate"
@@ -14,7 +14,7 @@ export interface TelemetryUpdate {
 }
 
 export function telemetryUpdateFromEvent(
-  event: ParioEventOfType<"telemetry.appended">
+  event: SixbEventOfType<"telemetry.appended">
 ): TelemetryUpdate {
   return {
     type: "telemetryUpdate",

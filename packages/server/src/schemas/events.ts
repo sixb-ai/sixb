@@ -2,7 +2,7 @@ import {
   EVENT_TOPICS as CORE_EVENT_TOPICS,
   EVENT_TYPES as CORE_EVENT_TYPES,
   type DomainEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import { z } from "zod"
 
 // z.enum expects a non-empty tuple; the core registry exposes readonly arrays.

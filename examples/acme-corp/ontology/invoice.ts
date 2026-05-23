@@ -1,4 +1,4 @@
-import { defineObjectType, link, prop, stringEnum } from "@pario/core"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core"
 import { Customer } from "./customer"
 import { Project } from "./project"
 

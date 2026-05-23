@@ -28,7 +28,7 @@ interface QueueRecord<TQueueJob extends QueueJob = QueueJob> {
 
 function assertNonEmpty(value: string, fieldName: string): void {
   if (value.trim().length === 0) {
-    throw new QueueError(`[Pario] Queue ${fieldName} must not be empty`)
+    throw new QueueError(`[Sixb] Queue ${fieldName} must not be empty`)
   }
 }
 
@@ -36,7 +36,7 @@ function parseTimestamp(value: string, fieldName: string): number {
   const timestamp = Date.parse(value)
 
   if (Number.isNaN(timestamp)) {
-    throw new QueueError(`[Pario] Queue ${fieldName} must be a valid timestamp`)
+    throw new QueueError(`[Sixb] Queue ${fieldName} must be a valid timestamp`)
   }
 
   return timestamp
@@ -44,7 +44,7 @@ function parseTimestamp(value: string, fieldName: string): number {
 
 function assertPositiveNumber(value: number, fieldName: string): void {
   if (!Number.isFinite(value) || value <= 0) {
-    throw new QueueError(`[Pario] Queue ${fieldName} must be greater than 0`)
+    throw new QueueError(`[Sixb] Queue ${fieldName} must be greater than 0`)
   }
 }
 
@@ -107,7 +107,7 @@ function toClaimedQueueJob<TQueueJob extends QueueJob>(
   record: QueueRecord<TQueueJob>
 ): ClaimedQueueJob<TQueueJob> {
   if (!record.leaseId || !record.claimedAt || !record.leaseExpiresAt) {
-    throw new QueueError(`[Pario] Queue job '${record.job.id}' is not currently leased`)
+    throw new QueueError(`[Sixb] Queue job '${record.job.id}' is not currently leased`)
   }
 
   return {
@@ -315,20 +315,20 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
     const record = this.store.find<TQueueJob>(params.projectId, this.queueId, params.jobId)
 
     if (!record) {
-      throw new QueueError(`[Pario] Unknown queue job '${params.jobId}'`)
+      throw new QueueError(`[Sixb] Unknown queue job '${params.jobId}'`)
     }
 
     if (record.state !== "queued") {
-      throw new QueueError(`[Pario] Queue job '${params.jobId}' is no longer active`)
+      throw new QueueError(`[Sixb] Queue job '${params.jobId}' is no longer active`)
     }
 
     if (record.leaseId !== params.leaseId || !record.leaseExpiresAt) {
-      throw new QueueError(`[Pario] Lease mismatch for queue job '${params.jobId}'`)
+      throw new QueueError(`[Sixb] Lease mismatch for queue job '${params.jobId}'`)
     }
 
     const expiresAt = leaseExpiresAtMs(record)
     if (expiresAt === null || expiresAt <= Date.now()) {
-      throw new QueueError(`[Pario] Lease for queue job '${params.jobId}' has expired`)
+      throw new QueueError(`[Sixb] Lease for queue job '${params.jobId}' has expired`)
     }
 
     return record

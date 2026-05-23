@@ -11,7 +11,7 @@ import type {
   OidcCallbackResult,
   OidcStartSignInInput,
   OidcStartSignInResult,
-} from "@pario/core"
+} from "@sixb/core"
 import { resolveOidcProfile } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"
@@ -80,7 +80,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
     this.authorizationParams = options.authorizationParams ?? {}
     this.sendInvitation = options.sendInvitation
     this.from = options.from
-    this.subject = options.subject ?? "You are invited to Pario"
+    this.subject = options.subject ?? "You are invited to Sixb"
     this.client = options.clientAdapter ?? defaultOidcClientAdapter
   }
 

@@ -1,7 +1,7 @@
 {
-  "name": "@pario/client",
+  "name": "@sixb/client",
   "version": "0.1.0",
-  "description": "Type-safe SDK for Pario API with TanStack Query hooks",
+  "description": "Type-safe SDK for Sixb API with TanStack Query hooks",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pario/core": "workspace:*"
+    "@sixb/core": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",

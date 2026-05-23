@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { basename, dirname, resolve, sep } from "node:path"
-import { type LoadedPario, loadParioFromEntry } from "./loadPario"
+import { type LoadedSixb, loadSixbFromEntry } from "./loadSixb"
 
 export interface RuntimeEntryOptions {
   readonly entry?: string
@@ -12,8 +12,8 @@ export interface ProductionPaths {
 }
 
 export async function resolveRuntimeEntry(options: RuntimeEntryOptions = {}): Promise<string> {
-  const sourceEntry = resolve("pario.config.ts")
-  const defaultBuiltEntry = resolve(".pario/dist/pario.config.js")
+  const sourceEntry = resolve("sixb.config.ts")
+  const defaultBuiltEntry = resolve(".sixb/dist/sixb.config.js")
 
   if (options.entry) {
     return resolve(options.entry)
@@ -23,16 +23,16 @@ export async function resolveRuntimeEntry(options: RuntimeEntryOptions = {}): Pr
   return builtInfo ? defaultBuiltEntry : sourceEntry
 }
 
-export async function loadProductionPario(
+export async function loadProductionSixb(
   options: RuntimeEntryOptions = {}
-): Promise<{ entry: string; pario: LoadedPario; projectRoot: string; buildOutdir: string }> {
+): Promise<{ entry: string; sixb: LoadedSixb; projectRoot: string; buildOutdir: string }> {
   const entry = await resolveRuntimeEntry(options)
-  const pario = await loadParioFromEntry(entry)
+  const sixb = await loadSixbFromEntry(entry)
   const paths = await resolveProductionPaths(entry)
 
   return {
     entry,
-    pario,
+    sixb,
     projectRoot: paths.projectRoot,
     buildOutdir: paths.buildOutdir,
   }
@@ -41,7 +41,7 @@ export async function loadProductionPario(
 export async function resolveProductionPaths(entry: string): Promise<ProductionPaths> {
   const resolvedEntry = resolve(entry)
   const projectRoot = resolveProjectRoot(resolvedEntry)
-  const defaultBuildOutdir = resolve(projectRoot, ".pario", "dist")
+  const defaultBuildOutdir = resolve(projectRoot, ".sixb", "dist")
 
   if (isDefaultBuildEntry(resolvedEntry)) {
     return { projectRoot, buildOutdir: defaultBuildOutdir }
@@ -57,7 +57,7 @@ export async function resolveProductionPaths(entry: string): Promise<ProductionP
 
 export function resolveProjectRoot(entry: string): string {
   const resolvedEntry = resolve(entry)
-  const distMarker = `${sep}.pario${sep}dist${sep}`
+  const distMarker = `${sep}.sixb${sep}dist${sep}`
   const distIndex = resolvedEntry.lastIndexOf(distMarker)
 
   if (distIndex >= 0) {
@@ -80,11 +80,11 @@ export function builtSentinelOutdir(buildOutdir: string): string {
 }
 
 function isDefaultBuildEntry(entry: string): boolean {
-  return entry.includes(`${sep}.pario${sep}dist${sep}`)
+  return entry.includes(`${sep}.sixb${sep}dist${sep}`)
 }
 
 async function isCustomBuildOutdirEntry(entry: string, entryDir: string): Promise<boolean> {
-  if (basename(entry) !== "pario.config.js") {
+  if (basename(entry) !== "sixb.config.js") {
     return false
   }
 

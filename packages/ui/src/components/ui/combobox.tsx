@@ -1,6 +1,6 @@
 "use client"
 
-import { Button } from "@pario/ui/components/ui/button"
+import { Button } from "@sixb/ui/components/ui/button"
 import {
   Command,
   CommandEmpty,
@@ -8,9 +8,9 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@pario/ui/components/ui/command"
-import { Popover, PopoverContent, PopoverTrigger } from "@pario/ui/components/ui/popover"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/ui/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components/ui/popover"
+import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronsUpDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 

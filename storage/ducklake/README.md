@@ -1,23 +1,23 @@
-# @pario/ducklake
+# @sixb/ducklake
 
-Durable Pario `LakeStorage` provider backed by DuckDB and the DuckLake
+Durable Sixb `LakeStorage` provider backed by DuckDB and the DuckLake
 extension.
 
 DuckLake owns physical tables, Parquet files, transactions, snapshots, and time
-travel. Pario keeps ownership of dataset ids, dataset-definition compatibility,
+travel. Sixb keeps ownership of dataset ids, dataset-definition compatibility,
 version shape, producer metadata, and `fileRef` values.
 
 ## Usage
 
 ```ts
-import { DuckLakeStorage } from "@pario/ducklake"
+import { DuckLakeStorage } from "@sixb/ducklake"
 
 const lakeStorage = new DuckLakeStorage({
   catalog: {
     type: "duckdb",
-    path: ".pario/lake/metadata.ducklake",
+    path: ".sixb/lake/metadata.ducklake",
   },
-  dataPath: ".pario/lake/data",
+  dataPath: ".sixb/lake/data",
 })
 
 await lakeStorage.close()
@@ -48,7 +48,7 @@ connections for DuckLake metadata.
 ```ts
 const lakeStorage = new DuckLakeStorage({
   catalog: { type: "postgres", host, database, user, password },
-  dataPath: "s3://pario-lake/data",
+  dataPath: "s3://sixb-lake/data",
   duckdb: {
     config: {
       threads: "1",
@@ -88,7 +88,7 @@ read throughput.
 Datasets must declare a schema before they can be stored in DuckLake:
 
 ```ts
-import { col, defineDataset, defineSync } from "@pario/core"
+import { col, defineDataset, defineSync } from "@sixb/core"
 
 const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [
@@ -110,7 +110,7 @@ export const syncOrders = defineSync("sync-orders")
 
 `intoDataset(...)` takes the dataset definition, not a dataset id and options.
 Export the definition from `datasets/` or pass it to
-`createPario({ datasets: [rawOrdersDataset], ... })` so the runtime and worker
+`createSixb({ datasets: [rawOrdersDataset], ... })` so the runtime and worker
 use the same schema that DuckLake materializes.
 
 ## DuckLake SQL Transforms
@@ -217,12 +217,12 @@ Rejected changes:
 - change column nullability
 - change existing `description` or `partitionBy` metadata
 
-Pario matches existing columns by name, not by declaration position. If a
+Sixb matches existing columns by name, not by declaration position. If a
 developer declares a new nullable column between existing columns, DuckLake still
 stores that new physical column at the end of the table. Later `getDataset(...)`
 calls return DuckLake's stored order.
 
-Schema-only DuckLake commits count as Pario dataset versions. After a schema
+Schema-only DuckLake commits count as Sixb dataset versions. After a schema
 change, `getLatestVersion(...)` and `listVersions(...)` include the schema
 version with `DatasetVersion.mode: "schema"` even if no rows were written in
 that commit. Historical `DatasetVersion.schema` values come from DuckLake
@@ -236,7 +236,7 @@ Supported catalogs:
 - `duckdb`: local DuckDB metadata file.
 - `sqlite`: local SQLite metadata file.
 - `postgres`: PostgreSQL metadata catalog, with optional `metadataSchema`.
-- `custom`: escape hatch for DuckLake catalog URI forms Pario does not model
+- `custom`: escape hatch for DuckLake catalog URI forms Sixb does not model
   yet, including DuckLake secrets.
 
 ```ts
@@ -248,16 +248,16 @@ const lakeStorage = new DuckLakeStorage({
     database: "ducklake",
     user: "postgres",
     password: process.env.POSTGRES_PASSWORD,
-    metadataSchema: "pario_lake",
+    metadataSchema: "sixb_lake",
   },
-  dataPath: "s3://pario-lake/data",
+  dataPath: "s3://sixb-lake/data",
   secrets: [
     {
       type: "s3",
       keyId: process.env.AWS_ACCESS_KEY_ID,
       secret: process.env.AWS_SECRET_ACCESS_KEY,
       region: "us-east-1",
-      scope: "s3://pario-lake",
+      scope: "s3://sixb-lake",
     },
   ],
 })
@@ -265,7 +265,7 @@ const lakeStorage = new DuckLakeStorage({
 
 ## PostgreSQL Configuration
 
-Use a PostgreSQL catalog for production or any deployment where multiple Pario
+Use a PostgreSQL catalog for production or any deployment where multiple Sixb
 processes need to see the same DuckLake snapshots. Local DuckDB or SQLite
 catalogs are better suited to development and tests.
 
@@ -275,7 +275,7 @@ PostgreSQL stores only DuckLake metadata. Dataset table data still lives under
 ```txt
 PostgreSQL catalog  -> snapshots, schemas, transactions, metadata
 dataPath            -> physical DuckLake table data and files
-BlobStorage         -> Pario fileRef payload bytes
+BlobStorage         -> Sixb fileRef payload bytes
 ```
 
 Recommended production shape:
@@ -290,11 +290,11 @@ const lakeStorage = new DuckLakeStorage({
     user: process.env.PGUSER!,
     password: process.env.PGPASSWORD!,
     sslMode: "require",
-    applicationName: "pario-api",
+    applicationName: "sixb-api",
     connectTimeoutSeconds: 10,
-    metadataSchema: "pario_lake",
+    metadataSchema: "sixb_lake",
   },
-  dataPath: "s3://pario-lake/data",
+  dataPath: "s3://sixb-lake/data",
   duckdb: {
     config: {
       threads: "2",
@@ -313,7 +313,7 @@ const lakeStorage = new DuckLakeStorage({
       keyId: process.env.AWS_ACCESS_KEY_ID,
       secret: process.env.AWS_SECRET_ACCESS_KEY,
       region: "us-east-1",
-      scope: "s3://pario-lake",
+      scope: "s3://sixb-lake",
     },
   ],
 })
@@ -329,7 +329,7 @@ const lakeStorage = new DuckLakeStorage({
 | `duckdb.config.threads` | Local DuckDB worker threads inside this process. |
 | `postgresPool` | DuckDB PostgreSQL extension connections for DuckLake metadata. |
 
-This pool is separate from any normal Pario `PostgresStorage` pool. Count both
+This pool is separate from any normal Sixb `PostgresStorage` pool. Count both
 when sizing a small database.
 
 ### Connection Sizing
@@ -360,7 +360,7 @@ role connection limit >=
   + migration, admin, and monitoring headroom
 ```
 
-Leave headroom for the normal Pario PostgreSQL storage provider, migrations,
+Leave headroom for the normal Sixb PostgreSQL storage provider, migrations,
 admin sessions, monitoring, and PostgreSQL reserved connections.
 
 ### Pool Options
@@ -400,7 +400,7 @@ into one process before lowering `maxConnections` too far. A pool budget below
 `4` can become fragile because one runtime may need several metadata operations
 during attach, commit, and snapshot hydration.
 
-Use `custom` when you need to pass a DuckLake catalog URI that Pario does not
+Use `custom` when you need to pass a DuckLake catalog URI that Sixb does not
 model directly:
 
 ```ts
@@ -410,7 +410,7 @@ const lakeStorage = new DuckLakeStorage({
     uri: "postgres:dbname=ducklake host=127.0.0.1 user=postgres",
     extensions: ["postgres"],
   },
-  dataPath: "s3://pario-lake/data",
+  dataPath: "s3://sixb-lake/data",
 })
 ```
 
@@ -421,8 +421,8 @@ secrets manually when the typed options are not enough.
 ## Blob Storage
 
 DuckLake stores `fileRef` values as dataset row metadata only. Blob payload
-bytes are owned by a separate Pario `BlobStorage` provider, such as
-`@pario/blob-local`, and should be composed beside this lake provider when
+bytes are owned by a separate Sixb `BlobStorage` provider, such as
+`@sixb/blob-local`, and should be composed beside this lake provider when
 creating a runtime.
 
 ## Tests
@@ -430,19 +430,19 @@ creating a runtime.
 Fast unit tests:
 
 ```bash
-bun --filter @pario/ducklake test
+bun --filter @sixb/ducklake test
 ```
 
 Local DuckLake e2e tests:
 
 ```bash
-bun --filter @pario/ducklake test:e2e:local
+bun --filter @sixb/ducklake test:e2e:local
 ```
 
 Docker-backed PostgreSQL and MinIO/S3-compatible e2e tests:
 
 ```bash
-bun --filter @pario/ducklake test:e2e:remote
+bun --filter @sixb/ducklake test:e2e:remote
 ```
 
 `test:e2e` runs the local suite first, then the remote suite. Remote e2e

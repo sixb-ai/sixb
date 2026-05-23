@@ -5,7 +5,7 @@ export type {
   PipelineRunResult,
   PipelineStepRunResult,
   PipelineWorkerContext,
-  PipelineWorkerPario,
+  PipelineWorkerSixb,
   RunPipelineJobInput,
 } from "./types"
 export { PipelineWorker } from "./worker"

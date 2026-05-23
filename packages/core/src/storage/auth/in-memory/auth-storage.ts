@@ -63,21 +63,21 @@ export class InMemoryAuthStorage implements AuthStorage {
     if (!magicLink) {
       throw new AuthStorageError(
         "missing_magic_link",
-        `[Pario] Magic link '${input.magicLinkId}' not found for project '${projectId}'.`
+        `[Sixb] Magic link '${input.magicLinkId}' not found for project '${projectId}'.`
       )
     }
 
     if (magicLink.tokenHash !== input.tokenHash || magicLink.consumedAt || magicLink.revokedAt) {
       throw new AuthStorageError(
         "invalid_magic_link",
-        `[Pario] Magic link '${input.magicLinkId}' is not valid for project '${projectId}'.`
+        `[Sixb] Magic link '${input.magicLinkId}' is not valid for project '${projectId}'.`
       )
     }
 
     if (magicLink.expiresAt <= completedAt) {
       throw new AuthStorageError(
         "expired_magic_link",
-        `[Pario] Magic link '${input.magicLinkId}' is expired for project '${projectId}'.`
+        `[Sixb] Magic link '${input.magicLinkId}' is expired for project '${projectId}'.`
       )
     }
 
@@ -100,7 +100,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       })
       throw new AuthStorageError(
         "suspended_user",
-        `[Pario] User '${existingUser.id}' is suspended for project '${projectId}'.`
+        `[Sixb] User '${existingUser.id}' is suspended for project '${projectId}'.`
       )
     }
 
@@ -113,7 +113,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       })
       throw new AuthStorageError(
         "user_creation_not_allowed",
-        `[Pario] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
+        `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -132,7 +132,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       })
       throw new AuthStorageError(
         "user_creation_not_allowed",
-        `[Pario] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
+        `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -145,7 +145,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       if (this.state.users.has(userKey(projectId, newUserId))) {
         throw new AuthStorageError(
           "duplicate_user",
-          `[Pario] User '${newUserId}' already exists for project '${projectId}'.`
+          `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
         )
       }
     }
@@ -211,21 +211,21 @@ export class InMemoryAuthStorage implements AuthStorage {
     if (!attempt) {
       throw new AuthStorageError(
         "missing_oidc_attempt",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' not found for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' not found for project '${projectId}'.`
       )
     }
 
     if (attempt.stateHash !== input.stateHash || attempt.consumedAt) {
       throw new AuthStorageError(
         "invalid_oidc_attempt",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' is not valid for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' is not valid for project '${projectId}'.`
       )
     }
 
     if (attempt.expiresAt <= completedAt) {
       throw new AuthStorageError(
         "expired_oidc_attempt",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' is expired for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' is expired for project '${projectId}'.`
       )
     }
 
@@ -246,7 +246,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${identity.userId}' not found for linked OIDC identity.`
+        `[Sixb] User '${identity.userId}' not found for linked OIDC identity.`
       )
     }
 
@@ -254,7 +254,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "email_link_not_allowed",
-        `[Pario] OIDC identity cannot auto-link to user '${user.id}' for project '${projectId}'.`
+        `[Sixb] OIDC identity cannot auto-link to user '${user.id}' for project '${projectId}'.`
       )
     }
 
@@ -262,7 +262,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "suspended_user",
-        `[Pario] User '${user.id}' is suspended for project '${projectId}'.`
+        `[Sixb] User '${user.id}' is suspended for project '${projectId}'.`
       )
     }
 
@@ -270,7 +270,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "user_creation_not_allowed",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -278,7 +278,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "user_creation_not_allowed",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -292,7 +292,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "user_creation_not_allowed",
-        `[Pario] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
+        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
       )
     }
 
@@ -305,7 +305,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       if (this.state.users.has(userKey(projectId, newUserId))) {
         throw new AuthStorageError(
           "duplicate_user",
-          `[Pario] User '${newUserId}' already exists for project '${projectId}'.`
+          `[Sixb] User '${newUserId}' already exists for project '${projectId}'.`
         )
       }
     }
@@ -379,7 +379,7 @@ export class InMemoryAuthStorage implements AuthStorage {
     if (!existing) {
       throw new AuthStorageError(
         "missing_user",
-        `[Pario] User '${input.userId}' not found for project '${input.projectId}'.`
+        `[Sixb] User '${input.userId}' not found for project '${input.projectId}'.`
       )
     }
 
@@ -506,6 +506,6 @@ function assertSignInSessionAudience(
 
   throw new AuthStorageError(
     "invalid_input",
-    `[Pario] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
+    `[Sixb] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
   )
 }

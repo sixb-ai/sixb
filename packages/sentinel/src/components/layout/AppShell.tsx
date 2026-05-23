@@ -1,4 +1,4 @@
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@pario/ui/components"
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@sixb/ui/components"
 import type { ReactNode } from "react"
 
 interface AppShellProps {

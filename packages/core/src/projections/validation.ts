@@ -191,7 +191,7 @@ export function validateProjectionsAtStartup(
     if (!dataset) {
       throw new ProjectionValidationError(
         `${prefix}: unknown dataset "${projection.datasetId}". ` +
-          `Add it to 'datasets' in createPario() or export it from 'datasets/'.`
+          `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
     }
 
@@ -261,7 +261,7 @@ export function validateProjectionsAtStartup(
     if (!dataset) {
       throw new ProjectionValidationError(
         `${prefix}: unknown dataset "${projection.datasetId}". ` +
-          `Add it to 'datasets' in createPario() or export it from 'datasets/'.`
+          `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
       )
     }
 

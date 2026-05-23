@@ -1,4 +1,4 @@
-import { defineConnector, defineWebhook } from "@pario/core"
+import { defineConnector, defineWebhook } from "@sixb/core"
 import { createAcmeErpClient } from "../lib/acme-erp"
 
 export interface AcmeInvoiceWebhookEvent {

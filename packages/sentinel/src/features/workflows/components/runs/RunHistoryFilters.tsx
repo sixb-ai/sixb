@@ -5,7 +5,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@pario/ui/components"
+} from "@sixb/ui/components"
 import { ListFilter, X } from "lucide-react"
 import {
   allWorkflowRunStatuses,

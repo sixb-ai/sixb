@@ -19,6 +19,6 @@ export type {
   RuleEventEvaluationCandidate,
   RuleLinkMap,
   RulesWorkerContext,
-  RulesWorkerPario,
+  RulesWorkerSixb,
 } from "./types"
 export { RulesWorker } from "./worker"

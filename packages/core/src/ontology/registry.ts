@@ -3,7 +3,7 @@
  *
  * Zero infrastructure dependencies: imports only from the `ontology/` module.
  * Other modules depend on `OntologyRegistry` instead of coupling to the full
- * `Pario` facade.
+ * `Sixb` facade.
  */
 
 import { OntologyValidationError } from "./errors"
@@ -14,7 +14,7 @@ import { validatePrimaryProperties, validatePropertyDefinitions } from "./valida
 
 // ── Input types ──────────────────────────────────────────────
 
-/** Typed wrapper used by `createPario` to register full ontology documents. */
+/** Typed wrapper used by `createSixb` to register full ontology documents. */
 export type OntologyDocumentInput = {
   readonly id: string
   readonly version: string
@@ -309,7 +309,7 @@ export class OntologyRegistry {
 
       if (!this.objectTypesById.has(parentId)) {
         throw new OntologyValidationError(
-          `ObjectType "${typeId}" extends unknown type "${parentId}". If "${parentId}" comes from an external ontology, add it to 'ontologies' in createPario().`
+          `ObjectType "${typeId}" extends unknown type "${parentId}". If "${parentId}" comes from an external ontology, add it to 'ontologies' in createSixb().`
         )
       }
 
@@ -338,7 +338,7 @@ export class OntologyRegistry {
         if (parentId === objectType.extends) continue
         if (!this.objectTypesById.has(parentId)) {
           throw new OntologyValidationError(
-            `ObjectType "${typeId}" lists unknown parent "${parentId}" in parents. If "${parentId}" comes from an external ontology, add it to 'ontologies' in createPario().`
+            `ObjectType "${typeId}" lists unknown parent "${parentId}" in parents. If "${parentId}" comes from an external ontology, add it to 'ontologies' in createSixb().`
           )
         }
         registerChild(parentId, typeId)

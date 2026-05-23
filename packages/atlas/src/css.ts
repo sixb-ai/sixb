@@ -11,7 +11,7 @@ let activeCssBuild: Promise<void> | null = null
 let tailwindCliEntryPromise: Promise<string> | null = null
 const packageRoot = join(import.meta.dir, "..")
 const sourceDir = join(packageRoot, "src")
-const generatedDir = join(packageRoot, ".pario")
+const generatedDir = join(packageRoot, ".sixb")
 
 export interface BuiltInUiCssOptions {
   readonly watch?: boolean
@@ -118,7 +118,7 @@ export async function buildBuiltInUiCss(inputPath?: string, outputPath?: string)
     }
 
     const stderr = await new Response(proc.stderr).text()
-    throw new Error(`[ParioAtlas] Failed to build built-in UI CSS: ${stderr.trim()}`)
+    throw new Error(`[SixbAtlas] Failed to build built-in UI CSS: ${stderr.trim()}`)
   })()
 
   try {

@@ -5,7 +5,7 @@ import { InMemoryQueues } from "../src/queues"
 import { InMemoryStorage } from "../src/storage"
 
 /**
- * Helper to create test runtime dependencies for Pario tests.
+ * Helper to create test runtime dependencies for Sixb tests.
  * Uses the real InMemory* implementations with no test-only duplicates.
  */
 export function createTestRuntimeDeps() {

@@ -1,11 +1,11 @@
 import { dirname, resolve } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@pario/app"
-import { type AtlasAppServer, createAtlasApp } from "@pario/atlas"
-import { createSentinelApp, type SentinelAppServer } from "@pario/sentinel"
-import { createParioServer, type ParioServer } from "@pario/server"
+import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
+import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
+import { createSentinelApp, type SentinelAppServer } from "@sixb/sentinel"
+import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
-import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
-import { runUntilSignal, startParioRuntime, stopQuietly } from "../lib/runtime"
+import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
+import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
 import { DevView, ErrorView, LoadingView, renderPersistent, renderStatic } from "../ui"
 
 export interface DevOptions {
@@ -23,28 +23,28 @@ export interface DevOptions {
 export async function runDev(options: DevOptions = {}) {
   process.env.NODE_ENV = "development"
 
-  const entry = resolve(options.entry ?? "pario.config.ts")
+  const entry = resolve(options.entry ?? "sixb.config.ts")
   const host = options.host ?? "0.0.0.0"
 
   const app = renderPersistent(
-    <LoadingView title="Starting pario" subtitle={entry} status="Loading runtime" />
+    <LoadingView title="Starting sixb" subtitle={entry} status="Loading runtime" />
   )
 
-  let server: ParioServer | null = null
+  let server: SixbServer | null = null
   let atlasServer: AtlasAppServer | null = null
   let sentinelServer: SentinelAppServer | null = null
   let customAppServer: CustomAppDevServer | null = null
-  let pario: LoadedPario | null = null
-  let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
+  let sixb: LoadedSixb | null = null
+  let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
 
   try {
-    pario = await loadParioFromEntry(entry)
+    sixb = await loadSixbFromEntry(entry)
     const projectRoot = dirname(resolve(entry))
 
-    runtime = await startParioRuntime(pario, { cohostWorkers: true })
-    const authEnabled = pario.auth.isEnabled()
+    runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
+    const authEnabled = sixb.auth.isEnabled()
 
-    app.rerender(<LoadingView title="Starting pario" subtitle={entry} status="Starting server" />)
+    app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />)
 
     const customAppProbe = await createCustomApp({ rootDir: projectRoot })
     const hasCustomApp = await customAppProbe.hasRoutes()
@@ -61,8 +61,8 @@ export async function runDev(options: DevOptions = {}) {
       includeCustomApp: hasCustomApp,
     })
 
-    server = createParioServer({
-      pario: pario as unknown as never,
+    server = createSixbServer({
+      sixb: sixb as unknown as never,
       port: topology.apiPort,
       host: topology.apiHost,
       quiet: true,
@@ -105,7 +105,7 @@ export async function runDev(options: DevOptions = {}) {
     let appUrl: string | null = null
     if (hasCustomApp) {
       app.rerender(
-        <LoadingView title="Starting pario" subtitle={entry} status="Starting custom app" />
+        <LoadingView title="Starting sixb" subtitle={entry} status="Starting custom app" />
       )
 
       customAppServer = await customApp.dev({
@@ -117,7 +117,7 @@ export async function runDev(options: DevOptions = {}) {
 
     app.rerender(
       <DevView
-        name={pario.id}
+        name={sixb.id}
         apiUrl={apiUrl(topology)}
         apiDocsUrl={apiDocsUrl(topology)}
         wsUrl={apiEventsUrl(topology)}

@@ -3,17 +3,17 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "pario",
+      "name": "sixb",
       "devDependencies": {
         "@biomejs/biome": "2.4.6",
         "typescript": "^5.7.0",
       },
     },
     "auth/magic-link": {
-      "name": "@pario/auth-magic-link",
+      "name": "@sixb/auth-magic-link",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -21,10 +21,10 @@
       },
     },
     "auth/oidc": {
-      "name": "@pario/auth-oidc",
+      "name": "@sixb/auth-oidc",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
         "openid-client": "^6.8.4",
       },
       "devDependencies": {
@@ -33,13 +33,13 @@
       },
     },
     "broker/nats": {
-      "name": "@pario/broker-nats",
+      "name": "@sixb/broker-nats",
       "version": "0.1.0",
       "dependencies": {
         "@nats-io/jetstream": "^3.3.1",
         "@nats-io/nats-core": "^3.3.1",
         "@nats-io/transport-node": "^3.3.1",
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -47,10 +47,10 @@
       },
     },
     "broker/redis": {
-      "name": "@pario/broker-redis",
+      "name": "@sixb/broker-redis",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -58,10 +58,10 @@
       },
     },
     "connectors/rest": {
-      "name": "@pario/connector-rest",
+      "name": "@sixb/connector-rest",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -69,10 +69,10 @@
       },
     },
     "connectors/sftp": {
-      "name": "@pario/connector-sftp",
+      "name": "@sixb/connector-sftp",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
         "ssh2": "^1.17.0",
       },
       "devDependencies": {
@@ -82,10 +82,10 @@
       },
     },
     "connectors/sql": {
-      "name": "@pario/connector-sql",
+      "name": "@sixb/connector-sql",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -93,14 +93,14 @@
       },
     },
     "examples/acme-corp": {
-      "name": "@pario/example-acme-corp",
+      "name": "@sixb/example-acme-corp",
       "dependencies": {
-        "@pario/app": "workspace:*",
-        "@pario/blob-local": "workspace:*",
-        "@pario/client": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/lake-local": "workspace:*",
-        "@pario/sqlite": "workspace:*",
+        "@sixb/app": "workspace:*",
+        "@sixb/blob-local": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/lake-local": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
         "@tanstack/react-query": "^5.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -114,12 +114,12 @@
       },
     },
     "examples/auth": {
-      "name": "@pario/example-auth",
+      "name": "@sixb/example-auth",
       "dependencies": {
-        "@pario/auth-magic-link": "workspace:*",
-        "@pario/auth-oidc": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/sqlite": "workspace:*",
+        "@sixb/auth-magic-link": "workspace:*",
+        "@sixb/auth-oidc": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -127,16 +127,16 @@
       },
     },
     "examples/panasonic-ac": {
-      "name": "@pario/example-panasonic-ac",
+      "name": "@sixb/example-panasonic-ac",
       "dependencies": {
-        "@pario/app": "workspace:*",
-        "@pario/blob-local": "workspace:*",
-        "@pario/broker-nats": "workspace:*",
-        "@pario/client": "workspace:*",
-        "@pario/connector-rest": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/lake-local": "workspace:*",
-        "@pario/pg": "workspace:*",
+        "@sixb/app": "workspace:*",
+        "@sixb/blob-local": "workspace:*",
+        "@sixb/broker-nats": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/lake-local": "workspace:*",
+        "@sixb/pg": "workspace:*",
         "@tanstack/react-query": "^5.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -151,15 +151,15 @@
       },
     },
     "examples/roku-tv": {
-      "name": "@pario/example-roku-tv",
+      "name": "@sixb/example-roku-tv",
       "dependencies": {
-        "@pario/app": "workspace:*",
-        "@pario/blob-local": "workspace:*",
-        "@pario/client": "workspace:*",
-        "@pario/connector-rest": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/lake-local": "workspace:*",
-        "@pario/sqlite": "workspace:*",
+        "@sixb/app": "workspace:*",
+        "@sixb/blob-local": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/lake-local": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
         "@tanstack/react-query": "^5.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
@@ -174,10 +174,10 @@
       },
     },
     "packages/action-worker": {
-      "name": "@pario/action-worker",
+      "name": "@sixb/action-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -185,7 +185,7 @@
       },
     },
     "packages/app": {
-      "name": "@pario/app",
+      "name": "@sixb/app",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "latest",
@@ -193,12 +193,12 @@
       },
     },
     "packages/atlas": {
-      "name": "@pario/atlas",
+      "name": "@sixb/atlas",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/client": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/ui": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/ui": "workspace:*",
         "@tanstack/react-query": "^5.0.0",
         "@xyflow/react": "^12.10.2",
         "lucide-react": "^0.562.0",
@@ -217,25 +217,25 @@
       },
     },
     "packages/cli": {
-      "name": "@pario/cli",
+      "name": "@sixb/cli",
       "version": "0.1.0",
       "bin": {
-        "pario": "./src/index.tsx",
-        "create-pario": "./src/index.tsx",
+        "sixb": "./src/index.tsx",
+        "create-sixb": "./src/index.tsx",
       },
       "dependencies": {
-        "@pario/action-worker": "workspace:*",
-        "@pario/app": "workspace:*",
-        "@pario/atlas": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/orchestrator": "workspace:*",
-        "@pario/pipeline-worker": "workspace:*",
-        "@pario/projection-worker": "workspace:*",
-        "@pario/rules-worker": "workspace:*",
-        "@pario/sentinel": "workspace:*",
-        "@pario/server": "workspace:*",
-        "@pario/sync-worker": "workspace:*",
-        "@pario/workflow-worker": "workspace:*",
+        "@sixb/action-worker": "workspace:*",
+        "@sixb/app": "workspace:*",
+        "@sixb/atlas": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/orchestrator": "workspace:*",
+        "@sixb/pipeline-worker": "workspace:*",
+        "@sixb/projection-worker": "workspace:*",
+        "@sixb/rules-worker": "workspace:*",
+        "@sixb/sentinel": "workspace:*",
+        "@sixb/server": "workspace:*",
+        "@sixb/sync-worker": "workspace:*",
+        "@sixb/workflow-worker": "workspace:*",
         "ink": "^6.0.0",
         "react": "^19.0.0",
         "react-devtools-core": "^4.19.1",
@@ -247,10 +247,10 @@
       },
     },
     "packages/client": {
-      "name": "@pario/client",
+      "name": "@sixb/client",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@hey-api/openapi-ts": "0.90.10",
@@ -270,7 +270,7 @@
       ],
     },
     "packages/core": {
-      "name": "@pario/core",
+      "name": "@sixb/core",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "latest",
@@ -278,10 +278,10 @@
       },
     },
     "packages/orchestrator": {
-      "name": "@pario/orchestrator",
+      "name": "@sixb/orchestrator",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -289,10 +289,10 @@
       },
     },
     "packages/pipeline-worker": {
-      "name": "@pario/pipeline-worker",
+      "name": "@sixb/pipeline-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -300,10 +300,10 @@
       },
     },
     "packages/projection-worker": {
-      "name": "@pario/projection-worker",
+      "name": "@sixb/projection-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -311,10 +311,10 @@
       },
     },
     "packages/rules-worker": {
-      "name": "@pario/rules-worker",
+      "name": "@sixb/rules-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -322,12 +322,12 @@
       },
     },
     "packages/sentinel": {
-      "name": "@pario/sentinel",
+      "name": "@sixb/sentinel",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/client": "workspace:*",
-        "@pario/core": "workspace:*",
-        "@pario/ui": "workspace:*",
+        "@sixb/client": "workspace:*",
+        "@sixb/core": "workspace:*",
+        "@sixb/ui": "workspace:*",
         "@tanstack/react-query": "^5.0.0",
         "lucide-react": "^0.562.0",
         "react": "^19.0.0",
@@ -344,38 +344,38 @@
       },
     },
     "packages/server": {
-      "name": "@pario/server",
+      "name": "@sixb/server",
       "version": "0.1.0",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.0",
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
         "elysia": "^1.2.0",
         "zod": "^3.24.0",
         "zod-to-json-schema": "^3.24.0",
       },
       "devDependencies": {
-        "@pario/auth-magic-link": "workspace:*",
-        "@pario/auth-oidc": "workspace:*",
-        "@pario/sqlite": "workspace:*",
+        "@sixb/auth-magic-link": "workspace:*",
+        "@sixb/auth-oidc": "workspace:*",
+        "@sixb/sqlite": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
     },
     "packages/sync-worker": {
-      "name": "@pario/sync-worker",
+      "name": "@sixb/sync-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
-        "@pario/lake-local": "workspace:*",
+        "@sixb/lake-local": "workspace:*",
         "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
     },
     "packages/ui": {
-      "name": "@pario/ui",
+      "name": "@sixb/ui",
       "version": "0.1.0",
       "dependencies": {
         "class-variance-authority": "^0.7.1",
@@ -402,10 +402,10 @@
       },
     },
     "packages/workflow-worker": {
-      "name": "@pario/workflow-worker",
+      "name": "@sixb/workflow-worker",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -413,10 +413,10 @@
       },
     },
     "queues/bullmq": {
-      "name": "@pario/queues-bullmq",
+      "name": "@sixb/queues-bullmq",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
         "bullmq": "^5.34.0",
         "ioredis": "^5.4.1",
       },
@@ -426,10 +426,10 @@
       },
     },
     "storage/blob-local": {
-      "name": "@pario/blob-local",
+      "name": "@sixb/blob-local",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -437,10 +437,10 @@
       },
     },
     "storage/blob-s3": {
-      "name": "@pario/blob-s3",
+      "name": "@sixb/blob-s3",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -448,11 +448,11 @@
       },
     },
     "storage/ducklake": {
-      "name": "@pario/ducklake",
+      "name": "@sixb/ducklake",
       "version": "0.1.0",
       "dependencies": {
         "@duckdb/node-api": "^1.5.2-r.1",
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -460,10 +460,10 @@
       },
     },
     "storage/lake-local": {
-      "name": "@pario/lake-local",
+      "name": "@sixb/lake-local",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -471,10 +471,10 @@
       },
     },
     "storage/pg": {
-      "name": "@pario/pg",
+      "name": "@sixb/pg",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -482,10 +482,10 @@
       },
     },
     "storage/sqlite": {
-      "name": "@pario/sqlite",
+      "name": "@sixb/sqlite",
       "version": "0.1.0",
       "dependencies": {
-        "@pario/core": "workspace:*",
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -654,72 +654,6 @@
 
     "@parcel/watcher-win32-x64": ["@parcel/watcher-win32-x64@2.5.6", "", { "os": "win32", "cpu": "x64" }, "sha512-hbQlYcCq5dlAX9Qx+kFb0FHue6vbjlf0FrNzSKdYK2APUf7tGfGxQCk2ihEREmbR6ZMc0MVAD5RIX/41gpUzTw=="],
 
-    "@pario/action-worker": ["@pario/action-worker@workspace:packages/action-worker"],
-
-    "@pario/app": ["@pario/app@workspace:packages/app"],
-
-    "@pario/atlas": ["@pario/atlas@workspace:packages/atlas"],
-
-    "@pario/auth-magic-link": ["@pario/auth-magic-link@workspace:auth/magic-link"],
-
-    "@pario/auth-oidc": ["@pario/auth-oidc@workspace:auth/oidc"],
-
-    "@pario/blob-local": ["@pario/blob-local@workspace:storage/blob-local"],
-
-    "@pario/blob-s3": ["@pario/blob-s3@workspace:storage/blob-s3"],
-
-    "@pario/broker-nats": ["@pario/broker-nats@workspace:broker/nats"],
-
-    "@pario/broker-redis": ["@pario/broker-redis@workspace:broker/redis"],
-
-    "@pario/cli": ["@pario/cli@workspace:packages/cli"],
-
-    "@pario/client": ["@pario/client@workspace:packages/client"],
-
-    "@pario/connector-rest": ["@pario/connector-rest@workspace:connectors/rest"],
-
-    "@pario/connector-sftp": ["@pario/connector-sftp@workspace:connectors/sftp"],
-
-    "@pario/connector-sql": ["@pario/connector-sql@workspace:connectors/sql"],
-
-    "@pario/core": ["@pario/core@workspace:packages/core"],
-
-    "@pario/ducklake": ["@pario/ducklake@workspace:storage/ducklake"],
-
-    "@pario/example-acme-corp": ["@pario/example-acme-corp@workspace:examples/acme-corp"],
-
-    "@pario/example-auth": ["@pario/example-auth@workspace:examples/auth"],
-
-    "@pario/example-panasonic-ac": ["@pario/example-panasonic-ac@workspace:examples/panasonic-ac"],
-
-    "@pario/example-roku-tv": ["@pario/example-roku-tv@workspace:examples/roku-tv"],
-
-    "@pario/lake-local": ["@pario/lake-local@workspace:storage/lake-local"],
-
-    "@pario/orchestrator": ["@pario/orchestrator@workspace:packages/orchestrator"],
-
-    "@pario/pg": ["@pario/pg@workspace:storage/pg"],
-
-    "@pario/pipeline-worker": ["@pario/pipeline-worker@workspace:packages/pipeline-worker"],
-
-    "@pario/projection-worker": ["@pario/projection-worker@workspace:packages/projection-worker"],
-
-    "@pario/queues-bullmq": ["@pario/queues-bullmq@workspace:queues/bullmq"],
-
-    "@pario/rules-worker": ["@pario/rules-worker@workspace:packages/rules-worker"],
-
-    "@pario/sentinel": ["@pario/sentinel@workspace:packages/sentinel"],
-
-    "@pario/server": ["@pario/server@workspace:packages/server"],
-
-    "@pario/sqlite": ["@pario/sqlite@workspace:storage/sqlite"],
-
-    "@pario/sync-worker": ["@pario/sync-worker@workspace:packages/sync-worker"],
-
-    "@pario/ui": ["@pario/ui@workspace:packages/ui"],
-
-    "@pario/workflow-worker": ["@pario/workflow-worker@workspace:packages/workflow-worker"],
-
     "@radix-ui/number": ["@radix-ui/number@1.1.1", "", {}, "sha512-MkKCwxlXTgz6CFoJx3pCwn07GKp36+aZyu/u2Ln2VrA5DcdyCZkASEDBTd8x5whTQQL5CiYf4prXKLcgQdv29g=="],
 
     "@radix-ui/primitive": ["@radix-ui/primitive@1.1.3", "", {}, "sha512-JTF99U/6XIjCBo0wqkU5sK10glYe27MRRsfwoiq5zzOEZLHU3A3KCMa5X/azekYRCJ0HlwI0crAXS/5dEHTzDg=="],
@@ -851,6 +785,72 @@
     "@redis/time-series": ["@redis/time-series@5.12.1", "", { "peerDependencies": { "@redis/client": "^5.12.1" } }, "sha512-c6JL6E3EcZJuNqKFz+KM+l9l5mpcQiKvTwgA3blt5glWJ8hjDk0yeHN3beE/MpqYIQ8UEX44ItQzgkE/gCBELQ=="],
 
     "@sinclair/typebox": ["@sinclair/typebox@0.34.49", "", {}, "sha512-brySQQs7Jtn0joV8Xh9ZV/hZb9Ozb0pmazDIASBkYKCjXrXU3mpcFahmK/z4YDhGkQvP9mWJbVyahdtU5wQA+A=="],
+
+    "@sixb/action-worker": ["@sixb/action-worker@workspace:packages/action-worker"],
+
+    "@sixb/app": ["@sixb/app@workspace:packages/app"],
+
+    "@sixb/atlas": ["@sixb/atlas@workspace:packages/atlas"],
+
+    "@sixb/auth-magic-link": ["@sixb/auth-magic-link@workspace:auth/magic-link"],
+
+    "@sixb/auth-oidc": ["@sixb/auth-oidc@workspace:auth/oidc"],
+
+    "@sixb/blob-local": ["@sixb/blob-local@workspace:storage/blob-local"],
+
+    "@sixb/blob-s3": ["@sixb/blob-s3@workspace:storage/blob-s3"],
+
+    "@sixb/broker-nats": ["@sixb/broker-nats@workspace:broker/nats"],
+
+    "@sixb/broker-redis": ["@sixb/broker-redis@workspace:broker/redis"],
+
+    "@sixb/cli": ["@sixb/cli@workspace:packages/cli"],
+
+    "@sixb/client": ["@sixb/client@workspace:packages/client"],
+
+    "@sixb/connector-rest": ["@sixb/connector-rest@workspace:connectors/rest"],
+
+    "@sixb/connector-sftp": ["@sixb/connector-sftp@workspace:connectors/sftp"],
+
+    "@sixb/connector-sql": ["@sixb/connector-sql@workspace:connectors/sql"],
+
+    "@sixb/core": ["@sixb/core@workspace:packages/core"],
+
+    "@sixb/ducklake": ["@sixb/ducklake@workspace:storage/ducklake"],
+
+    "@sixb/example-acme-corp": ["@sixb/example-acme-corp@workspace:examples/acme-corp"],
+
+    "@sixb/example-auth": ["@sixb/example-auth@workspace:examples/auth"],
+
+    "@sixb/example-panasonic-ac": ["@sixb/example-panasonic-ac@workspace:examples/panasonic-ac"],
+
+    "@sixb/example-roku-tv": ["@sixb/example-roku-tv@workspace:examples/roku-tv"],
+
+    "@sixb/lake-local": ["@sixb/lake-local@workspace:storage/lake-local"],
+
+    "@sixb/orchestrator": ["@sixb/orchestrator@workspace:packages/orchestrator"],
+
+    "@sixb/pg": ["@sixb/pg@workspace:storage/pg"],
+
+    "@sixb/pipeline-worker": ["@sixb/pipeline-worker@workspace:packages/pipeline-worker"],
+
+    "@sixb/projection-worker": ["@sixb/projection-worker@workspace:packages/projection-worker"],
+
+    "@sixb/queues-bullmq": ["@sixb/queues-bullmq@workspace:queues/bullmq"],
+
+    "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
+
+    "@sixb/sentinel": ["@sixb/sentinel@workspace:packages/sentinel"],
+
+    "@sixb/server": ["@sixb/server@workspace:packages/server"],
+
+    "@sixb/sqlite": ["@sixb/sqlite@workspace:storage/sqlite"],
+
+    "@sixb/sync-worker": ["@sixb/sync-worker@workspace:packages/sync-worker"],
+
+    "@sixb/ui": ["@sixb/ui@workspace:packages/ui"],
+
+    "@sixb/workflow-worker": ["@sixb/workflow-worker@workspace:packages/workflow-worker"],
 
     "@tailwindcss/cli": ["@tailwindcss/cli@4.3.0", "", { "dependencies": { "@parcel/watcher": "^2.5.1", "@tailwindcss/node": "4.3.0", "@tailwindcss/oxide": "4.3.0", "enhanced-resolve": "^5.21.0", "mri": "^1.2.0", "picocolors": "^1.1.1", "tailwindcss": "4.3.0" }, "bin": { "tailwindcss": "dist/index.mjs" } }, "sha512-X9kdlqyMopO9fewbgHsEeuy31YzMHbdZ9VsKt004tB+mxSg1CNbyhZYCzvhciN0AM4R4b5lvIprPjtNq7iQxpQ=="],
 

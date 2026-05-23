@@ -10,7 +10,7 @@ import type {
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteObjectStorageOptions {

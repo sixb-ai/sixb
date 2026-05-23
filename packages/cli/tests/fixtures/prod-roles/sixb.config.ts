@@ -12,12 +12,12 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  Pario,
   prop,
   type Queues,
   type RuleDefinition,
+  Sixb,
   type StorageMigrator,
-} from "@pario/core"
+} from "@sixb/core"
 
 const Transaction = defineObjectType({
   id: "Transaction",
@@ -51,7 +51,7 @@ const postedRule: RuleDefinition = {
 }
 
 function logFixtureEvent(entry: Record<string, unknown>): void {
-  const logPath = process.env.PARIO_CLI_TEST_LOG
+  const logPath = process.env.SIXB_CLI_TEST_LOG
   if (!logPath) return
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf-8")
 }
@@ -70,7 +70,7 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
 }
 
 // Not an `InMemoryQueues` instance and without an in-memory `provider` tag, so it
-// passes the `pario worker` shared-queue guard while still backed by real queues.
+// passes the `sixb worker` shared-queue guard while still backed by real queues.
 class SharedQueues implements Queues {
   private readonly inner = new InMemoryQueues()
 
@@ -114,9 +114,9 @@ function loggingStorage() {
   return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
 }
 
-export const pario = new Pario({
+export const sixb = new Sixb({
   id: "cli-prod-roles",
-  // Explicit disabled auth lets `pario api` boot in production mode for tests.
+  // Explicit disabled auth lets `sixb api` boot in production mode for tests.
   auth: { id: "disabled", kind: "disabled", allowDisabledInProduction: true },
   ontology: [Transaction],
   connectors: [erpDb],

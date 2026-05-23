@@ -4,15 +4,15 @@ import type {
   RelationshipEdge,
   TelemetryHistory,
   TelemetryProperty,
-} from "@pario/client"
-import { decodeObjectId, encodeObjectId } from "@pario/client"
+} from "@sixb/client"
+import { decodeObjectId, encodeObjectId } from "@sixb/client"
 import {
   getObjectOptions,
   getTelemetryHistoryOptions,
   listRelationshipsOptions,
-} from "@pario/client/hooks"
-import { Badge, Button, Card, EmptyState } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/client/hooks"
+import { Badge, Button, Card, EmptyState } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
 import { Box } from "lucide-react"
 import { Fragment, useEffect, useMemo, useState } from "react"

@@ -1,7 +1,7 @@
 import type {
   OntologySource,
-  Pario,
-  ParioRuntimeContext,
+  Sixb,
+  SixbRuntimeContext,
   WorkflowDefinition,
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
@@ -9,15 +9,15 @@ import type {
   WorkflowRunStorage,
   WorkflowStepOutputs,
   WorkflowsRuntime,
-} from "@pario/core"
+} from "@sixb/core"
 
-export interface WorkflowWorkerContext extends ParioRuntimeContext {
+export interface WorkflowWorkerContext extends SixbRuntimeContext {
   readonly workflowRuns: WorkflowRunStorage
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   getWorkflowById(workflowId: string): WorkflowDefinition | null
 }
 
-export interface WorkflowWorkerPario extends ParioRuntimeContext {
+export interface WorkflowWorkerSixb extends SixbRuntimeContext {
   readonly id: string
   readonly workflows: WorkflowsRuntime
 }

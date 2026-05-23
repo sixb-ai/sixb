@@ -13,13 +13,13 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
   prop,
   ref,
+  Sixb,
   type WorkflowDefinition,
   type WorkflowRunStorage,
   WorkflowValidationError,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   EventsRuntimeWorkflowRunObserver,
   runWorkflowJob,
@@ -141,11 +141,11 @@ const attachInvoice = defineAction("attach-invoice")
     actionHandlerCalls += 1
   })
 
-function createPario(options: {
+function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
   readonly actions?: readonly (typeof attachInvoice)[]
 }) {
-  return new Pario({
+  return new Sixb({
     id: "workflow-worker-tests",
     ontology: [Transaction, Invoice],
     broker: new InMemoryBroker(),
@@ -168,7 +168,7 @@ function requireWorkflowRunsStorage(input: {
   return workflowRuns
 }
 
-function createRuntime(pario: {
+function createRuntime(sixb: {
   readonly projectId: string
   readonly ontology: WorkflowWorkerContext["ontology"]
   readonly actionRegistry: WorkflowWorkerContext["actionRegistry"]
@@ -181,29 +181,29 @@ function createRuntime(pario: {
   readonly workflows: { getById(workflowId: string): WorkflowDefinition | null }
 }) {
   return {
-    projectId: pario.projectId,
-    ontology: pario.ontology,
-    actionRegistry: pario.actionRegistry,
-    events: pario.events,
-    storage: pario.storage,
-    lakeStorage: pario.lakeStorage,
-    blobStorage: pario.blobStorage,
-    queues: pario.queues,
-    rules: pario.rules,
-    workflowRuns: requireWorkflowRunsStorage(pario),
-    pario: pario as unknown as Pario<readonly OntologySource[]>,
+    projectId: sixb.projectId,
+    ontology: sixb.ontology,
+    actionRegistry: sixb.actionRegistry,
+    events: sixb.events,
+    storage: sixb.storage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobStorage,
+    queues: sixb.queues,
+    rules: sixb.rules,
+    workflowRuns: requireWorkflowRunsStorage(sixb),
+    sixb: sixb as unknown as Sixb<readonly OntologySource[]>,
     getWorkflowById(workflowId: string) {
-      return pario.workflows.getById(workflowId)
+      return sixb.workflows.getById(workflowId)
     },
   } satisfies WorkflowWorkerContext
 }
 
 async function completeRequestedActions(
-  pario: { readonly id: string; readonly events: EventsRuntime },
+  sixb: { readonly id: string; readonly events: EventsRuntime },
   status: "succeeded" | "failed",
   errorMessage = "action failed"
 ): Promise<() => void> {
-  return pario.events.subscribe(
+  return sixb.events.subscribe(
     {
       types: ["action.requested"],
     },
@@ -213,7 +213,7 @@ async function completeRequestedActions(
           continue
         }
 
-        void pario.events.append({
+        void sixb.events.append({
           events: [
             status === "succeeded"
               ? {
@@ -252,12 +252,12 @@ describe("runWorkflowJob", () => {
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
     const calls: string[] = []
     const observer: WorkflowRunObserver = {
       async onRunStarted(run) {
-        const stored = await pario.storage.workflowRuns!.getById({
-          projectId: pario.id,
+        const stored = await sixb.storage.workflowRuns!.getById({
+          projectId: sixb.id,
           id: run.id,
         })
         calls.push(`run-started:${stored?.status}`)
@@ -275,16 +275,16 @@ describe("runWorkflowJob", () => {
     const workflowInput = {
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     }
-    await pario.storage.workflowRuns!.queue({
+    await sixb.storage.workflowRuns!.queue({
       id: "wfrun_observed",
-      projectId: pario.id,
+      projectId: sixb.id,
       workflowId: workflow.id,
       input: workflowInput,
       queuedAt: new Date("2026-05-08T09:59:00.000Z"),
     })
 
     await runWorkflowJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "wfrun_observed",
         workflowId: workflow.id,
@@ -293,8 +293,8 @@ describe("runWorkflowJob", () => {
       observer,
     })
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_observed",
     })
 
@@ -313,7 +313,7 @@ describe("runWorkflowJob", () => {
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
     const observer: WorkflowRunObserver = {
       async onRunStarted() {
         throw new Error("observer failed")
@@ -327,7 +327,7 @@ describe("runWorkflowJob", () => {
     console.error = () => undefined
     try {
       const result = await runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_observer_fails",
           workflowId: workflow.id,
@@ -355,10 +355,10 @@ describe("runWorkflowJob", () => {
         invoice: steps.findBestInvoice.invoice,
         confidence: steps.findBestInvoice.confidence,
       }))
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     const result = await runWorkflowJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "wfrun_1",
         workflowId: workflow.id,
@@ -390,10 +390,10 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(reviewBeforeAttach)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     const result = await runWorkflowJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "wfrun_intervention_waiting",
         workflowId: workflow.id,
@@ -401,22 +401,22 @@ describe("runWorkflowJob", () => {
           transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
         },
       },
-      observer: new EventsRuntimeWorkflowRunObserver(pario.events),
+      observer: new EventsRuntimeWorkflowRunObserver(sixb.events),
     })
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_intervention_waiting",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_intervention_waiting",
       order: "asc",
     })
-    const interventions = await pario.storage.workflowInterventions!.list({
-      projectId: pario.id,
+    const interventions = await sixb.storage.workflowInterventions!.list({
+      projectId: sixb.id,
     })
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: [
         "workflow.run.started",
         "workflow.run.node.started",
@@ -482,9 +482,9 @@ describe("runWorkflowJob", () => {
       .then(attachReviewedInvoice, ({ steps }) => ({
         invoice: steps.reviewBeforeAttach.invoice,
       }))
-    const pario = createPario({ workflows: [workflow] })
-    const runtime = createRuntime(pario)
-    const observer = new EventsRuntimeWorkflowRunObserver(pario.events)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
 
     const waiting = await runWorkflowJob({
       runtime,
@@ -499,8 +499,8 @@ describe("runWorkflowJob", () => {
     })
 
     expect(waiting.status).toBe("waiting")
-    await pario.storage.workflowInterventions!.submit({
-      projectId: pario.id,
+    await sixb.storage.workflowInterventions!.submit({
+      projectId: sixb.id,
       id: "wfrun_resume:intervention:1",
       response: {
         invoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
@@ -518,16 +518,16 @@ describe("runWorkflowJob", () => {
       observer,
     })
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_resume",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_resume",
       order: "asc",
     })
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["workflow.run.node.finished", "workflow.run.node.started", "workflow.run.finished"],
     })
 
@@ -568,8 +568,8 @@ describe("runWorkflowJob", () => {
       },
       observer,
     })
-    const afterDuplicate = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const afterDuplicate = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_resume",
       order: "asc",
     })
@@ -588,8 +588,8 @@ describe("runWorkflowJob", () => {
       .then(attachReviewedInvoice, ({ steps }) => ({
         invoice: steps.reviewBeforeAttach.invoice,
       }))
-    const pario = createPario({ workflows: [workflow] })
-    const runtime = createRuntime(pario)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
 
     await runWorkflowJob({
       runtime,
@@ -601,8 +601,8 @@ describe("runWorkflowJob", () => {
         },
       },
     })
-    await pario.storage.workflowInterventions!.submit({
-      projectId: pario.id,
+    await sixb.storage.workflowInterventions!.submit({
+      projectId: sixb.id,
       id: "wfrun_invalid_resume_response:intervention:1",
       response: {
         invoice: { objectTypeId: "Transaction", primaryId: "txn_1" },
@@ -620,12 +620,12 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_invalid_resume_response",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_invalid_resume_response",
       order: "asc",
     })
@@ -643,11 +643,11 @@ describe("runWorkflowJob", () => {
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_invalid_input",
           workflowId: workflow.id,
@@ -656,8 +656,8 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const runs = await pario.storage.workflowRuns!.list({
-      projectId: pario.id,
+    const runs = await sixb.storage.workflowRuns!.list({
+      projectId: sixb.id,
     })
     expect(runs.total).toBe(0)
   })
@@ -668,19 +668,19 @@ describe("runWorkflowJob", () => {
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
     const observerCalls: string[] = []
 
-    await pario.storage.workflowRuns!.queue({
+    await sixb.storage.workflowRuns!.queue({
       id: "wfrun_queued_invalid_input",
-      projectId: pario.id,
+      projectId: sixb.id,
       workflowId: workflow.id,
       input: {},
     })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_queued_invalid_input",
           workflowId: workflow.id,
@@ -697,13 +697,13 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_queued_invalid_input",
     })
     expect(run?.status).toBe("failed")
     expect(observerCalls).toHaveLength(1)
-    expect(observerCalls[0]).toContain("failed:[Pario] Missing required field")
+    expect(observerCalls[0]).toContain("failed:[Sixb] Missing required field")
     expect(observerCalls[0]).toContain('Workflow "queued-invalid-input" input.transaction')
   })
 
@@ -713,11 +713,11 @@ describe("runWorkflowJob", () => {
         transaction: ref(Transaction),
       })
       .then(invalidOutputStep)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_invalid_output",
           workflowId: workflow.id,
@@ -728,12 +728,12 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_invalid_output",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_invalid_output",
     })
     expect(run?.status).toBe("failed")
@@ -753,11 +753,11 @@ describe("runWorkflowJob", () => {
       .then(failingStep, ({ steps }) => ({
         invoice: steps.findBestInvoice.invoice,
       }))
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_step_failed",
           workflowId: workflow.id,
@@ -768,12 +768,12 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toThrow("step exploded")
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_step_failed",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_step_failed",
       order: "asc",
     })
@@ -795,13 +795,13 @@ describe("runWorkflowJob", () => {
           invoice: steps.findBestInvoice.invoice,
         },
       }))
-    const pario = createPario({ actions: [attachInvoice], workflows: [workflow] })
-    await pario.upsertObject("Transaction", { id: "txn_1" })
-    const unsubscribe = await completeRequestedActions(pario, "succeeded")
+    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
+    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
 
     try {
       const result = await runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_action",
           workflowId: workflow.id,
@@ -811,7 +811,7 @@ describe("runWorkflowJob", () => {
         },
       })
 
-      const events = await pario.events.read({
+      const events = await sixb.events.read({
         types: ["action.requested", "action.completed"],
       })
       expect(actionHandlerCalls).toBe(0)
@@ -838,10 +838,10 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(reviewInvoiceDecision)
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     const result = await runWorkflowJob({
-      runtime: createRuntime(pario),
+      runtime: createRuntime(sixb),
       job: {
         id: "wfrun_intervention",
         workflowId: workflow.id,
@@ -849,23 +849,23 @@ describe("runWorkflowJob", () => {
           transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
         },
       },
-      observer: new EventsRuntimeWorkflowRunObserver(pario.events),
+      observer: new EventsRuntimeWorkflowRunObserver(sixb.events),
     })
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_intervention",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_intervention",
       order: "asc",
     })
-    const intervention = await pario.storage.workflowInterventions!.getById({
-      projectId: pario.id,
+    const intervention = await sixb.storage.workflowInterventions!.getById({
+      projectId: sixb.id,
       id: "wfrun_intervention:intervention:1",
     })
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       topics: ["workflows"],
     })
 
@@ -912,14 +912,14 @@ describe("runWorkflowJob", () => {
           invoice: steps.findBestInvoice.invoice,
         },
       }))
-    const pario = createPario({ actions: [attachInvoice], workflows: [workflow] })
-    await pario.upsertObject("Transaction", { id: "txn_1" })
-    const unsubscribe = await completeRequestedActions(pario, "failed", "attach failed")
+    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
+    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    const unsubscribe = await completeRequestedActions(sixb, "failed", "attach failed")
 
     try {
       await expect(
         runWorkflowJob({
-          runtime: createRuntime(pario),
+          runtime: createRuntime(sixb),
           job: {
             id: "wfrun_action_run_failed",
             workflowId: workflow.id,
@@ -933,12 +933,12 @@ describe("runWorkflowJob", () => {
       unsubscribe()
     }
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_action_run_failed",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_action_run_failed",
       order: "asc",
     })
@@ -959,11 +959,11 @@ describe("runWorkflowJob", () => {
           invoice: steps.findBestInvoice.invoice,
         },
       }))
-    const pario = createPario({ actions: [attachInvoice], workflows: [workflow] })
+    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_action_failed",
           workflowId: workflow.id,
@@ -974,16 +974,16 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toThrow("Object not found for action request")
 
-    const run = await pario.storage.workflowRuns!.getById({
-      projectId: pario.id,
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
       id: "wfrun_action_failed",
     })
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_action_failed",
       order: "asc",
     })
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["action.requested"],
     })
     expect(run?.status).toBe("failed")
@@ -992,18 +992,18 @@ describe("runWorkflowJob", () => {
   })
 
   test("fails clearly when the workflow is missing", async () => {
-    const pario = createPario({})
+    const sixb = createSixb({})
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_missing",
           workflowId: "missing-workflow",
           input: {},
         },
       })
-    ).rejects.toThrow("[ParioWorkflowWorker] Unknown workflow 'missing-workflow'.")
+    ).rejects.toThrow("[SixbWorkflowWorker] Unknown workflow 'missing-workflow'.")
   })
 
   test("does not invent a node row when a mapper throws before producing input", async () => {
@@ -1015,11 +1015,11 @@ describe("runWorkflowJob", () => {
       .then(reviewInvoiceMatch, () => {
         throw new WorkflowWorkerError("mapper exploded")
       })
-    const pario = createPario({ workflows: [workflow] })
+    const sixb = createSixb({ workflows: [workflow] })
 
     await expect(
       runWorkflowJob({
-        runtime: createRuntime(pario),
+        runtime: createRuntime(sixb),
         job: {
           id: "wfrun_mapper_failed",
           workflowId: workflow.id,
@@ -1030,8 +1030,8 @@ describe("runWorkflowJob", () => {
       })
     ).rejects.toThrow("mapper exploded")
 
-    const nodes = await pario.storage.workflowRuns!.nodes.list({
-      projectId: pario.id,
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
       workflowRunId: "wfrun_mapper_failed",
       order: "asc",
     })

@@ -8,7 +8,7 @@ import type {
 } from "../ontology"
 import type { InferObjectProperties } from "../ontology/inference"
 import type { QuantitativeTypeId } from "../ontology/units"
-import type { Pario } from "../runtime/pario"
+import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -104,7 +104,7 @@ export type ActionBinding<TObjectType extends ObjectType = ObjectType> =
 
 export interface GlobalActionContext<TParams extends Record<string, unknown>> {
   readonly params: TParams
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly signal: AbortSignal
 }
 

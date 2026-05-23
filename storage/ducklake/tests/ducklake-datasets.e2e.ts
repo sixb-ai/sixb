@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset, LakeStorageError } from "@pario/core"
+import { col, defineDataset, LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import {
   createDuckDbRuntime,
@@ -35,7 +35,7 @@ describe("DuckLakeStorage dataset metadata", () => {
   })
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-datasets-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-datasets-"))
     storage = createLocalDuckLakeStorage(rootDir)
   })
 
@@ -260,10 +260,10 @@ describe("DuckLakeStorage dataset metadata", () => {
       await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
 
       await runtime.run(
-        `CREATE TABLE pario_lake.main.${encodeDatasetTableName("raw.erp.orders")} ("orderId" VARCHAR NOT NULL)`
+        `CREATE TABLE sixb_lake.main.${encodeDatasetTableName("raw.erp.orders")} ("orderId" VARCHAR NOT NULL)`
       )
-      await runtime.run("CREATE TABLE pario_lake.main.pario__sys__state (id VARCHAR)")
-      await runtime.run('CREATE TABLE pario_lake.main."pario__ds__bad-" (id VARCHAR)')
+      await runtime.run("CREATE TABLE sixb_lake.main.sixb__sys__state (id VARCHAR)")
+      await runtime.run('CREATE TABLE sixb_lake.main."sixb__ds__bad-" (id VARCHAR)')
     } finally {
       await runtime.close()
     }
@@ -282,14 +282,14 @@ describe("DuckLakeStorage dataset metadata", () => {
       await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
 
       await runtime.run(
-        `CREATE TABLE pario_lake.main.${encodeDatasetTableName("raw.erp.unsupported")} (id INTEGER)`
+        `CREATE TABLE sixb_lake.main.${encodeDatasetTableName("raw.erp.unsupported")} (id INTEGER)`
       )
     } finally {
       await runtime.close()
     }
 
     await expect(storage.getDataset("raw.erp.unsupported")).rejects.toThrow(
-      "cannot be mapped to a Pario dataset column type"
+      "cannot be mapped to a Sixb dataset column type"
     )
   })
 
@@ -300,9 +300,9 @@ describe("DuckLakeStorage dataset metadata", () => {
       await setupDuckLake(runtime, localDuckLakeOptions(rootDir))
 
       const tableName = encodeDatasetTableName("raw.erp.partitioned")
-      await runtime.run(`CREATE TABLE pario_lake.main.${tableName} ("orderDate" DATE NOT NULL)`)
+      await runtime.run(`CREATE TABLE sixb_lake.main.${tableName} ("orderDate" DATE NOT NULL)`)
       await runtime.run(
-        `ALTER TABLE pario_lake.main.${tableName} SET PARTITIONED BY (year("orderDate"))`
+        `ALTER TABLE sixb_lake.main.${tableName} SET PARTITIONED BY (year("orderDate"))`
       )
     } finally {
       await runtime.close()

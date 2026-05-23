@@ -2,8 +2,8 @@ import type { AuthSessionAudience } from "./audience"
 import { DEFAULT_AUTH_SESSION_AUDIENCE, resolveAuthSessionAudience } from "./audience"
 import type { AuthCookieOptions } from "./types"
 
-export const DEFAULT_SESSION_COOKIE_NAME = "pario_session"
-export const DEFAULT_CSRF_COOKIE_NAME = "pario_csrf"
+export const DEFAULT_SESSION_COOKIE_NAME = "sixb_session"
+export const DEFAULT_CSRF_COOKIE_NAME = "sixb_csrf"
 
 export interface ResolvedAuthCookieOptions {
   readonly sessionCookieName: string
@@ -211,7 +211,7 @@ function assertValidCookieOptions(options: ResolvedAuthCookieOptions): void {
   assertValidCookieName(options.csrfCookieName, "csrfCookieName")
 
   if (options.sameSite !== "strict") {
-    throw new Error("[Pario] Auth cookie sameSite must be 'strict'.")
+    throw new Error("[Sixb] Auth cookie sameSite must be 'strict'.")
   }
 
   if (
@@ -219,7 +219,7 @@ function assertValidCookieOptions(options: ResolvedAuthCookieOptions): void {
     (isHostPrefixedCookieName(options.sessionCookieName) ||
       isHostPrefixedCookieName(options.csrfCookieName))
   ) {
-    throw new Error("[Pario] __Host- auth cookies cannot be configured with cookieDomain.")
+    throw new Error("[Sixb] __Host- auth cookies cannot be configured with cookieDomain.")
   }
 
   if (
@@ -227,13 +227,13 @@ function assertValidCookieOptions(options: ResolvedAuthCookieOptions): void {
     (requiresSecureCookieName(options.sessionCookieName) ||
       requiresSecureCookieName(options.csrfCookieName))
   ) {
-    throw new Error("[Pario] __Host- auth cookies require secure cookies.")
+    throw new Error("[Sixb] __Host- auth cookies require secure cookies.")
   }
 }
 
 function assertValidCookieName(name: string, label: string): void {
   if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) {
-    throw new Error(`[Pario] Auth cookie ${label} '${name}' is not a valid cookie name.`)
+    throw new Error(`[Sixb] Auth cookie ${label} '${name}' is not a valid cookie name.`)
   }
 }
 

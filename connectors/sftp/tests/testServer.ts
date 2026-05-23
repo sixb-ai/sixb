@@ -44,7 +44,7 @@ export interface TestSftpServer {
 
 export async function startTestSftpServer(): Promise<TestSftpServer> {
   const hostKey = utils.generateKeyPairSync("ed25519").private
-  const rootDir = await mkdtemp(join(tmpdir(), "pario-sftp-"))
+  const rootDir = await mkdtemp(join(tmpdir(), "sixb-sftp-"))
   mkdirSync(join(rootDir, "files"), { recursive: true })
   let activeConnections = 0
   let idleWaiters: Array<() => void> = []
@@ -366,7 +366,7 @@ function resolveRemotePath(rootDir: string, remotePath: string): string {
   const resolvedPath = resolve(rootDir, `.${normalizedPath}`)
 
   if (resolvedPath !== rootDir && !resolvedPath.startsWith(`${rootDir}/`)) {
-    throw new Error("[ParioSftpTest] Remote path escapes test root.")
+    throw new Error("[SixbSftpTest] Remote path escapes test root.")
   }
 
   return resolvedPath
@@ -400,7 +400,7 @@ async function listen(server: SshServer): Promise<number> {
       const address = server.address()
 
       if (!address || typeof address === "string") {
-        rejectListen(new Error("[ParioSftpTest] Failed to resolve test server address."))
+        rejectListen(new Error("[SixbSftpTest] Failed to resolve test server address."))
         return
       }
 

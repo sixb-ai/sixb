@@ -1,9 +1,9 @@
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 
 /**
- * Prefix used for all Pario dataset tables inside the DuckLake schema.
+ * Prefix used for all Sixb dataset tables inside the DuckLake schema.
  */
-export const DATASET_TABLE_PREFIX = "pario__ds__"
+export const DATASET_TABLE_PREFIX = "sixb__ds__"
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder("utf-8", { fatal: true })
@@ -17,7 +17,7 @@ function isHexPair(value: string): boolean {
 }
 
 /**
- * Encode a Pario dataset id into a SQL identifier-safe table suffix.
+ * Encode a Sixb dataset id into a SQL identifier-safe table suffix.
  *
  * Common lowercase dotted ids stay readable by mapping "." to "__". Literal
  * underscores and all other non-inline UTF-8 bytes are encoded as "_xx" hex
@@ -25,7 +25,7 @@ function isHexPair(value: string): boolean {
  */
 function encodeDatasetId(datasetId: string): string {
   if (datasetId.trim().length === 0) {
-    throw new LakeStorageError("[ParioDuckLake] Dataset id must not be empty.")
+    throw new LakeStorageError("[SixbDuckLake] Dataset id must not be empty.")
   }
 
   let encoded = ""
@@ -93,14 +93,14 @@ function decodeDatasetId(encoded: string): string | null {
 }
 
 /**
- * Convert a Pario dataset id to its physical DuckLake table name.
+ * Convert a Sixb dataset id to its physical DuckLake table name.
  */
 export function encodeDatasetTableName(datasetId: string): string {
   return `${DATASET_TABLE_PREFIX}${encodeDatasetId(datasetId)}`
 }
 
 /**
- * Decode a physical DuckLake table name back to a Pario dataset id.
+ * Decode a physical DuckLake table name back to a Sixb dataset id.
  */
 export function decodeDatasetTableName(tableName: string): string | null {
   if (!tableName.startsWith(DATASET_TABLE_PREFIX)) {

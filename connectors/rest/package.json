@@ -1,7 +1,7 @@
 {
-  "name": "@pario/connector-rest",
+  "name": "@sixb/connector-rest",
   "version": "0.1.0",
-  "description": "REST connector for Pario built on native fetch",
+  "description": "REST connector for Sixb built on native fetch",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -14,7 +14,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@pario/core": "workspace:*"
+    "@sixb/core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

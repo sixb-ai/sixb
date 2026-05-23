@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
@@ -23,7 +23,7 @@ describe("DuckLakeStorage versions and time travel", () => {
   })
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-versions-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-versions-"))
     storage = createLocalDuckLakeStorage(rootDir)
     await storage.createDataset(ordersDataset)
   })
@@ -106,7 +106,7 @@ describe("DuckLakeStorage versions and time travel", () => {
     ])
   })
 
-  test("discovers data changes and Pario metadata-only snapshots", async () => {
+  test("discovers data changes and Sixb metadata-only snapshots", async () => {
     await storage.close()
 
     const runtime = await createDuckDbRuntime()
@@ -115,17 +115,17 @@ describe("DuckLakeStorage versions and time travel", () => {
 
       const tableName = encodeDatasetTableName(ordersDataset.id)
       await runtime.run(
-        `INSERT INTO pario_lake.main.${tableName} VALUES ('raw_1', 'External', 1, NULL)`
+        `INSERT INTO sixb_lake.main.${tableName} VALUES ('raw_1', 'External', 1, NULL)`
       )
 
-      await runtime.run(`COMMENT ON TABLE pario_lake.main.${tableName} IS 'ignored metadata only'`)
+      await runtime.run(`COMMENT ON TABLE sixb_lake.main.${tableName} IS 'ignored metadata only'`)
 
       await runtime.run("BEGIN TRANSACTION")
-      await runtime.run(`COMMENT ON TABLE pario_lake.main.${tableName} IS 'pario metadata only'`)
+      await runtime.run(`COMMENT ON TABLE sixb_lake.main.${tableName} IS 'sixb metadata only'`)
       await runtime.run(
-        `CALL pario_lake.set_commit_message('Pario', 'pario metadata only', extra_info => ${quoteSqlString(
+        `CALL sixb_lake.set_commit_message('Sixb', 'sixb metadata only', extra_info => ${quoteSqlString(
           JSON.stringify({
-            pario: {
+            sixb: {
               kind: "datasetVersion",
               datasetId: ordersDataset.id,
               mode: "append",
@@ -159,7 +159,7 @@ describe("DuckLakeStorage versions and time travel", () => {
     ])
   })
 
-  test("rejects data-change snapshots with conflicting Pario metadata", async () => {
+  test("rejects data-change snapshots with conflicting Sixb metadata", async () => {
     await storage.close()
 
     const runtime = await createDuckDbRuntime()
@@ -169,12 +169,12 @@ describe("DuckLakeStorage versions and time travel", () => {
       const tableName = encodeDatasetTableName(ordersDataset.id)
       await runtime.run("BEGIN TRANSACTION")
       await runtime.run(
-        `INSERT INTO pario_lake.main.${tableName} VALUES ('raw_1', 'External', 1, NULL)`
+        `INSERT INTO sixb_lake.main.${tableName} VALUES ('raw_1', 'External', 1, NULL)`
       )
       await runtime.run(
-        `CALL pario_lake.set_commit_message('Pario', 'wrong dataset metadata', extra_info => ${quoteSqlString(
+        `CALL sixb_lake.set_commit_message('Sixb', 'wrong dataset metadata', extra_info => ${quoteSqlString(
           JSON.stringify({
-            pario: {
+            sixb: {
               kind: "datasetVersion",
               datasetId: "other.dataset",
               mode: "append",

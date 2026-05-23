@@ -1,8 +1,8 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { createCustomApp } from "@pario/app"
-import { buildAtlasAssets } from "@pario/atlas"
-import { buildSentinelAssets } from "@pario/sentinel"
+import { createCustomApp } from "@sixb/app"
+import { buildAtlasAssets } from "@sixb/atlas"
+import { buildSentinelAssets } from "@sixb/sentinel"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
 export interface BuildOptions {
@@ -11,20 +11,20 @@ export interface BuildOptions {
 }
 
 export async function runBuild(options: BuildOptions = {}) {
-  const entry = resolve(options.entry ?? "pario.config.ts")
-  const outdir = resolve(options.outdir ?? ".pario/dist")
+  const entry = resolve(options.entry ?? "sixb.config.ts")
+  const outdir = resolve(options.outdir ?? ".sixb/dist")
   const projectRoot = dirname(entry)
 
   await mkdir(outdir, { recursive: true })
 
-  // Build pario.config.ts
+  // Build sixb.config.ts
   const result = await Bun.build({
     entrypoints: [entry],
     outdir,
     target: "bun",
     sourcemap: "external",
     minify: false,
-    external: ["@pario/ducklake"],
+    external: ["@sixb/ducklake"],
   })
 
   if (!result.success) {

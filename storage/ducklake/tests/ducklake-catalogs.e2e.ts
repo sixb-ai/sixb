@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 
@@ -15,7 +15,7 @@ describe("DuckLakeStorage catalog options", () => {
   let storages: DuckLakeStorage[]
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-catalogs-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-catalogs-"))
     storages = []
   })
 
@@ -65,10 +65,10 @@ describe("DuckLakeStorage catalog options", () => {
           path: join(rootDir, "metadata.ducklake"),
         },
         dataPath: join(rootDir, "data"),
-        setupSql: ["CREATE MACRO pario_setup_value() AS 42"],
+        setupSql: ["CREATE MACRO sixb_setup_value() AS 42"],
       })
 
-      const [row] = await runtime.query("SELECT pario_setup_value() AS value")
+      const [row] = await runtime.query("SELECT sixb_setup_value() AS value")
       expect(row?.value).toBe(42)
     } finally {
       await runtime.close()

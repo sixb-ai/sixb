@@ -1,4 +1,4 @@
-import type { DatasetVersion, PipelineRunRecord } from "@pario/core"
+import type { DatasetVersion, PipelineRunRecord } from "@sixb/core"
 import {
   createPipelineBookkeepingError,
   requireFinishedAt,

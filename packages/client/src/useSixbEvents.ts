@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react"
 import {
-  isParioEvent,
-  type ParioEvent,
-  type ParioEventForSubscription,
-  type ParioEventTopic,
-  type ParioEventType,
+  isSixbEvent,
+  type SixbEvent,
+  type SixbEventForSubscription,
+  type SixbEventTopic,
+  type SixbEventType,
 } from "./events"
 import { client } from "./generated/client.gen"
 
-export interface UseParioEventsOptions<
-  TTopic extends ParioEventTopic | undefined = undefined,
-  TTypes extends readonly ParioEventType[] | undefined = undefined,
+export interface UseSixbEventsOptions<
+  TTopic extends SixbEventTopic | undefined = undefined,
+  TTypes extends readonly SixbEventType[] | undefined = undefined,
 > {
   readonly topic?: TTopic
   readonly types?: TTypes
@@ -19,11 +19,11 @@ export interface UseParioEventsOptions<
   readonly enabled?: boolean
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  readonly onEvent: (event: ParioEventForSubscription<TTopic, TTypes>) => void
+  readonly onEvent: (event: SixbEventForSubscription<TTopic, TTypes>) => void
   readonly onError?: (error: string) => void
 }
 
-export interface UseParioEventsResult {
+export interface UseSixbEventsResult {
   readonly connected: boolean
   readonly reconnecting: boolean
   readonly error: string | null
@@ -32,15 +32,15 @@ export interface UseParioEventsResult {
 type EventStreamServerMessage =
   | { readonly type: "connected" | "subscribed" | "unsubscribed" }
   | { readonly type: "error"; readonly message: string }
-  | { readonly type: "event"; readonly event: ParioEvent }
+  | { readonly type: "event"; readonly event: SixbEvent }
 
-const DEFAULT_PARIO_API_BASE_URL = "http://localhost:3002"
+const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
 
-export function useParioEvents<
-  const TTopic extends ParioEventTopic | undefined = undefined,
-  const TTypes extends readonly ParioEventType[] | undefined = undefined,
->(options: UseParioEventsOptions<TTopic, TTypes>): UseParioEventsResult {
+export function useSixbEvents<
+  const TTopic extends SixbEventTopic | undefined = undefined,
+  const TTypes extends readonly SixbEventType[] | undefined = undefined,
+>(options: UseSixbEventsOptions<TTopic, TTypes>): UseSixbEventsResult {
   const {
     topic,
     types,
@@ -54,7 +54,7 @@ export function useParioEvents<
   const onErrorRef = useRef(options.onError)
   const latestCursorRef = useRef(afterCursor)
   const wsRef = useRef<WebSocket | null>(null)
-  const [state, setState] = useState<UseParioEventsResult>({
+  const [state, setState] = useState<UseSixbEventsResult>({
     connected: false,
     reconnecting: false,
     error: null,
@@ -89,7 +89,7 @@ export function useParioEvents<
     const connect = () => {
       if (stopped) return
 
-      const ws = new WebSocket(createParioEventsWebSocketUrl())
+      const ws = new WebSocket(createSixbEventsWebSocketUrl())
       wsRef.current = ws
       setState((current) => ({
         connected: false,
@@ -120,7 +120,7 @@ export function useParioEvents<
         if (message.type === "event") {
           latestCursorRef.current = message.event.cursor
           if (matchesSubscription(message.event, topic, subscribedTypes)) {
-            onEventRef.current(message.event as ParioEventForSubscription<TTopic, TTypes>)
+            onEventRef.current(message.event as SixbEventForSubscription<TTopic, TTypes>)
           }
           return
         }
@@ -171,8 +171,8 @@ export function useParioEvents<
   return state
 }
 
-export function createParioEventsWebSocketUrl(baseUrl?: string): string {
-  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_PARIO_API_BASE_URL)
+export function createSixbEventsWebSocketUrl(baseUrl?: string): string {
+  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.pathname = "/ws/events"
   url.search = ""
@@ -196,7 +196,7 @@ function parseEventStreamMessage(value: unknown): EventStreamServerMessage | nul
     return null
   }
 
-  if (parsed.type === "event" && isParioEvent(parsed.event)) {
+  if (parsed.type === "event" && isSixbEvent(parsed.event)) {
     return { type: "event", event: parsed.event }
   }
 
@@ -215,14 +215,14 @@ function parseEventStreamMessage(value: unknown): EventStreamServerMessage | nul
   return null
 }
 
-function eventTypesFromKey(typesKey: string): readonly ParioEventType[] | undefined {
-  return typesKey ? (typesKey.split("\0") as ParioEventType[]) : undefined
+function eventTypesFromKey(typesKey: string): readonly SixbEventType[] | undefined {
+  return typesKey ? (typesKey.split("\0") as SixbEventType[]) : undefined
 }
 
 function matchesSubscription(
-  event: ParioEvent,
-  topic: ParioEventTopic | undefined,
-  types: readonly ParioEventType[] | undefined
+  event: SixbEvent,
+  topic: SixbEventTopic | undefined,
+  types: readonly SixbEventType[] | undefined
 ): boolean {
   if (topic && event.topic !== topic) {
     return false

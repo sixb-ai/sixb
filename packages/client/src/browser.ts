@@ -2,10 +2,10 @@ import { client } from "./generated/client.gen"
 import { getAuthSession } from "./generated/sdk.gen"
 import type { GetAuthSessionResponse } from "./generated/types.gen"
 
-const CSRF_HEADER_NAME = "x-pario-csrf"
+const CSRF_HEADER_NAME = "x-sixb-csrf"
 const CSRF_EXEMPT_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
-export interface ParioBrowserRuntimeConfig {
+export interface SixbBrowserRuntimeConfig {
   readonly api: {
     readonly baseUrl: string
   }
@@ -15,13 +15,13 @@ export interface ParioBrowserRuntimeConfig {
   }
 }
 
-export interface ParioBrowserRuntimeDefaults {
+export interface SixbBrowserRuntimeDefaults {
   readonly apiBaseUrl?: string
   readonly audience: string
   readonly authEnabled?: boolean
 }
 
-export interface ParioBrowserClientController {
+export interface SixbBrowserClientController {
   setCsrfToken(token: string | null): void
   getCsrfToken(): string | null
   dispose(): void
@@ -29,19 +29,19 @@ export interface ParioBrowserClientController {
 
 declare global {
   interface Window {
-    __PARIO_RUNTIME__?: Partial<ParioBrowserRuntimeConfig>
+    __SIXB_RUNTIME__?: Partial<SixbBrowserRuntimeConfig>
   }
 }
 
-export function renderParioBrowserRuntimeScript(config: ParioBrowserRuntimeConfig): string {
+export function renderSixbBrowserRuntimeScript(config: SixbBrowserRuntimeConfig): string {
   const safeConfig = JSON.stringify(config).replaceAll("<", "\\u003c")
-  return `<script>window.__PARIO_RUNTIME__ = ${safeConfig};</script>`
+  return `<script>window.__SIXB_RUNTIME__ = ${safeConfig};</script>`
 }
 
-export function readParioBrowserRuntimeConfig(
-  defaults: ParioBrowserRuntimeDefaults
-): ParioBrowserRuntimeConfig {
-  const runtime = window.__PARIO_RUNTIME__
+export function readSixbBrowserRuntimeConfig(
+  defaults: SixbBrowserRuntimeDefaults
+): SixbBrowserRuntimeConfig {
+  const runtime = window.__SIXB_RUNTIME__
   const runtimeAuthEnabled = runtime?.auth?.enabled
   return {
     api: {
@@ -59,9 +59,9 @@ export function readParioBrowserRuntimeConfig(
   }
 }
 
-export function configureParioBrowserClient(
-  config: ParioBrowserRuntimeConfig
-): ParioBrowserClientController {
+export function configureSixbBrowserClient(
+  config: SixbBrowserRuntimeConfig
+): SixbBrowserClientController {
   let csrfToken: string | null = null
 
   client.setConfig({
@@ -96,9 +96,9 @@ export function configureParioBrowserClient(
   }
 }
 
-export async function requireParioBrowserAuthSession(
-  config: ParioBrowserRuntimeConfig,
-  controller: ParioBrowserClientController,
+export async function requireSixbBrowserAuthSession(
+  config: SixbBrowserRuntimeConfig,
+  controller: SixbBrowserClientController,
   options: {
     readonly returnTo?: string
     readonly redirect?: (url: string) => void
@@ -113,11 +113,11 @@ export async function requireParioBrowserAuthSession(
 
   const returnTo = options.returnTo ?? window.location.href
   const redirect = options.redirect ?? ((url: string) => window.location.assign(url))
-  redirect(createParioSignInUrl(config, returnTo))
+  redirect(createSixbSignInUrl(config, returnTo))
   return data
 }
 
-export function createParioSignInUrl(config: ParioBrowserRuntimeConfig, returnTo: string): string {
+export function createSixbSignInUrl(config: SixbBrowserRuntimeConfig, returnTo: string): string {
   const url = new URL("/auth/sign-in", normalizeBaseUrl(config.api.baseUrl))
   url.searchParams.set("audience", config.auth.audience)
   url.searchParams.set("returnTo", returnTo)

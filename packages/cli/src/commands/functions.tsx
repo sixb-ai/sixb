@@ -1,11 +1,11 @@
-import type { LoadedPario } from "../lib/loadPario"
-import { loadProductionPario } from "../lib/production"
+import type { LoadedSixb } from "../lib/loadSixb"
+import { loadProductionSixb } from "../lib/production"
 import {
   type RunningFunctionsRuntime,
   runUntilSignal,
   startFunctionsRuntime,
-  stopParioProviders,
   stopQuietly,
+  stopSixbProviders,
 } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
@@ -16,25 +16,25 @@ export interface FunctionsOptions {
 export async function runFunctions(options: FunctionsOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionPario({ entry: options.entry })
+  const loaded = await loadProductionSixb({ entry: options.entry })
   const app = renderPersistent(
     <LoadingView
-      title="Starting pario functions"
+      title="Starting sixb functions"
       subtitle={loaded.entry}
       status="Starting functions"
     />
   )
 
-  let pario: LoadedPario | null = loaded.pario
+  let sixb: LoadedSixb | null = loaded.sixb
   let runtime: RunningFunctionsRuntime | null = null
 
   try {
-    runtime = await startFunctionsRuntime(pario)
+    runtime = await startFunctionsRuntime(sixb)
 
     app.rerender(
       <RoleView
-        title="Pario functions started"
-        name={pario.id}
+        title="Sixb functions started"
+        name={sixb.id}
         serviceName="Functions"
         items={[{ label: "Role", value: "registered functions" }]}
       />
@@ -44,16 +44,16 @@ export async function runFunctions(options: FunctionsOptions = {}) {
       app.unmount()
       console.log("\nShutting down functions...")
       await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-      if (pario) {
-        await stopParioProviders(pario)
+      if (sixb) {
+        await stopSixbProviders(sixb)
       }
-      pario = null
+      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-    if (pario) {
-      await stopParioProviders(pario)
+    if (sixb) {
+      await stopSixbProviders(sixb)
     }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)

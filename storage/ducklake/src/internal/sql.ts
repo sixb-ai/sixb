@@ -1,4 +1,4 @@
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 import type {
   AzureSecretOptions,
   DuckDbSecretOptions,
@@ -10,7 +10,7 @@ import type {
   S3SecretOptions,
 } from "../types"
 
-const DEFAULT_ALIAS = "pario_lake"
+const DEFAULT_ALIAS = "sixb_lake"
 
 /**
  * Resolve the DuckLake attachment alias used by all provider SQL.
@@ -83,7 +83,7 @@ export function duckLakeMetadataTableName(
  */
 export function quoteIdentifier(identifier: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid SQL identifier '${identifier}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid SQL identifier '${identifier}'.`)
   }
 
   return `"${identifier}"`
@@ -397,7 +397,7 @@ function optionalIdentifierParameter(name: string, value: string | undefined): r
   }
 
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid SQL identifier '${value}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid SQL identifier '${value}'.`)
   }
 
   return [`${name} ${value}`]
@@ -414,12 +414,12 @@ function appendPostgresConnectionParameter(
   }
 
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid PostgreSQL catalog parameter '${name}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid PostgreSQL catalog parameter '${name}'.`)
   }
 
   const normalizedName = name.toLowerCase()
   if (names.has(normalizedName)) {
-    throw new LakeStorageError(`[ParioDuckLake] Duplicate PostgreSQL catalog parameter '${name}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Duplicate PostgreSQL catalog parameter '${name}'.`)
   }
 
   names.add(normalizedName)

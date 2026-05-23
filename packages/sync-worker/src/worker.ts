@@ -13,12 +13,12 @@ import type {
   SyncDefinition,
   SyncRunRecord,
   SyncRunRequestedQueueJob,
-} from "@pario/core"
-import { QueueWorker } from "@pario/core"
+} from "@sixb/core"
+import { QueueWorker } from "@sixb/core"
 import { runSyncJob } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
-export interface SyncWorkerPario {
+export interface SyncWorkerSixb {
   readonly id: string
   readonly events?: EventsRuntime
   readonly lakeStorage: LakeStorage
@@ -35,21 +35,21 @@ export interface SyncWorkerPario {
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
   private readonly context: SyncWorkerContext
-  private readonly pario: SyncWorkerPario
+  private readonly sixb: SyncWorkerSixb
 
-  constructor(pario: SyncWorkerPario) {
-    if (pario.getSyncDefinitions().length === 0) {
-      throw new Error("[ParioSyncWorker] No sync definitions are registered.")
+  constructor(sixb: SyncWorkerSixb) {
+    if (sixb.getSyncDefinitions().length === 0) {
+      throw new Error("[SixbSyncWorker] No sync definitions are registered.")
     }
 
     super({
-      projectId: pario.id,
-      queue: pario.queues.syncRuns,
-      workerId: `sync-worker-${pario.id}`,
+      projectId: sixb.id,
+      queue: sixb.queues.syncRuns,
+      workerId: `sync-worker-${sixb.id}`,
     })
 
-    this.context = buildSyncContext(pario)
-    this.pario = pario
+    this.context = buildSyncContext(sixb)
+    this.sixb = sixb
   }
 
   protected async execute(
@@ -68,10 +68,10 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       runtime: this.context,
       job: syncJob,
       signal,
-      onRunStarted: (run) => emitSyncRunStarted(this.pario, run),
+      onRunStarted: (run) => emitSyncRunStarted(this.sixb, run),
     })
 
-    await emitSyncSucceededEvents(this.pario, syncJob, result)
+    await emitSyncSucceededEvents(this.sixb, syncJob, result)
   }
 
   protected override async onExecutionError(
@@ -79,7 +79,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     _error: unknown
   ): Promise<QueueWorkerFailureDecision> {
     const { job } = claimed
-    await emitSyncRunFinished(this.pario, {
+    await emitSyncRunFinished(this.sixb, {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
       syncId: job.payload.syncId,
     })
@@ -89,12 +89,12 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
 }
 
 async function emitSyncRunStarted(
-  pario: SyncWorkerPario,
+  sixb: SyncWorkerSixb,
   run: Pick<SyncRunRecord, "id" | "syncId" | "startedAt">
 ): Promise<void> {
-  if (!pario.events) return
+  if (!sixb.events) return
   try {
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "sync.run.started",
@@ -107,18 +107,18 @@ async function emitSyncRunStarted(
       ],
     })
   } catch (error) {
-    console.error("[ParioSyncWorker] Failed to emit sync.run.started:", error)
+    console.error("[SixbSyncWorker] Failed to emit sync.run.started:", error)
   }
 }
 
 async function emitSyncSucceededEvents(
-  pario: SyncWorkerPario,
+  sixb: SyncWorkerSixb,
   job: Pick<SyncJob, "id" | "syncId">,
   result: SyncRunResult
 ): Promise<void> {
-  if (!pario.events) return
+  if (!sixb.events) return
   try {
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "dataset.version.committed",
@@ -145,17 +145,17 @@ async function emitSyncSucceededEvents(
       ],
     })
   } catch (error) {
-    console.error("[ParioSyncWorker] Failed to emit sync success events:", error)
+    console.error("[SixbSyncWorker] Failed to emit sync success events:", error)
   }
 }
 
 async function emitSyncRunFinished(
-  pario: SyncWorkerPario,
+  sixb: SyncWorkerSixb,
   job: Pick<SyncJob, "id" | "syncId">
 ): Promise<void> {
-  if (!pario.events) return
+  if (!sixb.events) return
   try {
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "sync.run.finished",
@@ -168,29 +168,29 @@ async function emitSyncRunFinished(
       ],
     })
   } catch (error) {
-    console.error("[ParioSyncWorker] Failed to emit sync.run.finished:", error)
+    console.error("[SixbSyncWorker] Failed to emit sync.run.finished:", error)
   }
 }
 
-function buildSyncContext(pario: SyncWorkerPario): SyncWorkerContext {
-  const syncRunsStorage = pario.storage.syncRuns
+function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {
+  const syncRunsStorage = sixb.storage.syncRuns
   if (!syncRunsStorage) {
-    throw new Error("[ParioSyncWorker] Sync workers require storage.syncRuns support.")
+    throw new Error("[SixbSyncWorker] Sync workers require storage.syncRuns support.")
   }
 
   return {
-    id: pario.id,
+    id: sixb.id,
     syncRunsStorage,
-    lakeStorage: pario.lakeStorage,
-    blobStorage: pario.blobStorage,
+    lakeStorage: sixb.lakeStorage,
+    blobStorage: sixb.blobStorage,
     getSyncById(syncId) {
-      return pario.getSyncById(syncId)
+      return sixb.getSyncById(syncId)
     },
     getDatasetById(datasetId) {
-      return pario.getDatasetById(datasetId)
+      return sixb.getDatasetById(datasetId)
     },
     connector(definition) {
-      return pario.connector(definition)
+      return sixb.connector(definition)
     },
   }
 }

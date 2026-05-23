@@ -10,8 +10,8 @@ import type {
   SyncRunFailure,
   SyncRunRecord,
   SyncRunStorage,
-} from "@pario/core"
-import { SyncRunError } from "@pario/core"
+} from "@sixb/core"
+import { SyncRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteSyncRunStorageOptions {
@@ -66,7 +66,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new SyncRunError(
-          `[ParioSqlite] Sync run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Sync run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -76,7 +76,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new SyncRunError(
-        `[ParioSqlite] Failed to load sync run '${input.id}' for project '${input.projectId}'.`
+        `[SixbSqlite] Failed to load sync run '${input.id}' for project '${input.projectId}'.`
       )
     }
 
@@ -91,13 +91,13 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
 
       if (!existing) {
         throw new SyncRunError(
-          `[ParioSqlite] Sync run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Sync run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
         throw new SyncRunError(
-          `[ParioSqlite] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          `[SixbSqlite] Sync run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
       }
 

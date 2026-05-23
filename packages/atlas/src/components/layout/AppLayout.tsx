@@ -1,4 +1,4 @@
-import { getProjectInfoOptions } from "@pario/client/hooks"
+import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"

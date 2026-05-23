@@ -1,11 +1,11 @@
-import { useParioEvents } from "@pario/client"
+import { useSixbEvents } from "@sixb/client"
 import {
   getWorkflowQueryKey,
   getWorkflowRunQueryKey,
   listWorkflowRunsInfiniteQueryKey,
   listWorkflowRunsQueryKey,
   listWorkflowsQueryKey,
-} from "@pario/client/hooks"
+} from "@sixb/client/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
@@ -58,7 +58,7 @@ export function useWorkflowLiveUpdates() {
     timerRef.current = setTimeout(flush, invalidationDelayMs)
   }
 
-  useParioEvents({
+  useSixbEvents({
     topic: "workflows",
     types: workflowEventTypes,
     onEvent(event) {

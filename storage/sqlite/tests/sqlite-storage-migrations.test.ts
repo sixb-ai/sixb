@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { migrateStorage } from "@pario/core"
+import { migrateStorage } from "@sixb/core"
 import { SqliteStorage } from "../src"
 import {
   migrateSqliteStorage,
@@ -34,7 +34,7 @@ afterEach(async () => {
 
 describe("SQLite storage migrations", () => {
   test("migrateStorage writes storage-level migration history", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-sqlite-migrations-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-migrations-"))
     tempDirs.push(tempDir)
 
     const storage = new SqliteStorage({ path: tempDir })
@@ -47,7 +47,7 @@ describe("SQLite storage migrations", () => {
   })
 
   test("migrations install auth storage tables", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-sqlite-auth-migrations-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-auth-migrations-"))
     tempDirs.push(tempDir)
 
     const storage = new SqliteStorage({ path: tempDir })
@@ -85,7 +85,7 @@ describe("SQLite storage migrations", () => {
   })
 
   test("migrations preserve existing store rows", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-sqlite-legacy-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-legacy-"))
     tempDirs.push(tempDir)
 
     await seedExistingStoreRows(tempDir)
@@ -153,7 +153,7 @@ describe("SQLite storage migrations", () => {
   })
 
   test("dirty SQLite migration history blocks storage migrations", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-sqlite-dirty-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-dirty-"))
     tempDirs.push(tempDir)
 
     writeStartedMigration(sqliteStoragePath(tempDir))
@@ -179,7 +179,7 @@ function readMigrationRows(path: string): Array<{
     return db
       .query(`
         SELECT adapter_id, version, id, status, length(checksum) AS checksum_length
-        FROM pario_migrations
+        FROM sixb_migrations
         ORDER BY adapter_id, version
       `)
       .all() as Array<{
@@ -276,7 +276,7 @@ function writeStartedMigration(path: string): void {
 
   try {
     db.run(`
-      CREATE TABLE IF NOT EXISTS pario_migrations (
+      CREATE TABLE IF NOT EXISTS sixb_migrations (
         adapter_id TEXT NOT NULL,
         version INTEGER NOT NULL,
         id TEXT NOT NULL,
@@ -289,7 +289,7 @@ function writeStartedMigration(path: string): void {
     `)
 
     db.query(`
-      INSERT INTO pario_migrations (
+      INSERT INTO sixb_migrations (
         adapter_id, version, id, checksum, status, started_at, finished_at
       ) VALUES (?, 1, '001-initial-schema', NULL, 'started', ?, NULL)
     `).run(SQLITE_STORAGE_ADAPTER_ID, "2026-04-19T00:00:00.000Z")
@@ -459,7 +459,7 @@ function dropMigrationHistory(path: string): void {
   const db = new Database(path)
 
   try {
-    db.run("DROP TABLE IF EXISTS pario_migrations")
+    db.run("DROP TABLE IF EXISTS sixb_migrations")
   } finally {
     db.close()
   }

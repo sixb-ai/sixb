@@ -1,7 +1,7 @@
 import type { WebhookDefinition } from "../webhooks/types"
 
 /**
- * Runtime context passed to connector adapters when Pario establishes a connection.
+ * Runtime context passed to connector adapters when Sixb establishes a connection.
  *
  * Connectors can use this to scope logs, build cache keys, or attach cancellation
  * to long-running startup work.
@@ -13,7 +13,7 @@ export interface ConnectorContext {
 }
 
 /**
- * Minimal contract for a Pario connector adapter.
+ * Minimal contract for a Sixb connector adapter.
  *
  * Adapters are responsible for creating and optionally tearing down a client for an
  * external system. They should return the client shape that feels natural for that system.
@@ -26,10 +26,10 @@ export interface ConnectorAdapter<TType extends string = string, TClient = unkno
 }
 
 /**
- * Inert connector definition registered with Pario.
+ * Inert connector definition registered with Sixb.
  *
  * Definitions are safe to export from `connectors/` modules. The runtime turns them into
- * live clients when `pario.connector(...)` is called.
+ * live clients when `sixb.connector(...)` is called.
  */
 export interface ConnectorDefinition<
   TId extends string = string,

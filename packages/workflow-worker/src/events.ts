@@ -4,7 +4,7 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStatus,
-} from "@pario/core"
+} from "@sixb/core"
 import type {
   WorkflowNodeLifecycleContext,
   WorkflowRunObserver,
@@ -79,7 +79,7 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
   ): Promise<void> {
     if (node.nodeType !== "intervention") {
       throw new Error(
-        `[ParioWorkflowWorker] Workflow node run '${node.id}' is waiting, but is not an intervention node.`
+        `[SixbWorkflowWorker] Workflow node run '${node.id}' is waiting, but is not an intervention node.`
       )
     }
 
@@ -126,7 +126,7 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
     context: WorkflowNodeLifecycleContext
   ): Promise<void> {
     if (!node.finishedAt) {
-      throw new Error(`[ParioWorkflowWorker] Workflow node run '${node.id}' has no finishedAt.`)
+      throw new Error(`[SixbWorkflowWorker] Workflow node run '${node.id}' has no finishedAt.`)
     }
 
     await this.events.append({
@@ -153,7 +153,7 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
 
   async onRunFinished(run: WorkflowRunRecord): Promise<void> {
     if (!run.finishedAt) {
-      throw new Error(`[ParioWorkflowWorker] Workflow run '${run.id}' has no finishedAt.`)
+      throw new Error(`[SixbWorkflowWorker] Workflow run '${run.id}' has no finishedAt.`)
     }
 
     await this.events.append({
@@ -178,7 +178,7 @@ function requireTerminalStatus(
   context: string
 ): TerminalWorkflowRunStatus {
   if (status === "queued" || status === "running" || status === "waiting") {
-    throw new Error(`[ParioWorkflowWorker] ${context} is not terminal.`)
+    throw new Error(`[SixbWorkflowWorker] ${context} is not terminal.`)
   }
 
   return status
@@ -210,6 +210,6 @@ export async function emitWorkflowRunFinished(
       ],
     })
   } catch (error) {
-    console.error("[ParioWorkflowWorker] Failed to emit workflow.run.finished:", error)
+    console.error("[SixbWorkflowWorker] Failed to emit workflow.run.finished:", error)
   }
 }

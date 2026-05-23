@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { StoredDomainEvent } from "@pario/core"
+import type { StoredDomainEvent } from "@sixb/core"
 import { routeKeyForEvent } from "../src/route-key"
 
 function makeScheduleTriggeredEvent(scheduleId: string): StoredDomainEvent {

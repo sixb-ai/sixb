@@ -17,8 +17,8 @@ import type {
   WorkflowRunRecord,
   WorkflowRunSource,
   WorkflowRunStorage,
-} from "@pario/core"
-import { WorkflowRunError } from "@pario/core"
+} from "@sixb/core"
+import { WorkflowRunError } from "@sixb/core"
 import type { SQL } from "bun"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
@@ -61,7 +61,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -81,13 +81,13 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
       if (existing) {
         if (existing.status !== "queued") {
           throw new WorkflowRunError(
-            `[ParioPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
         if (existing.workflow_id !== input.workflowId) {
           throw new WorkflowRunError(
-            `[ParioPg] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
+            `[SixbPg] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
           )
         }
 
@@ -130,7 +130,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new WorkflowRunError(
-            `[ParioPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -149,13 +149,13 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (!canFinishWorkflowRun(existing.status, input.status)) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
+          `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
 
@@ -194,13 +194,13 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
+          `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
 
@@ -228,13 +228,13 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "waiting") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
+          `[SixbPg] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
         )
       }
 
@@ -316,19 +316,19 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!workflowRun) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow run '${input.workflowRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (workflowRun.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
+          `[SixbPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
       }
 
       if (workflowRun.workflow_id !== input.workflowId) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
+          `[SixbPg] Workflow node run '${input.id}' workflow '${input.workflowId}' does not match workflow run '${input.workflowRunId}' workflow '${workflowRun.workflow_id}'.`
         )
       }
 
@@ -366,7 +366,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new WorkflowRunError(
-            `[ParioPg] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbPg] Workflow node run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -385,13 +385,13 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running" && existing.status !== "waiting") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
@@ -432,13 +432,13 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (!existing) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
+          `[SixbPg] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
         )
       }
 
@@ -578,9 +578,7 @@ function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNo
 
 function assertNonNegativeInteger(value: number, fieldName: string): void {
   if (!Number.isInteger(value) || value < 0) {
-    throw new WorkflowRunError(
-      `[ParioPg] Workflow run ${fieldName} must be a non-negative integer.`
-    )
+    throw new WorkflowRunError(`[SixbPg] Workflow run ${fieldName} must be a non-negative integer.`)
   }
 }
 

@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
-import { LakeStorageError, type SqlTransformBody, type SqlTransformRelation } from "@pario/core"
+import { LakeStorageError, type SqlTransformBody, type SqlTransformRelation } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { encodeDatasetTableName } from "./names"
 import { qualifiedTableName } from "./sql"
 import { parseVersionId } from "./versions"
 
-const RELATION_PLACEHOLDER_PREFIX = "__pario_sql_transform_relation_"
-const RELATION_PLACEHOLDER_PATTERN = /__pario_sql_transform_relation_[0-9a-f]{32}_[0-9]+__/g
+const RELATION_PLACEHOLDER_PREFIX = "__sixb_sql_transform_relation_"
+const RELATION_PLACEHOLDER_PATTERN = /__sixb_sql_transform_relation_[0-9a-f]{32}_[0-9]+__/g
 
 export interface DuckLakeSqlTransformSourceRelation {
   readonly datasetId: string
@@ -37,7 +37,7 @@ export function renderDuckLakeSqlTransformSql(input: RenderDuckLakeSqlTransformS
   const sql = input.sql(context.relations)
 
   if (typeof sql !== "string") {
-    throw new LakeStorageError("[ParioDuckLake] SQL transform body must return a SQL string.")
+    throw new LakeStorageError("[SixbDuckLake] SQL transform body must return a SQL string.")
   }
 
   return context.render(sql)
@@ -90,6 +90,6 @@ function renderDuckLakeSourceRelation(
 
 function throwUnresolvedPlaceholder(): never {
   throw new LakeStorageError(
-    "[ParioDuckLake] SQL transform contains an unresolved relation placeholder."
+    "[SixbDuckLake] SQL transform contains an unresolved relation placeholder."
   )
 }

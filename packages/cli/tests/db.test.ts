@@ -26,9 +26,9 @@ async function runDbCommand(
 }> {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", "db-project", "pario.config.ts")
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", "db-project", "sixb.config.ts")
   const entryArgs = options.entry === null ? [] : ["--entry", options.entry ?? fixtureEntry]
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-db-"))
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-db-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
@@ -37,7 +37,7 @@ async function runDbCommand(
     cwd: options.cwd ?? repoRoot,
     env: {
       ...process.env,
-      PARIO_CLI_TEST_LOG: logPath,
+      SIXB_CLI_TEST_LOG: logPath,
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -58,26 +58,26 @@ async function runDbCommand(
 }
 
 async function createProjectWithDefaultBuiltEntry(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "pario-cli-db-built-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-cli-db-built-"))
   tempDirs.push(projectRoot)
-  const builtDir = join(projectRoot, ".pario", "dist")
+  const builtDir = join(projectRoot, ".sixb", "dist")
   await mkdir(builtDir, { recursive: true })
 
   await writeFile(
-    join(projectRoot, "pario.config.ts"),
+    join(projectRoot, "sixb.config.ts"),
     'throw new Error("source entry should not load when a default build exists")\n'
   )
 
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "pario.config.ts")
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "sixb.config.ts")
   await writeFile(
-    join(builtDir, "pario.config.js"),
-    `export { pario } from ${JSON.stringify(pathToFileURL(fixtureEntry).href)}\n`
+    join(builtDir, "sixb.config.js"),
+    `export { sixb } from ${JSON.stringify(pathToFileURL(fixtureEntry).href)}\n`
   )
 
   return projectRoot
 }
 
-describe("pario db", () => {
+describe("sixb db", () => {
   test("runs adapter migrations for the configured runtime", async () => {
     const result = await runDbCommand("migrate")
 

@@ -8,8 +8,8 @@ import type {
   StartWebhookRunInput,
   WebhookRunRecord,
   WebhookRunStorage,
-} from "@pario/core"
-import { WebhookRunError } from "@pario/core"
+} from "@sixb/core"
+import { WebhookRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -69,7 +69,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new WebhookRunError(
-          `[ParioSqlite] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Webhook run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -79,7 +79,7 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new WebhookRunError(
-        `[ParioSqlite] Failed to load webhook run '${input.id}' for project '${input.projectId}'.`
+        `[SixbSqlite] Failed to load webhook run '${input.id}' for project '${input.projectId}'.`
       )
     }
 
@@ -94,13 +94,13 @@ export class SqliteWebhookRunStorage implements WebhookRunStorage {
 
       if (!existing) {
         throw new WebhookRunError(
-          `[ParioSqlite] Webhook run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbSqlite] Webhook run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new WebhookRunError(
-          `[ParioSqlite] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbSqlite] Webhook run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 

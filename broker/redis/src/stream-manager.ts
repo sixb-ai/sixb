@@ -1,4 +1,4 @@
-import type { BrokerStreamDefinition } from "@pario/core"
+import type { BrokerStreamDefinition } from "@sixb/core"
 import type { RedisBrokerClient, RedisConnectionManager } from "./connection"
 import { RedisBrokerError } from "./errors"
 import { assertStreamId, type RedisStreamKeys, streamKeysFor, validateProjectId } from "./keys"

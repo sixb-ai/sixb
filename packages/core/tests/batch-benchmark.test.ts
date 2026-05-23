@@ -1,5 +1,5 @@
 import { describe, test } from "bun:test"
-import { defineObjectType, Pario, prop } from "../src"
+import { defineObjectType, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Item = defineObjectType({
@@ -16,20 +16,20 @@ describe("batch-benchmark (informative)", () => {
 
     // Individual upserts
     const depsIndividual = createTestRuntimeDeps()
-    const parioIndividual = new Pario({ ontology: [Item], ...depsIndividual })
+    const sixbIndividual = new Sixb({ ontology: [Item], ...depsIndividual })
 
     const startIndividual = performance.now()
     for (const item of items) {
-      await parioIndividual.upsertObject("item", item.properties)
+      await sixbIndividual.upsertObject("item", item.properties)
     }
     const durationIndividual = performance.now() - startIndividual
 
     // Batch upsert
     const depsBatch = createTestRuntimeDeps()
-    const parioBatch = new Pario({ ontology: [Item], ...depsBatch })
+    const sixbBatch = new Sixb({ ontology: [Item], ...depsBatch })
 
     const startBatch = performance.now()
-    await parioBatch.upsertObjectBatch("item", items)
+    await sixbBatch.upsertObjectBatch("item", items)
     const durationBatch = performance.now() - startBatch
 
     const ratio = durationIndividual / durationBatch

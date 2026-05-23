@@ -1,4 +1,4 @@
-import type { RestClient } from "@pario/connector-rest"
+import type { RestClient } from "@sixb/connector-rest"
 import type { RokuActiveApp, RokuApp, RokuDeviceInfo, RokuKey, RokuMediaPlayerState } from "./types"
 
 function extractTag(xml: string, tag: string): string | null {

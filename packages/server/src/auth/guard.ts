@@ -1,9 +1,9 @@
 import {
   type AuthSessionResult,
   type OntologySource,
-  type Pario,
+  type Sixb,
   verifyDoubleSubmitCsrf,
-} from "@pario/core"
+} from "@sixb/core"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
@@ -15,25 +15,25 @@ import {
 } from "./responses"
 
 export interface ServerAuthGuardOptions {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly resolveAuthContext: ResolveRequestAuthContext
 }
 
 export class ServerAuthGuard {
-  private readonly pario: Pario<readonly OntologySource[]>
+  private readonly sixb: Sixb<readonly OntologySource[]>
   private readonly resolveAuthContext: ResolveRequestAuthContext
 
   constructor(options: ServerAuthGuardOptions) {
-    this.pario = options.pario
+    this.sixb = options.sixb
     this.resolveAuthContext = options.resolveAuthContext
   }
 
   isAuthEnabled(): boolean {
-    return this.pario.auth.isEnabled()
+    return this.sixb.auth.isEnabled()
   }
 
   assertCanServeHttp(params: { readonly production: boolean }): void {
-    this.pario.auth.assertCanServeHttp(params)
+    this.sixb.auth.assertCanServeHttp(params)
   }
 
   async handle(request: Request): Promise<Response | undefined> {
@@ -51,7 +51,7 @@ export class ServerAuthGuard {
       return authContext
     }
 
-    const session = await this.pario.auth.getSession(request, {
+    const session = await this.sixb.auth.getSession(request, {
       audience: authContext.audience,
     })
     if (!session.authenticated) {
@@ -78,12 +78,12 @@ export class ServerAuthGuard {
 
   async getSession(request: Request): Promise<AuthSessionResult> {
     const authContext = this.resolveAuthContext(request)
-    return this.pario.auth.getSession(request, { audience: authContext.audience })
+    return this.sixb.auth.getSession(request, { audience: authContext.audience })
   }
 
   getCsrfCookieName(request: Request): string {
     const audience = this.resolveAuthContext(request).audience
-    return this.pario.auth.getCookieOptions({ audience }).csrfCookieName
+    return this.sixb.auth.getCookieOptions({ audience }).csrfCookieName
   }
 
   verifyCsrf(

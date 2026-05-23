@@ -1,19 +1,19 @@
 import {
-  configureParioBrowserClient,
-  type ParioBrowserRuntimeConfig,
-  readParioBrowserRuntimeConfig,
-  requireParioBrowserAuthSession,
-} from "@pario/client/browser"
-import { ThemeProvider } from "@pario/ui/hooks"
+  configureSixbBrowserClient,
+  readSixbBrowserRuntimeConfig,
+  requireSixbBrowserAuthSession,
+  type SixbBrowserRuntimeConfig,
+} from "@sixb/client/browser"
+import { ThemeProvider } from "@sixb/ui/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { BrowserRouter } from "react-router-dom"
 import App from "./App"
-import "../.pario/ui.css"
+import "../.sixb/ui.css"
 
 let canRenderApp = false
-let browserClient: ReturnType<typeof configureParioBrowserClient> | null = null
+let browserClient: ReturnType<typeof configureSixbBrowserClient> | null = null
 
 interface BuiltInUiHotData {
   root?: Root
@@ -32,10 +32,10 @@ void start()
 async function start(): Promise<void> {
   await loadDevRuntimeConfig()
 
-  const runtimeConfig = readParioBrowserRuntimeConfig({ audience: "atlas" })
-  browserClient = configureParioBrowserClient(runtimeConfig)
+  const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "atlas" })
+  browserClient = configureSixbBrowserClient(runtimeConfig)
   const authSession = runtimeConfig.auth.enabled
-    ? await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+    ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
     : null
   canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
 
@@ -67,7 +67,7 @@ function renderApp(): void {
 function getRoot(): Root {
   const element = document.getElementById("root")
   if (!element) {
-    throw new Error("[ParioAtlas] Could not find the root element.")
+    throw new Error("[SixbAtlas] Could not find the root element.")
   }
 
   if (import.meta.hot) {
@@ -105,13 +105,13 @@ function createQueryClient(): QueryClient {
 }
 
 async function loadDevRuntimeConfig(): Promise<void> {
-  if (window.__PARIO_RUNTIME__) {
+  if (window.__SIXB_RUNTIME__) {
     return
   }
 
   let response: Response
   try {
-    response = await fetch("/__pario/runtime.json", { cache: "no-store" })
+    response = await fetch("/__sixb/runtime.json", { cache: "no-store" })
   } catch {
     return
   }
@@ -121,12 +121,12 @@ async function loadDevRuntimeConfig(): Promise<void> {
   }
 
   const config: unknown = await response.json()
-  if (isParioBrowserRuntimeConfig(config)) {
-    window.__PARIO_RUNTIME__ = config
+  if (isSixbBrowserRuntimeConfig(config)) {
+    window.__SIXB_RUNTIME__ = config
   }
 }
 
-function isParioBrowserRuntimeConfig(value: unknown): value is ParioBrowserRuntimeConfig {
+function isSixbBrowserRuntimeConfig(value: unknown): value is SixbBrowserRuntimeConfig {
   if (!isRecord(value) || !isRecord(value.api) || !isRecord(value.auth)) {
     return false
   }

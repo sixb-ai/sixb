@@ -1,4 +1,4 @@
-import { actionParam, defineAction } from "@pario/core"
+import { actionParam, defineAction } from "@sixb/core"
 import type { FanSpeed } from "../lib/panasonic/types"
 import { getPanasonicApi } from "../lib/panasonicApi"
 import { PanasonicAcUnit } from "../ontology/acUnit"
@@ -8,11 +8,11 @@ export const setFan = defineAction("setFan", {
 })
   .target(PanasonicAcUnit)
   .params({ speed: actionParam("integer", { required: true }) })
-  .run(async ({ params, target, pario }) => {
-    const api = await getPanasonicApi(pario)
+  .run(async ({ params, target, sixb }) => {
+    const api = await getPanasonicApi(sixb)
     await api.setFanSpeed(target.properties.guid, params.speed as FanSpeed)
 
-    await pario
+    await sixb
       .objects(PanasonicAcUnit)
       .appendTelemetryBatch([
         { id: target.primaryId, properties: { fanSpeed: params.speed }, at: new Date() },

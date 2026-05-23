@@ -1,20 +1,20 @@
-import type { OntologySource, Pario } from "@pario/core"
+import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
 function serializeConnector(
-  connector: ReturnType<Pario<readonly OntologySource[]>["listConnectors"]>[number],
-  pario: Pario<readonly OntologySource[]>
+  connector: ReturnType<Sixb<readonly OntologySource[]>["listConnectors"]>[number],
+  sixb: Sixb<readonly OntologySource[]>
 ) {
   return {
     id: connector.id,
     type: connector.adapter.type,
-    syncIds: pario
+    syncIds: sixb
       .getSyncDefinitions()
       .filter((sync) => sync.connector.id === connector.id)
       .map((sync) => sync.id),
-    webhooks: pario
+    webhooks: sixb
       .listWebhooks()
       .filter((registered) => registered.connector.id === connector.id)
       .map(({ webhook, route }) => ({
@@ -28,12 +28,12 @@ function serializeConnector(
   }
 }
 
-export function registerConnectorRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/connectors",
       () => {
-        return pario.listConnectors().map((connector) => serializeConnector(connector, pario))
+        return sixb.listConnectors().map((connector) => serializeConnector(connector, sixb))
       },
       {
         response: { 200: ConnectorSchema.array() },
@@ -47,13 +47,13 @@ export function registerConnectorRoutes(app: Elysia, pario: Pario<readonly Ontol
     .get(
       "/api/connectors/:connectorId",
       ({ params, set }) => {
-        const connector = pario.getConnectorById(params.connectorId)
+        const connector = sixb.getConnectorById(params.connectorId)
         if (!connector) {
           set.status = 404
           return { error: "Connector not found" }
         }
 
-        return serializeConnector(connector, pario)
+        return serializeConnector(connector, sixb)
       },
       {
         params: ConnectorParamsSchema,

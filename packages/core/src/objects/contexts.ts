@@ -1,7 +1,7 @@
 /**
  * Resolved context types for object operations.
  *
- * Context hierarchy: ParioRuntimeContext → ResolvedObjectContext → ResolvedLinkContext
+ * Context hierarchy: SixbRuntimeContext → ResolvedObjectContext → ResolvedLinkContext
  *
  * Factory functions resolve ontology identifiers into concrete type data,
  * so leaf functions receive all structural information pre-resolved.
@@ -9,11 +9,11 @@
 
 import type { ObjectLink } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import type { ParioRuntimeContext } from "../runtime/types"
+import type { SixbRuntimeContext } from "../runtime/types"
 import { requireLinkDefinition } from "./context/resolve.js"
 
 /** Resolved context for object operations — extends runtime with resolved type info. */
-export interface ResolvedObjectContext extends ParioRuntimeContext {
+export interface ResolvedObjectContext extends SixbRuntimeContext {
   readonly objectType: ObjectTypeWithPropertyTokens
   readonly primaryPropertyId: string
 }
@@ -41,7 +41,7 @@ export interface ResolvedLinkBatchItem {
  * are structural resolution calls that belong in factories, not leaf functions.
  */
 export function resolveObjectContext(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string
 ): ResolvedObjectContext {
   const objectType = runtime.ontology.resolveObjectType(objectTypeId)

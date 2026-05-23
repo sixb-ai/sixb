@@ -5,7 +5,7 @@ import {
   InMemoryBroker,
   InMemoryQueues,
   type NewDomainEvent,
-} from "@pario/core"
+} from "@sixb/core"
 import type { OrchestratorJob, OrchestratorRouteKey, OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
 
@@ -609,7 +609,7 @@ describe("OrchestratorWorker", () => {
         workerId: "observer",
       })
       expect(syncClaimed).toHaveLength(0)
-      expect(String(errors[0]?.[0])).toContain("[ParioOrchestrator] Enqueue failed")
+      expect(String(errors[0]?.[0])).toContain("[SixbOrchestrator] Enqueue failed")
       expect(errors[0]?.[1]).toBeInstanceOf(Error)
     } finally {
       console.error = originalError
@@ -723,7 +723,7 @@ describe("OrchestratorWorker", () => {
         })
         return claimed.length === 1
       })
-      expect(String(errors[0]?.[0])).toContain("[ParioOrchestrator] Enqueue failed")
+      expect(String(errors[0]?.[0])).toContain("[SixbOrchestrator] Enqueue failed")
       expect(errors[0]?.[1]).toBeInstanceOf(Error)
     } finally {
       console.error = originalError
@@ -801,7 +801,7 @@ describe("OrchestratorWorker", () => {
     const routes = buildRoutes([])
 
     expect(() => new OrchestratorWorker({ projectId: "", events, queues, routes })).toThrow(
-      "[ParioOrchestrator] projectId is required."
+      "[SixbOrchestrator] projectId is required."
     )
   })
 
@@ -1137,7 +1137,7 @@ describe("OrchestratorWorker", () => {
         workerId: "observer",
       })
       expect(projectionJobs).toHaveLength(0)
-      expect(String(errors[0]?.[0])).toContain("[ParioOrchestrator] Enqueue failed")
+      expect(String(errors[0]?.[0])).toContain("[SixbOrchestrator] Enqueue failed")
       expect(errors[0]?.[1]).toBeInstanceOf(Error)
     } finally {
       console.error = originalError

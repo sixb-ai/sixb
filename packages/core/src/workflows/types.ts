@@ -1,7 +1,7 @@
 import type { ActionParamsConfig, InferActionParams } from "../actions"
 import type { JsonValue } from "../json"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
-import type { Pario } from "../runtime/pario"
+import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 import type { ScheduleDefinition } from "../schedules"
 
@@ -27,7 +27,7 @@ export type DerivedWorkflowNodeKey<TId extends string> = string extends TId
 
 export interface StepRunContext<TInput extends Record<string, unknown>> {
   readonly input: TInput
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
 }
 
 export type StepHandler<

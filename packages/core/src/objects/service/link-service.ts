@@ -3,7 +3,7 @@
  *
  * Resolves objectTypeId to a typed context and delegates to leaf functions.
  */
-import type { BatchItemResult, ParioRuntimeContext } from "../../runtime/types"
+import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
 import type { ResolvedLinkBatchItem } from "../context"
 import { requireLinkDefinition, resolveLinkContext, resolveObjectContext } from "../context"
 import {
@@ -13,7 +13,7 @@ import {
 } from "../link"
 
 export async function upsertLink(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   sourceId: string,
   linkId: string,
@@ -31,7 +31,7 @@ export async function upsertLink(
 }
 
 export async function upsertLinkBatch(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   items: readonly {
     objectTypeId: string
     sourceId: string
@@ -57,7 +57,7 @@ export async function upsertLinkBatch(
 }
 
 export async function removeLink(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   sourceId: string,
   linkId: string,

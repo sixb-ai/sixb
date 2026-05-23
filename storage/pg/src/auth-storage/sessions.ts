@@ -1,5 +1,5 @@
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import type { SQL } from "bun"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthSessionRow } from "./rows"
@@ -86,7 +86,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
       if (!existing) {
         throw new AuthStorageError(
           "missing_session",
-          `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+          `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
         )
       }
 

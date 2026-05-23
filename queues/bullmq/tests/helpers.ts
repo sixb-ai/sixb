@@ -3,14 +3,14 @@ import IORedis from "ioredis"
 import { BullMqQueues, type BullMqQueuesOptions } from "../src"
 
 /**
- * Reads `PARIO_REDIS_URL` (set by `tests/setup.ts` after `docker compose up`). Throws if the
+ * Reads `SIXB_REDIS_URL` (set by `tests/setup.ts` after `docker compose up`). Throws if the
  * setup hook did not run, which is the early signal that `bun run test:e2e` was not used.
  */
 export function requireRedisUrl(): string {
-  const url = process.env["PARIO_REDIS_URL"]
+  const url = process.env["SIXB_REDIS_URL"]
   if (!url) {
     throw new Error(
-      "[BullMqQueues test] PARIO_REDIS_URL is required. Run `bun run test:e2e` from the @pario/queues-bullmq package."
+      "[BullMqQueues test] SIXB_REDIS_URL is required. Run `bun run test:e2e` from the @sixb/queues-bullmq package."
     )
   }
   return url
@@ -58,7 +58,7 @@ export async function closeSharedConnection(): Promise<void> {
 export function createTestQueues(overrides: Partial<BullMqQueuesOptions> = {}): BullMqQueues {
   return new BullMqQueues({
     connection: getSharedConnection(),
-    prefix: `pario-test-${randomUUID().slice(0, 8)}`,
+    prefix: `sixb-test-${randomUUID().slice(0, 8)}`,
     defaultLeaseMs: 150,
     stalledInterval: 50,
     removeOnComplete: { count: 10 },
@@ -72,7 +72,7 @@ export function createBorrowedConnection(): IORedis {
   return new IORedis(requireRedisUrl(), { maxRetriesPerRequest: null })
 }
 
-const SHARED_PROVIDER_PREFIX = "pario-contract-suite"
+const SHARED_PROVIDER_PREFIX = "sixb-contract-suite"
 
 let sharedProvider: BullMqQueues | undefined
 

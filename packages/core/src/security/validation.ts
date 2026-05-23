@@ -176,7 +176,7 @@ export function validateSecurityDefinitionsAtStartup(input: {
     for (const groupId of policy.grantedToGroupIds) {
       if (!groupsById.has(groupId)) {
         throw new SecurityValidationError(
-          `Invite policy '${policy.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
+          `Invite policy '${policy.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
     }
@@ -184,7 +184,7 @@ export function validateSecurityDefinitionsAtStartup(input: {
     for (const groupId of policy.canInviteToGroupIds) {
       if (!groupsById.has(groupId)) {
         throw new SecurityValidationError(
-          `Invite policy '${policy.id}' canInviteTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createPario({ groups }).`
+          `Invite policy '${policy.id}' canInviteTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
     }

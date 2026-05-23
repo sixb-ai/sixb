@@ -1,8 +1,8 @@
-import type { DomainEvent } from "@pario/core"
+import type { DomainEvent } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../schemas/events"
-import type { ParioServer } from "../server"
+import type { SixbServer } from "../server"
 import { decodeWsMessage, safeSend } from "../utils/ws"
 
 interface EventSubscriptionState {
@@ -52,8 +52,8 @@ export function parseSubscriptionMessage(payload: unknown):
   return { ok: true, data: parsed.data }
 }
 
-async function resolveLatestCursor(server: ParioServer): Promise<string | undefined> {
-  const p = server.getPario()
+async function resolveLatestCursor(server: SixbServer): Promise<string | undefined> {
+  const p = server.getSixb()
   const events = await p.events.read()
   return events.at(-1)?.cursor
 }
@@ -69,7 +69,7 @@ function createDefaultState(): EventSubscriptionState {
   }
 }
 
-export function registerWsRoutes(app: Elysia, server: ParioServer) {
+export function registerWsRoutes(app: Elysia, server: SixbServer) {
   const states = new WeakMap<object, EventSubscriptionState>()
 
   const stopPolling = (ws: object) => {
@@ -97,7 +97,7 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
 
       state.polling = true
       try {
-        const p = server.getPario()
+        const p = server.getSixb()
         const events = await p.events.read({
           afterCursor: state.afterCursor,
           limit: state.limit,

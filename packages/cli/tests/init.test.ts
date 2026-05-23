@@ -25,7 +25,7 @@ function runInit(targetDir: string): {
   }
 }
 
-describe("pario init", () => {
+describe("sixb init", () => {
   const tempDirs: string[] = []
 
   afterEach(async () => {
@@ -38,7 +38,7 @@ describe("pario init", () => {
   })
 
   test("scaffolds the updated basic template with a root app folder", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-init-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-init-"))
     tempDirs.push(tempDir)
 
     const targetDir = join(tempDir, "starter")
@@ -47,14 +47,14 @@ describe("pario init", () => {
     expect(result.exitCode).toBe(0)
     expect(result.stderr).toBe("")
 
-    await stat(join(targetDir, "pario.config.ts"))
+    await stat(join(targetDir, "sixb.config.ts"))
     await stat(join(targetDir, "app", "layout.tsx"))
     await stat(join(targetDir, "app", "page.tsx"))
     await stat(join(targetDir, "app", "globals.css"))
     await stat(join(targetDir, "app", "public", "favicon.svg"))
     await stat(join(targetDir, "tsconfig.json"))
 
-    const configSource = await readFile(join(targetDir, "pario.config.ts"), "utf-8")
+    const configSource = await readFile(join(targetDir, "sixb.config.ts"), "utf-8")
     expect(configSource).toContain('id: "starter"')
     expect(configSource).toContain("broker:")
     expect(configSource).toContain("storage:")
@@ -68,7 +68,7 @@ describe("pario init", () => {
 
     expect(packageJson.name).toBe("starter")
     expect(packageJson.scripts.typecheck).toBe("tsc --noEmit")
-    expect(packageJson.dependencies["@pario/client"]).toBe("latest")
+    expect(packageJson.dependencies["@sixb/client"]).toBe("latest")
     expect(packageJson.dependencies.react).toBe("^19.0.0")
     expect(packageJson.dependencies["react-router-dom"]).toBe("^7.13.0")
   })

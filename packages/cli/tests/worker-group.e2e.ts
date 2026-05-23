@@ -12,7 +12,7 @@ const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
 function fixtureEntry(name: string): string {
-  return resolve(import.meta.dir, "fixtures", name, "pario.config.ts")
+  return resolve(import.meta.dir, "fixtures", name, "sixb.config.ts")
 }
 
 const WORKER_GROUP_TIMEOUT_MS = 30_000
@@ -31,7 +31,7 @@ afterEach(async () => {
 })
 
 async function startThenStop(args: readonly string[], fixture: string) {
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-wg-"))
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-wg-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
@@ -49,7 +49,7 @@ function claimedWorkerTypes(logEntries: Array<Record<string, unknown>>): Set<str
   )
 }
 
-describe("pario worker-group (e2e)", () => {
+describe("sixb worker-group (e2e)", () => {
   test(
     "starts all registered worker types by default",
     async () => {

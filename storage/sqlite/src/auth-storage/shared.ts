@@ -8,8 +8,8 @@ import type {
   OidcAuthorizationAttemptRecord,
   UpsertAuthGroupMembershipInput,
   UserRecord,
-} from "@pario/core"
-import { AuthStorageError } from "@pario/core"
+} from "@sixb/core"
+import { AuthStorageError } from "@sixb/core"
 import { isUniqueConstraintError } from "../storage-errors"
 import type {
   SqliteAuthGroupMembershipRow,
@@ -34,7 +34,7 @@ export type SqliteValue = string | number | null
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthStorageError("invalid_input", `[Pario] ${label} must be a non-empty string.`)
+    throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -163,7 +163,7 @@ export function requireSessionById(
   if (!session) {
     throw new AuthStorageError(
       "missing_session",
-      `[Pario] Session '${params.id}' not found for project '${params.projectId}'.`
+      `[Sixb] Session '${params.id}' not found for project '${params.projectId}'.`
     )
   }
   return session
@@ -207,7 +207,7 @@ export function requireInvitationById(
   if (!invitation) {
     throw new AuthStorageError(
       "missing_invitation",
-      `[Pario] Invitation '${params.id}' not found for project '${params.projectId}'.`
+      `[Sixb] Invitation '${params.id}' not found for project '${params.projectId}'.`
     )
   }
   return invitation
@@ -300,21 +300,21 @@ export function consumeMagicLink(
   if (!row) {
     throw new AuthStorageError(
       "missing_magic_link",
-      `[Pario] Magic link '${id}' not found for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.token_hash !== tokenHash || row.consumed_at || row.revoked_at) {
     throw new AuthStorageError(
       "invalid_magic_link",
-      `[Pario] Magic link '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= params.consumedAt) {
     throw new AuthStorageError(
       "expired_magic_link",
-      `[Pario] Magic link '${id}' is expired for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
     )
   }
 
@@ -367,21 +367,21 @@ export function consumeOidcAttempt(
   if (!row) {
     throw new AuthStorageError(
       "missing_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (row.state_hash !== stateHash || row.consumed_at) {
     throw new AuthStorageError(
       "invalid_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (new Date(row.expires_at) <= params.consumedAt) {
     throw new AuthStorageError(
       "expired_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
     )
   }
 
@@ -415,7 +415,7 @@ export function assertSessionIdAvailable(db: Database, projectId: string, sessio
   if (getSessionRowById(db, { projectId, id: sessionId })) {
     throw new AuthStorageError(
       "duplicate_session",
-      `[Pario] Session '${sessionId}' already exists for project '${projectId}'.`
+      `[Sixb] Session '${sessionId}' already exists for project '${projectId}'.`
     )
   }
 }
@@ -467,7 +467,7 @@ export function createSession(
   if (!session) {
     throw new AuthStorageError(
       "missing_session",
-      `[Pario] Failed to load session '${id}' for project '${projectId}'.`
+      `[Sixb] Failed to load session '${id}' for project '${projectId}'.`
     )
   }
   return session
@@ -537,7 +537,7 @@ export function upsertGroupMembership(
   if (!getUserRowById(db, { projectId, id: userId })) {
     throw new AuthStorageError(
       "missing_user",
-      `[Pario] User '${userId}' not found for project '${projectId}'.`
+      `[Sixb] User '${userId}' not found for project '${projectId}'.`
     )
   }
 

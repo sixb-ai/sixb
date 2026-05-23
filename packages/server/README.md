@@ -1,25 +1,25 @@
-# @pario/server
+# @sixb/server
 
-Pario API server. Owns the REST API, auth routes, WebSocket API, and OpenAPI docs. The built-in
-Atlas UI is served by `@pario/atlas`.
+Sixb API server. Owns the REST API, auth routes, WebSocket API, and OpenAPI docs. The built-in
+Atlas UI is served by `@sixb/atlas`.
 
 ## Installation
 
 ```bash
-bun add @pario/server
+bun add @sixb/server
 ```
 
 ## Usage
 
 ```typescript
-import { Pario } from "@pario/core"
-import { createParioServer } from "@pario/server"
+import { Sixb } from "@sixb/core"
+import { createSixbServer } from "@sixb/server"
 
-const pario = new Pario({ /* ... */ })
-await pario.init()
+const sixb = new Sixb({ /* ... */ })
+await sixb.init()
 
-const server = createParioServer({
-  pario,
+const server = createSixbServer({
+  sixb,
   port: 3002,
   browser: {
     publicOrigin: "https://api.example.com",
@@ -80,18 +80,18 @@ Events are delivered as:
 
 ```typescript
 import {
-  createParioApi,
-  createParioServer,
-  ParioServer,
-} from "@pario/server"
-import type { ParioApp, ParioServerOptions } from "@pario/server"
+  createSixbApi,
+  createSixbServer,
+  SixbServer,
+} from "@sixb/server"
+import type { SixbApp, SixbServerOptions } from "@sixb/server"
 ```
 
-- **`createParioServer(options)`** -- Preferred entrypoint for starting the API/auth/ws/docs server.
-- **`ParioServer`** -- Manages the server lifecycle (`start`, `stop`).
-- **`createParioApi(server)`** -- Creates the raw Elysia app with all API and WebSocket routes.
-- **`ParioApp`** -- Type alias for the Elysia app returned by `createParioApi`.
-- **`ParioServerOptions`** -- Config: `pario` and `browser` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`.
+- **`createSixbServer(options)`** -- Preferred entrypoint for starting the API/auth/ws/docs server.
+- **`SixbServer`** -- Manages the server lifecycle (`start`, `stop`).
+- **`createSixbApi(server)`** -- Creates the raw Elysia app with all API and WebSocket routes.
+- **`SixbApp`** -- Type alias for the Elysia app returned by `createSixbApi`.
+- **`SixbServerOptions`** -- Config: `sixb` and `browser` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`.
 
 ## OpenAPI
 
@@ -103,7 +103,7 @@ bun run generate:openapi
 
 ## Client Package
 
-`@pario/client` is auto-generated from this server's OpenAPI spec. After modifying routes, regenerate with:
+`@sixb/client` is auto-generated from this server's OpenAPI spec. After modifying routes, regenerate with:
 
 ```bash
 bun generate:client

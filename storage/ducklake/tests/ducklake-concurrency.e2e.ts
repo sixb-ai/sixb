@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, defineDataset } from "@sixb/core"
 import { type DuckLakeStorage, DuckLakeStorage as DuckLakeStorageProvider } from "../src"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
 
@@ -16,7 +16,7 @@ describe("DuckLakeStorage optimistic concurrency", () => {
   const extraStorages: DuckLakeStorage[] = []
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-concurrency-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-concurrency-"))
     storage = createLocalDuckLakeStorage(rootDir)
     await storage.createDataset(ordersDataset)
   })

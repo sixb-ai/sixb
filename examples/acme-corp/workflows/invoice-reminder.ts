@@ -4,7 +4,7 @@ import {
   defineWorkflowStep,
   interventionField,
   ref,
-} from "@pario/core"
+} from "@sixb/core"
 import { sendReminder } from "../actions/sendReminder"
 import { Invoice } from "../ontology/invoice"
 
@@ -18,10 +18,10 @@ const loadInvoiceContext = defineWorkflowStep("load-invoice-context")
     amountLabel: "string",
     status: "string",
   })
-  .run(async ({ input, pario }) => {
+  .run(async ({ input, sixb }) => {
     await wait(650)
 
-    const invoice = await pario.objects(Invoice).get(input.invoice.primaryId)
+    const invoice = await sixb.objects(Invoice).get(input.invoice.primaryId)
     if (!invoice) {
       throw new Error(`[AcmeCorp] Invoice '${input.invoice.primaryId}' was not found.`)
     }
@@ -82,21 +82,21 @@ const composeInvoiceReminder = defineWorkflowStep("compose-invoice-reminder")
     channel: "string",
     deliveryBatchId: "string",
   })
-  .run(async ({ input, pario }) => {
+  .run(async ({ input, sixb }) => {
     await wait(750)
 
     const message =
       input.urgency === "high"
         ? `Invoice ${input.invoiceNumber} for ${input.amountLabel} is overdue. Please review and submit payment.`
         : `Please review invoice ${input.invoiceNumber} for ${input.amountLabel} and submit payment when convenient.`
-    const invoice = await pario.objects(Invoice).get(input.invoice.primaryId)
+    const invoice = await sixb.objects(Invoice).get(input.invoice.primaryId)
     if (!invoice) {
       throw new Error(`[AcmeCorp] Invoice '${input.invoice.primaryId}' was not found.`)
     }
 
     // Business review state stays on the invoice; workflow interventions only track the runtime
     // pause and submitted response.
-    await pario.objects(Invoice).upsert({
+    await sixb.objects(Invoice).upsert({
       properties: {
         ...invoice.properties,
         id: invoice.primaryId,

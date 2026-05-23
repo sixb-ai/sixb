@@ -1,27 +1,27 @@
-# @pario/queues-bullmq
+# @sixb/queues-bullmq
 
-A Redis/BullMQ-backed implementation of the Pario `Queues` interface. Swap it in wherever `InMemoryQueues` is used to get durability, multi-process sharing, and Redis-level observability without any consumer changes.
+A Redis/BullMQ-backed implementation of the Sixb `Queues` interface. Swap it in wherever `InMemoryQueues` is used to get durability, multi-process sharing, and Redis-level observability without any consumer changes.
 
 ## Installation
 
 ```bash
-bun add @pario/queues-bullmq
+bun add @sixb/queues-bullmq
 ```
 
 ## Usage
 
 ```typescript
-import { createPario } from "@pario/core"
-import { BullMqQueues } from "@pario/queues-bullmq"
+import { createSixb } from "@sixb/core"
+import { BullMqQueues } from "@sixb/queues-bullmq"
 
-const pario = await createPario({
+const sixb = await createSixb({
   queues: new BullMqQueues({ connection: "redis://localhost:6379" }),
 })
 ```
 
-The rest of your code keeps calling `pario.queues.syncRuns.enqueue(...)`,
-`pario.queues.pipelines.claim(...)`, `pario.queues.projections.claim(...)`, or
-`pario.queues.workflows.claim(...)` exactly as before — the adapter translates Pario's lease-based
+The rest of your code keeps calling `sixb.queues.syncRuns.enqueue(...)`,
+`sixb.queues.pipelines.claim(...)`, `sixb.queues.projections.claim(...)`, or
+`sixb.queues.workflows.claim(...)` exactly as before — the adapter translates Sixb's lease-based
 `claim`/`complete`/`retry`/`fail`/`renewLease` onto BullMQ's manual-fetch primitives.
 
 ## Options
@@ -29,7 +29,7 @@ The rest of your code keeps calling `pario.queues.syncRuns.enqueue(...)`,
 | Option             | Type                                       | Default                               | Description                                                                                           |
 | ------------------ | ------------------------------------------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `connection`       | `string \| RedisOptions \| IORedis`        | _(required)_                          | Redis URL, ioredis options, or an existing IORedis client with `maxRetriesPerRequest: null`.          |
-| `prefix`           | `string`                                   | `"pario"`                             | BullMQ key prefix. Keys look like `pario:{<projectId>:<lane>}:wait`.                                  |
+| `prefix`           | `string`                                   | `"sixb"`                             | BullMQ key prefix. Keys look like `sixb:{<projectId>:<lane>}:wait`.                                  |
 | `defaultLeaseMs`   | `number`                                   | `30000`                               | Lease duration applied when callers do not pass `leaseMs` to `claim()`.                               |
 | `stalledInterval`  | `number`                                   | `30000`                               | Interval for the stalled-job checker. Lower values speed up lease-expiry redelivery in tests.         |
 | `maxStalledCount`  | `number`                                   | `Number.MAX_SAFE_INTEGER`             | Maximum stalls before BullMQ moves a job to `failed`. Large by default so retries stay caller-driven. |
@@ -41,12 +41,12 @@ The rest of your code keeps calling `pario.queues.syncRuns.enqueue(...)`,
 With the default prefix, each `(projectId, lane)` pair maps to a BullMQ queue named `${projectId}:${lane}`:
 
 ```
-pario:<projectId>:{sync.runs}:wait        LIST      ready to be claimed
-pario:<projectId>:{sync.runs}:active      LIST      currently leased
-pario:<projectId>:{sync.runs}:delayed     ZSET      scheduled, score = availableAt (ms)
-pario:<projectId>:{sync.runs}:completed   ZSET      bounded history
-pario:<projectId>:{sync.runs}:failed      ZSET      bounded history
-pario:<projectId>:{sync.runs}:<jobId>:lock STRING EX the lease, TTL = lockDuration
+sixb:<projectId>:{sync.runs}:wait        LIST      ready to be claimed
+sixb:<projectId>:{sync.runs}:active      LIST      currently leased
+sixb:<projectId>:{sync.runs}:delayed     ZSET      scheduled, score = availableAt (ms)
+sixb:<projectId>:{sync.runs}:completed   ZSET      bounded history
+sixb:<projectId>:{sync.runs}:failed      ZSET      bounded history
+sixb:<projectId>:{sync.runs}:<jobId>:lock STRING EX the lease, TTL = lockDuration
 ```
 
 The `{...}` around the queue name is a Redis Cluster hash tag — it forces every key of a given queue onto the same slot so BullMQ's Lua scripts stay atomic in cluster mode.
@@ -55,7 +55,7 @@ Per-project queues keep tenants isolated — `getNextJob` on one project's queue
 
 ## Translation cheatsheet
 
-| Pario `Queue<TJob>`       | BullMQ                                  |
+| Sixb `Queue<TJob>`       | BullMQ                                  |
 | ------------------------- | --------------------------------------- |
 | `enqueue(jobs)`           | `queue.addBulk([{ name, data, opts }])` |
 | `claim({ leaseMs })`      | `worker.getNextJob(token)` + `extendLock` |
@@ -66,7 +66,7 @@ Per-project queues keep tenants isolated — `getNextJob` on one project's queue
 | `leaseId`                 | BullMQ `token` (minted per claim)       |
 | `attempt`                 | BullMQ `attemptsStarted`                |
 
-Retries are caller-driven: `enqueue` always sets BullMQ `attempts: 1` so BullMQ never auto-retries. Pario's own `retry(availableAt)` uses `moveToDelayed`, which is the only release primitive available to a manually-fetched job.
+Retries are caller-driven: `enqueue` always sets BullMQ `attempts: 1` so BullMQ never auto-retries. Sixb's own `retry(availableAt)` uses `moveToDelayed`, which is the only release primitive available to a manually-fetched job.
 
 ## Connections
 

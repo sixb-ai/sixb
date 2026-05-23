@@ -9,7 +9,7 @@ import {
   type FileRef,
   type PutBlobInput,
   readBlobBody,
-} from "@pario/core"
+} from "@sixb/core"
 import { S3Client } from "bun"
 import type { S3BlobStorageOptions } from "./types"
 
@@ -54,7 +54,7 @@ export class S3BlobStorage implements BlobStorage {
   private readonly client: S3Client
 
   constructor(options: S3BlobStorageOptions = {}) {
-    this.basePath = normalizeS3BlobBasePath(options.basePath ?? "pario")
+    this.basePath = normalizeS3BlobBasePath(options.basePath ?? "sixb")
     this.client = new S3Client({
       bucket: options.bucket,
       region: options.region,

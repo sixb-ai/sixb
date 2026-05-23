@@ -16,7 +16,7 @@ afterEach(async () => {
 })
 
 async function tempLogPath(): Promise<string> {
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-worker-"))
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-worker-"))
   tempDirs.push(tempDir)
   return join(tempDir, "operations.log")
 }
@@ -41,7 +41,7 @@ function runWorkerFixture(
 } {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
   const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "pario.config.ts")
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
 
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, "worker", "--entry", fixtureEntry, ...args],
@@ -49,7 +49,7 @@ function runWorkerFixture(
     env: options.logPath
       ? {
           ...process.env,
-          PARIO_CLI_TEST_LOG: options.logPath,
+          SIXB_CLI_TEST_LOG: options.logPath,
         }
       : process.env,
     stdout: "pipe",
@@ -81,7 +81,7 @@ function runHelp(): { exitCode: number; stdout: string; stderr: string } {
   }
 }
 
-describe("pario worker", () => {
+describe("sixb worker", () => {
   test("fails fast when the project uses InMemoryQueues", () => {
     const result = runWorkerFixture("valid-project", ["sync"])
 
@@ -116,9 +116,7 @@ describe("pario worker", () => {
     const result = runWorkerFixture("valid-project")
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain(
-      "Usage: pario worker <sync|action|pipeline|projection|workflow>"
-    )
+    expect(result.stdout).toContain("Usage: sixb worker <sync|action|pipeline|projection|workflow>")
     expect(result.stderr).toBe("")
   })
 
@@ -126,7 +124,7 @@ describe("pario worker", () => {
     const result = runWorkerFixture("valid-project", ["--type", "pipeline"])
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("Use `pario worker <type>`")
+    expect(result.stdout).toContain("Use `sixb worker <type>`")
     expect(result.stderr).toBe("")
   })
 

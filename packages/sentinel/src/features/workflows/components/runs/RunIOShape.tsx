@@ -1,4 +1,4 @@
-import { cn } from "@pario/ui/lib/utils"
+import { cn } from "@sixb/ui/lib/utils"
 import { Box, Braces, Brackets, Check, Copy, Hash, Minus, Type } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 

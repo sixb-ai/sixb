@@ -12,7 +12,7 @@ import {
   type FileRef,
   type PutBlobInput,
   readBlobBody,
-} from "@pario/core"
+} from "@sixb/core"
 import type { LocalBlobStorageOptions } from "./types"
 
 async function pathExists(path: string): Promise<boolean> {
@@ -36,7 +36,7 @@ export class LocalBlobStorage implements BlobStorage {
   private readonly basePath: string
 
   constructor(options: LocalBlobStorageOptions = {}) {
-    this.basePath = resolve(options.basePath ?? ".pario")
+    this.basePath = resolve(options.basePath ?? ".sixb")
   }
 
   async put(input: PutBlobInput): Promise<FileRef> {

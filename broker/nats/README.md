@@ -1,13 +1,13 @@
-# @pario/broker-nats
+# @sixb/broker-nats
 
-NATS JetStream-backed implementation of the Pario `Broker` interface.
+NATS JetStream-backed implementation of the Sixb `Broker` interface.
 Use it for deployments that want a durable multi-process broker instead of
 the in-memory provider.
 
 ## Installation
 
 ```bash
-bun add @pario/broker-nats
+bun add @sixb/broker-nats
 ```
 
 Requires NATS server 2.10 or newer for multi-filter consumers.
@@ -15,10 +15,10 @@ Requires NATS server 2.10 or newer for multi-filter consumers.
 ## Usage
 
 ```typescript
-import { createPario, InMemoryQueues } from "@pario/core"
-import { NatsBroker } from "@pario/broker-nats"
+import { createSixb, InMemoryQueues } from "@sixb/core"
+import { NatsBroker } from "@sixb/broker-nats"
 
-export const pario = createPario({
+export const sixb = createSixb({
   id: "my-project",
   broker: new NatsBroker({
     connection: { servers: "nats://localhost:4222" },
@@ -42,7 +42,7 @@ All NATS authentication modes are supported through the pass-through
 new NatsBroker({
   connection: {
     servers: "nats://localhost:4222",
-    user: "pario",
+    user: "sixb",
     pass: "secret",
   },
 })
@@ -57,16 +57,16 @@ new NatsBroker({
 
 ## Stream And Subject Scheme
 
-The provider creates a dedicated JetStream stream for each Pario project and
+The provider creates a dedicated JetStream stream for each Sixb project and
 broker stream id.
 
 | Concept | Shape |
 | --- | --- |
-| Stream name | `PARIO_BRK_{namespace}_{projectId}_{encodedStreamId}` |
+| Stream name | `SIXB_BRK_{namespace}_{projectId}_{encodedStreamId}` |
 | Subject filter | `{namespace}.{projectId}.{encodedStreamId}.>` |
 | Record subject | `{namespace}.{projectId}.{encodedStreamId}.{encodedName}` |
 
-`namespace` defaults to `pario_broker` and can be overridden to isolate
+`namespace` defaults to `sixb_broker` and can be overridden to isolate
 environments or tests. `projectId` is restricted to `[a-zA-Z0-9_-]+`.
 Stream ids and record names are base64url-encoded before they are placed into
 NATS names or subjects.

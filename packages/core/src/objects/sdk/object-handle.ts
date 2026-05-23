@@ -1,6 +1,6 @@
 /**
  * ObjectByIdHandle binds operations to a specific object id within an ObjectSet.
- * Created via `pario.objects(MyType).byId("id-1")`, it provides link/unlink and
+ * Created via `sixb.objects(MyType).byId("id-1")`, it provides link/unlink and
  * per-property telemetry appenders with compile-time unit and value type safety.
  */
 import type { ActionDefinition } from "../../actions"
@@ -86,7 +86,7 @@ export function createObjectByIdHandle<
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
         throw new OntologyValidationError(
-          "[Pario] requestAction requires either 'action' or 'actionId'"
+          "[Sixb] requestAction requires either 'action' or 'actionId'"
         )
       }
       return requestActionLeaf(ctx, {
@@ -107,7 +107,7 @@ export function createObjectByIdHandle<
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
         throw new OntologyValidationError(
-          "[Pario] requestActionAndWait requires either 'action' or 'actionId'"
+          "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
         )
       }
       return requestActionAndWaitLeaf(ctx, {

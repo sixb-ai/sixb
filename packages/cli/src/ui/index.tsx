@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react"
 export async function renderStatic(view: React.ReactNode) {
   const app = render(<Box flexDirection="column">{view}</Box>, { exitOnCtrlC: false })
   // Let ink paint, then tear down explicitly. useApp().exit() + waitUntilExit()
-  // stopped resolving in ink v6, which caused callers (e.g. `pario worker`) to
+  // stopped resolving in ink v6, which caused callers (e.g. `sixb worker`) to
   // hang and never reach their `process.exit(1)`, masking failures with exit 0.
   await new Promise<void>((resolve) => setImmediate(resolve))
   app.unmount()
@@ -146,7 +146,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
   return (
     <Box flexDirection="column">
       <Text color="cyan" bold>
-        pario
+        sixb
       </Text>
       <Text dimColor>Real-time digital twin framework</Text>
       {errorMessage ? (
@@ -157,7 +157,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
       ) : null}
       <Spacer />
       <SectionTitle>Usage</SectionTitle>
-      <Text> pario {"<command>"} [options]</Text>
+      <Text> sixb {"<command>"} [options]</Text>
       <Spacer />
       <SectionTitle>Commands</SectionTitle>
       <KeyValueList
@@ -184,8 +184,8 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "build", value: "Build runtime and production UI/app assets" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
           { label: "lake check", value: "Check lake dataset definitions for drift" },
-          { label: "init [dir]", value: "Initialize pario project in directory" },
-          { label: "create <name>", value: "Create a new pario project" },
+          { label: "init [dir]", value: "Initialize sixb project in directory" },
+          { label: "create <name>", value: "Create a new sixb project" },
         ]}
       />
       <Spacer />
@@ -193,7 +193,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
       <KeyValueList
         labelWidth={22}
         items={[
-          { label: "--entry <path>", value: "Entry file (default: pario.config.ts)" },
+          { label: "--entry <path>", value: "Entry file (default: sixb.config.ts)" },
           { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
           { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
@@ -212,24 +212,24 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
       <BulletList
         dim
         items={[
-          "pario dev",
-          "pario build",
-          "pario api",
-          "pario atlas",
-          "pario sentinel",
-          "pario app",
-          "pario scheduler",
-          "pario orchestrator",
-          "pario functions",
-          "pario rules",
-          "pario worker pipeline",
-          "pario worker workflow",
-          "pario worker-group sync pipeline projection",
-          "pario dev --entry examples/mac-os/pario.config.ts --port 8080",
-          "pario check",
-          "pario db migrate",
-          "pario lake check",
-          "pario create my-project",
+          "sixb dev",
+          "sixb build",
+          "sixb api",
+          "sixb atlas",
+          "sixb sentinel",
+          "sixb app",
+          "sixb scheduler",
+          "sixb orchestrator",
+          "sixb functions",
+          "sixb rules",
+          "sixb worker pipeline",
+          "sixb worker workflow",
+          "sixb worker-group sync pipeline projection",
+          "sixb dev --entry examples/mac-os/sixb.config.ts --port 8080",
+          "sixb check",
+          "sixb db migrate",
+          "sixb lake check",
+          "sixb create my-project",
         ]}
       />
     </Box>
@@ -308,7 +308,7 @@ export function DevView({
 
   return (
     <Box flexDirection="column">
-      <Text bold>pario dev</Text>
+      <Text bold>sixb dev</Text>
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name="Server" items={serverItems} />
@@ -377,7 +377,7 @@ export function StartView({
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
-        Pario started
+        Sixb started
       </Text>
       <Text dimColor>{name}</Text>
       <Spacer />
@@ -413,7 +413,7 @@ export function WorkerView({
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
-        Pario worker started
+        Sixb worker started
       </Text>
       <Text dimColor>{name}</Text>
       <Spacer />
@@ -443,7 +443,7 @@ export function WorkerGroupView({
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
-        Pario worker group started
+        Sixb worker group started
       </Text>
       <Text dimColor>{name}</Text>
       <Spacer />
@@ -533,7 +533,7 @@ export function CheckView({
   return (
     <Box flexDirection="column">
       <Text color={allOk ? "green" : "red"} bold>
-        {allOk ? "Pario is healthy" : "Pario has issues"}
+        {allOk ? "Sixb is healthy" : "Sixb has issues"}
       </Text>
       <Text dimColor>{projectId}</Text>
       <Spacer />
@@ -645,7 +645,7 @@ export function InitView({
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
-        Pario created
+        Sixb created
       </Text>
       <Text dimColor>{name}</Text>
       <Text dimColor>{targetDir}</Text>
@@ -654,7 +654,7 @@ export function InitView({
       <BulletList items={files} />
       <Spacer />
       <SectionTitle>Next steps</SectionTitle>
-      <BulletList dim items={[`cd ${name}`, "bun install", "pario dev"]} />
+      <BulletList dim items={[`cd ${name}`, "bun install", "sixb dev"]} />
     </Box>
   )
 }

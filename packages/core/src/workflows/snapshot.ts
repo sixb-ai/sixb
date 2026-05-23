@@ -275,7 +275,7 @@ function snapshotSchemaValue(params: {
     const valueType = valueTypesById.get(schema.valueTypeId)
     if (!valueType) {
       throw new WorkflowValidationError(
-        `[Pario] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
+        `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
       )
     }
 
@@ -330,7 +330,7 @@ function snapshotDate(value: Date, path: string): string {
 }
 
 function cannotSerialize(path: string): WorkflowValidationError {
-  return new WorkflowValidationError(`[Pario] ${path} cannot be serialized as workflow IO`)
+  return new WorkflowValidationError(`[Sixb] ${path} cannot be serialized as workflow IO`)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

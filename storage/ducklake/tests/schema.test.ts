@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { col, type DatasetColumnType, LakeStorageError } from "@pario/core"
+import { col, type DatasetColumnType, LakeStorageError } from "@sixb/core"
 import {
   datasetColumnToDuckDbSql,
   datasetColumnTypeToDuckDbSql,
@@ -10,7 +10,7 @@ import {
 } from "../src/internal/schema"
 
 describe("DuckLake schema mapping", () => {
-  test("maps Pario column types to DuckDB SQL types", () => {
+  test("maps Sixb column types to DuckDB SQL types", () => {
     const expected: Readonly<Record<DatasetColumnType, string>> = {
       string: "VARCHAR",
       boolean: "BOOLEAN",
@@ -47,7 +47,7 @@ describe("DuckLake schema mapping", () => {
     ).toBe('"orderId" VARCHAR NOT NULL, "amount" DECIMAL(38, 9) NOT NULL, "metadata" JSON')
   })
 
-  test("maps DuckDB metadata back to a Pario schema", () => {
+  test("maps DuckDB metadata back to a Sixb schema", () => {
     expect(
       duckDbColumnsToDatasetSchema([
         { name: "orderId", type: "VARCHAR", nullable: false },
@@ -75,7 +75,7 @@ describe("DuckLake schema mapping", () => {
     })
   })
 
-  test("recognizes fileRef only from the exact Pario struct shape", () => {
+  test("recognizes fileRef only from the exact Sixb struct shape", () => {
     expect(duckDbTypeToDatasetColumnType("JSON")).toBe("json")
     expect(() =>
       duckDbTypeToDatasetColumnType("STRUCT(blobId VARCHAR, digest VARCHAR, extra VARCHAR)")
@@ -84,7 +84,7 @@ describe("DuckLake schema mapping", () => {
 
   test("rejects unknown DuckDB types with an actionable error", () => {
     expect(() => duckDbTypeToDatasetColumnType("INTEGER")).toThrow(
-      "cannot be mapped to a Pario dataset column type"
+      "cannot be mapped to a Sixb dataset column type"
     )
   })
 })

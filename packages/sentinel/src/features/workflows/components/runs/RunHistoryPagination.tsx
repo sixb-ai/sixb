@@ -1,4 +1,4 @@
-import { Button } from "@pario/ui/components"
+import { Button } from "@sixb/ui/components"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
 export function RunHistoryPagination({

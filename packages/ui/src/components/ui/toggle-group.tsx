@@ -1,7 +1,7 @@
 "use client"
 
-import { toggleVariants } from "@pario/ui/components/ui/toggle"
-import { cn } from "@pario/ui/lib/utils"
+import { toggleVariants } from "@sixb/ui/components/ui/toggle"
+import { cn } from "@sixb/ui/lib/utils"
 import type { VariantProps } from "class-variance-authority"
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
 import * as React from "react"

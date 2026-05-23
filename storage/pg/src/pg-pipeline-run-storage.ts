@@ -12,8 +12,8 @@ import type {
   PipelineStepRunRecord,
   StartPipelineRunInput,
   StartPipelineStepRunInput,
-} from "@pario/core"
-import { PipelineRunError } from "@pario/core"
+} from "@sixb/core"
+import { PipelineRunError } from "@sixb/core"
 import type { SQL } from "bun"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
@@ -44,7 +44,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbPg] Pipeline run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -61,13 +61,13 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Pipeline run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Pipeline run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
@@ -111,19 +111,19 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!pipelineRun) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
+          `[SixbPg] Pipeline run '${input.pipelineRunId}' not found for project '${input.projectId}'.`
         )
       }
 
       if (pipelineRun.status !== "running") {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Pipeline run '${input.pipelineRunId}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (pipelineRun.pipeline_id !== input.pipelineId) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
+          `[SixbPg] Pipeline step run '${input.id}' pipeline '${input.pipelineId}' does not match pipeline run '${input.pipelineRunId}' pipeline '${pipelineRun.pipeline_id}'.`
         )
       }
 
@@ -159,7 +159,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       } catch (error) {
         if (isUniqueViolation(error)) {
           throw new PipelineRunError(
-            `[ParioPg] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
+            `[SixbPg] Pipeline step run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
 
@@ -179,19 +179,19 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       if (!existing) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
+          `[SixbPg] Pipeline step run '${input.id}' not found for project '${input.projectId}'.`
         )
       }
 
       if (existing.status !== "running") {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[SixbPg] Pipeline step run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
       }
 
       if (input.status === "succeeded" && input.output.datasetId !== existing.dataset_id) {
         throw new PipelineRunError(
-          `[ParioPg] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
+          `[SixbPg] Pipeline step run '${input.id}' output dataset '${input.output.datasetId}' does not match '${existing.dataset_id}'.`
         )
       }
 
@@ -394,9 +394,7 @@ function parseDatasetVersionRefs(
 
 function assertOptionalNonNegativeInteger(value: number | undefined, fieldName: string): void {
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
-    throw new PipelineRunError(
-      `[ParioPg] Pipeline run ${fieldName} must be a non-negative integer.`
-    )
+    throw new PipelineRunError(`[SixbPg] Pipeline run ${fieldName} must be a non-negative integer.`)
   }
 }
 

@@ -1,5 +1,5 @@
-import { Badge, Card, CardContent } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import { Badge, Card, CardContent } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, UserCheck, Workflow, Zap } from "lucide-react"
 import { useState } from "react"
 import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"

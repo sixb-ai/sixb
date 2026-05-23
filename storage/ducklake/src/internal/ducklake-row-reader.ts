@@ -4,8 +4,8 @@ import type {
   DatasetRow,
   DatasetVersion,
   ReadDatasetRowsInput,
-} from "@pario/core"
-import { LakeStorageError } from "@pario/core"
+} from "@sixb/core"
+import { LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -19,9 +19,9 @@ import { parseVersionId } from "./versions"
 /**
  * Reads dataset rows from DuckLake snapshots.
  *
- * This module owns the last mile of reads: resolve the requested Pario version
+ * This module owns the last mile of reads: resolve the requested Sixb version
  * to a DuckLake snapshot id, render a DuckLake time-travel query, and normalize
- * DuckDB values back into Pario row shape.
+ * DuckDB values back into Sixb row shape.
  */
 export class DuckLakeRowReader {
   constructor(
@@ -43,7 +43,7 @@ export class DuckLakeRowReader {
       // physical DuckLake table.
       const definition = await this.datasets.getDatasetOnRuntime(runtime, input.datasetId)
       if (!definition) {
-        throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.datasetId}'.`)
+        throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
       }
 
       const version = await this.resolveVersion(runtime, definition, input.versionId)
@@ -114,7 +114,7 @@ export class DuckLakeRowReader {
       const column = columnsByName.get(columnName)
       if (!column) {
         throw new LakeStorageError(
-          `[ParioDuckLake] Dataset '${datasetId}' does not have column '${columnName}' at the requested version.`
+          `[SixbDuckLake] Dataset '${datasetId}' does not have column '${columnName}' at the requested version.`
         )
       }
 
@@ -124,7 +124,7 @@ export class DuckLakeRowReader {
 
   private throwNoCommittedVersion(datasetId: string): never {
     throw new LakeStorageError(
-      `[ParioDuckLake] No committed version found for dataset '${datasetId}'.`
+      `[SixbDuckLake] No committed version found for dataset '${datasetId}'.`
     )
   }
 }

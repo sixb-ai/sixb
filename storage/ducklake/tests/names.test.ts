@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { LakeStorageError } from "@pario/core"
+import { LakeStorageError } from "@sixb/core"
 import {
   DATASET_TABLE_PREFIX,
   decodeDatasetTableName,
@@ -39,7 +39,7 @@ describe("DuckLake dataset table names", () => {
 
   test("filters provider tables to dataset tables", () => {
     expect(decodeDatasetTableName(`${DATASET_TABLE_PREFIX}raw__erp__orders`)).toBe("raw.erp.orders")
-    expect(decodeDatasetTableName("pario__sys__snapshots")).toBeNull()
+    expect(decodeDatasetTableName("sixb__sys__snapshots")).toBeNull()
     expect(decodeDatasetTableName("orders")).toBeNull()
   })
 

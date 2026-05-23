@@ -10,5 +10,5 @@ export interface CustomAppRuntimeConfig {
 
 export function renderCustomAppRuntimeScript(config: CustomAppRuntimeConfig): string {
   const safeConfig = JSON.stringify(config).replaceAll("<", "\\u003c")
-  return `<script>window.__PARIO_RUNTIME__ = ${safeConfig};</script>`
+  return `<script>window.__SIXB_RUNTIME__ = ${safeConfig};</script>`
 }

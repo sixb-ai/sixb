@@ -3,12 +3,12 @@ import type {
   PipelineRunRecord,
   PipelineRunStatus,
   PipelineStepRunRecord,
-} from "@pario/core"
+} from "@sixb/core"
 import type {
   PipelineJob,
   PipelineStepLifecycleContext,
   PipelineStepRunResult,
-  PipelineWorkerPario,
+  PipelineWorkerSixb,
 } from "./types"
 
 export async function emitPipelineRunStarted(
@@ -31,7 +31,7 @@ export async function emitPipelineRunStarted(
       ],
     })
   } catch (error) {
-    console.error("[ParioPipelineWorker] Failed to emit pipeline.run.started:", error)
+    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.started:", error)
   }
 }
 
@@ -64,7 +64,7 @@ export async function emitPipelineRunStepStarted(
       ],
     })
   } catch (error) {
-    console.error("[ParioPipelineWorker] Failed to emit pipeline.run.step.started:", error)
+    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.step.started:", error)
   }
 }
 
@@ -110,20 +110,20 @@ export async function emitPipelineRunStepFinished(
       ],
     })
   } catch (error) {
-    console.error("[ParioPipelineWorker] Failed to emit pipeline.run.step.finished:", error)
+    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.step.finished:", error)
   }
 }
 
 export async function emitDatasetVersionCommitted(
-  pario: PipelineWorkerPario,
+  sixb: PipelineWorkerSixb,
   job: PipelineJob,
   step: PipelineStepRunResult
 ): Promise<void> {
-  if (!pario.events) return
+  if (!sixb.events) return
 
   try {
     // Emit step outputs immediately so datasetUpdated routes can react before later steps finish.
-    await pario.events.append({
+    await sixb.events.append({
       events: [
         {
           type: "dataset.version.committed" as const,
@@ -141,7 +141,7 @@ export async function emitDatasetVersionCommitted(
       ],
     })
   } catch (error) {
-    console.error("[ParioPipelineWorker] Failed to emit dataset.version.committed:", error)
+    console.error("[SixbPipelineWorker] Failed to emit dataset.version.committed:", error)
   }
 }
 
@@ -167,7 +167,7 @@ export async function emitPipelineRunFinished(
       ],
     })
   } catch (error) {
-    console.error("[ParioPipelineWorker] Failed to emit pipeline.run.finished:", error)
+    console.error("[SixbPipelineWorker] Failed to emit pipeline.run.finished:", error)
   }
 }
 
@@ -196,7 +196,7 @@ function requireFinishedAt(stepRunId: string, finishedAt: Date | undefined): Dat
     return finishedAt
   }
 
-  throw new Error(`[ParioPipelineWorker] Pipeline step run '${stepRunId}' has no finishedAt.`)
+  throw new Error(`[SixbPipelineWorker] Pipeline step run '${stepRunId}' has no finishedAt.`)
 }
 
 function requireTerminalStatus(
@@ -204,7 +204,7 @@ function requireTerminalStatus(
   context: string
 ): Exclude<PipelineRunStatus, "running"> {
   if (status === "running") {
-    throw new Error(`[ParioPipelineWorker] ${context} is still running.`)
+    throw new Error(`[SixbPipelineWorker] ${context} is still running.`)
   }
 
   return status

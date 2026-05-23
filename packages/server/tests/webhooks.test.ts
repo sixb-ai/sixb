@@ -8,20 +8,20 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
-  Pario,
-  type ParioOptions,
-} from "@pario/core"
-import { createParioApi, ParioServer } from "../src/server"
+  Sixb,
+  type SixbOptions,
+} from "@sixb/core"
+import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createParioInstance<TOntologySources extends readonly OntologySource[]>(
-  options: ParioOptions<TOntologySources>
-): Pario<TOntologySources> {
-  const ParioConstructor = Pario as unknown as new (
-    options: ParioOptions<TOntologySources>
-  ) => Pario<TOntologySources>
+function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
+  options: SixbOptions<TOntologySources>
+): Sixb<TOntologySources> {
+  const SixbConstructor = Sixb as unknown as new (
+    options: SixbOptions<TOntologySources>
+  ) => Sixb<TOntologySources>
 
-  return new ParioConstructor(options)
+  return new SixbConstructor(options)
 }
 
 describe("webhook routes", () => {
@@ -48,7 +48,7 @@ describe("webhook routes", () => {
             requestHeader = request.headers.get("x-provider") ?? ""
             rawBodyText = new TextDecoder().decode(rawBody)
           })
-          .handle(async ({ body, client, pario, request, webhook }) => {
+          .handle(async ({ body, client, sixb, request, webhook }) => {
             const resolved = (await client()) as { source: string }
             connected = resolved.source === "github"
 
@@ -57,7 +57,7 @@ describe("webhook routes", () => {
               headers: { "x-webhook": webhook.route },
               body: {
                 name: body.name,
-                projectId: pario.id,
+                projectId: sixb.id,
                 requestHeader: request.headers.get("x-provider"),
               },
             }
@@ -339,10 +339,10 @@ describe("webhook routes", () => {
 })
 
 function createWebhookApp(
-  connectors: ParioOptions<readonly OntologySource[]>["connectors"],
+  connectors: SixbOptions<readonly OntologySource[]>["connectors"],
   storage = new InMemoryStorage()
 ) {
-  const pario = createParioInstance<readonly OntologySource[]>({
+  const sixb = createSixbInstance<readonly OntologySource[]>({
     id: "test-project",
     ontology: [],
     broker: new InMemoryBroker(),
@@ -352,8 +352,8 @@ function createWebhookApp(
     queues: new InMemoryQueues(),
     connectors,
   })
-  const server = new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
-  return createParioApi(server)
+  const server = new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+  return createSixbApi(server)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

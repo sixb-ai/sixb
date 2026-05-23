@@ -1,19 +1,19 @@
-import { defineFunction } from "@pario/core"
+import { defineFunction } from "@sixb/core"
 import { Counter } from "../ontology/counter"
 
 let count = 0
 
 export const tick = defineFunction("tick")
   .interval(1000)
-  .run(async ({ pario }) => {
+  .run(async ({ sixb }) => {
     count++
 
-    await pario.objects(Counter).upsert({
+    await sixb.objects(Counter).upsert({
       key: "default",
       properties: { name: "My Counter" },
     })
 
-    await pario
+    await sixb
       .objects(Counter)
       .appendTelemetryBatch([{ key: "default", properties: { value: count }, at: new Date() }])
   })

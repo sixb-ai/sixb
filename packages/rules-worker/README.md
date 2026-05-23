@@ -1,6 +1,6 @@
-# @pario/rules-worker
+# @sixb/rules-worker
 
-Event-driven worker for evaluating Pario rules against object state.
+Event-driven worker for evaluating Sixb rules against object state.
 
 The rules worker subscribes directly to ontology events and evaluates only the
 rules affected by each event. It does not use queues or orchestrator routes:
@@ -20,12 +20,12 @@ arrive.
 
 ## Usage
 
-Most projects should use the CLI host. When rules are registered, `pario dev`
+Most projects should use the CLI host. When rules are registered, `sixb dev`
 co-hosts the worker automatically for local development; production deployments should run
-`pario rules` as a dedicated role:
+`sixb rules` as a dedicated role:
 
 ```ts
-const pario = createPario({
+const sixb = createSixb({
   ontology: [Transaction, Document],
   rules: [requiresDocumentRule],
 })
@@ -38,9 +38,9 @@ events.
 For tests or custom hosts:
 
 ```ts
-import { RulesWorker } from "@pario/rules-worker"
+import { RulesWorker } from "@sixb/rules-worker"
 
-const worker = new RulesWorker(pario)
+const worker = new RulesWorker(sixb)
 
 await worker.start()
 // ... worker is now consuming object/link events
@@ -100,7 +100,7 @@ dead-letter mechanism. The V1 rules worker is therefore live-only:
 
 - events appended before the worker starts are not replayed
 - evaluation batches are processed sequentially through a local promise chain
-- evaluation errors are logged with `[ParioRulesWorker]`
+- evaluation errors are logged with `[SixbRulesWorker]`
 - later event batches keep processing after an error
 - `stop()` unsubscribes first, then waits for already accepted evaluations to
   finish
@@ -111,9 +111,9 @@ future event consumer contract or a separate replay/backfill command.
 ## Development
 
 ```bash
-bun --filter @pario/rules-worker typecheck
+bun --filter @sixb/rules-worker typecheck
 bun test packages/rules-worker/tests/evaluate-predicate.test.ts
 bun test packages/rules-worker/tests/evaluate-rule-event.test.ts
 bun test packages/rules-worker/tests/worker.test.ts
-bun --filter @pario/rules-worker build
+bun --filter @sixb/rules-worker build
 ```

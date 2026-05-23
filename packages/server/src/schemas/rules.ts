@@ -1,4 +1,4 @@
-import type { RulePredicate } from "@pario/core"
+import type { RulePredicate } from "@sixb/core"
 import { z } from "zod"
 
 export const RuleParamsSchema = z.object({

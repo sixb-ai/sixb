@@ -10,7 +10,7 @@ import type {
   UserIdentityRecord,
   UserRecord,
   UserStatus,
-} from "@pario/core"
+} from "@sixb/core"
 
 export interface SqliteAuthUserRow {
   readonly project_id: string

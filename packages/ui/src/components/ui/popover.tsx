@@ -1,6 +1,6 @@
 "use client"
 
-import { cn } from "@pario/ui/lib/utils"
+import { cn } from "@sixb/ui/lib/utils"
 import { Popover as PopoverPrimitive } from "radix-ui"
 import type * as React from "react"
 

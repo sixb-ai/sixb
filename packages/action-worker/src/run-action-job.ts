@@ -1,5 +1,5 @@
-import type { ActionRunRecord, ActionTargetObject } from "@pario/core"
-import { ActionRunError, isObjectActionDefinition, ObjectNotFoundError } from "@pario/core"
+import type { ActionRunRecord, ActionTargetObject } from "@sixb/core"
+import { ActionRunError, isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -28,7 +28,7 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
   }
 
   throw new Error(
-    `[ParioActionWorker] Action run '${runId}' finished without a finishedAt timestamp.`
+    `[SixbActionWorker] Action run '${runId}' finished without a finishedAt timestamp.`
   )
 }
 
@@ -42,7 +42,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   const action = runtime.getActionById(job.actionId)
 
   if (!action) {
-    throw new Error(`[ParioActionWorker] Unknown action '${job.actionId}'.`)
+    throw new Error(`[SixbActionWorker] Unknown action '${job.actionId}'.`)
   }
 
   throwIfAborted(signal)
@@ -80,32 +80,32 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
     if (!isObjectActionDefinition(action)) {
       if (job.subject.kind !== "none") {
-        throw new Error(`[ParioActionWorker] Action '${job.actionId}' does not accept a subject.`)
+        throw new Error(`[SixbActionWorker] Action '${job.actionId}' does not accept a subject.`)
       }
 
       await action.handler({
         params: job.params,
-        pario: runtime.pario,
+        sixb: runtime.sixb,
         signal,
       })
     } else {
       if (job.subject.kind !== "object") {
-        throw new Error(`[ParioActionWorker] Action '${job.actionId}' requires an object subject.`)
+        throw new Error(`[SixbActionWorker] Action '${job.actionId}' requires an object subject.`)
       }
 
-      const subjectObjectType = runtime.pario.getObjectTypeById(job.subject.objectTypeId)
+      const subjectObjectType = runtime.sixb.getObjectTypeById(job.subject.objectTypeId)
       if (!subjectObjectType) {
         throw new Error(
-          `[ParioActionWorker] Unknown object type '${job.subject.objectTypeId}' for action '${job.actionId}'.`
+          `[SixbActionWorker] Unknown object type '${job.subject.objectTypeId}' for action '${job.actionId}'.`
         )
       }
 
-      const actionAppliesToSubject = runtime.pario
+      const actionAppliesToSubject = runtime.sixb
         .getActionsForType(subjectObjectType)
         .some((candidate) => candidate.id === action.id)
       if (!actionAppliesToSubject) {
         throw new Error(
-          `[ParioActionWorker] Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
+          `[SixbActionWorker] Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
         )
       }
 
@@ -126,7 +126,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       await action.handler({
         params: job.params,
         target: toActionTargetObject(targetRow, action.target.id),
-        pario: runtime.pario,
+        sixb: runtime.sixb,
         signal,
       })
     }

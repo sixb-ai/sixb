@@ -3,7 +3,7 @@ import {
   ObjectNotFoundError,
   type ObjectProjectionDefinition,
   objectService,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   buildObjectProjectionPlan,
   type ProjectedObjectRow,

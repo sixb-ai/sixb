@@ -13,6 +13,6 @@
     "lib/**/*.ts",
     "ontology/**/*.ts",
     "pipelines/**/*.ts",
-    "pario.config.ts"
+    "sixb.config.ts"
   ]
 }

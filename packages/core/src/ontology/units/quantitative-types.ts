@@ -1,5 +1,5 @@
 /**
- * Pario Quantitative Types registry.
+ * Sixb Quantitative Types registry.
  *
  * A single flat registry of physical quantities.  Each entry names a quantity,
  * describes it, and lists its valid units.  Where multiple quantities share the

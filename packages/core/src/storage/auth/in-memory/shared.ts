@@ -85,7 +85,7 @@ export function dateOrNow(value: Date | undefined): Date {
 export function assertNonEmpty(value: string, label: string): string {
   const normalized = value.trim()
   if (!normalized) {
-    throw new AuthStorageError("invalid_input", `[Pario] ${label} must be a non-empty string.`)
+    throw new AuthStorageError("invalid_input", `[Sixb] ${label} must be a non-empty string.`)
   }
   return normalized
 }
@@ -229,7 +229,7 @@ export function assertSessionIdAvailable(
   if (state.sessions.has(sessionKey(projectId, sessionId))) {
     throw new AuthStorageError(
       "duplicate_session",
-      `[Pario] Session '${sessionId}' already exists for project '${projectId}'.`
+      `[Sixb] Session '${sessionId}' already exists for project '${projectId}'.`
     )
   }
 }
@@ -284,7 +284,7 @@ export function upsertGroupMembershipRecord(
   if (!state.users.has(userKey(projectId, userId))) {
     throw new AuthStorageError(
       "missing_user",
-      `[Pario] User '${userId}' not found for project '${projectId}'.`
+      `[Sixb] User '${userId}' not found for project '${projectId}'.`
     )
   }
 
@@ -325,21 +325,21 @@ export function consumeMagicLinkRecord(
   if (!existing) {
     throw new AuthStorageError(
       "missing_magic_link",
-      `[Pario] Magic link '${id}' not found for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (existing.tokenHash !== tokenHash || existing.consumedAt || existing.revokedAt) {
     throw new AuthStorageError(
       "invalid_magic_link",
-      `[Pario] Magic link '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (existing.expiresAt <= params.consumedAt) {
     throw new AuthStorageError(
       "expired_magic_link",
-      `[Pario] Magic link '${id}' is expired for project '${projectId}'.`
+      `[Sixb] Magic link '${id}' is expired for project '${projectId}'.`
     )
   }
 
@@ -369,21 +369,21 @@ export function consumeOidcAttemptRecord(
   if (!existing) {
     throw new AuthStorageError(
       "missing_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' not found for project '${projectId}'.`
     )
   }
 
   if (existing.stateHash !== stateHash || existing.consumedAt) {
     throw new AuthStorageError(
       "invalid_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is not valid for project '${projectId}'.`
     )
   }
 
   if (existing.expiresAt <= params.consumedAt) {
     throw new AuthStorageError(
       "expired_oidc_attempt",
-      `[Pario] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
+      `[Sixb] OIDC authorization attempt '${id}' is expired for project '${projectId}'.`
     )
   }
 

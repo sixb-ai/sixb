@@ -1,4 +1,4 @@
-import type { ParioApiBrowserPolicy, ParioBrowserOrigin } from "../src"
+import type { SixbApiBrowserPolicy, SixbBrowserOrigin } from "../src"
 
 export function createTestBrowserPolicy(
   options: {
@@ -7,11 +7,11 @@ export function createTestBrowserPolicy(
     readonly appOrigin?: string
     readonly includeApp?: boolean
   } = {}
-): ParioApiBrowserPolicy {
+): SixbApiBrowserPolicy {
   const atlasOrigin = options.atlasOrigin ?? "http://atlas.localhost"
   const appOrigin = options.appOrigin ?? "http://app.localhost"
   const includeApp = options.includeApp ?? true
-  const allowedOrigins: ParioBrowserOrigin[] = [
+  const allowedOrigins: SixbBrowserOrigin[] = [
     { origin: atlasOrigin, audience: "atlas", kind: "atlas" },
   ]
 

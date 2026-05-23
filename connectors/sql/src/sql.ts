@@ -27,6 +27,6 @@ export function sql(connection: SqlConnection): SqlConnector {
 
 function assertConnection(connection: SqlConnection): void {
   if (typeof connection === "string" && !connection.trim()) {
-    throw new Error("[ParioSql] connection must not be empty.")
+    throw new Error("[SixbSql] connection must not be empty.")
   }
 }

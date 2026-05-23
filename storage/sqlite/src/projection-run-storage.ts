@@ -12,8 +12,8 @@ import type {
   ProjectionRunStorage,
   StartProjectionRunInput,
   UpdateProjectionRunInput,
-} from "@pario/core"
-import { ProjectionRunError } from "@pario/core"
+} from "@sixb/core"
+import { ProjectionRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   assertOptionalProjectionRunCounter,
@@ -89,7 +89,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         throw new ProjectionRunError(
-          `[ParioSqlite] Projection run '${input.id}' already exists for project '${input.projectId}'.`
+          `[SixbSqlite] Projection run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
@@ -99,7 +99,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     const record = await this.getById({ projectId: input.projectId, id: input.id })
     if (!record) {
       throw new ProjectionRunError(
-        `[ParioSqlite] Failed to load projection run '${input.id}' for project '${input.projectId}'.`
+        `[SixbSqlite] Failed to load projection run '${input.id}' for project '${input.projectId}'.`
       )
     }
 
@@ -274,7 +274,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     const row = this.requireRow(projectId, id)
     if (row.status !== "running") {
       throw new ProjectionRunError(
-        `[ParioSqlite] Projection run '${id}' for project '${projectId}' is already terminal.`
+        `[SixbSqlite] Projection run '${id}' for project '${projectId}' is already terminal.`
       )
     }
     return row
@@ -290,7 +290,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
 
     if (!row) {
       throw new ProjectionRunError(
-        `[ParioSqlite] Projection run '${id}' not found for project '${projectId}'.`
+        `[SixbSqlite] Projection run '${id}' not found for project '${projectId}'.`
       )
     }
 

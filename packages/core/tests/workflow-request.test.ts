@@ -3,12 +3,12 @@ import {
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
-  Pario,
-  type ParioRuntimeContext,
   prop,
   type Queues,
   ref,
   requestWorkflowRun,
+  Sixb,
+  type SixbRuntimeContext,
   type Storage,
   type WorkflowDefinition,
   WorkflowValidationError,
@@ -42,9 +42,9 @@ const reviewTransaction: WorkflowDefinition = defineWorkflow("review-transaction
   .input({ transaction: ref(Transaction) })
   .then(findBestInvoice)
 
-function createPario() {
+function createSixb() {
   const workflows: readonly WorkflowDefinition[] = [draftInvoice, reviewTransaction]
-  return new Pario({
+  return new Sixb({
     ontology: [Transaction, Invoice],
     workflows,
     ...createTestRuntimeDeps(),
@@ -55,29 +55,29 @@ function validInput() {
   return { transaction: { objectTypeId: "Transaction" as const, primaryId: "txn_1" } }
 }
 
-async function claimAll(pario: { queues: Queues; id: string }) {
-  return pario.queues.workflows.claim({ projectId: pario.id, workerId: "test", limit: 50 })
+async function claimAll(sixb: { queues: Queues; id: string }) {
+  return sixb.queues.workflows.claim({ projectId: sixb.id, workerId: "test", limit: 50 })
 }
 
-describe("pario.workflows.request", () => {
+describe("sixb.workflows.request", () => {
   test("queues a run, enqueues a job, and emits workflow.run.queued", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
-    const result = await pario.workflows.request(draftInvoice, { input: validInput() })
+    const result = await sixb.workflows.request(draftInvoice, { input: validInput() })
 
     expect(result.created).toBe(true)
     expect(result.workflowId).toBe("draft-invoice")
     expect(result.runId).toMatch(/^run_/)
     expect(result.jobId).toBeDefined()
 
-    const run = await pario.storage.workflowRuns?.getById({ projectId: pario.id, id: result.runId })
+    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: result.runId })
     expect(run?.status).toBe("queued")
     expect(run?.workflowId).toBe("draft-invoice")
     expect(run?.input).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
     })
 
-    const jobs = await claimAll(pario)
+    const jobs = await claimAll(sixb)
     expect(jobs).toHaveLength(1)
     expect(jobs[0]?.job.payload).toMatchObject({
       workflowId: "draft-invoice",
@@ -85,7 +85,7 @@ describe("pario.workflows.request", () => {
       input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
     })
 
-    const events = await pario.events.read({ types: ["workflow.run.queued"] })
+    const events = await sixb.events.read({ types: ["workflow.run.queued"] })
     expect(events).toHaveLength(1)
     expect(events[0]?.payload).toMatchObject({
       workflowId: "draft-invoice",
@@ -96,42 +96,42 @@ describe("pario.workflows.request", () => {
   })
 
   test("requestById rejects unknown input fields at runtime", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
     await expect(
-      pario.workflows.requestById({ workflowId: "draft-invoice", input: { bogus: true } })
+      sixb.workflows.requestById({ workflowId: "draft-invoice", input: { bogus: true } })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
   })
 
   test("rejects invalid input before any storage or queue write", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
     await expect(
-      pario.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input: {} })
+      sixb.workflows.requestById({ workflowId: "draft-invoice", runId: "run_fixed", input: {} })
     ).rejects.toBeInstanceOf(WorkflowValidationError)
 
-    const run = await pario.storage.workflowRuns?.getById({ projectId: pario.id, id: "run_fixed" })
+    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: "run_fixed" })
     expect(run).toBeNull()
-    expect(await claimAll(pario)).toHaveLength(0)
-    expect(await pario.events.read({ types: ["workflow.run.queued"] })).toHaveLength(0)
+    expect(await claimAll(sixb)).toHaveLength(0)
+    expect(await sixb.events.read({ types: ["workflow.run.queued"] })).toHaveLength(0)
   })
 
   test("throws for an unknown workflow", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
-    await expect(pario.workflows.requestById({ workflowId: "missing", input: {} })).rejects.toThrow(
-      "[Pario] Unknown workflow 'missing'"
+    await expect(sixb.workflows.requestById({ workflowId: "missing", input: {} })).rejects.toThrow(
+      "[Sixb] Unknown workflow 'missing'"
     )
   })
 
   test("deterministic runId returns the existing run without enqueuing twice", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
-    const first = await pario.workflows.request(draftInvoice, {
+    const first = await sixb.workflows.request(draftInvoice, {
       runId: "run_dedupe",
       input: validInput(),
     })
-    const second = await pario.workflows.request(draftInvoice, {
+    const second = await sixb.workflows.request(draftInvoice, {
       runId: "run_dedupe",
       input: validInput(),
     })
@@ -142,17 +142,17 @@ describe("pario.workflows.request", () => {
     expect(second.queuedAt).toBe(first.queuedAt)
     expect(second.jobId).toBeUndefined()
 
-    expect(await claimAll(pario)).toHaveLength(1)
-    expect(await pario.events.read({ types: ["workflow.run.queued"] })).toHaveLength(1)
+    expect(await claimAll(sixb)).toHaveLength(1)
+    expect(await sixb.events.read({ types: ["workflow.run.queued"] })).toHaveLength(1)
   })
 
   test("deterministic runId throws when reused for a different workflow", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
 
-    await pario.workflows.request(draftInvoice, { runId: "run_shared", input: validInput() })
+    await sixb.workflows.request(draftInvoice, { runId: "run_shared", input: validInput() })
 
     await expect(
-      pario.workflows.requestById({
+      sixb.workflows.requestById({
         workflowId: "review-transaction",
         runId: "run_shared",
         input: validInput(),
@@ -161,7 +161,7 @@ describe("pario.workflows.request", () => {
   })
 
   test("persists and emits the run source", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
     const source = {
       type: "webhook" as const,
       connectorId: "companycam",
@@ -169,17 +169,17 @@ describe("pario.workflows.request", () => {
       deliveryId: "delivery-1",
     }
 
-    const result = await pario.workflows.request(draftInvoice, { input: validInput(), source })
+    const result = await sixb.workflows.request(draftInvoice, { input: validInput(), source })
 
-    const run = await pario.storage.workflowRuns?.getById({ projectId: pario.id, id: result.runId })
+    const run = await sixb.storage.workflowRuns?.getById({ projectId: sixb.id, id: result.runId })
     expect(run?.source).toEqual(source)
 
-    const events = await pario.events.read({ types: ["workflow.run.queued"] })
+    const events = await sixb.events.read({ types: ["workflow.run.queued"] })
     expect(events[0]?.payload).toMatchObject({ source })
   })
 
   test("retried webhook delivery with a deterministic runId enqueues a single run", async () => {
-    const pario = createPario()
+    const sixb = createSixb()
     const source = {
       type: "webhook" as const,
       connectorId: "companycam",
@@ -188,47 +188,47 @@ describe("pario.workflows.request", () => {
     }
     const options = { runId: "run_companycam_photo-1", input: validInput(), source }
 
-    const first = await pario.workflows.request(draftInvoice, options)
-    const second = await pario.workflows.request(draftInvoice, options)
+    const first = await sixb.workflows.request(draftInvoice, options)
+    const second = await sixb.workflows.request(draftInvoice, options)
 
     expect(first.created).toBe(true)
     expect(second.created).toBe(false)
-    expect(await claimAll(pario)).toHaveLength(1)
+    expect(await claimAll(sixb)).toHaveLength(1)
   })
 
   test("throws a clear error when workflow run storage is not configured", async () => {
-    const pario = createPario()
-    const runtime: ParioRuntimeContext = {
-      projectId: pario.id,
-      ontology: pario.ontology,
-      actionRegistry: pario.actionRegistry,
-      events: pario.events,
-      storage: { ...pario.storage, workflowRuns: undefined } as Storage,
-      lakeStorage: pario.lakeStorage,
-      blobStorage: pario.blobStorage,
-      queues: pario.queues,
+    const sixb = createSixb()
+    const runtime: SixbRuntimeContext = {
+      projectId: sixb.id,
+      ontology: sixb.ontology,
+      actionRegistry: sixb.actionRegistry,
+      events: sixb.events,
+      storage: { ...sixb.storage, workflowRuns: undefined } as Storage,
+      lakeStorage: sixb.lakeStorage,
+      blobStorage: sixb.blobStorage,
+      queues: sixb.queues,
     }
 
     await expect(
       requestWorkflowRun(runtime, draftInvoice, { input: validInput() })
-    ).rejects.toThrow("[Pario] Workflow run storage is not configured.")
+    ).rejects.toThrow("[Sixb] Workflow run storage is not configured.")
   })
 
   test("throws a clear error when the workflow queue is not configured", async () => {
-    const pario = createPario()
-    const runtime: ParioRuntimeContext = {
-      projectId: pario.id,
-      ontology: pario.ontology,
-      actionRegistry: pario.actionRegistry,
-      events: pario.events,
-      storage: pario.storage,
-      lakeStorage: pario.lakeStorage,
-      blobStorage: pario.blobStorage,
-      queues: { ...pario.queues, workflows: undefined } as unknown as Queues,
+    const sixb = createSixb()
+    const runtime: SixbRuntimeContext = {
+      projectId: sixb.id,
+      ontology: sixb.ontology,
+      actionRegistry: sixb.actionRegistry,
+      events: sixb.events,
+      storage: sixb.storage,
+      lakeStorage: sixb.lakeStorage,
+      blobStorage: sixb.blobStorage,
+      queues: { ...sixb.queues, workflows: undefined } as unknown as Queues,
     }
 
     await expect(
       requestWorkflowRun(runtime, draftInvoice, { input: validInput() })
-    ).rejects.toThrow("[Pario] Workflow run queue is not configured.")
+    ).rejects.toThrow("[Sixb] Workflow run queue is not configured.")
   })
 })

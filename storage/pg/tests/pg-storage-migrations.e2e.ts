@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { migrateStorage } from "@pario/core"
+import { migrateStorage } from "@sixb/core"
 import { SQL } from "bun"
 import {
   POSTGRES_STORAGE_ADAPTER_ID,
@@ -134,10 +134,10 @@ describe("Postgres storage migrations", () => {
   test("serializes concurrent storage migrations for the same schema", async () => {
     const connectionString = process.env.DATABASE_URL
     if (!connectionString) {
-      throw new Error("[ParioPg] DATABASE_URL is required for Postgres migration tests.")
+      throw new Error("[SixbPg] DATABASE_URL is required for Postgres migration tests.")
     }
 
-    const schemaName = `pario_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
     const storages = Array.from(
       { length: 4 },
       () => new PostgresStorage({ connectionString, schemaName, max: 2 })
@@ -310,7 +310,7 @@ async function readMigrationRows(schemaName: string): Promise<
   return withSql(async (sql) => {
     const rows = (await sql.unsafe(`
       SELECT adapter_id, version, id, status, length(checksum) AS checksum_length
-      FROM ${quoteIdent(schemaName)}.pario_migrations
+      FROM ${quoteIdent(schemaName)}.sixb_migrations
       ORDER BY adapter_id, version
     `)) as Array<{
       adapter_id: string
@@ -377,7 +377,7 @@ async function readTableColumns(schemaName: string, tableName: string): Promise<
 
 async function dropMigrationHistory(schemaName: string): Promise<void> {
   await withSql((sql) =>
-    sql.unsafe(`DROP TABLE IF EXISTS ${quoteIdent(schemaName)}.pario_migrations`)
+    sql.unsafe(`DROP TABLE IF EXISTS ${quoteIdent(schemaName)}.sixb_migrations`)
   )
 }
 
@@ -385,7 +385,7 @@ async function writeStartedMigration(schemaName: string): Promise<void> {
   await withSql((sql) =>
     sql.unsafe(
       `
-        INSERT INTO ${quoteIdent(schemaName)}.pario_migrations (
+        INSERT INTO ${quoteIdent(schemaName)}.sixb_migrations (
           adapter_id, version, id, checksum, status, started_at, finished_at
         ) VALUES ($1, 1, '001-initial-schema', NULL, 'started', $2, NULL)
       `,
@@ -396,7 +396,7 @@ async function writeStartedMigration(schemaName: string): Promise<void> {
 
 async function withSql<T>(run: (sql: SQL) => Promise<T>): Promise<T> {
   const connectionString = process.env.DATABASE_URL
-  if (!connectionString) throw new Error("[ParioPg] DATABASE_URL is required.")
+  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
 
   const sql = new SQL({ url: connectionString, max: 1 })
   try {

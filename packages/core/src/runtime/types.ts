@@ -1,7 +1,7 @@
 /**
  * Core type definitions for the runtime layer.
  *
- * Hierarchy: Broker + Storage + Queues → Pario → ObjectSet → ObjectByIdHandle
+ * Hierarchy: Broker + Storage + Queues → Sixb → ObjectSet → ObjectByIdHandle
  * Each level narrows generic parameters so downstream code stays type-safe.
  */
 
@@ -50,13 +50,13 @@ import type { WorkflowsRuntime } from "../workflows"
 /**
  * Shared runtime context holding infrastructure + ontology registry.
  *
- * Built once by `Pario` at construction time and threaded to `objects/`
+ * Built once by `Sixb` at construction time and threaded to `objects/`
  * service and leaf functions.
  *
- * `Pario` satisfies this structurally — callers can pass `pario` directly
- * wherever a `ParioRuntimeContext` is expected.
+ * `Sixb` satisfies this structurally — callers can pass `sixb` directly
+ * wherever a `SixbRuntimeContext` is expected.
  */
-export interface ParioRuntimeContext {
+export interface SixbRuntimeContext {
   readonly projectId: string
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -307,12 +307,12 @@ export interface ObjectByIdHandle<
 }
 
 /**
- * Public API surface of a Pario runtime instance.
+ * Public API surface of a Sixb runtime instance.
  *
- * The class `Pario<T>` implements this interface so the contract is
+ * The class `Sixb<T>` implements this interface so the contract is
  * enforced at compile time and easy to scan in one place.
  */
-export interface ParioInstance<_ extends readonly OntologySource[]> {
+export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly id: string
   readonly ontology: OntologyRegistry
   readonly broker: Broker
@@ -422,7 +422,7 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
    *
    * Not part of this interface because `ObjectSet` triggers deep type
    * instantiation when the generic parameter is the widened base
-   * `ObjectTypeWithPropertyTokens`. Use `pario.objects(MyConcreteType)`
+   * `ObjectTypeWithPropertyTokens`. Use `sixb.objects(MyConcreteType)`
    * directly — TypeScript infers the narrow type from the literal.
    *
    * Signature: `objects<T>(objectType: T): ObjectSet<T, RegisteredValueTypes>`

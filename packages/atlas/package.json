@@ -1,5 +1,5 @@
 {
-  "name": "@pario/atlas",
+  "name": "@sixb/atlas",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,9 +13,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@pario/client": "workspace:*",
-    "@pario/core": "workspace:*",
-    "@pario/ui": "workspace:*",
+    "@sixb/client": "workspace:*",
+    "@sixb/core": "workspace:*",
+    "@sixb/ui": "workspace:*",
     "@tanstack/react-query": "^5.0.0",
     "@xyflow/react": "^12.10.2",
     "lucide-react": "^0.562.0",

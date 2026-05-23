@@ -10,7 +10,7 @@ import {
   type LakeWriteSession,
   type SyncRunFailure,
   type SyncRunRecord,
-} from "@pario/core"
+} from "@sixb/core"
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
 
@@ -35,7 +35,7 @@ function createBookkeepingError(options: {
 }): Error {
   // The lake commit is already durable here, so we surface an explicit repair-needed error.
   return new Error(
-    `[ParioSyncWorker] Sync '${options.syncId}' committed dataset version '${options.version.versionId}', but failed to finalize sync run '${options.runId}'. The dataset commit may already have succeeded and the sync run record may need repair.`,
+    `[SixbSyncWorker] Sync '${options.syncId}' committed dataset version '${options.version.versionId}', but failed to finalize sync run '${options.runId}'. The dataset commit may already have succeeded and the sync run record may need repair.`,
     { cause: options.cause }
   )
 }
@@ -45,7 +45,7 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
     return finishedAt
   }
 
-  throw new Error(`[ParioSyncWorker] Sync run '${runId}' finished without a finishedAt timestamp.`)
+  throw new Error(`[SixbSyncWorker] Sync run '${runId}' finished without a finishedAt timestamp.`)
 }
 
 async function verifyFileRef(options: {
@@ -59,19 +59,19 @@ async function verifyFileRef(options: {
   const blobInfo = await options.blobStorage.stat(options.fileRef.blobId)
   if (!blobInfo) {
     throw new Error(
-      `[ParioSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing unknown blob '${options.fileRef.blobId}'.`
+      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing unknown blob '${options.fileRef.blobId}'.`
     )
   }
 
   if (blobInfo.digest !== options.fileRef.digest) {
     throw new Error(
-      `[ParioSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with digest '${options.fileRef.digest}', but blob storage has '${blobInfo.digest}'.`
+      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with digest '${options.fileRef.digest}', but blob storage has '${blobInfo.digest}'.`
     )
   }
 
   if (blobInfo.sizeBytes !== options.fileRef.sizeBytes) {
     throw new Error(
-      `[ParioSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with size ${options.fileRef.sizeBytes}, but blob storage has ${blobInfo.sizeBytes}.`
+      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with size ${options.fileRef.sizeBytes}, but blob storage has ${blobInfo.sizeBytes}.`
     )
   }
 }
@@ -117,13 +117,13 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
   const sync = runtime.getSyncById(job.syncId)
   if (!sync) {
-    throw new Error(`[ParioSyncWorker] Unknown sync '${job.syncId}'.`)
+    throw new Error(`[SixbSyncWorker] Unknown sync '${job.syncId}'.`)
   }
 
   const dataset = runtime.getDatasetById(sync.target.dataset.id)
   if (!dataset) {
     throw new Error(
-      `[ParioSyncWorker] Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'.`
+      `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${sync.target.dataset.id}'.`
     )
   }
 
@@ -198,7 +198,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           const validationError = getDatasetRowValidationError(row, dataset)
           if (validationError) {
             throw new Error(
-              `[ParioSyncWorker] Sync '${sync.id}' returned an invalid row at item ${itemIndex}. ${validationError}`
+              `[SixbSyncWorker] Sync '${sync.id}' returned an invalid row at item ${itemIndex}. ${validationError}`
             )
           }
 

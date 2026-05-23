@@ -15,11 +15,11 @@ describe("DuckLake version metadata", () => {
     expect(() => parseVersionId("ducklake:not-a-number")).toThrow("Invalid DuckLake version id")
   })
 
-  test("parses Pario commit metadata from DuckLake extra info", () => {
+  test("parses Sixb commit metadata from DuckLake extra info", () => {
     expect(
       parseCommitMetadata(
         JSON.stringify({
-          pario: {
+          sixb: {
             kind: "datasetVersion",
             datasetId: "raw.erp.orders",
             commitId: "commit_123",
@@ -46,15 +46,15 @@ describe("DuckLake version metadata", () => {
   test("ignores malformed optional commit metadata fields", () => {
     expect(parseCommitMetadata(undefined)).toBeUndefined()
     expect(parseCommitMetadata("{not-json")).toBeUndefined()
-    expect(parseCommitMetadata(JSON.stringify({ pario: {} }))).toBeUndefined()
+    expect(parseCommitMetadata(JSON.stringify({ sixb: {} }))).toBeUndefined()
     expect(
-      parseCommitMetadata(JSON.stringify({ pario: { datasetId: "raw.erp.orders" } }))
+      parseCommitMetadata(JSON.stringify({ sixb: { datasetId: "raw.erp.orders" } }))
     ).toBeUndefined()
 
     expect(
       parseCommitMetadata(
         JSON.stringify({
-          pario: {
+          sixb: {
             kind: "datasetVersion",
             datasetId: "raw.erp.orders",
             mode: "merge",

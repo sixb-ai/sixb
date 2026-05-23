@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { ParioRuntimeContext } from "../runtime/types"
+import type { SixbRuntimeContext } from "../runtime/types"
 import { WorkflowValidationError } from "./errors"
 import { snapshotWorkflowInput } from "./snapshot"
 import type { WorkflowDefinition, WorkflowRunSource } from "./types"
@@ -33,18 +33,18 @@ export interface WorkflowRunRequestResult {
  * context, so it stays decoupled from how workflows are registered or looked up.
  */
 export async function requestWorkflowRun(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   workflow: WorkflowDefinition,
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
   const storage = runtime.storage.workflowRuns
   if (!storage) {
-    throw new WorkflowValidationError("[Pario] Workflow run storage is not configured.")
+    throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")
   }
 
   const queue = runtime.queues.workflows
   if (!queue) {
-    throw new WorkflowValidationError("[Pario] Workflow run queue is not configured.")
+    throw new WorkflowValidationError("[Sixb] Workflow run queue is not configured.")
   }
 
   const runId = createWorkflowRunId(options.runId)
@@ -61,7 +61,7 @@ export async function requestWorkflowRun(
   if (existing) {
     if (existing.workflowId !== workflow.id) {
       throw new WorkflowValidationError(
-        `[Pario] Workflow run '${runId}' already exists for a different workflow '${existing.workflowId}'.`
+        `[Sixb] Workflow run '${runId}' already exists for a different workflow '${existing.workflowId}'.`
       )
     }
 
@@ -120,7 +120,7 @@ export async function requestWorkflowRun(
 function createWorkflowRunId(runId: string | undefined): string {
   if (runId !== undefined) {
     if (!runId.trim()) {
-      throw new WorkflowValidationError("[Pario] Workflow run id must not be empty")
+      throw new WorkflowValidationError("[Sixb] Workflow run id must not be empty")
     }
     return runId
   }

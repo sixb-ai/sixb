@@ -1,4 +1,4 @@
-import { defineObjectType, defineOntology, link, Pario, prop } from "../src"
+import { defineObjectType, defineOntology, link, prop, Sixb } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Room = defineObjectType({
@@ -32,10 +32,10 @@ const Buildings = defineOntology({
   objectTypes: [Room, Thermostat],
 })
 
-const pario = new Pario({ ontology: [Buildings], ...createTestRuntimeDeps() })
+const sixb = new Sixb({ ontology: [Buildings], ...createTestRuntimeDeps() })
 
 async function contract(): Promise<void> {
-  await pario.objects(Room).upsert({
+  await sixb.objects(Room).upsert({
     properties: {
       id: "room:101",
       externalId: "RM-101",
@@ -43,19 +43,19 @@ async function contract(): Promise<void> {
     },
   })
 
-  await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+  await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
     value: 22.4,
     unit: "degreeCelsius",
     at: new Date(),
   })
 
-  const room = await pario.objects(Room).findFirst({
+  const room = await sixb.objects(Room).findFirst({
     where: (r) => r.p.externalId.eq("RM-101"),
   })
 
   void room
 
-  const tstat = await pario.objects(Thermostat).upsert({
+  const tstat = await sixb.objects(Thermostat).upsert({
     properties: {
       id: "tstat:abc",
       externalId: "device-123",
@@ -63,18 +63,18 @@ async function contract(): Promise<void> {
     },
   })
 
-  await pario.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
+  await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, tstat)
 
-  await pario.objects(Room).byId("room:101").link(Room.l.hasThermostat, {
+  await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, {
     // @ts-expect-error hasThermostat must point to Thermostat
     objectTypeId: "Room",
     primaryId: "room:999",
   })
 
   // @ts-expect-error non-telemetry properties are not valid telemetry tokens
-  pario.objects(Room).byId("room:101").telemetry(Room.p.name)
+  sixb.objects(Room).byId("room:101").telemetry(Room.p.name)
 
-  await pario.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
+  await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).append({
     // @ts-expect-error currentTemperature expects numeric values
     value: "hot",
     unit: "degreeCelsius",

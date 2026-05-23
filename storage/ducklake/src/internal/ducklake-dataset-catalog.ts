@@ -4,8 +4,8 @@ import type {
   DatasetDefinitionUpdatePlan,
   DatasetSchema,
   DatasetSchemaUpdatePlan,
-} from "@pario/core"
-import { LakeStorageError, planDatasetDefinitionUpdate } from "@pario/core"
+} from "@sixb/core"
+import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
@@ -35,10 +35,10 @@ interface PartitionColumnRow {
 }
 
 /**
- * Translates between Pario dataset definitions and DuckLake table metadata.
+ * Translates between Sixb dataset definitions and DuckLake table metadata.
  *
  * DuckLake stays the source of truth for the physical table, schema, comments,
- * and partitioning. Pario only decides which definition changes are safe to
+ * and partitioning. Sixb only decides which definition changes are safe to
  * translate into DuckLake DDL.
  */
 export class DuckLakeDatasetCatalog {
@@ -50,7 +50,7 @@ export class DuckLakeDatasetCatalog {
   async createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {
     this.assertSchema(definition)
 
-    // Step 1: read the current DuckLake table back into Pario shape. The
+    // Step 1: read the current DuckLake table back into Sixb shape. The
     // existing definition is DuckLake's catalog state; the next definition is
     // the developer's current source definition.
     const existing = await this.getDataset(definition.id)
@@ -138,7 +138,7 @@ export class DuckLakeDatasetCatalog {
     this.connections.assertOpen()
 
     return this.connections.withAttachedRuntime(async (runtime) => {
-      // Only Pario-encoded dataset tables are surfaced. Any DuckLake metadata,
+      // Only Sixb-encoded dataset tables are surfaced. Any DuckLake metadata,
       // internal tables, or unrelated user tables remain invisible to LakeStorage.
       const rows = await runtime.query(
         `SELECT table_name FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
@@ -178,7 +178,7 @@ export class DuckLakeDatasetCatalog {
   assertSchema(definition: DatasetDefinition): void {
     if (!definition.schema) {
       throw new LakeStorageError(
-        `[ParioDuckLake] Dataset '${definition.id}' requires a schema for DuckLake storage.`
+        `[SixbDuckLake] Dataset '${definition.id}' requires a schema for DuckLake storage.`
       )
     }
   }
@@ -193,7 +193,7 @@ export class DuckLakeDatasetCatalog {
         return
       }
 
-      // Schema-only DuckLake snapshots still matter to Pario. Apply schema and
+      // Schema-only DuckLake snapshots still matter to Sixb. Apply schema and
       // compatible metadata DDL atomically, then tag the commit so versions can
       // treat it as this dataset's schema-change version.
       await runtime.run("BEGIN TRANSACTION")
@@ -266,7 +266,7 @@ export class DuckLakeDatasetCatalog {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new LakeStorageError(
-        `[ParioDuckLake] Dataset '${definition.id}' cannot apply partitionBy because DuckLake rejected ALTER TABLE SET PARTITIONED BY: ${message}`
+        `[SixbDuckLake] Dataset '${definition.id}' cannot apply partitionBy because DuckLake rejected ALTER TABLE SET PARTITIONED BY: ${message}`
       )
     }
   }
@@ -278,10 +278,10 @@ export class DuckLakeDatasetCatalog {
   ): Promise<void> {
     await runtime.run(
       `CALL ${quoteIdentifier(duckLakeAlias(this.options))}.set_commit_message(${quoteSqlString(
-        "Pario"
+        "Sixb"
       )}, ${quoteSqlString(`evolve dataset ${datasetId} schema`)}, extra_info => ${quoteSqlString(
         JSON.stringify({
-          pario: {
+          sixb: {
             kind: "datasetVersion",
             datasetId,
             commitId: randomUUID(),
@@ -359,7 +359,7 @@ export class DuckLakeDatasetCatalog {
 
     // DuckLake exposes current partition metadata through the metadata catalog
     // attached beside the user-facing lake catalog. V1 only accepts identity
-    // transforms because Pario's dataset definition stores partition columns,
+    // transforms because Sixb's dataset definition stores partition columns,
     // not arbitrary partition expressions such as year(orderDate).
     const rows = await runtime.query(`
       SELECT column_meta.column_name, partition_column.transform
@@ -387,7 +387,7 @@ export class DuckLakeDatasetCatalog {
 
       if (partition.transform !== "identity") {
         throw new LakeStorageError(
-          `[ParioDuckLake] Dataset table '${tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
+          `[SixbDuckLake] Dataset table '${tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
         )
       }
 
@@ -398,7 +398,7 @@ export class DuckLakeDatasetCatalog {
 
 function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
-    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
+    throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
 }
 
@@ -415,6 +415,6 @@ function getDescribeColumnNullable(row: Readonly<Record<string, unknown>>): bool
   }
 
   throw new LakeStorageError(
-    `[ParioDuckLake] Expected DuckDB DESCRIBE column 'null' to be YES or NO.`
+    `[SixbDuckLake] Expected DuckDB DESCRIBE column 'null' to be YES or NO.`
   )
 }

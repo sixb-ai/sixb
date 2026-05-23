@@ -90,6 +90,6 @@ class MagicLinkConfigError extends Error {
   readonly name = "MagicLinkConfigError"
 
   constructor(message: string) {
-    super(`[Pario] ${message}`)
+    super(`[Sixb] ${message}`)
   }
 }

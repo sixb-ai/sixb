@@ -7,10 +7,10 @@ import {
 } from "../src/lib/browser-topology"
 
 const PUBLIC_ORIGIN_ENV = [
-  "PARIO_API_PUBLIC_ORIGIN",
-  "PARIO_ATLAS_PUBLIC_ORIGIN",
-  "PARIO_SENTINEL_PUBLIC_ORIGIN",
-  "PARIO_APP_PUBLIC_ORIGIN",
+  "SIXB_API_PUBLIC_ORIGIN",
+  "SIXB_ATLAS_PUBLIC_ORIGIN",
+  "SIXB_SENTINEL_PUBLIC_ORIGIN",
+  "SIXB_APP_PUBLIC_ORIGIN",
 ] as const
 const originalEnv = Object.fromEntries(PUBLIC_ORIGIN_ENV.map((name) => [name, process.env[name]]))
 
@@ -73,14 +73,14 @@ describe("browser topology", () => {
         mode: "production",
         includeCustomApp: true,
       })
-    ).toThrow("PARIO_API_PUBLIC_ORIGIN")
+    ).toThrow("SIXB_API_PUBLIC_ORIGIN")
   })
 
   test("uses configured production origins and bind ports", () => {
-    process.env.PARIO_API_PUBLIC_ORIGIN = "https://api.example.com"
-    process.env.PARIO_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
-    process.env.PARIO_SENTINEL_PUBLIC_ORIGIN = "https://sentinel.example.com"
-    process.env.PARIO_APP_PUBLIC_ORIGIN = "https://app.example.com"
+    process.env.SIXB_API_PUBLIC_ORIGIN = "https://api.example.com"
+    process.env.SIXB_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.SIXB_SENTINEL_PUBLIC_ORIGIN = "https://sentinel.example.com"
+    process.env.SIXB_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
     const topology = resolveBrowserTopology({
       mode: "production",

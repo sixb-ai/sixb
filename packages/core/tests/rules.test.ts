@@ -5,16 +5,16 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { OntologySource, RuleDefinition } from "../src"
 import {
-  createPario,
+  createSixb,
   defineObjectType,
   defineRule,
   deriveRuleEventDependencies,
   EventsRuntime,
   InMemoryBroker,
   link,
-  Pario,
   prop,
   RuleValidationError,
+  Sixb,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -198,15 +198,15 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
 `
     )
 
-    const pario = await createPario({
+    const sixb = await createSixb({
       projectRoot,
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getRuleDefinitions().map((rule) => rule.id)).toEqual([
+    expect(sixb.getRuleDefinitions().map((rule) => rule.id)).toEqual([
       "transaction.requires-document",
     ])
-    expect(pario.getRuleById("transaction.requires-document")?.predicate).toEqual({
+    expect(sixb.getRuleById("transaction.requires-document")?.predicate).toEqual({
       kind: "link",
       linkId: "document",
       op: "isMissing",
@@ -285,15 +285,13 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
 })
 
 async function createTempProjectRoot(): Promise<string> {
-  const projectRoot = await mkdtemp(join(tmpdir(), "pario-core-rules-"))
+  const projectRoot = await mkdtemp(join(tmpdir(), "sixb-core-rules-"))
   tempRoots.add(projectRoot)
   return projectRoot
 }
 
-function createRuntimeWithRules(
-  rules: readonly RuleDefinition[]
-): Pario<readonly OntologySource[]> {
-  return new Pario<readonly OntologySource[]>({
+function createRuntimeWithRules(rules: readonly RuleDefinition[]): Sixb<readonly OntologySource[]> {
+  return new Sixb<readonly OntologySource[]>({
     ontology: [Transaction, Document],
     rules,
     ...createTestRuntimeDeps(),

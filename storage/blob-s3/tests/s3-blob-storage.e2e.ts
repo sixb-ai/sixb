@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { BlobStorageError } from "@pario/core"
+import { BlobStorageError } from "@sixb/core"
 import { S3BlobStorage } from "../src"
 
 const encoder = new TextEncoder()
 
 function createStorage(): S3BlobStorage {
   return new S3BlobStorage({
-    bucket: process.env.PARIO_S3_BUCKET,
-    endpoint: process.env.PARIO_S3_ENDPOINT,
-    accessKeyId: process.env.PARIO_S3_ACCESS_KEY_ID,
-    secretAccessKey: process.env.PARIO_S3_SECRET_ACCESS_KEY,
+    bucket: process.env.SIXB_S3_BUCKET,
+    endpoint: process.env.SIXB_S3_ENDPOINT,
+    accessKeyId: process.env.SIXB_S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.SIXB_S3_SECRET_ACCESS_KEY,
     region: "us-east-1",
     basePath: `test-${randomUUID()}`,
   })

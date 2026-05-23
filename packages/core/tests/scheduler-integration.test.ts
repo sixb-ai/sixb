@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from "bun:test"
-import { defineObjectType, defineSchedule, Pario, prop } from "../src"
+import { defineObjectType, defineSchedule, prop, Sixb } from "../src"
 import type { StoredScheduleTriggeredEvent } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -11,7 +11,7 @@ const Stub = defineObjectType({
 
 const MINUTE = 60_000
 
-describe("Scheduler integration with Pario", () => {
+describe("Scheduler integration with Sixb", () => {
   beforeEach(() => {
     jest.useFakeTimers()
   })
@@ -24,42 +24,42 @@ describe("Scheduler integration with Pario", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("hourly").cron("0 * * * *")
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
     })
 
-    await pario.startScheduler()
+    await sixb.startScheduler()
 
     // Advance past the next hour mark
     jest.advanceTimersByTime(60 * MINUTE)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["schedule.triggered"],
     })
     expect(events.length).toBeGreaterThanOrEqual(1)
     expect((events[0] as StoredScheduleTriggeredEvent).payload.scheduleId).toBe("hourly")
 
-    await pario.stopScheduler()
+    await sixb.stopScheduler()
   })
 
   test("stopScheduler() stops emission", async () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
     })
 
-    await pario.startScheduler()
-    await pario.stopScheduler()
+    await sixb.startScheduler()
+    await sixb.stopScheduler()
 
     jest.advanceTimersByTime(120 * MINUTE)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["schedule.triggered"],
     })
     expect(events).toHaveLength(0)
@@ -68,13 +68,13 @@ describe("Scheduler integration with Pario", () => {
   test("no schedules is a silent no-op", async () => {
     const deps = createTestRuntimeDeps()
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Stub],
       ...deps,
     })
 
-    await pario.startScheduler()
-    await pario.stopScheduler()
+    await sixb.startScheduler()
+    await sixb.stopScheduler()
     // No errors
   })
 
@@ -82,55 +82,55 @@ describe("Scheduler integration with Pario", () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("s1").cron("0 * * * *")
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
     })
 
-    await pario.startScheduler()
-    await pario.startScheduler() // second call is no-op
+    await sixb.startScheduler()
+    await sixb.startScheduler() // second call is no-op
 
     jest.advanceTimersByTime(60 * MINUTE)
 
-    const events = await pario.events.read({
+    const events = await sixb.events.read({
       types: ["schedule.triggered"],
     })
     // Should not have duplicated timers
     expect(events.length).toBeGreaterThanOrEqual(1)
 
-    await pario.stopScheduler()
+    await sixb.stopScheduler()
   })
 
   test("full lifecycle", async () => {
     const deps = createTestRuntimeDeps()
     const schedule = defineSchedule("every-hour").cron("0 * * * *")
 
-    const pario = new Pario({
+    const sixb = new Sixb({
       ontology: [Stub],
       schedules: [schedule],
       ...deps,
     })
 
     // Start
-    await pario.startScheduler()
+    await sixb.startScheduler()
 
     // Fire
     jest.advanceTimersByTime(60 * MINUTE)
 
-    let events = await pario.events.read({
+    let events = await sixb.events.read({
       types: ["schedule.triggered"],
     })
     expect(events.length).toBeGreaterThanOrEqual(1)
 
     // Stop
-    await pario.stopScheduler()
+    await sixb.stopScheduler()
 
     const countBefore = events.length
 
     jest.advanceTimersByTime(120 * MINUTE)
 
-    events = await pario.events.read({
+    events = await sixb.events.read({
       types: ["schedule.triggered"],
     })
     // No new events after stop

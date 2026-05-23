@@ -28,8 +28,8 @@ describe("createCustomApp.start", () => {
   let tempRoot = ""
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "pario-app-start-"))
-    const outdir = join(tempRoot, ".pario", "dist", "app")
+    tempRoot = await mkdtemp(join(tmpdir(), "sixb-app-start-"))
+    const outdir = join(tempRoot, ".sixb", "dist", "app")
 
     await mkdir(outdir, { recursive: true })
     await writeFile(
@@ -116,7 +116,7 @@ describe("createCustomApp.dev", () => {
   let tempRoot = ""
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "pario-app-dev-"))
+    tempRoot = await mkdtemp(join(tmpdir(), "sixb-app-dev-"))
     const appDir = join(tempRoot, "app")
     await mkdir(appDir, { recursive: true })
     await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
@@ -128,7 +128,7 @@ describe("createCustomApp.dev", () => {
     }
   })
 
-  test("keeps Pario API-owned routes out of the dev app origin", async () => {
+  test("keeps Sixb API-owned routes out of the dev app origin", async () => {
     const port = await getFreePort()
     const app = await createCustomApp({
       rootDir: tempRoot,

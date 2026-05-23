@@ -1,4 +1,4 @@
-import { Badge, Card, CardContent } from "@pario/ui/components"
+import { Badge, Card, CardContent } from "@sixb/ui/components"
 import { Box, UserCheck, Workflow, Zap } from "lucide-react"
 import type { WorkflowNode } from "../../utils/workflows"
 import { SchemaShape } from "./SchemaShape"

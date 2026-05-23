@@ -5,7 +5,7 @@ import {
   RetentionPolicy,
   StorageType,
 } from "@nats-io/jetstream"
-import type { BrokerRetention, BrokerStreamDefinition } from "@pario/core"
+import type { BrokerRetention, BrokerStreamDefinition } from "@sixb/core"
 import type { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"
@@ -14,18 +14,18 @@ import { buildStreamSubject, encodeSubjectToken } from "./subjects"
 /**
  * Build the JetStream stream name for a broker stream.
  *
- * Format: `PARIO_BRK_{namespace}_{projectId}_{encodedStreamId}`. The `BRK_`
+ * Format: `SIXB_BRK_{namespace}_{projectId}_{encodedStreamId}`. The `BRK_`
  * infix distinguishes broker streams from older event streams and leaves
- * room for other Pario-owned JetStream resources.
+ * room for other Sixb-owned JetStream resources.
  */
 export function streamNameFor(namespace: string, projectId: string, streamId: string): string {
-  return `PARIO_BRK_${namespace}_${projectId}_${encodeSubjectToken(streamId)}`
+  return `SIXB_BRK_${namespace}_${projectId}_${encodeSubjectToken(streamId)}`
 }
 
 /**
  * Owns JetStream stream provisioning on behalf of NatsBroker.
  *
- * Each Pario project and broker stream id maps to its own JetStream stream.
+ * Each Sixb project and broker stream id maps to its own JetStream stream.
  * That gives events, future agent messages, and any other broker-backed lanes
  * independent retention, replay, and purging semantics. The manager caches
  * stream names it has already verified so repeat append/read/subscribe calls

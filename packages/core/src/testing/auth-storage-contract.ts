@@ -64,7 +64,7 @@ async function createUser(
 /**
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
- * The suite is the storage-independent specification for Pario auth state: users, identities,
+ * The suite is the storage-independent specification for Sixb auth state: users, identities,
  * sessions, invitations, group memberships, magic links, OIDC attempts, and atomic sign-in
  * completion.
  */

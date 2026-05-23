@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
-import type { OntologySource, Pario, SyncDefinition, SyncRunRecord } from "@pario/core"
+import type { OntologySource, Sixb, SyncDefinition, SyncRunRecord } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RequestSyncRunBodySchema,
@@ -32,15 +32,15 @@ function serializeSyncRun(run: SyncRunRecord) {
 }
 
 async function getLatestSyncRun(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   syncId: string
 ): Promise<ReturnType<typeof serializeSyncRun> | null> {
-  if (!pario.storage.syncRuns) {
+  if (!sixb.storage.syncRuns) {
     return null
   }
 
-  const result = await pario.storage.syncRuns.list({
-    projectId: pario.id,
+  const result = await sixb.storage.syncRuns.list({
+    projectId: sixb.id,
     syncId,
     limit: 1,
     order: "desc",
@@ -51,7 +51,7 @@ async function getLatestSyncRun(
 }
 
 async function serializeSync(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   sync: SyncDefinition
 ): Promise<ReturnType<typeof SyncSchema.parse>> {
   return SyncSchema.parse({
@@ -66,18 +66,16 @@ async function serializeSync(
       dataset: sync.target.dataset,
     },
     triggers: sync.triggers,
-    latestRun: await getLatestSyncRun(pario, sync.id),
+    latestRun: await getLatestSyncRun(sixb, sync.id),
   })
 }
 
-export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/syncs",
       async () => {
-        return await Promise.all(
-          pario.getSyncDefinitions().map((sync) => serializeSync(pario, sync))
-        )
+        return await Promise.all(sixb.getSyncDefinitions().map((sync) => serializeSync(sixb, sync)))
       },
       {
         response: { 200: SyncSchema.array() },
@@ -91,13 +89,13 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
     .get(
       "/api/syncs/:syncId",
       async ({ params, set }) => {
-        const sync = pario.getSyncById(params.syncId)
+        const sync = sixb.getSyncById(params.syncId)
         if (!sync) {
           set.status = 404
           return { error: "Sync not found" }
         }
 
-        return await serializeSync(pario, sync)
+        return await serializeSync(sixb, sync)
       },
       {
         params: SyncParamsSchema,
@@ -114,7 +112,7 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
       async ({ query, set }) => {
         try {
           const parsed = SyncRunsQuerySchema.parse(query)
-          const storage = pario.storage.syncRuns
+          const storage = sixb.storage.syncRuns
           if (!storage) {
             return {
               runs: [],
@@ -124,7 +122,7 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
           }
 
           const result = await storage.list({
-            projectId: pario.id,
+            projectId: sixb.id,
             syncId: parsed.syncId,
             datasetId: parsed.datasetId,
             statuses: parsed.status ? [parsed.status] : undefined,
@@ -158,13 +156,13 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
       "/api/syncs/:syncId/runs",
       async ({ params, body, set }) => {
         try {
-          const sync = pario.getSyncById(params.syncId)
+          const sync = sixb.getSyncById(params.syncId)
           if (!sync) {
             set.status = 404
             return { error: "Sync not found" }
           }
 
-          if (!pario.storage.syncRuns) {
+          if (!sixb.storage.syncRuns) {
             set.status = 400
             return { error: "Sync run storage is not configured" }
           }
@@ -172,8 +170,8 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
           const parsedBody = RequestSyncRunBodySchema.parse(body)
           const runId = `run_${randomUUID()}`
           const queuedAt = new Date().toISOString()
-          const [job] = await pario.queues.syncRuns.enqueue({
-            projectId: pario.id,
+          const [job] = await sixb.queues.syncRuns.enqueue({
+            projectId: sixb.id,
             jobs: [
               {
                 type: "sync.run.requested",
@@ -210,7 +208,7 @@ export function registerSyncRoutes(app: Elysia, pario: Pario<readonly OntologySo
           summary: "Request a sync run",
           tags: ["Syncs"],
           operationId: "requestSyncRun",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

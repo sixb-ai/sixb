@@ -4,7 +4,7 @@ import {
   type DatasetSchema,
   type FileRef,
   LakeStorageError,
-} from "@pario/core"
+} from "@sixb/core"
 import { quoteIdentifier } from "./sql"
 
 /**
@@ -17,7 +17,7 @@ export interface DuckDbColumnMetadata {
 }
 
 /**
- * Exact DuckDB struct shape used for Pario `fileRef` columns.
+ * Exact DuckDB struct shape used for Sixb `fileRef` columns.
  *
  * The reverse mapper intentionally recognizes only this shape so arbitrary
  * STRUCT or JSON columns are not reconstructed as `fileRef`.
@@ -25,7 +25,7 @@ export interface DuckDbColumnMetadata {
 export const FILE_REF_STRUCT_SQL =
   "STRUCT(blobId VARCHAR, digest VARCHAR, sizeBytes BIGINT, fileName VARCHAR, mediaType VARCHAR, logicalPath VARCHAR)"
 
-const DUCKDB_TYPE_BY_PARIO_TYPE: Readonly<Record<DatasetColumnType, string>> = {
+const DUCKDB_TYPE_BY_SIXB_TYPE: Readonly<Record<DatasetColumnType, string>> = {
   string: "VARCHAR",
   boolean: "BOOLEAN",
   int64: "BIGINT",
@@ -52,14 +52,14 @@ function normalizeSimpleType(typeSql: string): string {
 }
 
 /**
- * Map a Pario dataset column type to the DuckDB type used in CREATE TABLE.
+ * Map a Sixb dataset column type to the DuckDB type used in CREATE TABLE.
  */
 export function datasetColumnTypeToDuckDbSql(type: DatasetColumnType): string {
-  return DUCKDB_TYPE_BY_PARIO_TYPE[type]
+  return DUCKDB_TYPE_BY_SIXB_TYPE[type]
 }
 
 /**
- * Reconstruct a Pario dataset column type from DuckDB column metadata.
+ * Reconstruct a Sixb dataset column type from DuckDB column metadata.
  */
 export function duckDbTypeToDatasetColumnType(typeSql: string): DatasetColumnType {
   if (normalizeWhitespace(typeSql) === FILE_REF_STRUCT_SQL) {
@@ -88,13 +88,13 @@ export function duckDbTypeToDatasetColumnType(typeSql: string): DatasetColumnTyp
       return "json"
     default:
       throw new LakeStorageError(
-        `[ParioDuckLake] DuckDB column type '${typeSql}' cannot be mapped to a Pario dataset column type.`
+        `[SixbDuckLake] DuckDB column type '${typeSql}' cannot be mapped to a Sixb dataset column type.`
       )
   }
 }
 
 /**
- * Render one Pario dataset column as DuckDB DDL.
+ * Render one Sixb dataset column as DuckDB DDL.
  */
 export function datasetColumnToDuckDbSql(column: DatasetColumnDefinition): string {
   const nullableSql = column.nullable ? "" : " NOT NULL"
@@ -116,7 +116,7 @@ export function datasetSchemaColumnNamesSql(schema: DatasetSchema): string {
 }
 
 /**
- * Convert DuckDB column metadata back into a Pario dataset schema.
+ * Convert DuckDB column metadata back into a Sixb dataset schema.
  */
 export function duckDbColumnsToDatasetSchema(
   columns: readonly DuckDbColumnMetadata[]
@@ -155,7 +155,7 @@ export function normalizeReadValue(value: unknown, column: DatasetColumnDefiniti
 
 function normalizeFileRef(value: unknown): FileRef {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new LakeStorageError("[ParioDuckLake] DuckDB fileRef value must be a struct.")
+    throw new LakeStorageError("[SixbDuckLake] DuckDB fileRef value must be a struct.")
   }
 
   const record = value as Record<string, unknown>
@@ -172,7 +172,7 @@ function normalizeFileRef(value: unknown): FileRef {
 function getStringField(record: Readonly<Record<string, unknown>>, key: string): string {
   const value = record[key]
   if (typeof value !== "string") {
-    throw new LakeStorageError(`[ParioDuckLake] DuckDB fileRef field '${key}' must be a string.`)
+    throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`)
   }
 
   return value
@@ -188,7 +188,7 @@ function getOptionalStringField(
   }
 
   if (typeof value !== "string") {
-    throw new LakeStorageError(`[ParioDuckLake] DuckDB fileRef field '${key}' must be a string.`)
+    throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be a string.`)
   }
 
   return value
@@ -204,5 +204,5 @@ function getIntegerField(record: Readonly<Record<string, unknown>>, key: string)
     return Number(value)
   }
 
-  throw new LakeStorageError(`[ParioDuckLake] DuckDB fileRef field '${key}' must be an integer.`)
+  throw new LakeStorageError(`[SixbDuckLake] DuckDB fileRef field '${key}' must be an integer.`)
 }

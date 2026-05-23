@@ -11,7 +11,7 @@ import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "pario.config.ts")
+const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "sixb.config.ts")
 
 const ROLE_TIMEOUT_MS = 30_000
 
@@ -81,7 +81,7 @@ async function getFreePorts(count: number): Promise<readonly number[]> {
 }
 
 async function startRole(args: readonly string[]) {
-  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-roles-"))
+  const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
@@ -107,13 +107,13 @@ const backgroundRoles: Array<{
 describe("role startup connection budget", () => {
   for (const role of backgroundRoles) {
     test(
-      `pario ${role.name} starts without migrating storage or touching lake storage`,
+      `sixb ${role.name} starts without migrating storage or touching lake storage`,
       async () => {
         const { ready, logEntries } = await startRole(role.command)
 
         expect(ready).toBe(true)
         // Production roles do not stampede storage migrations at startup; that is a
-        // dedicated `pario db migrate` release step.
+        // dedicated `sixb db migrate` release step.
         expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
         // Roles do not open the lake catalog at startup either.
         expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
@@ -127,7 +127,7 @@ describe("role startup connection budget", () => {
   }
 
   test(
-    "pario api starts without migrating storage or touching lake storage",
+    "sixb api starts without migrating storage or touching lake storage",
     async () => {
       const [atlasPort, apiPort, sentinelPort] = await getFreePorts(3)
       const { ready, logEntries } = await startRole([

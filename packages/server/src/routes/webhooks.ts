@@ -5,14 +5,14 @@ import type {
   ConnectorDefinition,
   FinishWebhookRunStatus,
   OntologySource,
-  Pario,
   RegisteredWebhook,
+  Sixb,
   WebhookDefinition,
   WebhookDeliveryClaimResult,
   WebhookDeliveryKey,
   WebhookMetadata,
   WebhookResponse,
-} from "@pario/core"
+} from "@sixb/core"
 import type { Elysia } from "elysia"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
@@ -23,7 +23,7 @@ interface ElysiaSet {
 }
 
 interface DispatchWebhookOptions {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly registered: RegisteredWebhook
   readonly request: Request
   readonly set: ElysiaSet
@@ -31,7 +31,7 @@ interface DispatchWebhookOptions {
 }
 
 interface WebhookRunFinishInput {
-  readonly pario: Pario<readonly OntologySource[]>
+  readonly sixb: Sixb<readonly OntologySource[]>
   readonly runId: string | null
   readonly status: FinishWebhookRunStatus
   readonly requestBodyBytes?: number
@@ -54,18 +54,18 @@ type DeliveryClaimResult =
       readonly claimResult: WebhookDeliveryClaimResult
     }
 
-export function registerWebhookRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerWebhookRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app.all(
     "/api/webhooks/:connectorId/:webhookId",
     async ({ params, request, set }) => {
-      const registered = pario.getWebhookById(params.connectorId, params.webhookId)
+      const registered = sixb.getWebhookById(params.connectorId, params.webhookId)
 
       if (!registered) {
         set.status = 404
         return { error: "Webhook not found" }
       }
 
-      return dispatchWebhook({ pario, registered, request, set })
+      return dispatchWebhook({ sixb, registered, request, set })
     },
     {
       detail: {
@@ -76,16 +76,16 @@ export function registerWebhookRoutes(app: Elysia, pario: Pario<readonly Ontolog
 }
 
 async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown> {
-  const { pario, registered, request, set } = options
+  const { sixb, registered, request, set } = options
   const { connector, webhook, route } = registered
-  const runId = await startWebhookRun(pario, registered, request)
+  const runId = await startWebhookRun(sixb, registered, request)
   const requestMethod = request.method.toUpperCase()
 
   if (requestMethod !== webhook.method) {
     set.status = 405
     setHeader(set, "allow", webhook.method)
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       responseStatus: 405,
@@ -102,7 +102,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     const message = error instanceof Error ? error.message : String(error)
     set.status = responseStatus
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       responseStatus,
@@ -113,7 +113,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 
   const metadata = toWebhookMetadata(webhook, route)
   const verifyContext = {
-    pario,
+    sixb,
     connector,
     webhook: metadata,
     request,
@@ -125,7 +125,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   } catch {
     set.status = 401
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -142,7 +142,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     const message = error instanceof Error ? error.message : String(error)
     set.status = 400
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -155,7 +155,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   const handlerContext = {
     ...verifyContext,
     body,
-    client: createClientResolver(pario, connector),
+    client: createClientResolver(sixb, connector),
   }
 
   // Claim before running the handler so duplicate and concurrent provider
@@ -164,13 +164,13 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   let idempotencyKey: string | undefined
   let deliveryClaimResult: WebhookDeliveryClaimResult | undefined
   try {
-    const claim = await claimDeliveryKey(pario, webhook, handlerContext)
+    const claim = await claimDeliveryKey(sixb, webhook, handlerContext)
     idempotencyKey = claim.idempotencyKey
     deliveryClaimResult = claim.claimResult
     if (claim.status === "skip") {
       const result = accepted(set)
       await finishWebhookRun({
-        pario,
+        sixb,
         runId,
         status: "skipped",
         requestBodyBytes: rawBody.byteLength,
@@ -184,7 +184,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   } catch {
     set.status = 500
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -201,7 +201,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
     // Handler failures mark the key failed so the provider's next retry can
     // attempt the delivery again.
     if (deliveryKey) {
-      await pario.storage.webhookDeliveries?.fail({
+      await sixb.storage.webhookDeliveries?.fail({
         ...deliveryKey,
         failedAt: new Date().toISOString(),
         error: error instanceof Error ? error.message : String(error),
@@ -210,7 +210,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 
     set.status = 500
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -225,7 +225,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   try {
     if (deliveryKey) {
       // Mark completion only after the synchronous handler has succeeded.
-      await pario.storage.webhookDeliveries?.complete({
+      await sixb.storage.webhookDeliveries?.complete({
         ...deliveryKey,
         completedAt: new Date().toISOString(),
       })
@@ -233,7 +233,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   } catch {
     set.status = 500
     await finishWebhookRun({
-      pario,
+      sixb,
       runId,
       status: "failed",
       requestBodyBytes: rawBody.byteLength,
@@ -248,7 +248,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   const responseStatus = getWebhookResponseStatus(response)
   const runStatus = responseStatus >= 200 && responseStatus <= 299 ? "succeeded" : "failed"
   await finishWebhookRun({
-    pario,
+    sixb,
     runId,
     status: runStatus,
     requestBodyBytes: rawBody.byteLength,
@@ -262,11 +262,11 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
 }
 
 async function startWebhookRun(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   registered: RegisteredWebhook,
   request: Request
 ): Promise<string | null> {
-  const storage = pario.storage.webhookRuns
+  const storage = sixb.storage.webhookRuns
   if (!storage) {
     return null
   }
@@ -276,7 +276,7 @@ async function startWebhookRun(
   try {
     await storage.start({
       id: runId,
-      projectId: pario.id,
+      projectId: sixb.id,
       connectorId: registered.connector.id,
       webhookId: registered.webhook.id,
       method: request.method.toUpperCase(),
@@ -289,7 +289,7 @@ async function startWebhookRun(
 }
 
 async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
-  const storage = input.pario.storage.webhookRuns
+  const storage = input.sixb.storage.webhookRuns
   if (!storage || !input.runId) {
     return
   }
@@ -297,7 +297,7 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   try {
     await storage.finish({
       id: input.runId,
-      projectId: input.pario.id,
+      projectId: input.sixb.id,
       status: input.status,
       finishedAt: new Date(),
       requestBodyBytes: input.requestBodyBytes,
@@ -341,7 +341,7 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 }
 
 async function claimDeliveryKey(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   webhook: WebhookDefinition,
   context: Parameters<NonNullable<WebhookDefinition["idempotencyKey"]>>[0]
 ): Promise<DeliveryClaimResult> {
@@ -354,13 +354,13 @@ async function claimDeliveryKey(
     return { status: "run", key: null }
   }
 
-  const storage = pario.storage.webhookDeliveries
+  const storage = sixb.storage.webhookDeliveries
   if (!storage) {
     throw new Error("Webhook delivery storage is not configured.")
   }
 
   const deliveryKey = {
-    projectId: pario.id,
+    projectId: sixb.id,
     connectorId: context.connector.id,
     webhookId: webhook.id,
     idempotencyKey,
@@ -383,7 +383,7 @@ async function claimDeliveryKey(
 }
 
 function createClientResolver(
-  pario: Pario<readonly OntologySource[]>,
+  sixb: Sixb<readonly OntologySource[]>,
   connector: ConnectorDefinition
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null
@@ -391,7 +391,7 @@ function createClientResolver(
   return () => {
     // Avoid connecting inbound-only handlers or handlers that never need the
     // outbound client, while still reusing one connection within the request.
-    clientPromise ??= pario.connector(connector)
+    clientPromise ??= sixb.connector(connector)
     return clientPromise
   }
 }

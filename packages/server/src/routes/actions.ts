@@ -1,6 +1,6 @@
-import type { ActionDefinition, OntologySource, Pario } from "@pario/core"
+import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
   ActionCatalogItemSchema,
   ActionIdParamsSchema,
@@ -31,12 +31,12 @@ function serializeAction(
   })
 }
 
-export function registerActionRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
+export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/actions",
       async () => {
-        return pario.getActionDefinitions().map(serializeAction)
+        return sixb.getActionDefinitions().map(serializeAction)
       },
       {
         response: { 200: ActionCatalogItemSchema.array() },
@@ -50,7 +50,7 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
     .get(
       "/api/actions/:actionId",
       async ({ params, set }) => {
-        const action = pario.getActionById(params.actionId)
+        const action = sixb.getActionById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -73,7 +73,7 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
       async ({ params, body, set }) => {
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
-          const { runId } = await pario.actions.request({
+          const { runId } = await sixb.actions.request({
             actionId: params.actionId,
             subject: parsedBody.subject,
             params: parsedBody.params,
@@ -97,7 +97,7 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
           summary: "Request an action",
           tags: ["Actions"],
           operationId: "requestAction",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

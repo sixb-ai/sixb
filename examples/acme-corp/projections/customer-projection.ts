@@ -1,4 +1,4 @@
-import { defineProjection, fromForeignKey } from "@pario/core"
+import { defineProjection, fromForeignKey } from "@sixb/core"
 import { erpCustomersDataset } from "../datasets/erp"
 import { Customer } from "../ontology/customer"
 import { Employee } from "../ontology/employee"

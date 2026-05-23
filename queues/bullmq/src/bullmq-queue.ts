@@ -6,7 +6,7 @@ import {
   QueueError,
   type QueueJob,
   type QueueJobError,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   type Job as BullJob,
   Queue as BullQueue,
@@ -30,7 +30,7 @@ export interface BullMqLaneShared {
 }
 
 /**
- * Translates Pario's `Queue<TJob>` contract onto BullMQ's manual-fetch primitives.
+ * Translates Sixb's `Queue<TJob>` contract onto BullMQ's manual-fetch primitives.
  *
  * Each `(projectId, laneId)` pair maps to a dedicated BullMQ queue named
  * `${projectId}:${laneId}` under the shared prefix. `Queue` handles are created lazily on the
@@ -42,7 +42,7 @@ export interface BullMqLaneShared {
  * - `attempt` is read back from BullMQ's `attemptsStarted`, which increments on every move to
  *   active (including redelivery after retry or stall). `attemptsMade` is a different counter
  *   that only increments on failure and is not used here.
- * - BullMQ's built-in retry machinery is deliberately bypassed (`attempts: 1`): the Pario
+ * - BullMQ's built-in retry machinery is deliberately bypassed (`attempts: 1`): the Sixb
  *   contract places retry policy on the caller, not the broker.
  */
 export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
@@ -236,14 +236,14 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
     const queue = this.getQueue(projectId)
     const bullJob = (await queue.getJob(jobId)) as BullJob<QueueJobData<TQueueJob>> | undefined
     if (!bullJob) {
-      throw new QueueError(`[Pario] Unknown queue job '${jobId}'`)
+      throw new QueueError(`[Sixb] Unknown queue job '${jobId}'`)
     }
     return bullJob
   }
 
   private getQueue(projectId: string): BullQueue<QueueJobData<TQueueJob>> {
     if (this.closed) {
-      throw new QueueError("[Pario] BullMqQueues has been closed")
+      throw new QueueError("[Sixb] BullMqQueues has been closed")
     }
 
     const existing = this.queuesByProject.get(projectId)
@@ -251,7 +251,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
 
     // BullMQ forbids `:` in queue names, so per-tenant scoping goes in the prefix instead.
     // Redis keys end up as `${prefix}:${projectId}:{${laneId}}:...`, which matches the
-    // `pario:<projectId>:<lane>:...` layout documented for the provider.
+    // `sixb:<projectId>:<lane>:...` layout documented for the provider.
     const prefix = `${this.shared.prefix}:${projectId}`
     const queue = new BullQueue<QueueJobData<TQueueJob>>(this.laneId, {
       connection: this.shared.connections.queueConnection,
@@ -264,7 +264,7 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
 
   private getWorker(projectId: string): BullWorker<QueueJobData<TQueueJob>> {
     if (this.closed) {
-      throw new QueueError("[Pario] BullMqQueues has been closed")
+      throw new QueueError("[Sixb] BullMqQueues has been closed")
     }
 
     const existing = this.workersByProject.get(projectId)

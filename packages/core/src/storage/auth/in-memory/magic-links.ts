@@ -30,7 +30,7 @@ export class InMemoryAuthMagicLinkStore implements AuthMagicLinkStore {
     if (this.state.magicLinks.has(key)) {
       throw new AuthStorageError(
         "duplicate_magic_link",
-        `[Pario] Magic link '${id}' already exists for project '${projectId}'.`
+        `[Sixb] Magic link '${id}' already exists for project '${projectId}'.`
       )
     }
 

@@ -1,8 +1,8 @@
-export type { ParioApiBrowserPolicy, ParioBrowserOrigin } from "./auth/browser-origin"
+export type { SixbApiBrowserPolicy, SixbBrowserOrigin } from "./auth/browser-origin"
 export {
-  createParioApi,
-  createParioServer,
-  type ParioApp,
-  ParioServer,
-  type ParioServerOptions,
+  createSixbApi,
+  createSixbServer,
+  type SixbApp,
+  SixbServer,
+  type SixbServerOptions,
 } from "./server"

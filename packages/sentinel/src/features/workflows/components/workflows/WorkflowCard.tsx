@@ -1,4 +1,4 @@
-import { Card } from "@pario/ui/components"
+import { Card } from "@sixb/ui/components"
 import { ArrowRight, GitBranch } from "lucide-react"
 import { Link } from "react-router-dom"
 import { runTimeLabel, type WorkflowSummary } from "../../utils/workflows"

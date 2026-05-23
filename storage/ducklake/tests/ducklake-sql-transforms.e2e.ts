@@ -8,7 +8,7 @@ import {
   type DatasetRow,
   type DatasetVersion,
   defineDataset,
-} from "@pario/core"
+} from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
@@ -34,7 +34,7 @@ describe("DuckLake SQL transforms", () => {
   })
 
   beforeEach(async () => {
-    rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-sql-transforms-"))
+    rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-sql-transforms-"))
     storage = createLocalDuckLakeStorage(rootDir)
 
     await storage.createDataset(customersDataset)

@@ -1,5 +1,5 @@
 {
-  "name": "@pario/broker-nats",
+  "name": "@sixb/broker-nats",
   "version": "0.1.0",
   "type": "module",
   "main": "./src/index.ts",
@@ -16,7 +16,7 @@
     "@nats-io/jetstream": "^3.3.1",
     "@nats-io/nats-core": "^3.3.1",
     "@nats-io/transport-node": "^3.3.1",
-    "@pario/core": "workspace:*"
+    "@sixb/core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

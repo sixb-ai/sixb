@@ -8,7 +8,7 @@ import type {
   Storage,
   StoredDomainEvent,
   TimeseriesStorage,
-} from "@pario/core"
+} from "@sixb/core"
 import {
   EventsRuntime,
   InMemoryBroker,
@@ -16,8 +16,8 @@ import {
   InMemoryRulesStorage,
   InMemoryStorage,
   InMemoryTimeseriesStorage,
-} from "@pario/core"
-import type { RulesWorkerPario } from "../src"
+} from "@sixb/core"
+import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
 
 const projectId = "project-a"
@@ -49,7 +49,7 @@ afterEach(async () => {
 describe("RulesWorker", () => {
   test("constructor rejects runtimes with no registered rules", () => {
     expect(() => new RulesWorker(createRuntime({ rules: [] }))).toThrow(
-      "[ParioRulesWorker] Rules workers require at least one registered rule."
+      "[SixbRulesWorker] Rules workers require at least one registered rule."
     )
   })
 
@@ -61,7 +61,7 @@ describe("RulesWorker", () => {
             storage: createStorageWithoutRules(),
           })
         )
-    ).toThrow("[ParioRulesWorker] Rules workers require storage.rules support.")
+    ).toThrow("[SixbRulesWorker] Rules workers require storage.rules support.")
   })
 
   test("worker subscribes to object and link event types", async () => {
@@ -152,7 +152,7 @@ describe("RulesWorker", () => {
       })
       await worker.stop()
 
-      expect(String(errors[0]?.[0])).toContain("[ParioRulesWorker] Evaluation failed:")
+      expect(String(errors[0]?.[0])).toContain("[SixbRulesWorker] Evaluation failed:")
       expect(await ruleEventTypes(events)).toEqual(["rule.triggered"])
     } finally {
       console.error = originalError
@@ -222,7 +222,7 @@ function createRuntime(
     readonly events?: EventsRuntime
     readonly storage?: Storage
   } = {}
-): RulesWorkerPario {
+): RulesWorkerSixb {
   const rules = options.rules ?? [postedRule]
   return {
     id: projectId,

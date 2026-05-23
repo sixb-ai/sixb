@@ -1,4 +1,4 @@
-import { QueueError } from "@pario/core"
+import { QueueError } from "@sixb/core"
 import IORedis, { type Redis, type RedisOptions } from "ioredis"
 
 export type BullMqConnectionInput = string | RedisOptions | Redis
@@ -37,7 +37,7 @@ export function resolveConnections(input: BullMqConnectionInput): BullMqConnecti
     const options = input.options as RedisOptions | undefined
     if (options && options.maxRetriesPerRequest !== null) {
       throw new QueueError(
-        "[Pario] BullMqQueues requires a borrowed IORedis connection with `maxRetriesPerRequest: null`"
+        "[Sixb] BullMqQueues requires a borrowed IORedis connection with `maxRetriesPerRequest: null`"
       )
     }
     return {

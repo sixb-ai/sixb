@@ -1,4 +1,4 @@
-import { defineObjectType, prop } from "@pario/core"
+import { defineObjectType, prop } from "@sixb/core"
 
 // A single trivial object type so the signed-in app has something to render.
 export const Note = defineObjectType({

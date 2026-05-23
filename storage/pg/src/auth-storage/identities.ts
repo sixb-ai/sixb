@@ -2,7 +2,7 @@ import type {
   AuthUserIdentityStore,
   UpsertAuthUserIdentityInput,
   UserIdentityRecord,
-} from "@pario/core"
+} from "@sixb/core"
 import type { SQL } from "bun"
 import type { PgAuthUserIdentityRow } from "./rows"
 import { rowToIdentityRecord, serializeOptionalRecord } from "./rows"

@@ -1,4 +1,4 @@
-import type { Pario } from "../runtime/pario"
+import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 import { createCronMatcher } from "../schedules"
 import { FunctionError, FunctionValidationError } from "./errors"
@@ -13,19 +13,19 @@ import type {
 type CleanupFn = () => Promise<void>
 
 export interface FunctionRuntimeOptions {
-  pario: Pario<readonly OntologySource[]>
+  sixb: Sixb<readonly OntologySource[]>
   functions: readonly FunctionDefinition[]
 }
 
 export class FunctionRuntime {
-  private readonly pario: Pario<readonly OntologySource[]>
+  private readonly sixb: Sixb<readonly OntologySource[]>
   private readonly functions: readonly FunctionDefinition[]
   private readonly cleanups: CleanupFn[] = []
   private readonly activeFunctions = new Set<string>()
   private started = false
 
   constructor(options: FunctionRuntimeOptions) {
-    this.pario = options.pario
+    this.sixb = options.sixb
     this.functions = options.functions
   }
 
@@ -132,7 +132,7 @@ export class FunctionRuntime {
     try {
       await fn(context)
     } catch (error) {
-      console.error(`[Pario] Function '${functionId}' ${trigger.type} handler failed:`, error)
+      console.error(`[Sixb] Function '${functionId}' ${trigger.type} handler failed:`, error)
     } finally {
       this.activeFunctions.delete(functionId)
     }
@@ -156,7 +156,7 @@ export class FunctionRuntime {
       await trigger.handler(context)
     } catch (error) {
       console.error(
-        `[Pario] Function '${functionId}' interval handler failed:`,
+        `[Sixb] Function '${functionId}' interval handler failed:`,
         error instanceof Error ? error.message : String(error)
       )
     }
@@ -164,7 +164,7 @@ export class FunctionRuntime {
 
   private createContext(metadata: FunctionMetadata): FunctionContext {
     return {
-      pario: this.pario,
+      sixb: this.sixb,
       fn: metadata,
     }
   }

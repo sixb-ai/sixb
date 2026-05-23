@@ -15,7 +15,7 @@
  * `targetObjectTypeId` declares the concrete target type for this projection.
  * It must be the same type or a subtype (via `extends`) of the link's declared
  * target at the ontology level. Validation of the subtype relationship happens
- * at Pario startup (Increment 7), not at DSL build time.
+ * at Sixb startup (Increment 7), not at DSL build time.
  */
 export interface ForeignKeyDescriptor {
   readonly linkId: string

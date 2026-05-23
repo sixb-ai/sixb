@@ -3,12 +3,12 @@
  *
  * Resolves objectTypeId to a typed context and delegates to the leaf function.
  */
-import type { ParioRuntimeContext } from "../../runtime/types"
+import type { SixbRuntimeContext } from "../../runtime/types"
 import { resolveObjectContext } from "../context"
 import { appendTelemetryBatch as appendTelemetryBatchLeaf } from "../telemetry"
 
 export async function appendTelemetry(
-  runtime: ParioRuntimeContext,
+  runtime: SixbRuntimeContext,
   objectTypeId: string,
   items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
 ): Promise<void> {

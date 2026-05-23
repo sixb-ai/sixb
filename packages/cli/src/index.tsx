@@ -4,9 +4,9 @@ import { basename } from "node:path"
 import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
-const executable = basename(process.argv[1] ?? "pario")
+const executable = basename(process.argv[1] ?? "sixb")
 
-const VERSION = "pario v0.2.0"
+const VERSION = "sixb v0.2.0"
 
 function getFlag(name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`))
@@ -62,7 +62,7 @@ function getCommandPositionals(): string[] {
 }
 
 function getCommand(): string {
-  if (executable.startsWith("create-pario")) return "create"
+  if (executable.startsWith("create-sixb")) return "create"
   if (args[0] === "db") {
     return args[1] ? `db:${args[1]}` : "db"
   }
@@ -104,7 +104,7 @@ async function main(): Promise<void> {
 
     case "worker": {
       if (hasFlagValue("type") || hasFlagValue("worker")) {
-        throw new Error("[ParioWorker] Use `pario worker <type>`.")
+        throw new Error("[SixbWorker] Use `sixb worker <type>`.")
       }
 
       const { runWorker } = await import("./commands/worker")
@@ -227,7 +227,7 @@ async function main(): Promise<void> {
     case "panasonic:login": {
       try {
         // Resolve from cwd so the user's project dependencies are used, not the CLI's
-        const pkg = "@pario/connector-panasonic"
+        const pkg = "@sixb/connector-panasonic"
         const resolved = Bun.resolveSync(pkg, process.cwd())
         const mod = (await import(resolved)) as {
           panasonicLogin: (opts: { dir?: string }) => Promise<void>
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
         const message = error instanceof Error ? error.message : String(error)
         if (message.includes("Cannot find module") || message.includes("Cannot find package")) {
           throw new Error(
-            "@pario/connector-panasonic is not installed. Add it to your project dependencies."
+            "@sixb/connector-panasonic is not installed. Add it to your project dependencies."
           )
         }
         throw error
@@ -263,12 +263,12 @@ async function main(): Promise<void> {
     }
 
     case "db":
-      await renderStatic(<HelpView errorMessage="Usage: pario db <migrate>" />)
+      await renderStatic(<HelpView errorMessage="Usage: sixb db <migrate>" />)
       process.exit(1)
       break
 
     case "lake":
-      await renderStatic(<HelpView errorMessage="Usage: pario lake <check>" />)
+      await renderStatic(<HelpView errorMessage="Usage: sixb lake <check>" />)
       process.exit(1)
       break
 

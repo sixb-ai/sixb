@@ -1,4 +1,4 @@
-import { defineFunction } from "@pario/core"
+import { defineFunction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 /**
@@ -7,8 +7,8 @@ import { Invoice } from "../ontology/invoice"
  */
 export const checkOverdueInvoices = defineFunction("check-overdue-invoices")
   .cron("0 8 * * *")
-  .run(async ({ pario }) => {
-    const { objects } = await pario.objects(Invoice).list({
+  .run(async ({ sixb }) => {
+    const { objects } = await sixb.objects(Invoice).list({
       limit: 500,
       orderBy: "updatedAt",
       order: "desc",
@@ -21,7 +21,7 @@ export const checkOverdueInvoices = defineFunction("check-overdue-invoices")
       if (status !== "sent" || !dueDate) continue
       if (dueDate >= today) continue
 
-      await pario.objects(Invoice).upsert({
+      await sixb.objects(Invoice).upsert({
         properties: {
           id: invoice.primaryId,
           number: invoice.properties.number,

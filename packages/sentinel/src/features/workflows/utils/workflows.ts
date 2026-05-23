@@ -3,7 +3,7 @@ import type {
   GetWorkflowRunResponse,
   ListWorkflowRunsResponse,
   ListWorkflowsResponse,
-} from "@pario/client"
+} from "@sixb/client"
 
 export type WorkflowSummary = ListWorkflowsResponse[number]
 export type WorkflowDetail = GetWorkflowResponse

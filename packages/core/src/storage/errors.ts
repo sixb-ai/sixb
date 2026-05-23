@@ -10,6 +10,6 @@ export class ObjectNotFoundError extends Error {
     readonly primaryId: string,
     readonly context: string
   ) {
-    super(`[Pario] ${context}: ${objectTypeId}:${primaryId}`)
+    super(`[Sixb] ${context}: ${objectTypeId}:${primaryId}`)
   }
 }

@@ -32,7 +32,7 @@ async function getFreePort(): Promise<number> {
 
 describe("createSentinelApp", () => {
   beforeAll(async () => {
-    assetsRoot = await mkdtemp(join(tmpdir(), "pario-sentinel-assets-"))
+    assetsRoot = await mkdtemp(join(tmpdir(), "sixb-sentinel-assets-"))
     assetsOutdir = join(assetsRoot, "sentinel")
     await buildSentinelAssets({ outdir: assetsOutdir })
   })
@@ -74,11 +74,11 @@ describe("createSentinelApp", () => {
       const stylesheetPath = extractAssetPath(html, "stylesheet")
       const dottedWorkflowHtml = await dottedWorkflowResponse.text()
 
-      expect(html).toContain("<title>Pario Sentinel</title>")
+      expect(html).toContain("<title>Sixb Sentinel</title>")
       expect(html).toContain('"api":{"baseUrl":"http://api.localhost"}')
       expect(html).toContain('"auth":{"audience":"sentinel","enabled":true}')
-      expect(scriptPath).toMatch(/^\/__pario\/main-[^.]+\.js$/)
-      expect(stylesheetPath).toMatch(/^\/__pario\/main-[^.]+\.css$/)
+      expect(scriptPath).toMatch(/^\/__sixb\/main-[^.]+\.js$/)
+      expect(stylesheetPath).toMatch(/^\/__sixb\/main-[^.]+\.css$/)
       expect(html).toContain('<div id="root"></div>')
       expect(dottedWorkflowHtml).toContain('<div id="root"></div>')
 
@@ -90,7 +90,7 @@ describe("createSentinelApp", () => {
         )
       }
 
-      const stableAssetResponse = await fetch(`${baseUrl}/__pario/main.js`)
+      const stableAssetResponse = await fetch(`${baseUrl}/__sixb/main.js`)
       expect(stableAssetResponse.status).toBe(404)
     } finally {
       await server.stop()
@@ -136,7 +136,7 @@ describe("createSentinelApp", () => {
       const rootResponse = await fetch(`${baseUrl}/`)
       const routeResponse = await fetch(`${baseUrl}/workflows/invoice-reminder-workflow`)
       const faviconResponse = await fetch(`${baseUrl}/favicon.svg`)
-      const runtimeResponse = await fetch(`${baseUrl}/__pario/runtime.json`)
+      const runtimeResponse = await fetch(`${baseUrl}/__sixb/runtime.json`)
       const apiResponse = await fetch(`${baseUrl}/api/workflows`)
 
       expect(rootResponse.status).toBe(200)
@@ -153,7 +153,7 @@ describe("createSentinelApp", () => {
     }
   })
 
-  test("does not serve Pario API-owned routes from the Sentinel origin", async () => {
+  test("does not serve Sixb API-owned routes from the Sentinel origin", async () => {
     const port = await getFreePort()
     const sentinel = createSentinelApp({
       apiBaseUrl: "http://api.localhost",
@@ -189,7 +189,7 @@ describe("createSentinelApp", () => {
         development: false,
         outdir: join(assetsRoot, "missing"),
       })
-    ).rejects.toThrow("Run `pario build`")
+    ).rejects.toThrow("Run `sixb build`")
   })
 })
 

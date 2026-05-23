@@ -1,4 +1,4 @@
-import type { GetAuthInvitationOptionsResponse, ListAuthInvitationsResponse } from "@pario/client"
+import type { GetAuthInvitationOptionsResponse, ListAuthInvitationsResponse } from "@sixb/client"
 import {
   createAuthInvitationMutation,
   getAuthInvitationOptionsOptions,
@@ -6,9 +6,9 @@ import {
   listAuthInvitationsOptions,
   listAuthInvitationsQueryKey,
   revokeAuthInvitationMutation,
-} from "@pario/client/hooks"
-import { Badge, EmptyState } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+} from "@sixb/client/hooks"
+import { Badge, EmptyState } from "@sixb/ui/components"
+import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertCircle,

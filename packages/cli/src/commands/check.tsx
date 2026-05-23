@@ -1,5 +1,5 @@
 import { resolve } from "node:path"
-import { loadParioFromEntry } from "../lib/loadPario"
+import { loadSixbFromEntry } from "../lib/loadSixb"
 import { CheckView, renderStatic } from "../ui"
 
 export interface CheckOptions {
@@ -7,9 +7,9 @@ export interface CheckOptions {
 }
 
 export async function runCheck(options: CheckOptions = {}) {
-  const entry = resolve(options.entry ?? "pario.config.ts")
-  const pario = await loadParioFromEntry(entry)
-  const objectTypes = pario.listObjectTypes()
+  const entry = resolve(options.entry ?? "sixb.config.ts")
+  const sixb = await loadSixbFromEntry(entry)
+  const objectTypes = sixb.listObjectTypes()
 
   const providerStatus = { ok: true, message: "configured" }
   const projectValidation =
@@ -19,7 +19,7 @@ export async function runCheck(options: CheckOptions = {}) {
 
   await renderStatic(
     <CheckView
-      projectId={pario.id}
+      projectId={sixb.id}
       events={providerStatus}
       storage={providerStatus}
       timeseries={providerStatus}

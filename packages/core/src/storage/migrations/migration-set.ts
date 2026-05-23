@@ -94,13 +94,13 @@ function parseMigrationId(id: string): { version: number; name: string } {
   const match = /^(\d+)(?:[-_](.+))?$/.exec(id)
 
   if (!match) {
-    throw new Error(`[Pario] Migration id must start with a numeric prefix: ${id}`)
+    throw new Error(`[Sixb] Migration id must start with a numeric prefix: ${id}`)
   }
 
   const version = Number(match[1])
 
   if (!Number.isInteger(version) || version < 1) {
-    throw new Error(`[Pario] Migration id must start with a positive version: ${id}`)
+    throw new Error(`[Sixb] Migration id must start with a positive version: ${id}`)
   }
 
   return {
@@ -157,7 +157,7 @@ function assertAppliedPrefix<TContext>(
     const migration = migrations.steps[index]
 
     if (!migration || row.version > migrations.latestVersion) {
-      throw new Error(`[${migrations.adapterId}] Database schema is newer than this Pario version`)
+      throw new Error(`[${migrations.adapterId}] Database schema is newer than this Sixb version`)
     }
 
     if (row.version !== migration.version || row.id !== migration.id) {

@@ -1,5 +1,5 @@
 import { join } from "node:path"
-import type { DatasetRow } from "@pario/core"
+import type { DatasetRow } from "@sixb/core"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 
 export async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[]> {
