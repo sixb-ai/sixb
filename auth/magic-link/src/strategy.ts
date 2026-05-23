@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto"
 import type {
   AuthStorage,
-  CompleteSignInResult,
   GroupDefinition,
   InvitationDeliveryInput,
   InviteDeliveryResult,
   MagicLinkAuthStrategy,
   MagicLinkCallbackInput,
+  MagicLinkCallbackResult,
   MagicLinkInvitationRecipientInput,
   MagicLinkInvitationRecipientResult,
   MagicLinkRequestInput,
@@ -101,8 +101,10 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       id: magicLinkId,
       projectId: input.projectId,
       strategyId: this.id,
+      audience: input.audience,
       email,
       tokenHash: credential.tokenHash,
+      returnTo: input.returnTo,
       createdAt: now,
       expiresAt: new Date(now.getTime() + this.magicLinkTtlMs),
     })
@@ -110,7 +112,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     const link = this.createCallbackUrl({
       magicLinkId,
       requestOrigin: input.requestOrigin,
-      returnTo: input.returnTo,
       token: credential.token,
     })
 
@@ -140,6 +141,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       projectId: input.projectId,
       authStorage: input.authStorage,
       email: input.invitation.email,
+      audience: input.audience,
       returnTo: input.returnTo,
       requestOrigin: input.requestOrigin,
       now: input.now,
@@ -174,7 +176,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     return { status: "allowed", email }
   }
 
-  async completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<CompleteSignInResult> {
+  async completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<MagicLinkCallbackResult> {
     const now = input.now ? new Date(input.now) : new Date()
     const magicLink = await input.authStorage.magicLinks.getById({
       projectId: input.projectId,
@@ -194,7 +196,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       this.bootstrapUsers.has(magicLink.email) &&
       (await hasNoActiveUsers(input.authStorage, input.projectId))
 
-    return input.authStorage.completeMagicLinkSignIn({
+    const signIn = await input.authStorage.completeMagicLinkSignIn({
       projectId: input.projectId,
       magicLinkId: input.magicLinkId,
       tokenHash: hashMagicLinkToken(input.token),
@@ -203,8 +205,17 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       allowUserCreationWithoutInvitation: canBootstrap,
       requireNoActiveUsersForUserCreation: canBootstrap,
       manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
-      session: input.session,
+      session: {
+        ...input.session,
+        audience: magicLink.audience,
+      },
     })
+
+    return {
+      ...signIn,
+      audience: magicLink.audience,
+      returnTo: magicLink.returnTo ?? "/",
+    }
   }
 
   private async canRequestMagicLink(input: {
@@ -240,14 +251,12 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   private createCallbackUrl(input: {
     readonly magicLinkId: string
     readonly requestOrigin: string
-    readonly returnTo: string
     readonly token: string
   }): string {
     const origin = this.publicOrigin ?? normalizePublicOrigin(input.requestOrigin)
     const url = new URL("/auth/callback", origin)
     url.searchParams.set("magicLinkId", input.magicLinkId)
     url.searchParams.set("token", input.token)
-    url.searchParams.set("returnTo", input.returnTo)
     return url.toString()
   }
 

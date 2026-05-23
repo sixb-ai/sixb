@@ -85,7 +85,9 @@ class FakeOidcClient implements OidcClientAdapter {
   }
 }
 
-function createRuntime(options: { readonly failInvitationDelivery?: boolean } = {}) {
+function createRuntime(
+  options: { readonly browserApi?: boolean; readonly failInvitationDelivery?: boolean } = {}
+) {
   const storage = new InMemoryStorage()
   const client = new FakeOidcClient()
   const invitationMessages: SendOidcInvitationInput[] = []
@@ -123,7 +125,26 @@ function createRuntime(options: { readonly failInvitationDelivery?: boolean } = 
   })
 
   return {
-    app: createParioApi(new ParioServer({ pario, quiet: true, ui: false })),
+    app: createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        ...(options.browserApi
+          ? {
+              surface: {
+                kind: "browserApi" as const,
+                browser: {
+                  publicOrigin: "http://api.localhost",
+                  allowedOrigins: [
+                    { origin: "http://admin.localhost", audience: "admin" as const },
+                    { origin: "http://app.localhost", audience: "app" as const },
+                  ],
+                },
+              },
+            }
+          : { ui: false }),
+      })
+    ),
     client,
     invitationMessages,
     pario,
@@ -234,6 +255,38 @@ describe("oidc auth routes", () => {
     })
   })
 
+  test("browser API OIDC callbacks use the stored audience and return target", async () => {
+    const { app } = createRuntime({ browserApi: true })
+    const signIn = await app.fetch(
+      new Request(
+        "http://api.localhost/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
+        { redirect: "manual" }
+      )
+    )
+    const providerUrl = new URL(signIn.headers.get("location") ?? "")
+    const state = providerUrl.searchParams.get("state")
+
+    const callback = await app.fetch(
+      new Request(
+        `http://api.localhost/auth/callback?code=code&state=${state}&returnTo=http%3A%2F%2Fevil.localhost%2Fsteal`,
+        { redirect: "manual" }
+      )
+    )
+
+    expect(signIn.status).toBe(303)
+    expect(providerUrl.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://app.localhost"
+    )
+    expect(await callback.clone().text()).toContain(
+      '<meta http-equiv="refresh" content="0;url=http://app.localhost/dashboard">'
+    )
+    const setCookie = callback.headers.get("set-cookie")
+    const sessionCookie = cookieValue(setCookie, "pario_session_app")
+    expect(sessionCookie).toContain(".")
+  })
+
   test("callback replay returns a generic error without setting cookies", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
@@ -295,6 +348,7 @@ describe("oidc auth routes", () => {
       subject: "You are invited to Pario",
     })
     expect(invitationUrl.pathname).toBe("/auth/sign-in")
+    expect(invitationUrl.searchParams.get("audience")).toBe("admin")
     expect(invitationUrl.searchParams.get("returnTo")).toBe("/dashboard")
 
     client.tokenClaims = {

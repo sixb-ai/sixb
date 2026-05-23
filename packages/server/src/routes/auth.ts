@@ -18,8 +18,12 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@pario/core"
 import { type Elysia, t } from "elysia"
-import type { ResolveRequestAuthContext } from "../auth/browser-origin"
-import { sanitizeReturnTo } from "../auth/return-to"
+import {
+  type AuthRedirectContext,
+  BrowserOriginError,
+  type ResolveAuthRedirectContext,
+  type ResolveRequestAuthContext,
+} from "../auth/browser-origin"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
   AuthSessionResponseSchema,
@@ -53,6 +57,8 @@ type AuthenticatedAuthSessionResponse = {
 
 export interface AuthRoutesOptions {
   readonly resolveAuthContext: ResolveRequestAuthContext
+  readonly resolveAuthRedirectContext: ResolveAuthRedirectContext
+  readonly resolveAuthRequestOrigin: (request: Request) => string
 }
 
 export function registerAuthRoutes(
@@ -151,15 +157,31 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthInvitationBodySchema.parse(body)
+          const deliveryContext = resolveInvitationDeliveryContext(
+            options,
+            request,
+            parsed.returnTo,
+            authOptions
+          )
+          if (deliveryContext instanceof Response) {
+            return deliveryContext
+          }
+
           const result = await pario.auth.invite(
             request,
             {
               email: parsed.email,
               groupIds: parsed.groupIds,
               expiresAt: parseDate(parsed.expiresAt),
-              returnTo: parsed.returnTo,
+              returnTo: deliveryContext.returnTo,
             },
-            authOptions
+            {
+              ...authOptions,
+              delivery: {
+                returnTo: deliveryContext.returnTo,
+                requestOrigin: deliveryContext.requestOrigin,
+              },
+            }
           )
 
           return jsonResponse(
@@ -285,7 +307,14 @@ export function registerAuthRoutes(
       "/auth/sign-in",
       async ({ body, request }) => {
         const strategy = pario.auth.getStrategy()
-        const returnTo = sanitizeReturnTo(body.returnTo)
+        const authRedirect = resolveAuthRedirectContext(options, request, {
+          audience: body.audience,
+          returnTo: body.returnTo,
+        })
+        if (authRedirect instanceof Response) {
+          return authRedirect
+        }
+
         const authStorage = requireAuthStorage(pario)
 
         if (isMagicLinkAuthStrategy(strategy)) {
@@ -293,8 +322,9 @@ export function registerAuthRoutes(
             projectId: pario.id,
             authStorage,
             email: body.email ?? "",
-            returnTo,
-            requestOrigin: new URL(request.url).origin,
+            audience: authRedirect.audience,
+            returnTo: authRedirect.returnTo,
+            requestOrigin: authRedirect.requestOrigin,
           })
 
           return htmlMessageResponse("If this email can sign in, we sent a link.")
@@ -304,8 +334,9 @@ export function registerAuthRoutes(
           const result = await strategy.startOidcSignIn({
             projectId: pario.id,
             authStorage,
-            returnTo,
-            requestOrigin: new URL(request.url).origin,
+            audience: authRedirect.audience,
+            returnTo: authRedirect.returnTo,
+            requestOrigin: authRedirect.requestOrigin,
           })
           return redirectResponse(result.redirectTo)
         }
@@ -314,6 +345,7 @@ export function registerAuthRoutes(
       },
       {
         body: t.Object({
+          audience: t.Optional(t.String()),
           email: t.Optional(t.String()),
           returnTo: t.Optional(t.String()),
         }),
@@ -326,18 +358,25 @@ export function registerAuthRoutes(
       async ({ request }) => {
         const strategy = pario.auth.getStrategy()
         const url = new URL(request.url)
-        const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"))
+        const authRedirect = resolveAuthRedirectContext(options, request, {
+          audience: url.searchParams.get("audience"),
+          returnTo: url.searchParams.get("returnTo"),
+        })
+        if (authRedirect instanceof Response) {
+          return authRedirect
+        }
 
         if (isMagicLinkAuthStrategy(strategy)) {
-          return signInFormResponse(returnTo)
+          return signInFormResponse(authRedirect)
         }
 
         if (isOidcAuthStrategy(strategy)) {
           const result = await strategy.startOidcSignIn({
             projectId: pario.id,
             authStorage: requireAuthStorage(pario),
-            returnTo,
-            requestOrigin: url.origin,
+            audience: authRedirect.audience,
+            returnTo: authRedirect.returnTo,
+            requestOrigin: authRedirect.requestOrigin,
           })
           return redirectResponse(result.redirectTo)
         }
@@ -358,47 +397,17 @@ export function registerAuthRoutes(
           const url = new URL(request.url)
           const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
           const token = url.searchParams.get("token")?.trim()
-          const returnTo = sanitizeReturnTo(url.searchParams.get("returnTo"))
 
           if (!magicLinkId || !token) {
             return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
           }
 
           try {
-            await strategy.completeMagicLinkSignIn({
+            const result = await strategy.completeMagicLinkSignIn({
               projectId: pario.id,
               authStorage: requireAuthStorage(pario),
               magicLinkId,
               token,
-              session: {
-                id: sessionCredential.sessionId,
-                audience: authOptions.audience,
-                tokenHash: sessionCredential.tokenHash,
-                createdAt: now,
-                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
-              },
-            })
-          } catch {
-            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
-          }
-
-          return sessionCallbackCompletionResponse({
-            pario,
-            request,
-            sessionCredential,
-            audience: authOptions.audience,
-            returnTo,
-          })
-        }
-
-        if (isOidcAuthStrategy(strategy)) {
-          try {
-            const authOptions = resolveAuthOptions(options, request)
-            const result = await strategy.completeOidcSignIn({
-              projectId: pario.id,
-              authStorage: requireAuthStorage(pario),
-              requestUrl: request.url,
-              requestOrigin: new URL(request.url).origin,
               session: {
                 id: sessionCredential.sessionId,
                 audience: authOptions.audience,
@@ -412,7 +421,36 @@ export function registerAuthRoutes(
               pario,
               request,
               sessionCredential,
-              audience: authOptions.audience,
+              audience: result.session.audience,
+              returnTo: result.returnTo,
+            })
+          } catch {
+            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+          }
+        }
+
+        if (isOidcAuthStrategy(strategy)) {
+          try {
+            const authOptions = resolveAuthOptions(options, request)
+            const result = await strategy.completeOidcSignIn({
+              projectId: pario.id,
+              authStorage: requireAuthStorage(pario),
+              requestUrl: request.url,
+              requestOrigin: options.resolveAuthRequestOrigin(request),
+              session: {
+                id: sessionCredential.sessionId,
+                audience: authOptions.audience,
+                tokenHash: sessionCredential.tokenHash,
+                createdAt: now,
+                expiresAt: new Date(now.getTime() + pario.auth.getSessionTtlMs()),
+              },
+            })
+
+            return sessionCallbackCompletionResponse({
+              pario,
+              request,
+              sessionCredential,
+              audience: result.session.audience,
               returnTo: result.returnTo,
             })
           } catch (error) {
@@ -467,7 +505,9 @@ function authCallbackCompletionResponse(returnTo: string, headers: Headers): Res
   headers.set("content-type", "text/html; charset=utf-8")
   headers.set(
     "content-security-policy",
-    "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self'"
+    `default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to ${resolveNavigateToSources(
+      returnTo
+    )}`
   )
   headers.set("referrer-policy", "no-referrer")
   headers.set("x-content-type-options", "nosniff")
@@ -501,10 +541,45 @@ function authCallbackCompletionResponse(returnTo: string, headers: Headers): Res
 function resolveAuthOptions(
   options: AuthRoutesOptions,
   request: Request
-): {
-  readonly audience: AuthSessionAudience
-} {
-  return { audience: options.resolveAuthContext(request).audience }
+): ReturnType<ResolveRequestAuthContext> {
+  return options.resolveAuthContext(request)
+}
+
+function resolveAuthRedirectContext(
+  options: AuthRoutesOptions,
+  request: Request,
+  input: Parameters<ResolveAuthRedirectContext>[1]
+): AuthRedirectContext | Response {
+  try {
+    return options.resolveAuthRedirectContext(request, input)
+  } catch (error) {
+    if (error instanceof BrowserOriginError) {
+      return htmlMessageResponse("This sign-in request is invalid.", 400)
+    }
+
+    throw error
+  }
+}
+
+function resolveInvitationDeliveryContext(
+  options: AuthRoutesOptions,
+  request: Request,
+  returnTo: string | undefined,
+  authContext: ReturnType<ResolveRequestAuthContext>
+): AuthRedirectContext | Response {
+  try {
+    return options.resolveAuthRedirectContext(request, {
+      audience: authContext.audience,
+      fallbackReturnToOrigin: authContext.browserOrigin,
+      returnTo,
+    })
+  } catch (error) {
+    if (error instanceof BrowserOriginError) {
+      return jsonResponse({ error: "Invitation return target is not allowed" }, 400)
+    }
+
+    throw error
+  }
 }
 
 function resolveSessionCsrfToken(input: {
@@ -562,7 +637,7 @@ function strategyNotImplementedResponse(message: string): Response {
   })
 }
 
-function signInFormResponse(returnTo: string): Response {
+function signInFormResponse(context: AuthRedirectContext): Response {
   return new Response(
     [
       "<!doctype html>",
@@ -576,7 +651,8 @@ function signInFormResponse(returnTo: string): Response {
       '<main style="font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem;">',
       "<h1>Sign in</h1>",
       '<form method="post" action="/auth/sign-in">',
-      `<input type="hidden" name="returnTo" value="${escapeHtml(returnTo)}">`,
+      `<input type="hidden" name="audience" value="${escapeHtml(context.audience)}">`,
+      `<input type="hidden" name="returnTo" value="${escapeHtml(context.returnTo)}">`,
       '<label for="email">Email</label>',
       '<input id="email" name="email" type="email" autocomplete="email" required style="display: block; width: 100%; box-sizing: border-box; margin: 0.5rem 0 1rem; padding: 0.625rem;">',
       '<button type="submit">Send sign-in link</button>',
@@ -593,6 +669,14 @@ function signInFormResponse(returnTo: string): Response {
       },
     }
   )
+}
+
+function resolveNavigateToSources(returnTo: string): string {
+  try {
+    return `'self' ${new URL(returnTo).origin}`
+  } catch {
+    return "'self'"
+  }
 }
 
 function htmlMessageResponse(message: string, status = 200): Response {

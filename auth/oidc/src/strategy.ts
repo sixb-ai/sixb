@@ -101,6 +101,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       id: attemptId,
       projectId: input.projectId,
       strategyId: this.id,
+      audience: input.audience,
       stateHash: sha256(state),
       nonceHash: sha256(nonce),
       codeVerifier,
@@ -205,11 +206,15 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         requireNoActiveUsersForUserCreation: canBootstrap,
         manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
         newUserId: `usr_${randomUUID()}`,
-        session: input.session,
+        session: {
+          ...input.session,
+          audience: attempt.audience,
+        },
       })
 
       return {
         ...signIn,
+        audience: attempt.audience,
         returnTo: attempt.returnTo ?? "/",
       }
     } catch (error) {
@@ -257,6 +262,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         email: input.invitation.email,
         from: this.from,
         url: this.createSignInUrl({
+          audience: input.audience,
           requestOrigin: input.requestOrigin,
           returnTo: input.returnTo,
         }),
@@ -288,12 +294,14 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }
 
   private createSignInUrl(input: {
+    readonly audience: string
     readonly requestOrigin: string
     readonly returnTo: string
   }): string {
     const origin =
       this.publicOrigin ?? normalizeHttpUrl(input.requestOrigin, "OIDC request origin").origin
     const url = new URL("/auth/sign-in", origin)
+    url.searchParams.set("audience", input.audience)
     url.searchParams.set("returnTo", input.returnTo)
     return url.toString()
   }

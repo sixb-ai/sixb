@@ -1,3 +1,4 @@
+import { resolveAuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "../types"
 import type { AuthStorageState } from "./shared"
@@ -21,6 +22,7 @@ export class InMemoryAuthMagicLinkStore implements AuthMagicLinkStore {
     const id = assertNonEmpty(input.id, "Magic link id")
     const projectId = assertNonEmpty(input.projectId, "Project id")
     const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
+    const audience = resolveAuthSessionAudience(input.audience)
     const email = normalizeEmail(input.email)
     const tokenHash = assertNonEmpty(input.tokenHash, "Magic link token hash")
     const key = magicLinkKey(projectId, id)
@@ -38,8 +40,10 @@ export class InMemoryAuthMagicLinkStore implements AuthMagicLinkStore {
       id,
       projectId,
       strategyId,
+      audience,
       email,
       tokenHash,
+      returnTo: input.returnTo,
       createdAt: cloneDate(input.createdAt),
       expiresAt: cloneDate(input.expiresAt),
     }

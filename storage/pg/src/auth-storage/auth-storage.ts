@@ -195,6 +195,7 @@ export class PgAuthStorage implements AuthStorage {
         }
 
         await validateCompleteSessionInput(tx, projectId, input.session)
+        assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -389,6 +390,7 @@ export class PgAuthStorage implements AuthStorage {
         }
 
         await validateCompleteSessionInput(tx, projectId, input.session)
+        assertSignInSessionAudience(projectId, input.session.audience, attempt.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -761,4 +763,19 @@ async function hasActiveUsers(sql: SQL, projectId: string): Promise<boolean> {
   `) as Array<{ readonly active: number }>
 
   return rows.length > 0
+}
+
+function assertSignInSessionAudience(
+  projectId: string,
+  sessionAudience: string,
+  storedAudience: string
+): void {
+  if (sessionAudience === storedAudience) {
+    return
+  }
+
+  throw new AuthStorageError(
+    "invalid_input",
+    `[Pario] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
+  )
 }

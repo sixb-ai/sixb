@@ -92,6 +92,7 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
           projectId: input.projectId,
           authStorage: input.authStorage,
           email: input.invitation.email,
+          audience: input.audience,
           returnTo: input.returnTo,
           requestOrigin: input.requestOrigin,
           now: input.now,

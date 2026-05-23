@@ -137,6 +137,7 @@ export class InMemoryAuthStorage implements AuthStorage {
     }
 
     validateCompleteSessionInput(this.state, projectId, input.session)
+    assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
     let newUserId: string | undefined
     if (shouldCreateUser) {
@@ -296,6 +297,7 @@ export class InMemoryAuthStorage implements AuthStorage {
     }
 
     validateCompleteSessionInput(this.state, projectId, input.session)
+    assertSignInSessionAudience(projectId, input.session.audience, attempt.audience)
 
     let newUserId: string | undefined
     if (shouldCreateUser) {
@@ -491,4 +493,19 @@ function hasActiveUsers(state: AuthStorageState, projectId: string): boolean {
   }
 
   return false
+}
+
+function assertSignInSessionAudience(
+  projectId: string,
+  sessionAudience: string,
+  storedAudience: string
+): void {
+  if (sessionAudience === storedAudience) {
+    return
+  }
+
+  throw new AuthStorageError(
+    "invalid_input",
+    `[Pario] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
+  )
 }

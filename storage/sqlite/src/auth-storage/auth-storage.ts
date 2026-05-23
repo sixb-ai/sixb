@@ -168,6 +168,7 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         validateCompleteSessionInput(this.db, projectId, input.session)
+        assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -340,6 +341,7 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         validateCompleteSessionInput(this.db, projectId, input.session)
+        assertSignInSessionAudience(projectId, input.session.audience, attempt.audience)
 
         let newUserId: string | undefined
         if (shouldCreateUser) {
@@ -747,4 +749,19 @@ function hasActiveUsers(db: Database, projectId: string): boolean {
     .get(projectId) as { readonly active: number } | null
 
   return row !== null
+}
+
+function assertSignInSessionAudience(
+  projectId: string,
+  sessionAudience: string,
+  storedAudience: string
+): void {
+  if (sessionAudience === storedAudience) {
+    return
+  }
+
+  throw new AuthStorageError(
+    "invalid_input",
+    `[Pario] Sign-in session audience '${sessionAudience}' does not match stored auth audience '${storedAudience}' for project '${projectId}'.`
+  )
 }

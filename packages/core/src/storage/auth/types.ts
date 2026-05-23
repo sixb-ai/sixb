@@ -65,8 +65,10 @@ export interface MagicLinkRecord {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly email: string
   readonly tokenHash: string
+  readonly returnTo?: string
   readonly createdAt: Date
   readonly expiresAt: Date
   readonly consumedAt?: Date
@@ -77,6 +79,7 @@ export interface OidcAuthorizationAttemptRecord {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly stateHash: string
   readonly nonceHash: string
   readonly codeVerifier: string
@@ -195,8 +198,10 @@ export interface CreateAuthMagicLinkInput {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly email: string
   readonly tokenHash: string
+  readonly returnTo?: string
   readonly createdAt: Date
   readonly expiresAt: Date
 }
@@ -205,6 +210,7 @@ export interface CreateOidcAuthorizationAttemptInput {
   readonly id: string
   readonly projectId: string
   readonly strategyId: string
+  readonly audience: AuthSessionAudience
   readonly stateHash: string
   readonly nonceHash: string
   readonly codeVerifier: string
