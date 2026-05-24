@@ -151,6 +151,7 @@ export type {
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  QueueWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WorkflowIOSnapshot,

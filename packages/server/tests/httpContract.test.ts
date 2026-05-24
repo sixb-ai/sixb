@@ -17,6 +17,8 @@ import {
   defineSchedule,
   defineSync,
   defineWebhook,
+  defineWorkflow,
+  defineWorkflowStep,
   type EventsRuntime,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -35,6 +37,7 @@ import {
   SqliteSyncRunStorage,
   SqliteTimeseriesStorage,
   SqliteWebhookRunStorage,
+  SqliteWorkflowRunStorage,
 } from "@pario/sqlite"
 import { ParioServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -122,6 +125,16 @@ const githubEventsPipeline = definePipeline("github-events-pipeline")
   .when(datasetUpdated(githubEventsDataset.id))
   .then(cleanGithubEventsStep)
 
+const inspectDeviceStep = defineWorkflowStep("inspect-device")
+  .input({ deviceId: "string" })
+  .output({ deviceId: "string", healthy: "boolean" })
+  .run(({ input }) => ({ deviceId: input.deviceId, healthy: true }))
+
+const inspectDeviceWorkflow = defineWorkflow("inspect-device-workflow")
+  .input({ deviceId: "string" })
+  .when(nightlyGithub)
+  .then(inspectDeviceStep)
+
 const setSpeed = defineAction("setSpeed")
   .target(Device)
   .params({ speed: actionParam("double", { required: true }) })
@@ -175,6 +188,7 @@ describe("ParioServer HTTP contract", () => {
         timeseries: new SqliteTimeseriesStorage(),
         syncRuns: new SqliteSyncRunStorage(),
         pipelineRuns: new SqlitePipelineRunStorage(),
+        workflowRuns: new SqliteWorkflowRunStorage(),
         webhookRuns: new SqliteWebhookRunStorage(),
         rules: new SqliteRulesStorage(),
       },
@@ -186,6 +200,7 @@ describe("ParioServer HTTP contract", () => {
       datasets: [githubEventsDataset, auditLogDataset, cleanGithubEventsDataset],
       syncs: [githubEventsSync],
       pipelines: [githubEventsPipeline],
+      workflows: [inspectDeviceWorkflow],
       rules: [highRpmRule],
     })
 
@@ -304,6 +319,39 @@ describe("ParioServer HTTP contract", () => {
         datasetId: "clean.github.events",
         versionId: "ver_pipeline_previous",
       },
+    })
+
+    await pario.storage.workflowRuns!.start({
+      id: "workflow-run-previous",
+      projectId: "contract-project",
+      workflowId: "inspect-device-workflow",
+      input: { deviceId: "fan-1" },
+      startedAt: new Date("2026-02-18T09:07:00.000Z"),
+    })
+    await pario.storage.workflowRuns!.nodes.start({
+      id: "workflow-node-run-previous",
+      projectId: "contract-project",
+      workflowRunId: "workflow-run-previous",
+      workflowId: "inspect-device-workflow",
+      nodeIndex: 0,
+      nodeType: "step",
+      nodeId: "inspect-device",
+      nodeKey: "inspectDevice",
+      input: { deviceId: "fan-1" },
+      startedAt: new Date("2026-02-18T09:07:00.500Z"),
+    })
+    await pario.storage.workflowRuns!.nodes.finish({
+      id: "workflow-node-run-previous",
+      projectId: "contract-project",
+      status: "succeeded",
+      finishedAt: new Date("2026-02-18T09:07:01.000Z"),
+      output: { deviceId: "fan-1", healthy: true },
+    })
+    await pario.storage.workflowRuns!.finish({
+      id: "workflow-run-previous",
+      projectId: "contract-project",
+      status: "succeeded",
+      finishedAt: new Date("2026-02-18T09:07:02.000Z"),
     })
 
     await pario.storage.webhookRuns!.start({
@@ -733,6 +781,80 @@ describe("ParioServer HTTP contract", () => {
         ],
       })
 
+      const workflowsResponse = await fetch(`${baseUrl}/api/workflows`)
+      expect(workflowsResponse.status).toBe(200)
+      expect(await workflowsResponse.json()).toEqual([
+        expect.objectContaining({
+          id: "inspect-device-workflow",
+          input: { deviceId: "string" },
+          triggers: [{ type: "schedule", scheduleId: "nightly-github" }],
+          nodes: [
+            {
+              type: "step",
+              id: "inspect-device",
+              key: "inspectDevice",
+              input: { deviceId: "string" },
+              output: { deviceId: "string", healthy: "boolean" },
+            },
+          ],
+          latestRun: expect.objectContaining({
+            id: "workflow-run-previous",
+            status: "succeeded",
+            input: { deviceId: "fan-1" },
+          }),
+        }),
+      ])
+
+      const workflowResponse = await fetch(`${baseUrl}/api/workflows/inspect-device-workflow`)
+      expect(workflowResponse.status).toBe(200)
+      expect(await workflowResponse.json()).toMatchObject({
+        id: "inspect-device-workflow",
+        nodes: [{ type: "step", id: "inspect-device", key: "inspectDevice" }],
+      })
+
+      const missingWorkflowResponse = await fetch(`${baseUrl}/api/workflows/missing`)
+      expect(missingWorkflowResponse.status).toBe(404)
+      expect(await missingWorkflowResponse.json()).toEqual({ error: "Workflow not found" })
+
+      const workflowRunsResponse = await fetch(
+        `${baseUrl}/api/workflow-runs?workflowId=inspect-device-workflow&limit=5`
+      )
+      expect(workflowRunsResponse.status).toBe(200)
+      expect(await workflowRunsResponse.json()).toMatchObject({
+        total: 1,
+        hasMore: false,
+        runs: [
+          {
+            id: "workflow-run-previous",
+            workflowId: "inspect-device-workflow",
+            status: "succeeded",
+            input: { deviceId: "fan-1" },
+          },
+        ],
+      })
+
+      const workflowRunResponse = await fetch(`${baseUrl}/api/workflow-runs/workflow-run-previous`)
+      expect(workflowRunResponse.status).toBe(200)
+      expect(await workflowRunResponse.json()).toMatchObject({
+        run: {
+          id: "workflow-run-previous",
+          workflowId: "inspect-device-workflow",
+          status: "succeeded",
+          input: { deviceId: "fan-1" },
+        },
+        nodes: [
+          {
+            id: "workflow-node-run-previous",
+            workflowRunId: "workflow-run-previous",
+            nodeId: "inspect-device",
+            nodeKey: "inspectDevice",
+            status: "succeeded",
+            input: { deviceId: "fan-1" },
+            output: { deviceId: "fan-1", healthy: true },
+          },
+        ],
+      })
+
       const rulesResponse = await fetch(`${baseUrl}/api/rules`)
       expect(rulesResponse.status).toBe(200)
       expect(await rulesResponse.json()).toEqual([
@@ -1000,6 +1122,62 @@ describe("ParioServer HTTP contract", () => {
         pipelineId: "github-events-pipeline",
         runId: requestPipelineRunBody.runId,
       })
+
+      const requestWorkflowRunResponse = await fetch(
+        `${baseUrl}/api/workflows/inspect-device-workflow/runs`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ input: { deviceId: "fan-2" } }),
+        }
+      )
+      expect(requestWorkflowRunResponse.status).toBe(202)
+      const requestWorkflowRunBody = (await requestWorkflowRunResponse.json()) as {
+        runId: string
+        jobId: string
+        workflowId: string
+      }
+      expect(requestWorkflowRunBody.runId).toStartWith("run_")
+      expect(requestWorkflowRunBody.jobId).toBeTruthy()
+      expect(requestWorkflowRunBody.workflowId).toBe("inspect-device-workflow")
+
+      const queuedWorkflowRunRecord = await pario.storage.workflowRuns!.getById({
+        projectId: pario.id,
+        id: requestWorkflowRunBody.runId,
+      })
+      expect(queuedWorkflowRunRecord).toMatchObject({
+        id: requestWorkflowRunBody.runId,
+        workflowId: "inspect-device-workflow",
+        status: "queued",
+        input: { deviceId: "fan-2" },
+      })
+
+      const [queuedWorkflowRun] = await pario.queues.workflows.claim({
+        projectId: pario.id,
+        workerId: "contract-test",
+      })
+      expect(queuedWorkflowRun?.job.payload).toEqual({
+        workflowId: "inspect-device-workflow",
+        runId: requestWorkflowRunBody.runId,
+        input: { deviceId: "fan-2" },
+      })
+
+      const workflowEvents = await events.read({
+        topics: ["workflows"],
+        types: ["workflow.run.queued"],
+        limit: 10,
+      })
+      expect(workflowEvents).toEqual([
+        expect.objectContaining({
+          type: "workflow.run.queued",
+          payload: expect.objectContaining({
+            workflowId: "inspect-device-workflow",
+            runId: requestWorkflowRunBody.runId,
+            jobId: requestWorkflowRunBody.jobId,
+            source: { type: "manual" },
+          }),
+        }),
+      ])
     })
   })
 })

@@ -41,6 +41,7 @@ export type {
   WorkflowRunFinishedEvent,
   WorkflowRunNodeFinishedEvent,
   WorkflowRunNodeStartedEvent,
+  WorkflowRunQueuedEvent,
   WorkflowRunStartedEvent,
 } from "./workflows"
 
@@ -103,6 +104,10 @@ export type StoredPipelineRunStepFinishedEvent = Extract<
 export type StoredPipelineRunFinishedEvent = Extract<
   StoredDomainEvent,
   { type: "pipeline.run.finished" }
+>
+export type StoredWorkflowRunQueuedEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.run.queued" }
 >
 export type StoredWorkflowRunStartedEvent = Extract<
   StoredDomainEvent,

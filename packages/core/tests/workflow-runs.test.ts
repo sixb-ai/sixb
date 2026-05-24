@@ -40,6 +40,52 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
   })
 
+  test("queues workflow runs before transitioning them to running", async () => {
+    const storage = new InMemoryWorkflowRunStorage()
+    const queuedAt = new Date("2026-05-08T09:59:00.000Z")
+    const startedAt = new Date("2026-05-08T10:00:00.000Z")
+
+    const queued = await storage.queue({
+      id: "wf-run-queued",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_123" },
+      queuedAt,
+    })
+
+    const running = await storage.start({
+      id: "wf-run-queued",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_123" },
+      startedAt,
+    })
+
+    expect(queued.status).toBe("queued")
+    expect(queued.queuedAt?.toISOString()).toBe(queuedAt.toISOString())
+    expect(running.status).toBe("running")
+    expect(running.queuedAt?.toISOString()).toBe(queuedAt.toISOString())
+    expect(running.startedAt.toISOString()).toBe(startedAt.toISOString())
+
+    const failed = await storage.queue({
+      id: "wf-run-failed-before-start",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_456" },
+      queuedAt,
+    })
+    expect(failed.status).toBe("queued")
+
+    const finished = await storage.finish({
+      id: "wf-run-failed-before-start",
+      projectId: "my-app",
+      status: "failed",
+      error: "queue dispatch failed",
+    })
+    expect(finished.status).toBe("failed")
+    expect(finished.error).toBe("queue dispatch failed")
+  })
+
   test("stores failed workflow runs and lists with filters, ordering, and paging", async () => {
     const storage = new InMemoryWorkflowRunStorage()
 

@@ -15,6 +15,7 @@ import { registerStatusRoutes } from "./routes/status"
 import { registerSyncRoutes } from "./routes/syncs"
 import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
+import { registerWorkflowRoutes } from "./routes/workflows"
 
 export function registerHttpRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
   registerProjectRoutes(app, pario)
@@ -23,6 +24,7 @@ export function registerHttpRoutes(app: Elysia, pario: Pario<readonly OntologySo
   registerDatasetRoutes(app, pario)
   registerSyncRoutes(app, pario)
   registerPipelineRoutes(app, pario)
+  registerWorkflowRoutes(app, pario)
   registerRuleRoutes(app, pario)
   registerOntologyRoutes(app, pario)
   registerObjectRoutes(app, pario)

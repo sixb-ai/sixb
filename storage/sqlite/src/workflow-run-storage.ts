@@ -8,6 +8,7 @@ import type {
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  QueueWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WorkflowIOSnapshot,
@@ -48,8 +49,8 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     this.nodes = new SqliteWorkflowNodeRunStorage(this.db)
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
-    const startedAt = input.startedAt ?? new Date()
+  async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const queuedAt = input.queuedAt ?? new Date()
 
     try {
       this.db
@@ -61,17 +62,19 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             workflow_id,
             status,
             input,
+            queued_at,
             started_at
-          ) VALUES (?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
           input.projectId,
           input.id,
           input.workflowId,
-          "running",
+          "queued",
           serializeRecord(input.input),
-          startedAt.toISOString()
+          queuedAt.toISOString(),
+          queuedAt.toISOString()
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -83,14 +86,88 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       throw error
     }
 
-    const record = await this.getById({ projectId: input.projectId, id: input.id })
-    if (!record) {
-      throw new WorkflowRunError(
-        `[ParioSqlite] Failed to load workflow run '${input.id}' for project '${input.projectId}'.`
-      )
-    }
+    return this.requireWorkflowRun(input.projectId, input.id)
+  }
 
-    return record
+  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const startedAt = input.startedAt ?? new Date()
+
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as WorkflowRunDatabaseRow | null
+
+      if (existing) {
+        if (existing.status !== "queued") {
+          throw new WorkflowRunError(
+            `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          )
+        }
+
+        if (existing.workflow_id !== input.workflowId) {
+          throw new WorkflowRunError(
+            `[ParioSqlite] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
+          )
+        }
+
+        this.db
+          .query(
+            `
+            UPDATE workflow_runs
+            SET
+              status = ?,
+              input = ?,
+              started_at = ?,
+              finished_at = NULL,
+              error = NULL
+            WHERE project_id = ? AND id = ?
+          `
+          )
+          .run(
+            "running",
+            serializeRecord(input.input),
+            startedAt.toISOString(),
+            input.projectId,
+            input.id
+          )
+
+        return this.requireWorkflowRun(input.projectId, input.id)
+      }
+
+      try {
+        this.db
+          .query(
+            `
+            INSERT INTO workflow_runs (
+              project_id,
+              id,
+              workflow_id,
+              status,
+              input,
+              started_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+          `
+          )
+          .run(
+            input.projectId,
+            input.id,
+            input.workflowId,
+            "running",
+            serializeRecord(input.input),
+            startedAt.toISOString()
+          )
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new WorkflowRunError(
+            `[ParioSqlite] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          )
+        }
+
+        throw error
+      }
+
+      return this.requireWorkflowRun(input.projectId, input.id)
+    })()
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
@@ -105,9 +182,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
         )
       }
 
-      if (existing.status !== "running") {
+      if (!canFinishWorkflowRun(existing.status, input.status)) {
         throw new WorkflowRunError(
-          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[ParioSqlite] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
 
@@ -184,6 +261,20 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
 
   close(): void {
     this.db.close()
+  }
+
+  private requireWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
+    const record = this.db
+      .query("SELECT * FROM workflow_runs WHERE project_id = ? AND id = ?")
+      .get(projectId, id) as WorkflowRunDatabaseRow | null
+
+    if (!record) {
+      throw new WorkflowRunError(
+        `[ParioSqlite] Failed to load workflow run '${id}' for project '${projectId}'.`
+      )
+    }
+
+    return rowToWorkflowRunRecord(record)
   }
 }
 
@@ -401,6 +492,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
+    queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
@@ -434,12 +526,20 @@ function assertNonNegativeInteger(value: number, fieldName: string): void {
   }
 }
 
+function canFinishWorkflowRun(
+  current: WorkflowRunRecord["status"],
+  next: FinishWorkflowRunInput["status"]
+): boolean {
+  return current === "running" || (current === "queued" && next !== "succeeded")
+}
+
 interface WorkflowRunDatabaseRow {
   project_id: string
   id: string
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: string
+  queued_at: string | null
   started_at: string
   finished_at: string | null
   error: string | null

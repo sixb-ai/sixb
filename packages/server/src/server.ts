@@ -175,6 +175,7 @@ export function createParioApi(server: ParioServer) {
           { name: "Datasets", description: "Dataset definitions, versions, and row previews" },
           { name: "Syncs", description: "Sync metadata and run history" },
           { name: "Pipelines", description: "Pipeline metadata and run history" },
+          { name: "Workflows", description: "Workflow metadata and run history" },
           { name: "Rules", description: "Rule definitions and active states" },
           { name: "Projections", description: "Projection definitions" },
           { name: "Objects", description: "Twin objects and state" },

@@ -51,6 +51,12 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryErrors,
   GetTelemetryHistoryResponses,
+  GetWorkflowData,
+  GetWorkflowErrors,
+  GetWorkflowResponses,
+  GetWorkflowRunData,
+  GetWorkflowRunErrors,
+  GetWorkflowRunResponses,
   ListAuthInvitationsData,
   ListAuthInvitationsErrors,
   ListAuthInvitationsResponses,
@@ -96,6 +102,11 @@ import type {
   ListWebhookRunsData,
   ListWebhookRunsErrors,
   ListWebhookRunsResponses,
+  ListWorkflowRunsData,
+  ListWorkflowRunsErrors,
+  ListWorkflowRunsResponses,
+  ListWorkflowsData,
+  ListWorkflowsResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -108,6 +119,9 @@ import type {
   RequestSyncRunData,
   RequestSyncRunErrors,
   RequestSyncRunResponses,
+  RequestWorkflowRunData,
+  RequestWorkflowRunErrors,
+  RequestWorkflowRunResponses,
   RevokeAuthInvitationData,
   RevokeAuthInvitationErrors,
   RevokeAuthInvitationResponses,
@@ -416,6 +430,70 @@ export const requestPipelineRun = <ThrowOnError extends boolean = false>(
     security: [{ name: "x-pario-csrf", type: "apiKey" }],
     url: "/api/pipelines/{pipelineId}/runs",
     ...options,
+  })
+
+/**
+ * List registered workflows
+ */
+export const listWorkflows = <ThrowOnError extends boolean = false>(
+  options?: Options<ListWorkflowsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListWorkflowsResponses, unknown, ThrowOnError>({
+    url: "/api/workflows",
+    ...options,
+  })
+
+/**
+ * Get workflow metadata
+ */
+export const getWorkflow = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError>({
+    url: "/api/workflows/{workflowId}",
+    ...options,
+  })
+
+/**
+ * List workflow run history
+ */
+export const listWorkflowRuns = <ThrowOnError extends boolean = false>(
+  options?: Options<ListWorkflowRunsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListWorkflowRunsResponses, ListWorkflowRunsErrors, ThrowOnError>({
+    url: "/api/workflow-runs",
+    ...options,
+  })
+
+/**
+ * Get workflow run detail
+ */
+export const getWorkflowRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError>({
+    url: "/api/workflow-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * Request a workflow run
+ */
+export const requestWorkflowRun = <ThrowOnError extends boolean = false>(
+  options: Options<RequestWorkflowRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RequestWorkflowRunResponses,
+    RequestWorkflowRunErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    url: "/api/workflows/{workflowId}/runs",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

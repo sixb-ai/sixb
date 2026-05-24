@@ -3,6 +3,20 @@ import { EventsRuntime, InMemoryBroker, toStoredEvent } from "../src"
 
 describe("workflow runtime events", () => {
   test("stores workflow lifecycle events with workflow topic and run partition", () => {
+    const queued = toStoredEvent({
+      projectId: "project-a",
+      cursor: "0",
+      event: {
+        type: "workflow.run.queued",
+        payload: {
+          workflowId: "reconcile-transaction",
+          runId: "wfrun_1",
+          queuedAt: "2026-05-08T09:59:00.000Z",
+          jobId: "job_1",
+          source: { type: "manual" },
+        },
+      },
+    })
     const started = toStoredEvent({
       projectId: "project-a",
       cursor: "1",
@@ -53,8 +67,13 @@ describe("workflow runtime events", () => {
       },
     })
 
-    expect([started, nodeStarted, nodeFinished]).toEqual(
+    expect([queued, started, nodeStarted, nodeFinished]).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          type: "workflow.run.queued",
+          topic: "workflows",
+          partitionKey: "reconcile-transaction:wfrun_1",
+        }),
         expect.objectContaining({
           type: "workflow.run.started",
           topic: "workflows",
@@ -84,6 +103,7 @@ describe("workflow runtime events", () => {
           workflowId: "reconcile-transaction",
           runId: "wfrun_1",
           status: "succeeded",
+          finishedAt: "2026-05-08T10:00:03.000Z",
         },
       },
     })
@@ -96,6 +116,7 @@ describe("workflow runtime events", () => {
         workflowId: "reconcile-transaction",
         runId: "wfrun_1",
         status: "succeeded",
+        finishedAt: "2026-05-08T10:00:03.000Z",
       },
     })
   })
@@ -108,6 +129,14 @@ describe("workflow runtime events", () => {
 
     await eventsRuntime.append({
       events: [
+        {
+          type: "workflow.run.queued",
+          payload: {
+            workflowId: "reconcile-transaction",
+            runId: "wfrun_1",
+            queuedAt: "2026-05-08T09:59:00.000Z",
+          },
+        },
         {
           type: "workflow.run.started",
           payload: {
@@ -152,6 +181,8 @@ describe("workflow runtime events", () => {
             workflowId: "reconcile-transaction",
             runId: "wfrun_1",
             status: "failed",
+            finishedAt: "2026-05-08T10:00:03.000Z",
+            error: "No match",
           },
         },
       ],
@@ -160,6 +191,7 @@ describe("workflow runtime events", () => {
     const events = await eventsRuntime.read({
       topics: ["workflows"],
       types: [
+        "workflow.run.queued",
         "workflow.run.started",
         "workflow.run.node.started",
         "workflow.run.node.finished",
@@ -168,15 +200,18 @@ describe("workflow runtime events", () => {
     })
 
     expect(events.map((event) => event.type)).toEqual([
+      "workflow.run.queued",
       "workflow.run.started",
       "workflow.run.node.started",
       "workflow.run.node.finished",
       "workflow.run.finished",
     ])
-    expect(events[3]?.payload).toEqual({
+    expect(events[4]?.payload).toEqual({
       workflowId: "reconcile-transaction",
       runId: "wfrun_1",
       status: "failed",
+      finishedAt: "2026-05-08T10:00:03.000Z",
+      error: "No match",
     })
   })
 })

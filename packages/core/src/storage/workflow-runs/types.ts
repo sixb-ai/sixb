@@ -2,8 +2,8 @@ import type { WorkflowIOSnapshot } from "../../workflows/types"
 
 export type { WorkflowIOSnapshot } from "../../workflows/types"
 
-export type WorkflowRunStatus = "running" | "succeeded" | "failed" | "cancelled"
-export type WorkflowNodeRunStatus = WorkflowRunStatus
+export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
 export type WorkflowNodeRunType = "step" | "action"
 
 export interface WorkflowRunRecord {
@@ -12,6 +12,7 @@ export interface WorkflowRunRecord {
   readonly workflowId: string
   readonly status: WorkflowRunStatus
   readonly input: WorkflowIOSnapshot
+  readonly queuedAt?: Date
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly error?: string
@@ -40,6 +41,14 @@ export interface StartWorkflowRunInput {
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
+}
+
+export interface QueueWorkflowRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly workflowId: string
+  readonly input: WorkflowIOSnapshot
+  readonly queuedAt?: Date
 }
 
 export type FinishWorkflowRunInput =
@@ -127,6 +136,7 @@ export interface ListWorkflowNodeRunsResult {
 export interface WorkflowRunStorage {
   readonly nodes: WorkflowNodeRunStorage
 
+  queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord>
   start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>

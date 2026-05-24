@@ -212,10 +212,11 @@ describe("WorkflowWorker", () => {
       nodeRunId: "wfrun_worker_success:node:0",
       status: "succeeded",
     })
-    expect(events[3]?.payload).toEqual({
+    expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_success",
       status: "succeeded",
+      finishedAt: expect.any(String),
     })
 
     const claimed = await pario.queues.workflows.claim({
@@ -287,10 +288,12 @@ describe("WorkflowWorker", () => {
       status: "failed",
       error: "workflow exploded",
     })
-    expect(events[3]?.payload).toEqual({
+    expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_failed",
       status: "failed",
+      finishedAt: expect.any(String),
+      error: "workflow exploded",
     })
 
     const claimed = await pario.queues.workflows.claim({
@@ -358,10 +361,12 @@ describe("WorkflowWorker", () => {
       nodeRunId: "wfrun_worker_cancelled:node:0",
       status: "cancelled",
     })
-    expect(events[3]?.payload).toEqual({
+    expect(events[3]?.payload).toMatchObject({
       workflowId: workflow.id,
       runId: "wfrun_worker_cancelled",
       status: "cancelled",
+      finishedAt: expect.any(String),
+      error: "Workflow worker aborted.",
     })
 
     const claimed = await pario.queues.workflows.claim({

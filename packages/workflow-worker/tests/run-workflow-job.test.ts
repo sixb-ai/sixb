@@ -234,19 +234,33 @@ describe("runWorkflowJob", () => {
         calls.push(`run-finished:${run.status}`)
       },
     }
+    const workflowInput = {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    }
+    await pario.storage.workflowRuns!.queue({
+      id: "wfrun_observed",
+      projectId: pario.id,
+      workflowId: workflow.id,
+      input: workflowInput,
+      queuedAt: new Date("2026-05-08T09:59:00.000Z"),
+    })
 
     await runWorkflowJob({
       runtime: createRuntime(pario),
       job: {
         id: "wfrun_observed",
         workflowId: workflow.id,
-        input: {
-          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-        },
+        input: workflowInput,
       },
       observer,
     })
 
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_observed",
+    })
+
+    expect(run?.queuedAt?.toISOString()).toBe("2026-05-08T09:59:00.000Z")
     expect(calls).toEqual([
       "run-started:running",
       "node-started:0/1:running",
@@ -354,6 +368,51 @@ describe("runWorkflowJob", () => {
       projectId: pario.id,
     })
     expect(runs.total).toBe(0)
+  })
+
+  test("marks queued runs failed when validation fails before start", async () => {
+    const workflow = defineWorkflow("queued-invalid-input")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const pario = createPario({ workflows: [workflow] })
+    const observerCalls: string[] = []
+
+    await pario.storage.workflowRuns!.queue({
+      id: "wfrun_queued_invalid_input",
+      projectId: pario.id,
+      workflowId: workflow.id,
+      input: {},
+    })
+
+    await expect(
+      runWorkflowJob({
+        runtime: createRuntime(pario),
+        job: {
+          id: "wfrun_queued_invalid_input",
+          workflowId: workflow.id,
+          input: {},
+        },
+        observer: {
+          onRunStarted: async () => undefined,
+          onNodeStarted: async () => undefined,
+          onNodeFinished: async () => undefined,
+          onRunFinished: async (run) => {
+            observerCalls.push(`${run.status}:${run.error}`)
+          },
+        },
+      })
+    ).rejects.toBeInstanceOf(WorkflowValidationError)
+
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_queued_invalid_input",
+    })
+    expect(run?.status).toBe("failed")
+    expect(observerCalls).toHaveLength(1)
+    expect(observerCalls[0]).toContain("failed:[Pario] Missing required field")
+    expect(observerCalls[0]).toContain('Workflow "queued-invalid-input" input.transaction')
   })
 
   test("marks the active step and workflow failed when step output validation fails", async () => {
