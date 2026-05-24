@@ -505,8 +505,8 @@ export class RedisBroker implements Broker {
 }
 
 function positiveInteger(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new RedisBrokerError("broker numeric options must be positive finite numbers")
+  if (!Number.isFinite(value) || value <= 0 || !Number.isInteger(value)) {
+    throw new RedisBrokerError("broker numeric options must be positive finite integers")
   }
-  return Math.floor(value)
+  return value
 }
