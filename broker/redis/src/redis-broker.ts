@@ -1,7 +1,10 @@
 import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@pario/core"
 import { cloneJsonValue } from "@pario/core"
-import type { RedisClientOptions } from "redis"
-import { type RedisBrokerClient, RedisConnectionManager } from "./connection"
+import {
+  type RedisBrokerClient,
+  type RedisBrokerConnectionOptions,
+  RedisConnectionManager,
+} from "./connection"
 import { assertCursor, compareStreamIds } from "./cursor"
 import { RedisBrokerError } from "./errors"
 import { assertPrefix, assertStreamId, validateProjectId } from "./keys"
@@ -24,8 +27,8 @@ const DEFAULT_SUBSCRIBE_BATCH_SIZE = 100
 const DEFAULT_SUBSCRIBE_BLOCK_MS = 1_000
 
 export interface RedisBrokerOptions {
-  /** node-redis client options, commonly `{ url: "redis://localhost:6379" }`. */
-  readonly connection: RedisClientOptions
+  /** Bun Redis client options, commonly `{ url: "redis://localhost:6379" }`. */
+  readonly connection?: RedisBrokerConnectionOptions
   /** Redis key prefix. Defaults to `"pario:broker"`. */
   readonly prefix?: string
   /** Retry-deduplication window for `idempotencyKey`. Defaults to two minutes. */
@@ -58,7 +61,7 @@ export class RedisBroker implements Broker {
   private readonly subscribeBlockMs: number
   private closed = false
 
-  constructor(options: RedisBrokerOptions) {
+  constructor(options: RedisBrokerOptions = {}) {
     const prefix = options.prefix ?? DEFAULT_PREFIX
     assertPrefix(prefix)
 
@@ -272,7 +275,7 @@ export class RedisBroker implements Broker {
           console.error("[RedisBroker] Subscription pump failed:", error)
         }
       } finally {
-        this.connectionManager.destroyClient(client)
+        this.connectionManager.closeClient(client)
       }
     })()
 
@@ -282,7 +285,7 @@ export class RedisBroker implements Broker {
           return
         }
         stopped = true
-        this.connectionManager.destroyClient(client)
+        this.connectionManager.closeClient(client)
       },
       drain: async () => {
         await pump
@@ -316,8 +319,7 @@ export class RedisBroker implements Broker {
     try {
       // One Lua call keeps XADD, dedupe-key writes, trimming, and retained-range
       // metadata updates in the same Redis atomic operation.
-      reply = await params.client.sendCommand([
-        "EVAL",
+      reply = await params.client.send("EVAL", [
         APPEND_RECORD_SCRIPT,
         "3",
         params.ensured.keys.streamKey,
@@ -381,8 +383,7 @@ export class RedisBroker implements Broker {
   ): Promise<readonly RedisStreamEntry[]> {
     let reply: unknown
     try {
-      reply = await client.sendCommand([
-        "XRANGE",
+      reply = await client.send("XRANGE", [
         ensured.keys.streamKey,
         start,
         end,
@@ -402,8 +403,7 @@ export class RedisBroker implements Broker {
   ): Promise<readonly RedisStreamEntry[]> {
     let reply: unknown
     try {
-      reply = await client.sendCommand([
-        "XREAD",
+      reply = await client.send("XREAD", [
         "COUNT",
         String(this.subscribeBatchSize),
         "BLOCK",
@@ -427,8 +427,7 @@ export class RedisBroker implements Broker {
     try {
       // Age retention is a Pario-level policy. Redis Streams only trim when a
       // command asks them to, so reads/replays must also trim idle streams.
-      await client.sendCommand([
-        "EVAL",
+      await client.send("EVAL", [
         ENFORCE_AGE_RETENTION_SCRIPT,
         "2",
         ensured.keys.streamKey,
@@ -461,8 +460,7 @@ export class RedisBroker implements Broker {
   ): Promise<readonly RedisStreamEntry[]> {
     let reply: unknown
     try {
-      reply = await client.sendCommand([
-        "XREVRANGE",
+      reply = await client.send("XREVRANGE", [
         ensured.keys.streamKey,
         start,
         end,

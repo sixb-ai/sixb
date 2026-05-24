@@ -4,7 +4,6 @@ import { RedisBrokerError } from "./errors"
 import { assertStreamId, type RedisStreamKeys, streamKeysFor, validateProjectId } from "./keys"
 import { assertStream, normalizeRetention } from "./retention"
 import { ENSURE_STREAM_SCRIPT } from "./scripts"
-import { toText } from "./stream-replies"
 
 export interface EnsuredStream {
   readonly projectId: string
@@ -46,8 +45,7 @@ export class StreamManager {
       // The script creates metadata only when absent. That mirrors NATS'
       // "bind to existing stream config" behavior and avoids changing
       // production retention if a later runtime starts with different options.
-      await client.sendCommand([
-        "EVAL",
+      await client.send("EVAL", [
         ENSURE_STREAM_SCRIPT,
         "1",
         keys.metaKey,
@@ -77,14 +75,14 @@ export class StreamManager {
     }
 
     const client = await this.connectionManager.connect()
-    let exists: unknown
+    let exists: boolean
     try {
-      exists = await client.sendCommand(["EXISTS", keys.metaKey])
+      exists = await client.exists(keys.metaKey)
     } catch (error) {
       throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
     }
 
-    if (Number(exists) !== 1) {
+    if (!exists) {
       return null
     }
 
@@ -108,24 +106,20 @@ export class StreamManager {
     ensured: EnsuredStream,
     fields: readonly string[]
   ): Promise<ReadonlyMap<string, string>> {
-    let reply: unknown
+    let reply: Array<string | null>
     try {
-      reply = await client.sendCommand(["HMGET", ensured.keys.metaKey, ...fields])
+      reply = await client.hmget(ensured.keys.metaKey, [...fields])
     } catch (error) {
       throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}" metadata`, {
         cause: error,
       })
     }
 
-    if (!Array.isArray(reply)) {
-      throw new RedisBrokerError("Redis HMGET reply was not an array")
-    }
-
     const values = new Map<string, string>()
     for (let index = 0; index < fields.length; index += 1) {
       const value = reply[index]
-      if (value !== null && value !== undefined) {
-        values.set(fields[index]!, toText(value))
+      if (value !== null) {
+        values.set(fields[index]!, value)
       }
     }
     return values

@@ -13,7 +13,7 @@ export function assertPrefix(prefix: string): void {
     throw new RedisBrokerError("prefix must be a non-empty string")
   }
   if (/[{}]/.test(prefix)) {
-    throw new RedisBrokerError("prefix must not contain Redis Cluster hash-tag braces")
+    throw new RedisBrokerError("prefix must not contain Redis hash-tag braces")
   }
 }
 
@@ -34,9 +34,8 @@ export function streamKeysFor(
   projectId: string,
   streamId: string
 ): RedisStreamKeys {
-  // Keep every key for one logical broker stream in the same Redis Cluster
-  // hash slot. The append Lua script touches stream/meta/dedupe keys together,
-  // so cross-slot keys would break Redis Cluster deployments.
+  // Keep every key for one logical broker stream in a hash-tag-compatible group.
+  // The append Lua script touches stream/meta/dedupe keys together.
   const hashTag = `${encodeKeyPart(projectId)}:${encodeKeyPart(streamId)}`
   const base = `${prefix}:brk:{${hashTag}}`
 
