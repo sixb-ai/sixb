@@ -1,15 +1,20 @@
-import { mkdir } from "node:fs/promises"
+import { mkdir, readdir, rm } from "node:fs/promises"
 import { join } from "node:path"
 import { renderParioBrowserRuntimeScript } from "@pario/client/browser"
 import type { AuthSessionAudience } from "@pario/core"
 
 export interface BuiltInUiBundle {
   outdir: string
+  scriptPath: string
+  stylesheetPath: string
 }
 
 export interface BuiltInUiRuntimeConfig {
   readonly apiBaseUrl: string
   readonly audience: AuthSessionAudience
+  readonly authEnabled: boolean
+  readonly scriptPath: string
+  readonly stylesheetPath: string
 }
 
 let readyBundle: Promise<BuiltInUiBundle> | null = null
@@ -31,6 +36,7 @@ export async function ensureBuiltInUiBundle(): Promise<BuiltInUiBundle> {
 
 async function buildBuiltInUiBundle(): Promise<BuiltInUiBundle> {
   const outdir = join(import.meta.dir, ".pario", "browser")
+  await rm(outdir, { recursive: true, force: true })
   await mkdir(outdir, { recursive: true })
 
   const proc = Bun.spawn(
@@ -43,9 +49,11 @@ async function buildBuiltInUiBundle(): Promise<BuiltInUiBundle> {
       "--target",
       "browser",
       "--entry-naming",
-      "[name].[ext]",
+      "[name]-[hash].[ext]",
+      "--chunk-naming",
+      "[name]-[hash].[ext]",
       "--asset-naming",
-      "[name].[ext]",
+      "[name]-[hash].[ext]",
     ],
     {
       cwd: import.meta.dir,
@@ -60,13 +68,21 @@ async function buildBuiltInUiBundle(): Promise<BuiltInUiBundle> {
     throw new Error(`[ParioAtlas] Failed to build built-in UI bundle: ${stderr.trim()}`)
   }
 
-  return { outdir }
+  const files = await readdir(outdir)
+  const scriptFile = findBuiltAsset(files, "main", "js")
+  const stylesheetFile = findBuiltAsset(files, "main", "css")
+
+  return {
+    outdir,
+    scriptPath: `/__pario/${scriptFile}`,
+    stylesheetPath: `/__pario/${stylesheetFile}`,
+  }
 }
 
 export function renderBuiltInUiShell(config: BuiltInUiRuntimeConfig): string {
   const runtimeConfigScript = renderParioBrowserRuntimeScript({
     api: { baseUrl: config.apiBaseUrl },
-    auth: { audience: config.audience },
+    auth: { audience: config.audience, enabled: config.authEnabled },
   })
 
   return `<!DOCTYPE html>
@@ -79,12 +95,29 @@ export function renderBuiltInUiShell(config: BuiltInUiRuntimeConfig): string {
     <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
     <title>Pario</title>
-    <link rel="stylesheet" href="/__pario/main.css" />
+    <link rel="stylesheet" href="${config.stylesheetPath}" />
     ${runtimeConfigScript}
-    <script type="module" src="/__pario/main.js"></script>
+    <script type="module" src="${config.scriptPath}"></script>
   </head>
   <body>
     <div id="root"></div>
   </body>
 </html>`
+}
+
+function findBuiltAsset(files: readonly string[], entryName: string, extension: string): string {
+  const pattern = new RegExp(`^${escapeRegExp(entryName)}-[^.]+\\.${escapeRegExp(extension)}$`)
+  const matches = files.filter((file) => pattern.test(file))
+
+  if (matches.length !== 1) {
+    throw new Error(
+      `[ParioAtlas] Expected one ${entryName}.${extension} bundle in the built UI output, found ${matches.length}.`
+    )
+  }
+
+  return matches[0]
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

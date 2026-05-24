@@ -68,7 +68,7 @@ describe("createCustomApp.start", () => {
       const html = await rootResponse.text()
       expect(html).toContain("Fixture App")
       expect(html).toContain('"api":{"baseUrl":"http://127.0.0.1:3000"}')
-      expect(html).toContain('"auth":{"audience":"app"}')
+      expect(html).toContain('"auth":{"audience":"app","enabled":true}')
 
       const routeResponse = await fetch(`http://127.0.0.1:${port}/dashboard/devices`)
       expect(routeResponse.status).toBe(200)
@@ -88,6 +88,24 @@ describe("createCustomApp.start", () => {
         method: "POST",
       })
       expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("injects disabled auth state for public local apps", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot, audience: "app", authEnabled: false })
+    const server = await app.start({
+      host: "127.0.0.1",
+      port,
+      apiBaseUrl: "http://127.0.0.1:3000",
+    })
+
+    try {
+      const rootResponse = await fetch(`http://127.0.0.1:${port}/`)
+      expect(rootResponse.status).toBe(200)
+      expect(await rootResponse.text()).toContain('"auth":{"audience":"app","enabled":false}')
     } finally {
       await server.stop()
     }

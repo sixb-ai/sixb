@@ -48,6 +48,7 @@ export async function runStart(options: StartOptions = {}) {
   try {
     pario = await loadParioFromEntry(entry)
     runtime = await startParioRuntime(pario, { cohostWorkers: false })
+    const authEnabled = pario.auth.isEnabled()
     const projectRoot = resolveProjectRoot(entry)
 
     const builtAppEntry = resolve(projectRoot, ".pario", "dist", "app", "index.html")
@@ -81,6 +82,7 @@ export async function runStart(options: StartOptions = {}) {
     const atlas = createAtlasApp({
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "atlas",
+      authEnabled,
     })
     atlasServer = await atlas.start({
       host: topology.host,
@@ -92,6 +94,7 @@ export async function runStart(options: StartOptions = {}) {
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
+      authEnabled,
     })
 
     let appUrl: string | null = null
@@ -102,6 +105,7 @@ export async function runStart(options: StartOptions = {}) {
         outdir: resolve(projectRoot, ".pario", "dist", "app"),
         apiBaseUrl: topology.apiPublicOrigin,
         audience: "app",
+        authEnabled,
       })
       appUrl = topology.appPublicOrigin
     } else if (await customApp.hasRoutes()) {

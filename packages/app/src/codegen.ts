@@ -42,6 +42,7 @@ export async function generateAppEntry(
   options: {
     apiBaseUrl?: string
     audience?: string
+    authEnabled?: boolean
     appDir?: string
   } = {}
 ): Promise<{ htmlPath: string; mainPath: string }> {
@@ -66,7 +67,7 @@ export async function generateAppEntry(
   const runtimeConfigScript = options.apiBaseUrl
     ? renderCustomAppRuntimeScript({
         api: { baseUrl: options.apiBaseUrl },
-        auth: { audience: options.audience ?? "app" },
+        auth: { audience: options.audience ?? "app", enabled: options.authEnabled ?? true },
       })
     : ""
 
@@ -86,7 +87,10 @@ ${layoutImport}
 
 const runtimeConfig = readParioBrowserRuntimeConfig({ audience: "app" })
 const browserClient = configureParioBrowserClient(runtimeConfig)
-const authSession = await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+const authSession = runtimeConfig.auth.enabled
+  ? await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+  : null
+const canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -130,7 +134,7 @@ function applyMetadata() {
   }
 }
 
-if (authSession.authenticated) {
+if (canRenderApp) {
   applyMetadata()
 }
 
@@ -152,7 +156,7 @@ function App() {
   )
 }
 
-if (authSession.authenticated) {
+if (canRenderApp) {
   createRoot(document.getElementById("root")!).render(<App />)
 }
 `

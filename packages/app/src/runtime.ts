@@ -4,6 +4,7 @@ export interface CustomAppRuntimeConfig {
   }
   readonly auth: {
     readonly audience: string
+    readonly enabled: boolean
   }
 }
 
