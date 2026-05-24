@@ -23,7 +23,11 @@ export function classifyRoute(request: Request): RouteAccess {
     return { kind: "api", csrfProtected: !isCsrfExemptMethod(request.method) }
   }
 
-  return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
+  if (pathname === "/docs" || pathname.startsWith("/docs/")) {
+    return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
+  }
+
+  return { kind: "public", csrfProtected: false }
 }
 
 export function isPublicRoute(pathname: string, method: string): boolean {

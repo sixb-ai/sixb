@@ -1,12 +1,15 @@
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
+import { renderParioBrowserRuntimeScript } from "@pario/client/browser"
+import type { AuthSessionAudience } from "@pario/core"
 
 export interface BuiltInUiBundle {
   outdir: string
 }
 
 export interface BuiltInUiRuntimeConfig {
-  readonly csrfCookieName: string
+  readonly apiBaseUrl: string
+  readonly audience: AuthSessionAudience
 }
 
 let readyBundle: Promise<BuiltInUiBundle> | null = null
@@ -54,18 +57,17 @@ async function buildBuiltInUiBundle(): Promise<BuiltInUiBundle> {
   const exitCode = await proc.exited
   if (exitCode !== 0) {
     const stderr = await new Response(proc.stderr).text()
-    throw new Error(`[ParioServer] Failed to build built-in UI bundle: ${stderr.trim()}`)
+    throw new Error(`[ParioAtlas] Failed to build built-in UI bundle: ${stderr.trim()}`)
   }
 
   return { outdir }
 }
 
 export function renderBuiltInUiShell(config: BuiltInUiRuntimeConfig): string {
-  const runtimeConfig = JSON.stringify({
-    auth: {
-      csrfCookieName: config.csrfCookieName,
-    },
-  }).replaceAll("<", "\\u003c")
+  const runtimeConfigScript = renderParioBrowserRuntimeScript({
+    api: { baseUrl: config.apiBaseUrl },
+    auth: { audience: config.audience },
+  })
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -78,7 +80,7 @@ export function renderBuiltInUiShell(config: BuiltInUiRuntimeConfig): string {
     <meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)" />
     <title>Pario</title>
     <link rel="stylesheet" href="/__pario/main.css" />
-    <script>window.__PARIO_RUNTIME__ = ${runtimeConfig};</script>
+    ${runtimeConfigScript}
     <script type="module" src="/__pario/main.js"></script>
   </head>
   <body>

@@ -20,6 +20,7 @@ import {
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
@@ -85,9 +86,7 @@ class FakeOidcClient implements OidcClientAdapter {
   }
 }
 
-function createRuntime(
-  options: { readonly browserApi?: boolean; readonly failInvitationDelivery?: boolean } = {}
-) {
+function createRuntime(options: { readonly failInvitationDelivery?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const client = new FakeOidcClient()
   const invitationMessages: SendOidcInvitationInput[] = []
@@ -129,20 +128,7 @@ function createRuntime(
       new ParioServer({
         pario,
         quiet: true,
-        ...(options.browserApi
-          ? {
-              surface: {
-                kind: "browserApi" as const,
-                browser: {
-                  publicOrigin: "http://api.localhost",
-                  allowedOrigins: [
-                    { origin: "http://admin.localhost", audience: "admin" as const },
-                    { origin: "http://app.localhost", audience: "app" as const },
-                  ],
-                },
-              },
-            }
-          : { ui: false }),
+        browser: createTestBrowserPolicy(),
       })
     ),
     client,
@@ -170,7 +156,7 @@ async function seedAdminSession(storage: InMemoryStorage) {
     projectId,
     userId: "usr_admin",
     strategyId: "okta",
-    audience: "admin",
+    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-17T10:00:00.000Z"),
     expiresAt: new Date("2099-05-17T10:00:00.000Z"),
@@ -195,26 +181,32 @@ describe("oidc auth routes", () => {
     const { app } = createRuntime()
 
     const response = await app.fetch(
-      new Request("http://localhost/auth/sign-in?returnTo=/objects", { redirect: "manual" })
+      new Request(
+        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fobjects",
+        { redirect: "manual" }
+      )
     )
     const location = new URL(response.headers.get("location") ?? "")
 
     expect(response.status).toBe(303)
     expect(location.origin).toBe("https://idp.example")
-    expect(location.searchParams.get("redirect_uri")).toBe("http://localhost/auth/callback")
+    expect(location.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
     expect(location.searchParams.get("state")).toStartWith("oidc_")
   })
 
   test("callback creates a session, sets cookies, and exposes the session shape", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
-      new Request("http://localhost/auth/sign-in?returnTo=/dashboard", { redirect: "manual" })
+      new Request(
+        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fdashboard",
+        { redirect: "manual" }
+      )
     )
     const providerUrl = new URL(signIn.headers.get("location") ?? "")
     const state = providerUrl.searchParams.get("state")
 
     const callback = await app.fetch(
-      new Request(`http://localhost/auth/callback?code=code&state=${state}`, {
+      new Request(`http://api.localhost/auth/callback?code=code&state=${state}`, {
         redirect: "manual",
       })
     )
@@ -222,10 +214,10 @@ describe("oidc auth routes", () => {
     expect(callback.status).toBe(200)
     expect(callback.headers.get("location")).toBeNull()
     expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self'"
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://atlas.localhost"
     )
     expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "pario_session")
@@ -234,7 +226,7 @@ describe("oidc auth routes", () => {
     expect(csrfCookie).toBeTruthy()
 
     const sessionResponse = await app.fetch(
-      new Request("http://localhost/api/auth/session", {
+      new Request("http://api.localhost/api/auth/session", {
         headers: {
           cookie: `pario_session=${sessionCookie}`,
         },
@@ -255,8 +247,8 @@ describe("oidc auth routes", () => {
     })
   })
 
-  test("browser API OIDC callbacks use the stored audience and return target", async () => {
-    const { app } = createRuntime({ browserApi: true })
+  test("API browser OIDC callbacks use the stored audience and return target", async () => {
+    const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
         "http://api.localhost/auth/sign-in?audience=app&returnTo=http%3A%2F%2Fapp.localhost%2Fdashboard",
@@ -290,10 +282,13 @@ describe("oidc auth routes", () => {
   test("callback replay returns a generic error without setting cookies", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
-      new Request("http://localhost/auth/sign-in?returnTo=/dashboard", { redirect: "manual" })
+      new Request(
+        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fdashboard",
+        { redirect: "manual" }
+      )
     )
     const providerUrl = new URL(signIn.headers.get("location") ?? "")
-    const callbackUrl = `http://localhost/auth/callback?code=code&state=${providerUrl.searchParams.get(
+    const callbackUrl = `http://api.localhost/auth/callback?code=code&state=${providerUrl.searchParams.get(
       "state"
     )}`
 
@@ -309,7 +304,7 @@ describe("oidc auth routes", () => {
     const admin = await seedAdminSession(storage)
 
     const invite = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
+      new Request("http://api.localhost/api/auth/invitations", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -319,7 +314,7 @@ describe("oidc auth routes", () => {
         body: JSON.stringify({
           email: " Ava@Acme.COM ",
           groupIds: ["commercial"],
-          returnTo: "/dashboard",
+          returnTo: "http://atlas.localhost/dashboard",
         }),
       })
     )
@@ -348,8 +343,8 @@ describe("oidc auth routes", () => {
       subject: "You are invited to Pario",
     })
     expect(invitationUrl.pathname).toBe("/auth/sign-in")
-    expect(invitationUrl.searchParams.get("audience")).toBe("admin")
-    expect(invitationUrl.searchParams.get("returnTo")).toBe("/dashboard")
+    expect(invitationUrl.searchParams.get("audience")).toBe("atlas")
+    expect(invitationUrl.searchParams.get("returnTo")).toBe("http://atlas.localhost/dashboard")
 
     client.tokenClaims = {
       sub: "00u-ava",
@@ -358,14 +353,16 @@ describe("oidc auth routes", () => {
       name: "Ava Chen",
     }
     const signIn = await app.fetch(
-      new Request(`http://localhost${invitationUrl.pathname}${invitationUrl.search}`, {
+      new Request(invitationUrl.toString(), {
         redirect: "manual",
       })
     )
     const providerUrl = new URL(signIn.headers.get("location") ?? "")
     const callback = await app.fetch(
       new Request(
-        `http://localhost/auth/callback?code=code&state=${providerUrl.searchParams.get("state")}`,
+        `http://api.localhost/auth/callback?code=code&state=${providerUrl.searchParams.get(
+          "state"
+        )}`,
         { redirect: "manual" }
       )
     )
@@ -373,7 +370,7 @@ describe("oidc auth routes", () => {
     expect(callback.status).toBe(200)
     expect(callback.headers.get("location")).toBeNull()
     expect(await callback.text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     await expect(
       storage.auth.groupMemberships.listForGroup({
@@ -388,10 +385,11 @@ describe("oidc auth routes", () => {
     const admin = await seedAdminSession(storage)
 
     const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
+      new Request("http://api.localhost/api/auth/invitations", {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          origin: "http://atlas.localhost",
           cookie: admin.cookie,
           ...admin.csrfHeader,
         },

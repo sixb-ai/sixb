@@ -3,48 +3,54 @@ import { access, cp } from "node:fs/promises"
 import { isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { type BuildAppResult, buildApp } from "./build"
 import { generateAppEntry, generateRouteManifest } from "./codegen"
+import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, scanPages } from "./scanner"
 
-export interface CreateParioAppOptions {
+export interface CreateCustomAppOptions {
   rootDir: string
   appDir?: string
   generatedDir?: string
   publicDir?: string
   apiBaseUrl?: string
+  audience?: string
 }
 
-export interface ParioAppDevOptions {
+export interface CustomAppDevOptions {
   host?: string
   port?: number
 }
 
-export interface ParioAppBuildOptions {
+export interface CustomAppBuildOptions {
   outdir?: string
 }
 
-export interface ParioAppStartOptions {
+export interface CustomAppStartOptions {
   host?: string
   port?: number
   outdir?: string
   apiBaseUrl?: string
+  audience?: string
 }
 
-export interface ParioAppDevServer {
+export interface CustomAppDevServer {
   host: string
   port: number
   url: string
   stop(): Promise<void>
 }
 
-export interface ParioAppInstance {
+export interface CustomAppInstance {
   scanRoutes(): Promise<PageRoute[]>
   hasRoutes(): Promise<boolean>
-  dev(options?: ParioAppDevOptions): Promise<ParioAppDevServer>
-  build(options?: ParioAppBuildOptions): Promise<BuildAppResult>
-  start(options?: ParioAppStartOptions): Promise<ParioAppDevServer>
+  dev(options?: CustomAppDevOptions): Promise<CustomAppDevServer>
+  build(options?: CustomAppBuildOptions): Promise<BuildAppResult>
+  start(options?: CustomAppStartOptions): Promise<CustomAppDevServer>
 }
 
-export async function createParioApp(options: CreateParioAppOptions): Promise<ParioAppInstance> {
+type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
+type BunServeRoute = BunServeRoutes[string]
+
+export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
   const appDir = options.appDir ? resolve(rootDir, options.appDir) : resolve(rootDir, "app")
   const generatedDir = resolve(rootDir, options.generatedDir ?? join(".pario", "generated"))
@@ -52,6 +58,7 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
     ? resolve(rootDir, options.publicDir)
     : resolve(appDir, "public")
   const apiBaseUrl = options.apiBaseUrl
+  const audience = options.audience ?? "app"
 
   async function scanRoutes(): Promise<PageRoute[]> {
     if (!(await pathExists(appDir))) {
@@ -64,12 +71,13 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
   async function prepareGeneratedApp(): Promise<{ htmlPath: string; routes: PageRoute[] }> {
     const routes = await scanRoutes()
     if (routes.length === 0) {
-      throw new Error(`[ParioApp] No app routes found in ${appDir}`)
+      throw new Error(`[ParioCustomApp] No app routes found in ${appDir}`)
     }
 
     await generateRouteManifest(routes, generatedDir)
     const { htmlPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
+      audience,
       appDir,
     })
     return { htmlPath, routes }
@@ -85,7 +93,7 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
       return routes.length > 0
     },
 
-    async dev(devOptions: ParioAppDevOptions = {}) {
+    async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath } = await prepareGeneratedApp()
@@ -97,8 +105,9 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
         development: true,
         routes: {
           ...publicRoutes,
-          "/": htmlModule.default,
-          "/*": htmlModule.default,
+          ...reservedParioRoutes(),
+          "/": htmlBundleRoute(htmlModule.default),
+          "/*": htmlBundleRoute(htmlModule.default),
         },
       } as Parameters<typeof Bun.serve>[0])
 
@@ -126,7 +135,7 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
       }
     },
 
-    async build(buildOptions: ParioAppBuildOptions = {}) {
+    async build(buildOptions: CustomAppBuildOptions = {}) {
       const outdir = resolve(rootDir, buildOptions.outdir ?? join(".pario", "dist", "app"))
       const { htmlPath } = await prepareGeneratedApp()
       const result = await buildApp({
@@ -144,52 +153,63 @@ export async function createParioApp(options: CreateParioAppOptions): Promise<Pa
       return result
     },
 
-    async start(startOptions: ParioAppStartOptions = {}) {
+    async start(startOptions: CustomAppStartOptions = {}) {
       const host = startOptions.host ?? "0.0.0.0"
       const port = startOptions.port ?? 3001
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".pario", "dist", "app"))
       const indexPath = join(outdir, "index.html")
 
       if (!(await pathExists(indexPath))) {
-        throw new Error(`[ParioApp] No built app found in ${outdir}`)
+        throw new Error(`[ParioCustomApp] No built app found in ${outdir}`)
       }
 
-      const indexHtml = injectApiBaseUrl(await Bun.file(indexPath).text(), startOptions.apiBaseUrl)
+      const indexHtml = injectRuntimeConfig(await Bun.file(indexPath).text(), {
+        apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
+        audience: startOptions.audience ?? audience,
+      })
       const server = Bun.serve({
         port,
         hostname: host,
         development: false,
         async fetch(req) {
           const url = new URL(req.url)
+          if (isReservedParioRoute(url.pathname)) {
+            return notFoundResponse()
+          }
+
+          if (req.method !== "GET" && req.method !== "HEAD") {
+            return notFoundResponse()
+          }
+
           if (url.pathname === "/" || url.pathname === "") {
-            return htmlResponse(indexHtml)
+            return htmlResponse(req, indexHtml)
           }
 
           const resolvedPath = resolveStaticPath(outdir, url.pathname)
           if (!resolvedPath) {
-            return new Response("Not Found", { status: 404 })
+            return notFoundResponse()
           }
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
-            return new Response(directFile)
+            return fileResponse(req, directFile)
           }
 
           if (isAssetRequest(url.pathname)) {
-            return new Response("Not Found", { status: 404 })
+            return notFoundResponse()
           }
 
           const htmlFile = Bun.file(`${resolvedPath}.html`)
           if (await htmlFile.exists()) {
-            return new Response(htmlFile)
+            return fileResponse(req, htmlFile)
           }
 
           const nestedIndexFile = Bun.file(join(resolvedPath, "index.html"))
           if (await nestedIndexFile.exists()) {
-            return new Response(nestedIndexFile)
+            return fileResponse(req, nestedIndexFile)
           }
 
-          return htmlResponse(indexHtml)
+          return htmlResponse(req, indexHtml)
         },
       })
 
@@ -216,25 +236,53 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-async function createPublicRoutes(
-  publicDir: string
-): Promise<Record<string, () => Response | Promise<Response>>> {
+async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
   const files = new Bun.Glob("**/*").scan({
     cwd: publicDir,
     absolute: true,
     onlyFiles: true,
   })
-  const routes: Record<string, () => Response | Promise<Response>> = {}
+  const routes: BunServeRoutes = {}
 
   for await (const filePath of files) {
     const routePath = `/${filePath
       .slice(publicDir.length + 1)
       .split("\\")
       .join("/")}`
-    routes[routePath] = () => new Response(Bun.file(filePath))
+    if (isReservedParioRoute(routePath)) {
+      continue
+    }
+    routes[routePath] = getHeadRoute((request) => filePathResponse(request, filePath))
   }
 
   return routes
+}
+
+function reservedParioRoutes(): BunServeRoutes {
+  const handler = () => notFoundResponse()
+  return {
+    "/api": allMethodsRoute(handler),
+    "/api/*": allMethodsRoute(handler),
+    "/auth": allMethodsRoute(handler),
+    "/auth/*": allMethodsRoute(handler),
+    "/ws": allMethodsRoute(handler),
+    "/ws/*": allMethodsRoute(handler),
+    "/docs": allMethodsRoute(handler),
+    "/docs/*": allMethodsRoute(handler),
+  }
+}
+
+function isReservedParioRoute(pathname: string): boolean {
+  return (
+    pathname === "/api" ||
+    pathname.startsWith("/api/") ||
+    pathname === "/auth" ||
+    pathname.startsWith("/auth/") ||
+    pathname === "/ws" ||
+    pathname.startsWith("/ws/") ||
+    pathname === "/docs" ||
+    pathname.startsWith("/docs/")
+  )
 }
 
 function isAssetRequest(pathname: string): boolean {
@@ -262,12 +310,23 @@ function resolveStaticPath(appRoot: string, pathname: string): string | null {
   return resolvedPath
 }
 
-function injectApiBaseUrl(html: string, apiBaseUrl?: string): string {
-  if (!apiBaseUrl) {
+function injectRuntimeConfig(
+  html: string,
+  config: { readonly apiBaseUrl?: string; readonly audience: string }
+): string {
+  if (!config.apiBaseUrl) {
     return html
   }
 
-  const script = `<script>window.__PARIO_API_BASE_URL__ = ${JSON.stringify(apiBaseUrl)};</script>`
+  const script = renderCustomAppRuntimeScript({
+    api: { baseUrl: config.apiBaseUrl },
+    auth: { audience: config.audience },
+  })
+  const existingRuntimeScript = /<script>window\.__PARIO_RUNTIME__ = .*?;<\/script>/
+  if (existingRuntimeScript.test(html)) {
+    return html.replace(existingRuntimeScript, script)
+  }
+
   if (html.includes("</head>")) {
     return html.replace("</head>", `  ${script}\n  </head>`)
   }
@@ -275,10 +334,54 @@ function injectApiBaseUrl(html: string, apiBaseUrl?: string): string {
   return `${script}\n${html}`
 }
 
-function htmlResponse(html: string): Response {
-  return new Response(html, {
+function htmlResponse(request: Request, html: string): Response {
+  return new Response(request.method === "HEAD" ? null : html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
     },
   })
+}
+
+function fileResponse(request: Request, file: Bun.BunFile): Response {
+  return new Response(request.method === "HEAD" ? null : file)
+}
+
+function filePathResponse(request: Request, path: string): Response {
+  return fileResponse(request, Bun.file(path))
+}
+
+function notFoundResponse(): Response {
+  return new Response("Not Found", {
+    status: 404,
+    headers: {
+      "cache-control": "no-store",
+    },
+  })
+}
+
+function getHeadRoute(handler: (request: Request) => Response): BunServeRoute {
+  return {
+    GET: handler,
+    HEAD: handler,
+  } as unknown as BunServeRoute
+}
+
+function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute {
+  return {
+    GET: handler,
+    HEAD: handler,
+    POST: handler,
+    PUT: handler,
+    PATCH: handler,
+    DELETE: handler,
+    OPTIONS: handler,
+  } as unknown as BunServeRoute
+}
+
+function htmlBundleRoute(bundle: Bun.HTMLBundle): BunServeRoute {
+  return {
+    GET: bundle,
+    HEAD: bundle,
+  } as unknown as BunServeRoute
 }

@@ -86,7 +86,9 @@ export function useWebSocket(onUpdate: (update: TelemetryUpdate) => void, projec
   }, [onUpdate])
 
   useEffect(() => {
-    const wsUrl = new URL(client.getConfig().baseUrl ?? "http://localhost:3000")
+    const fallbackBaseUrl =
+      typeof window === "undefined" ? "http://localhost:3000" : window.location.origin
+    const wsUrl = new URL(client.getConfig().baseUrl ?? fallbackBaseUrl)
     const protocol = wsUrl.protocol === "https:" ? "wss:" : "ws:"
     const projectQuery = projectName ? `?project=${encodeURIComponent(projectName)}` : ""
     const ws = new WebSocket(`${protocol}//${wsUrl.host}/ws/events${projectQuery}`)

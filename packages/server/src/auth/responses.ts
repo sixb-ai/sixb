@@ -12,12 +12,26 @@ export function jsonForbiddenResponse(message = "Forbidden"): Response {
   return jsonResponse({ error: message }, 403)
 }
 
-export function htmlAuthRedirectResponse(request: Request): Response {
-  const returnTo = encodeURIComponent(returnToForRequest(request))
+export function htmlAuthRedirectResponse(
+  request: Request,
+  options: {
+    readonly absoluteReturnTo?: boolean
+    readonly audience?: string
+  } = {}
+): Response {
+  const requestUrl = new URL(request.url)
+  const rawReturnTo = options.absoluteReturnTo
+    ? new URL(returnToForRequest(request), requestUrl.origin).toString()
+    : returnToForRequest(request)
+  const params = new URLSearchParams({ returnTo: rawReturnTo })
+  if (options.absoluteReturnTo && options.audience) {
+    params.set("audience", options.audience)
+  }
+
   return new Response(null, {
     status: 302,
     headers: {
-      location: `/auth/sign-in?returnTo=${returnTo}`,
+      location: `/auth/sign-in?${params.toString()}`,
       "cache-control": "no-store",
     },
   })

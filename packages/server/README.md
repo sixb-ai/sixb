@@ -1,6 +1,7 @@
 # @pario/server
 
-Built-in Pario runtime server. Owns the REST API, WebSocket API, OpenAPI docs, and the built-in React UI served from `/`.
+Pario API server. Owns the REST API, auth routes, WebSocket API, and OpenAPI docs. The built-in
+Atlas UI is served by `@pario/atlas`.
 
 ## Installation
 
@@ -17,11 +18,17 @@ import { createParioServer } from "@pario/server"
 const pario = new Pario({ /* ... */ })
 await pario.init()
 
-const server = createParioServer({ pario, port: 3000 })
+const server = createParioServer({
+  pario,
+  port: 3002,
+  browser: {
+    publicOrigin: "https://api.example.com",
+    allowedOrigins: [{ origin: "https://atlas.example.com", audience: "atlas" }],
+  },
+})
 await server.start()
-// Server running at http://0.0.0.0:3000
-// Built-in UI at http://0.0.0.0:3000/
-// OpenAPI docs at http://0.0.0.0:3000/docs
+// Server running at http://0.0.0.0:3002
+// OpenAPI docs at http://0.0.0.0:3002/docs
 ```
 
 ## API Routes
@@ -71,7 +78,6 @@ Events are delivered as:
 
 ```typescript
 import {
-  createApp,
   createParioApi,
   createParioServer,
   ParioServer,
@@ -79,12 +85,11 @@ import {
 import type { ParioApp, ParioServerOptions } from "@pario/server"
 ```
 
-- **`createParioServer(options)`** -- Preferred entrypoint for starting the built-in Pario server.
+- **`createParioServer(options)`** -- Preferred entrypoint for starting the API/auth/ws/docs server.
 - **`ParioServer`** -- Manages the server lifecycle (`start`, `stop`).
 - **`createParioApi(server)`** -- Creates the raw Elysia app with all API and WebSocket routes.
-- **`createApp(server)`** -- Alias for `createParioApi(server)` for compatibility.
 - **`ParioApp`** -- Type alias for the Elysia app returned by `createParioApi`.
-- **`ParioServerOptions`** -- Config: `pario` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`, `ui` (default `true`).
+- **`ParioServerOptions`** -- Config: `pario` and `browser` (required), `port` (default 3000), `host` (default `"0.0.0.0"`), `quiet`.
 
 ## OpenAPI
 

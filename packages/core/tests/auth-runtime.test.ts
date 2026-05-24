@@ -64,7 +64,7 @@ async function seedAuthenticatedUser(
     projectId: pario.id,
     userId: params.userId,
     strategyId: "magic-link",
-    audience: "admin",
+    audience: "atlas",
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -162,7 +162,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "admin",
+      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -208,7 +208,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "admin",
+      audience: "atlas",
       tokenHash: adminCredential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -224,7 +224,7 @@ describe("Pario auth runtime", () => {
       expiresAt: new Date("2099-05-16T10:01:00.000Z"),
     })
 
-    expect(pario.auth.getCookieOptions({ audience: "admin" })).toMatchObject({
+    expect(pario.auth.getCookieOptions({ audience: "atlas" })).toMatchObject({
       sessionCookieName: "acme_session",
       csrfCookieName: "acme_csrf",
     })
@@ -246,7 +246,7 @@ describe("Pario auth runtime", () => {
         new Request("http://localhost/api/project", {
           headers: { cookie: `acme_session=${appCredential.cookieValue}` },
         }),
-        { audience: "admin" }
+        { audience: "atlas" }
       )
     ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
     expect(() => pario.auth.getCookieOptions({ audience: "app prod" })).toThrow(
@@ -274,7 +274,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "admin",
+      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -312,7 +312,7 @@ describe("Pario auth runtime", () => {
       projectId: pario.id,
       userId: "usr_1",
       strategyId: "test",
-      audience: "admin",
+      audience: "atlas",
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),

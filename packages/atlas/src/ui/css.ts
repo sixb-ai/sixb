@@ -99,7 +99,7 @@ async function buildBuiltInUiCss(inputPath: string, outputPath: string): Promise
     }
 
     const stderr = await new Response(proc.stderr).text()
-    throw new Error(`[ParioServer] Failed to build built-in UI CSS: ${stderr.trim()}`)
+    throw new Error(`[ParioAtlas] Failed to build built-in UI CSS: ${stderr.trim()}`)
   })()
 
   try {

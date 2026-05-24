@@ -13,6 +13,7 @@ import {
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
@@ -40,7 +41,6 @@ function createRuntime(
   options: {
     readonly bootstrapUsers?: readonly string[]
     readonly bootstrapGroups?: readonly [typeof securityAdmins]
-    readonly browserApi?: boolean
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -67,20 +67,7 @@ function createRuntime(
       new ParioServer({
         pario,
         quiet: true,
-        ...(options.browserApi
-          ? {
-              surface: {
-                kind: "browserApi" as const,
-                browser: {
-                  publicOrigin: "http://api.localhost",
-                  allowedOrigins: [
-                    { origin: "http://admin.localhost", audience: "admin" as const },
-                    { origin: "http://app.localhost", audience: "app" as const },
-                  ],
-                },
-              },
-            }
-          : { ui: false }),
+        browser: createTestBrowserPolicy(),
       })
     ),
     messages,
@@ -100,16 +87,15 @@ function linkFromLatestMessage(messages: readonly { readonly text: string }[]): 
 
 async function postSignIn(
   app: ReturnType<typeof createParioApi>,
-  input: { readonly email: string; readonly returnTo?: string }
+  input: { readonly email: string; readonly audience?: string; readonly returnTo?: string }
 ): Promise<Response> {
   const body = new URLSearchParams()
+  body.set("audience", input.audience ?? "atlas")
   body.set("email", input.email)
-  if (input.returnTo) {
-    body.set("returnTo", input.returnTo)
-  }
+  body.set("returnTo", input.returnTo ?? "http://atlas.localhost/")
 
   return app.fetch(
-    new Request("http://localhost/auth/sign-in", {
+    new Request("http://api.localhost/auth/sign-in", {
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
@@ -131,14 +117,18 @@ describe("magic-link auth routes", () => {
   test("renders the magic-link sign-in form for the magic-link strategy", async () => {
     const { app } = createRuntime()
 
-    const response = await app.fetch(new Request("http://localhost/auth/sign-in?returnTo=/objects"))
+    const response = await app.fetch(
+      new Request(
+        "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2Fobjects"
+      )
+    )
     const html = await response.text()
 
     expect(response.status).toBe(200)
     expect(html).toContain('action="/auth/sign-in"')
     expect(html).toContain('name="email"')
-    expect(html).toContain('name="audience" value="admin"')
-    expect(html).toContain('name="returnTo" value="/objects"')
+    expect(html).toContain('name="audience" value="atlas"')
+    expect(html).toContain('name="returnTo" value="http://atlas.localhost/objects"')
   })
 
   test("returns the same generic sign-in response for eligible and ineligible emails", async () => {
@@ -164,10 +154,13 @@ describe("magic-link auth routes", () => {
       bootstrapGroups: [securityAdmins],
     })
 
-    await postSignIn(app, { email: "founder@acme.com", returnTo: "/dashboard" })
+    await postSignIn(app, {
+      email: "founder@acme.com",
+      returnTo: "http://atlas.localhost/dashboard",
+    })
     const link = linkFromLatestMessage(messages)
     const callback = await app.fetch(
-      new Request(`http://localhost${link.pathname}${link.search}`, {
+      new Request(link.toString(), {
         redirect: "manual",
       })
     )
@@ -175,10 +168,10 @@ describe("magic-link auth routes", () => {
     expect(callback.status).toBe(200)
     expect(callback.headers.get("location")).toBeNull()
     expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self'"
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://atlas.localhost"
     )
     expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "pario_session")
@@ -187,7 +180,7 @@ describe("magic-link auth routes", () => {
     expect(csrfCookie).toBeTruthy()
 
     const sessionResponse = await app.fetch(
-      new Request("http://localhost/api/auth/session", {
+      new Request("http://api.localhost/api/auth/session", {
         headers: {
           cookie: `pario_session=${sessionCookie}`,
         },
@@ -214,7 +207,7 @@ describe("magic-link auth routes", () => {
 
     await postSignIn(app, { email: "founder@acme.com" })
     const link = linkFromLatestMessage(messages)
-    const callbackUrl = `http://localhost${link.pathname}${link.search}`
+    const callbackUrl = link.toString()
 
     await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
     const replay = await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
@@ -223,28 +216,24 @@ describe("magic-link auth routes", () => {
     expect(replay.headers.get("set-cookie")).toBeNull()
   })
 
-  test("callback falls back to root for unsafe returnTo values", async () => {
+  test("sign-in rejects unsafe returnTo values before sending a link", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
     })
 
-    await postSignIn(app, { email: "founder@acme.com", returnTo: "https://evil.com" })
-    const link = linkFromLatestMessage(messages)
-    const callback = await app.fetch(
-      new Request(`http://localhost${link.pathname}${link.search}`, {
-        redirect: "manual",
-      })
-    )
+    const response = await postSignIn(app, {
+      email: "founder@acme.com",
+      returnTo: "https://evil.com",
+    })
 
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("location")).toBeNull()
-    expect(await callback.text()).toContain('<meta http-equiv="refresh" content="0;url=/">')
+    expect(response.status).toBe(400)
+    expect(await response.text()).toContain("This sign-in request is invalid.")
+    expect(messages).toHaveLength(0)
   })
 
-  test("browser API magic-link callbacks use the stored audience and return target", async () => {
+  test("API browser magic-link callbacks use the stored audience and return target", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
-      browserApi: true,
     })
     const body = new URLSearchParams()
     body.set("email", "founder@acme.com")
@@ -292,10 +281,9 @@ describe("magic-link auth routes", () => {
     })
   })
 
-  test("browser API sign-in rejects return targets outside the audience origin", async () => {
+  test("API browser sign-in rejects return targets outside the audience origin", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
-      browserApi: true,
     })
     const body = new URLSearchParams()
     body.set("email", "founder@acme.com")
@@ -325,7 +313,7 @@ describe("magic-link auth routes", () => {
     await postSignIn(app, { email: "founder@acme.com" })
     const link = linkFromLatestMessage(messages)
     const callback = await app.fetch(
-      new Request(`http://localhost${link.pathname}${link.search}`, {
+      new Request(link.toString(), {
         redirect: "manual",
       })
     )

@@ -59,10 +59,20 @@ async function main() {
   })
 
   const port = await getFreePort()
-  const server = new ParioServer({ pario, host: "127.0.0.1", port, quiet: true })
+  const publicOrigin = `http://127.0.0.1:${port}`
+  const server = new ParioServer({
+    pario,
+    host: "127.0.0.1",
+    port,
+    quiet: true,
+    browser: {
+      publicOrigin,
+      allowedOrigins: [{ origin: publicOrigin, audience: "atlas", kind: "atlas" }],
+    },
+  })
   await server.start()
 
-  const res = await fetch(`http://127.0.0.1:${port}/docs/json`)
+  const res = await fetch(`${publicOrigin}/docs/json`)
   if (!res.ok) {
     console.error(`Failed to fetch OpenAPI spec: ${res.status} ${res.statusText}`)
     process.exit(1)

@@ -15,6 +15,7 @@ import {
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
@@ -40,7 +41,7 @@ function createSender() {
   }
 }
 
-function createRuntime(options: { readonly browserApi?: boolean } = {}) {
+function createRuntime() {
   const storage = new InMemoryStorage()
   const { messages, sendMagicLink } = createSender()
   const pario = new Pario<readonly OntologySource[]>({
@@ -70,20 +71,7 @@ function createRuntime(options: { readonly browserApi?: boolean } = {}) {
       new ParioServer({
         pario,
         quiet: true,
-        ...(options.browserApi
-          ? {
-              surface: {
-                kind: "browserApi" as const,
-                browser: {
-                  publicOrigin: "http://api.localhost",
-                  allowedOrigins: [
-                    { origin: "http://admin.localhost", audience: "admin" as const },
-                    { origin: "http://app.localhost", audience: "app" as const },
-                  ],
-                },
-              },
-            }
-          : { ui: false }),
+        browser: createTestBrowserPolicy(),
       })
     ),
     messages,
@@ -94,11 +82,11 @@ function createRuntime(options: { readonly browserApi?: boolean } = {}) {
 
 async function seedAdminSession(
   storage: InMemoryStorage,
-  params: { readonly audience?: "admin" | "app" } = {}
+  params: { readonly audience?: "atlas" | "app" } = {}
 ) {
   const credential = createSessionCredential("ses_admin")
-  const audience = params.audience ?? "admin"
-  const cookieSuffix = audience === "admin" ? "" : `_${audience}`
+  const audience = params.audience ?? "atlas"
+  const cookieSuffix = audience === "atlas" ? "" : `_${audience}`
   await storage.auth.users.create({
     id: "usr_admin",
     projectId,
@@ -178,7 +166,7 @@ describe("auth invitation routes", () => {
         body: JSON.stringify({
           email: " Ava@Acme.COM ",
           groupIds: ["commercial"],
-          returnTo: "/objects",
+          returnTo: "http://atlas.localhost/objects",
         }),
       })
     )
@@ -208,18 +196,19 @@ describe("auth invitation routes", () => {
     expect(messages[0]?.email).toBe("ava@acme.com")
   })
 
-  test("creates invitations on the current server audience", async () => {
+  test("creates invitations on the browser origin audience", async () => {
     const { pario, storage } = createRuntime()
     const app = createParioApi(
-      new ParioServer({ pario, quiet: true, ui: false, sessionAudience: "app" })
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
     )
     const admin = await seedAdminSession(storage, { audience: "app" })
 
     const response = await app.fetch(
-      new Request("http://localhost/api/auth/invitations", {
+      new Request("http://api.localhost/api/auth/invitations", {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          origin: "http://app.localhost",
           cookie: admin.cookie,
           ...admin.csrfHeader,
         },
@@ -248,6 +237,7 @@ describe("auth invitation routes", () => {
         method: "POST",
         headers: {
           "content-type": "application/json",
+          origin: "http://atlas.localhost",
           cookie: admin.cookie,
           ...admin.csrfHeader,
         },
@@ -282,14 +272,14 @@ describe("auth invitation routes", () => {
         body: JSON.stringify({
           email: "ava@acme.com",
           groupIds: ["commercial"],
-          returnTo: "/dashboard",
+          returnTo: "http://atlas.localhost/dashboard",
         }),
       })
     )
 
     const link = linkFromLatestMessage(messages)
     const callback = await app.fetch(
-      new Request(`http://localhost${link.pathname}${link.search}`, {
+      new Request(link.toString(), {
         redirect: "manual",
       })
     )
@@ -297,7 +287,7 @@ describe("auth invitation routes", () => {
     expect(callback.status).toBe(200)
     expect(callback.headers.get("location")).toBeNull()
     expect(await callback.text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=/dashboard">'
+      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
     )
     await expect(
       storage.auth.groupMemberships.listForGroup({
@@ -307,8 +297,8 @@ describe("auth invitation routes", () => {
     ).resolves.toMatchObject([{ groupId: "commercial", source: "invitation" }])
   })
 
-  test("browser API invitations create API links that return to the calling UI origin", async () => {
-    const { app, messages, storage } = createRuntime({ browserApi: true })
+  test("API browser invitations create API links that return to the calling UI origin", async () => {
+    const { app, messages, storage } = createRuntime()
     const admin = await seedAdminSession(storage, { audience: "app" })
 
     const response = await app.fetch(

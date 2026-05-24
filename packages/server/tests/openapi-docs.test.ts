@@ -11,6 +11,7 @@ import {
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 const Device = defineObjectType({
   id: "device",
@@ -32,7 +33,7 @@ interface OpenApiDocument {
   readonly paths?: Record<string, Record<string, OpenApiOperation>>
 }
 
-function createApp() {
+function createDocsApi() {
   const pario = new Pario<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Device],
@@ -43,12 +44,12 @@ function createApp() {
     queues: new InMemoryQueues(),
   })
 
-  return createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+  return createParioApi(new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() }))
 }
 
 describe("OpenAPI docs", () => {
   test("documents CSRF auth for protected mutating API routes", async () => {
-    const app = createApp()
+    const app = createDocsApi()
     const response = await app.fetch(new Request("http://localhost/docs/json"))
 
     expect(response.status).toBe(200)

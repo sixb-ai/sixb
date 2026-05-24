@@ -13,7 +13,7 @@ function at(value: string): Date {
 function sessionInput(id = "ses_1"): CompleteAuthSessionInput {
   return {
     id,
-    audience: "admin",
+    audience: "atlas",
     tokenHash: `${id}-hash`,
     createdAt: at("2026-05-16T10:05:00.000Z"),
     expiresAt: at("2026-05-23T10:05:00.000Z"),
@@ -53,7 +53,7 @@ async function requestMagicLink(input: {
     projectId,
     authStorage: input.storage,
     email: input.email,
-    audience: "admin",
+    audience: "atlas",
     returnTo: "/dashboard",
     requestOrigin,
     now: input.now ?? at("2026-05-16T10:00:00.000Z"),
@@ -198,7 +198,7 @@ describe("magicLink", () => {
     expect(record).toMatchObject({
       email: "ava@acme.com",
       strategyId: "magic-link",
-      audience: "admin",
+      audience: "atlas",
       returnTo: "/dashboard",
       tokenHash: hashMagicLinkToken(token ?? ""),
     })
@@ -310,7 +310,7 @@ describe("magicLink", () => {
 
     expect(result.user.email).toBe("founder@acme.com")
     expect(result.session).toMatchObject({ id: "ses_1", strategyId: "magic-link" })
-    expect(result).toMatchObject({ audience: "admin", returnTo: "/dashboard" })
+    expect(result).toMatchObject({ audience: "atlas", returnTo: "/dashboard" })
     await expect(
       storage.groupMemberships.listForUser({ projectId, userId: result.user.id })
     ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])

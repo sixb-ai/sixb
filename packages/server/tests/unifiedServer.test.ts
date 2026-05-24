@@ -11,6 +11,7 @@ import {
   type ParioOptions,
 } from "@pario/core"
 import { ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 function createParioInstance<TOntologySources extends readonly OntologySource[]>(
   options: ParioOptions<TOntologySources>
@@ -95,7 +96,7 @@ async function waitForWsMessages(
   })
 }
 
-describe("ParioServer unified serving", () => {
+describe("ParioServer API serving", () => {
   async function withUnifiedServer(
     run: (context: { baseUrl: string }) => Promise<void>
   ): Promise<void> {
@@ -133,6 +134,7 @@ describe("ParioServer unified serving", () => {
       host: "127.0.0.1",
       port,
       quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
     })
 
     await server.start()
@@ -154,18 +156,13 @@ describe("ParioServer unified serving", () => {
     })
   })
 
-  test("serves built-in UI assets and falls back to the SPA shell", async () => {
+  test("does not serve Atlas assets or SPA shell routes", async () => {
     await withUnifiedServer(async ({ baseUrl }) => {
       const staticResponse = await fetch(`${baseUrl}/favicon.svg`)
-      expect(staticResponse.status).toBe(200)
-      expect(await staticResponse.text()).toContain("<svg")
+      expect(staticResponse.status).toBe(404)
 
       const spaResponse = await fetch(`${baseUrl}/dashboard/devices`)
-      expect(spaResponse.status).toBe(200)
-
-      const html = await spaResponse.text()
-      expect(html).toContain('<div id="root"></div>')
-      expect(html).toContain("<title>Pario</title>")
+      expect(spaResponse.status).toBe(404)
     })
   })
 

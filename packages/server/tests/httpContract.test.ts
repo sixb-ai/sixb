@@ -17,7 +17,7 @@ import {
   defineSchedule,
   defineSync,
   defineWebhook,
-  type Events,
+  type EventsRuntime,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -37,6 +37,7 @@ import {
   SqliteWebhookRunStorage,
 } from "@pario/sqlite"
 import { ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 function createParioInstance<TOntologySources extends readonly OntologySource[]>(
   options: ParioOptions<TOntologySources>
@@ -157,7 +158,7 @@ describe("ParioServer HTTP contract", () => {
   async function withHttpContractServer(
     run: (context: {
       baseUrl: string
-      events: Events
+      events: EventsRuntime
       pario: Pario<readonly OntologySource[]>
     }) => Promise<void>
   ): Promise<void> {
@@ -210,7 +211,7 @@ describe("ParioServer HTTP contract", () => {
 
     await pario.storage.rules!.applyTriggered({
       id: "rule-state-event-1",
-      offset: 1,
+      cursor: "1",
       schemaVersion: 1,
       projectId: "contract-project",
       type: "rule.triggered",
@@ -331,7 +332,7 @@ describe("ParioServer HTTP contract", () => {
       host: "127.0.0.1",
       port,
       quiet: true,
-      ui: false,
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
     })
 
     await server.start()
@@ -927,8 +928,7 @@ describe("ParioServer HTTP contract", () => {
       const links = (await linksResponse.json()) as Array<{ targetId: string }>
       expect(links.some((linkRow) => linkRow.targetId === "fan-2")).toBe(true)
 
-      const actionEvents = await events!.read({
-        projectId: "contract-project",
+      const actionEvents = await events.read({
         topics: ["actions"],
         limit: 10,
       })

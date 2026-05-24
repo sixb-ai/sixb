@@ -1,7 +1,9 @@
 import { stat } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
-import { createParioApp, type ParioAppDevServer } from "@pario/app"
+import { type CustomAppDevServer, createCustomApp } from "@pario/app"
+import { type AtlasAppServer, createAtlasApp } from "@pario/atlas"
 import { createParioServer, type ParioServer } from "@pario/server"
+import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
 import { runUntilSignal, startParioRuntime, stopQuietly } from "../lib/runtime"
 import { ErrorView, LoadingView, renderPersistent, renderStatic, StartView } from "../ui"
@@ -10,6 +12,11 @@ export interface StartOptions {
   entry?: string
   port?: string
   host?: string
+  apiPort?: string
+  apiHost?: string
+  apiPublicOrigin?: string
+  atlasPublicOrigin?: string
+  appPublicOrigin?: string
 }
 
 export async function runStart(options: StartOptions = {}) {
@@ -17,7 +24,6 @@ export async function runStart(options: StartOptions = {}) {
 
   const sourceEntry = resolve("pario.config.ts")
   const defaultBuiltEntry = resolve(".pario/dist/pario.config.js")
-  const port = options.port ? Number.parseInt(options.port, 10) : 3000
   const host = options.host ?? "0.0.0.0"
 
   let entry = sourceEntry
@@ -33,7 +39,8 @@ export async function runStart(options: StartOptions = {}) {
   )
 
   let server: ParioServer | null = null
-  let customAppServer: ParioAppDevServer | null = null
+  let atlasServer: AtlasAppServer | null = null
+  let customAppServer: CustomAppDevServer | null = null
   let pario: LoadedPario | null = null
   let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
   const warnings: string[] = []
@@ -43,34 +50,60 @@ export async function runStart(options: StartOptions = {}) {
     runtime = await startParioRuntime(pario, { cohostWorkers: false })
     const projectRoot = resolveProjectRoot(entry)
 
-    server = createParioServer({
-      pario: pario as unknown as never,
-      port,
-      host,
-      quiet: true,
-      ui: true,
-    })
-    await server.start()
-
-    const displayHost = host === "0.0.0.0" ? "localhost" : host
-    const baseUrl = `http://${displayHost}:${port}`
-    const customApp = await createParioApp({
-      rootDir: projectRoot,
-    })
     const builtAppEntry = resolve(projectRoot, ".pario", "dist", "app", "index.html")
     const hasBuiltCustomApp = await stat(builtAppEntry)
       .then(() => true)
       .catch(() => false)
+    const topology = resolveBrowserTopology({
+      mode: "production",
+      host,
+      apiHost: options.apiHost,
+      port: options.port,
+      apiPort: options.apiPort,
+      apiPublicOrigin: options.apiPublicOrigin,
+      atlasPublicOrigin: options.atlasPublicOrigin,
+      appPublicOrigin: options.appPublicOrigin,
+      includeCustomApp: hasBuiltCustomApp,
+    })
+
+    server = createParioServer({
+      pario: pario as unknown as never,
+      port: topology.apiPort,
+      host: topology.apiHost,
+      quiet: true,
+      browser: {
+        publicOrigin: topology.apiPublicOrigin,
+        allowedOrigins: topology.allowedBrowserOrigins,
+      },
+    })
+    await server.start()
+
+    const atlas = createAtlasApp({
+      apiBaseUrl: topology.apiPublicOrigin,
+      audience: "atlas",
+    })
+    atlasServer = await atlas.start({
+      host: topology.host,
+      port: topology.atlasPort,
+      development: false,
+    })
+
+    const customApp = await createCustomApp({
+      rootDir: projectRoot,
+      apiBaseUrl: topology.apiPublicOrigin,
+      audience: "app",
+    })
 
     let appUrl: string | null = null
     if (hasBuiltCustomApp) {
       customAppServer = await customApp.start({
-        host,
-        port: port + 1,
+        host: topology.host,
+        port: topology.appPort,
         outdir: resolve(projectRoot, ".pario", "dist", "app"),
-        apiBaseUrl: baseUrl,
+        apiBaseUrl: topology.apiPublicOrigin,
+        audience: "app",
       })
-      appUrl = customAppServer.url
+      appUrl = topology.appPublicOrigin
     } else if (await customApp.hasRoutes()) {
       warnings.push(
         "Custom app source found, but no production build exists at .pario/dist/app. Run `pario build` first."
@@ -80,10 +113,11 @@ export async function runStart(options: StartOptions = {}) {
     app.rerender(
       <StartView
         name={pario.id}
-        apiUrl={`${baseUrl}/api`}
-        apiDocsUrl={`${baseUrl}/docs`}
-        wsUrl={`${baseUrl.replace("http", "ws")}/ws/events`}
-        uiUrl={baseUrl}
+        apiUrl={apiUrl(topology)}
+        apiDocsUrl={apiDocsUrl(topology)}
+        wsUrl={apiEventsUrl(topology)}
+        uiUrl={topology.atlasPublicOrigin}
+        uiStatus={null}
         appUrl={appUrl}
         warnings={warnings}
       />
@@ -93,12 +127,14 @@ export async function runStart(options: StartOptions = {}) {
       app.unmount()
       console.log("\nShutting down...")
       await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+      await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
       await stopQuietly(() => server?.stop() ?? Promise.resolve())
       await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+    await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => server?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
     const message = error instanceof Error ? error.message : String(error)

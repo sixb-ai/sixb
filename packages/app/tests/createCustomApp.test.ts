@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { createParioApp } from "../src/createParioApp"
+import { createCustomApp } from "../src/createCustomApp"
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -24,7 +24,7 @@ async function getFreePort(): Promise<number> {
   })
 }
 
-describe("createParioApp.start", () => {
+describe("createCustomApp.start", () => {
   let tempRoot = ""
 
   beforeEach(async () => {
@@ -55,7 +55,7 @@ describe("createParioApp.start", () => {
 
   test("serves the built app and injects the runtime API base URL", async () => {
     const port = await getFreePort()
-    const app = await createParioApp({ rootDir: tempRoot })
+    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
     const server = await app.start({
       host: "127.0.0.1",
       port,
@@ -67,7 +67,8 @@ describe("createParioApp.start", () => {
       expect(rootResponse.status).toBe(200)
       const html = await rootResponse.text()
       expect(html).toContain("Fixture App")
-      expect(html).toContain('window.__PARIO_API_BASE_URL__ = "http://127.0.0.1:3000";')
+      expect(html).toContain('"api":{"baseUrl":"http://127.0.0.1:3000"}')
+      expect(html).toContain('"auth":{"audience":"app"}')
 
       const routeResponse = await fetch(`http://127.0.0.1:${port}/dashboard/devices`)
       expect(routeResponse.status).toBe(200)
@@ -79,6 +80,57 @@ describe("createParioApp.start", () => {
 
       const missingAssetResponse = await fetch(`http://127.0.0.1:${port}/missing.js`)
       expect(missingAssetResponse.status).toBe(404)
+
+      const apiResponse = await fetch(`http://127.0.0.1:${port}/api/project`)
+      expect(apiResponse.status).toBe(404)
+
+      const mutationResponse = await fetch(`http://127.0.0.1:${port}/dashboard/devices`, {
+        method: "POST",
+      })
+      expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+})
+
+describe("createCustomApp.dev", () => {
+  let tempRoot = ""
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "pario-app-dev-"))
+    const appDir = join(tempRoot, "app")
+    await mkdir(appDir, { recursive: true })
+    await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
+  })
+
+  afterEach(async () => {
+    if (tempRoot) {
+      await rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("keeps Pario API-owned routes out of the dev app origin", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+    })
+    const server = await app.dev({
+      host: "127.0.0.1",
+      port,
+    })
+
+    try {
+      const apiResponse = await fetch(`http://127.0.0.1:${port}/api/project`)
+      const authResponse = await fetch(`http://127.0.0.1:${port}/auth/sign-in`)
+      const mutationResponse = await fetch(`http://127.0.0.1:${port}/devices`, {
+        method: "POST",
+      })
+
+      expect(apiResponse.status).toBe(404)
+      expect(authResponse.status).toBe(404)
+      expect(mutationResponse.status).toBe(404)
     } finally {
       await server.stop()
     }

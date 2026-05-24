@@ -1,5 +1,5 @@
+export type { ParioApiBrowserPolicy, ParioBrowserOrigin } from "./auth/browser-origin"
 export {
-  createApp,
   createParioApi,
   createParioServer,
   type ParioApp,

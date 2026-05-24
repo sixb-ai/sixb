@@ -1,30 +1,21 @@
-import { join } from "node:path"
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import {
-  type AuthSessionAudience,
-  CSRF_HEADER_NAME,
-  type OntologySource,
-  type Pario,
-  resolveAuthSessionAudience,
-} from "@pario/core"
+import { CSRF_HEADER_NAME, type OntologySource, type Pario } from "@pario/core"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import {
   BrowserOriginError,
-  createBrowserApiAuthContextResolver,
-  createBrowserApiAuthRedirectContextResolver,
-  createFixedAuthContextResolver,
-  createFixedAuthRedirectContextResolver,
-  isAllowedBrowserApiOrigin,
+  createApiBrowserAuthContextResolver,
+  createApiBrowserAuthRedirectContextResolver,
+  isAllowedApiBrowserOrigin,
   type ParioApiBrowserPolicy,
   type RequestAuthContext,
   type ResolveAuthRedirectContext,
   type ResolvedParioApiBrowserPolicy,
   type ResolveRequestAuthContext,
-  resolveBrowserApiPolicy,
-  resolveBrowserApiPublicOrigin,
+  resolveApiBrowserPolicy,
+  resolveApiBrowserPublicOrigin,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
 import { PARIO_CSRF_SECURITY_SCHEME, PARIO_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
@@ -32,24 +23,13 @@ import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWsRoutes } from "./routes/ws"
-import { ensureBuiltInUiBundle, renderBuiltInUiShell } from "./ui/assets"
-import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./ui/css"
-
-// Browser deployments are split by visible surface: UI surfaces serve public shells,
-// while browserApi owns API/auth/ws/docs and resolves the session audience from Origin.
-export type ParioServerSurface =
-  | { readonly kind: "builtInUi" }
-  | { readonly kind: "apiOnly"; readonly audience?: AuthSessionAudience }
-  | { readonly kind: "browserApi"; readonly browser: ParioApiBrowserPolicy }
 
 export interface ParioServerOptions {
   pario: Pario<readonly OntologySource[]>
   port?: number
   host?: string
   quiet?: boolean
-  ui?: boolean
-  sessionAudience?: AuthSessionAudience
-  surface?: ParioServerSurface
+  browser: ParioApiBrowserPolicy
 }
 
 export function createParioServer(options: ParioServerOptions): ParioServer {
@@ -61,34 +41,22 @@ export class ParioServer {
   private readonly port: number
   private readonly host: string
   private readonly quiet: boolean
-  private readonly surface: ParioServerSurface
-  private readonly sessionAudience: AuthSessionAudience
-  private readonly browserApiPolicy: ResolvedParioApiBrowserPolicy | null
+  private readonly apiBrowserPolicy: ResolvedParioApiBrowserPolicy
   private readonly authContextResolver: ResolveRequestAuthContext
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
   private app: ParioApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
-  private uiCss: BuiltInUiCssHandle | null = null
 
   constructor(options: ParioServerOptions) {
     this.pario = options.pario
     this.port = options.port ?? 3000
     this.host = options.host ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
-    this.surface = resolveServerSurface(options)
-    this.sessionAudience = resolveAuthSessionAudience(
-      this.surface.kind === "apiOnly"
-        ? (this.surface.audience ?? options.sessionAudience)
-        : options.sessionAudience
+    this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
+    this.authContextResolver = createApiBrowserAuthContextResolver(this.apiBrowserPolicy)
+    this.authRedirectContextResolver = createApiBrowserAuthRedirectContextResolver(
+      this.apiBrowserPolicy
     )
-    this.browserApiPolicy =
-      this.surface.kind === "browserApi" ? resolveBrowserApiPolicy(this.surface.browser) : null
-    this.authContextResolver = this.browserApiPolicy
-      ? createBrowserApiAuthContextResolver(this.browserApiPolicy)
-      : createFixedAuthContextResolver(this.sessionAudience)
-    this.authRedirectContextResolver = this.browserApiPolicy
-      ? createBrowserApiAuthRedirectContextResolver(this.browserApiPolicy)
-      : createFixedAuthRedirectContextResolver(this.sessionAudience)
   }
 
   getPario(): Pario<readonly OntologySource[]> {
@@ -97,10 +65,6 @@ export class ParioServer {
 
   getPort(): number {
     return this.port
-  }
-
-  getSessionAudience(): AuthSessionAudience {
-    return this.sessionAudience
   }
 
   resolveAuthContext(request: Request): RequestAuthContext {
@@ -115,36 +79,22 @@ export class ParioServer {
   }
 
   resolveAuthRequestOrigin(request: Request): string {
-    return this.browserApiPolicy
-      ? resolveBrowserApiPublicOrigin(this.browserApiPolicy, request)
-      : new URL(request.url).origin
+    return resolveApiBrowserPublicOrigin(this.apiBrowserPolicy, request)
   }
 
-  getBrowserApiPolicy(): ResolvedParioApiBrowserPolicy | null {
-    return this.browserApiPolicy
-  }
-
-  private isDevelopmentMode(): boolean {
-    return process.env.NODE_ENV === "development"
+  getApiBrowserPolicy(): ResolvedParioApiBrowserPolicy {
+    return this.apiBrowserPolicy
   }
 
   async start(): Promise<void> {
     this.app = createParioApi(this)
 
     try {
-      if (this.surface.kind === "builtInUi") {
-        this.uiCss = await ensureBuiltInUiCss({
-          watch: this.isDevelopmentMode(),
-        })
-        this.bunServer = await this.startUiServer(this.app)
-      } else {
-        this.app.listen({ port: this.port, hostname: this.host })
-      }
+      this.bunServer = startApiServer(this.app, {
+        host: this.host,
+        port: this.port,
+      })
     } catch (error) {
-      if (this.uiCss) {
-        await this.uiCss.stop().catch(() => {})
-        this.uiCss = null
-      }
       this.app = null
       this.bunServer = null
       const message = error instanceof Error ? error.message : String(error)
@@ -155,9 +105,6 @@ export class ParioServer {
       const base = `http://${this.host}:${this.port}`
       console.log(`Pario server running at ${base}`)
       console.log(`OpenAPI docs at ${base}/docs`)
-      if (this.surface.kind === "builtInUi") {
-        console.log(`Built-in UI at ${base}/`)
-      }
     }
   }
 
@@ -167,44 +114,10 @@ export class ParioServer {
       this.bunServer = null
     }
 
-    if (this.uiCss) {
-      await this.uiCss.stop()
-      this.uiCss = null
-    }
-
     if (this.app) {
       await this.app.stop()
       this.app = null
     }
-  }
-
-  private async startUiServer(app: ParioApp) {
-    const appFetch = (req: Request) => app.fetch(req)
-    const guard = new ServerAuthGuard({ pario: this.pario, audience: this.sessionAudience })
-    const routes = (
-      this.isDevelopmentMode()
-        ? await createDevelopmentUiRoutes(guard)
-        : await createProductionUiRoutes(guard)
-    ) as NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
-
-    const bunServer = Bun.serve({
-      port: this.port,
-      hostname: this.host,
-      development: this.isDevelopmentMode(),
-      routes: {
-        "/api/*": appFetch,
-        "/auth/*": appFetch,
-        "/ws/*": appFetch,
-        "/docs": appFetch,
-        "/docs/*": appFetch,
-        ...routes,
-      },
-      fetch: appFetch,
-      websocket: getElysiaWsHandler(app),
-    } as Parameters<typeof Bun.serve>[0])
-
-    attachBunServer(app, bunServer)
-    return bunServer
   }
 }
 
@@ -215,28 +128,28 @@ export function createParioApi(server: ParioServer) {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
   })
   guard.assertCanServeHttp({ production: process.env.NODE_ENV === "production" })
-  const browserApiPolicy = server.getBrowserApiPolicy()
+  const apiBrowserPolicy = server.getApiBrowserPolicy()
 
   const app = new Elysia()
 
-  if (browserApiPolicy) {
-    app.onRequest(({ request }) => {
-      const response = rejectDisallowedBrowserOrigin(request, browserApiPolicy)
-      if (response) {
-        return response
-      }
+  app.onRequest(({ request }) => {
+    const response = rejectDisallowedBrowserOrigin(request, apiBrowserPolicy)
+    if (response) {
+      return response
+    }
+  })
+  app.use(
+    cors({
+      origin: (request) => isAllowedApiBrowserOrigin(apiBrowserPolicy, request),
+      credentials: true,
+      methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["content-type", CSRF_HEADER_NAME],
+      exposeHeaders: [],
+      maxAge: 600,
     })
-    app.use(
-      cors({
-        origin: (request) => isAllowedBrowserApiOrigin(browserApiPolicy, request),
-        credentials: true,
-        methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allowedHeaders: ["content-type", CSRF_HEADER_NAME],
-        exposeHeaders: [],
-        maxAge: 600,
-      })
-    )
-  }
+  )
+
+  app.onBeforeHandle(({ request }) => guard.handle(request))
 
   app.use(
     openapi({
@@ -282,7 +195,6 @@ export function createParioApi(server: ParioServer) {
     })
   )
 
-  app.onBeforeHandle(({ request }) => guard.handle(request))
   registerAuthRoutes(app, pario, {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
@@ -296,18 +208,6 @@ export function createParioApi(server: ParioServer) {
   return app
 }
 
-function resolveServerSurface(options: ParioServerOptions): ParioServerSurface {
-  if (options.surface) {
-    return options.surface
-  }
-
-  if (options.ui === false) {
-    return { kind: "apiOnly", audience: options.sessionAudience }
-  }
-
-  return { kind: "builtInUi" }
-}
-
 function rejectDisallowedBrowserOrigin(
   request: Request,
   policy: ResolvedParioApiBrowserPolicy
@@ -317,7 +217,7 @@ function rejectDisallowedBrowserOrigin(
   }
 
   try {
-    if (isAllowedBrowserApiOrigin(policy, request)) {
+    if (isAllowedApiBrowserOrigin(policy, request)) {
       return undefined
     }
   } catch (error) {
@@ -335,13 +235,24 @@ function rejectDisallowedBrowserOrigin(
   })
 }
 
-export const createApp = createParioApi
 export type ParioApp = ReturnType<typeof createParioApi>
 
-type HtmlRouteHandler = (request: Request) => Response | Promise<Response>
+function startApiServer(
+  app: ParioApp,
+  options: {
+    readonly host: string
+    readonly port: number
+  }
+) {
+  const bunServer = Bun.serve({
+    port: options.port,
+    hostname: options.host,
+    fetch: (request) => app.fetch(request),
+    websocket: getElysiaWsHandler(app),
+  } as Parameters<typeof Bun.serve>[0])
 
-interface HtmlRouteModule {
-  default: Bun.HTMLBundle
+  attachBunServer(app, bunServer)
+  return bunServer
 }
 
 function getElysiaWsHandler(app: ParioApp) {
@@ -354,69 +265,4 @@ function getElysiaWsHandler(app: ParioApp) {
 
 function attachBunServer(app: ParioApp, bunServer: ReturnType<typeof Bun.serve>) {
   ;(app as unknown as { server: typeof bunServer }).server = bunServer
-}
-
-async function createBuiltInUiRoutes(): Promise<Record<string, HtmlRouteHandler>> {
-  const uiRoot = join(import.meta.dir, "ui")
-  return {
-    "/favicon.svg": () => new Response(Bun.file(join(uiRoot, "favicon.svg"))),
-    "/favicon.ico": () => new Response(null, { status: 204 }),
-  }
-}
-
-async function createDevelopmentUiRoutes(guard: ServerAuthGuard) {
-  const uiRoutes = await createBuiltInUiRoutes()
-  if (guard.isAuthEnabled()) {
-    return createBundledUiRoutes(guard, uiRoutes)
-  }
-
-  const htmlModule = await importBuiltInUiHtmlModule()
-
-  return {
-    ...uiRoutes,
-    "/": htmlModule.default,
-    "/*": htmlModule.default,
-  }
-}
-
-async function importBuiltInUiHtmlModule(): Promise<HtmlRouteModule> {
-  const htmlModuleUrl = new URL("./ui/pario-ui.html", import.meta.url)
-  return (await import(htmlModuleUrl.href)) as HtmlRouteModule
-}
-
-async function createProductionUiRoutes(guard: ServerAuthGuard) {
-  const uiRoutes = await createBuiltInUiRoutes()
-  return createBundledUiRoutes(guard, uiRoutes)
-}
-
-async function createBundledUiRoutes(
-  guard: ServerAuthGuard,
-  uiRoutes: Record<string, HtmlRouteHandler>
-) {
-  const bundle = await ensureBuiltInUiBundle()
-  const shell = renderBuiltInUiShell({ csrfCookieName: guard.getCsrfCookieName() })
-  const shellHandler = guard.withProtectedHtml(() => htmlResponse(shell))
-
-  return {
-    ...uiRoutes,
-    "/__pario/*": (request: Request) => serveBuiltInUiAsset(request, bundle.outdir),
-    "/": shellHandler,
-    "/*": shellHandler,
-  }
-}
-
-function htmlResponse(html: string): Response {
-  return new Response(html, {
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  })
-}
-
-function serveBuiltInUiAsset(request: Request, outdir: string): Response {
-  const url = new URL(request.url)
-  const relativePath = url.pathname.slice("/__pario/".length)
-  const file = Bun.file(join(outdir, relativePath))
-  return new Response(file)
 }

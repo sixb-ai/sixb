@@ -1,5 +1,6 @@
 import { access, mkdir, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
+import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
 /**
@@ -40,6 +41,7 @@ export async function generateAppEntry(
   generatedDir: string,
   options: {
     apiBaseUrl?: string
+    audience?: string
     appDir?: string
   } = {}
 ): Promise<{ htmlPath: string; mainPath: string }> {
@@ -62,7 +64,10 @@ export async function generateAppEntry(
   const layoutWrapperStart = hasLayout ? "<RootLayout>" : "<>"
   const layoutWrapperEnd = hasLayout ? "</RootLayout>" : "</>"
   const runtimeConfigScript = options.apiBaseUrl
-    ? `<script>window.__PARIO_API_BASE_URL__ = ${JSON.stringify(options.apiBaseUrl)};</script>`
+    ? renderCustomAppRuntimeScript({
+        api: { baseUrl: options.apiBaseUrl },
+        auth: { audience: options.audience ?? "app" },
+      })
     : ""
 
   // Generate main.tsx
@@ -70,18 +75,18 @@ export async function generateAppEntry(
 import { createRoot } from "react-dom/client"
 import { BrowserRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { client } from "@pario/client"
+import {
+  configureParioBrowserClient,
+  readParioBrowserRuntimeConfig,
+  requireParioBrowserAuthSession,
+} from "@pario/client/browser"
 import { routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
 
-const runtimeConfig = window as Window & {
-  __PARIO_API_BASE_URL__?: string
-}
-
-client.setConfig({
-  baseUrl: runtimeConfig.__PARIO_API_BASE_URL__ ?? window.location.origin,
-})
+const runtimeConfig = readParioBrowserRuntimeConfig({ audience: "app" })
+const browserClient = configureParioBrowserClient(runtimeConfig)
+const authSession = await requireParioBrowserAuthSession(runtimeConfig, browserClient)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -125,7 +130,9 @@ function applyMetadata() {
   }
 }
 
-applyMetadata()
+if (authSession.authenticated) {
+  applyMetadata()
+}
 
 function App() {
   return (
@@ -145,7 +152,9 @@ function App() {
   )
 }
 
-createRoot(document.getElementById("root")!).render(<App />)
+if (authSession.authenticated) {
+  createRoot(document.getElementById("root")!).render(<App />)
+}
 `
 
   const mainPath = join(generatedDir, "main.tsx")

@@ -16,6 +16,7 @@
   "dependencies": {
     "@pario/app": "workspace:*",
     "@pario/action-worker": "workspace:*",
+    "@pario/atlas": "workspace:*",
     "@pario/core": "workspace:*",
     "@pario/orchestrator": "workspace:*",
     "@pario/pipeline-worker": "workspace:*",

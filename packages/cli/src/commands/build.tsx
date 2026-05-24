@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
-import { createParioApp } from "@pario/app"
+import { createCustomApp } from "@pario/app"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
 export interface BuildOptions {
@@ -32,7 +32,7 @@ export async function runBuild(options: BuildOptions = {}) {
     process.exit(1)
   }
 
-  const customApp = await createParioApp({
+  const customApp = await createCustomApp({
     rootDir: projectRoot,
   })
 

@@ -1,6 +1,6 @@
 import { AuthRuntimeError } from "./errors"
 
-export const DEFAULT_AUTH_SESSION_AUDIENCE = "admin"
+export const DEFAULT_AUTH_SESSION_AUDIENCE = "atlas"
 export const AUTH_SESSION_AUDIENCE_PATTERN = /^[a-z][a-z0-9-]{0,47}$/
 
 export type AuthSessionAudience = typeof DEFAULT_AUTH_SESSION_AUDIENCE | "app" | (string & {})
