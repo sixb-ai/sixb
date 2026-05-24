@@ -435,6 +435,17 @@
         "typescript": "^5.7.0",
       },
     },
+    "sandboxes/local": {
+      "name": "@sixb/sandboxes-local",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "storage/blob-local": {
       "name": "@sixb/blob-local",
       "version": "0.1.0",
@@ -872,6 +883,8 @@
     "@sixb/queues-bullmq": ["@sixb/queues-bullmq@workspace:queues/bullmq"],
 
     "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
+
+    "@sixb/sandboxes-local": ["@sixb/sandboxes-local@workspace:sandboxes/local"],
 
     "@sixb/server": ["@sixb/server@workspace:packages/server"],
 

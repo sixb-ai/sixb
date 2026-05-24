@@ -21,3 +21,8 @@ export {
   type QueueContractSuiteOptions,
   runQueueContractSuite,
 } from "./queues-contract"
+export {
+  runSandboxesContractSuite,
+  type SandboxesContractCapabilities,
+  type SandboxesContractSuiteOptions,
+} from "./sandboxes-contract"

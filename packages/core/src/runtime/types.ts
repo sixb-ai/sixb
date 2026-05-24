@@ -52,6 +52,7 @@ import type {
 } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
+import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityRegistry } from "../security"
 import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
@@ -80,6 +81,7 @@ export interface SixbRuntimeContext {
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
+  readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
   /**
    * Principal scope for this context. Absent on privileged runtimes (raw
@@ -629,6 +631,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
+  readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
