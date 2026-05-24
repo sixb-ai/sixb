@@ -39,6 +39,7 @@ export async function runDev(options: DevOptions = {}) {
     const projectRoot = dirname(resolve(entry))
 
     runtime = await startParioRuntime(pario, { cohostWorkers: true })
+    const authEnabled = pario.auth.isEnabled()
 
     app.rerender(<LoadingView title="Starting pario" subtitle={entry} status="Starting server" />)
 
@@ -71,6 +72,7 @@ export async function runDev(options: DevOptions = {}) {
     const atlas = createAtlasApp({
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "atlas",
+      authEnabled,
     })
     atlasServer = await atlas.start({
       host: topology.host,
@@ -82,6 +84,7 @@ export async function runDev(options: DevOptions = {}) {
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
+      authEnabled,
     })
 
     let appUrl: string | null = null

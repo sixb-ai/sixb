@@ -10,6 +10,7 @@ import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./ui/css"
 export interface CreateAtlasAppOptions {
   readonly apiBaseUrl: string
   readonly audience?: AuthSessionAudience
+  readonly authEnabled?: boolean
 }
 
 export interface AtlasAppStartOptions {
@@ -32,6 +33,7 @@ export interface AtlasAppInstance {
 export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance {
   const apiBaseUrl = normalizeOrigin(options.apiBaseUrl, "Atlas API base URL")
   const audience = resolveAuthSessionAudience(options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE)
+  const authEnabled = options.authEnabled ?? true
 
   return {
     async start(startOptions: AtlasAppStartOptions = {}) {
@@ -43,7 +45,13 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
       try {
         css = await ensureBuiltInUiCss({ watch: development })
         const bundle = await ensureBuiltInUiBundle()
-        const shell = renderBuiltInUiShell({ apiBaseUrl, audience })
+        const shell = renderBuiltInUiShell({
+          apiBaseUrl,
+          audience,
+          authEnabled,
+          scriptPath: bundle.scriptPath,
+          stylesheetPath: bundle.stylesheetPath,
+        })
         const server = Bun.serve({
           port,
           hostname: host,

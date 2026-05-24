@@ -9,7 +9,7 @@ import { requestSyncRun } from "../src/generated/sdk.gen"
 
 const runtimeConfig: ParioBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
-  auth: { audience: "app" },
+  auth: { audience: "app", enabled: true },
 }
 
 afterEach(() => {

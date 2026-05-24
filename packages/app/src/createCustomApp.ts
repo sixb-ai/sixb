@@ -13,6 +13,7 @@ export interface CreateCustomAppOptions {
   publicDir?: string
   apiBaseUrl?: string
   audience?: string
+  authEnabled?: boolean
 }
 
 export interface CustomAppDevOptions {
@@ -30,6 +31,7 @@ export interface CustomAppStartOptions {
   outdir?: string
   apiBaseUrl?: string
   audience?: string
+  authEnabled?: boolean
 }
 
 export interface CustomAppDevServer {
@@ -59,6 +61,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     : resolve(appDir, "public")
   const apiBaseUrl = options.apiBaseUrl
   const audience = options.audience ?? "app"
+  const authEnabled = options.authEnabled ?? true
 
   async function scanRoutes(): Promise<PageRoute[]> {
     if (!(await pathExists(appDir))) {
@@ -78,6 +81,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     const { htmlPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
+      authEnabled,
       appDir,
     })
     return { htmlPath, routes }
@@ -166,6 +170,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const indexHtml = injectRuntimeConfig(await Bun.file(indexPath).text(), {
         apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
         audience: startOptions.audience ?? audience,
+        authEnabled: startOptions.authEnabled ?? authEnabled,
       })
       const server = Bun.serve({
         port,
@@ -312,7 +317,11 @@ function resolveStaticPath(appRoot: string, pathname: string): string | null {
 
 function injectRuntimeConfig(
   html: string,
-  config: { readonly apiBaseUrl?: string; readonly audience: string }
+  config: {
+    readonly apiBaseUrl?: string
+    readonly audience: string
+    readonly authEnabled: boolean
+  }
 ): string {
   if (!config.apiBaseUrl) {
     return html
@@ -320,7 +329,7 @@ function injectRuntimeConfig(
 
   const script = renderCustomAppRuntimeScript({
     api: { baseUrl: config.apiBaseUrl },
-    auth: { audience: config.audience },
+    auth: { audience: config.audience, enabled: config.authEnabled },
   })
   const existingRuntimeScript = /<script>window\.__PARIO_RUNTIME__ = .*?;<\/script>/
   if (existingRuntimeScript.test(html)) {

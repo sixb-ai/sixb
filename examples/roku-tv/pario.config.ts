@@ -12,4 +12,10 @@ export const pario = createPario({
   lakeStorage: new LocalLakeStorage({ path: ".pario/lake" }),
   blobStorage,
   queues: new InMemoryQueues(),
+  auth: {
+    disabled: true,
+    id: "roku-tv",
+    kind: "disabled",
+    allowDisabledInProduction: true,
+  },
 })

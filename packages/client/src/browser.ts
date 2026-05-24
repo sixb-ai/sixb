@@ -11,12 +11,14 @@ export interface ParioBrowserRuntimeConfig {
   }
   readonly auth: {
     readonly audience: string
+    readonly enabled: boolean
   }
 }
 
 export interface ParioBrowserRuntimeDefaults {
   readonly apiBaseUrl?: string
   readonly audience: string
+  readonly authEnabled?: boolean
 }
 
 export interface ParioBrowserClientController {
@@ -40,6 +42,7 @@ export function readParioBrowserRuntimeConfig(
   defaults: ParioBrowserRuntimeDefaults
 ): ParioBrowserRuntimeConfig {
   const runtime = window.__PARIO_RUNTIME__
+  const runtimeAuthEnabled = runtime?.auth?.enabled
   return {
     api: {
       baseUrl: normalizeBaseUrl(
@@ -48,6 +51,10 @@ export function readParioBrowserRuntimeConfig(
     },
     auth: {
       audience: runtime?.auth?.audience ?? defaults.audience,
+      enabled:
+        typeof runtimeAuthEnabled === "boolean"
+          ? runtimeAuthEnabled
+          : (defaults.authEnabled ?? true),
     },
   }
 }

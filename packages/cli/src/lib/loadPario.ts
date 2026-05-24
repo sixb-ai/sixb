@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url"
 import type {
   ActionDefinition,
+  AuthRuntime,
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
@@ -18,6 +19,7 @@ import type {
 
 export interface LoadedPario extends ParioRuntimeContext {
   readonly id: string
+  readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
   getActionDefinitions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
@@ -68,6 +70,7 @@ function isParioInstance(value: unknown): value is LoadedPario {
     "lakeStorage" in value &&
     "blobStorage" in value &&
     "queues" in value &&
+    "auth" in value &&
     typeof (value as { listObjectTypes?: unknown }).listObjectTypes === "function" &&
     typeof (value as { getSubTypes?: unknown }).getSubTypes === "function" &&
     typeof (value as { getActionDefinitions?: unknown }).getActionDefinitions === "function" &&

@@ -13,7 +13,10 @@ import "../.pario/ui.css"
 
 const runtimeConfig = readParioBrowserRuntimeConfig({ audience: "atlas" })
 const browserClient = configureParioBrowserClient(runtimeConfig)
-const authSession = await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+const authSession = runtimeConfig.auth.enabled
+  ? await requireParioBrowserAuthSession(runtimeConfig, browserClient)
+  : null
+const canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,7 +27,7 @@ const queryClient = new QueryClient({
   },
 })
 
-if (authSession.authenticated) {
+if (canRenderApp) {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
