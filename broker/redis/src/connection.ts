@@ -1,7 +1,11 @@
-import { createClient, type RedisClientOptions } from "redis"
+import { RedisClient, type RedisOptions } from "bun"
 import { RedisBrokerError } from "./errors"
 
-export type RedisBrokerClient = ReturnType<typeof createClient>
+export interface RedisBrokerConnectionOptions extends RedisOptions {
+  readonly url?: string
+}
+
+export type RedisBrokerClient = RedisClient
 
 /**
  * Lazily manages Redis clients for the broker.
@@ -10,31 +14,38 @@ export type RedisBrokerClient = ReturnType<typeof createClient>
  * dedicated clients so a blocked subscription cannot starve append/read calls.
  */
 export class RedisConnectionManager {
-  private readonly options: RedisClientOptions
+  private readonly url: string | undefined
+  private readonly options: RedisOptions | undefined
   private connectPromise: Promise<RedisBrokerClient> | undefined
   private client: RedisBrokerClient | undefined
 
-  constructor(options: RedisClientOptions) {
-    this.options = options
+  constructor(options: RedisBrokerConnectionOptions = {}) {
+    const { url, ...redisOptions } = options
+    this.url = url
+    this.options = Object.keys(redisOptions).length === 0 ? undefined : redisOptions
   }
 
   async connect(): Promise<RedisBrokerClient> {
-    if (this.client?.isOpen) {
+    if (this.client?.connected) {
       return this.client
     }
     if (this.connectPromise !== undefined) {
       return this.connectPromise
     }
 
-    this.connectPromise = this.openClient("Failed to connect to Redis").then((client) => {
+    const connectPromise = this.openClient("Failed to connect to Redis").then((client) => {
       this.client = client
+      this.connectPromise = undefined
       return client
     })
+    this.connectPromise = connectPromise
 
     try {
-      return await this.connectPromise
+      return await connectPromise
     } catch (error) {
-      this.connectPromise = undefined
+      if (this.connectPromise === connectPromise) {
+        this.connectPromise = undefined
+      }
       throw error
     }
   }
@@ -47,30 +58,32 @@ export class RedisConnectionManager {
     const client = this.client
     this.client = undefined
     this.connectPromise = undefined
-    if (client === undefined || !client.isOpen) {
+    if (client === undefined) {
       return
     }
-    await client.close().catch(() => undefined)
+    this.closeClient(client)
   }
 
-  destroyClient(client: RedisBrokerClient): void {
-    if (!client.isOpen) {
-      return
+  closeClient(client: RedisBrokerClient): void {
+    try {
+      client.close()
+    } catch {
+      // Closing is best-effort during unsubscribe and broker shutdown.
     }
-    client.destroy()
   }
 
   private async openClient(errorMessage: string): Promise<RedisBrokerClient> {
-    const client = createClient(this.options)
-    client.on("error", noop)
+    const client = new RedisClient(this.url ?? redisUrlFromEnvironment(), this.options)
     try {
       await client.connect()
       return client
     } catch (error) {
-      client.destroy()
+      this.closeClient(client)
       throw new RedisBrokerError(errorMessage, { cause: error })
     }
   }
 }
 
-function noop(): void {}
+function redisUrlFromEnvironment(): string | undefined {
+  return process.env["REDIS_URL"] || process.env["VALKEY_URL"]
+}

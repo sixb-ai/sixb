@@ -13,8 +13,7 @@
     "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts"
   },
   "dependencies": {
-    "@pario/core": "workspace:*",
-    "redis": "^5.12.1"
+    "@pario/core": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 import { runBrokerContractSuite } from "@pario/core/testing"
-import { createTestBroker } from "./helpers"
+import { RedisBroker } from "../src"
+import { createTestBroker, requireRedisUrl } from "./helpers"
 
 runBrokerContractSuite("RedisBroker", {
   createBroker: async () => createTestBroker().broker,
@@ -15,6 +17,37 @@ runBrokerContractSuite("RedisBroker", {
 })
 
 describe("RedisBroker", () => {
+  test("uses Redis environment defaults when connection is omitted", async () => {
+    const previousRedisUrl = process.env["REDIS_URL"]
+    process.env["REDIS_URL"] = requireRedisUrl()
+
+    const suffix = randomUUID().slice(0, 8)
+    const broker = new RedisBroker({
+      prefix: `pario:test:broker:${suffix}`,
+      subscribeBlockMs: 100,
+    })
+    const projectId = `project-${suffix}`
+    const stream = { id: "__events" }
+
+    try {
+      await broker.ensureStream({ projectId, stream })
+      const [record] = await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ name: "object.upserted", payload: { id: "room-1" } }],
+      })
+
+      expect(await broker.read({ projectId, streamId: stream.id })).toEqual([record])
+    } finally {
+      await broker.close()
+      if (previousRedisUrl === undefined) {
+        delete process.env["REDIS_URL"]
+      } else {
+        process.env["REDIS_URL"] = previousRedisUrl
+      }
+    }
+  })
+
   test("deduplicates records by idempotencyKey within the configured retry window", async () => {
     const { broker, projectId, cleanup } = createTestBroker()
     const stream = { id: "__events" }

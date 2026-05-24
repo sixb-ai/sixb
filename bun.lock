@@ -51,7 +51,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@pario/core": "workspace:*",
-        "redis": "^5.12.1",
       },
       "devDependencies": {
         "@types/bun": "latest",

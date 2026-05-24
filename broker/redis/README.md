@@ -11,6 +11,8 @@ bun add @pario/broker-redis
 
 Requires Redis 7.2 or newer.
 
+This package uses Bun's native Redis client.
+
 ## Usage
 
 ```typescript
@@ -30,18 +32,28 @@ export const pario = createPario({
 ```
 
 The constructor is synchronous. Redis connections are opened lazily on the
-first `append()`, `read()`, or `subscribe()` call.
+first `append()`, `read()`, or `subscribe()` call. If `connection` is omitted,
+the broker reads `REDIS_URL`, then `VALKEY_URL`, before falling back to Bun's
+default Redis URL.
 
 ## Options
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `connection` | `RedisClientOptions` | required | node-redis connection options. |
+| `connection` | `RedisBrokerConnectionOptions` | `undefined` | Bun Redis URL/options. Supports `url`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
 | `prefix` | `string` | `"pario:broker"` | Redis key prefix. |
 | `dedupeTtlMs` | `number` | `120000` | Retry dedupe window for `idempotencyKey`. |
 | `readBatchSize` | `number` | `1000` | `XRANGE COUNT` page size for retained reads. |
 | `subscribeBatchSize` | `number` | `100` | `XREAD COUNT` page size for subscriptions. |
 | `subscribeBlockMs` | `number` | `1000` | `XREAD BLOCK` duration. |
+
+Connection examples:
+
+```typescript
+new RedisBroker()
+new RedisBroker({ connection: { url: "redis://localhost:6379" } })
+new RedisBroker({ connection: { url: "rediss://redis.example.com:6379", tls: true } })
+```
 
 ## Redis Key Scheme
 
@@ -54,9 +66,10 @@ and broker stream id:
 | Metadata key | `{prefix}:brk:{base64url(projectId):base64url(streamId)}:meta` |
 | Dedupe key | `{prefix}:brk:{base64url(projectId):base64url(streamId)}:dedupe:{base64url(idempotencyKey)}` |
 
-The `{...}` segment is a Redis Cluster hash tag. It keeps the stream, metadata,
-and dedupe keys for one logical broker stream in the same cluster slot so the
-append Lua script can update them atomically.
+The `{...}` segment is hash-tag-compatible and keeps the stream, metadata, and
+dedupe keys for one logical broker stream grouped together. Bun's native Redis
+client does not currently support Redis Cluster, so this provider targets
+standalone Redis-compatible servers.
 
 ## Behavior Notes
 

@@ -17,20 +17,33 @@ export function parseXReadEntries(reply: unknown): readonly RedisStreamEntry[] {
   if (reply === null) {
     return []
   }
-  if (!Array.isArray(reply)) {
-    throw new RedisBrokerError("Redis XREAD reply was not an array")
-  }
 
   const entries: RedisStreamEntry[] = []
-  for (const stream of reply) {
-    if (!Array.isArray(stream) || stream.length !== 2 || !Array.isArray(stream[1])) {
-      throw new RedisBrokerError("Redis XREAD stream reply was malformed")
+  if (Array.isArray(reply)) {
+    for (const stream of reply) {
+      if (!Array.isArray(stream) || stream.length !== 2 || !Array.isArray(stream[1])) {
+        throw new RedisBrokerError("Redis XREAD stream reply was malformed")
+      }
+      for (const entry of stream[1]) {
+        entries.push(parseStreamEntry(entry))
+      }
     }
-    for (const entry of stream[1]) {
-      entries.push(parseStreamEntry(entry))
-    }
+    return entries
   }
-  return entries
+
+  if (typeof reply === "object") {
+    for (const streamEntries of Object.values(reply)) {
+      if (!Array.isArray(streamEntries)) {
+        throw new RedisBrokerError("Redis XREAD stream reply was malformed")
+      }
+      for (const entry of streamEntries) {
+        entries.push(parseStreamEntry(entry))
+      }
+    }
+    return entries
+  }
+
+  throw new RedisBrokerError("Redis XREAD reply was not an array or object")
 }
 
 export function bodyFromEntry(entry: RedisStreamEntry): string {
