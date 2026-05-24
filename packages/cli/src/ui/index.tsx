@@ -179,8 +179,13 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "--entry <path>", value: "Entry file (default: pario.config.ts)" },
-          { label: "--port <port>", value: "Server port (default: 3000)" },
-          { label: "--host <host>", value: "Server host (default: 0.0.0.0)" },
+          { label: "--port <port>", value: "Atlas UI port (default: 3000)" },
+          { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
+          { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
+          { label: "--api-host <host>", value: "API bind host (default: --host)" },
+          { label: "--api-public-origin <origin>", value: "Public API origin" },
+          { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
+          { label: "--app-public-origin <origin>", value: "Public custom app origin" },
           {
             label: "--worker <type>",
             value: "Worker type: sync, action, pipeline, projection, workflow",
@@ -270,9 +275,9 @@ export function DevView({
     { label: "Events", value: wsUrl },
   ]
   if (uiUrl) {
-    serverItems.push({ label: "UI", value: uiUrl })
+    serverItems.push({ label: "Atlas UI", value: uiUrl })
   } else if (uiStatus) {
-    serverItems.push({ label: "UI", value: uiStatus })
+    serverItems.push({ label: "Atlas UI", value: uiStatus })
   }
 
   return (
@@ -284,7 +289,7 @@ export function DevView({
       {appUrl ? (
         <>
           <Spacer />
-          <ServicePanel name="App" items={[{ label: "URL", value: appUrl }]} />
+          <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
         </>
       ) : null}
       {mqttUrl ? (
@@ -314,6 +319,7 @@ export function StartView({
   apiDocsUrl,
   wsUrl,
   uiUrl,
+  uiStatus,
   appUrl,
   warnings = [],
 }: {
@@ -321,10 +327,22 @@ export function StartView({
   apiUrl: string
   apiDocsUrl: string
   wsUrl: string
-  uiUrl: string
+  uiUrl: string | null
+  uiStatus?: string | null
   appUrl?: string | null
   warnings?: readonly string[]
 }) {
+  const serverItems: KeyValueItem[] = [
+    { label: "API", value: apiUrl },
+    { label: "API docs", value: apiDocsUrl },
+    { label: "Events", value: wsUrl },
+  ]
+  if (uiUrl) {
+    serverItems.push({ label: "Atlas UI", value: uiUrl })
+  } else if (uiStatus) {
+    serverItems.push({ label: "Atlas UI", value: uiStatus })
+  }
+
   return (
     <Box flexDirection="column">
       <Text color="green" bold>
@@ -332,19 +350,11 @@ export function StartView({
       </Text>
       <Text dimColor>{name}</Text>
       <Spacer />
-      <ServicePanel
-        name="Server"
-        items={[
-          { label: "API", value: apiUrl },
-          { label: "API docs", value: apiDocsUrl },
-          { label: "Events", value: wsUrl },
-          { label: "UI", value: uiUrl },
-        ]}
-      />
+      <ServicePanel name="Server" items={serverItems} />
       {appUrl ? (
         <>
           <Spacer />
-          <ServicePanel name="App" items={[{ label: "URL", value: appUrl }]} />
+          <ServicePanel name="Custom app" items={[{ label: "URL", value: appUrl }]} />
         </>
       ) : null}
       {warnings.length > 0 ? (

@@ -1,4 +1,4 @@
-import type { ProjectInfo } from "@pario/client"
+import { client, type ProjectInfo } from "@pario/client"
 import {
   Sidebar as ShadcnSidebar,
   SidebarContent,
@@ -52,6 +52,10 @@ const projectNavItems: NavItem[] = [
   { id: "home", label: "Objects", Icon: Box },
   { id: "rules", label: "Rules", Icon: ListChecks },
 ]
+
+function apiDocsUrl(): string {
+  return new URL("/docs", client.getConfig().baseUrl ?? window.location.origin).toString()
+}
 
 interface SidebarProps {
   selectedProject: ProjectInfo | null
@@ -177,7 +181,7 @@ export function Sidebar({
         <div className="flex items-center justify-between gap-2 px-2 group-data-[collapsible=icon]:hidden">
           <ThemeSwitcher />
           <a
-            href={`http://${window.location.hostname}:3000/docs`}
+            href={apiDocsUrl()}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground"

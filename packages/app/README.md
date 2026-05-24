@@ -38,18 +38,19 @@ If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also exp
 
 ### 4. Start
 
-`createParioApp().start(options)` serves the built app from `.pario/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so a separately hosted custom app can still target the main Pario API.
+`createCustomApp().start(options)` serves the built app from `.pario/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Pario API origin with credentials.
 
 ## Usage
 
 Preferred high-level API:
 
 ```typescript
-import { createParioApp } from "@pario/app"
+import { createCustomApp } from "@pario/app"
 
-const app = await createParioApp({
+const app = await createCustomApp({
   rootDir: process.cwd(),
   apiBaseUrl: "http://localhost:3000",
+  audience: "app",
 })
 
 await app.dev({ port: 3001 })
@@ -89,7 +90,7 @@ In dev mode the Bun server serves them directly; in production they are copied i
 
 | Export | Description |
 | --- | --- |
-| `createParioApp(options)` | High-level custom app toolkit for dev/build/start |
+| `createCustomApp(options)` | High-level custom app toolkit for dev/build/start |
 | `scanPages(appDir)` | Scan `app/` for page files and return `PageRoute[]` |
 | `generateRouteManifest(routes, generatedDir)` | Write `routes.ts` with lazy-loaded route imports |
 | `generateAppEntry(projectRoot, generatedDir, options)` | Write `index.html` and `main.tsx` entry points |

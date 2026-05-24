@@ -29,7 +29,6 @@ export const pario = createPario({
     allowedDomains: authAllowedDomains,
     bootstrapUsers: authBootstrapUsers,
     bootstrapGroups: [securityAdmins],
-    publicUrl: process.env.PARIO_PUBLIC_URL,
     from: authFromEmail,
     sendInvitation: sendAuthInvitation,
   }),

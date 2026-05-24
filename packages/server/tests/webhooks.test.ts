@@ -12,6 +12,7 @@ import {
   type ParioOptions,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 function createParioInstance<TOntologySources extends readonly OntologySource[]>(
   options: ParioOptions<TOntologySources>
@@ -351,7 +352,7 @@ function createWebhookApp(
     queues: new InMemoryQueues(),
     connectors,
   })
-  const server = new ParioServer({ pario, quiet: true, ui: false })
+  const server = new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
   return createParioApi(server)
 }
 

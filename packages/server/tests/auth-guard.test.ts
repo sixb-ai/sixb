@@ -15,6 +15,7 @@ import {
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 const authStrategy = {
   id: "test",
@@ -87,11 +88,11 @@ function createRuntime(options: { readonly auth?: boolean; readonly connector?: 
 
 async function seedSession(
   storage: InMemoryStorage,
-  params: { readonly audience?: "admin" | "app"; readonly status?: "active" | "suspended" } = {}
+  params: { readonly audience?: "atlas" | "app"; readonly status?: "active" | "suspended" } = {}
 ) {
   const credential = createSessionCredential("ses_1")
-  const audience = params.audience ?? "admin"
-  const cookieSuffix = audience === "admin" ? "" : `_${audience}`
+  const audience = params.audience ?? "atlas"
+  const cookieSuffix = audience === "atlas" ? "" : `_${audience}`
   await storage.auth.users.create({
     id: "usr_1",
     projectId: "test-project",
@@ -127,7 +128,9 @@ async function seedSession(
 describe("server auth guard", () => {
   test("leaves routes open when auth is not configured outside production", async () => {
     const { pario } = createRuntime()
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
 
@@ -141,9 +144,9 @@ describe("server auth guard", () => {
 
     try {
       const { pario } = createRuntime()
-      expect(() => createParioApi(new ParioServer({ pario, quiet: true, ui: false }))).toThrow(
-        "Auth is required in production"
-      )
+      expect(() =>
+        createParioApi(new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() }))
+      ).toThrow("Auth is required in production")
     } finally {
       if (previous === undefined) {
         delete process.env.NODE_ENV
@@ -155,7 +158,9 @@ describe("server auth guard", () => {
 
   test("protects API routes with generic JSON 401", async () => {
     const { pario } = createRuntime({ auth: true })
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
 
     const response = await app.fetch(new Request("http://localhost/api/project"))
 
@@ -166,7 +171,9 @@ describe("server auth guard", () => {
   test("returns a safe session shape", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
 
     const response = await app.fetch(
       new Request("http://localhost/api/auth/session", {
@@ -192,21 +199,24 @@ describe("server auth guard", () => {
     expect(response.headers.get("set-cookie")).toContain("pario_csrf=")
   })
 
-  test("resolves sessions with the server audience cookie names", async () => {
+  test("resolves sessions with the app audience cookie names", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createParioApi(
-      new ParioServer({ pario, quiet: true, ui: false, sessionAudience: "app" })
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
     )
 
     const accepted = await app.fetch(
-      new Request("http://localhost/api/auth/session", {
-        headers: { cookie: seeded.cookie },
+      new Request("http://api.localhost/api/auth/session", {
+        headers: { origin: "http://app.localhost", cookie: seeded.cookie },
       })
     )
     const adminCookie = await app.fetch(
-      new Request("http://localhost/api/project", {
-        headers: { cookie: `pario_session=${seeded.credential.cookieValue}` },
+      new Request("http://api.localhost/api/project", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: `pario_session=${seeded.credential.cookieValue}`,
+        },
       })
     )
 
@@ -218,23 +228,14 @@ describe("server auth guard", () => {
     expect(adminCookie.status).toBe(401)
   })
 
-  test("resolves browser API sessions from the allowed origin audience", async () => {
+  test("resolves API browser sessions from the allowed origin audience", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
     const app = createParioApi(
       new ParioServer({
         pario,
         quiet: true,
-        surface: {
-          kind: "browserApi",
-          browser: {
-            publicOrigin: "http://api.localhost",
-            allowedOrigins: [
-              { origin: "http://admin.localhost", audience: "admin", kind: "admin" },
-              { origin: "http://app.localhost", audience: "app", kind: "app" },
-            ],
-          },
-        },
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -267,19 +268,13 @@ describe("server auth guard", () => {
     expect(await wrongCookieName.json()).toEqual({ authenticated: false })
   })
 
-  test("rejects browser API requests from unknown origins", async () => {
+  test("rejects API browser requests from unknown origins", async () => {
     const { pario } = createRuntime({ auth: true })
     const app = createParioApi(
       new ParioServer({
         pario,
         quiet: true,
-        surface: {
-          kind: "browserApi",
-          browser: {
-            publicOrigin: "http://api.localhost",
-            allowedOrigins: [{ origin: "http://admin.localhost", audience: "admin" }],
-          },
-        },
+        browser: createTestBrowserPolicy({ includeApp: false }),
       })
     )
 
@@ -294,19 +289,13 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({ error: "Browser origin is not allowed" })
   })
 
-  test("handles browser API preflights with an exact origin allowlist", async () => {
+  test("handles API browser preflights with an exact origin allowlist", async () => {
     const { pario } = createRuntime({ auth: true })
     const app = createParioApi(
       new ParioServer({
         pario,
         quiet: true,
-        surface: {
-          kind: "browserApi",
-          browser: {
-            publicOrigin: "http://api.localhost",
-            allowedOrigins: [{ origin: "http://admin.localhost", audience: "admin" }],
-          },
-        },
+        browser: createTestBrowserPolicy({ includeApp: false }),
       })
     )
 
@@ -314,7 +303,7 @@ describe("server auth guard", () => {
       new Request("http://api.localhost/api/objects/device/fan-1", {
         method: "OPTIONS",
         headers: {
-          origin: "http://admin.localhost",
+          origin: "http://atlas.localhost",
           "access-control-request-method": "PUT",
           "access-control-request-headers": "content-type,x-pario-csrf",
         },
@@ -331,7 +320,7 @@ describe("server auth guard", () => {
     )
 
     expect(allowed.status).toBe(204)
-    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://admin.localhost")
+    expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
     expect(allowed.headers.get("access-control-allow-headers")).toBe("content-type, x-pario-csrf")
     expect(rejected.status).toBe(403)
@@ -344,13 +333,7 @@ describe("server auth guard", () => {
       new ParioServer({
         pario,
         quiet: true,
-        surface: {
-          kind: "browserApi",
-          browser: {
-            publicOrigin: "http://api.localhost",
-            allowedOrigins: [{ origin: "http://app.localhost", audience: "app" }],
-          },
-        },
+        browser: createTestBrowserPolicy(),
       })
     )
 
@@ -374,7 +357,9 @@ describe("server auth guard", () => {
   test("requires CSRF only after authentication for mutations", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
     const body = JSON.stringify({ properties: { name: "Fan" } })
 
     const unauthenticated = await app.fetch(
@@ -414,7 +399,9 @@ describe("server auth guard", () => {
   test("sign-out revokes the session and clears cookies", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
 
     const response = await app.fetch(
       new Request("http://localhost/api/auth/sign-out", {
@@ -438,7 +425,9 @@ describe("server auth guard", () => {
 
   test("keeps webhooks public while connector verification remains authoritative", async () => {
     const { pario } = createRuntime({ auth: true, connector: true })
-    const app = createParioApi(new ParioServer({ pario, quiet: true, ui: false }))
+    const app = createParioApi(
+      new ParioServer({ pario, quiet: true, browser: createTestBrowserPolicy() })
+    )
 
     const response = await app.fetch(
       new Request("http://localhost/api/webhooks/github/events", {
@@ -460,6 +449,7 @@ describe("server auth guard", () => {
       host: "127.0.0.1",
       port,
       quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
     })
 
     await server.start()
@@ -471,7 +461,68 @@ describe("server auth guard", () => {
     }
   })
 
-  test("redirects protected built-in UI routes while keeping static assets public", async () => {
+  test("accepts WebSocket connections from allowed origins with the matching audience", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    const port = await getFreePort()
+    const apiOrigin = `http://127.0.0.1:${port}`
+    const server = new ParioServer({
+      pario,
+      host: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin }),
+    })
+
+    await server.start()
+
+    try {
+      await expect(
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+          origin: "http://app.localhost",
+          cookie: seeded.cookie,
+        })
+      ).resolves.toBeUndefined()
+
+      await expect(
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+          origin: "http://app.localhost",
+          cookie: `pario_session=${seeded.credential.cookieValue}`,
+        })
+      ).rejects.toThrow()
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("rejects WebSocket connections from unknown browser origins", async () => {
+    const { pario, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    const port = await getFreePort()
+    const apiOrigin = `http://127.0.0.1:${port}`
+    const server = new ParioServer({
+      pario,
+      host: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin }),
+    })
+
+    await server.start()
+
+    try {
+      await expect(
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+          origin: "http://evil.localhost",
+          cookie: seeded.cookie,
+        })
+      ).rejects.toThrow()
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("does not serve Atlas shell or assets from the API server", async () => {
     const { pario } = createRuntime({ auth: true })
     const port = await getFreePort()
     const server = new ParioServer({
@@ -479,6 +530,7 @@ describe("server auth guard", () => {
       host: "127.0.0.1",
       port,
       quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
     })
 
     await server.start()
@@ -491,75 +543,114 @@ describe("server auth guard", () => {
         redirect: "manual",
       })
 
-      expect(staticResponse.status).toBe(200)
-      expect(fallbackIconResponse.status).toBe(204)
-      expect(htmlResponse.status).toBe(302)
-      expect(htmlResponse.headers.get("location")).toBe(
-        "/auth/sign-in?returnTo=%2Fdashboard%2Fdevices"
-      )
+      expect(staticResponse.status).toBe(404)
+      expect(fallbackIconResponse.status).toBe(404)
+      expect(htmlResponse.status).toBe(404)
     } finally {
       await server.stop()
     }
   })
 
-  test("serves protected built-in UI routes in development for authenticated sessions", async () => {
-    const previous = process.env.NODE_ENV
-    process.env.NODE_ENV = "development"
+  test("redirects API-owned HTML routes with API-origin auth context", async () => {
+    const { pario } = createRuntime({ auth: true })
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        browser: createTestBrowserPolicy({ includeApp: false }),
+      })
+    )
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/docs", {
+        redirect: "manual",
+      })
+    )
+    const location = new URL(response.headers.get("location") ?? "", "http://api.localhost")
+
+    expect(response.status).toBe(302)
+    expect(location.origin).toBe("http://api.localhost")
+    expect(location.pathname).toBe("/auth/sign-in")
+    expect(location.searchParams.get("audience")).toBe("atlas")
+    expect(location.searchParams.get("returnTo")).toBe("http://api.localhost/docs")
+  })
+
+  test("allows API-owned docs mutations with the API-origin session and CSRF token", async () => {
     const { pario, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
-    const port = await getFreePort()
-    const server = new ParioServer({
-      pario,
-      host: "127.0.0.1",
-      port,
-      quiet: true,
-    })
-
-    try {
-      await server.start()
-
-      const response = await fetch(`http://127.0.0.1:${port}/dashboard/devices`, {
-        headers: { cookie: seeded.cookie },
+    const app = createParioApi(
+      new ParioServer({
+        pario,
+        quiet: true,
+        browser: createTestBrowserPolicy({ includeApp: false }),
       })
+    )
 
-      expect(response.status).toBe(200)
-      const html = await response.text()
-      expect(html).toContain('<div id="root"></div>')
-      expect(html).toContain('"auth":{"csrfCookieName":"pario_csrf"}')
-    } finally {
-      await server.stop()
-      if (previous === undefined) {
-        delete process.env.NODE_ENV
-      } else {
-        process.env.NODE_ENV = previous
-      }
-    }
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/objects/device/fan-1", {
+        method: "PUT",
+        headers: {
+          origin: "http://api.localhost",
+          "content-type": "application/json",
+          cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+          ...seeded.csrfHeader,
+        },
+        body: JSON.stringify({ properties: { name: "Fan" } }),
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("access-control-allow-origin")).toBe("http://api.localhost")
   })
 })
 
-async function connectWebSocket(url: string): Promise<void> {
+async function connectWebSocket(url: string, headers?: Record<string, string>): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
-    const ws = new WebSocket(url)
+    const ws = createTestWebSocket(url, headers)
+    let settled = false
+    const settle = (callback: () => void) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      clearTimeout(timeout)
+      callback()
+    }
     const timeout = setTimeout(() => {
       ws.close()
-      reject(new Error("WebSocket stayed open"))
+      settle(() => reject(new Error("WebSocket stayed open")))
     }, 1000)
 
     ws.addEventListener("open", () => {
-      clearTimeout(timeout)
-      ws.close()
-      resolvePromise()
+      settle(() => {
+        ws.close()
+        resolvePromise()
+      })
     })
 
     ws.addEventListener("error", () => {
-      clearTimeout(timeout)
-      ws.close()
-      reject(new Error("WebSocket connection failed"))
+      settle(() => {
+        ws.close()
+        reject(new Error("WebSocket connection failed"))
+      })
     })
 
     ws.addEventListener("close", () => {
-      clearTimeout(timeout)
-      reject(new Error("WebSocket connection closed"))
+      settle(() => reject(new Error("WebSocket connection closed")))
     })
   })
+}
+
+function createTestWebSocket(url: string, headers?: Record<string, string>): WebSocket {
+  if (!headers) {
+    return new WebSocket(url)
+  }
+
+  const TestWebSocket = WebSocket as unknown as new (
+    url: string,
+    options: { readonly headers: Record<string, string> }
+  ) => WebSocket
+
+  return new TestWebSocket(url, { headers })
 }

@@ -4,35 +4,35 @@ import {
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
 } from "@pario/core"
-import { sanitizeReturnTo } from "./return-to"
 
 export interface ParioBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "admin" | "app"
+  readonly kind?: "atlas" | "app"
 }
 
 export interface ParioApiBrowserPolicy {
   readonly publicOrigin?: string
   readonly allowedOrigins: readonly ParioBrowserOrigin[]
-  readonly sameOriginAudience?: AuthSessionAudience
+  readonly apiOriginAudience?: AuthSessionAudience
 }
 
 export interface ResolvedParioBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "admin" | "app"
+  readonly kind?: "atlas" | "app"
 }
 
 export interface ResolvedParioApiBrowserPolicy {
   readonly publicOrigin?: string
-  readonly sameOriginAudience: AuthSessionAudience
+  readonly apiOriginAudience: AuthSessionAudience
   readonly allowedOrigins: readonly ResolvedParioBrowserOrigin[]
 }
 
 export interface RequestAuthContext {
   readonly audience: AuthSessionAudience
   readonly browserOrigin?: string
+  readonly absoluteReturnTo?: boolean
 }
 
 export type ResolveRequestAuthContext = (request: Request) => RequestAuthContext
@@ -58,11 +58,11 @@ export class BrowserOriginError extends Error {
   readonly name = "BrowserOriginError"
 }
 
-export function resolveBrowserApiPolicy(
+export function resolveApiBrowserPolicy(
   policy: ParioApiBrowserPolicy
 ): ResolvedParioApiBrowserPolicy {
-  const sameOriginAudience = resolveAuthSessionAudience(
-    policy.sameOriginAudience ?? DEFAULT_AUTH_SESSION_AUDIENCE
+  const apiOriginAudience = resolveAuthSessionAudience(
+    policy.apiOriginAudience ?? DEFAULT_AUTH_SESSION_AUDIENCE
   )
   const origins = new Map<string, ResolvedParioBrowserOrigin>()
 
@@ -87,72 +87,52 @@ export function resolveBrowserApiPolicy(
   }
 
   if (origins.size === 0) {
-    throw new Error("[ParioServer] browserApi requires at least one allowed browser origin.")
+    throw new Error("[ParioServer] API browser policy requires at least one allowed origin.")
   }
 
   return {
     publicOrigin: policy.publicOrigin
-      ? normalizeHttpOrigin(policy.publicOrigin, "browser API public origin")
+      ? normalizeHttpOrigin(policy.publicOrigin, "API public origin")
       : undefined,
-    sameOriginAudience,
+    apiOriginAudience,
     allowedOrigins: [...origins.values()],
   }
 }
 
-export function createFixedAuthContextResolver(
-  audience: AuthSessionAudience
-): ResolveRequestAuthContext {
-  const resolvedAudience = resolveAuthSessionAudience(audience)
-  return () => ({ audience: resolvedAudience })
-}
-
-export function createFixedAuthRedirectContextResolver(
-  audience: AuthSessionAudience
-): ResolveAuthRedirectContext {
-  const resolvedAudience = resolveAuthSessionAudience(audience)
-  // Temporary compatibility for fixed-audience API/internal tests while the browser flows move to
-  // the separated-origin browserApi model. Do not use this for new browser-facing auth routes.
-  return (request, input) => ({
-    audience: resolvedAudience,
-    returnTo: sanitizeReturnTo(input.returnTo),
-    requestOrigin: new URL(request.url).origin,
-  })
-}
-
-export function createBrowserApiAuthContextResolver(
+export function createApiBrowserAuthContextResolver(
   policy: ResolvedParioApiBrowserPolicy
 ): ResolveRequestAuthContext {
-  return (request) => resolveBrowserApiAuthContext(policy, request)
+  return (request) => resolveApiBrowserAuthContext(policy, request)
 }
 
-export function createBrowserApiAuthRedirectContextResolver(
+export function createApiBrowserAuthRedirectContextResolver(
   policy: ResolvedParioApiBrowserPolicy
 ): ResolveAuthRedirectContext {
-  return (request, input) => resolveBrowserApiAuthRedirectContext(policy, request, input)
+  return (request, input) => resolveApiBrowserAuthRedirectContext(policy, request, input)
 }
 
-export function resolveBrowserApiAuthContext(
+export function resolveApiBrowserAuthContext(
   policy: ResolvedParioApiBrowserPolicy,
   request: Request
 ): RequestAuthContext {
   const origin = normalizeRequestOrigin(request)
   if (!origin) {
-    return { audience: policy.sameOriginAudience }
+    return { audience: policy.apiOriginAudience, absoluteReturnTo: true }
   }
 
   const allowed = findAllowedBrowserOrigin(policy, origin)
   if (allowed) {
-    return { audience: allowed.audience, browserOrigin: allowed.origin }
+    return { audience: allowed.audience, browserOrigin: allowed.origin, absoluteReturnTo: true }
   }
 
   if (isSameOriginApiRequest(policy, origin, request)) {
-    return { audience: policy.sameOriginAudience, browserOrigin: origin }
+    return { audience: policy.apiOriginAudience, browserOrigin: origin, absoluteReturnTo: true }
   }
 
   throw new BrowserOriginError(`[ParioServer] Browser origin '${origin}' is not allowed.`)
 }
 
-export function isAllowedBrowserApiOrigin(
+export function isAllowedApiBrowserOrigin(
   policy: ResolvedParioApiBrowserPolicy,
   request: Request
 ): boolean {
@@ -167,22 +147,22 @@ export function isAllowedBrowserApiOrigin(
   )
 }
 
-export function resolveBrowserApiAuthRedirectContext(
+export function resolveApiBrowserAuthRedirectContext(
   policy: ResolvedParioApiBrowserPolicy,
   request: Request,
   input: AuthRedirectInput
 ): AuthRedirectContext {
   const audience = resolveRequiredAuthAudience(input.audience)
-  const returnTo = resolveBrowserApiReturnTo(policy, request, input, audience)
+  const returnTo = resolveApiBrowserReturnTo(policy, request, input, audience)
 
   return {
     audience,
     returnTo,
-    requestOrigin: resolveBrowserApiPublicOrigin(policy, request),
+    requestOrigin: resolveApiBrowserPublicOrigin(policy, request),
   }
 }
 
-export function resolveBrowserApiPublicOrigin(
+export function resolveApiBrowserPublicOrigin(
   policy: ResolvedParioApiBrowserPolicy,
   request: Request
 ): string {
@@ -201,7 +181,7 @@ function isSameOriginApiRequest(
   origin: string,
   request: Request
 ): boolean {
-  const apiOrigin = resolveBrowserApiPublicOrigin(policy, request)
+  const apiOrigin = resolveApiBrowserPublicOrigin(policy, request)
   return origin === apiOrigin
 }
 
@@ -214,7 +194,7 @@ function resolveRequiredAuthAudience(value: string | null | undefined): AuthSess
   return audience
 }
 
-function resolveBrowserApiReturnTo(
+function resolveApiBrowserReturnTo(
   policy: ResolvedParioApiBrowserPolicy,
   request: Request,
   input: AuthRedirectInput,
@@ -261,8 +241,8 @@ function resolveReturnToAudience(
     return allowed.audience
   }
 
-  if (origin === resolveBrowserApiPublicOrigin(policy, request)) {
-    return policy.sameOriginAudience
+  if (origin === resolveApiBrowserPublicOrigin(policy, request)) {
+    return policy.apiOriginAudience
   }
 
   return null
