@@ -232,6 +232,10 @@ describe("Pario auth runtime", () => {
       sessionCookieName: "acme_session_app",
       csrfCookieName: "acme_csrf_app",
     })
+    expect(pario.auth.getCookieOptions({ audience: "sentinel" })).toMatchObject({
+      sessionCookieName: "acme_session_sentinel",
+      csrfCookieName: "acme_csrf_sentinel",
+    })
 
     await expect(
       pario.auth.getSession(

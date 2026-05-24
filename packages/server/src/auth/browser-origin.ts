@@ -8,7 +8,7 @@ import {
 export interface ParioBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "atlas" | "app"
+  readonly kind?: "atlas" | "sentinel" | "app"
 }
 
 export interface ParioApiBrowserPolicy {
@@ -20,7 +20,7 @@ export interface ParioApiBrowserPolicy {
 export interface ResolvedParioBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "atlas" | "app"
+  readonly kind?: "atlas" | "sentinel" | "app"
 }
 
 export interface ResolvedParioApiBrowserPolicy {

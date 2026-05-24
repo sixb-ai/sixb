@@ -9,6 +9,7 @@ import {
 const PUBLIC_ORIGIN_ENV = [
   "PARIO_API_PUBLIC_ORIGIN",
   "PARIO_ATLAS_PUBLIC_ORIGIN",
+  "PARIO_SENTINEL_PUBLIC_ORIGIN",
   "PARIO_APP_PUBLIC_ORIGIN",
 ] as const
 const originalEnv = Object.fromEntries(PUBLIC_ORIGIN_ENV.map((name) => [name, process.env[name]]))
@@ -37,12 +38,15 @@ describe("browser topology", () => {
       atlasPort: 3000,
       appPort: 3001,
       apiPort: 3002,
+      sentinelPort: 3003,
       atlasPublicOrigin: "http://localhost:3000",
       appPublicOrigin: "http://localhost:3001",
       apiPublicOrigin: "http://localhost:3002",
+      sentinelPublicOrigin: "http://localhost:3003",
     })
     expect(topology.allowedBrowserOrigins).toEqual([
       { origin: "http://localhost:3000", audience: "atlas", kind: "atlas" },
+      { origin: "http://localhost:3003", audience: "sentinel", kind: "sentinel" },
       { origin: "http://localhost:3001", audience: "app", kind: "app" },
     ])
     expect(apiUrl(topology)).toBe("http://localhost:3002/api")
@@ -59,6 +63,7 @@ describe("browser topology", () => {
     expect(topology.appPublicOrigin).toBeNull()
     expect(topology.allowedBrowserOrigins).toEqual([
       { origin: "http://localhost:3000", audience: "atlas", kind: "atlas" },
+      { origin: "http://localhost:3003", audience: "sentinel", kind: "sentinel" },
     ])
   })
 
@@ -74,6 +79,7 @@ describe("browser topology", () => {
   test("uses configured production origins and bind ports", () => {
     process.env.PARIO_API_PUBLIC_ORIGIN = "https://api.example.com"
     process.env.PARIO_ATLAS_PUBLIC_ORIGIN = "https://atlas.example.com"
+    process.env.PARIO_SENTINEL_PUBLIC_ORIGIN = "https://sentinel.example.com"
     process.env.PARIO_APP_PUBLIC_ORIGIN = "https://app.example.com"
 
     const topology = resolveBrowserTopology({
@@ -91,12 +97,15 @@ describe("browser topology", () => {
       atlasPort: 8080,
       appPort: 8081,
       apiPort: 8082,
+      sentinelPort: 8083,
       atlasPublicOrigin: "https://atlas.example.com",
       appPublicOrigin: "https://app.example.com",
       apiPublicOrigin: "https://api.example.com",
+      sentinelPublicOrigin: "https://sentinel.example.com",
     })
     expect(topology.allowedBrowserOrigins).toEqual([
       { origin: "https://atlas.example.com", audience: "atlas", kind: "atlas" },
+      { origin: "https://sentinel.example.com", audience: "sentinel", kind: "sentinel" },
       { origin: "https://app.example.com", audience: "app", kind: "app" },
     ])
     expect(apiEventsUrl(topology)).toBe("wss://api.example.com/ws/events")

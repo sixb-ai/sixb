@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises"
 import { dirname, resolve, sep } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@pario/app"
 import { type AtlasAppServer, createAtlasApp } from "@pario/atlas"
+import { createSentinelApp, type SentinelAppServer } from "@pario/sentinel"
 import { createParioServer, type ParioServer } from "@pario/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
@@ -16,6 +17,7 @@ export interface StartOptions {
   apiHost?: string
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
+  sentinelPublicOrigin?: string
   appPublicOrigin?: string
 }
 
@@ -40,6 +42,7 @@ export async function runStart(options: StartOptions = {}) {
 
   let server: ParioServer | null = null
   let atlasServer: AtlasAppServer | null = null
+  let sentinelServer: SentinelAppServer | null = null
   let customAppServer: CustomAppDevServer | null = null
   let pario: LoadedPario | null = null
   let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
@@ -63,6 +66,7 @@ export async function runStart(options: StartOptions = {}) {
       apiPort: options.apiPort,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
+      sentinelPublicOrigin: options.sentinelPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
       includeCustomApp: hasBuiltCustomApp,
     })
@@ -87,6 +91,17 @@ export async function runStart(options: StartOptions = {}) {
     atlasServer = await atlas.start({
       host: topology.host,
       port: topology.atlasPort,
+      development: false,
+    })
+
+    const sentinel = createSentinelApp({
+      apiBaseUrl: topology.apiPublicOrigin,
+      audience: "sentinel",
+      authEnabled,
+    })
+    sentinelServer = await sentinel.start({
+      host: topology.host,
+      port: topology.sentinelPort,
       development: false,
     })
 
@@ -122,6 +137,7 @@ export async function runStart(options: StartOptions = {}) {
         wsUrl={apiEventsUrl(topology)}
         uiUrl={topology.atlasPublicOrigin}
         uiStatus={null}
+        sentinelUrl={topology.sentinelPublicOrigin}
         appUrl={appUrl}
         warnings={warnings}
       />
@@ -131,6 +147,7 @@ export async function runStart(options: StartOptions = {}) {
       app.unmount()
       console.log("\nShutting down...")
       await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+      await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
       await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
       await stopQuietly(() => server?.stop() ?? Promise.resolve())
       await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
@@ -138,6 +155,7 @@ export async function runStart(options: StartOptions = {}) {
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+    await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => server?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
