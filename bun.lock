@@ -220,6 +220,7 @@
         "@pario/pipeline-worker": "workspace:*",
         "@pario/projection-worker": "workspace:*",
         "@pario/rules-worker": "workspace:*",
+        "@pario/sentinel": "workspace:*",
         "@pario/server": "workspace:*",
         "@pario/sync-worker": "workspace:*",
         "@pario/workflow-worker": "workspace:*",
@@ -302,6 +303,28 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
+    "packages/sentinel": {
+      "name": "@pario/sentinel",
+      "version": "0.1.0",
+      "dependencies": {
+        "@pario/client": "workspace:*",
+        "@pario/core": "workspace:*",
+        "@pario/ui": "workspace:*",
+        "@tanstack/react-query": "^5.0.0",
+        "lucide-react": "^0.562.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "react-router-dom": "^7.13.0",
+      },
+      "devDependencies": {
+        "@tailwindcss/cli": "^4.2.2",
+        "@types/bun": "latest",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
+        "tailwindcss": "^4.1.18",
         "typescript": "^5.7.0",
       },
     },
@@ -667,6 +690,8 @@
     "@pario/queues-bullmq": ["@pario/queues-bullmq@workspace:queues/bullmq"],
 
     "@pario/rules-worker": ["@pario/rules-worker@workspace:packages/rules-worker"],
+
+    "@pario/sentinel": ["@pario/sentinel@workspace:packages/sentinel"],
 
     "@pario/server": ["@pario/server@workspace:packages/server"],
 

@@ -185,6 +185,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
           { label: "--api-public-origin <origin>", value: "Public API origin" },
           { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
+          { label: "--sentinel-public-origin <origin>", value: "Public Sentinel origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
           {
             label: "--worker <type>",
@@ -255,6 +256,7 @@ export function DevView({
   wsUrl,
   uiUrl,
   uiStatus,
+  sentinelUrl,
   appUrl,
   mqttUrl,
   warnings = [],
@@ -265,6 +267,7 @@ export function DevView({
   wsUrl: string
   uiUrl: string | null
   uiStatus: string | null
+  sentinelUrl: string | null
   appUrl?: string | null
   mqttUrl: string | null
   warnings?: readonly string[]
@@ -278,6 +281,9 @@ export function DevView({
     serverItems.push({ label: "Atlas UI", value: uiUrl })
   } else if (uiStatus) {
     serverItems.push({ label: "Atlas UI", value: uiStatus })
+  }
+  if (sentinelUrl) {
+    serverItems.push({ label: "Sentinel UI", value: sentinelUrl })
   }
 
   return (
@@ -320,6 +326,7 @@ export function StartView({
   wsUrl,
   uiUrl,
   uiStatus,
+  sentinelUrl,
   appUrl,
   warnings = [],
 }: {
@@ -329,6 +336,7 @@ export function StartView({
   wsUrl: string
   uiUrl: string | null
   uiStatus?: string | null
+  sentinelUrl: string | null
   appUrl?: string | null
   warnings?: readonly string[]
 }) {
@@ -341,6 +349,9 @@ export function StartView({
     serverItems.push({ label: "Atlas UI", value: uiUrl })
   } else if (uiStatus) {
     serverItems.push({ label: "Atlas UI", value: uiStatus })
+  }
+  if (sentinelUrl) {
+    serverItems.push({ label: "Sentinel UI", value: sentinelUrl })
   }
 
   return (

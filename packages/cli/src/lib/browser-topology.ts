@@ -8,6 +8,7 @@ export interface BrowserTopologyOptions {
   readonly apiPort?: string
   readonly apiPublicOrigin?: string
   readonly atlasPublicOrigin?: string
+  readonly sentinelPublicOrigin?: string
   readonly appPublicOrigin?: string
   readonly includeCustomApp: boolean
 }
@@ -18,8 +19,10 @@ export interface BrowserTopology {
   readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
+  readonly sentinelPort: number
   readonly apiPublicOrigin: string
   readonly atlasPublicOrigin: string
+  readonly sentinelPublicOrigin: string
   readonly appPublicOrigin: string | null
   readonly allowedBrowserOrigins: readonly ParioBrowserOrigin[]
 }
@@ -33,11 +36,13 @@ interface BrowserPorts {
   readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
+  readonly sentinelPort: number
 }
 
 interface BrowserPublicOrigins {
   readonly apiPublicOrigin: string
   readonly atlasPublicOrigin: string
+  readonly sentinelPublicOrigin: string
   readonly appPublicOrigin: string | null
 }
 
@@ -45,6 +50,7 @@ const DEFAULT_BROWSER_HOST = "0.0.0.0"
 const DEFAULT_ATLAS_PORT = 3000
 const DEFAULT_APP_PORT_OFFSET = 1
 const DEFAULT_API_PORT_OFFSET = 2
+const DEFAULT_SENTINEL_PORT_OFFSET = 3
 
 export function resolveBrowserTopology(options: BrowserTopologyOptions): BrowserTopology {
   const hosts = resolveBrowserHosts(options)
@@ -71,11 +77,13 @@ function resolveBrowserPorts(options: BrowserTopologyOptions): BrowserPorts {
   const atlasPort = parsePort(options.port, "port", DEFAULT_ATLAS_PORT)
   const appPort = atlasPort + DEFAULT_APP_PORT_OFFSET
   const apiPort = parsePort(options.apiPort, "api-port", atlasPort + DEFAULT_API_PORT_OFFSET)
+  const sentinelPort = atlasPort + DEFAULT_SENTINEL_PORT_OFFSET
 
   return {
     atlasPort,
     appPort,
     apiPort,
+    sentinelPort,
   }
 }
 
@@ -97,6 +105,13 @@ function resolveBrowserPublicOrigins(
     localDefault: `http://localhost:${ports.atlasPort}`,
     mode: options.mode,
   })
+  const sentinelPublicOrigin = resolvePublicOrigin({
+    value: options.sentinelPublicOrigin,
+    envName: "PARIO_SENTINEL_PUBLIC_ORIGIN",
+    label: "Sentinel public origin",
+    localDefault: `http://localhost:${ports.sentinelPort}`,
+    mode: options.mode,
+  })
   const appPublicOrigin = options.includeCustomApp
     ? resolvePublicOrigin({
         value: options.appPublicOrigin,
@@ -110,6 +125,7 @@ function resolveBrowserPublicOrigins(
   return {
     apiPublicOrigin,
     atlasPublicOrigin,
+    sentinelPublicOrigin,
     appPublicOrigin,
   }
 }
@@ -117,6 +133,7 @@ function resolveBrowserPublicOrigins(
 function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly ParioBrowserOrigin[] {
   const allowedOrigins: ParioBrowserOrigin[] = [
     { origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" },
+    { origin: origins.sentinelPublicOrigin, audience: "sentinel", kind: "sentinel" },
   ]
 
   if (origins.appPublicOrigin) {

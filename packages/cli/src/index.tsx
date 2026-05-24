@@ -54,6 +54,7 @@ async function main(): Promise<void> {
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
+        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
       })
       break
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
+        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
       })
       break

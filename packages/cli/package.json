@@ -22,6 +22,7 @@
     "@pario/pipeline-worker": "workspace:*",
     "@pario/projection-worker": "workspace:*",
     "@pario/rules-worker": "workspace:*",
+    "@pario/sentinel": "workspace:*",
     "@pario/server": "workspace:*",
     "@pario/sync-worker": "workspace:*",
     "@pario/workflow-worker": "workspace:*",
