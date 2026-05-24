@@ -439,6 +439,7 @@ export type {
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
+  QueueWorkflowRunInput,
   RuleStateRecord,
   RulesStorage,
   SessionRecord,

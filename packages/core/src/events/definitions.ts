@@ -121,6 +121,10 @@ export const PIPELINE_EVENT_DEFINITIONS = defineEventGroup<PipelineEvent>({
 })
 
 export const WORKFLOW_EVENT_DEFINITIONS = defineEventGroup<WorkflowEvent>({
+  "workflow.run.queued": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
   "workflow.run.started": {
     topic: "workflows",
     partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,

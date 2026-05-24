@@ -6,6 +6,8 @@ import type {
 } from "@pario/core"
 import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
 
+type TerminalWorkflowRunStatus = Exclude<WorkflowRunStatus, "queued" | "running">
+
 export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
   constructor(private readonly events: EventsRuntime) {}
 
@@ -79,6 +81,10 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
   }
 
   async onRunFinished(run: WorkflowRunRecord): Promise<void> {
+    if (!run.finishedAt) {
+      throw new Error(`[ParioWorkflowWorker] Workflow run '${run.id}' has no finishedAt.`)
+    }
+
     await this.events.append({
       events: [
         {
@@ -87,6 +93,8 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
             workflowId: run.workflowId,
             runId: run.id,
             status: requireTerminalStatus(run.status, `Workflow run '${run.id}'`),
+            finishedAt: run.finishedAt.toISOString(),
+            ...(run.error ? { error: run.error } : {}),
           },
         },
       ],
@@ -97,9 +105,9 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
 function requireTerminalStatus(
   status: WorkflowRunStatus,
   context: string
-): Exclude<WorkflowRunStatus, "running"> {
-  if (status === "running") {
-    throw new Error(`[ParioWorkflowWorker] ${context} is still running.`)
+): TerminalWorkflowRunStatus {
+  if (status === "queued" || status === "running") {
+    throw new Error(`[ParioWorkflowWorker] ${context} is not terminal.`)
   }
 
   return status
@@ -110,7 +118,9 @@ export async function emitWorkflowRunFinished(
   job: {
     readonly id: string
     readonly workflowId: string
-    readonly status: Exclude<WorkflowRunStatus, "running">
+    readonly status: TerminalWorkflowRunStatus
+    readonly finishedAt?: string
+    readonly error?: string
   }
 ): Promise<void> {
   try {
@@ -122,6 +132,8 @@ export async function emitWorkflowRunFinished(
             workflowId: job.workflowId,
             runId: job.id,
             status: job.status,
+            finishedAt: job.finishedAt ?? new Date().toISOString(),
+            ...(job.error ? { error: job.error } : {}),
           },
         },
       ],

@@ -1522,6 +1522,304 @@ export type RequestPipelineRunResponses = {
 export type RequestPipelineRunResponse =
   RequestPipelineRunResponses[keyof RequestPipelineRunResponses]
 
+export type ListWorkflowsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/workflows"
+}
+
+export type ListWorkflowsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: Array<{
+    id: string
+    input: {
+      [key: string]: unknown
+    }
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
+    nodes: Array<
+      | {
+          type: "step"
+          id: string
+          key: string
+          input: {
+            [key: string]: unknown
+          }
+          output: {
+            [key: string]: unknown
+          }
+        }
+      | {
+          type: "action"
+          id: string
+          key: string
+          targetObjectTypeId: string
+          params: {
+            [key: string]: unknown
+          }
+        }
+    >
+    latestRun: {
+      id: string
+      projectId: string
+      workflowId: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      queuedAt?: string
+      startedAt: string
+      finishedAt?: string
+      error?: string
+    } | null
+  }>
+}
+
+export type ListWorkflowsResponse = ListWorkflowsResponses[keyof ListWorkflowsResponses]
+
+export type GetWorkflowData = {
+  body?: never
+  path: {
+    workflowId: string
+  }
+  query?: never
+  url: "/api/workflows/{workflowId}"
+}
+
+export type GetWorkflowErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetWorkflowError = GetWorkflowErrors[keyof GetWorkflowErrors]
+
+export type GetWorkflowResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    input: {
+      [key: string]: unknown
+    }
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
+    nodes: Array<
+      | {
+          type: "step"
+          id: string
+          key: string
+          input: {
+            [key: string]: unknown
+          }
+          output: {
+            [key: string]: unknown
+          }
+        }
+      | {
+          type: "action"
+          id: string
+          key: string
+          targetObjectTypeId: string
+          params: {
+            [key: string]: unknown
+          }
+        }
+    >
+    latestRun: {
+      id: string
+      projectId: string
+      workflowId: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      queuedAt?: string
+      startedAt: string
+      finishedAt?: string
+      error?: string
+    } | null
+  }
+}
+
+export type GetWorkflowResponse = GetWorkflowResponses[keyof GetWorkflowResponses]
+
+export type ListWorkflowRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    workflowId?: string
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    startedAfter?: string
+    startedBefore?: string
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/workflow-runs"
+}
+
+export type ListWorkflowRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListWorkflowRunsError = ListWorkflowRunsErrors[keyof ListWorkflowRunsErrors]
+
+export type ListWorkflowRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      workflowId: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      queuedAt?: string
+      startedAt: string
+      finishedAt?: string
+      error?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListWorkflowRunsResponse = ListWorkflowRunsResponses[keyof ListWorkflowRunsResponses]
+
+export type GetWorkflowRunData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/workflow-runs/{runId}"
+}
+
+export type GetWorkflowRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetWorkflowRunError = GetWorkflowRunErrors[keyof GetWorkflowRunErrors]
+
+export type GetWorkflowRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    run: {
+      id: string
+      projectId: string
+      workflowId: string
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      queuedAt?: string
+      startedAt: string
+      finishedAt?: string
+      error?: string
+    }
+    nodes: Array<{
+      id: string
+      projectId: string
+      workflowRunId: string
+      workflowId: string
+      nodeIndex: number
+      nodeType: "step" | "action"
+      nodeId: string
+      nodeKey: string
+      status: "running" | "succeeded" | "failed" | "cancelled"
+      input: {
+        [key: string]: unknown
+      }
+      startedAt: string
+      finishedAt?: string
+      output?: {
+        [key: string]: unknown
+      }
+      error?: string
+    }>
+  }
+}
+
+export type GetWorkflowRunResponse = GetWorkflowRunResponses[keyof GetWorkflowRunResponses]
+
+export type RequestWorkflowRunData = {
+  body: {
+    input?: {
+      [key: string]: unknown
+    }
+  }
+  path: {
+    workflowId: string
+  }
+  query?: never
+  url: "/api/workflows/{workflowId}/runs"
+}
+
+export type RequestWorkflowRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type RequestWorkflowRunError = RequestWorkflowRunErrors[keyof RequestWorkflowRunErrors]
+
+export type RequestWorkflowRunResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    runId: string
+    jobId: string
+    workflowId: string
+    queuedAt: string
+  }
+}
+
+export type RequestWorkflowRunResponse =
+  RequestWorkflowRunResponses[keyof RequestWorkflowRunResponses]
+
 export type ListRulesData = {
   body?: never
   path?: never
@@ -2461,6 +2759,7 @@ export type ListEventsData = {
       | "pipeline.run.step.started"
       | "pipeline.run.step.finished"
       | "pipeline.run.finished"
+      | "workflow.run.queued"
       | "workflow.run.started"
       | "workflow.run.node.started"
       | "workflow.run.node.finished"
@@ -2522,6 +2821,7 @@ export type ListEventsResponses = {
         | "pipeline.run.step.started"
         | "pipeline.run.step.finished"
         | "pipeline.run.finished"
+        | "workflow.run.queued"
         | "workflow.run.started"
         | "workflow.run.node.started"
         | "workflow.run.node.finished"

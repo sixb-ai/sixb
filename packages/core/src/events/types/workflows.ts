@@ -1,5 +1,21 @@
 import type { EventEnvelope } from "../envelope"
 
+export interface WorkflowRunQueuedEvent extends EventEnvelope {
+  type: "workflow.run.queued"
+  topic: "workflows"
+  partitionKey: string
+  payload: {
+    workflowId: string
+    runId: string
+    queuedAt: string
+    jobId?: string
+    source?: {
+      type: "manual" | "schedule" | "event"
+      id?: string
+    }
+  }
+}
+
 export interface WorkflowRunStartedEvent extends EventEnvelope {
   type: "workflow.run.started"
   topic: "workflows"
@@ -55,10 +71,13 @@ export interface WorkflowRunFinishedEvent extends EventEnvelope {
     workflowId: string
     runId: string
     status: "succeeded" | "failed" | "cancelled"
+    finishedAt: string
+    error?: string
   }
 }
 
 export type WorkflowEvent =
+  | WorkflowRunQueuedEvent
   | WorkflowRunStartedEvent
   | WorkflowRunNodeStartedEvent
   | WorkflowRunNodeFinishedEvent

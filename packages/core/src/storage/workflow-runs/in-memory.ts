@@ -15,6 +15,7 @@ import type {
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  QueueWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WorkflowNodeRunRecord,
@@ -40,12 +41,56 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     })
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+  async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
       throw new WorkflowRunError(
         `[Pario] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
       )
+    }
+
+    const queuedAt = new Date(input.queuedAt ?? new Date())
+    const record: WorkflowRunRecord = {
+      id: input.id,
+      projectId: input.projectId,
+      workflowId: input.workflowId,
+      status: "queued",
+      input: cloneRecord(input.input),
+      queuedAt,
+      startedAt: queuedAt,
+    }
+
+    this.runs.set(key, cloneRecord(record))
+    return cloneRecord(record)
+  }
+
+  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const key = storageKey(input.projectId, input.id)
+    const existing = this.runs.get(key)
+    if (existing) {
+      if (existing.status !== "queued") {
+        throw new WorkflowRunError(
+          `[Pario] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.workflowId !== input.workflowId) {
+        throw new WorkflowRunError(
+          `[Pario] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflowId}'.`
+        )
+      }
+
+      const next: WorkflowRunRecord = {
+        ...existing,
+        status: "running",
+        input: cloneRecord(input.input),
+        startedAt: new Date(input.startedAt ?? new Date()),
+        finishedAt: undefined,
+        error: undefined,
+      }
+
+      this.runs.set(key, cloneRecord(next))
+      return cloneRecord(next)
     }
 
     const record: WorkflowRunRecord = {
@@ -62,7 +107,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
-    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    const existing = this.requireFinishableWorkflowRun(input)
     const base: WorkflowRunRecord = {
       ...existing,
       status: input.status,
@@ -141,6 +186,21 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     }
 
     return record
+  }
+
+  private requireFinishableWorkflowRun(input: FinishWorkflowRunInput): WorkflowRunRecord {
+    const record = this.requireExistingWorkflowRun(input.projectId, input.id)
+    if (record.status === "running") {
+      return record
+    }
+
+    if (record.status === "queued" && input.status !== "succeeded") {
+      return record
+    }
+
+    throw new WorkflowRunError(
+      `[Pario] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${record.status}'.`
+    )
   }
 }
 

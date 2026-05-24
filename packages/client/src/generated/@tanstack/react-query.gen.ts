@@ -27,6 +27,8 @@ import {
   getStatus,
   getSync,
   getTelemetryHistory,
+  getWorkflow,
+  getWorkflowRun,
   listAuthInvitations,
   listConnectors,
   listDatasetRows,
@@ -44,11 +46,14 @@ import {
   listSyncRuns,
   listSyncs,
   listWebhookRuns,
+  listWorkflowRuns,
+  listWorkflows,
   type Options,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
   requestSyncRun,
+  requestWorkflowRun,
   revokeAuthInvitation,
   signOut,
   upsertObject,
@@ -103,6 +108,12 @@ import type {
   GetTelemetryHistoryData,
   GetTelemetryHistoryError,
   GetTelemetryHistoryResponse,
+  GetWorkflowData,
+  GetWorkflowError,
+  GetWorkflowResponse,
+  GetWorkflowRunData,
+  GetWorkflowRunError,
+  GetWorkflowRunResponse,
   ListAuthInvitationsData,
   ListAuthInvitationsError,
   ListAuthInvitationsResponse,
@@ -148,6 +159,11 @@ import type {
   ListWebhookRunsData,
   ListWebhookRunsError,
   ListWebhookRunsResponse,
+  ListWorkflowRunsData,
+  ListWorkflowRunsError,
+  ListWorkflowRunsResponse,
+  ListWorkflowsData,
+  ListWorkflowsResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -160,6 +176,9 @@ import type {
   RequestSyncRunData,
   RequestSyncRunError,
   RequestSyncRunResponse,
+  RequestWorkflowRunData,
+  RequestWorkflowRunError,
+  RequestWorkflowRunResponse,
   RevokeAuthInvitationData,
   RevokeAuthInvitationError,
   RevokeAuthInvitationResponse,
@@ -978,6 +997,176 @@ export const requestPipelineRunMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await requestPipelineRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listWorkflowsQueryKey = (options?: Options<ListWorkflowsData>) =>
+  createQueryKey("listWorkflows", options)
+
+/**
+ * List registered workflows
+ */
+export const listWorkflowsOptions = (options?: Options<ListWorkflowsData>) =>
+  queryOptions<
+    ListWorkflowsResponse,
+    DefaultError,
+    ListWorkflowsResponse,
+    ReturnType<typeof listWorkflowsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listWorkflows({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listWorkflowsQueryKey(options),
+  })
+
+export const getWorkflowQueryKey = (options: Options<GetWorkflowData>) =>
+  createQueryKey("getWorkflow", options)
+
+/**
+ * Get workflow metadata
+ */
+export const getWorkflowOptions = (options: Options<GetWorkflowData>) =>
+  queryOptions<
+    GetWorkflowResponse,
+    GetWorkflowError,
+    GetWorkflowResponse,
+    ReturnType<typeof getWorkflowQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflow({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowQueryKey(options),
+  })
+
+export const listWorkflowRunsQueryKey = (options?: Options<ListWorkflowRunsData>) =>
+  createQueryKey("listWorkflowRuns", options)
+
+/**
+ * List workflow run history
+ */
+export const listWorkflowRunsOptions = (options?: Options<ListWorkflowRunsData>) =>
+  queryOptions<
+    ListWorkflowRunsResponse,
+    ListWorkflowRunsError,
+    ListWorkflowRunsResponse,
+    ReturnType<typeof listWorkflowRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listWorkflowRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listWorkflowRunsQueryKey(options),
+  })
+
+export const listWorkflowRunsInfiniteQueryKey = (
+  options?: Options<ListWorkflowRunsData>
+): QueryKey<Options<ListWorkflowRunsData>> => createQueryKey("listWorkflowRuns", options, true)
+
+/**
+ * List workflow run history
+ */
+export const listWorkflowRunsInfiniteOptions = (options?: Options<ListWorkflowRunsData>) =>
+  infiniteQueryOptions<
+    ListWorkflowRunsResponse,
+    ListWorkflowRunsError,
+    InfiniteData<ListWorkflowRunsResponse>,
+    QueryKey<Options<ListWorkflowRunsData>>,
+    string | Pick<QueryKey<Options<ListWorkflowRunsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListWorkflowRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listWorkflowRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listWorkflowRunsInfiniteQueryKey(options),
+    }
+  )
+
+export const getWorkflowRunQueryKey = (options: Options<GetWorkflowRunData>) =>
+  createQueryKey("getWorkflowRun", options)
+
+/**
+ * Get workflow run detail
+ */
+export const getWorkflowRunOptions = (options: Options<GetWorkflowRunData>) =>
+  queryOptions<
+    GetWorkflowRunResponse,
+    GetWorkflowRunError,
+    GetWorkflowRunResponse,
+    ReturnType<typeof getWorkflowRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflowRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowRunQueryKey(options),
+  })
+
+/**
+ * Request a workflow run
+ */
+export const requestWorkflowRunMutation = (
+  options?: Partial<Options<RequestWorkflowRunData>>
+): UseMutationOptions<
+  RequestWorkflowRunResponse,
+  RequestWorkflowRunError,
+  Options<RequestWorkflowRunData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RequestWorkflowRunResponse,
+    RequestWorkflowRunError,
+    Options<RequestWorkflowRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await requestWorkflowRun({
         ...options,
         ...fnOptions,
         throwOnError: true,

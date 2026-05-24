@@ -17,6 +17,7 @@
     "schedules/**/*.ts",
     "scripts/**/*.ts",
     "syncs/**/*.ts",
+    "workflows/**/*.ts",
     "pario.config.ts"
   ]
 }

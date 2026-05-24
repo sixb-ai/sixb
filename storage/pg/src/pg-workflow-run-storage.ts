@@ -5,6 +5,7 @@ import type {
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  QueueWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
   WorkflowIOSnapshot,
@@ -25,7 +26,9 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     this.nodes = new PgWorkflowNodeRunStorage(sql)
   }
 
-  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+  async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const queuedAt = input.queuedAt ?? new Date()
+
     try {
       const [row] = (await this.sql`
         INSERT INTO workflow_runs (
@@ -34,14 +37,16 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           workflow_id,
           status,
           input,
+          queued_at,
           started_at
         ) VALUES (
           ${input.projectId},
           ${input.id},
           ${input.workflowId},
-          ${"running"},
+          ${"queued"},
           ${serializeRecord(input.input)}::text::jsonb,
-          ${input.startedAt ?? new Date()}
+          ${queuedAt},
+          ${queuedAt}
         )
         RETURNING *
       `) as WorkflowRunDatabaseRow[]
@@ -58,6 +63,76 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     }
   }
 
+  async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
+    return this.sql.begin(async (tx) => {
+      const startedAt = input.startedAt ?? new Date()
+      const [existing] = (await tx`
+        SELECT * FROM workflow_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `) as WorkflowRunDatabaseRow[]
+
+      if (existing) {
+        if (existing.status !== "queued") {
+          throw new WorkflowRunError(
+            `[ParioPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          )
+        }
+
+        if (existing.workflow_id !== input.workflowId) {
+          throw new WorkflowRunError(
+            `[ParioPg] Workflow run '${input.id}' workflow '${input.workflowId}' does not match existing workflow '${existing.workflow_id}'.`
+          )
+        }
+
+        const [updated] = (await tx`
+          UPDATE workflow_runs
+          SET
+            status = ${"running"},
+            input = ${serializeRecord(input.input)}::text::jsonb,
+            started_at = ${startedAt},
+            finished_at = ${null},
+            error = ${null}
+          WHERE project_id = ${input.projectId} AND id = ${input.id}
+          RETURNING *
+        `) as WorkflowRunDatabaseRow[]
+
+        return rowToWorkflowRunRecord(updated)
+      }
+
+      try {
+        const [row] = (await tx`
+          INSERT INTO workflow_runs (
+            project_id,
+            id,
+            workflow_id,
+            status,
+            input,
+            started_at
+          ) VALUES (
+            ${input.projectId},
+            ${input.id},
+            ${input.workflowId},
+            ${"running"},
+            ${serializeRecord(input.input)}::text::jsonb,
+            ${startedAt}
+          )
+          RETURNING *
+        `) as WorkflowRunDatabaseRow[]
+
+        return rowToWorkflowRunRecord(row)
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new WorkflowRunError(
+            `[ParioPg] Workflow run '${input.id}' already exists for project '${input.projectId}'.`
+          )
+        }
+
+        throw error
+      }
+    })
+  }
+
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
     return this.sql.begin(async (tx) => {
       const [existing] = (await tx`
@@ -72,9 +147,9 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
         )
       }
 
-      if (existing.status !== "running") {
+      if (!canFinishWorkflowRun(existing.status, input.status)) {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' is already terminal.`
+          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' cannot be finished from status '${existing.status}'.`
         )
       }
 
@@ -357,6 +432,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     workflowId: row.workflow_id,
     status: row.status,
     input: parseRecord(row.input),
+    queuedAt: row.queued_at ? new Date(row.queued_at) : undefined,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
@@ -390,12 +466,20 @@ function assertNonNegativeInteger(value: number, fieldName: string): void {
   }
 }
 
+function canFinishWorkflowRun(
+  current: WorkflowRunRecord["status"],
+  next: FinishWorkflowRunInput["status"]
+): boolean {
+  return current === "running" || (current === "queued" && next !== "succeeded")
+}
+
 interface WorkflowRunDatabaseRow {
   project_id: string
   id: string
   workflow_id: string
   status: WorkflowRunRecord["status"]
   input: WorkflowIOSnapshot | string
+  queued_at: Date | string | null
   started_at: Date | string
   finished_at: Date | string | null
   error: string | null
