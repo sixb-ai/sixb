@@ -17,6 +17,16 @@ runBrokerContractSuite("RedisBroker", {
 })
 
 describe("RedisBroker", () => {
+  test("rejects fractional numeric options", () => {
+    expect(
+      () =>
+        new RedisBroker({
+          connection: { url: requireRedisUrl() },
+          subscribeBlockMs: 0.5,
+        })
+    ).toThrow("positive finite integers")
+  })
+
   test("uses Redis environment defaults when connection is omitted", async () => {
     const previousRedisUrl = process.env["REDIS_URL"]
     process.env["REDIS_URL"] = requireRedisUrl()

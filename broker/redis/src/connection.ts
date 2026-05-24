@@ -26,7 +26,9 @@ export class RedisConnectionManager {
   }
 
   async connect(): Promise<RedisBrokerClient> {
-    if (this.client?.connected) {
+    if (this.client !== undefined) {
+      // Bun owns reconnects and offline queueing for the client. Keep returning
+      // the same main client while it reconnects instead of opening duplicates.
       return this.client
     }
     if (this.connectPromise !== undefined) {

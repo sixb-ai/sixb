@@ -63,6 +63,8 @@ jobs:
             package: "@pario/ducklake"
           - name: broker-nats
             package: "@pario/broker-nats"
+          - name: broker-redis
+            package: "@pario/broker-redis"
           - name: pg
             package: "@pario/pg"
           - name: queues-bullmq
