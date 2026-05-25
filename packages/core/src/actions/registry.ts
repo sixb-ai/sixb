@@ -1,24 +1,22 @@
 import type { ObjectType } from "../ontology"
 import type { OntologyRegistry } from "../ontology/registry"
 import { ActionDefinitionError } from "./errors"
-import type { ActionDefinition } from "./types"
+import type { ActionDefinition, ObjectActionDefinition } from "./types"
+
+function isObjectActionDefinition(action: ActionDefinition): action is ObjectActionDefinition {
+  return action.binding.kind === "object"
+}
 
 export class ActionRegistry {
   private readonly byId = new Map<string, ActionDefinition>()
-  private readonly byTargetId = new Map<string, ActionDefinition[]>()
+  private readonly globalActions: ActionDefinition[] = []
+  private readonly byTargetId = new Map<string, ObjectActionDefinition[]>()
 
   constructor(
     actions: readonly ActionDefinition[],
     private readonly ontology: OntologyRegistry
   ) {
     for (const action of actions) {
-      const target = this.ontology.getObjectTypeById(action.target.id)
-      if (!target) {
-        throw new ActionDefinitionError(
-          `Action "${action.id}" targets unknown object type "${action.target.id}". Add the object type to ontology before registering the action.`
-        )
-      }
-
       const previous = this.byId.get(action.id)
       if (previous) {
         const chainDuplicate = this.getInheritanceDuplicate(action, previous)
@@ -35,6 +33,18 @@ export class ActionRegistry {
 
       this.byId.set(action.id, action)
 
+      if (!isObjectActionDefinition(action)) {
+        this.globalActions.push(action)
+        continue
+      }
+
+      const target = this.ontology.getObjectTypeById(action.target.id)
+      if (!target) {
+        throw new ActionDefinitionError(
+          `Action "${action.id}" targets unknown object type "${action.target.id}". Add the object type to ontology before registering the action.`
+        )
+      }
+
       const bucket = this.byTargetId.get(action.target.id) ?? []
       bucket.push(action)
       this.byTargetId.set(action.target.id, bucket)
@@ -49,11 +59,15 @@ export class ActionRegistry {
     return this.byId.get(id) ?? null
   }
 
-  getActionsForType(type: ObjectType): readonly ActionDefinition[] {
+  getGlobalActions(): readonly ActionDefinition[] {
+    return [...this.globalActions]
+  }
+
+  getActionsForType(type: ObjectType): readonly ObjectActionDefinition[] {
     this.ontology.resolveObjectType(type.id)
 
     const seen = new Set<string>()
-    const result: ActionDefinition[] = []
+    const result: ObjectActionDefinition[] = []
 
     for (const ancestor of this.ontology.getAncestorChain(type)) {
       for (const action of this.byTargetId.get(ancestor.id) ?? []) {
@@ -70,6 +84,10 @@ export class ActionRegistry {
     action: ActionDefinition,
     previous: ActionDefinition
   ): { objectTypeId: string; firstTargetId: string; secondTargetId: string } | null {
+    if (!isObjectActionDefinition(action) || !isObjectActionDefinition(previous)) {
+      return null
+    }
+
     if (action.target.id === previous.target.id) {
       return null
     }

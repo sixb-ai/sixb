@@ -11,12 +11,15 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
     async ({ params, body, set }) => {
       try {
         const parsedBody = RequestActionBodySchema.parse(body)
-        const { runId } = await pario.requestAction(
-          params.objectTypeId,
-          params.objectId,
-          params.actionId,
-          parsedBody.params
-        )
+        const { runId } = await pario.actions.request({
+          actionId: params.actionId,
+          subject: {
+            kind: "object",
+            objectTypeId: params.objectTypeId,
+            primaryId: params.objectId,
+          },
+          params: parsedBody.params,
+        })
 
         return { success: true, runId }
       } catch (error) {

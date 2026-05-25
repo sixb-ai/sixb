@@ -138,8 +138,11 @@ describe("ActionWorker", () => {
       payload: {
         actionId: "setStatus",
         runId,
-        objectTypeId: "Device",
-        primaryId: "device-1",
+        subject: {
+          kind: "object",
+          objectTypeId: "Device",
+          primaryId: "device-1",
+        },
       },
     })
 

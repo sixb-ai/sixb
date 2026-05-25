@@ -2,6 +2,7 @@ import type {
   ActionRunFailure,
   ActionRunRecord,
   ActionRunStorage,
+  ActionSubject,
   FinishActionRunInput,
   JsonValue,
   ListActionRunsInput,
@@ -21,6 +22,7 @@ export class PgActionRunStorage implements ActionRunStorage {
           project_id,
           id,
           action_id,
+          subject_kind,
           object_type_id,
           primary_id,
           status,
@@ -31,8 +33,9 @@ export class PgActionRunStorage implements ActionRunStorage {
           ${input.projectId},
           ${input.id},
           ${input.actionId},
-          ${input.objectTypeId},
-          ${input.primaryId},
+          ${input.subject.kind},
+          ${input.subject.kind === "object" ? input.subject.objectTypeId : null},
+          ${input.subject.kind === "object" ? input.subject.primaryId : null},
           ${"running"},
           ${input.startedAt ?? new Date()},
           ${JSON.stringify(input.params)}::text::jsonb,
@@ -127,13 +130,28 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     if (input.objectTypeId) {
+      whereClauses.push(`subject_kind = $${index++}`)
+      params.push("object")
       whereClauses.push(`object_type_id = $${index++}`)
       params.push(input.objectTypeId)
     }
 
     if (input.primaryId) {
+      whereClauses.push(`subject_kind = $${index++}`)
+      params.push("object")
       whereClauses.push(`primary_id = $${index++}`)
       params.push(input.primaryId)
+    }
+
+    if (input.subject) {
+      whereClauses.push(`subject_kind = $${index++}`)
+      params.push(input.subject.kind)
+      if (input.subject.kind === "object") {
+        whereClauses.push(`object_type_id = $${index++}`)
+        params.push(input.subject.objectTypeId)
+        whereClauses.push(`primary_id = $${index++}`)
+        params.push(input.subject.primaryId)
+      }
     }
 
     if (input.statuses) {
@@ -225,14 +243,29 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
     id: row.id,
     projectId: row.project_id,
     actionId: row.action_id,
-    objectTypeId: row.object_type_id,
-    primaryId: row.primary_id,
+    subject: rowToActionSubject(row),
     status: row.status,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     params: row.params,
     error: toActionRunFailure(row),
     metadata: row.metadata ?? undefined,
+  }
+}
+
+function rowToActionSubject(row: DatabaseRow): ActionSubject {
+  if (row.subject_kind === "none") {
+    return { kind: "none" }
+  }
+
+  if (!row.object_type_id || !row.primary_id) {
+    throw new ActionRunError(`[ParioPg] Action run '${row.id}' has an invalid object subject.`)
+  }
+
+  return {
+    kind: "object",
+    objectTypeId: row.object_type_id,
+    primaryId: row.primary_id,
   }
 }
 
@@ -244,8 +277,9 @@ interface DatabaseRow {
   project_id: string
   id: string
   action_id: string
-  object_type_id: string
-  primary_id: string
+  subject_kind: ActionSubject["kind"]
+  object_type_id: string | null
+  primary_id: string | null
   status: ActionRunRecord["status"]
   started_at: Date | string
   finished_at: Date | string | null

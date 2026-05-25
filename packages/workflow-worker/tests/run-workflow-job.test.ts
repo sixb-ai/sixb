@@ -181,8 +181,7 @@ async function completeRequestedActions(
                   payload: {
                     actionId: event.payload.actionId,
                     runId: event.payload.runId,
-                    objectTypeId: event.payload.objectTypeId,
-                    primaryId: event.payload.primaryId,
+                    subject: event.payload.subject,
                     finishedAt: "2026-05-08T10:00:00.000Z",
                   },
                 }
@@ -191,8 +190,7 @@ async function completeRequestedActions(
                   payload: {
                     actionId: event.payload.actionId,
                     runId: event.payload.runId,
-                    objectTypeId: event.payload.objectTypeId,
-                    primaryId: event.payload.primaryId,
+                    subject: event.payload.subject,
                     error: {
                       message: errorMessage,
                       phase: "handler",
@@ -525,8 +523,11 @@ describe("runWorkflowJob", () => {
       expect(actionHandlerCalls).toBe(0)
       expect(events.map((event) => event.type)).toEqual(["action.requested", "action.completed"])
       expect(events[0]?.payload).toMatchObject({
-        objectTypeId: "Transaction",
-        primaryId: "txn_1",
+        subject: {
+          kind: "object",
+          objectTypeId: "Transaction",
+          primaryId: "txn_1",
+        },
         actionId: "attach-invoice",
         runId: "wfrun_action:action:1",
       })

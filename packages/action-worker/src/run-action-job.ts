@@ -1,5 +1,5 @@
 import type { ActionRunRecord, ActionTargetObject } from "@pario/core"
-import { ActionRunError, ObjectNotFoundError } from "@pario/core"
+import { ActionRunError, isObjectActionDefinition, ObjectNotFoundError } from "@pario/core"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -53,8 +53,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       projectId: runtime.id,
       id: job.id,
       actionId: job.actionId,
-      objectTypeId: job.objectTypeId,
-      primaryId: job.primaryId,
+      subject: job.subject,
       params: job.params,
     })
   } catch (error) {
@@ -66,8 +65,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       return {
         id: job.id,
         actionId: job.actionId,
-        objectTypeId: job.objectTypeId,
-        primaryId: job.primaryId,
+        subject: job.subject,
         status: existing.status,
         skipped: true,
         record: existing,
@@ -80,26 +78,58 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   try {
     throwIfAborted(signal)
 
-    const targetRow = await runtime.storage.objects.getByPrimaryId({
-      projectId: runtime.id,
-      objectTypeId: job.objectTypeId,
-      primaryId: job.primaryId,
-    })
+    if (!isObjectActionDefinition(action)) {
+      if (job.subject.kind !== "none") {
+        throw new Error(`[ParioActionWorker] Action '${job.actionId}' does not accept a subject.`)
+      }
 
-    if (!targetRow) {
-      throw new ObjectNotFoundError(
-        job.objectTypeId,
-        job.primaryId,
-        "Object not found for action run"
-      )
+      await action.handler({
+        params: job.params,
+        pario: runtime.pario,
+        signal,
+      })
+    } else {
+      if (job.subject.kind !== "object") {
+        throw new Error(`[ParioActionWorker] Action '${job.actionId}' requires an object subject.`)
+      }
+
+      const subjectObjectType = runtime.pario.getObjectTypeById(job.subject.objectTypeId)
+      if (!subjectObjectType) {
+        throw new Error(
+          `[ParioActionWorker] Unknown object type '${job.subject.objectTypeId}' for action '${job.actionId}'.`
+        )
+      }
+
+      const actionAppliesToSubject = runtime.pario
+        .getActionsForType(subjectObjectType)
+        .some((candidate) => candidate.id === action.id)
+      if (!actionAppliesToSubject) {
+        throw new Error(
+          `[ParioActionWorker] Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
+        )
+      }
+
+      const targetRow = await runtime.storage.objects.getByPrimaryId({
+        projectId: runtime.id,
+        objectTypeId: subjectObjectType.id,
+        primaryId: job.subject.primaryId,
+      })
+
+      if (!targetRow) {
+        throw new ObjectNotFoundError(
+          job.subject.objectTypeId,
+          job.subject.primaryId,
+          "Object not found for action run"
+        )
+      }
+
+      await action.handler({
+        params: job.params,
+        target: toActionTargetObject(targetRow, action.target.id),
+        pario: runtime.pario,
+        signal,
+      })
     }
-
-    await action.handler({
-      params: job.params,
-      target: toActionTargetObject(targetRow, action.target.id),
-      pario: runtime.pario,
-      signal,
-    })
 
     throwIfAborted(signal)
 
@@ -112,8 +142,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return {
       id: job.id,
       actionId: job.actionId,
-      objectTypeId: job.objectTypeId,
-      primaryId: job.primaryId,
+      subject: job.subject,
       status: "succeeded",
       startedAt: startedRun.startedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
@@ -139,8 +168,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return {
       id: job.id,
       actionId: job.actionId,
-      objectTypeId: job.objectTypeId,
-      primaryId: job.primaryId,
+      subject: job.subject,
       status,
       startedAt: startedRun.startedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),

@@ -24,6 +24,10 @@ function normalizeParams(
   return structuredClone(params)
 }
 
+function normalizeSubject(subject: StartActionRunInput["subject"]): StartActionRunInput["subject"] {
+  return structuredClone(subject)
+}
+
 function normalizeMetadata(
   metadata: Readonly<Record<string, JsonValue>> | undefined
 ): Readonly<Record<string, JsonValue>> | undefined {
@@ -62,8 +66,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       id: input.id,
       projectId: input.projectId,
       actionId: input.actionId,
-      objectTypeId: input.objectTypeId,
-      primaryId: input.primaryId,
+      subject: normalizeSubject(input.subject),
       status: "running",
       startedAt: new Date(input.startedAt ?? new Date()),
       params: normalizeParams(input.params),
@@ -128,8 +131,17 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.actionId ? record.actionId === input.actionId : true))
-      .filter((record) => (input.objectTypeId ? record.objectTypeId === input.objectTypeId : true))
-      .filter((record) => (input.primaryId ? record.primaryId === input.primaryId : true))
+      .filter((record) => (input.subject ? subjectsEqual(record.subject, input.subject) : true))
+      .filter((record) =>
+        input.objectTypeId
+          ? record.subject.kind === "object" && record.subject.objectTypeId === input.objectTypeId
+          : true
+      )
+      .filter((record) =>
+        input.primaryId
+          ? record.subject.kind === "object" && record.subject.primaryId === input.primaryId
+          : true
+      )
       .filter((record) => (statuses ? statuses.has(record.status) : true))
       .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))
       .filter((record) => (input.startedBefore ? record.startedAt <= input.startedBefore : true))
@@ -144,4 +156,23 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       total,
     }
   }
+}
+
+function subjectsEqual(
+  left: StartActionRunInput["subject"],
+  right: StartActionRunInput["subject"]
+): boolean {
+  if (left.kind !== right.kind) {
+    return false
+  }
+
+  if (left.kind === "none") {
+    return true
+  }
+
+  if (right.kind === "none") {
+    return false
+  }
+
+  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
 }

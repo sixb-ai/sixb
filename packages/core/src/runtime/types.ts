@@ -5,7 +5,13 @@
  * Each level narrows generic parameters so downstream code stays type-safe.
  */
 
-import type { ActionDefinition, ActionRegistry, InferActionParams } from "../actions"
+import type {
+  ActionDefinition,
+  ActionParamsConfig,
+  ActionRegistry,
+  ActionsRuntime,
+  InferActionParams,
+} from "../actions"
 import type { AuthRuntime } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
@@ -222,6 +228,14 @@ export interface TelemetryAppender<
   append(input: TelemetryAppendInput<TToken, TValueTypes>): Promise<void>
 }
 
+type TypedActionReference<TParams extends ActionParamsConfig = ActionParamsConfig> = {
+  readonly id: string
+  readonly params: TParams
+}
+
+type TypedActionParams<TAction extends TypedActionReference> =
+  TAction extends TypedActionReference<infer TParams> ? InferActionParams<TParams> : never
+
 export type ListResult<T> = {
   objects: T[]
   hasMore: boolean
@@ -261,12 +275,12 @@ export interface ObjectByIdHandle<
   }): Promise<{ runId: string }>
 
   /**
-   * Request an action on this object using a typed `ActionDefinition` reference.
+   * Request an action on this object using a typed action reference.
    * Params are inferred from the action's declared shape.
    */
-  requestAction<TAction extends ActionDefinition>(input: {
+  requestAction<const TAction extends TypedActionReference>(input: {
     action: TAction
-    params: InferActionParams<TAction["params"]>
+    params: NoInfer<TypedActionParams<TAction>>
     runId?: string
   }): Promise<{ runId: string }>
 
@@ -279,9 +293,9 @@ export interface ObjectByIdHandle<
   }): Promise<{ runId: string }>
 
   /** Request a typed action and wait for the terminal lifecycle event. */
-  requestActionAndWait<TAction extends ActionDefinition>(input: {
+  requestActionAndWait<const TAction extends TypedActionReference>(input: {
     action: TAction
-    params: InferActionParams<TAction["params"]>
+    params: NoInfer<TypedActionParams<TAction>>
     timeoutMs?: number
     signal?: AbortSignal
   }): Promise<{ runId: string }>
@@ -310,6 +324,7 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
   readonly rules?: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
+  readonly actions: ActionsRuntime
 
   /** All registered object types. */
   listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]
@@ -325,6 +340,9 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
 
   /** Lookup an action definition by id. */
   getActionById(actionId: string): ActionDefinition | null
+
+  /** All registered global actions. */
+  getGlobalActions(): readonly ActionDefinition[]
 
   /** All actions valid for an object type, including inherited actions. */
   getActionsForType(objectType: ObjectType): readonly ActionDefinition[]
@@ -420,24 +438,6 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
 
   /** Upsert an object by type id (for server / dynamic contexts). */
   upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
-
-  /** Request an action on an object by type id and id. */
-  requestAction(
-    objectTypeId: string,
-    id: string,
-    actionId: string,
-    params?: Record<string, unknown>,
-    options?: { runId?: string }
-  ): Promise<{ runId: string }>
-
-  /** Request an action on an object by type id and wait for its terminal event. */
-  requestActionAndWait(
-    objectTypeId: string,
-    id: string,
-    actionId: string,
-    params?: Record<string, unknown>,
-    options?: { runId?: string; timeoutMs?: number; signal?: AbortSignal }
-  ): Promise<{ runId: string }>
 
   /** Append telemetry for multiple objects of a given type. */
   appendTelemetry(
@@ -566,13 +566,13 @@ export interface ObjectSet<
   }): Promise<{ runId: string }>
 
   /**
-   * Request an action on an object of this type using a typed `ActionDefinition`
-   * reference. Params are inferred from the action's declared shape.
+   * Request an action on an object of this type using a typed action reference.
+   * Params are inferred from the action's declared shape.
    */
-  requestAction<TAction extends ActionDefinition>(input: {
+  requestAction<const TAction extends TypedActionReference>(input: {
     id: string
     action: TAction
-    params: InferActionParams<TAction["params"]>
+    params: NoInfer<TypedActionParams<TAction>>
     runId?: string
   }): Promise<{ runId: string }>
 
@@ -586,10 +586,10 @@ export interface ObjectSet<
   }): Promise<{ runId: string }>
 
   /** Request a typed action and wait for the terminal lifecycle event. */
-  requestActionAndWait<TAction extends ActionDefinition>(input: {
+  requestActionAndWait<const TAction extends TypedActionReference>(input: {
     id: string
     action: TAction
-    params: InferActionParams<TAction["params"]>
+    params: NoInfer<TypedActionParams<TAction>>
     timeoutMs?: number
     signal?: AbortSignal
   }): Promise<{ runId: string }>

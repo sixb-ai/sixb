@@ -32,7 +32,7 @@ type _roomRefSchema = Expect<Equal<typeof RoomRefSchema, ObjectRefSchema<"Room">
 type _roomRefValue = Expect<Equal<InferSchemaOrRef<typeof RoomRefSchema>, ObjectRef<"Room">>>
 
 const setTemperature = defineAction("setTemperature")
-  .target(Room)
+  .on(Room)
   .params({
     target: actionParam("double", { required: true }),
     mode: actionParam(stringEnum(["heat", "cool", "auto"])),
@@ -69,8 +69,15 @@ const reboot = defineAction("reboot")
     void force
   })
 
+const setRequestTemperature = defineAction("setRequestTemperature")
+  .on(Room)
+  .params({
+    target: actionParam("double", { required: true }),
+  })
+  .run(async () => {})
+
 const assignRelatedRoom = defineAction("assignRelatedRoom")
-  .target(Room)
+  .on(Room)
   .params({
     relatedRoom: actionParam(RoomRefSchema, { required: true }),
     fallbackRoom: actionParam(ref(Room)),
@@ -89,9 +96,36 @@ const assignRelatedRoom = defineAction("assignRelatedRoom")
     void suiteRoomRef
   })
 
+const createRoom = defineAction("createRoom")
+  .params({
+    id: actionParam("string", { required: true }),
+    name: actionParam("string", { required: true }),
+  })
+  .validate(({ params }) => {
+    const id: string = params.id
+
+    // @ts-expect-error global validators do not expose target
+    const primaryId = target.primaryId
+
+    void id
+    void primaryId
+  })
+  .run(({ params, pario }) => {
+    const id: string = params.id
+    const name: string = params.name
+    pario.objects(Room)
+
+    // @ts-expect-error global action handlers do not expose target
+    const primaryId = target.primaryId
+
+    void id
+    void name
+    void primaryId
+  })
+
 const pario = new Pario({
   ontology: [Room],
-  actions: [setTemperature, reboot, assignRelatedRoom],
+  actions: [setTemperature, reboot, setRequestTemperature, assignRelatedRoom, createRoom],
   ...createTestRuntimeDeps(),
 })
 
@@ -110,5 +144,44 @@ const invalidAssignRelatedRoomParams: AssignRelatedRoomParams = {
 }
 
 void pario
+pario.actions.request({
+  actionId: "createRoom",
+  params: {
+    id: "room:1",
+    name: "Room 1",
+  },
+})
+pario.actions.request({
+  actionId: "setTemperature",
+  subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
+  params: { target: 22 },
+})
+pario.actions.request({
+  // @ts-expect-error global action request API is actionId-based
+  action: createRoom,
+  params: {
+    id: "room:1",
+  },
+})
+pario
+  .objects(Room)
+  .byId("room:1")
+  .requestAction({
+    action: setRequestTemperature,
+    params: { target: 22 },
+  })
+pario.objects(Room).requestAction({
+  id: "room:1",
+  action: setRequestTemperature,
+  params: { target: 22 },
+})
+
+const invalidRequestTemperatureParams: InferActionParams<(typeof setRequestTemperature)["params"]> =
+  {
+    // @ts-expect-error target must be numeric
+    target: "22",
+  }
+
 void validAssignRelatedRoomParams
 void invalidAssignRelatedRoomParams
+void invalidRequestTemperatureParams

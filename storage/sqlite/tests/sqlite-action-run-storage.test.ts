@@ -18,8 +18,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       params: {
         amount: 50_000,
       },
@@ -52,8 +51,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       params: {},
       startedAt: new Date("2026-04-29T10:00:00.000Z"),
     })
@@ -72,8 +70,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_2",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-456",
+      subject: { kind: "none" },
       params: {},
       startedAt: new Date("2026-04-29T11:00:00.000Z"),
     })
@@ -104,8 +101,7 @@ describe("SqliteActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       params: {},
     })
 
@@ -114,8 +110,7 @@ describe("SqliteActionRunStorage", () => {
         id: "act_1",
         projectId: "my-app",
         actionId: "sendQuote",
-        objectTypeId: "Opportunity",
-        primaryId: "opp-123",
+        subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
         params: {},
       })
     ).rejects.toBeInstanceOf(ActionRunError)

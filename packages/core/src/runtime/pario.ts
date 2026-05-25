@@ -6,7 +6,7 @@
  * `pario.broker`, `pario.events`, `pario.storage`, and `pario.queues`.
  */
 
-import { ActionRegistry } from "../actions"
+import { ActionRegistry, ActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import {
   AuthRuntime,
@@ -106,6 +106,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   private readonly projectionsById = new Map<string, ProjectionDefinition>()
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
+  readonly actions: ActionsRuntime
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -252,6 +253,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       blobStorage: this.blobStorage,
       queues: this.queues,
     }
+    this.actions = new ActionsRuntime(this.runtimeContext)
 
     const { objectProjections, linkProjections } = categorizeProjections(options.projections ?? [])
     this.objectProjections = objectProjections
@@ -292,6 +294,10 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
 
   getActionById(actionId: string): ActionDefinition | null {
     return this.actionRegistry.getById(actionId)
+  }
+
+  getGlobalActions(): readonly ActionDefinition[] {
+    return this.actionRegistry.getGlobalActions()
   }
 
   getActionsForType(objectType: ObjectType): readonly ActionDefinition[] {
@@ -476,40 +482,6 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
     }[]
   ): Promise<readonly BatchItemResult<void>[]> {
     return objectService.upsertLinkBatch(this.runtimeContext, items)
-  }
-
-  async requestAction(
-    objectTypeId: string,
-    id: string,
-    actionId: string,
-    params?: Record<string, unknown>,
-    options?: { runId?: string }
-  ): Promise<{ runId: string }> {
-    return objectService.requestAction(
-      this.runtimeContext,
-      objectTypeId,
-      id,
-      actionId,
-      params,
-      options
-    )
-  }
-
-  async requestActionAndWait(
-    objectTypeId: string,
-    id: string,
-    actionId: string,
-    params?: Record<string, unknown>,
-    options?: { runId?: string; timeoutMs?: number; signal?: AbortSignal }
-  ): Promise<{ runId: string }> {
-    return objectService.requestActionAndWait(
-      this.runtimeContext,
-      objectTypeId,
-      id,
-      actionId,
-      params,
-      options
-    )
   }
 
   async appendTelemetry(

@@ -291,8 +291,9 @@ CREATE TABLE IF NOT EXISTS action_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   action_id TEXT NOT NULL,
-  object_type_id TEXT NOT NULL,
-  primary_id TEXT NOT NULL,
+  subject_kind TEXT NOT NULL CHECK (subject_kind IN ('none', 'object')),
+  object_type_id TEXT,
+  primary_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
@@ -301,6 +302,10 @@ CREATE TABLE IF NOT EXISTS action_runs (
   error_message TEXT,
   error_phase TEXT CHECK (error_phase IS NULL OR error_phase IN ('handler', 'cancelled')),
   metadata JSONB,
+  CHECK (
+    (subject_kind = 'none' AND object_type_id IS NULL AND primary_id IS NULL)
+    OR (subject_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL)
+  ),
   PRIMARY KEY (project_id, id)
 );
 

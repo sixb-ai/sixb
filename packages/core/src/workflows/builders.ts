@@ -1,5 +1,5 @@
-import type { ActionDefinition } from "../actions"
-import { isActionDefinition } from "../actions"
+import type { ObjectActionDefinition } from "../actions"
+import { isActionDefinition, isObjectActionDefinition } from "../actions"
 import type { SchemaOrRef } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
@@ -74,6 +74,12 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
     }
 
     if (isActionDefinition(target)) {
+      if (!isObjectActionDefinition(target)) {
+        throw new WorkflowDefinitionError(
+          `Workflow "${id}" action node "${target.id}" must be object-scoped in V1.`
+        )
+      }
+
       if (typeof mapper !== "function") {
         throw new WorkflowDefinitionError(
           `Workflow "${id}" action node "${target.id}" requires a mapper.`
@@ -145,7 +151,7 @@ function createStepNode(
 function createActionNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
-  action: ActionDefinition,
+  action: ObjectActionDefinition,
   mapper: unknown
 ): WorkflowNodeDefinition {
   const key = deriveWorkflowNodeKey(action.id)

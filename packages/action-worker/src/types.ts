@@ -3,6 +3,7 @@ import type {
   ActionRunFailure,
   ActionRunRecord,
   ActionRunStorage,
+  ActionSubject,
   EventsRuntime,
   ObjectRow,
   OntologySource,
@@ -22,9 +23,15 @@ export interface ActionWorkerContext {
 export interface ActionJob {
   readonly id: string
   readonly actionId: string
-  readonly objectTypeId: string
-  readonly primaryId: string
+  readonly subject: ActionSubject
   readonly params: Readonly<Record<string, unknown>>
+}
+
+interface BaseActionRunResult {
+  readonly id: string
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly record: ActionRunRecord
 }
 
 export interface RunActionJobInput {
@@ -34,36 +41,21 @@ export interface RunActionJobInput {
 }
 
 export type ActionRunResult =
-  | {
-      readonly id: string
-      readonly actionId: string
-      readonly objectTypeId: string
-      readonly primaryId: string
+  | (BaseActionRunResult & {
       readonly status: "succeeded"
       readonly startedAt: Date
       readonly finishedAt: Date
-      readonly record: ActionRunRecord
-    }
-  | {
-      readonly id: string
-      readonly actionId: string
-      readonly objectTypeId: string
-      readonly primaryId: string
+    })
+  | (BaseActionRunResult & {
       readonly status: "failed" | "cancelled"
       readonly startedAt: Date
       readonly finishedAt: Date
       readonly error: ActionRunFailure
-      readonly record: ActionRunRecord
-    }
-  | {
-      readonly id: string
-      readonly actionId: string
-      readonly objectTypeId: string
-      readonly primaryId: string
+    })
+  | (BaseActionRunResult & {
       readonly status: ActionRunRecord["status"]
       readonly skipped: true
-      readonly record: ActionRunRecord
-    }
+    })
 
 export type ActionTargetRow = Pick<
   ObjectRow,

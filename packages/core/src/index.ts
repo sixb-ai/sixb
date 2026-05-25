@@ -51,6 +51,8 @@ export {
 // ── Actions ─────────────────────────────────────────────────
 
 export type {
+  ActionBinding,
+  ActionBuilder,
   ActionContext,
   ActionDefinition,
   ActionHandler,
@@ -58,18 +60,38 @@ export type {
   ActionParamsBuilder,
   ActionParamsConfig,
   ActionRunBuilder,
+  ActionSubject,
   ActionTargetBuilder,
   ActionTargetObject,
   ActionValidationContext,
   ActionValidator,
+  GlobalActionContext,
+  GlobalActionDefinition,
+  GlobalActionHandler,
+  GlobalActionParamsBuilder,
+  GlobalActionRunBuilder,
+  GlobalActionValidationContext,
+  GlobalActionValidator,
   InferActionParams,
+  ObjectActionDefinition,
+  ObjectActionParamsBuilder,
+  ObjectActionRunBuilder,
+  RequestActionAndWaitInput,
+  RequestActionAndWaitOptions,
+  RequestActionInput,
+  RequestActionOptions,
 } from "./actions"
 export {
   ActionDefinitionError,
   ActionRegistry,
+  ActionsRuntime,
   actionParam,
   defineAction,
   isActionDefinition,
+  isGlobalActionDefinition,
+  isObjectActionDefinition,
+  requestAction,
+  requestActionAndWait,
 } from "./actions"
 export {
   ActionRunFailedError,
