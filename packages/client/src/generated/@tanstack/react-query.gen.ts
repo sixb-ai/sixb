@@ -12,6 +12,7 @@ import { client } from "../client.gen"
 import {
   appendTelemetry,
   createAuthInvitation,
+  getAction,
   getAuthSession,
   getConnector,
   getDataset,
@@ -29,6 +30,7 @@ import {
   getTelemetryHistory,
   getWorkflow,
   getWorkflowRun,
+  listActions,
   listAuthInvitations,
   listConnectors,
   listDatasetRows,
@@ -67,6 +69,9 @@ import type {
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
+  GetActionData,
+  GetActionError,
+  GetActionResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
   GetConnectorData,
@@ -115,6 +120,8 @@ import type {
   GetWorkflowRunData,
   GetWorkflowRunError,
   GetWorkflowRunResponse,
+  ListActionsData,
+  ListActionsResponse,
   ListAuthInvitationsData,
   ListAuthInvitationsError,
   ListAuthInvitationsResponse,
@@ -1458,6 +1465,56 @@ export const upsertObjectMutation = (
   }
   return mutationOptions
 }
+
+export const listActionsQueryKey = (options?: Options<ListActionsData>) =>
+  createQueryKey("listActions", options)
+
+/**
+ * List registered actions
+ */
+export const listActionsOptions = (options?: Options<ListActionsData>) =>
+  queryOptions<
+    ListActionsResponse,
+    DefaultError,
+    ListActionsResponse,
+    ReturnType<typeof listActionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listActions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listActionsQueryKey(options),
+  })
+
+export const getActionQueryKey = (options: Options<GetActionData>) =>
+  createQueryKey("getAction", options)
+
+/**
+ * Get action metadata
+ */
+export const getActionOptions = (options: Options<GetActionData>) =>
+  queryOptions<
+    GetActionResponse,
+    GetActionError,
+    GetActionResponse,
+    ReturnType<typeof getActionQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAction({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActionQueryKey(options),
+  })
 
 /**
  * Request a global action

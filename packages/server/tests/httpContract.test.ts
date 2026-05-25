@@ -933,6 +933,57 @@ describe("ParioServer HTTP contract", () => {
       expect(objectType.id).toBe("device")
       expect(objectType.actions[0]?.id).toBe("setSpeed")
 
+      const actionsResponse = await fetch(`${baseUrl}/api/actions`)
+      expect(actionsResponse.status).toBe(200)
+      expect(await actionsResponse.json()).toEqual([
+        {
+          id: "setSpeed",
+          name: "setSpeed",
+          binding: { kind: "object", objectTypeId: "device" },
+          params: [
+            {
+              id: "speed",
+              name: "speed",
+              schema: "double",
+              required: true,
+            },
+          ],
+        },
+        {
+          id: "createMaintenanceRun",
+          name: "createMaintenanceRun",
+          binding: { kind: "global" },
+          params: [
+            {
+              id: "note",
+              name: "note",
+              schema: "string",
+              required: true,
+            },
+          ],
+        },
+      ])
+
+      const actionResponse = await fetch(`${baseUrl}/api/actions/createMaintenanceRun`)
+      expect(actionResponse.status).toBe(200)
+      expect(await actionResponse.json()).toEqual({
+        id: "createMaintenanceRun",
+        name: "createMaintenanceRun",
+        binding: { kind: "global" },
+        params: [
+          {
+            id: "note",
+            name: "note",
+            schema: "string",
+            required: true,
+          },
+        ],
+      })
+
+      const missingActionResponse = await fetch(`${baseUrl}/api/actions/missing`)
+      expect(missingActionResponse.status).toBe(404)
+      expect(await missingActionResponse.json()).toEqual({ error: "Action not found" })
+
       const objectsResponse = await fetch(`${baseUrl}/api/objects?objectTypeId=device`)
       expect(objectsResponse.status).toBe(200)
       const objectsBody = (await objectsResponse.json()) as {
