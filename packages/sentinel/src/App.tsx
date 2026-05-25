@@ -5,10 +5,6 @@ import { RunsPage } from "./pages/RunsPage"
 import { WorkflowDetailPage } from "./pages/WorkflowDetailPage"
 import { WorkflowsPage } from "./pages/WorkflowsPage"
 
-if (import.meta.hot) {
-  import.meta.hot.accept()
-}
-
 export default function App() {
   return (
     <Routes>
