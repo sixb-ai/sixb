@@ -2426,11 +2426,56 @@ export type UpsertObjectResponses = {
 
 export type UpsertObjectResponse = UpsertObjectResponses[keyof UpsertObjectResponses]
 
+export type RequestGlobalActionData = {
+  body: {
+    params?: {
+      [key: string]: unknown
+    }
+    runId?: string
+  }
+  path: {
+    actionId: string
+  }
+  query?: never
+  url: "/api/actions/{actionId}"
+}
+
+export type RequestGlobalActionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type RequestGlobalActionError = RequestGlobalActionErrors[keyof RequestGlobalActionErrors]
+
+export type RequestGlobalActionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+    runId: string
+  }
+}
+
+export type RequestGlobalActionResponse =
+  RequestGlobalActionResponses[keyof RequestGlobalActionResponses]
+
 export type RequestActionData = {
   body: {
     params?: {
       [key: string]: unknown
     }
+    runId?: string
   }
   path: {
     objectTypeId: string

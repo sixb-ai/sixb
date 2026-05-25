@@ -1,45 +1,83 @@
 import type { OntologySource, Pario } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
-import { ActionParamsSchema, RequestActionBodySchema } from "../schemas/actions"
+import {
+  GlobalActionParamsSchema,
+  ObjectActionParamsSchema,
+  RequestActionBodySchema,
+} from "../schemas/actions"
 import { ActionRequestedResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
 
 export function registerActionRoutes(app: Elysia, pario: Pario<readonly OntologySource[]>) {
-  return app.post(
-    "/api/objects/:objectTypeId/:objectId/actions/:actionId",
-    async ({ params, body, set }) => {
-      try {
-        const parsedBody = RequestActionBodySchema.parse(body)
-        const { runId } = await pario.actions.request({
-          actionId: params.actionId,
-          subject: {
-            kind: "object",
-            objectTypeId: params.objectTypeId,
-            primaryId: params.objectId,
-          },
-          params: parsedBody.params,
-        })
+  return app
+    .post(
+      "/api/actions/:actionId",
+      async ({ params, body, set }) => {
+        try {
+          const parsedBody = RequestActionBodySchema.parse(body)
+          const { runId } = await pario.actions.request({
+            actionId: params.actionId,
+            params: parsedBody.params,
+            runId: parsedBody.runId,
+          })
 
-        return { success: true, runId }
-      } catch (error) {
-        return handleRouteError(error, set)
+          return { success: true, runId }
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        params: GlobalActionParamsSchema,
+        body: RequestActionBodySchema,
+        response: {
+          200: ActionRequestedResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Request a global action",
+          tags: ["Actions"],
+          operationId: "requestGlobalAction",
+          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+        },
       }
-    },
-    {
-      params: ActionParamsSchema,
-      body: RequestActionBodySchema,
-      response: {
-        200: ActionRequestedResponseSchema,
-        400: ErrorResponseSchema,
-        404: ErrorResponseSchema,
+    )
+    .post(
+      "/api/objects/:objectTypeId/:objectId/actions/:actionId",
+      async ({ params, body, set }) => {
+        try {
+          const parsedBody = RequestActionBodySchema.parse(body)
+          const { runId } = await pario.actions.request({
+            actionId: params.actionId,
+            subject: {
+              kind: "object",
+              objectTypeId: params.objectTypeId,
+              primaryId: params.objectId,
+            },
+            params: parsedBody.params,
+            runId: parsedBody.runId,
+          })
+
+          return { success: true, runId }
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
       },
-      detail: {
-        summary: "Request an action on an object",
-        tags: ["Actions"],
-        operationId: "requestAction",
-        security: PARIO_CSRF_SECURITY_REQUIREMENT,
-      },
-    }
-  )
+      {
+        params: ObjectActionParamsSchema,
+        body: RequestActionBodySchema,
+        response: {
+          200: ActionRequestedResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Request an action on an object",
+          tags: ["Actions"],
+          operationId: "requestAction",
+          security: PARIO_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
 }

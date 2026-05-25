@@ -1,4 +1,4 @@
-import { requestAction } from "./generated/sdk.gen"
+import { requestAction, requestGlobalAction } from "./generated/sdk.gen"
 import type {
   GetProjectInfoResponse,
   GetTelemetryHistoryResponse,
@@ -352,6 +352,7 @@ export async function executeAction(options: {
   }
   body: {
     params?: Record<string, unknown>
+    runId?: string
   }
 }): Promise<{
   data: {
@@ -379,6 +380,50 @@ export async function executeAction(options: {
       },
       body: {
         params: options.body.params,
+        runId: options.body.runId,
+      },
+      throwOnError: true,
+    })
+
+    return {
+      data: {
+        success: Boolean(response.data?.success),
+        runId: response.data?.runId,
+      },
+    }
+  } catch (error) {
+    return {
+      data: {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    }
+  }
+}
+
+export async function executeGlobalAction(options: {
+  path: {
+    actionId: string
+  }
+  body: {
+    params?: Record<string, unknown>
+    runId?: string
+  }
+}): Promise<{
+  data: {
+    success: boolean
+    runId?: string
+    error?: string
+  }
+}> {
+  try {
+    const response = await requestGlobalAction({
+      path: {
+        actionId: options.path.actionId,
+      },
+      body: {
+        params: options.body.params,
+        runId: options.body.runId,
       },
       throwOnError: true,
     })

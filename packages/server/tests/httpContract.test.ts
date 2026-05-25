@@ -140,6 +140,10 @@ const setSpeed = defineAction("setSpeed")
   .params({ speed: actionParam("double", { required: true }) })
   .run(async () => {})
 
+const createMaintenanceRun = defineAction("createMaintenanceRun")
+  .params({ note: actionParam("string", { required: true }) })
+  .run(async () => {})
+
 const highRpmRule = defineRule("device.high-rpm")
   .on(Device)
   .where((device) => device.p.rpm.gt(1000))
@@ -181,7 +185,7 @@ describe("ParioServer HTTP contract", () => {
     const pario = createParioInstance<readonly OntologySource[]>({
       id: "contract-project",
       ontology: [Space, Device],
-      actions: [setSpeed],
+      actions: [setSpeed, createMaintenanceRun],
       broker: new InMemoryBroker(),
       storage: {
         objects: new SqliteObjectStorage(),
@@ -1032,6 +1036,33 @@ describe("ParioServer HTTP contract", () => {
       expect(requestActionBody.success).toBe(true)
       expect(requestActionBody.runId.startsWith("act_")).toBe(true)
 
+      const requestGlobalActionResponse = await fetch(
+        `${baseUrl}/api/actions/createMaintenanceRun`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            params: { note: "Inspect fan vibration" },
+            runId: "act_contract_global",
+          }),
+        }
+      )
+      expect(requestGlobalActionResponse.status).toBe(200)
+      expect(await requestGlobalActionResponse.json()).toEqual({
+        success: true,
+        runId: "act_contract_global",
+      })
+
+      const invalidGlobalActionResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ params: { speed: 975 } }),
+      })
+      expect(invalidGlobalActionResponse.status).toBe(400)
+      expect(await invalidGlobalActionResponse.json()).toEqual({
+        error: "Action 'setSpeed' requires an object subject.",
+      })
+
       const upsertLinkResponse = await fetch(`${baseUrl}/api/objects/space/system/links/contains`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
@@ -1066,6 +1097,15 @@ describe("ParioServer HTTP contract", () => {
             },
             params: { speed: 950 },
             runId: requestActionBody.runId,
+          },
+        }),
+        expect.objectContaining({
+          type: "action.requested",
+          payload: {
+            actionId: "createMaintenanceRun",
+            subject: { kind: "none" },
+            params: { note: "Inspect fan vibration" },
+            runId: "act_contract_global",
           },
         }),
       ])

@@ -70,6 +70,7 @@ describe("OpenAPI docs", () => {
       ["post", "/api/syncs/{syncId}/runs"],
       ["post", "/api/pipelines/{pipelineId}/runs"],
       ["post", "/api/workflows/{workflowId}/runs"],
+      ["post", "/api/actions/{actionId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}"],
       ["post", "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],

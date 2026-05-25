@@ -51,6 +51,7 @@ import {
   type Options,
   removeObjectLink,
   requestAction,
+  requestGlobalAction,
   requestPipelineRun,
   requestSyncRun,
   requestWorkflowRun,
@@ -170,6 +171,9 @@ import type {
   RequestActionData,
   RequestActionError,
   RequestActionResponse,
+  RequestGlobalActionData,
+  RequestGlobalActionError,
+  RequestGlobalActionResponse,
   RequestPipelineRunData,
   RequestPipelineRunError,
   RequestPipelineRunResponse,
@@ -1445,6 +1449,33 @@ export const upsertObjectMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await upsertObject({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Request a global action
+ */
+export const requestGlobalActionMutation = (
+  options?: Partial<Options<RequestGlobalActionData>>
+): UseMutationOptions<
+  RequestGlobalActionResponse,
+  RequestGlobalActionError,
+  Options<RequestGlobalActionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RequestGlobalActionResponse,
+    RequestGlobalActionError,
+    Options<RequestGlobalActionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await requestGlobalAction({
         ...options,
         ...fnOptions,
         throwOnError: true,
