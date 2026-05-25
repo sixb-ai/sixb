@@ -4,8 +4,13 @@ import {
   DEFAULT_AUTH_SESSION_AUDIENCE,
   resolveAuthSessionAudience,
 } from "@pario/core"
-import { ensureBuiltInUiBundle, renderBuiltInUiShell } from "./ui/assets"
-import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./ui/css"
+import { ensureBuiltInUiBundle, ensureBuiltInUiDevBundle, renderBuiltInUiShell } from "./assets"
+import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./css"
+
+type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
+type BunServeRoute = BunServeRoutes[string]
+const sourceDir = join(import.meta.dir, "..", "src")
+const faviconPath = join(sourceDir, "favicon.svg")
 
 export interface CreateAtlasAppOptions {
   readonly apiBaseUrl: string
@@ -30,6 +35,14 @@ export interface AtlasAppInstance {
   start(options?: AtlasAppStartOptions): Promise<AtlasAppServer>
 }
 
+interface BuiltInUiServerOptions {
+  readonly host: string
+  readonly port: number
+  readonly apiBaseUrl: string
+  readonly audience: AuthSessionAudience
+  readonly authEnabled: boolean
+}
+
 export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance {
   const apiBaseUrl = normalizeOrigin(options.apiBaseUrl, "Atlas API base URL")
   const audience = resolveAuthSessionAudience(options.audience ?? DEFAULT_AUTH_SESSION_AUDIENCE)
@@ -44,20 +57,9 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
 
       try {
         css = await ensureBuiltInUiCss({ watch: development })
-        const bundle = await ensureBuiltInUiBundle()
-        const shell = renderBuiltInUiShell({
-          apiBaseUrl,
-          audience,
-          authEnabled,
-          scriptPath: bundle.scriptPath,
-          stylesheetPath: bundle.stylesheetPath,
-        })
-        const server = Bun.serve({
-          port,
-          hostname: host,
-          development,
-          fetch: (request) => atlasResponse(request, { bundleOutdir: bundle.outdir, shell }),
-        })
+        const server = development
+          ? await startDevelopmentServer({ host, port, apiBaseUrl, audience, authEnabled })
+          : await startProductionServer({ host, port, apiBaseUrl, audience, authEnabled })
         const displayHost = host === "0.0.0.0" ? "localhost" : host
 
         return {
@@ -78,6 +80,46 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
   }
 }
 
+async function startDevelopmentServer(
+  input: BuiltInUiServerOptions
+): Promise<ReturnType<typeof Bun.serve>> {
+  const bundle = await ensureBuiltInUiDevBundle()
+
+  return Bun.serve({
+    port: input.port,
+    hostname: input.host,
+    development: true,
+    routes: {
+      ...reservedParioRoutes(),
+      "/__pario/runtime.json": getHeadRoute((request) => runtimeConfigResponse(request, input)),
+      "/favicon.svg": getHeadRoute((request) => fileResponse(request, faviconPath)),
+      "/favicon.ico": getHeadRoute(() => new Response(null, { status: 204 })),
+      "/": htmlBundleRoute(bundle.html),
+      "/*": htmlBundleRoute(bundle.html),
+    },
+  } as Parameters<typeof Bun.serve>[0])
+}
+
+async function startProductionServer(
+  input: BuiltInUiServerOptions
+): Promise<ReturnType<typeof Bun.serve>> {
+  const bundle = await ensureBuiltInUiBundle()
+  const shell = renderBuiltInUiShell({
+    apiBaseUrl: input.apiBaseUrl,
+    audience: input.audience,
+    authEnabled: input.authEnabled,
+    scriptPath: bundle.scriptPath,
+    stylesheetPath: bundle.stylesheetPath,
+  })
+
+  return Bun.serve({
+    port: input.port,
+    hostname: input.host,
+    development: false,
+    fetch: (request) => atlasResponse(request, { bundleOutdir: bundle.outdir, shell }),
+  })
+}
+
 async function atlasResponse(
   request: Request,
   options: {
@@ -96,7 +138,7 @@ async function atlasResponse(
   }
 
   if (url.pathname === "/favicon.svg") {
-    return await fileResponse(request, join(import.meta.dir, "ui", "favicon.svg"))
+    return await fileResponse(request, faviconPath)
   }
 
   if (url.pathname === "/favicon.ico") {
@@ -114,6 +156,10 @@ async function atlasResponse(
     })
   }
 
+  if (isAssetRequest(url.pathname)) {
+    return notFoundResponse()
+  }
+
   return htmlResponse(request, options.shell)
 }
 
@@ -121,6 +167,20 @@ function htmlResponse(request: Request, html: string): Response {
   return new Response(request.method === "HEAD" ? null : html, {
     headers: {
       "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  })
+}
+
+function runtimeConfigResponse(request: Request, config: BuiltInUiServerOptions): Response {
+  const body = JSON.stringify({
+    api: { baseUrl: config.apiBaseUrl },
+    auth: { audience: config.audience, enabled: config.authEnabled },
+  })
+
+  return new Response(request.method === "HEAD" ? null : body, {
+    headers: {
+      "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
     },
   })
@@ -159,6 +219,51 @@ function isReservedParioRoute(pathname: string): boolean {
     pathname === "/docs" ||
     pathname.startsWith("/docs/")
   )
+}
+
+function reservedParioRoutes(): BunServeRoutes {
+  const handler = () => notFoundResponse()
+  return {
+    "/api": allMethodsRoute(handler),
+    "/api/*": allMethodsRoute(handler),
+    "/auth": allMethodsRoute(handler),
+    "/auth/*": allMethodsRoute(handler),
+    "/ws": allMethodsRoute(handler),
+    "/ws/*": allMethodsRoute(handler),
+    "/docs": allMethodsRoute(handler),
+    "/docs/*": allMethodsRoute(handler),
+  }
+}
+
+function getHeadRoute(handler: (request: Request) => Response | Promise<Response>): BunServeRoute {
+  return {
+    GET: handler,
+    HEAD: handler,
+  } as unknown as BunServeRoute
+}
+
+function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute {
+  return {
+    GET: handler,
+    HEAD: handler,
+    POST: handler,
+    PUT: handler,
+    PATCH: handler,
+    DELETE: handler,
+    OPTIONS: handler,
+  } as unknown as BunServeRoute
+}
+
+function htmlBundleRoute(bundle: Bun.HTMLBundle): BunServeRoute {
+  return {
+    GET: bundle,
+    HEAD: bundle,
+  } as unknown as BunServeRoute
+}
+
+function isAssetRequest(pathname: string): boolean {
+  const lastSegment = pathname.split("/").pop() ?? ""
+  return /\.[^/]+$/.test(lastSegment)
 }
 
 function normalizeOrigin(value: string, label: string): string {

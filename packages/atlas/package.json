@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build:ui-css": "bun ./src/ui/buildCss.ts",
+    "build:ui-css": "bun ./src/buildCss.ts",
     "build": "bun run build:ui-css && bun build ./src/index.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit"
   },

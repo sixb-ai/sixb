@@ -96,6 +96,41 @@ describe("createAtlasApp", () => {
     }
   })
 
+  test("serves the development Atlas shell with Bun's HTML bundle", async () => {
+    const port = await getFreePort()
+    const atlas = createAtlasApp({
+      apiBaseUrl: "http://api.localhost",
+      audience: "atlas",
+      authEnabled: false,
+    })
+    const server = await atlas.start({
+      host: "127.0.0.1",
+      port,
+      development: true,
+    })
+
+    try {
+      const baseUrl = `http://127.0.0.1:${port}`
+      const rootResponse = await fetch(`${baseUrl}/`)
+      const routeResponse = await fetch(`${baseUrl}/devices`)
+      const faviconResponse = await fetch(`${baseUrl}/favicon.svg`)
+      const runtimeResponse = await fetch(`${baseUrl}/__pario/runtime.json`)
+      const apiResponse = await fetch(`${baseUrl}/api/project`)
+
+      expect(rootResponse.status).toBe(200)
+      expect(routeResponse.status).toBe(200)
+      expect(faviconResponse.status).toBe(200)
+      expect(runtimeResponse.status).toBe(200)
+      expect(await runtimeResponse.json()).toEqual({
+        api: { baseUrl: "http://api.localhost" },
+        auth: { audience: "atlas", enabled: false },
+      })
+      expect(apiResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("does not serve Pario API-owned routes from the Atlas origin", async () => {
     const port = await getFreePort()
     const atlas = createAtlasApp({
