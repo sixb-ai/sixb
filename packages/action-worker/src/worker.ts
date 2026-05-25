@@ -107,8 +107,7 @@ export class ActionWorker extends Worker {
     const job: ActionJob = {
       id: event.payload.runId,
       actionId: event.payload.actionId,
-      objectTypeId: event.payload.objectTypeId,
-      primaryId: event.payload.primaryId,
+      subject: event.payload.subject,
       params: event.payload.params,
     }
 
@@ -146,8 +145,7 @@ async function emitActionTerminalEvent(
             payload: {
               actionId: result.actionId,
               runId: result.id,
-              objectTypeId: result.objectTypeId,
-              primaryId: result.primaryId,
+              subject: result.subject,
               finishedAt,
             },
           },
@@ -164,8 +162,7 @@ async function emitActionTerminalEvent(
           payload: {
             actionId: result.actionId,
             runId: result.id,
-            objectTypeId: result.objectTypeId,
-            primaryId: result.primaryId,
+            subject: result.subject,
             error: result.error,
             finishedAt,
           },

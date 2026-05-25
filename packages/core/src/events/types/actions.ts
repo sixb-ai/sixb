@@ -1,3 +1,4 @@
+import type { ActionSubject } from "../../actions"
 import type { EventEnvelope } from "../envelope"
 
 export interface ActionRequestedEvent extends EventEnvelope {
@@ -5,9 +6,8 @@ export interface ActionRequestedEvent extends EventEnvelope {
   topic: "actions"
   partitionKey: string
   payload: {
-    objectTypeId: string
-    primaryId: string
     actionId: string
+    subject: ActionSubject
     params: Record<string, unknown>
     runId: string
   }
@@ -20,8 +20,7 @@ export interface ActionCompletedEvent extends EventEnvelope {
   payload: {
     actionId: string
     runId: string
-    objectTypeId: string
-    primaryId: string
+    subject: ActionSubject
     finishedAt: string
   }
 }
@@ -33,8 +32,7 @@ export interface ActionFailedEvent extends EventEnvelope {
   payload: {
     actionId: string
     runId: string
-    objectTypeId: string
-    primaryId: string
+    subject: ActionSubject
     error: {
       name?: string
       message: string

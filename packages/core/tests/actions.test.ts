@@ -34,7 +34,7 @@ const SuiteRoom = defineObjectType({
 const setTemperature = defineAction("setTemperature", {
   description: "Set room temperature.",
 })
-  .target(Room)
+  .on(Room)
   .params({ target: actionParam("double", { required: true }) })
   .validate(({ params }) => {
     if (params.target < 10) {
@@ -46,6 +46,18 @@ const setTemperature = defineAction("setTemperature", {
 const reboot = defineAction("reboot")
   .target(Room)
   .params({})
+  .run(async () => {})
+
+const createRoom = defineAction("createRoom")
+  .params({
+    id: actionParam("string", { required: true }),
+    name: actionParam("string", { required: true }),
+  })
+  .validate(({ params }) => {
+    if (!params.id.startsWith("room:")) {
+      return { error: "Room id must start with room:" }
+    }
+  })
   .run(async () => {})
 
 const prepareSuite = defineAction("prepareSuite")
@@ -63,6 +75,7 @@ const attachRelatedRoom = defineAction("attachRelatedRoom")
 describe("defineAction", () => {
   test("builds an inert typed action definition", () => {
     expect(setTemperature.kind).toBe("action")
+    expect(setTemperature.binding.kind).toBe("object")
     expect(setTemperature.id).toBe("setTemperature")
     expect(setTemperature.target.id).toBe("Room")
     expect(setTemperature.params.target.schema).toBe("double")
@@ -70,6 +83,14 @@ describe("defineAction", () => {
     expect(setTemperature.validators).toHaveLength(1)
     expect(typeof setTemperature.handler).toBe("function")
     expect(setTemperature.description).toBe("Set room temperature.")
+  })
+
+  test("builds global action definitions without a target", () => {
+    expect(createRoom.kind).toBe("action")
+    expect(createRoom.binding.kind).toBe("global")
+    expect(createRoom.target).toBeUndefined()
+    expect(createRoom.params.id.required).toBe(true)
+    expect(createRoom.validators).toHaveLength(1)
   })
 
   test("validates empty action ids", () => {
@@ -87,7 +108,7 @@ describe("ActionRegistry", () => {
     const pario = new Pario({
       id: "action-registry-test",
       ontology: [Room, SuiteRoom],
-      actions: [setTemperature, reboot, prepareSuite],
+      actions: [setTemperature, reboot, prepareSuite, createRoom],
       ...createTestRuntimeDeps(),
     })
 
@@ -95,8 +116,10 @@ describe("ActionRegistry", () => {
       "setTemperature",
       "reboot",
       "prepareSuite",
+      "createRoom",
     ])
     expect(pario.getActionById("reboot")?.id).toBe(reboot.id)
+    expect(pario.getGlobalActions().map((action) => action.id)).toEqual(["createRoom"])
     expect(pario.getActionsForType(Room).map((action) => action.id)).toEqual([
       "setTemperature",
       "reboot",
@@ -192,7 +215,7 @@ describe("requestAction", () => {
         id: "room:1",
         actionId: "nonexistent",
       })
-    ).rejects.toThrow("Unknown action 'nonexistent' on object type 'Room'")
+    ).rejects.toThrow("Unknown action 'nonexistent'")
   })
 
   test("rejects actions that are not valid for the object type", async () => {
@@ -212,7 +235,7 @@ describe("requestAction", () => {
         id: "room:1",
         actionId: "prepareSuite",
       })
-    ).rejects.toThrow("Unknown action 'prepareSuite' on object type 'Room'")
+    ).rejects.toThrow("Action 'prepareSuite' is not valid for object type 'Room'")
   })
 
   test("rejects missing required param", async () => {
@@ -415,8 +438,11 @@ describe("requestAction", () => {
     expect(events.length).toBe(1)
     expect(events[0].type).toBe("action.requested")
     if (events[0].type === "action.requested") {
-      expect(events[0].payload.objectTypeId).toBe("Room")
-      expect(events[0].payload.primaryId).toBe("room:1")
+      expect(events[0].payload.subject).toEqual({
+        kind: "object",
+        objectTypeId: "Room",
+        primaryId: "room:1",
+      })
       expect(events[0].payload.actionId).toBe("counted")
       expect(events[0].payload.params).toEqual({})
       expect(events[0].payload.runId).toBe(result.runId)
@@ -474,8 +500,96 @@ describe("requestAction", () => {
     })
     expect(events.length).toBe(1)
     if (events[0].type === "action.requested") {
-      expect(events[0].payload.objectTypeId).toBe("SuiteRoom")
+      expect(events[0].payload.subject).toEqual({
+        kind: "object",
+        objectTypeId: "SuiteRoom",
+        primaryId: "suite:1",
+      })
       expect(events[0].payload.actionId).toBe("setTemperature")
     }
+  })
+
+  test("requests global actions through pario.actions", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const pario = new Pario({
+      id: "global-action-test",
+      ontology: [Room],
+      actions: [createRoom],
+      ...runtimeDeps,
+    })
+
+    const result = await pario.actions.request({
+      actionId: "createRoom",
+      params: { id: "room:1", name: "Room 1" },
+    })
+
+    const events = await pario.events.read({
+      types: ["action.requested"],
+    })
+    expect(result.runId.startsWith("act_")).toBe(true)
+    expect(events.length).toBe(1)
+    if (events[0].type === "action.requested") {
+      expect(events[0].payload).toEqual({
+        actionId: "createRoom",
+        subject: { kind: "none" },
+        params: { id: "room:1", name: "Room 1" },
+        runId: result.runId,
+      })
+    }
+  })
+
+  test("rejects invalid global action params before emitting an event", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const pario = new Pario({
+      id: "global-action-test",
+      ontology: [Room],
+      actions: [createRoom],
+      ...runtimeDeps,
+    })
+
+    await expect(
+      pario.actions.request({
+        actionId: "createRoom",
+        params: { id: "bad", name: "Room 1" },
+      })
+    ).rejects.toBeInstanceOf(ActionValidationError)
+
+    const events = await pario.events.read({
+      types: ["action.requested"],
+    })
+    expect(events).toHaveLength(0)
+  })
+
+  test("rejects object-scoped actions without an object subject", async () => {
+    const pario = new Pario({
+      id: "global-action-test",
+      ontology: [Room],
+      actions: [setTemperature],
+      ...createTestRuntimeDeps(),
+    })
+
+    await expect(
+      pario.actions.request({
+        actionId: "setTemperature",
+        params: { target: 72 },
+      })
+    ).rejects.toThrow("Action 'setTemperature' requires an object subject.")
+  })
+
+  test("rejects global actions with an object subject", async () => {
+    const pario = new Pario({
+      id: "global-action-test",
+      ontology: [Room],
+      actions: [createRoom],
+      ...createTestRuntimeDeps(),
+    })
+
+    await expect(
+      pario.actions.request({
+        actionId: "createRoom",
+        subject: { kind: "object", objectTypeId: "Room", primaryId: "room:1" },
+        params: { id: "room:2", name: "Room 2" },
+      })
+    ).rejects.toThrow("Action 'createRoom' does not accept an object subject.")
   })
 })

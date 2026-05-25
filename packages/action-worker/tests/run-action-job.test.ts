@@ -26,6 +26,15 @@ const Device = defineObjectType({
   ],
 })
 
+const Sensor = defineObjectType({
+  id: "Sensor",
+  name: "Sensor",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", { required: true }),
+  ],
+})
+
 interface DeviceObjectSet {
   upsert(input: { properties: Record<string, unknown> }): Promise<unknown>
   get(id: string): Promise<{ properties: Record<string, unknown> } | null>
@@ -47,10 +56,13 @@ function deviceObjects(pario: TestPario): DeviceObjectSet {
   )
 }
 
-function createPario(actions: readonly ActionDefinition[]): TestPario {
+function createPario(
+  actions: readonly ActionDefinition[],
+  ontology: readonly unknown[] = [Device]
+): TestPario {
   return new ParioConstructor({
     id: "action-worker-tests",
-    ontology: [Device],
+    ontology,
     actions,
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
@@ -100,8 +112,7 @@ describe("runActionJob", () => {
       job: {
         id: "act_1",
         actionId: "setStatus",
-        objectTypeId: "Device",
-        primaryId: "device-1",
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
         params: { status: "ready" },
       },
     })
@@ -141,8 +152,7 @@ describe("runActionJob", () => {
       job: {
         id: "act_1",
         actionId: "failAfterWrite",
-        objectTypeId: "Device",
-        primaryId: "device-1",
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
         params: {},
       },
     })
@@ -181,8 +191,7 @@ describe("runActionJob", () => {
       job: {
         id: "act_1",
         actionId: "count",
-        objectTypeId: "Device",
-        primaryId: "device-1",
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
         params: {},
       },
     })
@@ -192,13 +201,79 @@ describe("runActionJob", () => {
       job: {
         id: "act_1",
         actionId: "count",
-        objectTypeId: "Device",
-        primaryId: "device-1",
+        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
         params: {},
       },
     })
 
     expect(invoked).toBe(1)
     expect("skipped" in duplicate).toBe(true)
+  })
+
+  test("runs global action handlers without loading a target", async () => {
+    const createDevice = defineAction("createDevice")
+      .params({ id: actionParam("string", { required: true }) })
+      .run(async ({ params, pario, signal }) => {
+        expect(signal).toBeInstanceOf(AbortSignal)
+        await pario.objects(Device).upsert({
+          properties: {
+            id: params.id,
+            name: "Created Device",
+            status: "created",
+          },
+        })
+      })
+
+    const pario = createPario([createDevice])
+    const result = await runActionJob({
+      runtime: createContext(pario),
+      job: {
+        id: "act_1",
+        actionId: "createDevice",
+        subject: { kind: "none" },
+        params: { id: "device-1" },
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    const run = await pario.storage.actionRuns!.getById({ projectId: pario.id, id: "act_1" })
+    expect(run?.subject).toEqual({ kind: "none" })
+
+    const created = await deviceObjects(pario).get("device-1")
+    expect(created?.properties.status).toBe("created")
+  })
+
+  test("rejects forged object subjects outside the action target hierarchy", async () => {
+    let invoked = 0
+    const setStatus = defineAction("setStatus")
+      .target(Device)
+      .params({})
+      .run(() => {
+        invoked += 1
+      })
+
+    const pario = createPario([setStatus], [Device, Sensor])
+    await pario.upsertObject("Sensor", {
+      id: "sensor-1",
+      name: "Sensor 1",
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(pario),
+      job: {
+        id: "act_1",
+        actionId: "setStatus",
+        subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
+        params: {},
+      },
+    })
+
+    expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error.message).toBe(
+        "[ParioActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
+      )
+    }
+    expect(invoked).toBe(0)
   })
 })

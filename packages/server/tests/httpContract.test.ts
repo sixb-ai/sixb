@@ -936,9 +936,12 @@ describe("ParioServer HTTP contract", () => {
         expect.objectContaining({
           type: "action.requested",
           payload: {
-            objectTypeId: "device",
-            primaryId: "fan-2",
             actionId: "setSpeed",
+            subject: {
+              kind: "object",
+              objectTypeId: "device",
+              primaryId: "fan-2",
+            },
             params: { speed: 950 },
             runId: requestActionBody.runId,
           },

@@ -11,8 +11,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       params: { amount: 50_000 },
       startedAt,
       metadata: {
@@ -36,8 +35,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       status: "succeeded",
       params: { amount: 50_000 },
       metadata: {
@@ -56,8 +54,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-123",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       params: {},
     })
 
@@ -66,8 +63,7 @@ describe("InMemoryActionRunStorage", () => {
         id: "act_1",
         projectId: "my-app",
         actionId: "sendQuote",
-        objectTypeId: "Opportunity",
-        primaryId: "opp-123",
+        subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
         params: {},
       })
     ).rejects.toBeInstanceOf(ActionRunError)
@@ -92,8 +88,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-1",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-1" },
       params: {},
       startedAt: new Date("2026-04-29T10:00:00.000Z"),
     })
@@ -112,8 +107,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_2",
       projectId: "my-app",
       actionId: "sendQuote",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-2",
+      subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-2" },
       params: {},
       startedAt: new Date("2026-04-29T11:00:00.000Z"),
     })
@@ -122,8 +116,7 @@ describe("InMemoryActionRunStorage", () => {
       id: "act_3",
       projectId: "my-app",
       actionId: "closeOpportunity",
-      objectTypeId: "Opportunity",
-      primaryId: "opp-3",
+      subject: { kind: "none" },
       params: {},
       startedAt: new Date("2026-04-29T12:00:00.000Z"),
     })

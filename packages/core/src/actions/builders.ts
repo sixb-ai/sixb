@@ -1,11 +1,13 @@
 import type { ObjectType, SchemaOrRef } from "../ontology"
 import type { QuantitativeTypeId } from "../ontology/units"
 import type {
+  ActionBuilder,
   ActionHandler,
   ActionParamConfig,
   ActionParamsConfig,
-  ActionTargetBuilder,
   ActionValidator,
+  GlobalActionHandler,
+  GlobalActionValidator,
 } from "./types"
 import { assertNonEmpty } from "./validation"
 
@@ -64,42 +66,78 @@ export function actionParam(schema: SchemaOrRef, options?: ActionParamOptions): 
 export function defineAction<const TId extends string>(
   id: TId,
   options?: ActionOptions
-): ActionTargetBuilder<TId> {
+): ActionBuilder<TId> {
   assertNonEmpty(id, "id")
 
-  return createActionBuilder(id, options) as unknown as ActionTargetBuilder<TId>
+  return createActionBuilder(id, options) as unknown as ActionBuilder<TId>
 }
 
 function createActionBuilder(id: string, options?: ActionOptions) {
-  return {
-    target(objectType: ObjectType) {
-      assertNonEmpty(objectType.id, "target id")
+  const builder = {
+    params(params: ActionParamsConfig) {
+      const validators: GlobalActionValidator<Record<string, unknown>>[] = []
 
-      return {
-        params(params: ActionParamsConfig) {
-          const validators: ActionValidator<ObjectType, Record<string, unknown>>[] = []
-
-          const builder = {
-            validate(validator: ActionValidator<ObjectType, Record<string, unknown>>) {
-              validators.push(validator)
-              return builder
-            },
-            run(handler: ActionHandler<ObjectType, Record<string, unknown>>) {
-              return {
-                kind: "action",
-                id,
-                target: objectType,
-                params,
-                validators,
-                handler,
-                description: options?.description,
-              }
-            },
+      const runBuilder = {
+        validate(validator: GlobalActionValidator<Record<string, unknown>>) {
+          validators.push(validator)
+          return runBuilder
+        },
+        run(handler: GlobalActionHandler<Record<string, unknown>>) {
+          return {
+            kind: "action",
+            id,
+            binding: { kind: "global" },
+            params,
+            validators,
+            handler,
+            description: options?.description,
           }
-
-          return builder
         },
       }
+
+      return runBuilder
+    },
+    on(objectType: ObjectType) {
+      assertNonEmpty(objectType.id, "target id")
+      return createObjectActionParamsBuilder(id, objectType, options)
+    },
+    target(objectType: ObjectType) {
+      return builder.on(objectType)
+    },
+  }
+
+  return builder
+}
+
+function createObjectActionParamsBuilder(
+  id: string,
+  objectType: ObjectType,
+  options?: ActionOptions
+) {
+  return {
+    params(params: ActionParamsConfig) {
+      const validators: ActionValidator<ObjectType, Record<string, unknown>>[] = []
+
+      const runBuilder = {
+        validate(validator: ActionValidator<ObjectType, Record<string, unknown>>) {
+          validators.push(validator)
+          return runBuilder
+        },
+        run(handler: ActionHandler<ObjectType, Record<string, unknown>>) {
+          return {
+            kind: "action",
+            id,
+            binding: { kind: "object", objectType },
+            target: objectType,
+            params,
+            validators,
+            handler,
+            description: options?.description,
+          }
+        },
+      }
+
+      return runBuilder
     },
   }
 }

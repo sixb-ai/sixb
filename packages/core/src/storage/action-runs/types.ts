@@ -1,3 +1,4 @@
+import type { ActionSubject } from "../../actions"
 import type { JsonValue } from "../../json"
 
 export type ActionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
@@ -12,8 +13,7 @@ export interface ActionRunRecord {
   readonly id: string
   readonly projectId: string
   readonly actionId: string
-  readonly objectTypeId: string
-  readonly primaryId: string
+  readonly subject: ActionSubject
   readonly status: ActionRunStatus
   readonly startedAt: Date
   readonly finishedAt?: Date
@@ -26,8 +26,7 @@ export interface StartActionRunInput {
   readonly id: string
   readonly projectId: string
   readonly actionId: string
-  readonly objectTypeId: string
-  readonly primaryId: string
+  readonly subject: ActionSubject
   readonly params: Readonly<Record<string, unknown>>
   readonly startedAt?: Date
   readonly metadata?: Readonly<Record<string, JsonValue>>
@@ -53,6 +52,7 @@ export type FinishActionRunInput =
 export interface ListActionRunsInput {
   readonly projectId: string
   readonly actionId?: string
+  readonly subject?: ActionSubject
   readonly objectTypeId?: string
   readonly primaryId?: string
   readonly statuses?: readonly ActionRunStatus[]
