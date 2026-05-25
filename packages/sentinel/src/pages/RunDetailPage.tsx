@@ -1,9 +1,10 @@
 import { getWorkflowRunOptions } from "@pario/client/hooks"
-import { Badge, Card, CardContent, CardTitle, EmptyState } from "@pario/ui/components"
+import { Badge, Button, Card, CardContent, CardTitle, EmptyState } from "@pario/ui/components"
 import { useQuery } from "@tanstack/react-query"
-import { GitBranch, Play } from "lucide-react"
+import { Check, Copy, GitBranch, Play } from "lucide-react"
 import type { ReactNode } from "react"
-import { Navigate, useParams } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { Link, Navigate, useParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { RunIOShape } from "../features/workflows/components/RunIOShape"
 import { RunNodeRow } from "../features/workflows/components/RunNodeRow"
@@ -12,6 +13,7 @@ import {
   formatDate,
   formatRunDuration,
   formatRunStartedDate,
+  runTimeLabel,
   type WorkflowRunDetail,
 } from "../features/workflows/utils/workflows"
 
@@ -38,12 +40,11 @@ export function RunDetailPage() {
 
   return (
     <PageFrame
-      eyebrow="Run"
-      title={run.id}
-      description={run.workflowId}
+      title={<RunDetailTitle run={run} />}
+      description={<RunDetailMeta run={run} nodeCount={nodes.length} />}
       backTo="/runs"
-      backLabel="Runs"
-      contentClassName="mx-auto max-w-5xl"
+      backLabel="Run history"
+      contentClassName="mx-auto max-w-5xl gap-3"
     >
       <section className="space-y-5">
         <RunHeaderStats run={run} />
@@ -78,6 +79,109 @@ export function RunDetailPage() {
       </section>
     </PageFrame>
   )
+}
+
+function RunDetailMeta({ run, nodeCount }: { run: WorkflowRunDetail; nodeCount: number }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+      <span>
+        <span className="tabular-nums text-foreground">{nodeCount}</span> recorded node
+        {nodeCount === 1 ? "" : "s"}
+      </span>
+      <MetaSeparator />
+      <span>{runTimeLabel(run)}</span>
+    </span>
+  )
+}
+
+function MetaSeparator() {
+  return (
+    <span aria-hidden className="text-muted-foreground/50">
+      ·
+    </span>
+  )
+}
+
+function RunDetailTitle({ run }: { run: WorkflowRunDetail }) {
+  return (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+      <Link
+        to={`/workflows/${run.workflowId}`}
+        className="min-w-0 truncate underline-offset-4 hover:underline"
+      >
+        {run.workflowId}
+      </Link>
+      <CopyRunIdButton runId={run.id} />
+    </span>
+  )
+}
+
+function CopyRunIdButton({ runId }: { runId: string }) {
+  const [copied, setCopied] = useState(false)
+  const label = copied ? "Copied" : shortRunId(runId)
+
+  useEffect(() => {
+    if (!copied) return
+
+    const timeout = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timeout)
+  }, [copied])
+
+  const onCopy = async () => {
+    const copiedToClipboard = await copyText(runId)
+    if (copiedToClipboard) {
+      setCopied(true)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      onClick={onCopy}
+      title={runId}
+      aria-label={`Copy run id ${runId}`}
+      className="h-7 max-w-full rounded-md border-border bg-card px-2 text-xs font-medium text-muted-foreground shadow-none hover:text-foreground"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-600" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+      <span className="min-w-0 truncate font-mono">{label}</span>
+    </Button>
+  )
+}
+
+function shortRunId(runId: string): string {
+  if (runId.length <= 24) return runId
+  return `${runId.slice(0, 12)}...${runId.slice(-8)}`
+}
+
+async function copyText(value: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(value)
+    return true
+  } catch {
+    return fallbackCopyText(value)
+  }
+}
+
+function fallbackCopyText(value: string): boolean {
+  const textarea = document.createElement("textarea")
+  textarea.value = value
+  textarea.setAttribute("readonly", "")
+  textarea.style.position = "fixed"
+  textarea.style.opacity = "0"
+  document.body.append(textarea)
+  textarea.select()
+
+  try {
+    return document.execCommand("copy")
+  } finally {
+    textarea.remove()
+  }
 }
 
 function RunHeaderStats({ run }: { run: WorkflowRunDetail }) {

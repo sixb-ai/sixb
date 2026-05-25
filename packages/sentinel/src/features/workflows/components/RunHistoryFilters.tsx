@@ -6,7 +6,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@pario/ui/components"
-import { ListFilter } from "lucide-react"
+import { ListFilter, X } from "lucide-react"
 import {
   allWorkflowRunStatuses,
   readStatusFilter,
@@ -33,16 +33,25 @@ export function RunHistoryFilters({
   const selectedWorkflowIsKnown =
     workflowId === "all" || workflows.some((workflow) => workflow.id === workflowId)
   const filtered = workflowId !== "all" || status !== "all"
+  const activeFilterCount = Number(workflowId !== "all") + Number(status !== "all")
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-        <ListFilter className="h-4 w-4 text-muted-foreground" />
-        Filters
+    <div className="flex flex-col gap-3 py-1 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+          <ListFilter className="h-4 w-4" />
+        </span>
+        <span className="text-sm font-medium text-foreground">Filters</span>
+        {filtered ? (
+          <span className="rounded-md border border-border bg-muted/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+            {activeFilterCount} active
+          </span>
+        ) : null}
       </div>
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,16rem)_12rem_auto]">
+
+      <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-[minmax(12rem,18rem)_12rem_auto]">
         <Select value={workflowId} onValueChange={onWorkflowIdChange}>
-          <SelectTrigger className="h-8 w-full bg-background text-sm">
+          <SelectTrigger size="sm" className="w-full min-w-0 bg-card text-sm">
             <SelectValue placeholder="All workflows" />
           </SelectTrigger>
           <SelectContent>
@@ -59,7 +68,7 @@ export function RunHistoryFilters({
         </Select>
 
         <Select value={status} onValueChange={(value) => onStatusChange(readStatusFilter(value))}>
-          <SelectTrigger className="h-8 w-full bg-background text-sm">
+          <SelectTrigger size="sm" className="w-full bg-card text-sm">
             <SelectValue placeholder="All statuses" />
           </SelectTrigger>
           <SelectContent>
@@ -78,9 +87,10 @@ export function RunHistoryFilters({
             variant="ghost"
             size="sm"
             onClick={onClear}
-            className="justify-start sm:justify-center"
+            className="h-8 justify-start px-2 text-muted-foreground hover:text-foreground sm:justify-center sm:px-3"
           >
-            Clear
+            <X className="h-3.5 w-3.5" />
+            <span>Clear</span>
           </Button>
         ) : null}
       </div>
