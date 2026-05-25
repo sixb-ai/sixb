@@ -22,12 +22,6 @@ interface BuiltInUiHotData {
 
 if (import.meta.hot) {
   import.meta.hot.accept()
-  import.meta.hot.accept("./App", () => {
-    renderApp()
-  })
-  import.meta.hot.on("bun:afterUpdate", () => {
-    renderApp()
-  })
   import.meta.hot.dispose(() => {
     browserClient?.dispose()
   })

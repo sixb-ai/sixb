@@ -85,7 +85,10 @@ async function startDevelopmentServer(
   return Bun.serve({
     port: input.port,
     hostname: input.host,
-    development: true,
+    development: {
+      hmr: true,
+      console: true,
+    },
     routes: {
       ...reservedParioRoutes(),
       "/__pario/runtime.json": getHeadRoute((request) => runtimeConfigResponse(request, input)),
