@@ -1,11 +1,14 @@
 import {
   type DatasetDefinition,
-  type DatasetRow,
-  getDatasetRowValidationError,
   ObjectNotFoundError,
   type ObjectProjectionDefinition,
   objectService,
 } from "@pario/core"
+import {
+  buildObjectProjectionPlan,
+  type ProjectedObjectRow,
+  projectObjectRow,
+} from "./object-projection-plan"
 import type {
   ProjectionExecutionResult,
   ProjectionProgressReporter,
@@ -29,11 +32,6 @@ interface RunObjectProjectionInput {
   readonly onProgress?: ProjectionProgressReporter
 }
 
-interface CollectedObjectRow {
-  readonly properties: Record<string, unknown>
-  readonly primaryValue: unknown
-}
-
 interface ForeignKeyLinkItem {
   readonly objectTypeId: string
   readonly sourceId: string
@@ -50,7 +48,13 @@ export async function runObjectProjection(
   const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
   const counters = createZeroCounters()
   const primaryPropertyId = runtime.ontology.getPrimaryPropertyId(projection.objectTypeId)
-  const batch: CollectedObjectRow[] = []
+  const projectionPlan = buildObjectProjectionPlan({
+    ontology: runtime.ontology,
+    projection,
+    dataset,
+    primaryPropertyId,
+  })
+  const batch: ProjectedObjectRow[] = []
   let firstErrorMessage: string | undefined
 
   const rememberError = (message: string): void => {
@@ -69,7 +73,7 @@ export async function runObjectProjection(
       rows.map((row) => ({ properties: row.properties }))
     )
 
-    const succeededRows: CollectedObjectRow[] = []
+    const succeededRows: ProjectedObjectRow[] = []
     for (let index = 0; index < rows.length; index += 1) {
       const result = batchResults[index]
       const row = rows[index]!
@@ -103,21 +107,19 @@ export async function runObjectProjection(
     throwIfAborted(signal)
     counters.rowsProcessed += 1
 
-    const validationError = getDatasetRowValidationError(row, dataset)
-    if (validationError) {
+    const projected = projectObjectRow(projectionPlan, row)
+    if (!projected.ok) {
       counters.rowsSkipped += 1
-      rememberError(validationError)
+      rememberError(projected.errorMessage)
       continue
     }
 
-    const properties = collectProperties(projection, row)
-    const primaryValue = properties[primaryPropertyId]
-    if (isBlank(primaryValue)) {
+    if (isBlank(projected.row.primaryValue)) {
       counters.rowsSkipped += 1
       continue
     }
 
-    batch.push({ properties, primaryValue })
+    batch.push(projected.row)
     if (batch.length >= batchSize) {
       await flushBatch()
     }
@@ -134,24 +136,10 @@ export async function runObjectProjection(
   }
 }
 
-function collectProperties(
-  projection: ObjectProjectionDefinition,
-  row: DatasetRow
-): Record<string, unknown> {
-  const properties: Record<string, unknown> = {}
-  for (const [propertyId, columnName] of Object.entries(projection.properties)) {
-    const value = row[columnName]
-    if (value !== null && value !== undefined) {
-      properties[propertyId] = value
-    }
-  }
-  return properties
-}
-
 async function upsertForeignKeyLinks(input: {
   readonly runtime: ProjectionWorkerContext
   readonly projection: ObjectProjectionDefinition
-  readonly rows: readonly CollectedObjectRow[]
+  readonly rows: readonly ProjectedObjectRow[]
   readonly counters: {
     linksUpserted: number
   }

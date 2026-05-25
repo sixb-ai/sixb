@@ -7,12 +7,14 @@ import {
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineValueType,
   fromForeignKey,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  integerEnum,
   type LakeStorage,
   link,
   Pario,
@@ -20,6 +22,7 @@ import {
   type ProjectionRunStorage,
   prop,
   stringEnum,
+  valueTypeRef,
 } from "@pario/core"
 import { type ProjectionWorkerContext, ProjectionWorkerError, runProjectionJob } from "../src"
 
@@ -456,6 +459,182 @@ describe("runProjectionJob", () => {
     expect(run?.rowsSkipped).toBe(1)
     expect(run?.objectsUpserted).toBe(0)
     expect(run?.errorMessage).toContain("must be one of")
+  })
+
+  test("normalizes int64 strings mapped to integer-like object properties", async () => {
+    const ReadingCount = defineValueType({
+      id: "ReadingCount",
+      name: "Reading Count",
+      schema: "integer",
+    })
+    const Device = defineObjectType({
+      id: "Device",
+      name: "Device",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("count", "integer"),
+        prop("level", integerEnum([1, 2, 3])),
+        prop("readingCount", valueTypeRef(ReadingCount)),
+      ],
+    })
+    const devicesDataset = defineDataset("canonical.integer-devices", {
+      schema: [
+        col("device_id", "string"),
+        col("device_count", "int64"),
+        col("device_level", "int64"),
+        col("reading_count", "int64"),
+      ],
+    })
+    const deviceProjection = defineProjection("integer-device-proj", Device)
+      .fromDataset(devicesDataset)
+      .properties({
+        id: "device_id",
+        count: "device_count",
+        level: "device_level",
+        readingCount: "reading_count",
+      })
+    const deps = createDeps()
+    const pario = new Pario({
+      id: "projection-worker-tests",
+      ontology: [Device],
+      ...deps,
+      datasets: [devicesDataset],
+      projections: [deviceProjection],
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, devicesDataset, [
+      {
+        device_id: "d1",
+        device_count: "100",
+        device_level: "2",
+        reading_count: "7",
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-int64-string",
+        projectionId: "integer-device-proj",
+        projectionKind: "object",
+        datasetId: devicesDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.objectsUpserted).toBe(1)
+    const device = await deps.storage.objects.getByPrimaryId({
+      projectId: pario.id,
+      objectTypeId: "Device",
+      primaryId: "d1",
+    })
+    expect(device?.properties.count).toBe(100)
+    expect(device?.properties.level).toBe(2)
+    expect(device?.properties.readingCount).toBe(7)
+  })
+
+  test("fails unsafe int64 strings mapped to integer object properties", async () => {
+    const Device = defineObjectType({
+      id: "Device",
+      name: "Device",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("count", "integer"),
+      ],
+    })
+    const devicesDataset = defineDataset("canonical.unsafe-integer-devices", {
+      schema: [col("device_id", "string"), col("device_count", "int64")],
+    })
+    const deviceProjection = defineProjection("unsafe-integer-device-proj", Device)
+      .fromDataset(devicesDataset)
+      .properties({ id: "device_id", count: "device_count" })
+    const deps = createDeps()
+    const pario = new Pario({
+      id: "projection-worker-tests",
+      ontology: [Device],
+      ...deps,
+      datasets: [devicesDataset],
+      projections: [deviceProjection],
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, devicesDataset, [
+      { device_id: "d1", device_count: "9007199254740992" },
+    ])
+
+    await expect(
+      runProjectionJob({
+        runtime: createRuntime(pario),
+        job: {
+          id: "projrun-unsafe-int64-string",
+          projectionId: "unsafe-integer-device-proj",
+          projectionKind: "object",
+          datasetId: devicesDataset.id,
+          versionId: version.versionId,
+        },
+      })
+    ).rejects.toThrow("cannot safely coerce")
+
+    const run = await deps.storage.projectionRuns.getById({
+      projectId: pario.id,
+      id: "projrun-unsafe-int64-string",
+    })
+    expect(run?.status).toBe("failed")
+    expect(run?.rowsProcessed).toBe(1)
+    expect(run?.rowsSkipped).toBe(1)
+    expect(run?.objectsUpserted).toBe(0)
+    expect(run?.errorMessage).toContain("cannot safely coerce")
+  })
+
+  test("materializes fileRef object properties from fileRef dataset columns", async () => {
+    const Document = defineObjectType({
+      id: "Document",
+      name: "Document",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("attachment", "fileRef"),
+      ],
+    })
+    const documentsDataset = defineDataset("canonical.documents", {
+      schema: [col("document_id", "string"), col("attachment", "fileRef")],
+    })
+    const documentProjection = defineProjection("document-proj", Document)
+      .fromDataset(documentsDataset)
+      .properties({ id: "document_id", attachment: "attachment" })
+    const deps = createDeps()
+    const pario = new Pario({
+      id: "projection-worker-tests",
+      ontology: [Document],
+      ...deps,
+      datasets: [documentsDataset],
+      projections: [documentProjection],
+    })
+    const attachment = {
+      blobId: "blob_document",
+      digest: "sha256:document",
+      sizeBytes: 8,
+      fileName: "document.pdf",
+      mediaType: "application/pdf",
+    } as const
+    const version = await commitDatasetVersion(deps.lakeStorage, documentsDataset, [
+      { document_id: "doc1", attachment },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-fileref",
+        projectionId: "document-proj",
+        projectionKind: "object",
+        datasetId: documentsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.objectsUpserted).toBe(1)
+    const document = await deps.storage.objects.getByPrimaryId({
+      projectId: pario.id,
+      objectTypeId: "Document",
+      primaryId: "doc1",
+    })
+    expect(document?.properties.attachment).toEqual(attachment)
   })
 
   test("marks the run failed before reading rows when the committed schema mismatches", async () => {
