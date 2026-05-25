@@ -14,7 +14,7 @@ export function PageFrame({
   children,
 }: {
   eyebrow?: string
-  title: string
+  title: ReactNode
   description?: ReactNode
   backTo?: string
   backLabel?: string

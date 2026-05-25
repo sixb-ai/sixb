@@ -16,6 +16,7 @@ import {
   type WorkflowRunSummary,
 } from "../utils/workflows"
 import { RunListItem } from "./RunListItem"
+import { useRunHistoryNavigation } from "./runHistoryNavigation"
 import { StatusBadge } from "./StatusBadge"
 
 type RunHistoryTableVariant = "framed" | "plain"
@@ -70,15 +71,26 @@ export function RunHistoryTable({
 }
 
 function RunHistoryCard({ run }: { run: WorkflowRunSummary }) {
+  const { workflowPath, onContainerClick, onContainerKeyDown } = useRunHistoryNavigation(run)
+
   return (
-    <Link
-      to={`/runs/${run.id}`}
-      className="block rounded-lg border border-border bg-background/60 p-4 transition-colors hover:bg-muted/40"
+    <article
+      role="link"
+      tabIndex={0}
+      aria-label={`Open run ${run.id}`}
+      onClick={onContainerClick}
+      onKeyDown={onContainerKeyDown}
+      className="block cursor-pointer rounded-lg border border-border bg-background/60 p-4 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-mono text-xs text-muted-foreground">{run.id}</p>
-          <p className="mt-1 truncate text-sm font-medium text-foreground">{run.workflowId}</p>
+          <Link
+            to={workflowPath}
+            className="mt-1 block truncate text-sm font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            {run.workflowId}
+          </Link>
         </div>
         <StatusBadge status={run.status} />
       </div>
@@ -89,7 +101,7 @@ function RunHistoryCard({ run }: { run: WorkflowRunSummary }) {
         <RunMetric label="Status" value={run.status} />
       </div>
       {run.error ? <p className="mt-3 break-words text-xs text-destructive">{run.error}</p> : null}
-    </Link>
+    </article>
   )
 }
 
@@ -103,17 +115,23 @@ function RunMetric({ label, value }: { label: string; value: string }) {
 }
 
 function RunHistoryTableRow({ run }: { run: WorkflowRunSummary }) {
+  const { runPath, workflowPath, onContainerClick } = useRunHistoryNavigation(run)
+
   return (
-    <TableRow>
+    <TableRow
+      onClick={onContainerClick}
+      className="cursor-pointer hover:bg-muted/70"
+      aria-label={`Open run ${run.id}`}
+    >
       <TableCell className="min-w-[15rem]">
         <Link
-          to={`/runs/${run.id}`}
+          to={runPath}
           className="block truncate font-mono text-xs font-medium text-foreground underline-offset-4 hover:underline"
         >
           {run.id}
         </Link>
         <Link
-          to={`/workflows/${run.workflowId}`}
+          to={workflowPath}
           className="mt-1 block truncate text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
         >
           {run.workflowId}
@@ -140,7 +158,7 @@ function RunHistoryTableRow({ run }: { run: WorkflowRunSummary }) {
       </TableCell>
       <TableCell>
         <Button variant="ghost" size="icon-sm" asChild aria-label={`Open run ${run.id}`}>
-          <Link to={`/runs/${run.id}`}>
+          <Link to={runPath}>
             <ArrowRight />
           </Link>
         </Button>
