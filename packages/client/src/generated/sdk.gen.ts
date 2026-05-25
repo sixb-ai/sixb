@@ -9,6 +9,9 @@ import type {
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
+  GetActionData,
+  GetActionErrors,
+  GetActionResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
   GetConnectorData,
@@ -57,6 +60,8 @@ import type {
   GetWorkflowRunData,
   GetWorkflowRunErrors,
   GetWorkflowRunResponses,
+  ListActionsData,
+  ListActionsResponses,
   ListAuthInvitationsData,
   ListAuthInvitationsErrors,
   ListAuthInvitationsResponses,
@@ -590,14 +595,36 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Request an action on an object
+ * List registered actions
+ */
+export const listActions = <ThrowOnError extends boolean = false>(
+  options?: Options<ListActionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListActionsResponses, unknown, ThrowOnError>({
+    url: "/api/actions",
+    ...options,
+  })
+
+/**
+ * Get action metadata
+ */
+export const getAction = <ThrowOnError extends boolean = false>(
+  options: Options<GetActionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetActionResponses, GetActionErrors, ThrowOnError>({
+    url: "/api/actions/{actionId}",
+    ...options,
+  })
+
+/**
+ * Request an action
  */
 export const requestAction = <ThrowOnError extends boolean = false>(
   options: Options<RequestActionData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestActionResponses, RequestActionErrors, ThrowOnError>({
     security: [{ name: "x-pario-csrf", type: "apiKey" }],
-    url: "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}",
+    url: "/api/actions/{actionId}",
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -179,7 +179,7 @@ export function createParioApi(server: ParioServer) {
           { name: "Rules", description: "Rule definitions and active states" },
           { name: "Projections", description: "Projection definitions" },
           { name: "Objects", description: "Twin objects and state" },
-          { name: "Actions", description: "Object action requests" },
+          { name: "Actions", description: "Global and object action requests" },
           { name: "Links", description: "Object relationship links" },
           { name: "Telemetry", description: "Telemetry history and appends" },
           { name: "Events", description: "Domain event stream" },

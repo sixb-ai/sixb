@@ -2426,19 +2426,112 @@ export type UpsertObjectResponses = {
 
 export type UpsertObjectResponse = UpsertObjectResponses[keyof UpsertObjectResponses]
 
-export type RequestActionData = {
-  body: {
-    params?: {
-      [key: string]: unknown
-    }
-  }
+export type ListActionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/actions"
+}
+
+export type ListActionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: Array<{
+    id: string
+    name: string
+    description?: string
+    binding:
+      | {
+          kind: "global"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+        }
+    params: Array<{
+      id: string
+      name: string
+      description?: string
+      required?: boolean
+      semanticType?: string
+      schema?: unknown
+    }>
+  }>
+}
+
+export type ListActionsResponse = ListActionsResponses[keyof ListActionsResponses]
+
+export type GetActionData = {
+  body?: never
   path: {
-    objectTypeId: string
-    objectId: string
     actionId: string
   }
   query?: never
-  url: "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}"
+  url: "/api/actions/{actionId}"
+}
+
+export type GetActionErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetActionError = GetActionErrors[keyof GetActionErrors]
+
+export type GetActionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    name: string
+    description?: string
+    binding:
+      | {
+          kind: "global"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+        }
+    params: Array<{
+      id: string
+      name: string
+      description?: string
+      required?: boolean
+      semanticType?: string
+      schema?: unknown
+    }>
+  }
+}
+
+export type GetActionResponse = GetActionResponses[keyof GetActionResponses]
+
+export type RequestActionData = {
+  body: {
+    subject?:
+      | {
+          kind: "none"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+          primaryId: string
+        }
+    params?: {
+      [key: string]: unknown
+    }
+    runId?: string
+  }
+  path: {
+    actionId: string
+  }
+  query?: never
+  url: "/api/actions/{actionId}"
 }
 
 export type RequestActionErrors = {

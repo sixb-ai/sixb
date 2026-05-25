@@ -67,7 +67,7 @@
     },
     {
       "name": "Actions",
-      "description": "Object action requests"
+      "description": "Global and object action requests"
     },
     {
       "name": "Links",
@@ -7024,9 +7024,214 @@
         }
       }
     },
-    "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}": {
+    "/api/actions": {
+      "get": {
+        "summary": "List registered actions",
+        "tags": ["Actions"],
+        "operationId": "listActions",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "binding": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["global"]
+                              }
+                            },
+                            "required": ["kind"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["object"]
+                              },
+                              "objectTypeId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["kind", "objectTypeId"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "params": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "required": {
+                              "type": "boolean"
+                            },
+                            "semanticType": {
+                              "type": "string"
+                            },
+                            "schema": {}
+                          },
+                          "required": ["id", "name"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["id", "name", "binding", "params"],
+                    "additionalProperties": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/actions/{actionId}": {
+      "get": {
+        "summary": "Get action metadata",
+        "tags": ["Actions"],
+        "operationId": "getAction",
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "binding": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["global"]
+                            }
+                          },
+                          "required": ["kind"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["object"]
+                            },
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["kind", "objectTypeId"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "params": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "required": {
+                            "type": "boolean"
+                          },
+                          "semanticType": {
+                            "type": "string"
+                          },
+                          "schema": {}
+                        },
+                        "required": ["id", "name"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["id", "name", "binding", "params"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
-        "summary": "Request an action on an object",
+        "summary": "Request an action",
         "tags": ["Actions"],
         "operationId": "requestAction",
         "security": [
@@ -7035,24 +7240,6 @@
           }
         ],
         "parameters": [
-          {
-            "name": "objectTypeId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "objectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
           {
             "name": "actionId",
             "in": "path",
@@ -7070,9 +7257,47 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -7082,9 +7307,47 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
@@ -7094,9 +7357,47 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}
+                  },
+                  "runId": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "additionalProperties": false
