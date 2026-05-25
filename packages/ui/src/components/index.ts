@@ -2,7 +2,6 @@
 
 // Pario data-viz primitives
 export { MiniSparkline } from "./charts/MiniSparkline"
-// Pario shadcn-composed components
 export {
   CollectionCardButton,
   CollectionCardGrid,
@@ -26,6 +25,8 @@ export {
   CardTitle,
 } from "./ui/card"
 export { Checkbox } from "./ui/checkbox"
+// Pario shadcn-composed components
+export { Combobox, type ComboboxOption } from "./ui/combobox"
 export {
   Command,
   CommandDialog,
@@ -68,6 +69,12 @@ export {
 } from "./ui/dropdown-menu"
 export { Input } from "./ui/input"
 export { Label } from "./ui/label"
+export {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
+} from "./ui/popover"
 export { Progress } from "./ui/progress"
 export { ScrollArea, ScrollBar } from "./ui/scroll-area"
 export {
