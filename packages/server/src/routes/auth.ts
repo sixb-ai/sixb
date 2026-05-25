@@ -30,6 +30,7 @@ import {
   AuthSignOutResponseSchema,
   CreateAuthInvitationBodySchema,
   CreateAuthInvitationResponseSchema,
+  GetAuthInvitationOptionsResponseSchema,
   ListAuthInvitationsQuerySchema,
   ListAuthInvitationsResponseSchema,
   RevokeAuthInvitationParamsSchema,
@@ -211,6 +212,29 @@ export function registerAuthRoutes(
           tags: ["Auth"],
           operationId: "createAuthInvitation",
           security: PARIO_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/invitation-options",
+      async ({ request }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          return jsonResponse(await pario.auth.getInvitationOptions(request, authOptions), 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        response: {
+          200: GetAuthInvitationOptionsResponseSchema,
+          401: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get auth invitation options",
+          tags: ["Auth"],
+          operationId: "getAuthInvitationOptions",
         },
       }
     )

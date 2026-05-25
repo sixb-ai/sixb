@@ -18,6 +18,30 @@ export const AuthInvitationDeliverySchema = z.object({
   status: z.enum(["sent", "skipped", "rate_limited", "not_supported"]),
 })
 
+export const AuthInvitationGroupOptionSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  description: z.string().optional(),
+})
+
+export const AuthCreateInvitationCapabilitySchema = z.union([
+  z.object({
+    state: z.literal("enabled"),
+  }),
+  z.object({
+    state: z.literal("disabled"),
+    reason: z.enum(["missing_invite_policy", "invitation_delivery_not_supported"]),
+  }),
+])
+
+export const GetAuthInvitationOptionsResponseSchema = z.object({
+  groups: z.array(AuthInvitationGroupOptionSchema),
+  canInviteWithoutGroups: z.boolean(),
+  capabilities: z.object({
+    createInvitation: AuthCreateInvitationCapabilitySchema,
+  }),
+})
+
 export const CreateAuthInvitationBodySchema = z.object({
   email: z.string().min(1),
   groupIds: z.array(z.string().min(1)).optional(),

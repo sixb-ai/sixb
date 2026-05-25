@@ -61,7 +61,9 @@ export interface InvitationDeliveryInput {
   readonly now?: Date
 }
 
-export type InviteDeliveryStatus = "sent" | "skipped" | "rate_limited" | "not_supported"
+export type AuthEmailDeliveryStatus = "sent" | "skipped" | "rate_limited"
+
+export type InviteDeliveryStatus = AuthEmailDeliveryStatus | "not_supported"
 
 export interface InviteDeliveryResult {
   readonly status: InviteDeliveryStatus
@@ -82,11 +84,17 @@ export interface MagicLinkRequestInput {
   readonly now?: Date
 }
 
-export type MagicLinkRequestStatus = Exclude<InviteDeliveryStatus, "not_supported">
+export type MagicLinkRequestStatus = AuthEmailDeliveryStatus
 
 export interface MagicLinkRequestResult {
   readonly status: MagicLinkRequestStatus
 }
+
+export type AuthInvitationRecipientInput = InvitationRecipientInput
+
+export type AuthInvitationRecipientStatus = InvitationRecipientStatus
+
+export type AuthInvitationRecipientResult = InvitationRecipientResult
 
 export type MagicLinkInvitationRecipientInput = InvitationRecipientInput
 
@@ -177,6 +185,27 @@ export interface ListInvitationsResult {
   readonly invitations: readonly InvitationRecord[]
   readonly hasMore: boolean
   readonly total: number
+}
+
+export interface InvitationGroupOption {
+  readonly id: string
+  readonly label?: string
+  readonly description?: string
+}
+
+export type CreateInvitationCapability =
+  | { readonly state: "enabled" }
+  | {
+      readonly state: "disabled"
+      readonly reason: "missing_invite_policy" | "invitation_delivery_not_supported"
+    }
+
+export interface GetInvitationOptionsResult {
+  readonly groups: readonly InvitationGroupOption[]
+  readonly canInviteWithoutGroups: boolean
+  readonly capabilities: {
+    readonly createInvitation: CreateInvitationCapability
+  }
 }
 
 export type AuthSessionResolutionOptions = AuthSessionAudienceOptions

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { magicLink, type SendMagicLinkInput } from "@pario/auth-magic-link"
+import { oidc, type SendOidcInvitationInput } from "@pario/auth-oidc"
 import {
+  type AuthStrategy,
   createSessionCredential,
   defineGroup,
   defineInvitePolicy,
@@ -10,8 +12,10 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type InvitePolicyDefinition,
   type OntologySource,
   Pario,
+  type ParioAuthConfig,
   prop,
 } from "@pario/core"
 import { createParioApi, ParioServer } from "../src/server"
@@ -41,9 +45,18 @@ function createSender() {
   }
 }
 
-function createRuntime() {
+function createRuntime(
+  options: {
+    readonly auth?: ParioAuthConfig
+    readonly invitePolicies?: readonly InvitePolicyDefinition[]
+  } = {}
+) {
   const storage = new InMemoryStorage()
   const { messages, sendMagicLink } = createSender()
+  const defaultAuth = magicLink({
+    allowedDomains: ["acme.com"],
+    sendMagicLink,
+  })
   const pario = new Pario<readonly OntologySource[]>({
     id: projectId,
     ontology: [Device],
@@ -53,17 +66,14 @@ function createRuntime() {
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [securityAdmins, commercial, finance],
-    invitePolicies: [
+    invitePolicies: options.invitePolicies ?? [
       defineInvitePolicy("default-invites", {
         grantedTo: [securityAdmins],
         canInviteTo: [commercial],
         canInviteWithoutGroups: true,
       }),
     ],
-    auth: magicLink({
-      allowedDomains: ["acme.com"],
-      sendMagicLink,
-    }),
+    auth: options.auth ?? defaultAuth,
   })
 
   return {
@@ -224,6 +234,308 @@ describe("auth invitation routes", () => {
       invitation: {
         email: "new@acme.com",
         groupIds: ["commercial"],
+      },
+    })
+  })
+
+  test("creates OIDC invitations without magic-link delivery", async () => {
+    const { app, storage } = createRuntime({
+      auth: oidc({
+        issuer: "https://idp.example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        allowedDomains: ["acme.com"],
+      }),
+    })
+    const admin = await seedAdminSession(storage)
+
+    const options = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "oidc-user@acme.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+
+    expect(options.status).toBe(200)
+    expect(await options.json()).toMatchObject({
+      capabilities: {
+        createInvitation: { state: "enabled" },
+      },
+    })
+    expect(response.status).toBe(201)
+    expect(await response.json()).toMatchObject({
+      invitation: {
+        email: "oidc-user@acme.com",
+        groupIds: ["commercial"],
+        status: "pending",
+      },
+      delivery: {
+        status: "not_supported",
+      },
+    })
+  })
+
+  test("sends OIDC invitation emails when the strategy configures a sender", async () => {
+    const messages: SendOidcInvitationInput[] = []
+    const { app, storage } = createRuntime({
+      auth: oidc({
+        issuer: "https://idp.example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        allowedDomains: ["acme.com"],
+        publicUrl: "https://app.example.com",
+        async sendInvitation(message) {
+          messages.push(message)
+        },
+      }),
+    })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "oidc-user@acme.com",
+          groupIds: ["commercial"],
+          returnTo: "http://atlas.localhost/objects",
+        }),
+      })
+    )
+    const signInUrl = new URL(messages[0]?.url ?? "")
+
+    expect(response.status).toBe(201)
+    expect(await response.json()).toMatchObject({
+      invitation: {
+        email: "oidc-user@acme.com",
+        groupIds: ["commercial"],
+        status: "pending",
+      },
+      delivery: {
+        status: "sent",
+      },
+    })
+    expect(messages).toHaveLength(1)
+    expect(signInUrl.origin).toBe("https://app.example.com")
+    expect(signInUrl.pathname).toBe("/auth/sign-in")
+    expect(signInUrl.searchParams.get("returnTo")).toBe("http://atlas.localhost/objects")
+  })
+
+  test("revokes OIDC invitations when invitation email sending fails", async () => {
+    const { app, storage } = createRuntime({
+      auth: oidc({
+        issuer: "https://idp.example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        allowedDomains: ["acme.com"],
+        async sendInvitation() {
+          throw new Error("Email provider unavailable")
+        },
+      }),
+    })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "oidc-user@acme.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+
+    expect(response.status).toBe(500)
+    expect(await response.json()).toEqual({ error: "Email provider unavailable" })
+    await expect(
+      storage.auth.invitations.getActiveByEmail({
+        projectId,
+        email: "oidc-user@acme.com",
+        now: new Date(),
+      })
+    ).resolves.toBeNull()
+  })
+
+  test("rejects OIDC invitations outside the allowed domains", async () => {
+    const { app, storage } = createRuntime({
+      auth: oidc({
+        issuer: "https://idp.example",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        allowedDomains: ["acme.com"],
+      }),
+    })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "oidc-user@example.com",
+          groupIds: ["commercial"],
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error:
+        "[Pario] Invitation email 'oidc-user@example.com' is not allowed by the active auth strategy.",
+    })
+    await expect(storage.auth.invitations.list({ projectId })).resolves.toMatchObject({ total: 0 })
+  })
+
+  test("returns scoped invitation options for the current user", async () => {
+    const { app, storage } = createRuntime()
+    const admin = await seedAdminSession(storage)
+
+    const unauthenticated = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options")
+    )
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+
+    expect(unauthenticated.status).toBe(401)
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      groups: [{ id: "commercial" }],
+      canInviteWithoutGroups: true,
+      capabilities: {
+        createInvitation: { state: "enabled" },
+      },
+    })
+  })
+
+  test("merges invitation options from applicable invite policies", async () => {
+    const { app, storage } = createRuntime({
+      invitePolicies: [
+        defineInvitePolicy("commercial-invites", {
+          grantedTo: [securityAdmins],
+          canInviteTo: [commercial],
+        }),
+        defineInvitePolicy("finance-invites", {
+          grantedTo: [securityAdmins],
+          canInviteTo: [finance],
+          canInviteWithoutGroups: true,
+        }),
+      ],
+    })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      groups: [{ id: "commercial" }, { id: "finance" }],
+      canInviteWithoutGroups: true,
+      capabilities: {
+        createInvitation: { state: "enabled" },
+      },
+    })
+  })
+
+  test("returns disabled invitation options when the user has no invite policy", async () => {
+    const { app, storage } = createRuntime({ invitePolicies: [] })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      groups: [],
+      canInviteWithoutGroups: false,
+      capabilities: {
+        createInvitation: {
+          state: "disabled",
+          reason: "missing_invite_policy",
+        },
+      },
+    })
+  })
+
+  test("returns disabled invitation options when delivery is unsupported", async () => {
+    const devAuth: AuthStrategy = { id: "dev", kind: "dev" }
+    const { app, storage } = createRuntime({ auth: devAuth })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/auth/invitation-options", {
+        headers: { cookie: admin.cookie },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      groups: [{ id: "commercial" }],
+      canInviteWithoutGroups: true,
+      capabilities: {
+        createInvitation: {
+          state: "disabled",
+          reason: "invitation_delivery_not_supported",
+        },
+      },
+    })
+  })
+
+  test("returns invitation options on the browser origin audience", async () => {
+    const { app, storage } = createRuntime()
+    const admin = await seedAdminSession(storage, { audience: "app" })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitation-options", {
+        headers: {
+          origin: "http://app.localhost",
+          cookie: admin.cookie,
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      groups: [{ id: "commercial" }],
+      capabilities: {
+        createInvitation: { state: "enabled" },
       },
     })
   })

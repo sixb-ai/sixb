@@ -25,6 +25,7 @@ import {
   LayoutGrid,
   ListChecks,
   RefreshCw,
+  Settings,
   Workflow,
 } from "lucide-react"
 
@@ -36,6 +37,7 @@ export type ViewMode =
   | "pipelines"
   | "rules"
   | "ontology"
+  | "settings"
 
 interface NavItem {
   id: ViewMode
@@ -51,6 +53,7 @@ const projectNavItems: NavItem[] = [
   { id: "ontology", label: "Ontology", Icon: LayoutGrid },
   { id: "home", label: "Objects", Icon: Box },
   { id: "rules", label: "Rules", Icon: ListChecks },
+  { id: "settings", label: "Settings", Icon: Settings },
 ]
 
 function apiDocsUrl(): string {

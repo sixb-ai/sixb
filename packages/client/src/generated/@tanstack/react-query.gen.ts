@@ -13,6 +13,7 @@ import {
   appendTelemetry,
   createAuthInvitation,
   getAction,
+  getAuthInvitationOptions,
   getAuthSession,
   getConnector,
   getDataset,
@@ -71,6 +72,9 @@ import type {
   GetActionData,
   GetActionError,
   GetActionResponse,
+  GetAuthInvitationOptionsData,
+  GetAuthInvitationOptionsError,
+  GetAuthInvitationOptionsResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
   GetConnectorData,
@@ -413,6 +417,31 @@ export const createAuthInvitationMutation = (
   }
   return mutationOptions
 }
+
+export const getAuthInvitationOptionsQueryKey = (options?: Options<GetAuthInvitationOptionsData>) =>
+  createQueryKey("getAuthInvitationOptions", options)
+
+/**
+ * Get auth invitation options
+ */
+export const getAuthInvitationOptionsOptions = (options?: Options<GetAuthInvitationOptionsData>) =>
+  queryOptions<
+    GetAuthInvitationOptionsResponse,
+    GetAuthInvitationOptionsError,
+    GetAuthInvitationOptionsResponse,
+    ReturnType<typeof getAuthInvitationOptionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAuthInvitationOptions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAuthInvitationOptionsQueryKey(options),
+  })
 
 /**
  * Revoke an auth invitation

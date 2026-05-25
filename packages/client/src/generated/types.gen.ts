@@ -217,6 +217,58 @@ export type CreateAuthInvitationResponses = {
 export type CreateAuthInvitationResponse =
   CreateAuthInvitationResponses[keyof CreateAuthInvitationResponses]
 
+export type GetAuthInvitationOptionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/invitation-options"
+}
+
+export type GetAuthInvitationOptionsErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type GetAuthInvitationOptionsError =
+  GetAuthInvitationOptionsErrors[keyof GetAuthInvitationOptionsErrors]
+
+export type GetAuthInvitationOptionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    groups: Array<{
+      id: string
+      label?: string
+      description?: string
+    }>
+    canInviteWithoutGroups: boolean
+    capabilities: {
+      createInvitation:
+        | {
+            state: "enabled"
+          }
+        | {
+            state: "disabled"
+            reason: "missing_invite_policy" | "invitation_delivery_not_supported"
+          }
+    }
+  }
+}
+
+export type GetAuthInvitationOptionsResponse =
+  GetAuthInvitationOptionsResponses[keyof GetAuthInvitationOptionsResponses]
+
 export type RevokeAuthInvitationData = {
   body?: never
   path: {

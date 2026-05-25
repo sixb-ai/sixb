@@ -24,6 +24,7 @@ import { ObjectTypeDetail } from "./components/ObjectTypeDetail"
 import { OntologyExplorer } from "./components/OntologyExplorer"
 import { PipelineDetailPage, PipelinesPage } from "./components/PipelinesPage"
 import { RuleDetailPage, RulesPage } from "./components/RulesPage"
+import { SettingsInvitationsPage } from "./components/SettingsInvitationsPage"
 import { SyncDetailPage, SyncsPage } from "./components/SyncsPage"
 import { type TelemetryUpdate, useWebSocket } from "./hooks/useWebSocket"
 import {
@@ -56,6 +57,7 @@ const KNOWN_VIEWS = new Set([
   "pipelines",
   "rules",
   "ontology",
+  "settings",
 ])
 const emptyObjectList: ObjectSummary[] = []
 
@@ -91,6 +93,10 @@ function AppLayout() {
   const handleViewChange = (mode: ViewMode) => {
     if (mode === "home") {
       navigate("/")
+      return
+    }
+    if (mode === "settings") {
+      navigate("/settings/invitations")
       return
     }
     navigate(`/${mode}`)
@@ -321,6 +327,8 @@ function ProjectWorkspace() {
             <Route path="pipelines" element={<PipelinesPage />} />
             <Route path="rules" element={<RulesPage />} />
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
+            <Route path="settings" element={<Navigate to="/settings/invitations" replace />} />
+            <Route path="settings/invitations" element={<SettingsInvitationsPage />} />
             <Route
               path="ontology"
               element={
