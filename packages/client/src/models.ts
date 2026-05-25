@@ -1,4 +1,4 @@
-import { requestAction, requestGlobalAction } from "./generated/sdk.gen"
+import { requestAction } from "./generated/sdk.gen"
 import type {
   GetProjectInfoResponse,
   GetTelemetryHistoryResponse,
@@ -374,11 +374,14 @@ export async function executeAction(options: {
   try {
     const response = await requestAction({
       path: {
-        objectTypeId: parsed.objectTypeId,
-        objectId: parsed.primaryId,
         actionId: options.path.actionId,
       },
       body: {
+        subject: {
+          kind: "object",
+          objectTypeId: parsed.objectTypeId,
+          primaryId: parsed.primaryId,
+        },
         params: options.body.params,
         runId: options.body.runId,
       },
@@ -417,7 +420,7 @@ export async function executeGlobalAction(options: {
   }
 }> {
   try {
-    const response = await requestGlobalAction({
+    const response = await requestAction({
       path: {
         actionId: options.path.actionId,
       },

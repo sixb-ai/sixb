@@ -1071,14 +1071,18 @@ describe("ParioServer HTTP contract", () => {
       expect(appendTelemetryResponse.status).toBe(200)
       expect(await appendTelemetryResponse.json()).toEqual({ success: true })
 
-      const requestActionResponse = await fetch(
-        `${baseUrl}/api/objects/device/fan-2/actions/setSpeed`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ params: { speed: 950 } }),
-        }
-      )
+      const requestActionResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subject: {
+            kind: "object",
+            objectTypeId: "device",
+            primaryId: "fan-2",
+          },
+          params: { speed: 950 },
+        }),
+      })
       expect(requestActionResponse.status).toBe(200)
       const requestActionBody = (await requestActionResponse.json()) as {
         success: boolean
@@ -1087,7 +1091,7 @@ describe("ParioServer HTTP contract", () => {
       expect(requestActionBody.success).toBe(true)
       expect(requestActionBody.runId.startsWith("act_")).toBe(true)
 
-      const requestGlobalActionResponse = await fetch(
+      const requestCreateMaintenanceRunResponse = await fetch(
         `${baseUrl}/api/actions/createMaintenanceRun`,
         {
           method: "POST",
@@ -1098,19 +1102,19 @@ describe("ParioServer HTTP contract", () => {
           }),
         }
       )
-      expect(requestGlobalActionResponse.status).toBe(200)
-      expect(await requestGlobalActionResponse.json()).toEqual({
+      expect(requestCreateMaintenanceRunResponse.status).toBe(200)
+      expect(await requestCreateMaintenanceRunResponse.json()).toEqual({
         success: true,
         runId: "act_contract_global",
       })
 
-      const invalidGlobalActionResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
+      const missingSubjectResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ params: { speed: 975 } }),
       })
-      expect(invalidGlobalActionResponse.status).toBe(400)
-      expect(await invalidGlobalActionResponse.json()).toEqual({
+      expect(missingSubjectResponse.status).toBe(400)
+      expect(await missingSubjectResponse.json()).toEqual({
         error: "Action 'setSpeed' requires an object subject.",
       })
 

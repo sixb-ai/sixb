@@ -72,7 +72,6 @@ describe("OpenAPI docs", () => {
       ["post", "/api/workflows/{workflowId}/runs"],
       ["post", "/api/actions/{actionId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}"],
-      ["post", "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["delete", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["post", "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}"],

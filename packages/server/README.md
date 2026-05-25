@@ -39,12 +39,14 @@ await server.start()
 |--------|------|-------------|
 | `GET` | `/api/project` | Project metadata |
 | `GET` | `/api/status` | Runtime status (object type and function counts) |
+| `GET` | `/api/actions` | List registered actions |
+| `GET` | `/api/actions/:actionId` | Get action metadata |
+| `POST` | `/api/actions/:actionId` | Request an action (`subject` is optional for global actions) |
 | `GET` | `/api/object-types` | List registered object types |
 | `GET` | `/api/object-types/:objectTypeId` | Get object type definition |
 | `GET` | `/api/objects` | List objects (`?objectTypeId=&keyPrefix=&limit=&offset=&orderBy=&order=`) |
 | `GET` | `/api/objects/:objectTypeId/:objectKey` | Get object by key |
 | `PUT` | `/api/objects/:objectTypeId/:objectKey` | Create or update object |
-| `POST` | `/api/objects/:objectTypeId/:objectKey/actions/:actionId` | Request an action on an object |
 | `GET` | `/api/objects/:objectTypeId/:objectKey/links` | List object links (`?linkId=`) |
 | `PUT` | `/api/objects/:objectTypeId/:objectKey/links/:linkId` | Create or update link |
 | `DELETE` | `/api/objects/:objectTypeId/:objectKey/links/:linkId` | Remove link (`?targetTypeId=&targetKey=`) |

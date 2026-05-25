@@ -55,8 +55,11 @@ const { data: history } = await getTelemetryHistory({
 import { requestAction } from "@pario/client"
 
 await requestAction({
-  path: { objectTypeId: "thermostat", objectKey: "living-room", actionId: "setTemperature" },
-  body: { params: { target: 72 } },
+  path: { actionId: "setTemperature" },
+  body: {
+    subject: { kind: "object", objectTypeId: "thermostat", primaryId: "living-room" },
+    params: { target: 72 },
+  },
 })
 ```
 

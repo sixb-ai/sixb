@@ -375,8 +375,15 @@ export default function UnitDetail() {
   function doAction(actionId: string, params: Record<string, unknown>) {
     if (!objectKey) return
     sendAction({
-      path: { objectTypeId: acUnitObjectTypeId, objectId: objectKey, actionId },
-      body: { params },
+      path: { actionId },
+      body: {
+        subject: {
+          kind: "object",
+          objectTypeId: acUnitObjectTypeId,
+          primaryId: objectKey,
+        },
+        params,
+      },
     })
   }
 

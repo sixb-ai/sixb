@@ -7231,139 +7231,7 @@
         }
       },
       "post": {
-        "summary": "Request a global action",
-        "tags": ["Actions"],
-        "operationId": "requestGlobalAction",
-        "security": [
-          {
-            "parioCsrf": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "actionId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "params": {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  "runId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "application/x-www-form-urlencoded": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "params": {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  "runId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "params": {
-                    "type": "object",
-                    "additionalProperties": {}
-                  },
-                  "runId": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Response for status 200",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "runId": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["success", "runId"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Response for status 400",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["error"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Response for status 404",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": ["error"],
-                  "additionalProperties": false
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}": {
-      "post": {
-        "summary": "Request an action on an object",
+        "summary": "Request an action",
         "tags": ["Actions"],
         "operationId": "requestAction",
         "security": [
@@ -7373,24 +7241,6 @@
         ],
         "parameters": [
           {
-            "name": "objectTypeId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
-            "name": "objectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          {
             "name": "actionId",
             "in": "path",
             "required": true,
@@ -7407,6 +7257,40 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}
@@ -7423,6 +7307,40 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}
@@ -7439,6 +7357,40 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "subject": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["none"]
+                          }
+                        },
+                        "required": ["kind"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": ["object"]
+                          },
+                          "objectTypeId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "primaryId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["kind", "objectTypeId", "primaryId"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
                   "params": {
                     "type": "object",
                     "additionalProperties": {}

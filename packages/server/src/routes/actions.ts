@@ -4,7 +4,6 @@ import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
   ActionCatalogItemSchema,
   ActionIdParamsSchema,
-  ObjectActionParamsSchema,
   RequestActionBodySchema,
 } from "../schemas/actions"
 import { ActionRequestedResponseSchema, ErrorResponseSchema } from "../schemas/common"
@@ -76,6 +75,7 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
           const parsedBody = RequestActionBodySchema.parse(body)
           const { runId } = await pario.actions.request({
             actionId: params.actionId,
+            subject: parsedBody.subject,
             params: parsedBody.params,
             runId: parsedBody.runId,
           })
@@ -94,44 +94,7 @@ export function registerActionRoutes(app: Elysia, pario: Pario<readonly Ontology
           404: ErrorResponseSchema,
         },
         detail: {
-          summary: "Request a global action",
-          tags: ["Actions"],
-          operationId: "requestGlobalAction",
-          security: PARIO_CSRF_SECURITY_REQUIREMENT,
-        },
-      }
-    )
-    .post(
-      "/api/objects/:objectTypeId/:objectId/actions/:actionId",
-      async ({ params, body, set }) => {
-        try {
-          const parsedBody = RequestActionBodySchema.parse(body)
-          const { runId } = await pario.actions.request({
-            actionId: params.actionId,
-            subject: {
-              kind: "object",
-              objectTypeId: params.objectTypeId,
-              primaryId: params.objectId,
-            },
-            params: parsedBody.params,
-            runId: parsedBody.runId,
-          })
-
-          return { success: true, runId }
-        } catch (error) {
-          return handleRouteError(error, set)
-        }
-      },
-      {
-        params: ObjectActionParamsSchema,
-        body: RequestActionBodySchema,
-        response: {
-          200: ActionRequestedResponseSchema,
-          400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-        },
-        detail: {
-          summary: "Request an action on an object",
+          summary: "Request an action",
           tags: ["Actions"],
           operationId: "requestAction",
           security: PARIO_CSRF_SECURITY_REQUIREMENT,

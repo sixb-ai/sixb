@@ -2511,8 +2511,17 @@ export type GetActionResponses = {
 
 export type GetActionResponse = GetActionResponses[keyof GetActionResponses]
 
-export type RequestGlobalActionData = {
+export type RequestActionData = {
   body: {
+    subject?:
+      | {
+          kind: "none"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+          primaryId: string
+        }
     params?: {
       [key: string]: unknown
     }
@@ -2523,52 +2532,6 @@ export type RequestGlobalActionData = {
   }
   query?: never
   url: "/api/actions/{actionId}"
-}
-
-export type RequestGlobalActionErrors = {
-  /**
-   * Response for status 400
-   */
-  400: {
-    error: string
-  }
-  /**
-   * Response for status 404
-   */
-  404: {
-    error: string
-  }
-}
-
-export type RequestGlobalActionError = RequestGlobalActionErrors[keyof RequestGlobalActionErrors]
-
-export type RequestGlobalActionResponses = {
-  /**
-   * Response for status 200
-   */
-  200: {
-    success: boolean
-    runId: string
-  }
-}
-
-export type RequestGlobalActionResponse =
-  RequestGlobalActionResponses[keyof RequestGlobalActionResponses]
-
-export type RequestActionData = {
-  body: {
-    params?: {
-      [key: string]: unknown
-    }
-    runId?: string
-  }
-  path: {
-    objectTypeId: string
-    objectId: string
-    actionId: string
-  }
-  query?: never
-  url: "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}"
 }
 
 export type RequestActionErrors = {

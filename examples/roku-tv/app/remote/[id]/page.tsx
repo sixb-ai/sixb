@@ -136,11 +136,16 @@ export default function RemoteControl() {
       setLastPressedKey(key)
       sendAction({
         path: {
-          objectTypeId: televisionObjectTypeId,
-          objectId: objectKey,
           actionId: "pressButton",
         },
-        body: { params: { button: key } },
+        body: {
+          subject: {
+            kind: "object",
+            objectTypeId: televisionObjectTypeId,
+            primaryId: objectKey,
+          },
+          params: { button: key },
+        },
       })
       setTimeout(() => {
         setLastPressedKey((current) => (current === key ? null : current))

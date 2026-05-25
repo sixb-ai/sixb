@@ -118,9 +118,6 @@ import type {
   RequestActionData,
   RequestActionErrors,
   RequestActionResponses,
-  RequestGlobalActionData,
-  RequestGlobalActionErrors,
-  RequestGlobalActionResponses,
   RequestPipelineRunData,
   RequestPipelineRunErrors,
   RequestPipelineRunResponses,
@@ -620,34 +617,14 @@ export const getAction = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Request a global action
- */
-export const requestGlobalAction = <ThrowOnError extends boolean = false>(
-  options: Options<RequestGlobalActionData, ThrowOnError>
-) =>
-  (options.client ?? client).post<
-    RequestGlobalActionResponses,
-    RequestGlobalActionErrors,
-    ThrowOnError
-  >({
-    security: [{ name: "x-pario-csrf", type: "apiKey" }],
-    url: "/api/actions/{actionId}",
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...options.headers,
-    },
-  })
-
-/**
- * Request an action on an object
+ * Request an action
  */
 export const requestAction = <ThrowOnError extends boolean = false>(
   options: Options<RequestActionData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestActionResponses, RequestActionErrors, ThrowOnError>({
     security: [{ name: "x-pario-csrf", type: "apiKey" }],
-    url: "/api/objects/{objectTypeId}/{objectId}/actions/{actionId}",
+    url: "/api/actions/{actionId}",
     ...options,
     headers: {
       "Content-Type": "application/json",

@@ -5,13 +5,19 @@ export const ActionIdParamsSchema = z.object({
   actionId: z.string().min(1),
 })
 
-export const ObjectActionParamsSchema = z.object({
-  objectTypeId: z.string().min(1),
-  objectId: z.string().min(1),
-  actionId: z.string().min(1),
-})
+export const ActionSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("none"),
+  }),
+  z.object({
+    kind: z.literal("object"),
+    objectTypeId: z.string().min(1),
+    primaryId: z.string().min(1),
+  }),
+])
 
 export const RequestActionBodySchema = z.object({
+  subject: ActionSubjectSchema.optional(),
   params: z.record(z.unknown()).optional(),
   runId: z.string().min(1).optional(),
 })
