@@ -44,7 +44,6 @@ type CollectPropertiesResult =
   | {
       readonly ok: true
       readonly properties: Record<string, unknown>
-      readonly rowForValidation: DatasetRow
     }
   | {
       readonly ok: false
@@ -78,14 +77,14 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
     }
   }
 
+  const rowValidationError = getDatasetRowValidationError(row, dataset)
+  if (rowValidationError) {
+    return { ok: false, errorMessage: rowValidationError }
+  }
+
   const collected = collectProperties(projection, row, propertyPlans)
   if (!collected.ok) {
     return collected
-  }
-
-  const rowValidationError = getDatasetRowValidationError(collected.rowForValidation, dataset)
-  if (rowValidationError) {
-    return { ok: false, errorMessage: rowValidationError }
   }
 
   return {
@@ -147,7 +146,6 @@ function collectProperties(
   propertyPlans: ReadonlyMap<string, ProjectedPropertyPlan>
 ): CollectPropertiesResult {
   const properties: Record<string, unknown> = {}
-  let rowForValidation: Record<string, unknown> | undefined
 
   for (const [propertyId, columnName] of Object.entries(projection.properties)) {
     const value = row[columnName]
@@ -175,15 +173,10 @@ function collectProperties(
       }
     }
 
-    if (normalized.value !== value) {
-      rowForValidation ??= { ...row }
-      rowForValidation[columnName] = normalized.value
-    }
-
     properties[propertyId] = normalized.value
   }
 
-  return { ok: true, properties, rowForValidation: rowForValidation ?? row }
+  return { ok: true, properties }
 }
 
 function isPlainObject(value: unknown): value is DatasetRow {
