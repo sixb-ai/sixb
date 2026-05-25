@@ -1,7 +1,8 @@
-import { type TelemetryUpdate, useWebSocket } from "@pario/client"
+import { useParioEvents } from "@pario/client"
 import { listObjectsOptions } from "@pario/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
+import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 import { televisionObjectTypeId, televisionTwinProps } from "../lib/televisionTwin"
 
 function asString(value: unknown): string | null {
@@ -36,7 +37,14 @@ export default function DevicePicker() {
     }))
   }, [])
 
-  const { connected } = useWebSocket(handleUpdate)
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent(event) {
+      const update = telemetryUpdateFromEvent(event)
+      if (update) handleUpdate(update)
+    },
+  })
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

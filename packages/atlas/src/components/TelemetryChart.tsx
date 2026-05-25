@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts/lib/index.js"
-import type { TelemetryUpdate } from "../hooks/useWebSocket"
+import type { TelemetryUpdate } from "../lib/telemetryEvents"
 import { TelemetryValue } from "./TelemetryValue"
 
 interface TelemetryChartProps {

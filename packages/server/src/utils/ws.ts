@@ -15,31 +15,30 @@ function parseJson(text: string): unknown {
 }
 
 export async function decodeWsMessage(message: unknown): Promise<unknown> {
-  if (
-    message &&
-    typeof message === "object" &&
-    "data" in message &&
-    (message as { data?: unknown }).data !== undefined
-  ) {
-    return decodeWsMessage((message as { data: unknown }).data)
+  if (message && typeof message === "object") {
+    if ("data" in message && (message as { data?: unknown }).data !== undefined) {
+      return decodeWsMessage((message as { data: unknown }).data)
+    }
+
+    if (message instanceof ArrayBuffer) {
+      const text = new TextDecoder().decode(new Uint8Array(message))
+      return parseJson(text)
+    }
+
+    if (ArrayBuffer.isView(message)) {
+      const text = new TextDecoder().decode(message)
+      return parseJson(text)
+    }
+
+    if (typeof Blob !== "undefined" && message instanceof Blob) {
+      return parseJson(await message.text())
+    }
+
+    return message
   }
 
   if (typeof message === "string") {
     return parseJson(message)
-  }
-
-  if (message instanceof ArrayBuffer) {
-    const text = new TextDecoder().decode(new Uint8Array(message))
-    return parseJson(text)
-  }
-
-  if (ArrayBuffer.isView(message)) {
-    const text = new TextDecoder().decode(message)
-    return parseJson(text)
-  }
-
-  if (typeof Blob !== "undefined" && message instanceof Blob) {
-    return parseJson(await message.text())
   }
 
   return null

@@ -18,7 +18,14 @@ import {
   toTelemetryHistoryWithRange,
 } from "./models"
 
+export * from "./events"
 export * from "./generated/@tanstack/react-query.gen"
+export {
+  createParioEventsWebSocketUrl,
+  type UseParioEventsOptions,
+  type UseParioEventsResult,
+  useParioEvents,
+} from "./useParioEvents"
 
 type QueryKey = readonly [
   {

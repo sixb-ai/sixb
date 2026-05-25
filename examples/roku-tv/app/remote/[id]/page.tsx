@@ -1,9 +1,10 @@
-import { type TelemetryUpdate, useWebSocket } from "@pario/client"
+import { useParioEvents } from "@pario/client"
 import { getObjectOptions, getObjectTypeOptions, requestActionMutation } from "@pario/client/hooks"
 import { encodeObjectId } from "@pario/client/models"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { useParams } from "react-router-dom"
+import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../../../lib/telemetryEvents"
 import { televisionObjectTypeId, televisionTwinProps } from "../../../lib/televisionTwin"
 
 const KEYS = {
@@ -122,7 +123,14 @@ export default function RemoteControl() {
     [objectKey]
   )
 
-  const { connected } = useWebSocket(handleUpdate)
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent(event) {
+      const update = telemetryUpdateFromEvent(event)
+      if (update) handleUpdate(update)
+    },
+  })
 
   const { mutate: sendAction } = useMutation(requestActionMutation())
   const [lastPressedKey, setLastPressedKey] = useState<RokuKey | null>(null)

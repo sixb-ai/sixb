@@ -1,6 +1,6 @@
 # @pario/client
 
-Type-safe API client for Pario, auto-generated from the server's OpenAPI spec. Provides a fetch-based SDK for all REST endpoints, TanStack React Query hooks, and a real-time WebSocket hook for telemetry streaming.
+Type-safe API client for Pario, auto-generated from the server's OpenAPI spec. Provides a fetch-based SDK for all REST endpoints, TanStack Query hooks, and a core-typed real-time domain event hook.
 
 ## Installation
 
@@ -30,7 +30,7 @@ bun generate:client
 import { client, listObjects, getObject, getTelemetryHistory, listObjectTypes } from "@pario/client"
 
 // Configure the base URL
-client.setConfig({ baseUrl: "http://localhost:3000" })
+client.setConfig({ baseUrl: "http://localhost:3002" })
 
 // List all object types
 const { data: types } = await listObjectTypes()
@@ -90,15 +90,18 @@ const { data: history } = useQuery(
 )
 ```
 
-### WebSocket (real-time telemetry)
+### Domain events
 
 ```typescript
-import { useWebSocket } from "@pario/client"
+import { useParioEvents } from "@pario/client"
 
 function LiveDashboard() {
-  const { connected } = useWebSocket((update) => {
-    // update.objectId, update.propertyId, update.value, update.timestamp
-    console.log(`${update.objectId} ${update.propertyId} = ${update.value}`)
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent(event) {
+      console.log(event.type, event.payload)
+    },
   })
 
   return <div>{connected ? "Connected" : "Disconnected"}</div>
@@ -118,6 +121,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@pario/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, UI model types/adapters, `useWebSocket` hook |
-| `@pario/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) |
+| `@pario/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, UI model types/adapters, `useParioEvents` hook |
+| `@pario/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useParioEvents` |
 | `@pario/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

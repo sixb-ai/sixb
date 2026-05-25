@@ -73,7 +73,7 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
   const states = new WeakMap<object, EventSubscriptionState>()
 
   const stopPolling = (ws: object) => {
-    const state = states.get(ws)
+    const state = states.get(wsStateKey(ws))
     if (!state) {
       return
     }
@@ -85,7 +85,7 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
   }
 
   const startPolling = (ws: { send: (message: string) => void }) => {
-    const state = states.get(ws)
+    const state = states.get(wsStateKey(ws))
     if (!state || state.timer) {
       return
     }
@@ -130,12 +130,10 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
 
   return app.ws("/ws/events", {
     async open(ws) {
-      safeSend(ws, { type: "connected", channel: "events" })
-
       const state = createDefaultState()
       state.afterCursor = await resolveLatestCursor(server)
-      states.set(ws, state)
-      startPolling(ws)
+      states.set(wsStateKey(ws), state)
+      safeSend(ws, { type: "connected", channel: "events" })
     },
 
     async message(ws, message) {
@@ -146,7 +144,7 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
         return
       }
 
-      const state = states.get(ws)
+      const state = states.get(wsStateKey(ws))
       if (!state) {
         safeSend(ws, { type: "error", message: "Subscription state not found." })
         return
@@ -164,7 +162,7 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
       state.topics = parsed.data.topic ? [parsed.data.topic] : undefined
       state.types = parsed.data.types
       state.limit = parsed.data.limit ?? state.limit
-      state.afterCursor = parsed.data.afterCursor ?? (await resolveLatestCursor(server))
+      state.afterCursor = parsed.data.afterCursor ?? state.afterCursor
 
       startPolling(ws)
       safeSend(ws, {
@@ -177,7 +175,12 @@ export function registerWsRoutes(app: Elysia, server: ParioServer) {
 
     close(ws) {
       stopPolling(ws)
-      states.delete(ws)
+      states.delete(wsStateKey(ws))
     },
   })
+}
+
+function wsStateKey(ws: object): object {
+  const raw = (ws as { raw?: unknown }).raw
+  return raw && typeof raw === "object" ? raw : ws
 }
