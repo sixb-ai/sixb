@@ -7,5 +7,6 @@
     "jsx": "react-jsx",
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  "files": ["src/css.d.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts"]
 }

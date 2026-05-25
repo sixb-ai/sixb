@@ -99,6 +99,40 @@ describe("createSentinelApp", () => {
     }
   })
 
+  test("serves the development Sentinel shell with Bun's HTML bundle", async () => {
+    const port = await getFreePort()
+    const sentinel = createSentinelApp({
+      apiBaseUrl: "http://api.localhost",
+      authEnabled: false,
+    })
+    const server = await sentinel.start({
+      host: "127.0.0.1",
+      port,
+      development: true,
+    })
+
+    try {
+      const baseUrl = `http://127.0.0.1:${port}`
+      const rootResponse = await fetch(`${baseUrl}/`)
+      const routeResponse = await fetch(`${baseUrl}/workflows/invoice-reminder-workflow`)
+      const faviconResponse = await fetch(`${baseUrl}/favicon.svg`)
+      const runtimeResponse = await fetch(`${baseUrl}/__pario/runtime.json`)
+      const apiResponse = await fetch(`${baseUrl}/api/workflows`)
+
+      expect(rootResponse.status).toBe(200)
+      expect(routeResponse.status).toBe(200)
+      expect(faviconResponse.status).toBe(200)
+      expect(runtimeResponse.status).toBe(200)
+      expect(await runtimeResponse.json()).toEqual({
+        api: { baseUrl: "http://api.localhost" },
+        auth: { audience: "sentinel", enabled: false },
+      })
+      expect(apiResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("does not serve Pario API-owned routes from the Sentinel origin", async () => {
     const port = await getFreePort()
     const sentinel = createSentinelApp({
