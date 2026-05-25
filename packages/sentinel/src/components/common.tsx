@@ -10,6 +10,7 @@ export function PageFrame({
   description,
   backTo,
   backLabel,
+  actions,
   contentClassName,
   children,
 }: {
@@ -18,6 +19,7 @@ export function PageFrame({
   description?: ReactNode
   backTo?: string
   backLabel?: string
+  actions?: ReactNode
   contentClassName?: string
   children: ReactNode
 }) {
@@ -34,18 +36,21 @@ export function PageFrame({
             <Link to={backTo}>{backLabel}</Link>
           </Button>
         ) : null}
-        <header className="space-y-1">
-          {eyebrow ? (
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {eyebrow}
-            </p>
-          ) : null}
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            {title}
-          </h1>
-          {description ? (
-            <div className="max-w-3xl text-sm text-muted-foreground">{description}</div>
-          ) : null}
+        <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            {eyebrow ? (
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {eyebrow}
+              </p>
+            ) : null}
+            <h1 className="break-words text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+              {title}
+            </h1>
+            {description ? (
+              <div className="max-w-3xl text-sm text-muted-foreground">{description}</div>
+            ) : null}
+          </div>
+          {actions ? <div className="shrink-0 sm:pt-1">{actions}</div> : null}
         </header>
         {children}
       </div>

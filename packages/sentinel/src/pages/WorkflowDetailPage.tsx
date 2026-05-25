@@ -23,13 +23,14 @@ import { Link, Navigate, useParams, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingInline, LoadingPage, PageFrame } from "../components/common"
 import { SchemaShape } from "../features/workflows/components/nodes/SchemaShape"
 import { WorkflowNodeRow } from "../features/workflows/components/nodes/WorkflowNodeRow"
+import { RequestWorkflowRunDialog } from "../features/workflows/components/RequestWorkflowRunDialog"
 import { RunHistoryTable } from "../features/workflows/components/runs/RunHistoryTable"
 import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
 import {
   allWorkflowRunStatuses,
-  formatRelativeTime,
   isWorkflowRunStatus,
   RUN_HISTORY_PAGE_SIZE,
+  runTimeLabel,
   statusLabels,
   type WorkflowDetail,
   type WorkflowRunStatusFilter,
@@ -90,6 +91,7 @@ export function WorkflowDetailPage() {
       }
       backTo="/"
       backLabel="Workflows"
+      actions={<RequestWorkflowRunDialog workflow={workflow} />}
     >
       <LatestRunBanner workflow={workflow} />
 
@@ -212,8 +214,6 @@ function LatestRunBanner({ workflow }: { workflow: WorkflowDetail }) {
       </div>
     )
   }
-  const timestamp = latest.finishedAt ?? latest.startedAt ?? latest.queuedAt
-  const verb = latest.finishedAt ? "Finished" : latest.startedAt ? "Started" : "Queued"
   return (
     <Link
       to={`/runs/${latest.id}`}
@@ -225,9 +225,7 @@ function LatestRunBanner({ workflow }: { workflow: WorkflowDetail }) {
           <p className="truncate text-sm text-foreground">
             Latest run <span className="font-mono text-xs text-muted-foreground">{latest.id}</span>
           </p>
-          <p className="text-xs text-muted-foreground">
-            {verb} {formatRelativeTime(timestamp)}
-          </p>
+          <p className="text-xs text-muted-foreground">{runTimeLabel(latest)}</p>
         </div>
       </div>
       <span className="shrink-0 text-xs text-muted-foreground group-hover:text-foreground">

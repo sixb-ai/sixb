@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query"
+import { type InfiniteData, infiniteQueryOptions, queryOptions } from "@tanstack/react-query"
 import {
   getObject,
   getTelemetryHistory,
@@ -30,6 +30,7 @@ export {
 type QueryKey = readonly [
   {
     _id: string
+    _infinite?: boolean
     path?: Record<string, unknown>
     query?: Record<string, unknown>
   },
@@ -218,13 +219,19 @@ export const listObjectsPageQueryKey = (options?: ListObjectsOptions): QueryKey 
   })
 }
 
-async function fetchObjectListPage(options?: ListObjectsOptions): Promise<ObjectListPage> {
+async function fetchObjectListPage(
+  options?: ListObjectsOptions,
+  offsetOverride?: string
+): Promise<ObjectListPage> {
   const { path: _path, query, ...rest } = options ?? {}
   const [objectTypeMap, objectsResponse] = await Promise.all([
     fetchObjectTypeMap(),
     listObjects({
       ...rest,
-      query: buildListObjectsQuery(query),
+      query: {
+        ...buildListObjectsQuery(query),
+        offset: offsetOverride ?? query?.offset,
+      },
       throwOnError: true,
     }),
   ])
@@ -275,6 +282,33 @@ export const objectCountOptions = (options?: ListObjectsOptions) => {
       })
 
       return data?.total ?? 0
+    },
+  })
+}
+
+export type ListObjectSummariesPage = ObjectListPage
+
+export const listObjectsInfiniteQueryKey = (options?: ListObjectsOptions): QueryKey => {
+  const [key] = listObjectsQueryKey(options)
+  return [{ ...key, _infinite: true }] as const
+}
+
+export const listObjectsInfiniteOptions = (options?: ListObjectsOptions) => {
+  return infiniteQueryOptions<
+    ListObjectSummariesPage,
+    Error,
+    InfiniteData<ListObjectSummariesPage>,
+    QueryKey,
+    string
+  >({
+    queryKey: listObjectsInfiniteQueryKey(options),
+    initialPageParam: String(options?.query?.offset ?? "0"),
+    getNextPageParam: (lastPage, pages) => {
+      if (!lastPage.hasMore) return undefined
+      return String(pages.reduce((total, page) => total + page.objects.length, 0))
+    },
+    queryFn: async ({ pageParam }) => {
+      return await fetchObjectListPage(options, String(pageParam ?? options?.query?.offset ?? "0"))
     },
   })
 }

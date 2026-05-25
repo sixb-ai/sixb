@@ -13,6 +13,7 @@ import {
   formatDate,
   formatRunDuration,
   formatRunStartedDate,
+  isActiveRunStatus,
   runTimeLabel,
   type WorkflowRunDetail,
 } from "../features/workflows/utils/workflows"
@@ -22,6 +23,10 @@ export function RunDetailPage() {
   const runQuery = useQuery({
     ...getWorkflowRunOptions({ path: { runId } }),
     enabled: runId.length > 0,
+    refetchInterval: (query) => {
+      const status = query.state.data?.run.status
+      return status && isActiveRunStatus(status) ? 5000 : false
+    },
   })
 
   if (!runId) {
