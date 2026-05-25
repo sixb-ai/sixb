@@ -59,7 +59,6 @@ export type {
   ActionParamConfig,
   ActionParamsBuilder,
   ActionParamsConfig,
-  ActionRequestApi,
   ActionRunBuilder,
   ActionSubject,
   ActionTargetBuilder,
@@ -85,8 +84,8 @@ export type {
 export {
   ActionDefinitionError,
   ActionRegistry,
+  ActionsRuntime,
   actionParam,
-  createActionRequestApi,
   defineAction,
   isActionDefinition,
   isGlobalActionDefinition,

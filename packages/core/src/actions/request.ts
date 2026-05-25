@@ -46,11 +46,6 @@ export interface RequestActionAndWaitInput extends RequestActionInput {
   readonly onRequested?: (runId: string) => void | Promise<void>
 }
 
-export interface ActionRequestApi {
-  request(input: RequestActionInput): Promise<{ runId: string }>
-  requestAndWait(input: RequestActionAndWaitInput): Promise<{ runId: string }>
-}
-
 const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
 
 function createActionRunId(runId: string | undefined): string {
@@ -267,15 +262,4 @@ export async function requestActionAndWait(
   }
 
   return terminal
-}
-
-export function createActionRequestApi(runtime: ParioRuntimeContext): ActionRequestApi {
-  return {
-    request(input) {
-      return requestAction(runtime, input)
-    },
-    requestAndWait(input) {
-      return requestActionAndWait(runtime, input)
-    },
-  }
 }

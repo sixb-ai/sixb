@@ -2,13 +2,13 @@ export { actionParam, defineAction } from "./builders"
 export { ActionDefinitionError } from "./errors"
 export { ActionRegistry } from "./registry"
 export type {
-  ActionRequestApi,
   RequestActionAndWaitInput,
   RequestActionAndWaitOptions,
   RequestActionInput,
   RequestActionOptions,
 } from "./request"
-export { createActionRequestApi, requestAction, requestActionAndWait } from "./request"
+export { requestAction, requestActionAndWait } from "./request"
+export { ActionsRuntime } from "./runtime"
 export type {
   ActionBinding,
   ActionBuilder,

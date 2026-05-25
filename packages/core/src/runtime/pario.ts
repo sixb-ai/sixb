@@ -6,7 +6,7 @@
  * `pario.broker`, `pario.events`, `pario.storage`, and `pario.queues`.
  */
 
-import { ActionRegistry, type ActionRequestApi, createActionRequestApi } from "../actions"
+import { ActionRegistry, ActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import {
   AuthRuntime,
@@ -106,7 +106,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   private readonly projectionsById = new Map<string, ProjectionDefinition>()
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
-  readonly actions: ActionRequestApi
+  readonly actions: ActionsRuntime
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -253,7 +253,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       blobStorage: this.blobStorage,
       queues: this.queues,
     }
-    this.actions = createActionRequestApi(this.runtimeContext)
+    this.actions = new ActionsRuntime(this.runtimeContext)
 
     const { objectProjections, linkProjections } = categorizeProjections(options.projections ?? [])
     this.objectProjections = objectProjections

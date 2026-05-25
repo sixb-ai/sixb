@@ -9,7 +9,7 @@ import type {
   ActionDefinition,
   ActionParamsConfig,
   ActionRegistry,
-  ActionRequestApi,
+  ActionsRuntime,
   InferActionParams,
 } from "../actions"
 import type { AuthRuntime } from "../auth"
@@ -324,7 +324,7 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
   readonly rules?: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
-  readonly actions: ActionRequestApi
+  readonly actions: ActionsRuntime
 
   /** All registered object types. */
   listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]
