@@ -5,6 +5,7 @@ export type {
   ParioBrowserRuntimeConfig,
   ParioBrowserRuntimeDefaults,
 } from "./browser"
+export * from "./events"
 export * from "./generated"
 export { client } from "./generated/client.gen"
 
@@ -12,4 +13,9 @@ export { client } from "./generated/client.gen"
 export * from "./models"
 
 // React hooks
-export { type TelemetryUpdate, useWebSocket } from "./useWebSocket"
+export {
+  createParioEventsWebSocketUrl,
+  type UseParioEventsOptions,
+  type UseParioEventsResult,
+  useParioEvents,
+} from "./useParioEvents"

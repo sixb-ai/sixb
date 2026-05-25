@@ -6,6 +6,7 @@ import {
 } from "../src/browser"
 import { client } from "../src/generated/client.gen"
 import { requestSyncRun } from "../src/generated/sdk.gen"
+import { createParioEventsWebSocketUrl } from "../src/useParioEvents"
 
 const runtimeConfig: ParioBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
@@ -15,6 +16,21 @@ const runtimeConfig: ParioBrowserRuntimeConfig = {
 afterEach(() => {
   client.interceptors.request.clear()
   client.setConfig({ baseUrl: undefined, credentials: undefined })
+})
+
+describe("event websocket URLs", () => {
+  test("defaults to the local Pario API websocket origin", () => {
+    expect(createParioEventsWebSocketUrl()).toBe("ws://localhost:3002/ws/events")
+  })
+
+  test("derives the events websocket URL from an API base URL", () => {
+    expect(createParioEventsWebSocketUrl("http://localhost:3002/api")).toBe(
+      "ws://localhost:3002/ws/events"
+    )
+    expect(createParioEventsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
+      "wss://api.example.com/ws/events"
+    )
+  })
 })
 
 describe("browser client auth", () => {

@@ -1,8 +1,9 @@
-import { type TelemetryUpdate, useWebSocket } from "@pario/client"
+import { useParioEvents } from "@pario/client"
 import { listObjectsOptions } from "@pario/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { acUnitObjectTypeId, acUnitProps, MODE_NAMES } from "../lib/acUnitConstants"
+import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 
 function modeClass(mode: number): string {
   const map: Record<number, string> = {
@@ -71,7 +72,14 @@ export default function DevicePicker() {
     }))
   }, [])
 
-  const { connected } = useWebSocket(handleUpdate)
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent(event) {
+      const update = telemetryUpdateFromEvent(event)
+      if (update) handleUpdate(update)
+    },
+  })
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

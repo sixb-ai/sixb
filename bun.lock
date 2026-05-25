@@ -237,6 +237,9 @@
     "packages/client": {
       "name": "@pario/client",
       "version": "0.1.0",
+      "dependencies": {
+        "@pario/core": "workspace:*",
+      },
       "devDependencies": {
         "@hey-api/openapi-ts": "0.90.10",
         "@tanstack/react-query": "^5.0.0",

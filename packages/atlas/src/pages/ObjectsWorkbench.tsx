@@ -27,8 +27,8 @@ import { Box, ChevronLeft, ChevronRight, Search } from "lucide-react"
 import { type ReactNode, useMemo, useState } from "react"
 import { LetterAvatar, LoadingState } from "../components/common"
 import { ObjectIcon } from "../components/ObjectIcon"
-import type { TelemetryUpdate } from "../hooks/useWebSocket"
 import { formatLocation, humanizeIdentifier } from "../lib/labels"
+import type { TelemetryUpdate } from "../lib/telemetryEvents"
 import { formatRelativeTime } from "../lib/time"
 import {
   getObjectViewStyle,

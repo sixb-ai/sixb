@@ -1,4 +1,4 @@
-import { executeAction, useWebSocket } from "@pario/client"
+import { executeAction, useParioEvents } from "@pario/client"
 import { listObjectsOptions } from "@pario/client/hooks"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { startTransition } from "react"
@@ -29,10 +29,14 @@ export default function HomePage() {
   const currentValue = counter?.telemetry.value?.currentValue ?? counter?.properties.value ?? 0
   const counterValue = formatCounterValue(currentValue)
 
-  useWebSocket(() => {
-    startTransition(() => {
-      void queryClient.invalidateQueries({ queryKey: counterQueryOptions.queryKey })
-    })
+  useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent() {
+      startTransition(() => {
+        void queryClient.invalidateQueries({ queryKey: counterQueryOptions.queryKey })
+      })
+    },
   })
 
   const resetCounter = useMutation({

@@ -22,9 +22,9 @@ import { TelemetryChart } from "../components/TelemetryChart"
 import { TelemetryValue } from "../components/TelemetryValue"
 import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
-import type { TelemetryUpdate } from "../hooks/useWebSocket"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
+import type { TelemetryUpdate } from "../lib/telemetryEvents"
 import { formatRelativeTime } from "../lib/time"
 
 interface ObjectDetailPageProps {

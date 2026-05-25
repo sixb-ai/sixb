@@ -1,4 +1,4 @@
-import type { ObjectSummary } from "@pario/client"
+import { type ObjectSummary, useParioEvents } from "@pario/client"
 import {
   getProjectInfoOptions,
   listConnectorsOptions,
@@ -26,7 +26,7 @@ import {
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
-import { type TelemetryUpdate, useWebSocket } from "../hooks/useWebSocket"
+import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -282,7 +282,15 @@ export function ProjectWorkspace() {
     [resolvedProjectName]
   )
 
-  const { connected } = useWebSocket(handleUpdate, resolvedProjectName || "default")
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    enabled: Boolean(resolvedProjectName),
+    onEvent(event) {
+      const update = telemetryUpdateFromEvent(event)
+      if (update) handleUpdate(update)
+    },
+  })
 
   const selectedObjectIdForSidebar = objectIdFromUrl
 

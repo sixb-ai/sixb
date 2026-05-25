@@ -226,6 +226,7 @@ export type {
   StoredWorkflowRunFinishedEvent,
   StoredWorkflowRunNodeFinishedEvent,
   StoredWorkflowRunNodeStartedEvent,
+  StoredWorkflowRunQueuedEvent,
   StoredWorkflowRunStartedEvent,
   SyncEvent,
   SyncRunFinishedEvent,
@@ -236,6 +237,7 @@ export type {
   WorkflowRunFinishedEvent,
   WorkflowRunNodeFinishedEvent,
   WorkflowRunNodeStartedEvent,
+  WorkflowRunQueuedEvent,
   WorkflowRunStartedEvent,
 } from "./events"
 export {

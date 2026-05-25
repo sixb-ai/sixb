@@ -57,7 +57,7 @@ await server.start()
 
 ### WebSocket
 
-**`/ws/events`** -- Real-time domain event streaming. On connect, the server begins tailing new events from the latest cursor.
+**`/ws/events`** -- Real-time domain event streaming. On connect, the server sends a `connected` message and waits for an explicit subscription.
 
 Send messages to control the subscription:
 
@@ -68,7 +68,7 @@ Send messages to control the subscription:
 
 - `topic` -- Filter by topic: `objects`, `telemetry`, `links`, `actions`, `schedules`, `syncs`, `pipelines`, `workflows`, `datasets`, or `rules`.
 - `types` -- Filter by event type, for example `object.upserted`, `telemetry.appended`, `action.requested`, or `workflow.run.finished`.
-- `afterCursor` -- Start streaming after a broker cursor. Defaults to latest.
+- `afterCursor` -- Start streaming after a broker cursor. Defaults to the cursor captured when the socket opened.
 
 Events are delivered as:
 

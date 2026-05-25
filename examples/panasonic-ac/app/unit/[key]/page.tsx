@@ -1,4 +1,4 @@
-import { encodeObjectId, type TelemetryUpdate, useWebSocket } from "@pario/client"
+import { encodeObjectId, useParioEvents } from "@pario/client"
 import { getObjectOptions, requestActionMutation } from "@pario/client/hooks"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
@@ -9,6 +9,7 @@ import {
   FAN_SPEED_NAMES,
   MODE_NAMES,
 } from "../../../lib/acUnitConstants"
+import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../../../lib/telemetryEvents"
 
 function decodeKey(input: string | undefined): string | null {
   if (!input) return null
@@ -338,7 +339,14 @@ export default function UnitDetail() {
     [objectKey]
   )
 
-  const { connected } = useWebSocket(handleUpdate)
+  const { connected } = useParioEvents({
+    topic: "telemetry",
+    types: ["telemetry.appended"],
+    onEvent(event) {
+      const update = telemetryUpdateFromEvent(event)
+      if (update) handleUpdate(update)
+    },
+  })
   const { mutate: sendAction } = useMutation(requestActionMutation())
 
   function val(propId: string): unknown {

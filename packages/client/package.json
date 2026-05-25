@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./browser": "./src/browser.ts",
+    "./events": "./src/events.ts",
     "./hooks": "./src/hooks.ts",
     "./models": "./src/models.ts"
   },
@@ -15,7 +16,9 @@
     "generate": "openapi-ts",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@pario/core": "workspace:*"
+  },
   "peerDependencies": {
     "@tanstack/react-query": "^5.0.0",
     "react": "^18.0.0 || ^19.0.0"

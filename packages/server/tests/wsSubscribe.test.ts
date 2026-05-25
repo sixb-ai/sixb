@@ -1,5 +1,26 @@
 import { describe, expect, test } from "bun:test"
+import { createServer } from "node:net"
+import {
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  type OntologySource,
+  Pario,
+  type ParioOptions,
+} from "@pario/core"
 import { parseSubscriptionMessage } from "../src/routes/ws"
+import { ParioServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
+
+const WORKFLOW_EVENT_TYPES = [
+  "workflow.run.queued",
+  "workflow.run.started",
+  "workflow.run.node.started",
+  "workflow.run.node.finished",
+  "workflow.run.finished",
+] as const
 
 describe("parseSubscriptionMessage", () => {
   test("accepts a valid subscribe message", () => {
@@ -27,7 +48,7 @@ describe("parseSubscriptionMessage", () => {
     const result = parseSubscriptionMessage({
       type: "subscribe",
       topic: "workflows",
-      types: ["workflow.run.finished"],
+      types: [...WORKFLOW_EVENT_TYPES],
     })
 
     expect(result).toEqual({
@@ -35,7 +56,7 @@ describe("parseSubscriptionMessage", () => {
       data: {
         type: "subscribe",
         topic: "workflows",
-        types: ["workflow.run.finished"],
+        types: [...WORKFLOW_EVENT_TYPES],
       },
     })
   })
@@ -72,3 +93,185 @@ describe("parseSubscriptionMessage", () => {
     })
   })
 })
+
+describe("/ws/events subscriptions", () => {
+  test("streams after subscribe and keeps events emitted after open", async () => {
+    await withWsServer(async ({ baseUrl, pario }) => {
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
+
+        const [stored] = await pario.events.append({
+          events: [
+            {
+              type: "telemetry.appended",
+              payload: {
+                objectTypeId: "device",
+                objectId: "fan-1",
+                propertyId: "rpm",
+                value: 1200,
+                at: "2026-02-18T10:00:10.000Z",
+              },
+            },
+          ],
+        })
+
+        await expectNoWsMessage(ws)
+
+        ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            topic: "telemetry",
+            types: ["telemetry.appended"],
+          })
+        )
+
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "subscribed",
+          topic: "telemetry",
+          types: ["telemetry.appended"],
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "event",
+          event: {
+            cursor: stored?.cursor,
+            type: "telemetry.appended",
+            topic: "telemetry",
+          },
+        })
+      } finally {
+        ws.close()
+      }
+    })
+  })
+})
+
+function createParioInstance<TOntologySources extends readonly OntologySource[]>(
+  options: ParioOptions<TOntologySources>
+): Pario<TOntologySources> {
+  const ParioConstructor = Pario as unknown as new (
+    options: ParioOptions<TOntologySources>
+  ) => Pario<TOntologySources>
+
+  return new ParioConstructor(options)
+}
+
+async function withWsServer(
+  run: (context: { baseUrl: string; pario: Pario<readonly OntologySource[]> }) => Promise<void>
+): Promise<void> {
+  const port = await getFreePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const pario = createParioInstance<readonly OntologySource[]>({
+    id: "ws-test-project",
+    ontology: [],
+    broker: new InMemoryBroker(),
+    storage: new InMemoryStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+  })
+  const server = new ParioServer({
+    pario,
+    host: "127.0.0.1",
+    port,
+    quiet: true,
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+  })
+
+  await server.start()
+  try {
+    await run({ baseUrl, pario })
+  } finally {
+    await server.stop()
+  }
+}
+
+async function getFreePort(): Promise<number> {
+  return await new Promise<number>((resolvePromise, reject) => {
+    const server = createServer() as ReturnType<typeof createServer> & {
+      on(event: string, listener: (error: Error) => void): void
+    }
+    server.on("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      if (!address || typeof address === "string") {
+        reject(new Error("Could not resolve an open port"))
+        return
+      }
+
+      server.close((error) => {
+        if (error) reject(error)
+        else resolvePromise(address.port)
+      })
+    })
+  })
+}
+
+async function nextWsMessage(ws: WebSocket, timeoutMs = 3000): Promise<Record<string, unknown>> {
+  return await new Promise<Record<string, unknown>>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error("Timed out waiting for websocket message"))
+    }, timeoutMs)
+
+    const onMessage = (event: MessageEvent) => {
+      cleanup()
+      try {
+        resolvePromise(JSON.parse(decodeWsData(event.data)) as Record<string, unknown>)
+      } catch (error) {
+        reject(error)
+      }
+    }
+    const onError = () => {
+      cleanup()
+      reject(new Error("WebSocket error"))
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      ws.removeEventListener("message", onMessage)
+      ws.removeEventListener("error", onError)
+    }
+
+    ws.addEventListener("message", onMessage)
+    ws.addEventListener("error", onError)
+  })
+}
+
+async function expectNoWsMessage(ws: WebSocket): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup()
+      resolvePromise()
+    }, 650)
+
+    const onMessage = (event: MessageEvent) => {
+      cleanup()
+      reject(new Error(`Unexpected websocket message: ${decodeWsData(event.data)}`))
+    }
+    const onError = () => {
+      cleanup()
+      reject(new Error("WebSocket error"))
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      ws.removeEventListener("message", onMessage)
+      ws.removeEventListener("error", onError)
+    }
+
+    ws.addEventListener("message", onMessage)
+    ws.addEventListener("error", onError)
+  })
+}
+
+function decodeWsData(value: unknown): string {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (value instanceof ArrayBuffer) {
+    return new TextDecoder().decode(value)
+  }
+
+  return String(value)
+}
