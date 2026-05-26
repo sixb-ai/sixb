@@ -15,7 +15,7 @@ describe("PgSyncRunStorage", () => {
     await storage.close()
   })
 
-  test("starts and finishes runs with merged metadata", async () => {
+  test("starts and finishes runs with checkpoints", async () => {
     await storage.syncRuns.start({
       id: "run-1",
       projectId: "my-app",
@@ -23,9 +23,6 @@ describe("PgSyncRunStorage", () => {
       datasetId: "raw.erp.orders",
       mode: "snapshot",
       startedAt: new Date("2026-04-06T15:00:00.000Z"),
-      metadata: {
-        connectorType: "sql",
-      },
     })
 
     const finished = await storage.syncRuns.finish({
@@ -38,8 +35,9 @@ describe("PgSyncRunStorage", () => {
         datasetId: "raw.erp.orders",
         versionId: "ver_123",
       },
-      metadata: {
-        datasetCreated: true,
+      checkpoint: {
+        cursor: "cursor-2",
+        seenIds: ["evt-1", "evt-2"],
       },
     })
 
@@ -48,10 +46,32 @@ describe("PgSyncRunStorage", () => {
       datasetId: "raw.erp.orders",
       versionId: "ver_123",
     })
-    expect(finished.metadata).toEqual({
-      connectorType: "sql",
-      datasetCreated: true,
+    expect(finished.checkpoint).toEqual({
+      cursor: "cursor-2",
+      seenIds: ["evt-1", "evt-2"],
     })
+
+    await storage.syncRuns.start({
+      id: "run-null",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "append",
+    })
+    const nullFinished = await storage.syncRuns.finish({
+      id: "run-null",
+      projectId: "my-app",
+      status: "succeeded",
+      rowsRead: 0,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_null",
+      },
+      checkpoint: null,
+    })
+    const storedNull = await storage.syncRuns.getById({ projectId: "my-app", id: "run-null" })
+    expect(nullFinished.checkpoint).toBeNull()
+    expect(storedNull?.checkpoint).toBeNull()
   })
 
   test("stores failures and supports filtered paging", async () => {

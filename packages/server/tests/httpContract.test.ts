@@ -284,6 +284,7 @@ describe("ParioServer HTTP contract", () => {
         datasetId: "raw.github.events",
         versionId: committedVersion.versionId,
       },
+      checkpoint: { cursor: "secret-sync-cursor" },
     })
 
     await pario.storage.pipelineRuns!.start({
@@ -627,6 +628,8 @@ describe("ParioServer HTTP contract", () => {
           }),
         }),
       ])
+      expect(syncs[0]?.latestRun).not.toHaveProperty("checkpoint")
+      expect(syncs[0]?.latestRun).not.toHaveProperty("metadata")
 
       const syncResponse = await fetch(`${baseUrl}/api/syncs/sync-github-events`)
       expect(syncResponse.status).toBe(200)
@@ -647,7 +650,10 @@ describe("ParioServer HTTP contract", () => {
         `${baseUrl}/api/sync-runs?syncId=sync-github-events&limit=5`
       )
       expect(syncRunsResponse.status).toBe(200)
-      expect(await syncRunsResponse.json()).toMatchObject({
+      const syncRunsBody = (await syncRunsResponse.json()) as {
+        runs: Array<Record<string, unknown>>
+      }
+      expect(syncRunsBody).toMatchObject({
         total: 1,
         hasMore: false,
         runs: [
@@ -665,6 +671,8 @@ describe("ParioServer HTTP contract", () => {
           },
         ],
       })
+      expect(syncRunsBody.runs[0]).not.toHaveProperty("checkpoint")
+      expect(syncRunsBody.runs[0]).not.toHaveProperty("metadata")
 
       const pipelinesResponse = await fetch(`${baseUrl}/api/pipelines`)
       expect(pipelinesResponse.status).toBe(200)

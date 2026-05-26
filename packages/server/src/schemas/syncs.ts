@@ -68,7 +68,6 @@ export const SyncRunSchema = z.object({
       message: z.string(),
     })
     .optional(),
-  metadata: z.record(z.unknown()).optional(),
 })
 
 export const SyncSchema = z.object({

@@ -26,7 +26,7 @@ bun add @pario/core
 
 **Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `pario.connector(...)`.
 
-**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot` and `append` modes with optional cron metadata.
+**Syncs** -- Declarative batch sync definitions that read from one connector and write into one raw dataset. V1 supports `snapshot` and `append` modes with optional triggers and typed source checkpoints.
 
 **Queues** -- Typed durable work lanes for executable jobs such as sync runs, pipeline runs, and projection runs. App setup passes one `Queues` provider, while workers claim from lanes like `pario.queues.syncRuns`.
 
@@ -286,12 +286,14 @@ const syncOrders = defineSync("sync-orders")
   .read(({ query }) => query("select * from orders"))
   .intoDataset(rawOrdersDataset)
 
-const syncOrderEvents = defineSync("sync-order-events", {
-  mode: "append",
-  cron: "0 * * * *",
-})
+const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
+  .checkpoint<{ cursor: string }>()
   .from(erpDb)
-  .read(({ query }) => query("select * from order_events"))
+  .read(({ query }, context) => {
+    const cursor = context.checkpoint?.cursor ?? "0"
+    context.setCheckpoint({ cursor: String(Number(cursor) + 1) })
+    return query(`select * from order_events where cursor > ${cursor}`)
+  })
   .intoDataset(rawOrderEventsDataset)
 
 const pario = new Pario({
@@ -307,6 +309,10 @@ const pario = new Pario({
 pario.getSyncDefinitions()
 pario.getSyncById("sync-orders")
 ```
+
+Call `.checkpoint<T>()` before `.from(...)` to type `context.checkpoint` and
+`context.setCheckpoint(...)` in a sync read handler. The sync worker loads the checkpoint from the
+latest successful run and stores the next checkpoint only after the dataset commit succeeds.
 
 ## Convention-based Setup
 

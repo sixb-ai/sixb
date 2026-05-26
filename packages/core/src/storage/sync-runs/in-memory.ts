@@ -1,4 +1,4 @@
-import type { JsonValue } from "../../json"
+import { cloneJsonValue, type JsonValue } from "../../json"
 import { SyncRunError } from "./errors"
 import type {
   FinishSyncRunInput,
@@ -18,10 +18,8 @@ function cloneSyncRunRecord(record: SyncRunRecord): SyncRunRecord {
   return structuredClone(record)
 }
 
-function normalizeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  return metadata ? structuredClone(metadata) : undefined
+function normalizeCheckpoint(checkpoint: JsonValue | undefined): JsonValue | undefined {
+  return checkpoint !== undefined ? cloneJsonValue(checkpoint) : undefined
 }
 
 function normalizeError(error: SyncRunFailure | undefined): SyncRunFailure | undefined {
@@ -62,7 +60,6 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       startedAt: new Date(input.startedAt ?? new Date()),
       expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: input.commitMessage,
-      metadata: normalizeMetadata(input.metadata),
     }
 
     this.rows.set(key, structuredClone(record))
@@ -85,19 +82,10 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       )
     }
 
-    const metadata =
-      existing.metadata || input.metadata
-        ? {
-            ...(existing.metadata ?? {}),
-            ...(normalizeMetadata(input.metadata) ?? {}),
-          }
-        : undefined
-
     const base: SyncRunRecord = {
       ...existing,
       status: input.status,
       finishedAt: new Date(input.finishedAt ?? new Date()),
-      metadata,
     }
 
     const next: SyncRunRecord =
@@ -107,12 +95,14 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
             rowsRead: input.rowsRead,
             output: structuredClone(input.output),
             error: undefined,
+            checkpoint: normalizeCheckpoint(input.checkpoint),
           }
         : {
             ...base,
             rowsRead: input.rowsRead ?? existing.rowsRead,
             output: undefined,
             error: normalizeError(input.error),
+            checkpoint: undefined,
           }
 
     this.rows.set(key, structuredClone(next))

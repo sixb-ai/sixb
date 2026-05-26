@@ -265,6 +265,181 @@ describe("runSyncJob", () => {
     expect(asyncResult.rowsRead).toBe(2)
   })
 
+  test("passes the latest successful checkpoint and stores the next checkpoint", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    await syncRunsStorage.start({
+      id: "run_previous",
+      projectId: "project-1",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "append",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await syncRunsStorage.finish({
+      id: "run_previous",
+      projectId: "project-1",
+      status: "succeeded",
+      finishedAt: new Date("2026-04-06T15:00:01.000Z"),
+      rowsRead: 1,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_previous",
+      },
+      checkpoint: { cursor: "cursor-1" },
+    })
+    await syncRunsStorage.start({
+      id: "run_running",
+      projectId: "project-1",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "append",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+
+    let seenCheckpoint: { cursor: string } | undefined
+    const sync = defineSync("sync-orders", { mode: "append" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read((_client, context) => {
+        seenCheckpoint = context.checkpoint
+        context.setCheckpoint({ cursor: "cursor-2" })
+        return [{ orderId: "ord_1" }]
+      })
+      .intoDataset(rawOrdersDataset)
+
+    await runSyncJob({
+      runtime: createRuntime({
+        sync,
+        syncRunsStorage,
+      }),
+      job: {
+        id: "run_1",
+        syncId: "sync-orders",
+      },
+    })
+
+    const run = await syncRunsStorage.getById({
+      projectId: "project-1",
+      id: "run_1",
+    })
+    expect(seenCheckpoint).toEqual({ cursor: "cursor-1" })
+    expect(run?.checkpoint).toEqual({ cursor: "cursor-2" })
+  })
+
+  test("does not advance checkpoints from failed runs", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    await syncRunsStorage.start({
+      id: "run_previous",
+      projectId: "project-1",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "append",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await syncRunsStorage.finish({
+      id: "run_previous",
+      projectId: "project-1",
+      status: "succeeded",
+      finishedAt: new Date("2026-04-06T15:00:01.000Z"),
+      rowsRead: 1,
+      output: {
+        datasetId: "raw.erp.orders",
+        versionId: "ver_previous",
+      },
+      checkpoint: { cursor: "cursor-1" },
+    })
+
+    let shouldFail = true
+    const seenCheckpoints: Array<{ cursor: string } | undefined> = []
+    const sync = defineSync("sync-orders", { mode: "append" })
+      .checkpoint<{ cursor: string }>()
+      .from(erpDb)
+      .read((_client, context) => {
+        seenCheckpoints.push(context.checkpoint ? structuredClone(context.checkpoint) : undefined)
+        if (shouldFail) {
+          context.setCheckpoint({ cursor: "cursor-bad" })
+          return [42]
+        }
+
+        context.setCheckpoint({ cursor: "cursor-2" })
+        return [{ orderId: "ord_1" }]
+      })
+      .intoDataset(rawOrdersDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({
+          sync,
+          syncRunsStorage,
+        }),
+        job: {
+          id: "run_failed",
+          syncId: "sync-orders",
+        },
+      })
+    ).rejects.toThrow("returned an invalid row")
+
+    const failedRun = await syncRunsStorage.getById({
+      projectId: "project-1",
+      id: "run_failed",
+    })
+    expect(failedRun?.checkpoint).toBeUndefined()
+
+    shouldFail = false
+    await runSyncJob({
+      runtime: createRuntime({
+        sync,
+        syncRunsStorage,
+      }),
+      job: {
+        id: "run_succeeded",
+        syncId: "sync-orders",
+      },
+    })
+
+    const succeededRun = await syncRunsStorage.getById({
+      projectId: "project-1",
+      id: "run_succeeded",
+    })
+    expect(seenCheckpoints).toEqual([{ cursor: "cursor-1" }, { cursor: "cursor-1" }])
+    expect(succeededRun?.checkpoint).toEqual({ cursor: "cursor-2" })
+  })
+
+  test("rejects non-JSON checkpoint values", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const sync = defineSync("sync-orders", { mode: "append" })
+      .checkpoint<unknown>()
+      .from(erpDb)
+      .read((_client, context) => {
+        context.setCheckpoint(new Date("2026-04-06T15:00:00.000Z"))
+        return [{ orderId: "ord_1" }]
+      })
+      .intoDataset(rawOrdersDataset)
+
+    await expect(
+      runSyncJob({
+        runtime: createRuntime({
+          sync,
+          syncRunsStorage,
+        }),
+        job: {
+          id: "run_1",
+          syncId: "sync-orders",
+        },
+      })
+    ).rejects.toThrow("checkpoint must be a JSON value")
+
+    const run = await syncRunsStorage.getById({
+      projectId: "project-1",
+      id: "run_1",
+    })
+    expect(run).toMatchObject({
+      status: "failed",
+      rowsRead: 0,
+    })
+    expect(run?.checkpoint).toBeUndefined()
+  })
+
   test("writes the running record before connector execution", async () => {
     const syncRunsStorage = new InMemorySyncRunStorage()
     let seenStatus: string | undefined

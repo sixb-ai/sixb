@@ -26,8 +26,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
           status,
           started_at,
           expected_latest_version_id,
-          commit_message,
-          metadata
+          commit_message
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -37,10 +36,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
           ${"running"},
           ${input.startedAt ?? new Date()},
           ${input.expectedLatestVersionId ?? null},
-          ${input.commitMessage ?? null},
-          ${serializeMetadata(input.metadata)}::text::jsonb
+          ${input.commitMessage ?? null}
         )
-        RETURNING *
+        RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
       `) as DatabaseRow[]
 
       return rowToSyncRunRecord(row)
@@ -58,7 +56,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
     return this.sql.begin(async (tx) => {
       const [existing] = (await tx`
-        SELECT * FROM sync_runs
+        SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
       `) as DatabaseRow[]
 
@@ -74,8 +72,6 @@ export class PgSyncRunStorage implements SyncRunStorage {
         )
       }
 
-      const metadata = mergeMetadata(existing.metadata, input.metadata)
-
       const [updated] =
         input.status === "succeeded"
           ? ((await tx`
@@ -87,9 +83,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
                 output_version_id = ${input.output.versionId},
                 error_name = ${null},
                 error_message = ${null},
-                metadata = ${serializeMetadata(metadata)}::text::jsonb
+                checkpoint = ${serializeCheckpoint(input.checkpoint)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
-              RETURNING *
+              RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
             `) as DatabaseRow[])
           : ((await tx`
               UPDATE sync_runs
@@ -100,9 +96,9 @@ export class PgSyncRunStorage implements SyncRunStorage {
                 output_version_id = ${null},
                 error_name = ${input.error?.name ?? null},
                 error_message = ${input.error?.message ?? null},
-                metadata = ${serializeMetadata(metadata)}::text::jsonb
+                checkpoint = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
-              RETURNING *
+              RETURNING *, checkpoint IS NOT NULL AS checkpoint_present
             `) as DatabaseRow[])
 
       return rowToSyncRunRecord(updated)
@@ -111,7 +107,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
   async getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null> {
     const [row] = (await this.sql`
-      SELECT * FROM sync_runs
+      SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
     `) as DatabaseRow[]
 
@@ -168,7 +164,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
 
     const queryParams = [...params]
     let query = `
-      SELECT * FROM sync_runs
+      SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
       ${where}
       ORDER BY started_at ${order}, id ${order}
     `
@@ -193,24 +189,8 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 }
 
-function serializeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): string | null {
-  return metadata ? JSON.stringify(metadata) : null
-}
-
-function mergeMetadata(
-  existing: Readonly<Record<string, JsonValue>> | null | undefined,
-  next: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  if (!existing && !next) {
-    return undefined
-  }
-
-  return {
-    ...(existing ?? {}),
-    ...(next ?? {}),
-  }
+function serializeCheckpoint(checkpoint: JsonValue | undefined): string | null {
+  return checkpoint !== undefined ? JSON.stringify(checkpoint) : null
 }
 
 function toSyncRunFailure(row: DatabaseRow): SyncRunFailure | undefined {
@@ -244,8 +224,18 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
     expectedLatestVersionId: row.expected_latest_version_id ?? undefined,
     commitMessage: row.commit_message ?? undefined,
     error: toSyncRunFailure(row),
-    metadata: row.metadata ?? undefined,
+    checkpoint: hasCheckpoint(row) ? row.checkpoint : undefined,
   }
+}
+
+function hasCheckpoint(row: DatabaseRow): boolean {
+  return (
+    row.checkpoint_present === true ||
+    row.checkpoint_present === 1 ||
+    row.checkpoint_present === "1" ||
+    row.checkpoint_present === "t" ||
+    row.checkpoint_present === "true"
+  )
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -267,5 +257,6 @@ interface DatabaseRow {
   commit_message: string | null
   error_name: string | null
   error_message: string | null
-  metadata: Readonly<Record<string, JsonValue>> | null
+  checkpoint: JsonValue | null
+  checkpoint_present: boolean | number | string
 }

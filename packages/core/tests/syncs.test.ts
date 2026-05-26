@@ -136,6 +136,43 @@ describe("defineSync", () => {
     ).toThrow("Sync dataset id must not be empty")
   })
 
+  test("exposes typed checkpoints to read handlers", async () => {
+    type OrdersCheckpoint = { cursor: string }
+    const checkpoints: OrdersCheckpoint[] = []
+    const sync = defineSync("sync-orders", { mode: "append" })
+      .checkpoint<OrdersCheckpoint>()
+      .from(erpDb)
+      .read((_client, context) => {
+        if (context.checkpoint) {
+          checkpoints.push(context.checkpoint)
+        }
+        context.setCheckpoint({ cursor: "cursor-2" })
+        return []
+      })
+      .intoDataset(rawOrdersDataset)
+
+    let nextCheckpoint: OrdersCheckpoint | undefined
+    await sync.read(
+      {
+        query(sql: string) {
+          return sql
+        },
+      },
+      {
+        projectId: "project-1",
+        syncId: "sync-orders",
+        signal: new AbortController().signal,
+        checkpoint: { cursor: "cursor-1" },
+        setCheckpoint(next) {
+          nextCheckpoint = next
+        },
+      }
+    )
+
+    expect(checkpoints).toEqual([{ cursor: "cursor-1" }])
+    expect(nextCheckpoint).toEqual({ cursor: "cursor-2" })
+  })
+
   test("stores the connector and read handler", async () => {
     const calls: SyncReadContext[] = []
     const sync = defineSync("sync-orders")
