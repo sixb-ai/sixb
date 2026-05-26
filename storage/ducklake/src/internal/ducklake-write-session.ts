@@ -8,7 +8,7 @@ import type {
 } from "@pario/core"
 import { getDatasetRowValidationError, LakeStorageError } from "@pario/core"
 import type { DuckDbRuntime } from "./duckdb-runtime"
-import { buildInsertRowSql } from "./row-sql"
+import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"
 import { quoteIdentifier } from "./sql"
 
@@ -70,16 +70,16 @@ class DuckLakeWriteSession implements LakeWriteSession {
   async writeRows(rows: Iterable<DatasetRow> | AsyncIterable<DatasetRow>): Promise<void> {
     this.assertOpen()
 
-    for await (const row of rows) {
-      const validationError = getDatasetRowValidationError(row, this.input.dataset)
-      if (validationError) {
-        throw new LakeStorageError(`[ParioDuckLake] ${validationError}`)
-      }
+    await this.runtime.withAppender(this.stagingTableName, async (appender) => {
+      for await (const row of rows) {
+        const validationError = getDatasetRowValidationError(row, this.input.dataset)
+        if (validationError) {
+          throw new LakeStorageError(`[ParioDuckLake] ${validationError}`)
+        }
 
-      await this.runtime.run(
-        ...buildInsertRowSql(this.stagingTableName, this.input.dataset.schema, row)
-      )
-    }
+        appendDatasetRow(appender, this.input.dataset.schema, row)
+      }
+    })
   }
 
   async commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion> {

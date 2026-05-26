@@ -64,4 +64,23 @@ describe("DuckLakeStorage", () => {
     await close
     await expect(runtime.query("SELECT 1")).rejects.toThrow("closed")
   })
+
+  test("runtime withAppender closes staged rows before the next operation", async () => {
+    const runtime = await createDuckDbRuntime()
+
+    try {
+      await runtime.run("CREATE TEMP TABLE staged_rows (id VARCHAR, count BIGINT)")
+      await runtime.withAppender("staged_rows", (appender) => {
+        appender.appendVarchar("ord_1")
+        appender.appendBigInt(1n)
+        appender.endRow()
+      })
+
+      await expect(runtime.query("SELECT count(*) AS row_count FROM staged_rows")).resolves.toEqual(
+        [{ row_count: 1n }]
+      )
+    } finally {
+      await runtime.close()
+    }
+  })
 })

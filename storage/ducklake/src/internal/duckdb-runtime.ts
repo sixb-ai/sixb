@@ -1,4 +1,9 @@
-import { type DuckDBConnection, DuckDBInstance, type DuckDBValue } from "@duckdb/node-api"
+import {
+  type DuckDBConnection,
+  DuckDBInstance,
+  type DuckDBValue,
+  type DuckDBAppender as NodeDuckDBAppender,
+} from "@duckdb/node-api"
 import { LakeStorageError } from "@pario/core"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
 import {
@@ -18,7 +23,21 @@ import {
 export interface DuckDbRuntime {
   run(sql: string, values?: readonly DuckDBValue[]): Promise<void>
   query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]>
+  withAppender<T>(
+    tableName: string,
+    useAppender: (appender: DuckDbAppender) => T | Promise<T>
+  ): Promise<T>
   close(): Promise<void>
+}
+
+export interface DuckDbAppender {
+  appendNull(): void
+  appendBoolean(value: boolean): void
+  appendVarchar(value: string): void
+  appendBigInt(value: bigint): void
+  appendDouble(value: number): void
+  appendStruct(value: Readonly<Record<string, DuckDBValue>>): void
+  endRow(): void
 }
 
 class NodeDuckDbRuntime implements DuckDbRuntime {
@@ -52,6 +71,20 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     })
   }
 
+  async withAppender<T>(
+    tableName: string,
+    useAppender: (appender: DuckDbAppender) => T | Promise<T>
+  ): Promise<T> {
+    return this.enqueue(async () => {
+      const appender = await this.connection.createAppender(tableName)
+      try {
+        return await useAppender(new NodeDuckDbAppenderAdapter(appender))
+      } finally {
+        appender.closeSync()
+      }
+    })
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return
@@ -66,7 +99,7 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     this.instance.closeSync()
   }
 
-  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+  private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
     this.assertAcceptingOperations()
 
     // Keep the chain alive after failures so one rejected query does not block
@@ -92,6 +125,38 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     if (this.closed) {
       throw new LakeStorageError("[ParioDuckLake] DuckDB runtime is closed.")
     }
+  }
+}
+
+class NodeDuckDbAppenderAdapter implements DuckDbAppender {
+  constructor(private readonly appender: NodeDuckDBAppender) {}
+
+  appendNull(): void {
+    this.appender.appendNull()
+  }
+
+  appendBoolean(value: boolean): void {
+    this.appender.appendBoolean(value)
+  }
+
+  appendVarchar(value: string): void {
+    this.appender.appendVarchar(value)
+  }
+
+  appendBigInt(value: bigint): void {
+    this.appender.appendBigInt(value)
+  }
+
+  appendDouble(value: number): void {
+    this.appender.appendDouble(value)
+  }
+
+  appendStruct(value: Readonly<Record<string, DuckDBValue>>): void {
+    this.appender.appendStruct(value)
+  }
+
+  endRow(): void {
+    this.appender.endRow()
   }
 }
 

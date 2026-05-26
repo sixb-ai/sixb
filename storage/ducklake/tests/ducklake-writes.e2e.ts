@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@pario/core"
+import { col, type DatasetRow, defineDataset } from "@pario/core"
 import type { DuckLakeStorage } from "../src"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
@@ -127,6 +127,116 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ).toEqual([
       { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
       { orderId: "ord_2", customerName: "Grace", orderCount: "2", metadata: null },
+    ])
+  })
+
+  test("writes large row streams through the appender staging path", async () => {
+    const ROW_COUNT = 1001
+
+    const rows = Array.from({ length: ROW_COUNT }, (_, index) => ({
+      orderId: `ord_${index + 1}`,
+      customerName: `Customer ${index + 1}`,
+      orderCount: index + 1,
+    }))
+
+    const write = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await write.writeRows(rows)
+    const version = await write.commit()
+
+    expect(version.rowCount).toBe(ROW_COUNT)
+
+    const persisted = await collectRows(storage.readRows({ datasetId: ordersDataset.id }))
+    expect(persisted).toHaveLength(ROW_COUNT)
+    expect(persisted[0]).toEqual({
+      orderId: "ord_1",
+      customerName: "Customer 1",
+      orderCount: "1",
+      metadata: null,
+    })
+    expect(persisted[500]).toEqual({
+      orderId: "ord_501",
+      customerName: "Customer 501",
+      orderCount: "501",
+      metadata: null,
+    })
+    expect(persisted[ROW_COUNT - 1]).toEqual({
+      orderId: `ord_${ROW_COUNT}`,
+      customerName: `Customer ${ROW_COUNT}`,
+      orderCount: String(ROW_COUNT),
+      metadata: null,
+    })
+  })
+
+  test("appends streamed rows before reusable row objects mutate again", async () => {
+    function* reusedOrderRows(): Iterable<DatasetRow> {
+      const metadata: Record<string, unknown> = {
+        source: "erp",
+        sequence: 0,
+      }
+      const row: Record<string, unknown> = {
+        orderId: "",
+        customerName: "",
+        orderCount: 0,
+        metadata,
+      }
+
+      for (const values of [
+        {
+          orderId: "ord_1",
+          customerName: "Ada",
+          orderCount: 1,
+          sequence: 1,
+        },
+        {
+          orderId: "ord_2",
+          customerName: "Grace",
+          orderCount: 2,
+          sequence: 2,
+        },
+        {
+          orderId: "ord_3",
+          customerName: "Katherine",
+          orderCount: 3,
+          sequence: 3,
+        },
+      ]) {
+        const { sequence, ...rowValues } = values
+        metadata.sequence = sequence
+        Object.assign(row, rowValues)
+        yield row
+      }
+    }
+
+    const write = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await write.writeRows(reusedOrderRows())
+    await write.commit()
+
+    const persisted = await collectRows(storage.readRows({ datasetId: ordersDataset.id }))
+    expect(persisted).toEqual([
+      {
+        orderId: "ord_1",
+        customerName: "Ada",
+        orderCount: "1",
+        metadata: { source: "erp", sequence: 1 },
+      },
+      {
+        orderId: "ord_2",
+        customerName: "Grace",
+        orderCount: "2",
+        metadata: { source: "erp", sequence: 2 },
+      },
+      {
+        orderId: "ord_3",
+        customerName: "Katherine",
+        orderCount: "3",
+        metadata: { source: "erp", sequence: 3 },
+      },
     ])
   })
 
