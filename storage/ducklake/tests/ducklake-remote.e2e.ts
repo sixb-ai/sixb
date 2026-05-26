@@ -57,6 +57,33 @@ describe("DuckLakeStorage remote catalogs", () => {
     }
   })
 
+  test("does not exhaust the PostgreSQL catalog pool across repeated metadata reads", async () => {
+    const dataset = defineDataset(`raw.pg.metadata.${randomId()}`, {
+      schema: [col("orderId", "string")],
+    })
+    const storage = new DuckLakeStorage({
+      catalog: postgresCatalog(),
+      dataPath: `s3://${s3Bucket()}/lake/${randomId()}`,
+      secrets: [minioSecret()],
+    })
+
+    try {
+      await storage.createDataset(dataset)
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows([{ orderId: "ord_1" }])
+      const version = await write.commit()
+
+      for (let index = 0; index < 20; index += 1) {
+        await expect(storage.getDataset(dataset.id)).resolves.toMatchObject({ id: dataset.id })
+        await expect(storage.getLatestVersion(dataset.id)).resolves.toMatchObject({
+          versionId: version.versionId,
+        })
+      }
+    } finally {
+      await storage.close()
+    }
+  }, 60_000)
+
   test("allows two provider instances to commit to one PostgreSQL catalog", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-pg-shared-"))
     const dataset = defineDataset(`raw.pg.shared.${randomId()}`, {

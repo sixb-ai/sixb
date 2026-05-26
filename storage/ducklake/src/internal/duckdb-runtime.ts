@@ -1,7 +1,13 @@
 import { type DuckDBConnection, DuckDBInstance, type DuckDBValue } from "@duckdb/node-api"
 import { LakeStorageError } from "@pario/core"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
-import { buildAttachSql, buildCreateSecretSql, quoteIdentifier, requiredExtensions } from "./sql"
+import {
+  buildAttachSql,
+  buildConfigurePostgresMetadataPoolSql,
+  buildCreateSecretSql,
+  quoteIdentifier,
+  requiredExtensions,
+} from "./sql"
 
 /**
  * Narrow adapter around `@duckdb/node-api`.
@@ -16,7 +22,11 @@ export interface DuckDbRuntime {
 }
 
 class NodeDuckDbRuntime implements DuckDbRuntime {
+  private closing = false
   private closed = false
+  // One DuckDBConnection is shared by the runtime. Serialize calls so request
+  // handlers cannot interleave statements or close/reset an active query.
+  private operations: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly instance: DuckDBInstance,
@@ -24,20 +34,22 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
   ) {}
 
   async run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
-    this.assertOpen()
-    await this.connection.run(sql, values === undefined ? undefined : [...values])
+    await this.enqueue(async () => {
+      await this.connection.run(sql, values === undefined ? undefined : [...values])
+    })
   }
 
   async query(
     sql: string,
     values?: readonly DuckDBValue[]
   ): Promise<readonly Record<string, unknown>[]> {
-    this.assertOpen()
-    const reader = await this.connection.runAndReadAll(
-      sql,
-      values === undefined ? undefined : [...values]
-    )
-    return reader.getRowObjectsJS()
+    return this.enqueue(async () => {
+      const reader = await this.connection.runAndReadAll(
+        sql,
+        values === undefined ? undefined : [...values]
+      )
+      return reader.getRowObjectsJS()
+    })
   }
 
   async close(): Promise<void> {
@@ -45,12 +57,38 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
       return
     }
 
+    this.closing = true
+    // resetRuntime()/close() can run while an API read is still using this
+    // runtime. Wait for accepted work before closing the native connection.
+    await this.operations.catch(() => {})
     this.closed = true
     this.connection.closeSync()
     this.instance.closeSync()
   }
 
-  private assertOpen(): void {
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    this.assertAcceptingOperations()
+
+    // Keep the chain alive after failures so one rejected query does not block
+    // all later work on this runtime.
+    const result = this.operations.then(async () => {
+      this.assertNotClosed()
+      return operation()
+    })
+    this.operations = result.then(
+      () => {},
+      () => {}
+    )
+    return result
+  }
+
+  private assertAcceptingOperations(): void {
+    if (this.closing || this.closed) {
+      throw new LakeStorageError("[ParioDuckLake] DuckDB runtime is closed.")
+    }
+  }
+
+  private assertNotClosed(): void {
     if (this.closed) {
       throw new LakeStorageError("[ParioDuckLake] DuckDB runtime is closed.")
     }
@@ -92,4 +130,8 @@ export async function setupDuckLake(
   }
 
   await runtime.run(buildAttachSql(options))
+
+  if (options.catalog.type === "postgres") {
+    await runtime.run(buildConfigurePostgresMetadataPoolSql(options))
+  }
 }

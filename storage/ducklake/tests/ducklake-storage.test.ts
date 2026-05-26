@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { type DatasetDefinition, LakeStorageError } from "@pario/core"
 import { DuckLakeStorage } from "../src"
+import { createDuckDbRuntime } from "../src/internal/duckdb-runtime"
 
 describe("DuckLakeStorage", () => {
   test("rejects schemaless dataset definitions", async () => {
@@ -49,5 +50,18 @@ describe("DuckLakeStorage", () => {
     const rejected = storage.getVersion("missing.dataset", "not-a-ducklake-version")
     await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
     await expect(rejected).rejects.toThrow("Invalid DuckLake version id")
+  })
+
+  test("runtime close waits for accepted operations and rejects new operations", async () => {
+    const runtime = await createDuckDbRuntime()
+    const running = runtime.query("SELECT sum(sin(i)) AS total FROM range(50000000) AS t(i)")
+    const close = runtime.close()
+
+    await expect(runtime.query("SELECT 1")).rejects.toThrow("closed")
+    await expect(
+      Promise.race([running.then(() => "operation"), close.then(() => "close")])
+    ).resolves.toBe("operation")
+    await close
+    await expect(runtime.query("SELECT 1")).rejects.toThrow("closed")
   })
 })

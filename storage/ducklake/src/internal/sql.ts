@@ -28,6 +28,20 @@ function duckLakeMetadataCatalog(options: Pick<DuckLakeStorageOptions, "alias">)
 }
 
 /**
+ * Configure the PostgreSQL extension pool used by DuckLake's attached metadata
+ * catalog. DuckDB worker threads can otherwise pin pooled Postgres connections
+ * in the thread-local cache until the pool is exhausted during repeated
+ * DuckLake metadata reads.
+ */
+export function buildConfigurePostgresMetadataPoolSql(
+  options: Pick<DuckLakeStorageOptions, "alias">
+): string {
+  return `FROM postgres_configure_pool(catalog_name=${quoteSqlString(
+    duckLakeMetadataCatalog(options)
+  )}, enable_thread_local_cache=false)`
+}
+
+/**
  * Render a fully-qualified DuckLake metadata table path.
  *
  * PostgreSQL catalogs expose DuckLake metadata tables under the configured

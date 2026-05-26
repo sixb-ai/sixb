@@ -91,10 +91,44 @@ async function serializeDatasetCatalogItem(
     pario.lakeStorage.getLatestVersion(dataset.id),
   ])
 
+  return serializeDatasetCatalogItemFromState(pario, dataset, {
+    materialized: storedDataset !== null,
+    latestVersion,
+  })
+}
+
+async function serializeDatasetCatalogItems(pario: Pario<readonly OntologySource[]>) {
+  const storedDatasets = new Set(
+    (await pario.lakeStorage.listDatasets()).map((dataset) => dataset.id)
+  )
+
+  return Promise.all(
+    pario.getDatasetDefinitions().map(async (dataset) => {
+      const materialized = storedDatasets.has(dataset.id)
+      const latestVersion = materialized
+        ? await pario.lakeStorage.getLatestVersion(dataset.id)
+        : null
+
+      return serializeDatasetCatalogItemFromState(pario, dataset, {
+        materialized,
+        latestVersion,
+      })
+    })
+  )
+}
+
+function serializeDatasetCatalogItemFromState(
+  pario: Pario<readonly OntologySource[]>,
+  dataset: DatasetDefinition,
+  state: {
+    readonly materialized: boolean
+    readonly latestVersion: DatasetVersion | null
+  }
+) {
   return DatasetCatalogItemSchema.parse({
     ...dataset,
-    materialized: storedDataset !== null,
-    latestVersion: latestVersion ? serializeDatasetVersion(latestVersion) : null,
+    materialized: state.materialized,
+    latestVersion: state.latestVersion ? serializeDatasetVersion(state.latestVersion) : null,
     ...getDatasetReferences(pario, dataset.id),
   })
 }
@@ -147,11 +181,7 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       "/api/datasets",
       async ({ set }) => {
         try {
-          return await Promise.all(
-            pario
-              .getDatasetDefinitions()
-              .map((dataset) => serializeDatasetCatalogItem(pario, dataset))
-          )
+          return await serializeDatasetCatalogItems(pario)
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
