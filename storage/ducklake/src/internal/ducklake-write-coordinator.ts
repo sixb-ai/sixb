@@ -113,14 +113,14 @@ export class DuckLakeWriteCoordinator {
       // Guarded Pario commits need compare-and-swap semantics. DuckLake can
       // automatically retry non-conflicting commits, so guarded transactions
       // disable retries and re-check the dataset head after BEGIN.
-      const latestVersion = await this.snapshots.getLatestVersionForDefinition(
+      const latestVersionRef = await this.snapshots.getLatestVersionRefForDefinition(
         input.runtime,
         input.dataset
       )
       this.assertExpectedLatestVersion({
         datasetId: input.dataset.id,
         expectedLatestVersionId: input.expectedLatestVersionId,
-        actualLatestVersionId: latestVersion?.versionId ?? null,
+        actualLatestVersionId: latestVersionRef?.versionId ?? null,
       })
 
       const dataChangeExpected = await input.applyChanges(input.runtime)

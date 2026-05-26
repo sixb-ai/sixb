@@ -10,7 +10,12 @@ import {
   defineDataset,
 } from "@pario/core"
 import type { DuckLakeStorage } from "../src"
+import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+
+interface DuckLakeStorageInternals {
+  readonly snapshotReader: DuckLakeSnapshotReader
+}
 
 describe("DuckLake SQL transforms", () => {
   let rootDir: string
@@ -273,6 +278,48 @@ describe("DuckLake SQL transforms", () => {
     await expect(
       collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
     ).resolves.toEqual([{ customerId: "cust_1", orders: "1", revenue: "10" }])
+  })
+
+  test("validates pinned SQL execute sources without full version hydration", async () => {
+    const ordersVersion = await commitRows(storage, ordersDataset, [
+      { orderId: "ord_1", customerId: "cust_1", amount: 10 },
+    ])
+    const snapshotReader = (storage as unknown as DuckLakeStorageInternals).snapshotReader
+    const getVersionForSnapshot = snapshotReader.getVersionForSnapshot.bind(snapshotReader)
+    snapshotReader.getVersionForSnapshot = async (runtime, dataset, snapshotId) => {
+      if (dataset.id === ordersDataset.id && ordersVersion.versionId === `ducklake:${snapshotId}`) {
+        throw new Error("pinned source should not hydrate full DatasetVersion")
+      }
+
+      return getVersionForSnapshot(runtime, dataset, snapshotId)
+    }
+
+    try {
+      const version = await storage.sql.execute({
+        sources: {
+          orders: { dataset: ordersDataset, versionId: ordersVersion.versionId },
+        },
+        target: customerInsightsDataset,
+        mode: "snapshot",
+        sql: ({ orders }) => `
+          SELECT
+            customerId,
+            count(orderId)::BIGINT AS orders,
+            sum(amount)::BIGINT AS revenue
+          FROM ${orders}
+          GROUP BY customerId
+        `,
+      })
+
+      expect(version.inputs).toEqual([
+        { datasetId: ordersDataset.id, versionId: ordersVersion.versionId },
+      ])
+      await expect(
+        collectRows(storage.readRows({ datasetId: customerInsightsDataset.id }))
+      ).resolves.toEqual([{ customerId: "cust_1", orders: "1", revenue: "10" }])
+    } finally {
+      snapshotReader.getVersionForSnapshot = getVersionForSnapshot
+    }
   })
 
   test("rejects snapshot SQL execute when the target dataset is unknown", async () => {
