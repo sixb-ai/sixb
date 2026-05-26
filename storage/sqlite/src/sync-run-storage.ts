@@ -48,9 +48,8 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             status,
             started_at,
             expected_latest_version_id,
-            commit_message,
-            metadata
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            commit_message
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -62,8 +61,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
           "running",
           startedAt.toISOString(),
           input.expectedLatestVersionId ?? null,
-          input.commitMessage ?? null,
-          serializeMetadata(input.metadata)
+          input.commitMessage ?? null
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -103,8 +101,6 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
         )
       }
 
-      const metadata = mergeMetadata(parseMetadata(existing.metadata), input.metadata)
-
       this.db
         .query(
           `
@@ -116,7 +112,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
             output_version_id = ?,
             error_name = ?,
             error_message = ?,
-            metadata = ?
+            checkpoint = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -129,7 +125,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
           input.status === "succeeded" ? input.output.versionId : null,
           input.status === "succeeded" ? null : (input.error?.name ?? null),
           input.status === "succeeded" ? null : (input.error?.message ?? null),
-          serializeMetadata(metadata),
+          input.status === "succeeded" ? serializeCheckpoint(input.checkpoint) : null,
           input.projectId,
           input.id
         )
@@ -226,28 +222,12 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
   }
 }
 
-function serializeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): string | null {
-  return metadata ? JSON.stringify(metadata) : null
+function serializeCheckpoint(checkpoint: JsonValue | undefined): string | null {
+  return checkpoint !== undefined ? JSON.stringify(checkpoint) : null
 }
 
-function parseMetadata(value: string | null): Readonly<Record<string, JsonValue>> | undefined {
-  return value ? (JSON.parse(value) as Readonly<Record<string, JsonValue>>) : undefined
-}
-
-function mergeMetadata(
-  existing: Readonly<Record<string, JsonValue>> | undefined,
-  next: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  if (!existing && !next) {
-    return undefined
-  }
-
-  return {
-    ...(existing ?? {}),
-    ...(next ?? {}),
-  }
+function parseCheckpoint(value: string | null | undefined): JsonValue | undefined {
+  return value != null ? (JSON.parse(value) as JsonValue) : undefined
 }
 
 function toSyncRunFailure(row: DatabaseRow): SyncRunFailure | undefined {
@@ -281,7 +261,7 @@ function rowToSyncRunRecord(row: DatabaseRow): SyncRunRecord {
     expectedLatestVersionId: row.expected_latest_version_id ?? undefined,
     commitMessage: row.commit_message ?? undefined,
     error: toSyncRunFailure(row),
-    metadata: parseMetadata(row.metadata),
+    checkpoint: parseCheckpoint(row.checkpoint),
   }
 }
 
@@ -304,5 +284,5 @@ interface DatabaseRow {
   commit_message: string | null
   error_name: string | null
   error_message: string | null
-  metadata: string | null
+  checkpoint: string | null
 }

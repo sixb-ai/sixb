@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { InMemorySyncRunStorage, SyncRunError } from "../src"
 
 describe("InMemorySyncRunStorage", () => {
-  test("starts and finishes a successful run with merged metadata", async () => {
+  test("starts and finishes a successful run with a checkpoint", async () => {
     const storage = new InMemorySyncRunStorage()
     const startedAt = new Date("2026-04-06T15:00:00.000Z")
     const finishedAt = new Date("2026-04-06T15:00:01.280Z")
@@ -16,19 +16,16 @@ describe("InMemorySyncRunStorage", () => {
       startedAt,
       expectedLatestVersionId: "ver_prev",
       commitMessage: "refresh orders",
-      metadata: {
-        connectorType: "sql",
-        context: {
-          source: "erp",
-        },
-      },
     })
 
     ;(started.startedAt as Date).setUTCFullYear(2040)
-    ;(
-      (started.metadata as { context?: { source?: string } }).context as { source?: string }
-    ).source = "mutated"
 
+    const checkpoint = {
+      cursor: "cursor-2",
+      nested: {
+        page: 2,
+      },
+    }
     const finished = await storage.finish({
       id: "syncrun_1",
       projectId: "my-app",
@@ -39,11 +36,9 @@ describe("InMemorySyncRunStorage", () => {
         datasetId: "raw.erp.orders",
         versionId: "ver_123",
       },
-      metadata: {
-        datasetCreated: true,
-        durationMs: 1280,
-      },
+      checkpoint,
     })
+    checkpoint.nested.page = 999
 
     const stored = await storage.getById({
       projectId: "my-app",
@@ -56,18 +51,22 @@ describe("InMemorySyncRunStorage", () => {
       datasetId: "raw.erp.orders",
       versionId: "ver_123",
     })
-    expect(finished.metadata).toEqual({
-      connectorType: "sql",
-      context: {
-        source: "erp",
+    expect(finished.checkpoint).toEqual({
+      cursor: "cursor-2",
+      nested: {
+        page: 2,
       },
-      datasetCreated: true,
-      durationMs: 1280,
     })
     expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
     expect(stored?.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
     expect(stored?.commitMessage).toBe("refresh orders")
     expect(stored?.expectedLatestVersionId).toBe("ver_prev")
+    expect(stored?.checkpoint).toEqual({
+      cursor: "cursor-2",
+      nested: {
+        page: 2,
+      },
+    })
   })
 
   test("rejects duplicate starts and missing finishes", async () => {

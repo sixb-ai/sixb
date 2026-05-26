@@ -1,0 +1,5 @@
+ALTER TABLE sync_runs
+  ADD COLUMN IF NOT EXISTS checkpoint JSONB;
+
+ALTER TABLE sync_runs
+  DROP COLUMN IF EXISTS metadata;

@@ -28,7 +28,6 @@ function serializeSyncRun(run: SyncRunRecord) {
     expectedLatestVersionId: run.expectedLatestVersionId,
     commitMessage: run.commitMessage,
     error: run.error,
-    metadata: run.metadata,
   }
 }
 

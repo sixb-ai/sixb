@@ -936,9 +936,6 @@ export type ListSyncsResponses = {
         name?: string
         message: string
       }
-      metadata?: {
-        [key: string]: unknown
-      }
     } | null
   }>
 }
@@ -1040,9 +1037,6 @@ export type GetSyncResponses = {
         name?: string
         message: string
       }
-      metadata?: {
-        [key: string]: unknown
-      }
     } | null
   }
 }
@@ -1100,9 +1094,6 @@ export type ListSyncRunsResponses = {
       error?: {
         name?: string
         message: string
-      }
-      metadata?: {
-        [key: string]: unknown
       }
     }>
     hasMore: boolean

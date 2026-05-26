@@ -15,7 +15,7 @@ describe("Postgres storage migrations", () => {
         {
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           status: "migrated",
-          applied: ["001-initial-schema"],
+          applied: ["001-initial-schema", "002-sync-run-checkpoints"],
         },
       ])
       expect(await readMigrationRows(schemaName)).toEqual([
@@ -25,6 +25,13 @@ describe("Postgres storage migrations", () => {
           id: "001-initial-schema",
           status: "applied",
           version: 1,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "002-sync-run-checkpoints",
+          status: "applied",
+          version: 2,
         },
       ])
     })
@@ -66,7 +73,7 @@ describe("Postgres storage migrations", () => {
       expect(result.status).toBe("migrated")
       expect(object?.properties).toEqual({ name: "Legacy Room" })
       expect(point?.value).toBe(21.5)
-      expect(syncRun?.metadata).toEqual({ source: "legacy" })
+      expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
       expect(projectionRun?.status).toBe("succeeded")
       expect(projectionRun?.objectsUpserted).toBe(4)
       expect(workflowRun?.status).toBe("succeeded")
@@ -182,7 +189,18 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     datasetId: "raw.orders",
     mode: "snapshot",
     startedAt: new Date("2026-04-19T12:00:00.000Z"),
-    metadata: { source: "legacy" },
+  })
+  await storage.syncRuns.finish({
+    id: "run-1",
+    projectId: "project-a",
+    status: "succeeded",
+    finishedAt: new Date("2026-04-19T12:00:01.000Z"),
+    rowsRead: 10,
+    output: {
+      datasetId: "raw.orders",
+      versionId: "ver_1",
+    },
+    checkpoint: { cursor: "legacy" },
   })
   await storage.projectionRuns.start({
     id: "proj-run-1",

@@ -2540,10 +2540,6 @@
                             },
                             "required": ["message"],
                             "additionalProperties": false
-                          },
-                          "metadata": {
-                            "type": "object",
-                            "additionalProperties": {}
                           }
                         },
                         "required": [
@@ -2814,10 +2810,6 @@
                           },
                           "required": ["message"],
                           "additionalProperties": false
-                        },
-                        "metadata": {
-                          "type": "object",
-                          "additionalProperties": {}
                         }
                       },
                       "required": [
@@ -3005,10 +2997,6 @@
                             },
                             "required": ["message"],
                             "additionalProperties": false
-                          },
-                          "metadata": {
-                            "type": "object",
-                            "additionalProperties": {}
                           }
                         },
                         "required": [

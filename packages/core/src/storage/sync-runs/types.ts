@@ -22,7 +22,7 @@ export interface SyncRunRecord {
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
   readonly error?: SyncRunFailure
-  readonly metadata?: Readonly<Record<string, JsonValue>>
+  readonly checkpoint?: JsonValue
 }
 
 export interface StartSyncRunInput {
@@ -34,7 +34,6 @@ export interface StartSyncRunInput {
   readonly startedAt?: Date
   readonly expectedLatestVersionId?: string
   readonly commitMessage?: string
-  readonly metadata?: Readonly<Record<string, JsonValue>>
 }
 
 export type FinishSyncRunInput =
@@ -45,7 +44,7 @@ export type FinishSyncRunInput =
       readonly finishedAt?: Date
       readonly rowsRead: number
       readonly output: DatasetVersionRef
-      readonly metadata?: Readonly<Record<string, JsonValue>>
+      readonly checkpoint?: JsonValue
     }
   | {
       readonly id: string
@@ -54,7 +53,6 @@ export type FinishSyncRunInput =
       readonly finishedAt?: Date
       readonly rowsRead?: number
       readonly error?: SyncRunFailure
-      readonly metadata?: Readonly<Record<string, JsonValue>>
     }
 
 export interface ListSyncRunsInput {

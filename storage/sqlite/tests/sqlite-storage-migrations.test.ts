@@ -20,6 +20,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 1,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "002-sync-run-checkpoints",
+    status: "applied",
+    version: 2,
+  },
 ]
 
 afterEach(async () => {
@@ -133,7 +140,7 @@ describe("SQLite storage migrations", () => {
     expect(row?.properties).toEqual({ name: "Legacy Room", temperature: 21.5 })
     expect(point?.value).toBe(21.5)
     expect(syncRun?.status).toBe("succeeded")
-    expect(syncRun?.metadata).toEqual({ source: "legacy" })
+    expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
     expect(projectionRun?.status).toBe("succeeded")
     expect(projectionRun?.objectsUpserted).toBe(4)
     expect(workflowRun?.status).toBe("succeeded")
@@ -346,7 +353,6 @@ async function seedExistingStoreRows(basePath: string): Promise<void> {
       datasetId: "raw.orders",
       mode: "snapshot",
       startedAt: new Date("2026-04-19T12:00:00.000Z"),
-      metadata: { source: "legacy" },
     })
 
     await storage.syncRuns.finish({
@@ -359,6 +365,7 @@ async function seedExistingStoreRows(basePath: string): Promise<void> {
         datasetId: "raw.orders",
         versionId: "ver_1",
       },
+      checkpoint: { cursor: "legacy" },
     })
 
     await storage.projectionRuns.start({

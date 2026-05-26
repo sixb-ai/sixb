@@ -1,9 +1,12 @@
 import {
+  assertJsonValue,
   type BlobStorage,
+  cloneJsonValue,
   type DatasetVersion,
   type FileRef,
   getDatasetRowValidationError,
   isFileRef,
+  type JsonValue,
   type LakeWriteSession,
   type SyncRunFailure,
   type SyncRunRecord,
@@ -145,11 +148,27 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     throwIfAborted(signal)
     await lakeStorage.createDataset(dataset)
 
+    const latestSuccessfulRuns = await syncRunsStorage.list({
+      projectId: runtime.id,
+      syncId: sync.id,
+      statuses: ["succeeded"],
+      limit: 1,
+      order: "desc",
+    })
+    const previousCheckpoint = latestSuccessfulRuns.runs[0]?.checkpoint
+    let nextCheckpoint: JsonValue | undefined =
+      previousCheckpoint !== undefined ? cloneJsonValue(previousCheckpoint) : undefined
+
     const client = await runtime.connector(sync.connector)
     const readResult = await sync.read(client, {
       projectId: runtime.id,
       syncId: sync.id,
       signal,
+      checkpoint: previousCheckpoint !== undefined ? cloneJsonValue(previousCheckpoint) : undefined,
+      setCheckpoint(next: unknown) {
+        assertJsonValue(next, `Sync '${sync.id}' checkpoint`)
+        nextCheckpoint = cloneJsonValue(next)
+      },
     })
     const rows = normalizeReadResult(readResult, sync.id)
 
@@ -217,6 +236,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           datasetId: version.datasetId,
           versionId: version.versionId,
         },
+        checkpoint: nextCheckpoint,
       })
     } catch (error) {
       throw createBookkeepingError({
