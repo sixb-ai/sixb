@@ -29,6 +29,27 @@ describe("DuckLakeStorage optimistic concurrency", () => {
     await rm(rootDir, { recursive: true, force: true })
   })
 
+  test("serializes concurrent metadata reads on one provider instance", async () => {
+    const version = await seedInitialVersion(storage)
+
+    const results = await Promise.all(
+      Array.from({ length: 8 }, async () => {
+        const [dataset, latestVersion, versions] = await Promise.all([
+          storage.getDataset(ordersDataset.id),
+          storage.getLatestVersion(ordersDataset.id),
+          storage.listVersions(ordersDataset.id),
+        ])
+        return { dataset, latestVersion, versions }
+      })
+    )
+
+    for (const result of results) {
+      expect(result.dataset?.id).toBe(ordersDataset.id)
+      expect(result.latestVersion?.versionId).toBe(version.versionId)
+      expect(result.versions.map((item) => item.versionId)).toEqual([version.versionId])
+    }
+  })
+
   test("rejects a stale guarded commit from an older write session", async () => {
     const initialVersion = await seedInitialVersion(storage)
 

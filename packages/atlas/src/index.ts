@@ -114,10 +114,6 @@ async function atlasResponse(
     })
   }
 
-  if (isAssetRequest(url.pathname)) {
-    return notFoundResponse()
-  }
-
   return htmlResponse(request, options.shell)
 }
 
@@ -163,11 +159,6 @@ function isReservedParioRoute(pathname: string): boolean {
     pathname === "/docs" ||
     pathname.startsWith("/docs/")
   )
-}
-
-function isAssetRequest(pathname: string): boolean {
-  const lastSegment = pathname.split("/").pop() ?? ""
-  return /\.[^/]+$/.test(lastSegment)
 }
 
 function normalizeOrigin(value: string, label: string): string {

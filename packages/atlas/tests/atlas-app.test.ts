@@ -41,19 +41,23 @@ describe("createAtlasApp", () => {
       const baseUrl = `http://127.0.0.1:${port}`
       const rootResponse = await fetch(`${baseUrl}/`)
       const routeResponse = await fetch(`${baseUrl}/devices`)
+      const dottedRouteResponse = await fetch(`${baseUrl}/datasets/raw.ace.sites`)
 
       expect(rootResponse.status).toBe(200)
       expect(routeResponse.status).toBe(200)
+      expect(dottedRouteResponse.status).toBe(200)
 
       const html = await rootResponse.text()
       const scriptPath = extractAssetPath(html, "script")
       const stylesheetPath = extractAssetPath(html, "stylesheet")
+      const dottedRouteHtml = await dottedRouteResponse.text()
 
       expect(html).toContain('"api":{"baseUrl":"http://api.localhost"}')
       expect(html).toContain('"auth":{"audience":"atlas","enabled":true}')
       expect(scriptPath).toMatch(/^\/__pario\/main-[^.]+\.js$/)
       expect(stylesheetPath).toMatch(/^\/__pario\/main-[^.]+\.css$/)
       expect(html).toContain('<div id="root"></div>')
+      expect(dottedRouteHtml).toContain('<div id="root"></div>')
 
       for (const assetPath of [scriptPath, stylesheetPath]) {
         const assetResponse = await fetch(`${baseUrl}${assetPath}`)

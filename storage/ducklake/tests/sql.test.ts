@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildAttachSql,
+  buildConfigurePostgresMetadataPoolSql,
   buildCreateSecretSql,
   catalogUri,
   duckLakeMetadataTableName,
@@ -110,6 +111,12 @@ describe("DuckLake SQL rendering", () => {
         "ducklake_snapshot"
       )
     ).toBe('"__ducklake_metadata_lake"."pario_meta"."ducklake_snapshot"')
+  })
+
+  test("builds PostgreSQL metadata pool configuration SQL", () => {
+    expect(buildConfigurePostgresMetadataPoolSql({ alias: "lake" })).toBe(
+      "FROM postgres_configure_pool(catalog_name='__ducklake_metadata_lake', enable_thread_local_cache=false)"
+    )
   })
 
   test("loads extensions required by catalogs, data paths, and secrets", () => {

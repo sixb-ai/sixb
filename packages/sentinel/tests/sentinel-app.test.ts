@@ -40,15 +40,20 @@ describe("createSentinelApp", () => {
       const baseUrl = `http://127.0.0.1:${port}`
       const rootResponse = await fetch(`${baseUrl}/`)
       const workflowResponse = await fetch(`${baseUrl}/workflows/invoice-reminder-workflow`)
+      const dottedWorkflowResponse = await fetch(
+        `${baseUrl}/workflows/invoice-reminder.workflow.v1`
+      )
       const runResponse = await fetch(`${baseUrl}/runs/run-123`)
 
       expect(rootResponse.status).toBe(200)
       expect(workflowResponse.status).toBe(200)
+      expect(dottedWorkflowResponse.status).toBe(200)
       expect(runResponse.status).toBe(200)
 
       const html = await rootResponse.text()
       const scriptPath = extractAssetPath(html, "script")
       const stylesheetPath = extractAssetPath(html, "stylesheet")
+      const dottedWorkflowHtml = await dottedWorkflowResponse.text()
 
       expect(html).toContain("<title>Pario Sentinel</title>")
       expect(html).toContain('"api":{"baseUrl":"http://api.localhost"}')
@@ -56,6 +61,7 @@ describe("createSentinelApp", () => {
       expect(scriptPath).toMatch(/^\/__pario\/main-[^.]+\.js$/)
       expect(stylesheetPath).toMatch(/^\/__pario\/main-[^.]+\.css$/)
       expect(html).toContain('<div id="root"></div>')
+      expect(dottedWorkflowHtml).toContain('<div id="root"></div>')
 
       for (const assetPath of [scriptPath, stylesheetPath]) {
         const assetResponse = await fetch(`${baseUrl}${assetPath}`)
