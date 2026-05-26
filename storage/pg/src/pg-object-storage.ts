@@ -616,6 +616,8 @@ export class PgObjectStorage implements ObjectStorage {
     `) as { total: number }[]
     const total = countResult.total
 
+    if (limit === 0) return { objects: [], hasMore: queryOffset < total, total }
+
     // Get paginated results (+1 for hasMore check)
     // Column and direction derived from a fixed mapping — safe to use as identifiers
     const fetchLimit = limit + 1

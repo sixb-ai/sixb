@@ -1,6 +1,7 @@
 import type { ObjectDetail, ObjectSummary } from "@pario/client"
 import { getObjectOptions } from "@pario/client/hooks"
 import {
+  Button,
   Card,
   CollectionCardButton,
   CollectionCardGrid,
@@ -22,9 +23,8 @@ import {
 } from "@pario/ui/components"
 import { cn } from "@pario/ui/lib/utils"
 import { useQueries } from "@tanstack/react-query"
-import { Box, Search } from "lucide-react"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { useSearchParams } from "react-router-dom"
+import { Box, ChevronLeft, ChevronRight, Search } from "lucide-react"
+import { type ReactNode, useMemo, useState } from "react"
 import type { TelemetryUpdate } from "../hooks/useWebSocket"
 import { formatLocation, humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -37,14 +37,31 @@ import {
 import { LetterAvatar, LoadingState } from "./common"
 import { ObjectIcon } from "./ObjectIcon"
 
+export interface ObjectTypePreviewSection {
+  objectTypeId: string
+  objects: ObjectSummary[]
+  total: number
+}
+
 interface ObjectsWorkbenchProps {
   projectName: string
   objects: ObjectSummary[]
+  objectsTotal: number
+  objectsHasMore: boolean
+  objectOffset: number
+  objectPageSize: number
+  allObjectsTotal: number
+  objectTypeCounts: ReadonlyMap<string, number>
+  overviewSections: ObjectTypePreviewSection[]
+  overviewLoading: boolean
   loading: boolean
   sortBy: ObjectSortPreference
+  classFilter?: string | null
   selectedObjectId?: string | null
   latestProjectUpdates: TelemetryUpdate[]
   onSortByChange: (sortBy: ObjectSortPreference) => void
+  onClassFilterChange: (objectTypeId: string | null, offset?: number) => void
+  onObjectOffsetChange: (offset: number) => void
   onSelectObject: (id: string) => void
 }
 
@@ -63,41 +80,67 @@ function formatCompactValue(value: number | string | boolean): string {
   return value
 }
 
+function formatCount(value: number): string {
+  return value.toLocaleString()
+}
+
+function formatLoadedCount(loaded: number, total: number | undefined): string {
+  if (typeof total === "number" && total !== loaded) {
+    return `${formatCount(loaded)} of ${formatCount(total)}`
+  }
+  return formatCount(total ?? loaded)
+}
+
+function objectMatchesQuery(
+  candidate: ObjectSummary,
+  query: string,
+  details: ReadonlyMap<string, ObjectDetail>
+): boolean {
+  const detail = details.get(candidate.id)
+  const location = formatLocation(detail?.location).toLowerCase()
+  const name = (candidate.name || "").toLowerCase()
+  const className = humanizeIdentifier(candidate.class).toLowerCase()
+  return (
+    candidate.id.toLowerCase().includes(query) ||
+    candidate.class.toLowerCase().includes(query) ||
+    className.includes(query) ||
+    name.includes(query) ||
+    location.includes(query)
+  )
+}
+
 export function ObjectsWorkbench({
   projectName,
   objects,
+  objectsTotal,
+  objectsHasMore,
+  objectOffset,
+  objectPageSize,
+  allObjectsTotal,
+  objectTypeCounts,
+  overviewSections,
+  overviewLoading,
   loading,
   sortBy,
+  classFilter,
   selectedObjectId,
   latestProjectUpdates,
   onSortByChange,
+  onClassFilterChange,
+  onObjectOffsetChange,
   onSelectObject,
 }: ObjectsWorkbenchProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [viewStyle, setViewStyle] = useState<ViewStyle>(getObjectViewStyle)
-  const [searchParams, setSearchParams] = useSearchParams()
-  const classFilter = searchParams.get("class")
+  const selectedTypeMode = classFilter != null
 
-  const setClassFilter = useCallback(
-    (next: string | null) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev)
-          if (next) {
-            params.set("class", next)
-          } else {
-            params.delete("class")
-          }
-          return params
-        },
-        { replace: true }
-      )
-    },
-    [setSearchParams]
+  const displayObjects = useMemo(
+    () => (selectedTypeMode ? objects : overviewSections.flatMap((section) => section.objects)),
+    [objects, overviewSections, selectedTypeMode]
   )
 
   const detailQueries = useQueries({
-    queries: objects.map((object) => ({
+    queries: displayObjects.map((object) => ({
       ...getObjectOptions({
         path: { projectName, objectId: object.id },
       }),
@@ -108,12 +151,12 @@ export function ObjectsWorkbench({
 
   const detailById = useMemo(() => {
     const detailMap = new Map<string, ObjectDetail>()
-    for (let i = 0; i < objects.length; i += 1) {
+    for (let i = 0; i < displayObjects.length; i += 1) {
       const detail = detailQueries[i]?.data as ObjectDetail | undefined
-      if (detail) detailMap.set(objects[i].id, detail)
+      if (detail) detailMap.set(displayObjects[i].id, detail)
     }
     return detailMap
-  }, [objects, detailQueries])
+  }, [displayObjects, detailQueries])
 
   const updatesByObject = useMemo(() => {
     const grouped = new Map<string, TelemetryUpdate[]>()
@@ -128,45 +171,39 @@ export function ObjectsWorkbench({
     return grouped
   }, [latestProjectUpdates])
 
-  const classCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const obj of objects) {
-      counts.set(obj.class, (counts.get(obj.class) ?? 0) + 1)
-    }
-    return counts
-  }, [objects])
-
   const availableClasses = useMemo(
     () =>
-      Array.from(classCounts.keys()).sort((a, b) =>
-        humanizeIdentifier(a).localeCompare(humanizeIdentifier(b))
-      ),
-    [classCounts]
+      Array.from(objectTypeCounts.entries())
+        .filter(([className, count]) => count > 0 || className === classFilter)
+        .map(([className]) => className)
+        .sort((a, b) => humanizeIdentifier(a).localeCompare(humanizeIdentifier(b))),
+    [objectTypeCounts, classFilter]
   )
-
-  // Reset filter if the active class disappears from the dataset.
-  useEffect(() => {
-    if (!loading && classFilter && !classCounts.has(classFilter)) {
-      setClassFilter(null)
-    }
-  }, [classFilter, classCounts, loading, setClassFilter])
 
   const filteredObjects = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    const result = classFilter ? objects.filter((obj) => obj.class === classFilter) : objects
-    if (!query) return result
-    return result.filter((candidate) => {
-      const detail = detailById.get(candidate.id)
-      const location = formatLocation(detail?.location).toLowerCase()
-      const name = (candidate.name || "").toLowerCase()
-      return (
-        candidate.id.toLowerCase().includes(query) ||
-        candidate.class.toLowerCase().includes(query) ||
-        name.includes(query) ||
-        location.includes(query)
+    if (!query) return objects
+    return objects.filter((candidate) => objectMatchesQuery(candidate, query, detailById))
+  }, [objects, searchQuery, detailById])
+
+  const filteredOverviewSections = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return overviewSections
+
+    return overviewSections
+      .map((section) => ({
+        ...section,
+        objects: section.objects.filter((candidate) =>
+          objectMatchesQuery(candidate, query, detailById)
+        ),
+      }))
+      .filter(
+        (section) =>
+          section.objects.length > 0 ||
+          humanizeIdentifier(section.objectTypeId).toLowerCase().includes(query) ||
+          section.objectTypeId.toLowerCase().includes(query)
       )
-    })
-  }, [objects, classFilter, searchQuery, detailById])
+  }, [overviewSections, searchQuery, detailById])
 
   const groups = useMemo(() => {
     const grouped = new Map<string, ObjectSummary[]>()
@@ -185,11 +222,27 @@ export function ObjectsWorkbench({
     onSelectObject(objectId)
   }
 
+  const searching = searchQuery.trim().length > 0
+  const visibleObjectCount = selectedTypeMode
+    ? filteredObjects.length
+    : filteredOverviewSections.reduce((total, section) => total + section.objects.length, 0)
+  const headerCount = searching
+    ? visibleObjectCount
+    : selectedTypeMode
+      ? objectsTotal
+      : allObjectsTotal
+  const pageLoading = selectedTypeMode ? loading : overviewLoading
+  const showPagination =
+    selectedTypeMode && !loading && (objectsTotal > objectPageSize || objectOffset > 0)
+  const hasResults = selectedTypeMode
+    ? filteredObjects.length > 0
+    : filteredOverviewSections.some((section) => section.objects.length > 0)
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <CollectionHeader
         title="Objects"
-        count={filteredObjects.length}
+        count={headerCount}
         actions={
           <div className="flex items-center gap-2">
             <Select
@@ -208,14 +261,16 @@ export function ObjectsWorkbench({
                 <SelectItem value="updatedAt">Updated at</SelectItem>
               </SelectContent>
             </Select>
-            <CollectionViewToggle
-              value={viewStyle}
-              options={objectViewOptions}
-              onChange={(style) => {
-                setViewStyle(style)
-                setObjectViewStyle(style)
-              }}
-            />
+            {selectedTypeMode ? (
+              <CollectionViewToggle
+                value={viewStyle}
+                options={objectViewOptions}
+                onChange={(style) => {
+                  setViewStyle(style)
+                  setObjectViewStyle(style)
+                }}
+              />
+            ) : null}
           </div>
         }
       />
@@ -224,17 +279,17 @@ export function ObjectsWorkbench({
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <ClassChip
             label="All"
-            count={objects.length}
-            active={classFilter === null}
-            onClick={() => setClassFilter(null)}
+            count={allObjectsTotal}
+            active={classFilter == null}
+            onClick={() => onClassFilterChange(null)}
           />
           {availableClasses.map((cls) => (
             <ClassChip
               key={cls}
               label={humanizeIdentifier(cls)}
-              count={classCounts.get(cls) ?? 0}
+              count={objectTypeCounts.get(cls) ?? 0}
               active={classFilter === cls}
-              onClick={() => setClassFilter(cls)}
+              onClick={() => onClassFilterChange(cls)}
             />
           ))}
         </div>
@@ -251,17 +306,46 @@ export function ObjectsWorkbench({
         />
       </div>
 
-      <div className="mt-4">
-        {loading ? (
+      <div className="mt-4 space-y-4">
+        {pageLoading ? (
           <div className="flex min-h-72 items-center justify-center">
             <LoadingState label="Loading objects..." />
           </div>
-        ) : filteredObjects.length === 0 ? (
+        ) : !hasResults ? (
           <EmptyState
             icon={<Box className="size-12 stroke-1" />}
             title="No matching objects"
             description="Try a broader search query."
           />
+        ) : !selectedTypeMode ? (
+          <div className="space-y-6">
+            {filteredOverviewSections.map((section) => (
+              <ObjectCardSection
+                key={section.objectTypeId}
+                objectTypeId={section.objectTypeId}
+                objects={section.objects}
+                count={formatLoadedCount(
+                  section.objects.length,
+                  searching ? undefined : section.total
+                )}
+                selectedObjectId={selectedObjectId}
+                onSelectObject={handleSelectObject}
+                action={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 px-2 text-xs"
+                    title={`View ${humanizeIdentifier(section.objectTypeId)} objects`}
+                    onClick={() => onClassFilterChange(section.objectTypeId)}
+                  >
+                    View all
+                    <ChevronRight />
+                  </Button>
+                }
+              />
+            ))}
+          </div>
         ) : viewStyle === "table" ? (
           <TableView
             objects={filteredObjects}
@@ -273,30 +357,133 @@ export function ObjectsWorkbench({
         ) : (
           <div className="space-y-6">
             {groups.map(([className, items]) => (
-              <section key={className} className="space-y-2">
-                <div className="sticky top-0 z-10 -mx-1 flex items-baseline gap-2 bg-background/95 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-                  <LetterAvatar label={humanizeIdentifier(className)} />
-                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
-                    {humanizeIdentifier(className)}
-                  </h3>
-                  <span className="text-[11px] text-muted-foreground tabular-nums">
-                    · {items.length}
-                  </span>
-                </div>
-                <CollectionCardGrid>
-                  {items.map((candidate) => (
-                    <ObjectCardItem
-                      key={candidate.id}
-                      object={candidate}
-                      isActive={selectedObjectId === candidate.id}
-                      onSelect={() => handleSelectObject(candidate.id)}
-                    />
-                  ))}
-                </CollectionCardGrid>
-              </section>
+              <ObjectCardSection
+                key={className}
+                objectTypeId={className}
+                objects={items}
+                count={formatLoadedCount(
+                  items.length,
+                  searching
+                    ? undefined
+                    : className === classFilter
+                      ? objectsTotal
+                      : objectTypeCounts.get(className)
+                )}
+                selectedObjectId={selectedObjectId}
+                onSelectObject={handleSelectObject}
+              />
             ))}
           </div>
         )}
+        {showPagination ? (
+          <ObjectsPagination
+            offset={objectOffset}
+            pageSize={objectPageSize}
+            total={objectsTotal}
+            loadedCount={objects.length}
+            visibleCount={filteredObjects.length}
+            hasMore={objectsHasMore}
+            searching={searching}
+            onOffsetChange={onObjectOffsetChange}
+          />
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function ObjectCardSection({
+  objectTypeId,
+  objects,
+  count,
+  selectedObjectId,
+  action,
+  onSelectObject,
+}: {
+  objectTypeId: string
+  objects: ObjectSummary[]
+  count: string
+  selectedObjectId?: string | null
+  action?: ReactNode
+  onSelectObject: (id: string) => void
+}) {
+  const label = humanizeIdentifier(objectTypeId)
+
+  return (
+    <section className="space-y-2">
+      <div className="sticky top-0 z-10 -mx-1 flex items-baseline gap-2 bg-background/95 px-1 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <LetterAvatar label={label} />
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-foreground">
+          {label}
+        </h3>
+        <span className="text-[11px] text-muted-foreground tabular-nums">· {count}</span>
+        {action}
+      </div>
+      <CollectionCardGrid>
+        {objects.map((candidate) => (
+          <ObjectCardItem
+            key={candidate.id}
+            object={candidate}
+            isActive={selectedObjectId === candidate.id}
+            onSelect={() => onSelectObject(candidate.id)}
+          />
+        ))}
+      </CollectionCardGrid>
+    </section>
+  )
+}
+
+function ObjectsPagination({
+  offset,
+  pageSize,
+  total,
+  loadedCount,
+  visibleCount,
+  hasMore,
+  searching,
+  onOffsetChange,
+}: {
+  offset: number
+  pageSize: number
+  total: number
+  loadedCount: number
+  visibleCount: number
+  hasMore: boolean
+  searching: boolean
+  onOffsetChange: (offset: number) => void
+}) {
+  const rangeStart = loadedCount > 0 ? offset + 1 : 0
+  const rangeEnd = loadedCount > 0 ? offset + loadedCount : 0
+  const canGoBack = offset > 0
+  const canGoForward = hasMore
+
+  return (
+    <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs tabular-nums text-muted-foreground">
+        Showing {formatCount(rangeStart)}-{formatCount(rangeEnd)} of {formatCount(total)}
+        {searching ? ` · ${formatCount(visibleCount)} matching this page` : ""}
+      </p>
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!canGoBack}
+          onClick={() => onOffsetChange(Math.max(0, offset - pageSize))}
+        >
+          <ChevronLeft />
+          Previous
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!canGoForward}
+          onClick={() => onOffsetChange(offset + pageSize)}
+        >
+          Next
+          <ChevronRight />
+        </Button>
       </div>
     </div>
   )
@@ -326,7 +513,7 @@ function ClassChip({
     >
       <span>{label}</span>
       <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground")}>
-        {count}
+        {formatCount(count)}
       </span>
     </button>
   )

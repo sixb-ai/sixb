@@ -589,6 +589,10 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
     const total = countResult.total
 
+    const offset = params.offset ?? 0
+    const limit = params.limit ?? 50
+    if (limit === 0) return { objects: [], hasMore: offset < total, total }
+
     // Add ordering
     const orderBy = params.orderBy ?? "updatedAt"
     const order = params.order ?? "desc"
@@ -597,8 +601,6 @@ export class SqliteObjectStorage implements ObjectStorage {
     query += ` ORDER BY ${orderColumn} ${order.toUpperCase()}`
 
     // Add pagination
-    const offset = params.offset ?? 0
-    const limit = params.limit ?? 50
     query += " LIMIT ? OFFSET ?"
     args.push(limit + 1, offset) // +1 to check for hasMore
 
