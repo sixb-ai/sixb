@@ -1,4 +1,9 @@
-import type { DatasetDefinition, DatasetVersion, DatasetVersionMode } from "@pario/core"
+import type {
+  DatasetDefinition,
+  DatasetVersion,
+  DatasetVersionMode,
+  DatasetVersionRef,
+} from "@pario/core"
 import { LakeStorageError } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getDate, getString } from "./duckdb-row"
@@ -22,6 +27,32 @@ interface DatasetSnapshotRow {
   readonly parentSnapshotId?: string
   readonly metadata?: ParioCommitMetadata
 }
+
+interface DatasetSnapshotCandidateRow {
+  readonly snapshotId: string
+  readonly createdAt: Date
+  readonly changesMade: string
+  readonly hasFileChange: boolean
+  readonly hasFileDeleteChange: boolean
+  readonly metadata?: ParioCommitMetadata
+}
+
+interface SnapshotCandidateQueryInput {
+  readonly tableId: bigint
+  readonly exactSnapshotId?: string
+  readonly beforeSnapshotId?: string
+  readonly limit?: number
+}
+
+interface VisibleSnapshotRowsInput {
+  readonly datasetId: string
+  readonly tableId: bigint
+  readonly exactSnapshotId?: string
+  readonly beforeSnapshotId?: string
+  readonly visibleRowLimit?: number
+}
+
+const SNAPSHOT_ROW_BATCH_SIZE = 128
 
 /**
  * Reconstructs Pario DatasetVersion objects from DuckLake snapshots.
@@ -84,14 +115,34 @@ export class DuckLakeSnapshotReader {
     return latest ?? null
   }
 
+  async getLatestVersionRefForDefinition(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition
+  ): Promise<DatasetVersionRef | null> {
+    const row = await this.getLatestSnapshotRowForDefinition(runtime, dataset)
+    return row ? { datasetId: dataset.id, versionId: toVersionId(row.snapshotId) } : null
+  }
+
   async getVersionForSnapshot(
     runtime: DuckDbRuntime,
     dataset: DatasetDefinition,
     snapshotId: string
   ): Promise<DatasetVersion | null> {
-    const rows = await this.getSnapshotRows(runtime, dataset.id)
-    const match = rows.find((row) => row.snapshotId === snapshotId)
+    const match = await this.getSnapshotRowForDefinition(runtime, dataset, snapshotId, {
+      includeParent: true,
+    })
     return match ? this.snapshotToVersion(runtime, dataset, match) : null
+  }
+
+  async getVersionRefForSnapshot(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition,
+    snapshotId: string
+  ): Promise<DatasetVersionRef | null> {
+    const row = await this.getSnapshotRowForDefinition(runtime, dataset, snapshotId, {
+      includeParent: false,
+    })
+    return row ? { datasetId: dataset.id, versionId: toVersionId(row.snapshotId) } : null
   }
 
   async listVersionsForDefinition(
@@ -99,8 +150,7 @@ export class DuckLakeSnapshotReader {
     dataset: DatasetDefinition,
     limit?: number
   ): Promise<readonly DatasetVersion[]> {
-    const rows = await this.getSnapshotRows(runtime, dataset.id)
-    const limitedRows = limit === undefined ? rows : rows.slice(0, Math.max(0, limit))
+    const limitedRows = await this.getSnapshotRowsForDefinition(runtime, dataset, limit)
     const versions: DatasetVersion[] = []
 
     for (const row of limitedRows) {
@@ -110,77 +160,230 @@ export class DuckLakeSnapshotReader {
     return versions
   }
 
-  private async getSnapshotRows(
+  private async getLatestSnapshotRowForDefinition(
     runtime: DuckDbRuntime,
-    datasetId: string
+    dataset: DatasetDefinition
+  ): Promise<DatasetSnapshotRow | null> {
+    const tableName = encodeDatasetTableName(dataset.id)
+    const tableId = await this.getTableId(runtime, tableName)
+    if (tableId === null) {
+      return null
+    }
+
+    const [row] = await this.collectVisibleSnapshotRows(runtime, {
+      datasetId: dataset.id,
+      tableId,
+      visibleRowLimit: 1,
+    })
+    return row ?? null
+  }
+
+  private async getSnapshotRowForDefinition(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition,
+    snapshotId: string,
+    options: { readonly includeParent: boolean }
+  ): Promise<DatasetSnapshotRow | null> {
+    assertDuckLakeSnapshotId(snapshotId)
+
+    const tableName = encodeDatasetTableName(dataset.id)
+    const tableId = await this.getTableId(runtime, tableName)
+    if (tableId === null) {
+      return null
+    }
+
+    const [row] = await this.collectVisibleSnapshotRows(runtime, {
+      datasetId: dataset.id,
+      tableId,
+      exactSnapshotId: snapshotId,
+      visibleRowLimit: 1,
+    })
+    if (!row) {
+      return null
+    }
+
+    if (!options.includeParent || (row.mode !== "append" && row.mode !== "schema")) {
+      return row
+    }
+
+    const [parent] = await this.collectVisibleSnapshotRows(runtime, {
+      datasetId: dataset.id,
+      tableId,
+      beforeSnapshotId: snapshotId,
+      visibleRowLimit: 1,
+    })
+
+    return parent ? { ...row, parentSnapshotId: parent.snapshotId } : row
+  }
+
+  private async getSnapshotRowsForDefinition(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition,
+    limit?: number
   ): Promise<readonly DatasetSnapshotRow[]> {
-    // Step 1: resolve the current DuckLake table id for the Pario dataset
-    // table. Snapshot change metadata is keyed by DuckLake table id, not by
-    // user-facing table name.
-    const tableName = encodeDatasetTableName(datasetId)
+    const visibleLimit = limit === undefined ? undefined : Math.max(0, limit)
+    if (visibleLimit === 0) {
+      return []
+    }
+
+    const tableName = encodeDatasetTableName(dataset.id)
     const tableId = await this.getTableId(runtime, tableName)
     if (tableId === null) {
       return []
     }
 
+    const rows = await this.collectVisibleSnapshotRows(runtime, {
+      datasetId: dataset.id,
+      tableId,
+      visibleRowLimit: visibleLimit === undefined ? undefined : visibleLimit + 1,
+    })
+    const rowsWithParents = this.withParentSnapshotIds(rows)
+    return visibleLimit === undefined ? rowsWithParents : rowsWithParents.slice(0, visibleLimit)
+  }
+
+  private async collectVisibleSnapshotRows(
+    runtime: DuckDbRuntime,
+    input: VisibleSnapshotRowsInput
+  ): Promise<readonly DatasetSnapshotRow[]> {
+    if (input.visibleRowLimit !== undefined && input.visibleRowLimit <= 0) {
+      return []
+    }
+
+    const snapshots: DatasetSnapshotRow[] = []
+    let beforeSnapshotId = input.beforeSnapshotId
+
+    while (input.visibleRowLimit === undefined || snapshots.length < input.visibleRowLimit) {
+      const candidates = await this.querySnapshotCandidates(runtime, {
+        tableId: input.tableId,
+        exactSnapshotId: input.exactSnapshotId,
+        beforeSnapshotId,
+        limit: input.exactSnapshotId === undefined ? SNAPSHOT_ROW_BATCH_SIZE : 1,
+      })
+      if (candidates.length === 0) {
+        break
+      }
+
+      for (const candidate of candidates) {
+        const snapshot = this.candidateToSnapshotRow(input.datasetId, input.tableId, candidate)
+        if (snapshot) {
+          snapshots.push(snapshot)
+        }
+
+        if (input.visibleRowLimit !== undefined && snapshots.length >= input.visibleRowLimit) {
+          break
+        }
+      }
+
+      if (input.exactSnapshotId !== undefined || candidates.length < SNAPSHOT_ROW_BATCH_SIZE) {
+        break
+      }
+
+      beforeSnapshotId = candidates[candidates.length - 1]?.snapshotId
+    }
+
+    return snapshots
+  }
+
+  private async querySnapshotCandidates(
+    runtime: DuckDbRuntime,
+    input: SnapshotCandidateQueryInput
+  ): Promise<readonly DatasetSnapshotCandidateRow[]> {
+    if (input.limit !== undefined && input.limit <= 0) {
+      return []
+    }
+
+    const where: string[] = []
+    if (input.exactSnapshotId !== undefined) {
+      assertDuckLakeSnapshotId(input.exactSnapshotId)
+      where.push(`snapshot.snapshot_id = ${input.exactSnapshotId}`)
+    }
+    if (input.beforeSnapshotId !== undefined) {
+      assertDuckLakeSnapshotId(input.beforeSnapshotId)
+      where.push(`snapshot.snapshot_id < ${input.beforeSnapshotId}`)
+    }
+
+    const whereSql = where.length === 0 ? "" : `WHERE ${where.join(" AND ")}`
+    const limitSql =
+      input.limit === undefined ? "" : `LIMIT ${Math.max(0, Math.trunc(input.limit))}`
     const ducklakeSnapshot = duckLakeMetadataTableName(this.options, "ducklake_snapshot")
     const ducklakeSnapshotChanges = duckLakeMetadataTableName(
       this.options,
       "ducklake_snapshot_changes"
     )
-    // Step 2: scan DuckLake snapshots newest-first. Data-change snapshots are
-    // always visible for Pario dataset tables. Metadata-only snapshots are
-    // visible only when Pario explicitly marked them as dataset commits.
+    const ducklakeDataFile = duckLakeMetadataTableName(this.options, "ducklake_data_file")
+    const ducklakeDeleteFile = duckLakeMetadataTableName(this.options, "ducklake_delete_file")
+
     const rows = await runtime.query(`
-      SELECT snapshot.snapshot_id, snapshot.snapshot_time, changes.changes_made, changes.commit_extra_info
-      FROM ${ducklakeSnapshot} snapshot
-      JOIN ${ducklakeSnapshotChanges} changes
-        ON changes.snapshot_id = snapshot.snapshot_id
-      ORDER BY snapshot.snapshot_id DESC
+      WITH candidate_snapshots AS (
+        -- Recent DuckLake snapshots to inspect; Pario visibility is filtered later.
+        SELECT
+          snapshot.snapshot_id,
+          snapshot.snapshot_time,
+          changes.changes_made,
+          changes.commit_extra_info
+        FROM ${ducklakeSnapshot} snapshot
+        JOIN ${ducklakeSnapshotChanges} changes
+          ON changes.snapshot_id = snapshot.snapshot_id
+        ${whereSql}
+        ORDER BY snapshot.snapshot_id DESC
+        ${limitSql}
+      ),
+      file_changes AS (
+        -- File metadata tells whether this table changed in each candidate snapshot.
+        SELECT begin_snapshot AS snapshot_id, false AS is_delete_change
+        FROM ${ducklakeDataFile}
+        WHERE table_id = ${input.tableId}
+          AND begin_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
+        UNION ALL
+        SELECT end_snapshot AS snapshot_id, true AS is_delete_change
+        FROM ${ducklakeDataFile}
+        WHERE table_id = ${input.tableId}
+          AND end_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
+        UNION ALL
+        SELECT begin_snapshot AS snapshot_id, true AS is_delete_change
+        FROM ${ducklakeDeleteFile}
+        WHERE table_id = ${input.tableId}
+          AND begin_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
+        UNION ALL
+        SELECT end_snapshot AS snapshot_id, true AS is_delete_change
+        FROM ${ducklakeDeleteFile}
+        WHERE table_id = ${input.tableId}
+          AND end_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
+      ),
+      file_changes_by_snapshot AS (
+        -- Collapse file-level changes into one row per snapshot.
+        SELECT
+          snapshot_id,
+          count(*) > 0 AS has_file_change,
+          count(*) FILTER (WHERE is_delete_change) > 0 AS has_file_delete_change
+        FROM file_changes
+        GROUP BY snapshot_id
+      )
+      SELECT
+        -- Keep metadata-only candidates; Pario filters them with commit_extra_info.
+        candidate.snapshot_id,
+        candidate.snapshot_time,
+        candidate.changes_made,
+        candidate.commit_extra_info,
+        coalesce(file_changes.has_file_change, false) AS has_file_change,
+        coalesce(file_changes.has_file_delete_change, false) AS has_file_delete_change
+      FROM candidate_snapshots candidate
+      LEFT JOIN file_changes_by_snapshot file_changes
+        ON file_changes.snapshot_id = candidate.snapshot_id
+      ORDER BY candidate.snapshot_id DESC
     `)
 
-    const snapshots: DatasetSnapshotRow[] = []
-    for (const row of rows) {
-      const snapshotId = String(getBigIntLike(row, "snapshot_id"))
-      const changesMade = getString(row, "changes_made")
-      const dataChange = await this.getSnapshotDataChange(runtime, tableId, snapshotId, changesMade)
+    return rows.map((row) => {
       const metadata = parseCommitMetadata(row.commit_extra_info)
-
-      // Metadata-only snapshots are common for table comments, schema changes,
-      // and other catalog operations. Treat them as dataset versions only when
-      // their Pario metadata names this dataset.
-      if (!dataChange.hasDataChange) {
-        if (metadata?.datasetId !== datasetId) {
-          continue
-        }
-
-        snapshots.push({
-          snapshotId,
-          createdAt: getDate(row, "snapshot_time"),
-          mode: metadata.mode ?? "schema",
-          metadata,
-        })
-        continue
-      }
-
-      // A real data-change snapshot belongs to this dataset because DuckLake's
-      // change metadata touched this table id. If Pario metadata is present but
-      // points elsewhere, fail loudly rather than hydrating the wrong lineage.
-      if (metadata !== undefined && metadata.datasetId !== datasetId) {
-        throw new LakeStorageError(
-          `[ParioDuckLake] DuckLake snapshot '${snapshotId}' changed dataset '${datasetId}' but Pario commit metadata references dataset '${metadata.datasetId}'.`
-        )
-      }
-
-      snapshots.push({
-        snapshotId,
+      return {
+        snapshotId: String(getBigIntLike(row, "snapshot_id")),
         createdAt: getDate(row, "snapshot_time"),
-        mode: metadata?.mode ?? (dataChange.hasDeleteChange ? "snapshot" : "append"),
+        changesMade: getString(row, "changes_made"),
+        hasFileChange: getBoolean(row, "has_file_change"),
+        hasFileDeleteChange: getBoolean(row, "has_file_delete_change"),
         ...(metadata !== undefined ? { metadata } : {}),
-      })
-    }
-
-    return this.withParentSnapshotIds(snapshots)
+      }
+    })
   }
 
   private async getTableId(runtime: DuckDbRuntime, tableName: string): Promise<bigint | null> {
@@ -196,41 +399,46 @@ export class DuckLakeSnapshotReader {
     return row === undefined ? null : getBigIntLike(row, "table_id")
   }
 
-  private async getSnapshotDataChange(
-    runtime: DuckDbRuntime,
+  private candidateToSnapshotRow(
+    datasetId: string,
     tableId: bigint,
-    snapshotId: string,
-    changesMade: string
-  ): Promise<{ readonly hasDataChange: boolean; readonly hasDeleteChange: boolean }> {
-    // DuckLake records some changes inline in changes_made and some through
-    // data/delete file metadata. Check both so external DuckLake writes and
-    // Pario writes are interpreted consistently.
-    const inlineChange = parseInlineDataChange(changesMade, tableId)
-    const ducklakeDataFile = duckLakeMetadataTableName(this.options, "ducklake_data_file")
-    const ducklakeDeleteFile = duckLakeMetadataTableName(this.options, "ducklake_delete_file")
-    const [row] = await runtime.query(`
-      SELECT
-        count(*) > 0 AS has_file_change,
-        count(*) FILTER (WHERE is_delete_change) > 0 AS has_file_delete_change
-      FROM (
-        SELECT end_snapshot = ${snapshotId} AS is_delete_change
-        FROM ${ducklakeDataFile}
-        WHERE table_id = ${tableId}
-          AND (begin_snapshot = ${snapshotId} OR end_snapshot = ${snapshotId})
-        UNION ALL
-        SELECT true AS is_delete_change
-        FROM ${ducklakeDeleteFile}
-        WHERE table_id = ${tableId}
-          AND (begin_snapshot = ${snapshotId} OR end_snapshot = ${snapshotId})
-      ) changes
-    `)
+    candidate: DatasetSnapshotCandidateRow
+  ): DatasetSnapshotRow | null {
+    const inlineChange = parseInlineDataChange(candidate.changesMade, tableId)
+    const hasDataChange = inlineChange.hasDataChange || candidate.hasFileChange
+    const hasDeleteChange = inlineChange.hasDeleteChange || candidate.hasFileDeleteChange
 
-    const hasFileChange = row ? getBoolean(row, "has_file_change") : false
-    const hasFileDeleteChange = row ? getBoolean(row, "has_file_delete_change") : false
+    // Metadata-only snapshots are common for table comments, schema changes,
+    // and other catalog operations. Treat them as dataset versions only when
+    // their Pario metadata names this dataset.
+    if (!hasDataChange) {
+      const metadata = candidate.metadata
+      if (!metadata || metadata.datasetId !== datasetId) {
+        return null
+      }
+
+      return {
+        snapshotId: candidate.snapshotId,
+        createdAt: candidate.createdAt,
+        mode: metadata.mode ?? "schema",
+        metadata,
+      }
+    }
+
+    // A real data-change snapshot belongs to this dataset because DuckLake's
+    // change metadata touched this table id. If Pario metadata is present but
+    // points elsewhere, fail loudly rather than hydrating the wrong lineage.
+    if (candidate.metadata !== undefined && candidate.metadata.datasetId !== datasetId) {
+      throw new LakeStorageError(
+        `[ParioDuckLake] DuckLake snapshot '${candidate.snapshotId}' changed dataset '${datasetId}' but Pario commit metadata references dataset '${candidate.metadata.datasetId}'.`
+      )
+    }
 
     return {
-      hasDataChange: inlineChange.hasDataChange || hasFileChange,
-      hasDeleteChange: inlineChange.hasDeleteChange || hasFileDeleteChange,
+      snapshotId: candidate.snapshotId,
+      createdAt: candidate.createdAt,
+      mode: candidate.metadata?.mode ?? (hasDeleteChange ? "snapshot" : "append"),
+      ...(candidate.metadata !== undefined ? { metadata: candidate.metadata } : {}),
     }
   }
 
@@ -294,5 +502,11 @@ export class DuckLakeSnapshotReader {
           : undefined
       return parentSnapshotId === undefined ? snapshot : { ...snapshot, parentSnapshotId }
     })
+  }
+}
+
+function assertDuckLakeSnapshotId(snapshotId: string): void {
+  if (!/^\d+$/.test(snapshotId)) {
+    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
 }

@@ -126,15 +126,15 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 
     for (const [sourceName, source] of Object.entries(sources)) {
       const definition = await this.resolveSourceDataset(source.dataset)
-      const version = await this.resolveSourceVersion(runtime, definition, source.versionId)
+      const versionRef = await this.resolveSourceVersion(runtime, definition, source.versionId)
 
       relations[sourceName] = {
         datasetId: definition.id,
-        versionId: version.versionId,
+        versionId: versionRef.versionId,
       }
       inputs.push({
         datasetId: definition.id,
-        versionId: version.versionId,
+        versionId: versionRef.versionId,
       })
     }
 
@@ -171,20 +171,20 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     runtime: DuckDbRuntime,
     dataset: DatasetDefinition,
     versionId?: string
-  ): Promise<DatasetVersion> {
+  ): Promise<DatasetVersionRef> {
     if (versionId !== undefined) {
       const snapshotId = parseVersionId(versionId)
-      const version = await this.snapshots.getVersionForSnapshot(runtime, dataset, snapshotId)
-      if (version) {
-        return version
+      const versionRef = await this.snapshots.getVersionRefForSnapshot(runtime, dataset, snapshotId)
+      if (versionRef) {
+        return versionRef
       }
 
       throwNoCommittedSourceVersion(dataset.id)
     }
 
-    const latestVersion = await this.snapshots.getLatestVersionForDefinition(runtime, dataset)
-    if (latestVersion) {
-      return latestVersion
+    const latestVersionRef = await this.snapshots.getLatestVersionRefForDefinition(runtime, dataset)
+    if (latestVersionRef) {
+      return latestVersionRef
     }
 
     throwNoCommittedSourceVersion(dataset.id)
