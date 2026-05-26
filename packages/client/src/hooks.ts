@@ -11,6 +11,7 @@ import type { GetObjectData, GetTelemetryHistoryData, ListObjectsData } from "./
 import {
   decodeObjectId,
   encodeObjectId,
+  type ObjectSummary,
   type RelationshipEdge,
   toObjectDetail,
   toObjectSummary,
@@ -73,9 +74,21 @@ function parseLimit(value: string | number | undefined): string | undefined {
   return undefined
 }
 
-async function fetchObjectTypeMap() {
+async function loadObjectTypeMap() {
   const { data } = await listObjectTypes({ throwOnError: true })
   return new Map((data ?? []).map((objectType) => [objectType.id, objectType]))
+}
+
+let objectTypeMapPromise: ReturnType<typeof loadObjectTypeMap> | null = null
+
+async function fetchObjectTypeMap() {
+  objectTypeMapPromise ??= loadObjectTypeMap()
+  try {
+    return await objectTypeMapPromise
+  } catch (error) {
+    objectTypeMapPromise = null
+    throw error
+  }
 }
 
 export interface ListRelationshipsOptions {
@@ -162,6 +175,28 @@ export interface ListObjectsOptions extends Omit<Options<ListObjectsData>, "path
   }
 }
 
+export interface ObjectListPage {
+  objects: ObjectSummary[]
+  hasMore: boolean
+  total: number
+}
+
+function buildListObjectsQuery(query: ListObjectsOptions["query"] | undefined) {
+  return {
+    limit: query?.limit ?? "300",
+    orderBy: query?.orderBy ?? "updatedAt",
+    order: query?.order ?? "desc",
+    objectTypeId: query?.objectTypeId,
+    idPrefix: query?.idPrefix,
+    idSuffix: query?.idSuffix,
+    updatedAfter: query?.updatedAfter,
+    updatedBefore: query?.updatedBefore,
+    createdAfter: query?.createdAfter,
+    createdBefore: query?.createdBefore,
+    offset: query?.offset,
+  }
+}
+
 export const listObjectsQueryKey = (options?: ListObjectsOptions): QueryKey => {
   return createQueryKey("listObjects", {
     path: options?.path,
@@ -169,36 +204,70 @@ export const listObjectsQueryKey = (options?: ListObjectsOptions): QueryKey => {
   })
 }
 
+export const listObjectsPageQueryKey = (options?: ListObjectsOptions): QueryKey => {
+  return createQueryKey("listObjectsPage", {
+    path: options?.path,
+    query: options?.query as Record<string, unknown> | undefined,
+  })
+}
+
+async function fetchObjectListPage(options?: ListObjectsOptions): Promise<ObjectListPage> {
+  const { path: _path, query, ...rest } = options ?? {}
+  const [objectTypeMap, objectsResponse] = await Promise.all([
+    fetchObjectTypeMap(),
+    listObjects({
+      ...rest,
+      query: buildListObjectsQuery(query),
+      throwOnError: true,
+    }),
+  ])
+
+  const response = objectsResponse.data
+  const rows = response?.objects ?? []
+  return {
+    objects: rows.map((object) => toObjectSummary(object, objectTypeMap.get(object.objectTypeId))),
+    hasMore: response?.hasMore ?? false,
+    total: response?.total ?? rows.length,
+  }
+}
+
+export const listObjectsPageOptions = (options?: ListObjectsOptions) => {
+  return queryOptions({
+    queryKey: listObjectsPageQueryKey(options),
+    queryFn: async () => fetchObjectListPage(options),
+  })
+}
+
 export const listObjectsOptions = (options?: ListObjectsOptions) => {
   return queryOptions({
     queryKey: listObjectsQueryKey(options),
+    queryFn: async () => (await fetchObjectListPage(options)).objects,
+  })
+}
+
+export const objectCountQueryKey = (options?: ListObjectsOptions): QueryKey => {
+  return createQueryKey("objectCount", {
+    path: options?.path,
+    query: options?.query as Record<string, unknown> | undefined,
+  })
+}
+
+export const objectCountOptions = (options?: ListObjectsOptions) => {
+  return queryOptions({
+    queryKey: objectCountQueryKey(options),
     queryFn: async () => {
       const { path: _path, query, ...rest } = options ?? {}
-      const [objectTypeMap, objectsResponse] = await Promise.all([
-        fetchObjectTypeMap(),
-        listObjects({
-          ...rest,
-          query: {
-            limit: query?.limit ?? "300",
-            orderBy: query?.orderBy ?? "updatedAt",
-            order: query?.order ?? "desc",
-            objectTypeId: query?.objectTypeId,
-            idPrefix: query?.idPrefix,
-            idSuffix: query?.idSuffix,
-            updatedAfter: query?.updatedAfter,
-            updatedBefore: query?.updatedBefore,
-            createdAfter: query?.createdAfter,
-            createdBefore: query?.createdBefore,
-            offset: query?.offset,
-          },
-          throwOnError: true,
-        }),
-      ])
+      const { data } = await listObjects({
+        ...rest,
+        query: {
+          ...buildListObjectsQuery(query),
+          limit: "0",
+          offset: undefined,
+        },
+        throwOnError: true,
+      })
 
-      const objects = objectsResponse.data?.objects ?? []
-      return objects.map((object) =>
-        toObjectSummary(object, objectTypeMap.get(object.objectTypeId))
-      )
+      return data?.total ?? 0
     },
   })
 }

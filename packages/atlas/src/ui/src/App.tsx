@@ -3,23 +3,32 @@ import {
   getProjectInfoOptions,
   listConnectorsOptions,
   listDatasetsOptions,
-  listObjectsOptions,
+  listObjectsPageOptions,
   listObjectTypesOptions,
   listPipelinesOptions,
   listRulesOptions,
   listSyncsOptions,
+  objectCountOptions,
 } from "@pario/client/hooks"
 import { Button, Card, EmptyState } from "@pario/ui/components"
 import { cn } from "@pario/ui/lib/utils"
-import { useQuery } from "@tanstack/react-query"
+import { useQueries, useQuery } from "@tanstack/react-query"
 import { Box, Loader2 } from "lucide-react"
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
-import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom"
+import {
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom"
 import { ConnectorDetailPage, ConnectorsPage } from "./components/ConnectorsPage"
 import { DatasetDetailPage, DatasetsPage } from "./components/DatasetsPage"
 import { AppShell, Sidebar, type ViewMode } from "./components/layout"
 import { ObjectDetailPage } from "./components/ObjectDetailPage"
-import { ObjectsWorkbench } from "./components/ObjectsWorkbench"
+import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./components/ObjectsWorkbench"
 import { ObjectTypeDetail } from "./components/ObjectTypeDetail"
 import { OntologyExplorer } from "./components/OntologyExplorer"
 import { PipelineDetailPage, PipelinesPage } from "./components/PipelinesPage"
@@ -34,7 +43,7 @@ import {
 } from "./lib/userPreferences"
 
 interface ProjectSidebarData {
-  objectCount: number
+  objectCount?: number
   datasetCount: number
   connectorCount: number
   syncCount: number
@@ -60,6 +69,16 @@ const KNOWN_VIEWS = new Set([
   "settings",
 ])
 const emptyObjectList: ObjectSummary[] = []
+const OBJECT_PAGE_SIZE = 300
+const OBJECT_TYPE_PREVIEW_LIMIT = 12
+
+function parseObjectOffset(value: string | null): number {
+  if (!value) return 0
+
+  const parsed = Number.parseInt(value, 10)
+  if (!Number.isFinite(parsed) || parsed < 0) return 0
+  return parsed
+}
 
 function getViewModeFromPath(pathname: string): ViewMode {
   if (pathname === "/" || pathname === "") return "home"
@@ -137,6 +156,52 @@ function ProjectWorkspace() {
 
   const [latestUpdates, setLatestUpdates] = useState<Record<string, TelemetryUpdate>>({})
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const classFilter = searchParams.get("class") || null
+  const objectOffset = parseObjectOffset(searchParams.get("offset"))
+
+  const setObjectOffset = useCallback(
+    (nextOffset: number, options?: { replace?: boolean }) => {
+      const offset = Math.max(0, Math.trunc(nextOffset))
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (offset > 0) {
+            params.set("offset", String(offset))
+          } else {
+            params.delete("offset")
+          }
+          return params
+        },
+        { replace: options?.replace ?? false }
+      )
+    },
+    [setSearchParams]
+  )
+
+  const setClassFilter = useCallback(
+    (next: string | null, options?: { offset?: number; replace?: boolean }) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev)
+          if (next) {
+            params.set("class", next)
+          } else {
+            params.delete("class")
+          }
+          const offset = Math.max(0, Math.trunc(options?.offset ?? 0))
+          if (offset > 0) {
+            params.set("offset", String(offset))
+          } else {
+            params.delete("offset")
+          }
+          return params
+        },
+        { replace: options?.replace ?? true }
+      )
+    },
+    [setSearchParams]
+  )
 
   const {
     data: projectInfo,
@@ -154,21 +219,122 @@ function ProjectWorkspace() {
   }, [resolvedProjectName])
 
   const objectsQuery = useQuery({
-    ...listObjectsOptions({
+    ...listObjectsPageOptions({
       query: {
+        objectTypeId: classFilter ?? undefined,
+        limit: String(OBJECT_PAGE_SIZE),
+        offset: objectOffset > 0 ? String(objectOffset) : undefined,
         orderBy: objectSortBy,
         order: objectSortBy === "primaryId" ? "asc" : "desc",
       },
     }),
-    enabled: !!projectInfo,
+    enabled: !!projectInfo && !!classFilter,
   })
-  const objects = objectsQuery.data ?? emptyObjectList
+  const objectsPage = objectsQuery.data
+  const objects = objectsPage?.objects ?? emptyObjectList
   const { isLoading: objectsLoading } = objectsQuery
 
-  const { data: objectTypes = [] } = useQuery({
+  const { data: objectTypes = [], isLoading: objectTypesLoading } = useQuery({
     ...listObjectTypesOptions(),
     enabled: !!projectInfo,
   })
+
+  useEffect(() => {
+    if (objectTypes.length === 0 || !classFilter) return
+    if (!objectTypes.some((objectType) => objectType.id === classFilter)) {
+      setClassFilter(null, { replace: true })
+    }
+  }, [classFilter, objectTypes, setClassFilter])
+
+  useEffect(() => {
+    const total = objectsPage?.total
+    if (typeof total !== "number" || objectOffset === 0) return
+    if (total === 0) {
+      setObjectOffset(0, { replace: true })
+      return
+    }
+    if (objectOffset < total) return
+
+    const lastOffset = Math.floor((total - 1) / OBJECT_PAGE_SIZE) * OBJECT_PAGE_SIZE
+    setObjectOffset(lastOffset, { replace: true })
+  }, [objectOffset, objectsPage?.total, setObjectOffset])
+
+  const globalObjectCountQuery = useQuery({
+    ...objectCountOptions(),
+    enabled: !!projectInfo,
+  })
+
+  const objectTypePreviewQueries = useQueries({
+    queries: objectTypes.map((objectType) => ({
+      ...listObjectsPageOptions({
+        query: {
+          objectTypeId: objectType.id,
+          limit: String(OBJECT_TYPE_PREVIEW_LIMIT),
+          orderBy: objectSortBy,
+          order: objectSortBy === "primaryId" ? "asc" : "desc",
+        },
+      }),
+      enabled: !!projectInfo && !classFilter,
+    })),
+  })
+
+  const objectTypeCountQueries = useQueries({
+    queries: objectTypes.map((objectType, index) => ({
+      ...objectCountOptions({
+        query: {
+          objectTypeId: objectType.id,
+        },
+      }),
+      enabled:
+        !!projectInfo &&
+        !!classFilter &&
+        typeof objectTypePreviewQueries[index]?.data?.total !== "number",
+    })),
+  })
+
+  const objectTypePreviewSections = useMemo<ObjectTypePreviewSection[]>(() => {
+    return objectTypes
+      .map((objectType, index) => {
+        const previewQuery = objectTypePreviewQueries[index]
+        const page = previewQuery?.data
+        const total = page?.total ?? 0
+
+        return {
+          objectTypeId: objectType.id,
+          objects: page?.objects ?? emptyObjectList,
+          total,
+        }
+      })
+      .filter((section) => section.total > 0 || section.objects.length > 0)
+  }, [objectTypes, objectTypePreviewQueries])
+
+  const objectTypeCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (let i = 0; i < objectTypes.length; i += 1) {
+      const count = objectTypeCountQueries[i]?.data ?? objectTypePreviewQueries[i]?.data?.total
+      if (typeof count === "number") counts.set(objectTypes[i].id, count)
+    }
+    return counts
+  }, [objectTypes, objectTypeCountQueries, objectTypePreviewQueries])
+
+  const objectTypeTotal = useMemo(() => {
+    if (objectTypes.length === 0 || objectTypeCounts.size !== objectTypes.length) return undefined
+
+    let total = 0
+    for (const objectType of objectTypes) {
+      const count = objectTypeCounts.get(objectType.id)
+      if (typeof count !== "number") return undefined
+      total += count
+    }
+    return total
+  }, [objectTypes, objectTypeCounts])
+
+  const allObjectsTotal = globalObjectCountQuery.data ?? objectTypeTotal ?? 0
+
+  const overviewLoading =
+    !classFilter &&
+    (objectTypesLoading ||
+      (objectTypes.length > 0 && objectTypePreviewQueries.some((query) => query.isLoading)))
 
   const { data: connectors = [] } = useQuery({
     ...listConnectorsOptions(),
@@ -214,7 +380,7 @@ function ProjectWorkspace() {
 
   useEffect(() => {
     setSidebarData({
-      objectCount: objects.length,
+      objectCount: globalObjectCountQuery.data ?? objectTypeTotal,
       datasetCount: datasets.length,
       connectorCount: connectors.length,
       syncCount: syncs.length,
@@ -224,7 +390,8 @@ function ProjectWorkspace() {
       connected,
     })
   }, [
-    objects.length,
+    globalObjectCountQuery.data,
+    objectTypeTotal,
     datasets.length,
     connectors.length,
     syncs.length,
@@ -246,8 +413,13 @@ function ProjectWorkspace() {
   )
 
   const objectLookup = useMemo(
-    () => Object.fromEntries(objects.map((object) => [object.id, object])),
-    [objects]
+    () =>
+      Object.fromEntries(
+        [...objects, ...objectTypePreviewSections.flatMap((section) => section.objects)].map(
+          (object) => [object.id, object]
+        )
+      ),
+    [objects, objectTypePreviewSections]
   )
 
   const toProjectPath = (suffix: string) => `/${suffix}`
@@ -255,6 +427,7 @@ function ProjectWorkspace() {
   const handleObjectSortByChange = (sortBy: ObjectSortPreference) => {
     setObjectSortBy(sortBy)
     setObjectSortPreference(sortBy)
+    setObjectOffset(0, { replace: true })
   }
 
   if (projectLoading) {
@@ -307,11 +480,24 @@ function ProjectWorkspace() {
                 <ObjectsWorkbench
                   projectName={resolvedProjectName}
                   objects={objects}
+                  objectsTotal={objectsPage?.total ?? objects.length}
+                  objectsHasMore={objectsPage?.hasMore ?? false}
+                  objectOffset={objectOffset}
+                  objectPageSize={OBJECT_PAGE_SIZE}
+                  allObjectsTotal={allObjectsTotal}
+                  objectTypeCounts={objectTypeCounts}
+                  overviewSections={objectTypePreviewSections}
+                  overviewLoading={overviewLoading}
                   loading={objectsLoading}
                   sortBy={objectSortBy}
+                  classFilter={classFilter}
                   selectedObjectId={selectedObjectIdForSidebar}
                   latestProjectUpdates={latestProjectUpdates}
                   onSortByChange={handleObjectSortByChange}
+                  onClassFilterChange={(objectTypeId, offset) =>
+                    setClassFilter(objectTypeId, { offset })
+                  }
+                  onObjectOffsetChange={setObjectOffset}
                   onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
                 />
               }

@@ -144,6 +144,11 @@ describe("InMemoryObjectStorage", () => {
     expect(page1.total).toBe(5)
     expect(page1.hasMore).toBe(true)
 
+    const countOnly = await storage.list({ projectId: "p1", objectTypeId: "Room", limit: 0 })
+    expect(countOnly.objects).toHaveLength(0)
+    expect(countOnly.total).toBe(5)
+    expect(countOnly.hasMore).toBe(true)
+
     const page2 = await storage.list({ projectId: "p1", objectTypeId: "Room", limit: 2, offset: 4 })
     expect(page2.objects).toHaveLength(1)
     expect(page2.hasMore).toBe(false)

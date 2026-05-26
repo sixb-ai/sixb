@@ -317,6 +317,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
     const total = allRows.length
 
+    const offset = params.offset ?? 0
+    const limit = params.limit ?? 50
+    if (limit === 0) return { objects: [], hasMore: offset < total, total }
+
     const orderBy = params.orderBy ?? "updatedAt"
     const order = params.order ?? "desc"
 
@@ -336,8 +340,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
       return order === "desc" ? -comparison : comparison
     })
 
-    const offset = params.offset ?? 0
-    const limit = params.limit ?? 50
     const objects = allRows.slice(offset, offset + limit)
     const hasMore = offset + limit < total
 

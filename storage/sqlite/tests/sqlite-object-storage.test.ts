@@ -398,6 +398,15 @@ describe("SqliteObjectStorage", () => {
     expect(result.objects).toHaveLength(2)
     expect(result.total).toBe(5)
     expect(result.hasMore).toBe(true)
+
+    const countOnly = await storage.list({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      limit: 0,
+    })
+    expect(countOnly.objects).toHaveLength(0)
+    expect(countOnly.total).toBe(5)
+    expect(countOnly.hasMore).toBe(true)
   })
 
   test("list with primaryIdPrefix filter", async () => {
