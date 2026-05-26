@@ -1,11 +1,24 @@
-import { cloneJsonValue, getInvalidJsonValueReason } from "../json"
+import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { BrokerError } from "./errors"
 import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "./types"
+
+// Payloads are validated by assertBrokerPayload above the call site, so we can
+// skip the redundant validity walk that cloneJsonValue performs.
+function cloneValidatedPayload(value: JsonValue): JsonValue {
+  return JSON.parse(JSON.stringify(value)) as JsonValue
+}
+
+// Records stored internally carry a numeric publishedAtMs alongside the public
+// ISO publishedAt string so retention sweeps can avoid Date.parse on every
+// record on every append/read.
+interface StoredRecord extends BrokerRecord {
+  readonly publishedAtMs: number
+}
 
 interface StoredStream {
   definition: BrokerStreamDefinition
   nextSequence: bigint
-  records: BrokerRecord[]
+  records: StoredRecord[]
 }
 
 interface Subscription {
@@ -42,25 +55,28 @@ export class InMemoryBroker implements Broker {
     }
 
     const storedStream = this.getEnsuredStream(params.projectId, params.streamId)
-    const stored: BrokerRecord[] = []
+    const stored: StoredRecord[] = []
 
     for (const record of params.records) {
       const cursor = storedStream.nextSequence.toString()
       storedStream.nextSequence += 1n
+      const publishedAtMs = Date.now()
       stored.push({
         streamId: params.streamId,
         cursor,
         name: record.name,
         key: record.key,
-        payload: cloneJsonValue(record.payload),
-        publishedAt: new Date().toISOString(),
+        payload: cloneValidatedPayload(record.payload as JsonValue),
+        publishedAt: new Date(publishedAtMs).toISOString(),
+        publishedAtMs,
       })
     }
 
     storedStream.records.push(...stored)
     this.applyRetention(storedStream)
+    const records = stored.map(toBrokerRecord)
     this.notify(params.projectId, params.streamId, stored)
-    return stored
+    return records
   }
 
   async read(params: {
@@ -164,7 +180,19 @@ export class InMemoryBroker implements Broker {
         records = []
       } else {
         const oldestAllowed = Date.now() - retention.maxAgeMs
-        records = records.filter((record) => Date.parse(record.publishedAt) >= oldestAllowed)
+        // Records are appended in chronological order, so we only need to find
+        // the first record that is still in range and slice off the prefix —
+        // avoids walking the entire retained set on every sweep.
+        let firstInRange = 0
+        while (
+          firstInRange < records.length &&
+          records[firstInRange].publishedAtMs < oldestAllowed
+        ) {
+          firstInRange += 1
+        }
+        if (firstInRange > 0) {
+          records = records.slice(firstInRange)
+        }
       }
     }
 
@@ -201,7 +229,7 @@ export class InMemoryBroker implements Broker {
     }
   }
 
-  private notify(projectId: string, streamId: string, records: readonly BrokerRecord[]): void {
+  private notify(projectId: string, streamId: string, records: readonly StoredRecord[]): void {
     for (const subscription of this.subscriptions) {
       if (subscription.projectId !== projectId || subscription.streamId !== streamId) {
         continue
@@ -228,7 +256,7 @@ export class InMemoryBroker implements Broker {
   }
 
   private filterRecords(
-    records: readonly BrokerRecord[],
+    records: readonly StoredRecord[],
     filters: {
       afterCursor?: string
       limit?: number
@@ -246,7 +274,7 @@ export class InMemoryBroker implements Broker {
       if (names && (!record.name || !names.has(record.name))) {
         continue
       }
-      result.push(record)
+      result.push(toBrokerRecord(record))
       if (filters.limit !== undefined && result.length >= filters.limit) {
         break
       }
@@ -258,6 +286,17 @@ export class InMemoryBroker implements Broker {
 
 function streamKey(projectId: string, streamId: string): string {
   return `${projectId}\0${streamId}`
+}
+
+function toBrokerRecord(record: StoredRecord): BrokerRecord {
+  return {
+    streamId: record.streamId,
+    cursor: record.cursor,
+    name: record.name,
+    key: record.key,
+    payload: record.payload,
+    publishedAt: record.publishedAt,
+  }
 }
 
 function assertProjectId(projectId: string): void {

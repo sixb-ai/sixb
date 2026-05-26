@@ -11,6 +11,29 @@ interface LocalComponents {
   dayOfWeek: number // 0=Sunday
 }
 
+// Intl.DateTimeFormat construction is expensive (~30-100µs each); the search
+// loop in nextCronOccurrence calls getLocalComponents many times for sparse
+// crons, so we cache one formatter per timezone for the lifetime of the process.
+const timezoneFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+function getTimezoneFormatter(timezone: string): Intl.DateTimeFormat {
+  let formatter = timezoneFormatterCache.get(timezone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      weekday: "short",
+      hour12: false,
+    })
+    timezoneFormatterCache.set(timezone, formatter)
+  }
+  return formatter
+}
+
 function getLocalComponents(date: Date, timezone: string | undefined): LocalComponents {
   if (timezone === undefined) {
     return {
@@ -22,17 +45,7 @@ function getLocalComponents(date: Date, timezone: string | undefined): LocalComp
     }
   }
 
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    weekday: "short",
-    hour12: false,
-  })
-
+  const formatter = getTimezoneFormatter(timezone)
   const parts = formatter.formatToParts(date)
   const get = (type: Intl.DateTimeFormatPartTypes): string => {
     const part = parts.find((p) => p.type === type)
