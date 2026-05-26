@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Broker, BrokerRecord, BrokerStreamDefinition } from "../broker"
-import { cloneJsonValue, getInvalidJsonValueReason, type JsonValue } from "../json"
+import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import {
   EVENT_DEFINITIONS,
   EVENT_TYPES,
@@ -196,7 +196,7 @@ function toBrokerRecordPayload(payload: StoredEventPayload): JsonValue {
     throw new EventsError(`Event '${payload.type}' cannot be stored in broker; ${reason}`)
   }
 
-  return cloneJsonValue(payload as unknown as JsonValue)
+  return payload as unknown as JsonValue
 }
 
 function hydrateEventRecord(record: BrokerRecord): StoredDomainEvent {
