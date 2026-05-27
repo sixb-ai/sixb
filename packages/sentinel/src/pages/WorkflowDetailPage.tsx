@@ -21,10 +21,10 @@ import type { Ref } from "react"
 import { useEffect, useMemo, useRef } from "react"
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingInline, LoadingPage, PageFrame } from "../components/common"
-import { RunHistoryTable } from "../features/workflows/components/RunHistoryTable"
-import { SchemaShape } from "../features/workflows/components/SchemaShape"
-import { StatusBadge } from "../features/workflows/components/StatusBadge"
-import { WorkflowNodeRow } from "../features/workflows/components/WorkflowNodeRow"
+import { SchemaShape } from "../features/workflows/components/nodes/SchemaShape"
+import { WorkflowNodeRow } from "../features/workflows/components/nodes/WorkflowNodeRow"
+import { RunHistoryTable } from "../features/workflows/components/runs/RunHistoryTable"
+import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
 import {
   allWorkflowRunStatuses,
   formatRelativeTime,

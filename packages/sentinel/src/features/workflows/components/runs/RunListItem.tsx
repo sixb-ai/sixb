@@ -4,7 +4,7 @@ import {
   formatRunDuration,
   runTimeLabel,
   type WorkflowRunSummary,
-} from "../utils/workflows"
+} from "../../utils/workflows"
 import { useRunHistoryNavigation } from "./runHistoryNavigation"
 import { StatusBadge } from "./StatusBadge"
 

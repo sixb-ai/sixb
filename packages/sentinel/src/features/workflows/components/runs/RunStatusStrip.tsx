@@ -1,4 +1,4 @@
-import { allWorkflowRunStatuses, type WorkflowRunStatus } from "../utils/workflows"
+import { allWorkflowRunStatuses, type WorkflowRunStatus } from "../../utils/workflows"
 import { StatusBadge } from "./StatusBadge"
 
 export function RunStatusStrip({ counts }: { counts: Record<WorkflowRunStatus, number> }) {

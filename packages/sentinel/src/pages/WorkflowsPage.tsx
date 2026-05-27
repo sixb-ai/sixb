@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { Workflow } from "lucide-react"
 import type { ReactNode } from "react"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
-import { WorkflowCard } from "../features/workflows/components/WorkflowCard"
+import { WorkflowCard } from "../features/workflows/components/workflows/WorkflowCard"
 
 export function WorkflowsPage() {
   const workflowsQuery = useQuery(listWorkflowsOptions())

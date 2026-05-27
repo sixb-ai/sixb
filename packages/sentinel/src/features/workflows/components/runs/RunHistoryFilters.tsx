@@ -13,7 +13,7 @@ import {
   statusLabels,
   type WorkflowRunStatusFilter,
   type WorkflowSummary,
-} from "../utils/workflows"
+} from "../../utils/workflows"
 
 export function RunHistoryFilters({
   workflows,

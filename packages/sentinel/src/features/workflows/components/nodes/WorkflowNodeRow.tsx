@@ -1,6 +1,6 @@
 import { Badge, Card, CardContent } from "@pario/ui/components"
 import { Box, Workflow, Zap } from "lucide-react"
-import type { WorkflowNode } from "../utils/workflows"
+import type { WorkflowNode } from "../../utils/workflows"
 import { SchemaShape } from "./SchemaShape"
 
 export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: number }) {

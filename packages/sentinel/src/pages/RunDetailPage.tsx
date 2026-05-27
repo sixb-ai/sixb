@@ -6,9 +6,9 @@ import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
-import { RunIOShape } from "../features/workflows/components/RunIOShape"
-import { RunNodeRow } from "../features/workflows/components/RunNodeRow"
-import { StatusBadge } from "../features/workflows/components/StatusBadge"
+import { RunNodeRow } from "../features/workflows/components/nodes/RunNodeRow"
+import { RunIOShape } from "../features/workflows/components/runs/RunIOShape"
+import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
 import {
   formatDate,
   formatRunDuration,

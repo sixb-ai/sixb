@@ -1,6 +1,6 @@
 import type { KeyboardEvent, MouseEvent } from "react"
 import { useNavigate } from "react-router-dom"
-import type { WorkflowRunSummary } from "../utils/workflows"
+import type { WorkflowRunSummary } from "../../utils/workflows"
 
 const nestedInteractiveSelector =
   "a,button,input,select,textarea,[role='button'],[data-run-history-interactive]"
