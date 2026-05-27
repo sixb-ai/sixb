@@ -175,7 +175,8 @@ export function isDatasetDefinition(value: unknown): value is DatasetDefinition 
 
 export function getDatasetRowValidationError(
   row: unknown,
-  dataset: DatasetDefinition
+  dataset: DatasetDefinition,
+  options?: { readonly columns?: Iterable<string> }
 ): string | null {
   if (!isPlainObject(row)) {
     return `Dataset '${dataset.id}' rows must be plain objects.`
@@ -185,6 +186,25 @@ export function getDatasetRowValidationError(
     dataset.schema.columns.map((column) => [column.name, column] as const)
   )
 
+  // When `columns` is provided, validate only that subset (e.g. the columns a
+  // projection actually maps). Projection reads are column-pruned, so the row
+  // never carries unmapped columns and must not be checked against them.
+  if (options?.columns !== undefined) {
+    const columnsToValidate = new Set(options.columns)
+    for (const column of dataset.schema.columns) {
+      if (!columnsToValidate.has(column.name)) {
+        continue
+      }
+
+      const error = getColumnValidationError(row, column, dataset)
+      if (error) {
+        return error
+      }
+    }
+
+    return null
+  }
+
   for (const columnName of Object.keys(row)) {
     if (!columnsByName.has(columnName)) {
       return `Dataset '${dataset.id}' row contains unknown column '${columnName}'.`
@@ -192,28 +212,41 @@ export function getDatasetRowValidationError(
   }
 
   for (const column of dataset.schema.columns) {
-    const hasValue = Object.hasOwn(row, column.name)
-    const value = row[column.name]
-
-    // Treat `undefined` the same as an omitted field so callers either send a real
-    // value or use `null` explicitly on nullable columns.
-    if (!hasValue || value === undefined) {
-      if (!column.nullable) {
-        return `Dataset '${dataset.id}' row is missing required column '${column.name}'.`
-      }
-      continue
+    const error = getColumnValidationError(row, column, dataset)
+    if (error) {
+      return error
     }
+  }
 
-    if (value === null) {
-      if (!column.nullable) {
-        return `Dataset '${dataset.id}' column '${column.name}' does not allow null values.`
-      }
-      continue
-    }
+  return null
+}
 
-    if (!matchesColumnType(value, column.type)) {
-      return `Dataset '${dataset.id}' column '${column.name}' must match type '${column.type}'.`
+function getColumnValidationError(
+  row: Record<string, unknown>,
+  column: DatasetColumnDefinition,
+  dataset: DatasetDefinition
+): string | null {
+  const hasValue = Object.hasOwn(row, column.name)
+  const value = row[column.name]
+
+  // Treat `undefined` the same as an omitted field so callers either send a real
+  // value or use `null` explicitly on nullable columns.
+  if (!hasValue || value === undefined) {
+    if (!column.nullable) {
+      return `Dataset '${dataset.id}' row is missing required column '${column.name}'.`
     }
+    return null
+  }
+
+  if (value === null) {
+    if (!column.nullable) {
+      return `Dataset '${dataset.id}' column '${column.name}' does not allow null values.`
+    }
+    return null
+  }
+
+  if (!matchesColumnType(value, column.type)) {
+    return `Dataset '${dataset.id}' column '${column.name}' must match type '${column.type}'.`
   }
 
   return null

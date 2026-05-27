@@ -1,10 +1,11 @@
-import type {
-  DatasetColumnDefinition,
-  DatasetDefinition,
-  DatasetRow,
-  ObjectProjectionDefinition,
-  OntologyRegistry,
-  Schema,
+import {
+  type DatasetColumnDefinition,
+  type DatasetDefinition,
+  type DatasetRow,
+  getDatasetRowValidationError,
+  type ObjectProjectionDefinition,
+  type OntologyRegistry,
+  type Schema,
 } from "@pario/core"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
@@ -67,6 +68,13 @@ export function buildObjectProjectionPlan(input: {
 
 export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): ProjectObjectRowResult {
   const { projection, dataset, primaryPropertyId, propertyPlans } = plan
+
+  const rowValidationError = getDatasetRowValidationError(row, dataset, {
+    columns: Object.values(projection.properties),
+  })
+  if (rowValidationError) {
+    return { ok: false, errorMessage: rowValidationError }
+  }
 
   if (!isPlainObject(row)) {
     return {
