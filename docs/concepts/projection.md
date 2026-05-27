@@ -1,72 +1,74 @@
 # Projection
 
-A projection maps committed dataset versions into typed objects and links in the twin graph.
+A projection turns dataset rows into ontology objects and links.
 
-Projection authoring lives in `@sixb/core`. Projection execution lives in
-`@sixb/projection-worker`.
+Use projections after syncs and pipelines have produced clean table data. Projections are the
+step that makes that data show up as typed app objects.
 
-## What It Does
+## Why it is useful
 
-- maps dataset columns to object type properties;
-- derives object primary ids from the mapped primary property;
-- resolves foreign key columns into ontology links;
-- materializes many-to-many join datasets into links;
-- records run status and aggregate counters in `ProjectionRunStorage`.
+Datasets are tables. Ontology types are app objects.
 
-## Parts
+A projection connects those two worlds:
 
-| Piece | Role |
-| --- | --- |
-| `defineDataset` / `col` | Typed dataset contract used by syncs, pipelines, and projections |
-| `defineProjection` | Fluent builder for object projections |
-| `defineLinkProjection` | Fluent builder for many-to-many link projections |
-| `fromForeignKey` | Type-safe FK descriptor tying a link, a source property, and a target type |
-| `OrchestratorWorker` | Routes `dataset.version.committed` events to `queues.projections` |
-| `ProjectionWorker` | Reads committed dataset versions and writes objects/links through `objectService` |
-| `ProjectionRunStorage` | Stores run status and counters |
+- map dataset columns to object properties
+- create or update objects from rows
+- create links from foreign key columns
+- keep app state in sync with committed dataset versions
 
-## Define a Dataset
+In a typical app, syncs and pipelines prepare clean datasets before projections create objects and
+links.
 
-File: `datasets/erp.ts`
+## Define an object projection
+
+File: `projections/customer.ts`
 
 ```ts
-import { col, defineDataset } from "@sixb/core"
-
-export const erpCustomersDataset = defineDataset("erp.customers", {
-  schema: [
-    col("customer_id", "string"),
-    col("contact_name", "string"),
-    col("contact_email", "string"),
-    col("company_name", "string"),
-    col("industry_sector", "string"),
-    col("service_tier", "string"),
-    col("account_mgr_id", "string"),
-  ],
-})
-```
-
-Projection builders receive the dataset definition directly, not a string id. The lowered projection definition remains serializable and stores `datasetId`.
-
-## Define an Object Projection
-
-File: `projections/customer-projection.ts`
-
-```ts
-import { defineProjection, fromForeignKey } from "@sixb/core"
-import { erpCustomersDataset } from "../datasets/erp"
+import { defineProjection } from "@sixb/core"
+import { customersDataset } from "../datasets/customers"
 import { Customer } from "../ontology/customer"
-import { Employee } from "../ontology/employee"
 
-export const customerProjection = defineProjection("customer-proj", Customer)
-  .fromDataset(erpCustomersDataset)
+export const customerProjection = defineProjection("customers", Customer)
+  .fromDataset(customersDataset)
   .properties({
     id: "customer_id",
     name: "contact_name",
     email: "contact_email",
-    company: "company_name",
-    industry: "industry_sector",
     tier: "service_tier",
-    accountManagerRef: "account_mgr_id",
+  })
+```
+
+Each row in `customersDataset` becomes a `Customer` object.
+
+The object property `id` is read from the dataset column `customer_id`. The object property
+`name` is read from `contact_name`, and so on.
+
+## What each part does
+
+| Part | Meaning |
+| --- | --- |
+| `defineProjection("customers", Customer)` | Names the projection and target object type |
+| `.fromDataset(customersDataset)` | Chooses the source dataset |
+| `.properties({ ... })` | Maps object properties to dataset columns |
+
+The primary property must be mapped. For `Customer`, that is usually `id`.
+
+## Project links from foreign keys
+
+If a dataset row contains a foreign key, a projection can turn it into an ontology link.
+
+```ts
+import { defineProjection, fromForeignKey } from "@sixb/core"
+import { customersDataset } from "../datasets/customers"
+import { Customer } from "../ontology/customer"
+import { Employee } from "../ontology/employee"
+
+export const customerProjection = defineProjection("customers", Customer)
+  .fromDataset(customersDataset)
+  .properties({
+    id: "customer_id",
+    name: "contact_name",
+    accountManagerRef: "account_manager_id",
   })
   .withLinks({
     accountManager: fromForeignKey({
@@ -77,170 +79,110 @@ export const customerProjection = defineProjection("customer-proj", Customer)
   })
 ```
 
-`.properties(...)` is type-safe:
+Here, `account_manager_id` stores the primary id of an `Employee`. The projection uses that
+value to create the `Customer -> Employee` link.
 
-- keys must be property ids on the object type;
-- values must be column names on the dataset;
-- mapped dataset column types must be compatible with the property schema;
-- the primary property must be mapped.
+## Project many-to-many links
 
-`fromForeignKey(...)` is also type-safe:
-
-- the link and source property must belong to the same object type;
-- the target object type must match the link target, or be a compatible subtype.
-
-At runtime, the FK column value is used as the target object's primary id.
-
-## Define a Link Projection
-
-For many-to-many relationships stored in a join dataset:
+Use a link projection when a join dataset stores relationships.
 
 ```ts
 import { defineLinkProjection } from "@sixb/core"
-import { erpProjectMembersDataset } from "../datasets/erp"
+import { projectMembersDataset } from "../datasets/projects"
 import { Project } from "../ontology/project"
 
 export const projectMembersProjection = defineLinkProjection("project-members", Project.l.members)
-  .fromDataset(erpProjectMembersDataset)
+  .fromDataset(projectMembersDataset)
   .sourceField("project_id")
   .targetField("employee_id")
 ```
 
-Link projection source and target fields must be string dataset columns. Polymorphic and wildcard link targets are rejected for V1.
+Each row creates one link from a `Project` to an `Employee`.
 
-## Runtime Flow
+## Projection vs pipeline
 
-Projection execution is driven by committed dataset versions:
+Pipelines and projections solve different problems.
 
-```text
-sync or pipeline writes rows
-  -> LakeStorage commits a dataset version
-  -> events emits dataset.version.committed
-  -> OrchestratorWorker enqueues projection.run.requested
-  -> ProjectionWorker reads the exact dataset version
-  -> objectService upserts objects and links
-  -> ProjectionRunStorage records counters and status
-```
+| Need | Use |
+| --- | --- |
+| Clean, filter, join, or reshape rows | Pipeline |
+| Create app objects from rows | Projection |
+| Create object relationships from foreign keys | Projection |
+| Keep data as tables | Dataset or pipeline |
 
-The Orchestrator matches projections by `projection.datasetId`. The Projection Worker executes the projection named by the queued job; it does not resolve projection dependencies itself.
-
-## Hosting Workers
-
-`sixb dev` starts the projection worker automatically when projection definitions are registered.
-No manual worker setup is needed for normal local development.
-
-Custom hosts can still start both workers explicitly:
-
-```ts
-import { compileRoutes, OrchestratorWorker } from "@sixb/orchestrator"
-import { ProjectionWorker } from "@sixb/projection-worker"
-
-const routes = compileRoutes({
-  syncs: sixb.getSyncDefinitions(),
-  pipelines: sixb.getPipelineDefinitions(),
-  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
-})
-
-const orchestrator = new OrchestratorWorker({
-  projectId: sixb.id,
-  events: sixb.events,
-  queues: sixb.queues,
-  routes,
-})
-
-const projectionWorker = new ProjectionWorker(sixb)
-
-await orchestrator.start()
-await projectionWorker.start()
-```
-
-Start the orchestrator before emitting dataset commit events. The V1 orchestrator is live-only and does not catch up on events emitted before startup.
-
-## Inspect Runs
-
-Projection runs are stored by `ProjectionRunStorage`:
-
-```ts
-const result = await sixb.storage.projectionRuns?.list({
-  projectId: sixb.id,
-  projectionId: "customer-proj",
-  statuses: ["succeeded", "failed"],
-  limit: 20,
-})
-```
-
-Each `ProjectionRunRecord` includes:
-
-```ts
-{
-  id: string
-  projectionId: string
-  projectionKind: "object" | "link"
-  datasetId: string
-  datasetVersionId: string
-  status: "running" | "succeeded" | "failed" | "cancelled"
-  rowsProcessed: number
-  rowsSkipped: number
-  objectsUpserted: number
-  linksUpserted: number
-  errorMessage?: string
-}
-```
-
-V1 stores aggregate counters and one terminal error message. Detailed per-row diagnostics can be added later if needed.
+A good rule: pipelines make better rows; projections make objects.
 
 ## Convention
 
-Export projection definitions from `projections/`:
+Put projection definitions in `projections/` and export them.
 
 ```txt
 your-project/
   datasets/
-    erp.ts
+    customers.ts
+    projects.ts
   ontology/
     customer.ts
     employee.ts
     project.ts
   projections/
-    customer-projection.ts
-    project-projection.ts
-    project-members-projection.ts
+    customers.ts
+    project-members.ts
   sixb.config.ts
 ```
 
-`createSixb()` scans `datasets/` and `projections/` and registers exported definitions automatically.
+`createSixb()` discovers exported projection definitions from `projections/` automatically.
 
 You can also register projections explicitly:
 
 ```ts
-createSixb({
-  datasets: [erpCustomersDataset],
+import { createSixb } from "@sixb/core"
+import { customersDataset } from "./datasets/customers"
+import { Customer } from "./ontology/customer"
+import { customerProjection } from "./projections/customers"
+
+export const sixb = createSixb({
+  datasets: [customersDataset],
+  ontology: [Customer],
   projections: [customerProjection],
 })
 ```
 
-Startup validation checks projections against registered datasets and ontology:
+## How to model projections
 
-- referenced dataset exists;
-- projected object type exists;
-- mapped properties and dataset columns exist;
-- mapped column types are compatible with property schemas;
-- primary property is mapped;
-- FK links reference valid links, mapped source properties, and compatible target types;
-- link projection source and target object types exist and have primary properties.
+Start with one object type.
 
-## Guidelines
+1. Choose the clean dataset you want to project.
+2. Choose the ontology object type the rows should become.
+3. Map the primary property first.
+4. Map the simple properties next.
+5. Add links only when the dataset has reliable foreign keys.
 
-- Keep one projection focused on one object type and one dataset.
-- Use `fromForeignKey()` for one-to-one and many-to-one relationships stored as columns.
-- Use `defineLinkProjection()` for many-to-many relationships stored in join datasets.
-- Pass dataset definitions to `.fromDataset(...)`, not string ids.
-- Commit datasets to `LakeStorage`; do not build ad hoc row sources.
-- Keep projection run storage enabled when hosting `ProjectionWorker`.
+Good projection names usually describe the object or relationship they materialize:
 
-## V1 Limits
+- `customers`
+- `invoices`
+- `projects`
+- `project-members`
 
-- Set-only: missing dataset rows do not delete existing objects or links.
-- Latest write wins: user edits and projection writes both go through object service.
-- Batch materialization is not globally transactional across object storage writes.
-- No manual CLI/API projection run trigger yet.
+## Running projections
+
+In local development, `sixb dev` can co-host projection workers when projections are
+registered.
+
+For a separate worker process:
+
+```bash
+sixb worker --worker projection
+```
+
+## Extra details
+
+- `.properties(...)` checks that mapped object properties and dataset columns exist.
+- mapped dataset column types must be compatible with object property schemas.
+- the primary property must be mapped.
+- projection execution is triggered by committed dataset versions.
+- projections are set-only in V1: missing rows do not delete existing objects or links.
+- link projections require string source and target fields.
+
+The important first step is to decide which clean table should become which object type.

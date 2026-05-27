@@ -2,6 +2,7 @@
   "name": "sixb",
   "private": true,
   "workspaces": [
+    "apps/*",
     "auth/*",
     "packages/*",
     "connectors/*",
@@ -24,6 +25,9 @@
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "generate:client": "bun --filter @sixb/server generate:openapi && bun --filter @sixb/client generate && bun check:fix",
+    "docs:dev": "bun --filter @sixb/docs dev",
+    "docs:build": "bun --filter @sixb/docs build",
+    "docs:typecheck": "bun --filter @sixb/docs typecheck",
     "ui:dev": "bun --filter @sixb/ui dev",
     "ui:add": "bun --cwd packages/ui x shadcn@latest add"
   },

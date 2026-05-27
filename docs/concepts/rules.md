@@ -1,19 +1,26 @@
 # Rules
 
-Rules describe business conditions over ontology objects.
+A rule watches an ontology object for a business condition.
 
+Use rules for statements like "a posted transaction must have a document" or "a critical task
+should have an owner."
 
-## What they are
+A rule does not fetch data, transform rows, or run a process by itself. It names the condition,
+watches object and link changes, and emits a transition when the condition starts or clears.
 
-- inert, serializable definitions
-- scoped to a single ontology object type
-- written as "where the rule is active"
-- reactive to object and link changes
-- validated at runtime startup against the registered ontology
+## Why it is useful
 
-Rules are useful for business logic that should be evaluated when object state changes. For
-example, a finance application may require every transaction to be linked to a source document.
+Business software usually has conditions people care about:
 
+- invoices that are overdue
+- tasks that are critical and unassigned
+- customers that need an account manager
+- transactions that are missing a source document
+
+Rules give those conditions one typed place to live. Apps, alerts, and workflows can then react
+to the same definition.
+
+Write the rule as the state where the object needs attention.
 
 ## Define a rule
 
@@ -28,197 +35,164 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
   .where((tx) => tx.l.document.isMissing())
 ```
 
-The `.where(...)` predicate describes when the rule is active. In this example, the rule is
-active for transactions that do not have a `document` link.
+This rule is triggered when a `Transaction` does not have a `document` link.
 
-The resulting definition is serializable data:
+## What each part does
+
+| Part | Meaning |
+| --- | --- |
+| `defineRule("transaction.requires-document")` | Names the rule |
+| `.on(Transaction)` | Chooses the object type the rule watches |
+| `.where(...)` | Describes when the rule should be triggered |
+| `tx.l.document.isMissing()` | Checks that the `document` link does not exist |
+
+## Property conditions
+
+Use `p` for object properties.
 
 ```ts
-{
-  kind: "rule",
-  id: "transaction.requires-document",
-  subject: { kind: "object", objectTypeId: "transaction" },
-  predicate: { kind: "link", linkId: "document", op: "isMissing" },
-}
+import { defineRule } from "@sixb/core"
+import { Invoice } from "../ontology/invoice"
+
+export const invoiceCollectionRisk = defineRule("invoice.collection-risk")
+  .on(Invoice)
+  .where((invoice) =>
+    invoice.any(
+      invoice.p.status.eq("overdue"),
+      invoice.all(invoice.p.status.eq("sent"), invoice.p.amount.gte(40000))
+    )
+  )
 ```
 
-The callback is not retained. It is only used by the builder to produce the predicate AST.
+This rule is triggered when an invoice is overdue, or when a sent invoice has a large amount.
 
+## Link conditions
+
+Use `l` for ontology links.
+
+```ts
+import { defineRule } from "@sixb/core"
+import { Customer } from "../ontology/customer"
+
+export const customerNeedsOwner = defineRule("customer.needs-owner")
+  .on(Customer)
+  .where((customer) => customer.l.accountManager.isMissing())
+```
+
+This rule is triggered when a `Customer` does not have an `accountManager` link.
+
+## Compose conditions
+
+Use `all`, `any`, and `not` to combine smaller conditions.
+
+```ts
+import { defineRule } from "@sixb/core"
+import { Task } from "../ontology/task"
+
+export const taskCriticalUnassigned = defineRule("task.critical-unassigned")
+  .on(Task)
+  .where((task) =>
+    task.all(
+      task.p.priority.eq("critical"),
+      task.not(task.p.status.eq("done")),
+      task.l.assignee.isMissing()
+    )
+  )
+```
+
+This rule is triggered when a task is critical, not done, and missing an assignee.
 
 ## Predicates
 
-The rule subject exposes typed property and link predicate builders for the selected object type:
-
-```ts
-defineRule("transaction.review-required")
-  .on(Transaction)
-  .where((tx) =>
-    tx.all(
-      tx.p.status.eq("posted"),
-      tx.p.amount.gt(1000),
-      tx.l.document.isMissing()
-    )
-  )
-```
-
-### Property predicates
-
-| Predicate | Meaning |
+| Need | Use |
 | --- | --- |
-| `eq(value)` | Property equals a scalar value |
-| `notEq(value)` | Property does not equal a scalar value |
-| `gt(value)` | Property is greater than a number |
-| `gte(value)` | Property is greater than or equal to a number |
-| `lt(value)` | Property is less than a number |
-| `lte(value)` | Property is less than or equal to a number |
-| `isPresent()` | Property value is not `null` or `undefined` |
-| `isMissing()` | Property value is `null` or `undefined` |
+| Equal or not equal | `eq(value)`, `notEq(value)` |
+| Compare numbers | `gt(value)`, `gte(value)`, `lt(value)`, `lte(value)` |
+| Check a property value | `isPresent()`, `isMissing()` |
+| Check a link | `exists()`, `isMissing()` |
+| Combine conditions | `all(...)`, `any(...)`, `not(...)` |
 
-### Link predicates
+Predicate values can be strings, numbers, booleans, or `null`.
 
-| Predicate | Meaning |
+## Rule vs workflow
+
+Rules and workflows solve different problems.
+
+| Need | Use |
 | --- | --- |
-| `exists()` | At least one link exists for that link id from the subject object |
-| `isMissing()` | No link exists for that link id from the subject object |
+| Know whether an object needs attention | Rule |
+| Emit a triggered or resolved signal | Rule |
+| Run a multi-step process | Workflow |
+| Fetch source data | Sync |
+| Clean or join table data | Pipeline |
 
-### Logical predicates
+A good rule: rules decide if something is true; workflows decide what to do next.
 
-Use `all`, `any`, and `not` to compose predicates:
+## Convention
 
-```ts
-defineRule("transaction.missing-document-for-posted")
-  .on(Transaction)
-  .where((tx) =>
-    tx.all(
-      tx.p.status.eq("posted"),
-      tx.not(tx.p.status.eq("void")),
-      tx.any(tx.p.amount.gt(0), tx.l.document.isMissing())
-    )
-  )
-```
-
-Empty `all()` and `any()` groups are rejected during runtime startup validation.
-
-
-## Discovery
-
-`createSixb()` discovers rule definitions exported from `rules/`:
+Put rule definitions in `rules/` and export them.
 
 ```txt
-my-project/
+your-project/
   ontology/
     transaction.ts
   rules/
     transaction-requires-document.ts
+  sixb.config.ts
 ```
 
-You can also pass rules explicitly:
+`createSixb()` discovers exported rule definitions from `rules/` automatically.
+
+You can also register rules explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
+import { Transaction } from "./ontology/transaction"
 import { transactionRequiresDocument } from "./rules/transaction-requires-document"
 
-const sixb = await createSixb({
-  ontologies: [Transaction],
+export const sixb = createSixb({
+  ontology: [Transaction],
   rules: [transactionRequiresDocument],
-  broker,
-  storage,
-  lakeStorage,
-  blobStorage,
-  queues,
 })
 ```
 
-Registered rules can be inspected from the runtime:
+## How to model rules
 
-```ts
-sixb.getRuleDefinitions()
-sixb.getRuleById("transaction.requires-document")
-```
+Start with one plain sentence.
 
+1. Pick the ontology object type the rule watches.
+2. Write the condition in normal language.
+3. Convert that condition into property and link predicates.
+4. Keep the first version small.
+5. Add `all`, `any`, or `not` only when the condition needs them.
 
-## Event dependencies
+Good rule names describe the condition:
 
-Rules are reactive to ontology object events. A rule does not declare schedules.
+- `transaction.requires-document`
+- `invoice.collection-risk`
+- `customer.needs-owner`
+- `task.critical-unassigned`
 
-Use `deriveRuleEventDependencies()` to derive the domain events that can affect a rule:
+## What happens when a rule matches
 
-```ts
-import { deriveRuleEventDependencies } from "@sixb/core"
+Once registered, Sixb evaluates rules as ontology objects and links change.
 
-const dependencies = deriveRuleEventDependencies(transactionRequiresDocument)
-```
+When a rule starts matching an object, it is triggered. When the object no longer matches, it is
+resolved.
 
-For the transaction document rule, the dependencies are:
+That gives the rest of your app a stable signal to show attention states, send notifications, or
+start follow-up work.
 
-```ts
-[
-  { type: "object.upserted", objectTypeId: "transaction" },
-  { type: "link.upserted", sourceTypeId: "transaction", linkId: "document" },
-  { type: "link.removed", sourceTypeId: "transaction", linkId: "document" },
-]
-```
+## Extra details
 
-Property predicates are covered by `object.upserted`. Link predicates add `link.upserted` and
-`link.removed` dependencies for each referenced link id.
+- rule ids must be unique.
+- rules are scoped to one ontology object type.
+- predicates are validated against the registered ontology at startup.
+- empty `all()` and `any()` groups are rejected.
+- the `.where(...)` callback creates serializable rule data; the callback is not stored.
+- rule evaluation reacts to object and link changes after the worker starts.
+- active rule state is stored in `storage.rules`, which prevents duplicate triggers.
+- registered rules can be inspected with `sixb.getRuleDefinitions()` and `sixb.getRuleById(...)`.
 
-
-## Runtime validation
-
-At startup, Sixb rejects:
-
-- duplicate rule ids
-- rules whose subject object type is not registered
-- property predicates for properties not on the subject object type
-- link predicates for links not on the subject object type
-- empty `all()` or `any()` predicate groups
-
-
-## Rule transition events
-
-The core event model includes rule transition events:
-
-```ts
-{
-  type: "rule.triggered",
-  topic: "rules",
-  payload: {
-    ruleId: "transaction.requires-document",
-    subject: {
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-001",
-    },
-    triggeredAt: "2026-05-06T00:00:00.000Z",
-  },
-}
-```
-
-```ts
-{
-  type: "rule.resolved",
-  topic: "rules",
-  payload: {
-    ruleId: "transaction.requires-document",
-    subject: {
-      kind: "object",
-      objectTypeId: "transaction",
-      primaryId: "tx-001",
-    },
-    resolvedAt: "2026-05-06T00:05:00.000Z",
-  },
-}
-```
-
-Rule transition events use a stable partition key:
-
-```ts
-`${ruleId}:${objectTypeId}:${primaryId}`
-```
-
-
-## Current scope
-
-The current core rules surface defines and registers rules, validates rule definitions, derives
-event dependencies, and adds rule transition event types. A full rule evaluator/runtime loop is
-not included yet.
+The important first step is to describe the business condition clearly before writing the
+predicate.

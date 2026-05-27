@@ -1,0 +1,29 @@
+{
+  "name": "@sixb/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:docs": "bun ./src/docs/buildDocs.ts",
+    "clean:dist": "bun ./src/docs/cleanDist.ts",
+    "copy:docs": "bun ./src/docs/writeStaticDocs.ts",
+    "build:css": "bun ./src/buildCss.ts",
+    "dev": "NODE_ENV=development bun run generate:docs && bun run build:css && bun ./src/dev.ts",
+    "build": "NODE_ENV=production bun run generate:docs && bun run clean:dist && bun run build:css && bun build ./index.html --outdir ./dist --target browser --public-path / --minify && bun run copy:docs",
+    "typecheck": "bun run generate:docs && tsc --noEmit"
+  },
+  "dependencies": {
+    "@sixb/ui": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.2.2",
+    "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "shiki": "^4.1.0",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.7.0"
+  }
+}

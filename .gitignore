@@ -8,6 +8,7 @@ dist/
 build/
 .next/
 out/
+.docs/
 
 # OS
 .DS_Store
@@ -29,3 +30,4 @@ npm-debug.log*
 
 .local/
 .sixb/
+apps/docs/src/generated/
