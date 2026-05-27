@@ -266,8 +266,27 @@ function htmlBundleRoute(bundle: Bun.HTMLBundle): BunServeRoute {
 
 function isAssetRequest(pathname: string): boolean {
   const lastSegment = pathname.split("/").pop() ?? ""
-  return /\.[^/]+$/.test(lastSegment)
+  const extension = lastSegment.includes(".") ? lastSegment.split(".").pop()?.toLowerCase() : ""
+  return !!extension && staticAssetExtensions.has(extension)
 }
+
+const staticAssetExtensions = new Set([
+  "avif",
+  "css",
+  "gif",
+  "ico",
+  "jpeg",
+  "jpg",
+  "js",
+  "json",
+  "map",
+  "png",
+  "svg",
+  "txt",
+  "webp",
+  "woff",
+  "woff2",
+])
 
 function normalizeOrigin(value: string, label: string): string {
   let url: URL

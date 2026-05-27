@@ -1,7 +1,7 @@
 import { createContext } from "react"
 
 export interface ProjectSidebarData {
-  objectCount: number
+  objectCount?: number
   datasetCount: number
   connectorCount: number
   syncCount: number
