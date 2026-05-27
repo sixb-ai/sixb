@@ -95,6 +95,99 @@ describe("RedisBroker", () => {
     }
   })
 
+  test("deduplicates records inside a bulk append before retention trims them", async () => {
+    const { broker, projectId, cleanup } = createTestBroker()
+    const stream = { id: "__bulk_dedupe_retained", retention: { maxRecords: 1 } }
+    try {
+      await broker.ensureStream({ projectId, stream })
+      const [first, duplicate, newest] = await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [
+          { payload: { id: "old" }, idempotencyKey: "same" },
+          { payload: { id: "ignored" }, idempotencyKey: "same" },
+          { payload: { id: "new" }, idempotencyKey: "new" },
+        ],
+      })
+
+      expect(duplicate?.cursor).toBe(first?.cursor)
+      expect(duplicate?.payload).toEqual({ id: "old" })
+      expect(newest?.payload).toEqual({ id: "new" })
+      expect(
+        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+      ).toEqual([{ id: "new" }])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  test("delivers live bulk append records before maxRecords retention trims them", async () => {
+    const { broker, projectId, cleanup } = createTestBroker()
+    const stream = { id: "__live_bulk_retained", retention: { maxRecords: 1 } }
+    const received: string[] = []
+    let unsubscribe: (() => void) | undefined
+
+    try {
+      await broker.ensureStream({ projectId, stream })
+      unsubscribe = await broker.subscribe({ projectId, streamId: stream.id }, (records) => {
+        received.push(...records.map((record) => String(record.payload)))
+      })
+      await Bun.sleep(150)
+
+      await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ payload: "one" }, { payload: "two" }, { payload: "three" }],
+      })
+
+      await waitUntil(() => received.length === 3, 5_000)
+      expect(received).toEqual(["one", "two", "three"])
+      expect(
+        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+      ).toEqual(["three"])
+    } finally {
+      unsubscribe?.()
+      await cleanup()
+    }
+  })
+
+  test("enforces maxRecords retained reads before physical trim completes", async () => {
+    const { broker, projectId, cleanup } = createTestBroker()
+    const brokerWithTrimDisabled = broker as unknown as { trimRetention: () => Promise<void> }
+    brokerWithTrimDisabled.trimRetention = async () => {}
+    const stream = { id: "__logical_bulk_retained", retention: { maxRecords: 1 } }
+    const received: string[] = []
+    let unsubscribe: (() => void) | undefined
+
+    try {
+      await broker.ensureStream({ projectId, stream })
+      const [first] = await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ payload: "one" }, { payload: "two" }, { payload: "three" }],
+      })
+
+      expect(
+        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+      ).toEqual(["three"])
+      await expect(
+        broker.read({ projectId, streamId: stream.id, afterCursor: first?.cursor })
+      ).rejects.toThrow("outside the retained range")
+
+      unsubscribe = await broker.subscribe(
+        { projectId, streamId: stream.id, from: "earliest" },
+        (records) => {
+          received.push(...records.map((record) => String(record.payload)))
+        }
+      )
+      await waitUntil(() => received.length === 1, 5_000)
+      expect(received).toEqual(["three"])
+    } finally {
+      unsubscribe?.()
+      await cleanup()
+    }
+  })
+
   test("close drains active subscriptions and rejects later operations", async () => {
     const { broker, projectId } = createTestBroker()
     const stream = { id: "__events" }
