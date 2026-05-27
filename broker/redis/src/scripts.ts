@@ -75,30 +75,16 @@ end
 return last_trimmed_id
 `
 
-// Appends exactly one broker record. Keep this operation in Lua so the returned
-// cursor, dedupe key, retention trim, and retained-range metadata cannot drift
-// apart if another process writes to the same Redis stream concurrently.
-export const APPEND_RECORD_SCRIPT = `
+// Trims retained append history after appends have committed. This is separate
+// from APPEND_RECORDS_SCRIPT so blocked XREAD subscribers can be woken with the
+// full live batch before retained history is reduced to its configured window.
+export const TRIM_STREAM_RETENTION_SCRIPT = `
 local stream_key = KEYS[1]
 local meta_key = KEYS[2]
-local dedupe_key = KEYS[3]
-local body = ARGV[1]
-local has_idempotency_key = ARGV[2]
-local dedupe_ttl_ms = ARGV[3]
 
 if redis.call("EXISTS", meta_key) == 0 then
   return redis.error_reply("broker stream has not been ensured")
 end
-
-if has_idempotency_key == "1" then
-  local existing_id = redis.call("GET", dedupe_key)
-  if existing_id then
-    return { "duplicate", existing_id }
-  end
-end
-
-local id = redis.call("XADD", stream_key, "*", "body", body)
-redis.call("HSET", meta_key, "lastId", id)
 
 local last_trimmed_id = nil
 local max_records = redis.call("HGET", meta_key, "maxRecords")
@@ -153,9 +139,101 @@ if last_trimmed_id then
   redis.call("HSET", meta_key, "lastTrimmedId", last_trimmed_id)
 end
 
-if has_idempotency_key == "1" then
-  redis.call("SET", dedupe_key, id, "PX", dedupe_ttl_ms)
+return last_trimmed_id
+`
+
+// Appends a batch of broker records with one Redis round trip. Each record still
+// gets its own stream id and idempotency decision.
+//
+// KEYS:
+//   1: stream key
+//   2: metadata key
+//   3..N: per-record dedupe keys, using a placeholder key when the record has no idempotency key
+// ARGV:
+//   1: dedupe ttl ms
+//   2: record count
+//   3..N: repeated pairs of { body, has idempotency key: "1" | "0" }
+export const APPEND_RECORDS_SCRIPT = `
+local stream_key = KEYS[1]
+local meta_key = KEYS[2]
+local dedupe_ttl_ms = ARGV[1]
+local record_count = tonumber(ARGV[2])
+
+if redis.call("EXISTS", meta_key) == 0 then
+  return redis.error_reply("broker stream has not been ensured")
 end
 
-return { "stored", id }
+if not record_count then
+  return redis.error_reply("invalid broker record count")
+end
+
+if (#KEYS - 2) ~= record_count then
+  return redis.error_reply("dedupe key count does not match broker record count")
+end
+
+local replies = {}
+local stored_count = 0
+local last_stored_id = nil
+
+for i = 1, record_count do
+  local dedupe_key = KEYS[i + 2]
+  local arg_index = 3 + ((i - 1) * 2)
+  local body = ARGV[arg_index]
+  local has_idempotency_key = ARGV[arg_index + 1]
+
+  if has_idempotency_key == "1" then
+    local existing_id = redis.call("GET", dedupe_key)
+    if existing_id then
+      local existing_body = ""
+      local existing_entries = redis.call("XRANGE", stream_key, existing_id, existing_id, "COUNT", 1)
+      if #existing_entries > 0 then
+        local fields = existing_entries[1][2]
+        for field_index = 1, #fields, 2 do
+          if fields[field_index] == "body" then
+            existing_body = fields[field_index + 1]
+            break
+          end
+        end
+      end
+      replies[#replies + 1] = { "duplicate", existing_id, existing_body }
+    else
+      local id = redis.call("XADD", stream_key, "*", "body", body)
+      redis.call("SET", dedupe_key, id, "PX", dedupe_ttl_ms)
+      replies[#replies + 1] = { "stored", id, "" }
+      stored_count = stored_count + 1
+      last_stored_id = id
+    end
+  else
+    local id = redis.call("XADD", stream_key, "*", "body", body)
+    replies[#replies + 1] = { "stored", id, "" }
+    stored_count = stored_count + 1
+    last_stored_id = id
+  end
+end
+
+if stored_count == 0 then
+  return replies
+end
+
+redis.call("HSET", meta_key, "lastId", last_stored_id)
+
+local max_records = redis.call("HGET", meta_key, "maxRecords")
+
+if max_records then
+  -- Mark the retained boundary atomically with append so retained reads do not
+  -- observe entries beyond maxRecords while physical XTRIM is deferred for live
+  -- XREAD delivery.
+  local max_records_number = tonumber(max_records)
+  local length = redis.call("XLEN", stream_key)
+  local remove_count = length - max_records_number
+
+  if remove_count > 0 then
+    local removed = redis.call("XRANGE", stream_key, "-", "+", "COUNT", remove_count)
+    if #removed > 0 then
+      redis.call("HSET", meta_key, "lastTrimmedId", removed[#removed][1])
+    end
+  end
+end
+
+return replies
 `

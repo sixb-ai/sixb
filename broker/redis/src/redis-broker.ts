@@ -8,7 +8,11 @@ import {
 import { assertCursor, compareStreamIds } from "./cursor"
 import { RedisBrokerError } from "./errors"
 import { assertPrefix, assertStreamId, validateProjectId } from "./keys"
-import { APPEND_RECORD_SCRIPT, ENFORCE_AGE_RETENTION_SCRIPT } from "./scripts"
+import {
+  APPEND_RECORDS_SCRIPT,
+  ENFORCE_AGE_RETENTION_SCRIPT,
+  TRIM_STREAM_RETENTION_SCRIPT,
+} from "./scripts"
 import { assertEncodableRecord, decodeRecord, encodeRecord } from "./serialization"
 import { type EnsuredStream, StreamManager } from "./stream-manager"
 import {
@@ -25,6 +29,18 @@ const DEFAULT_DEDUPE_TTL_MS = 120_000
 const DEFAULT_READ_BATCH_SIZE = 1_000
 const DEFAULT_SUBSCRIBE_BATCH_SIZE = 100
 const DEFAULT_SUBSCRIBE_BLOCK_MS = 1_000
+
+interface EncodedAppendRecord {
+  readonly input: BrokerRecordInput
+  readonly body: string
+  readonly publishedAt: string
+}
+
+interface AppendBatchResult {
+  readonly cursor: string
+  readonly duplicate: boolean
+  readonly duplicateBody?: string
+}
 
 export interface RedisBrokerOptions {
   /** Bun Redis client options, commonly `{ url: "redis://localhost:6379" }`. */
@@ -99,33 +115,53 @@ export class RedisBroker implements Broker {
 
     const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
     const client = await this.connectionManager.connect()
-    const records: BrokerRecord[] = []
-
-    for (const input of params.records) {
-      // Multi-record append is sequential like NatsBroker. Each individual
-      // record is atomic, but callers should use idempotency keys when retrying
-      // a batch that may have partially committed.
+    const encodedRecords: EncodedAppendRecord[] = params.records.map((input) => {
       const publishedAt = new Date().toISOString()
-      const body = encodeRecord(input, publishedAt)
-      const result = await this.appendOne({
-        client,
-        ensured,
+      return {
         input,
-        body,
-      })
+        publishedAt,
+        body: encodeRecord(input, publishedAt),
+      }
+    })
+
+    const appendResults = await this.appendBatch({
+      client,
+      ensured,
+      records: encodedRecords,
+    })
+
+    if (appendResults.length !== encodedRecords.length) {
+      throw new RedisBrokerError(
+        `Redis append script returned ${appendResults.length} result(s) for ${encodedRecords.length} record(s).`
+      )
+    }
+
+    const records: BrokerRecord[] = []
+    for (let index = 0; index < encodedRecords.length; index += 1) {
+      const encoded = encodedRecords[index]!
+      const result = appendResults[index]!
 
       if (result.duplicate) {
-        records.push(await this.fetchRecordByCursor(client, ensured, result.cursor))
+        records.push(
+          result.duplicateBody
+            ? decodeRecord({
+                streamId: ensured.streamId,
+                body: result.duplicateBody,
+                cursor: result.cursor,
+                fallbackPublishedAt: new Date().toISOString(),
+              })
+            : await this.fetchRecordByCursor(client, ensured, result.cursor)
+        )
         continue
       }
 
       records.push({
         streamId: params.streamId,
         cursor: result.cursor,
-        name: input.name,
-        key: input.key,
-        payload: cloneJsonValue(input.payload),
-        publishedAt,
+        name: encoded.input.name,
+        key: encoded.input.key,
+        payload: cloneJsonValue(encoded.input.payload),
+        publishedAt: encoded.publishedAt,
       })
     }
 
@@ -155,12 +191,18 @@ export class RedisBroker implements Broker {
 
     const client = await this.connectionManager.connect()
     await this.enforceAgeRetention(client, ensured)
-    await this.assertCursorInRetainedRange(client, ensured, params.afterCursor)
+    const lastTrimmedId = await this.readLastTrimmedId(client, ensured)
+    this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
 
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
     const records: BrokerRecord[] = []
     // Redis makes range starts exclusive by prefixing the id with "(".
-    let start = params.afterCursor === undefined ? "-" : `(${params.afterCursor}`
+    let start =
+      params.afterCursor === undefined
+        ? lastTrimmedId === undefined
+          ? "-"
+          : `(${lastTrimmedId}`
+        : `(${params.afterCursor}`
 
     while (params.limit === undefined || records.length < params.limit) {
       const entries = await this.readRange(client, ensured, start, this.readBatchSize)
@@ -217,8 +259,9 @@ export class RedisBroker implements Broker {
     const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
     const commandClient = await this.connectionManager.connect()
     await this.enforceAgeRetention(commandClient, ensured)
+    const lastTrimmedId = await this.readLastTrimmedId(commandClient, ensured)
     if (params.afterCursor !== undefined) {
-      await this.assertCursorInRetainedRange(commandClient, ensured, params.afterCursor)
+      this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
     }
 
     const client = await this.connectionManager.createSubscriptionClient()
@@ -227,7 +270,9 @@ export class RedisBroker implements Broker {
     // timeout can skip records written between two XREAD calls.
     let lastSeenId =
       params.afterCursor ??
-      (params.from === "earliest" ? "0-0" : await this.latestCursor(client, ensured))
+      (params.from === "earliest"
+        ? (lastTrimmedId ?? "0-0")
+        : await this.latestCursor(client, ensured))
     let stopped = false
 
     const pump = (async () => {
@@ -307,50 +352,62 @@ export class RedisBroker implements Broker {
     }
   }
 
-  private async appendOne(params: {
+  private async appendBatch(params: {
     client: RedisBrokerClient
     ensured: EnsuredStream
-    input: BrokerRecordInput
-    body: string
-  }): Promise<{ readonly cursor: string; readonly duplicate: boolean }> {
-    const hasIdempotencyKey = params.input.idempotencyKey !== undefined
-
+    records: readonly EncodedAppendRecord[]
+  }): Promise<readonly AppendBatchResult[]> {
     let reply: unknown
     try {
-      // One Lua call keeps XADD, dedupe-key writes, trimming, and retained-range
-      // metadata updates in the same Redis atomic operation.
+      const dedupeKeys = params.records.map((record) =>
+        params.ensured.keys.dedupeKey(record.input.idempotencyKey)
+      )
+      const args = params.records.flatMap((record) => [
+        record.body,
+        record.input.idempotencyKey === undefined ? "0" : "1",
+      ])
+
+      // One Lua call keeps XADDs and dedupe-key writes atomic for the whole
+      // append batch. Retention trimming follows as a separate command so
+      // blocked XREAD subscribers can observe the complete live batch first.
       reply = await params.client.send("EVAL", [
-        APPEND_RECORD_SCRIPT,
-        "3",
+        APPEND_RECORDS_SCRIPT,
+        String(2 + dedupeKeys.length),
         params.ensured.keys.streamKey,
         params.ensured.keys.metaKey,
-        params.ensured.keys.dedupeKey(params.input.idempotencyKey),
-        params.body,
-        hasIdempotencyKey ? "1" : "0",
+        ...dedupeKeys,
         String(this.dedupeTtlMs),
+        String(params.records.length),
+        ...args,
       ])
     } catch (error) {
-      throw new RedisBrokerError(`Failed to append record to stream "${params.ensured.streamId}"`, {
-        cause: error,
-      })
+      throw new RedisBrokerError(
+        `Failed to append records to stream "${params.ensured.streamId}"`,
+        {
+          cause: error,
+        }
+      )
     }
 
-    if (!Array.isArray(reply) || reply.length !== 2) {
-      throw new RedisBrokerError("Redis append script returned a malformed reply")
+    const results = parseAppendBatchReply(reply)
+    if (results.some((result) => !result.duplicate)) {
+      await this.trimRetention(params.client, params.ensured)
     }
 
-    const status = toText(reply[0])
-    const cursor = toText(reply[1])
-    assertCursor(cursor)
+    return results
+  }
 
-    if (status === "stored") {
-      return { cursor, duplicate: false }
+  private async trimRetention(client: RedisBrokerClient, ensured: EnsuredStream): Promise<void> {
+    try {
+      await client.send("EVAL", [
+        TRIM_STREAM_RETENTION_SCRIPT,
+        "2",
+        ensured.keys.streamKey,
+        ensured.keys.metaKey,
+      ])
+    } catch (error) {
+      throw new RedisBrokerError(`Failed to trim stream "${ensured.streamId}"`, { cause: error })
     }
-    if (status === "duplicate") {
-      return { cursor, duplicate: true }
-    }
-
-    throw new RedisBrokerError(`Redis append script returned unknown status "${status}"`)
   }
 
   private async fetchRecordByCursor(
@@ -473,26 +530,31 @@ export class RedisBroker implements Broker {
     return parseStreamEntries(reply)
   }
 
-  private async assertCursorInRetainedRange(
+  private async readLastTrimmedId(
     client: RedisBrokerClient,
-    ensured: EnsuredStream,
-    afterCursor: string | undefined
-  ): Promise<void> {
+    ensured: EnsuredStream
+  ): Promise<string | undefined> {
+    const metadata = await this.streamManager.readMetadata(client, ensured, ["lastTrimmedId"])
+    return metadata.get("lastTrimmedId")
+  }
+
+  private assertCursorInRetainedRange(
+    streamId: string,
+    afterCursor: string | undefined,
+    lastTrimmedId: string | undefined
+  ): void {
     if (afterCursor === undefined) {
       return
     }
 
-    const metadata = await this.streamManager.readMetadata(client, ensured, ["lastTrimmedId"])
-    const lastTrimmedId = metadata.get("lastTrimmedId")
-
     // Do not compare against the first retained entry: Redis ids are not dense,
     // so the cursor immediately before the first retained entry is still valid.
-    // The append script records the latest id actually trimmed; only cursors
-    // older than that represent unavailable history.
+    // The append/trim scripts record the latest id removed from the logical
+    // retained range; only cursors older than that represent unavailable history.
     if (lastTrimmedId !== undefined && compareStreamIds(afterCursor, lastTrimmedId) < 0) {
       throw new RedisBrokerError(
         `afterCursor '${afterCursor}' is outside the retained range for stream ` +
-          `'${ensured.streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
+          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
       )
     }
   }
@@ -509,4 +571,41 @@ function positiveInteger(value: number): number {
     throw new RedisBrokerError("broker numeric options must be positive finite integers")
   }
   return value
+}
+
+function parseAppendBatchReply(reply: unknown): readonly AppendBatchResult[] {
+  if (!Array.isArray(reply)) {
+    throw new RedisBrokerError("Redis append script returned a malformed reply")
+  }
+
+  return reply.map(parseAppendBatchResult)
+}
+
+function parseAppendBatchResult(item: unknown): AppendBatchResult {
+  if (!Array.isArray(item) || item.length < 2) {
+    throw new RedisBrokerError("Redis append script returned a malformed item")
+  }
+
+  const status = toText(item[0])
+  const cursor = toText(item[1])
+  assertCursor(cursor)
+  const duplicateBody = item.length >= 3 ? optionalText(item[2]) : undefined
+
+  if (status === "stored") {
+    return { cursor, duplicate: false }
+  }
+  if (status === "duplicate") {
+    return { cursor, duplicate: true, duplicateBody }
+  }
+
+  throw new RedisBrokerError(`Redis append script returned unknown status "${status}"`)
+}
+
+function optionalText(value: unknown): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined
+  }
+
+  const text = toText(value)
+  return text.length === 0 ? undefined : text
 }
