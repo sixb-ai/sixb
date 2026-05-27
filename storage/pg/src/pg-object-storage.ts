@@ -1,4 +1,5 @@
 import type {
+  LinkDirection,
   ObjectLinkRow,
   ObjectRow,
   ObjectStorage,
@@ -474,28 +475,25 @@ export class PgObjectStorage implements ObjectStorage {
 
   async listLinks(params: {
     projectId: string
-    sourceTypeId: string
-    sourceId: string
+    objectTypeId: string
+    objectId: string
     linkId?: string
+    direction?: LinkDirection
   }): Promise<readonly ObjectLinkRow[]> {
-    let rows: LinkDatabaseRow[]
-
-    if (params.linkId) {
-      rows = (await this.sql`
-        SELECT * FROM links
-        WHERE project_id = ${params.projectId}
-          AND source_type_id = ${params.sourceTypeId}
-          AND source_id = ${params.sourceId}
-          AND link_id = ${params.linkId}
-      `) as LinkDatabaseRow[]
-    } else {
-      rows = (await this.sql`
-        SELECT * FROM links
-        WHERE project_id = ${params.projectId}
-          AND source_type_id = ${params.sourceTypeId}
-          AND source_id = ${params.sourceId}
-      `) as LinkDatabaseRow[]
-    }
+    const direction = params.direction ?? "outgoing"
+    const directionWhere =
+      direction === "incoming"
+        ? "target_type_id = $2 AND target_id = $3"
+        : direction === "both"
+          ? "((source_type_id = $2 AND source_id = $3) OR (target_type_id = $2 AND target_id = $3))"
+          : "source_type_id = $2 AND source_id = $3"
+    const query = `SELECT * FROM links WHERE project_id = $1 AND ${directionWhere}${
+      params.linkId ? " AND link_id = $4" : ""
+    }`
+    const args = params.linkId
+      ? [params.projectId, params.objectTypeId, params.objectId, params.linkId]
+      : [params.projectId, params.objectTypeId, params.objectId]
+    const rows = (await this.sql.unsafe(query, args)) as LinkDatabaseRow[]
 
     return rows.map((row) => rowToLink(row))
   }
@@ -523,7 +521,7 @@ export class PgObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
-    items: readonly { sourceTypeId: string; sourceId: string; linkId: string }[]
+    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<string, ObjectLinkRow[]>> {
     const result = new Map<string, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
@@ -531,7 +529,7 @@ export class PgObjectStorage implements ObjectStorage {
       this.sql,
       "SELECT l.* FROM links l",
       ["source_type_id", "source_id", "link_id"],
-      params.items.map((i) => [i.sourceTypeId, i.sourceId, i.linkId]),
+      params.items.map((i) => [i.objectTypeId, i.objectId, i.linkId]),
       `WHERE l.project_id = $1`,
       [params.projectId]
     )) as LinkDatabaseRow[]

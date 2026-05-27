@@ -29,8 +29,8 @@ export async function upsertLink(
 
   const existingLinks = await storage.objects.listLinks({
     projectId,
-    sourceTypeId: objectType.id,
-    sourceId,
+    objectTypeId: objectType.id,
+    objectId: sourceId,
     linkId,
   })
 

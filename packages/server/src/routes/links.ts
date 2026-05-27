@@ -21,9 +21,10 @@ export function registerLinkRoutes(app: Elysia, pario: Pario<readonly OntologySo
           const parsedQuery = LinkQuerySchema.parse(query)
           const links = await pario.storage.objects.listLinks({
             projectId: pario.id,
-            sourceTypeId: params.objectTypeId,
-            sourceId: params.objectId,
+            objectTypeId: params.objectTypeId,
+            objectId: params.objectId,
             linkId: parsedQuery.linkId,
+            direction: parsedQuery.direction,
           })
 
           return links.map((link) => ({

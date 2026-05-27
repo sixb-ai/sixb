@@ -247,8 +247,8 @@ describe("InMemoryObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "p1",
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
     })
     expect(links).toHaveLength(1)
     expect(links[0].targetId).toBe("d1")
@@ -266,8 +266,8 @@ describe("InMemoryObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "p1",
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
     })
     expect(links).toHaveLength(0)
   })
@@ -283,12 +283,38 @@ describe("InMemoryObjectStorage", () => {
 
     const deviceLinks = await storage.listLinks({
       projectId: "p1",
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
       linkId: "hasDevice",
     })
     expect(deviceLinks).toHaveLength(1)
     expect(deviceLinks[0].linkId).toBe("hasDevice")
+  })
+
+  test("listLinks supports incoming and both directions", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1", "1")
+    )
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Device", "d1", "installedIn", "Room", "r1", "2")
+    )
+
+    const incoming = await storage.listLinks({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      direction: "incoming",
+    })
+    const both = await storage.listLinks({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      direction: "both",
+    })
+
+    expect(incoming.map((link) => link.linkId)).toEqual(["installedIn"])
+    expect(both.map((link) => link.linkId).sort()).toEqual(["hasDevice", "installedIn"])
   })
 })
 

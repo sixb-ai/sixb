@@ -33,6 +33,8 @@ export interface ObjectLinkRow {
   sourceEventId?: string
 }
 
+export type LinkDirection = "outgoing" | "incoming" | "both"
+
 export interface ObjectStorage {
   applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow>
   applyObjectUpsertedBatch(
@@ -62,9 +64,10 @@ export interface ObjectStorage {
 
   listLinks(params: {
     projectId: string
-    sourceTypeId: string
-    sourceId: string
+    objectTypeId: string
+    objectId: string
     linkId?: string
+    direction?: LinkDirection
   }): Promise<readonly ObjectLinkRow[]>
 
   /**
@@ -77,12 +80,12 @@ export interface ObjectStorage {
   }): Promise<Map<string, ObjectRow>>
 
   /**
-   * Batch fetch links by (sourceTypeId, sourceId, linkId) tuples.
-   * Returns a Map keyed by "sourceTypeId:sourceId:linkId". Missing entries are absent.
+   * Batch fetch outgoing links by (objectTypeId, objectId, linkId) tuples.
+   * Returns a Map keyed by "objectTypeId:objectId:linkId". Missing entries are absent.
    */
   listLinksBatch(params: {
     projectId: string
-    items: readonly { sourceTypeId: string; sourceId: string; linkId: string }[]
+    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<string, ObjectLinkRow[]>>
 
   list(params: {

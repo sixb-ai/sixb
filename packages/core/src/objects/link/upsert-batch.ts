@@ -133,8 +133,8 @@ function collectLinkLookups(
   items: {
     item: { objectType: ObjectTypeWithPropertyTokens; sourceId: string; linkId: string }
   }[]
-): { sourceTypeId: string; sourceId: string; linkId: string }[] {
-  const lookups: { sourceTypeId: string; sourceId: string; linkId: string }[] = []
+): { objectTypeId: string; objectId: string; linkId: string }[] {
+  const lookups: { objectTypeId: string; objectId: string; linkId: string }[] = []
   const keys = new Set<string>()
 
   for (const { item } of items) {
@@ -142,8 +142,8 @@ function collectLinkLookups(
     if (!keys.has(key)) {
       keys.add(key)
       lookups.push({
-        sourceTypeId: item.objectType.id,
-        sourceId: item.sourceId,
+        objectTypeId: item.objectType.id,
+        objectId: item.sourceId,
         linkId: item.linkId,
       })
     }

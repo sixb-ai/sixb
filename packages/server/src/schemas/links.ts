@@ -11,6 +11,7 @@ export const LinkParamsSchema = LinkSourceParamsSchema.extend({
 
 export const LinkQuerySchema = z.object({
   linkId: z.string().optional(),
+  direction: z.enum(["outgoing", "incoming", "both"]).default("outgoing"),
 })
 
 export const RemoveLinkQuerySchema = z.object({

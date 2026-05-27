@@ -424,6 +424,7 @@ export type {
   GroupMembershipSource,
   InvitationRecord,
   InvitationStatus,
+  LinkDirection,
   ListActionRunsInput,
   ListActionRunsResult,
   ListActiveRuleStatesInput,

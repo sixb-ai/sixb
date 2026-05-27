@@ -126,60 +126,27 @@ export const listRelationshipsOptions = (options?: ListRelationshipsOptions) => 
   return queryOptions({
     queryKey: listRelationshipsQueryKey(options),
     queryFn: async (): Promise<RelationshipEdge[]> => {
-      const { data: objectsResponse } = await listObjects({
+      const objectId = options?.query?.objectId
+      const requestedObject = objectId ? decodeObjectId(objectId) : null
+      if (!requestedObject) return []
+
+      const { data = [] } = await listObjectLinks({
+        path: {
+          objectTypeId: requestedObject.objectTypeId,
+          objectId: requestedObject.primaryId,
+        },
         query: {
-          limit: "500",
-          orderBy: "updatedAt",
-          order: "desc",
+          direction: "both",
         },
         throwOnError: true,
       })
 
-      const objects = objectsResponse?.objects ?? []
-      if (objects.length === 0) {
-        return []
-      }
-
-      const linksByKey = new Map<string, RelationshipEdge>()
-      const linkResponses = await Promise.all(
-        objects.map(async (object) => {
-          try {
-            const { data } = await listObjectLinks({
-              path: {
-                objectTypeId: object.objectTypeId,
-                objectId: object.primaryId,
-              },
-              throwOnError: true,
-            })
-            return data ?? []
-          } catch {
-            return []
-          }
-        })
-      )
-
-      for (const links of linkResponses) {
-        for (const link of links) {
-          const source = encodeObjectId(link.sourceTypeId, link.sourceId)
-          const target = encodeObjectId(link.targetTypeId, link.targetId)
-          const key = `${source}|${target}|${link.linkId}`
-
-          linksByKey.set(key, {
-            source,
-            target,
-            type: link.linkId,
-            properties: link.properties,
-          })
-        }
-      }
-
-      const all = Array.from(linksByKey.values())
-      const objectId = options?.query?.objectId
-      if (!objectId) {
-        return all
-      }
-
-      return all.filter((edge) => edge.source === objectId || edge.target === objectId)
+      return data.map((link) => ({
+        source: encodeObjectId(link.sourceTypeId, link.sourceId),
+        target: encodeObjectId(link.targetTypeId, link.targetId),
+        type: link.linkId,
+        properties: link.properties,
+      }))
     },
   })
 }

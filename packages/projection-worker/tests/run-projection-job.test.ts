@@ -399,8 +399,8 @@ describe("runProjectionJob", () => {
 
     const links = await deps.storage.objects.listLinks({
       projectId: pario.id,
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
       linkId: "inBuilding",
     })
     expect(links).toHaveLength(1)
@@ -474,8 +474,8 @@ describe("runProjectionJob", () => {
 
     const links = await deps.storage.objects.listLinks({
       projectId: pario.id,
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
       linkId: "hasSensors",
     })
     expect(links).toHaveLength(1)

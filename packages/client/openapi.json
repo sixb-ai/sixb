@@ -7613,6 +7613,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["outgoing", "incoming", "both"],
+              "default": "outgoing"
+            }
           }
         ],
         "responses": {

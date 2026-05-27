@@ -2623,6 +2623,7 @@ export type ListObjectLinksData = {
   }
   query?: {
     linkId?: string
+    direction?: "outgoing" | "incoming" | "both"
   }
   url: "/api/objects/{objectTypeId}/{objectId}/links"
 }

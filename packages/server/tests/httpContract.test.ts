@@ -1028,6 +1028,18 @@ describe("ParioServer HTTP contract", () => {
         }),
       ])
 
+      const incomingLinksResponse = await fetch(
+        `${baseUrl}/api/objects/device/fan-1/links?direction=incoming`
+      )
+      expect(incomingLinksResponse.status).toBe(200)
+      const incomingLinks = (await incomingLinksResponse.json()) as Array<{ sourceId: string }>
+      expect(incomingLinks.map((link) => link.sourceId)).toEqual(["system"])
+
+      const invalidDirectionResponse = await fetch(
+        `${baseUrl}/api/objects/device/fan-1/links?direction=sideways`
+      )
+      expect(invalidDirectionResponse.status).toBe(422)
+
       const historyResponse = await fetch(
         `${baseUrl}/api/objects/device/fan-1/telemetry/rpm/history?limit=2&order=desc`
       )
