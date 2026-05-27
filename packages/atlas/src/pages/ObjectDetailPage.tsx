@@ -5,6 +5,7 @@ import type {
   TelemetryHistory,
   TelemetryProperty,
 } from "@pario/client"
+import { decodeObjectId, encodeObjectId } from "@pario/client"
 import {
   getObjectOptions,
   getTelemetryHistoryOptions,
@@ -122,6 +123,12 @@ export function ObjectDetailPage({
     setSelectedPropertyId(null)
   }, [objectId])
 
+  const canonicalObjectId = useMemo(() => {
+    if (!objectId) return null
+    const parsed = decodeObjectId(objectId)
+    return parsed ? encodeObjectId(parsed.objectTypeId, parsed.primaryId) : objectId
+  }, [objectId])
+
   const { data: object, isLoading: objectLoading } = useQuery({
     ...getObjectOptions({
       path: { projectName, objectId: objectId! },
@@ -132,7 +139,7 @@ export function ObjectDetailPage({
   const { data: relationships = [] } = useQuery({
     ...listRelationshipsOptions({
       path: { projectName },
-      query: { objectId: objectId ?? undefined },
+      query: { objectId: canonicalObjectId ?? undefined },
     }),
     enabled: !!objectId,
   })
@@ -323,12 +330,12 @@ export function ObjectDetailPage({
   }, [object?.actions])
 
   const outgoing = useMemo(
-    () => relationships.filter((r) => r.source === objectId),
-    [relationships, objectId]
+    () => relationships.filter((r) => r.source === canonicalObjectId),
+    [relationships, canonicalObjectId]
   )
   const incoming = useMemo(
-    () => relationships.filter((r) => r.target === objectId),
-    [relationships, objectId]
+    () => relationships.filter((r) => r.target === canonicalObjectId),
+    [relationships, canonicalObjectId]
   )
 
   const usagePercent = object ? getUsagePercent(telemetryWithLive, object.class) : null
@@ -543,20 +550,20 @@ export function ObjectDetailPage({
         </Section>
       ) : null}
 
-      {Object.keys(properties).length > 0 || outgoing.length > 0 ? (
+      {Object.keys(properties).length > 0 ? (
         <Section title="Details">
-          <DetailsList
-            properties={properties}
-            outgoing={outgoing}
-            objectLookup={objectLookup}
-            onSelectObject={(id) => navigate(`/${id}`)}
-          />
+          <DetailsList properties={properties} />
         </Section>
       ) : null}
 
-      {incoming.length > 0 ? (
-        <Section title="Links" count={incoming.length}>
-          <LinksList edges={incoming} objectLookup={objectLookup} />
+      {outgoing.length > 0 || incoming.length > 0 ? (
+        <Section title="Links" count={outgoing.length + incoming.length}>
+          <LinksList
+            outgoing={outgoing}
+            incoming={incoming}
+            objectLookup={objectLookup}
+            onSelectObject={(id) => navigate(`/${id}`)}
+          />
         </Section>
       ) : null}
 
@@ -599,31 +606,13 @@ export function ObjectDetailPage({
   )
 }
 
-function DetailsList({
-  properties,
-  outgoing,
-  objectLookup,
-  onSelectObject,
-}: {
-  properties: Record<string, unknown>
-  outgoing: RelationshipEdge[]
-  objectLookup: Record<string, ObjectSummary>
-  onSelectObject: (id: string) => void
-}) {
+function DetailsList({ properties }: { properties: Record<string, unknown> }) {
   const rows = useMemo(() => {
-    const outgoingByTarget = new Map<string, RelationshipEdge>()
-    for (const edge of outgoing) {
-      outgoingByTarget.set(edge.target, edge)
-      outgoingByTarget.set(unqualifyId(edge.target), edge)
-    }
-
-    const seen = new Set<RelationshipEdge>()
     const list: Array<{
       key: string
       label: string
-      kind: "value" | "edge" | "primary"
+      kind: "value" | "primary"
       value?: unknown
-      edge?: RelationshipEdge
     }> = []
 
     if (typeof properties.id !== "undefined") {
@@ -632,27 +621,11 @@ function DetailsList({
 
     for (const [key, value] of Object.entries(properties)) {
       if (key === "id") continue
-      const matched = matchEdge(value, outgoingByTarget)
-      if (matched) {
-        seen.add(matched)
-        list.push({ key, label: humanizeIdentifier(matched.type), kind: "edge", edge: matched })
-      } else {
-        list.push({ key, label: humanizeIdentifier(key), kind: "value", value })
-      }
-    }
-
-    for (const edge of outgoing) {
-      if (seen.has(edge)) continue
-      list.push({
-        key: `__edge_${edge.type}_${edge.target}`,
-        label: humanizeIdentifier(edge.type),
-        kind: "edge",
-        edge,
-      })
+      list.push({ key, label: humanizeIdentifier(key), kind: "value", value })
     }
 
     return list
-  }, [properties, outgoing])
+  }, [properties])
 
   if (rows.length === 0) return null
 
@@ -673,15 +646,7 @@ function DetailsList({
               ) : null}
             </dt>
             <dd className="min-w-0 text-foreground">
-              {row.kind === "edge" && row.edge ? (
-                <RelationshipLink
-                  edge={row.edge}
-                  related={objectLookup[row.edge.target]}
-                  onSelect={onSelectObject}
-                />
-              ) : (
-                <FormattedValue value={row.value} />
-              )}
+              <FormattedValue value={row.value} />
             </dd>
           </Fragment>
         ))}
@@ -690,59 +655,65 @@ function DetailsList({
   )
 }
 
-function unqualifyId(value: string): string {
-  const idx = value.indexOf("~")
-  return idx >= 0 ? value.slice(idx + 1) : value
-}
-
-function matchEdge(
-  value: unknown,
-  outgoingByTarget: Map<string, RelationshipEdge>
-): RelationshipEdge | null {
-  if (typeof value !== "string") return null
-  const direct = outgoingByTarget.get(value)
-  if (direct) return direct
-  return outgoingByTarget.get(unqualifyId(value)) ?? null
-}
-
 function LinksList({
-  edges,
+  outgoing,
+  incoming,
   objectLookup,
+  onSelectObject,
 }: {
-  edges: RelationshipEdge[]
+  outgoing: RelationshipEdge[]
+  incoming: RelationshipEdge[]
   objectLookup: Record<string, ObjectSummary>
+  onSelectObject: (id: string) => void
 }) {
-  const sorted = useMemo(() => {
-    return [...edges].sort((a, b) => {
-      const typeCompare = a.type.localeCompare(b.type)
+  const rows = useMemo(() => {
+    const linkRows = [
+      ...outgoing.map((edge) => ({
+        key: `out:${edge.type}:${edge.target}`,
+        direction: "to" as const,
+        edge,
+        relatedId: edge.target,
+      })),
+      ...incoming.map((edge) => ({
+        key: `in:${edge.type}:${edge.source}`,
+        direction: "from" as const,
+        edge,
+        relatedId: edge.source,
+      })),
+    ]
+
+    return linkRows.sort((a, b) => {
+      if (a.direction !== b.direction) return a.direction === "to" ? -1 : 1
+      const typeCompare = a.edge.type.localeCompare(b.edge.type)
       if (typeCompare !== 0) return typeCompare
-      const aName = objectLookup[a.source]?.name ?? a.source
-      const bName = objectLookup[b.source]?.name ?? b.source
+      const aName = objectLookup[a.relatedId]?.name ?? a.relatedId
+      const bName = objectLookup[b.relatedId]?.name ?? b.relatedId
       return aName.localeCompare(bName)
     })
-  }, [edges, objectLookup])
+  }, [incoming, objectLookup, outgoing])
 
   return (
     <Card className="p-4 sm:p-5">
-      <dl className="grid grid-cols-[max-content_max-content_max-content_max-content] items-baseline gap-x-3 gap-y-2 text-sm">
-        {sorted.map((edge) => {
-          const related = objectLookup[edge.source]
+      <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2.5 text-sm">
+        {rows.map((row) => {
+          const related = objectLookup[row.relatedId]
           return (
-            <Fragment key={`${edge.type}__${edge.source}`}>
-              <dt className="text-xs text-muted-foreground">{humanizeIdentifier(edge.type)}</dt>
-              <span aria-hidden="true" className="text-muted-foreground/40">
-                ←
-              </span>
-              <dd>
-                <Link
-                  to={`/${edge.source}`}
-                  className="text-foreground underline-offset-2 hover:underline"
+            <Fragment key={row.key}>
+              <dt className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
+                <span>{humanizeIdentifier(row.edge.type)}</span>
+                <Badge
+                  variant="secondary"
+                  className="h-4 border-0 bg-muted px-1.5 text-[9px] font-medium text-muted-foreground"
                 >
-                  {related?.name ?? edge.source}
-                </Link>
-              </dd>
-              <dd className="text-xs text-muted-foreground">
-                {related?.class ? humanizeIdentifier(related.class) : ""}
+                  {row.direction}
+                </Badge>
+              </dt>
+              <dd className="min-w-0 text-foreground">
+                <RelatedObjectLink
+                  objectId={row.relatedId}
+                  related={related}
+                  onSelect={onSelectObject}
+                />
               </dd>
             </Fragment>
           )
@@ -752,26 +723,26 @@ function LinksList({
   )
 }
 
-function RelationshipLink({
-  edge,
+function RelatedObjectLink({
+  objectId,
   related,
   onSelect,
 }: {
-  edge: RelationshipEdge
+  objectId: string
   related: ObjectSummary | undefined
   onSelect: (id: string) => void
 }) {
   return (
     <Link
-      to={`/${edge.target}`}
+      to={`/${objectId}`}
       onClick={(event) => {
         event.preventDefault()
-        onSelect(edge.target)
+        onSelect(objectId)
       }}
       className="inline-flex items-baseline gap-1.5 underline-offset-2 hover:underline"
-      title={edge.target}
+      title={objectId}
     >
-      <span>{related?.name ?? edge.target}</span>
+      <span>{related?.name ?? objectId}</span>
       {related?.class ? (
         <span className="text-xs text-muted-foreground">{humanizeIdentifier(related.class)}</span>
       ) : null}

@@ -1,2 +1,2 @@
 export { InMemoryObjectStorage } from "./in-memory"
-export type { ObjectLinkRow, ObjectRow, ObjectStorage } from "./types"
+export type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "./types"

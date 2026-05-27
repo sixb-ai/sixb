@@ -269,8 +269,8 @@ describe("SqliteObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(1)
@@ -304,8 +304,8 @@ describe("SqliteObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(1)
@@ -339,8 +339,8 @@ describe("SqliteObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(0)
@@ -372,13 +372,38 @@ describe("SqliteObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
       linkId: "hasThermostat",
     })
 
     expect(links).toHaveLength(1)
     expect(links[0]?.linkId).toBe("hasThermostat")
+  })
+
+  test("listLinks supports incoming and both directions", async () => {
+    await storage.applyLinkUpserted(
+      createLinkUpsertedEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
+    )
+    await storage.applyLinkUpserted(
+      createLinkUpsertedEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
+    )
+
+    const incoming = await storage.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      direction: "incoming",
+    })
+    const both = await storage.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      direction: "both",
+    })
+
+    expect(incoming.map((link) => link.linkId)).toEqual(["installedIn"])
+    expect(both.map((link) => link.linkId).sort()).toEqual(["hasSensor", "installedIn"])
   })
 
   test("list returns objects with pagination", async () => {
@@ -544,8 +569,8 @@ describe("SqliteObjectStorage", () => {
 
     const links = await storage.listLinks({
       projectId: "p1",
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
       linkId: "hasSensors",
     })
     expect(links).toHaveLength(2)
@@ -580,8 +605,8 @@ describe("SqliteObjectStorage", () => {
     const result = await storage.listLinksBatch({
       projectId: "p1",
       items: [
-        { sourceTypeId: "Room", sourceId: "r1", linkId: "hasSensors" },
-        { sourceTypeId: "Room", sourceId: "r1", linkId: "noLinks" },
+        { objectTypeId: "Room", objectId: "r1", linkId: "hasSensors" },
+        { objectTypeId: "Room", objectId: "r1", linkId: "noLinks" },
       ],
     })
 

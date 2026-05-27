@@ -4,7 +4,7 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
-import type { ObjectLinkRow, ObjectRow, ObjectStorage } from "./types"
+import type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "./types"
 
 function objectRowKey(projectId: string, objectTypeId: string): string {
   return `${projectId}:${objectTypeId}`
@@ -16,6 +16,10 @@ function sourceLinkBucketKey(projectId: string, sourceTypeId: string, sourceId: 
 
 function linkRowKey(linkId: string, targetTypeId: string, targetId: string): string {
   return `${linkId}:${targetTypeId}:${targetId}`
+}
+
+function fullLinkRowKey(row: ObjectLinkRow): string {
+  return `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`
 }
 
 export class InMemoryObjectStorage implements ObjectStorage {
@@ -199,22 +203,39 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
   async listLinks(params: {
     projectId: string
-    sourceTypeId: string
-    sourceId: string
+    objectTypeId: string
+    objectId: string
     linkId?: string
+    direction?: LinkDirection
   }): Promise<readonly ObjectLinkRow[]> {
-    const bucketKey = sourceLinkBucketKey(params.projectId, params.sourceTypeId, params.sourceId)
-    const bucket = this.links.get(bucketKey)
-    if (!bucket) {
-      return []
+    const direction = params.direction ?? "outgoing"
+    const matches = (row: ObjectLinkRow) => !params.linkId || row.linkId === params.linkId
+    const rows: ObjectLinkRow[] = []
+
+    if (direction === "outgoing" || direction === "both") {
+      const bucket = this.links.get(
+        sourceLinkBucketKey(params.projectId, params.objectTypeId, params.objectId)
+      )
+      if (bucket) rows.push(...[...bucket.values()].filter(matches))
     }
 
-    const rows = [...bucket.values()]
-    if (!params.linkId) {
-      return rows
+    if (direction === "incoming" || direction === "both") {
+      for (const bucket of this.links.values()) {
+        for (const row of bucket.values()) {
+          if (
+            row.projectId === params.projectId &&
+            row.targetTypeId === params.objectTypeId &&
+            row.targetId === params.objectId &&
+            matches(row)
+          ) {
+            rows.push(row)
+          }
+        }
+      }
     }
 
-    return rows.filter((row) => row.linkId === params.linkId)
+    if (direction !== "both") return rows
+    return [...new Map(rows.map((row) => [fullLinkRowKey(row), row])).values()]
   }
 
   async getByPrimaryIdBatch(params: {
@@ -237,18 +258,18 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
-    items: readonly { sourceTypeId: string; sourceId: string; linkId: string }[]
+    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<string, ObjectLinkRow[]>> {
     const result = new Map<string, ObjectLinkRow[]>()
     for (const item of params.items) {
       const rows = await this.listLinks({
         projectId: params.projectId,
-        sourceTypeId: item.sourceTypeId,
-        sourceId: item.sourceId,
+        objectTypeId: item.objectTypeId,
+        objectId: item.objectId,
         linkId: item.linkId,
       })
       if (rows.length > 0) {
-        result.set(`${item.sourceTypeId}:${item.sourceId}:${item.linkId}`, [...rows])
+        result.set(`${item.objectTypeId}:${item.objectId}:${item.linkId}`, [...rows])
       }
     }
     return result

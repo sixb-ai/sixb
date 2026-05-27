@@ -311,8 +311,8 @@ async function loadLinksWithOverlay(
     linkIds.map(async (linkId) => {
       const rows = await input.runtime.storage.objects.listLinks({
         projectId: input.runtime.projectId,
-        sourceTypeId: input.subject.objectTypeId,
-        sourceId: input.subject.primaryId,
+        objectTypeId: input.subject.objectTypeId,
+        objectId: input.subject.primaryId,
         linkId,
       })
       links.set(linkId, [...rows])

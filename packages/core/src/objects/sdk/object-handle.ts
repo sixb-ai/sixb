@@ -39,8 +39,8 @@ export function createObjectByIdHandle<
       }
       return ctx.storage.objects.listLinks({
         projectId: ctx.projectId,
-        sourceTypeId: ctx.objectType.id,
-        sourceId: primaryId,
+        objectTypeId: ctx.objectType.id,
+        objectId: primaryId,
         linkId: linkToken?.id,
       })
     },

@@ -311,8 +311,8 @@ describe("Pario runtime", () => {
 
     const links = await runtimeDeps.storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
       linkId: "hasThermostat",
     })
 
@@ -568,8 +568,8 @@ describe("Pario runtime", () => {
 
     const linksBefore = await runtimeDeps.storage.objects.listLinks({
       projectId: "remove-link-test",
-      sourceTypeId: "Room",
-      sourceId: "room:201",
+      objectTypeId: "Room",
+      objectId: "room:201",
     })
     expect(linksBefore).toHaveLength(1)
 
@@ -582,8 +582,8 @@ describe("Pario runtime", () => {
 
     const linksAfter = await runtimeDeps.storage.objects.listLinks({
       projectId: "remove-link-test",
-      sourceTypeId: "Room",
-      sourceId: "room:201",
+      objectTypeId: "Room",
+      objectId: "room:201",
     })
     expect(linksAfter).toHaveLength(0)
   })

@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type {
+  LinkDirection,
   ObjectLinkRow,
   ObjectRow,
   ObjectStorage,
@@ -459,12 +460,29 @@ export class SqliteObjectStorage implements ObjectStorage {
 
   async listLinks(params: {
     projectId: string
-    sourceTypeId: string
-    sourceId: string
+    objectTypeId: string
+    objectId: string
     linkId?: string
+    direction?: LinkDirection
   }): Promise<readonly ObjectLinkRow[]> {
-    let query = "SELECT * FROM links WHERE project_id = ? AND source_type_id = ? AND source_id = ?"
-    const args: (string | number)[] = [params.projectId, params.sourceTypeId, params.sourceId]
+    const direction = params.direction ?? "outgoing"
+    const directionWhere =
+      direction === "incoming"
+        ? "target_type_id = ? AND target_id = ?"
+        : direction === "both"
+          ? "((source_type_id = ? AND source_id = ?) OR (target_type_id = ? AND target_id = ?))"
+          : "source_type_id = ? AND source_id = ?"
+    let query = `SELECT * FROM links WHERE project_id = ? AND ${directionWhere}`
+    const args: (string | number)[] =
+      direction === "both"
+        ? [
+            params.projectId,
+            params.objectTypeId,
+            params.objectId,
+            params.objectTypeId,
+            params.objectId,
+          ]
+        : [params.projectId, params.objectTypeId, params.objectId]
 
     if (params.linkId) {
       query += " AND link_id = ?"
@@ -501,7 +519,7 @@ export class SqliteObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
-    items: readonly { sourceTypeId: string; sourceId: string; linkId: string }[]
+    items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<string, ObjectLinkRow[]>> {
     const result = new Map<string, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
@@ -512,13 +530,13 @@ export class SqliteObjectStorage implements ObjectStorage {
     for (const item of params.items) {
       const rows = stmt.all(
         params.projectId,
-        item.sourceTypeId,
-        item.sourceId,
+        item.objectTypeId,
+        item.objectId,
         item.linkId
       ) as LinkDatabaseRow[]
       if (rows.length > 0) {
         result.set(
-          `${item.sourceTypeId}:${item.sourceId}:${item.linkId}`,
+          `${item.objectTypeId}:${item.objectId}:${item.linkId}`,
           rows.map((r) => this.rowToLink(r))
         )
       }

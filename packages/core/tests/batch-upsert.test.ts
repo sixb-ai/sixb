@@ -190,8 +190,8 @@ describe("upsertLinkBatch", () => {
 
     const links = await deps.storage.objects.listLinks({
       projectId: pario.id,
-      sourceTypeId: "room",
-      sourceId: "r1",
+      objectTypeId: "room",
+      objectId: "r1",
       linkId: "hasSensors",
     })
     expect(links).toHaveLength(2)

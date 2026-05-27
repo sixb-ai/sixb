@@ -271,8 +271,8 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(1)
@@ -306,8 +306,8 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(1)
@@ -341,8 +341,8 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
     })
 
     expect(links).toHaveLength(0)
@@ -374,13 +374,38 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
       linkId: "hasThermostat",
     })
 
     expect(links).toHaveLength(1)
     expect(links[0]?.linkId).toBe("hasThermostat")
+  })
+
+  test("listLinks supports incoming and both directions", async () => {
+    await storage.objects.applyLinkUpserted(
+      createLinkUpsertedEvent("project-a", "Room", "room:101", "hasSensor", "Sensor", "s1", "1")
+    )
+    await storage.objects.applyLinkUpserted(
+      createLinkUpsertedEvent("project-a", "Sensor", "s1", "installedIn", "Room", "room:101", "2")
+    )
+
+    const incoming = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      direction: "incoming",
+    })
+    const both = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      direction: "both",
+    })
+
+    expect(incoming.map((link) => link.linkId)).toEqual(["installedIn"])
+    expect(both.map((link) => link.linkId).sort()).toEqual(["hasSensor", "installedIn"])
   })
 
   test("list returns objects with pagination", async () => {
@@ -604,8 +629,8 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "project-a",
-      sourceTypeId: "Room",
-      sourceId: "room:101",
+      objectTypeId: "Room",
+      objectId: "room:101",
       linkId: "hasThermostat",
     })
 
@@ -710,8 +735,8 @@ describe("PgObjectStorage", () => {
 
     const links = await storage.objects.listLinks({
       projectId: "p1",
-      sourceTypeId: "Room",
-      sourceId: "r1",
+      objectTypeId: "Room",
+      objectId: "r1",
       linkId: "hasSensors",
     })
     expect(links).toHaveLength(2)
@@ -750,8 +775,8 @@ describe("PgObjectStorage", () => {
     const result = await storage.objects.listLinksBatch({
       projectId: "p1",
       items: [
-        { sourceTypeId: "Room", sourceId: "r1", linkId: "hasSensors" },
-        { sourceTypeId: "Room", sourceId: "r1", linkId: "noLinks" },
+        { objectTypeId: "Room", objectId: "r1", linkId: "hasSensors" },
+        { objectTypeId: "Room", objectId: "r1", linkId: "noLinks" },
       ],
     })
 
