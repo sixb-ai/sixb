@@ -103,6 +103,7 @@ export async function runObjectProjection(
   for await (const row of runtime.lakeStorage.readRows({
     datasetId: projection.datasetId,
     versionId,
+    columns: objectProjectionReadColumns(projection),
   })) {
     throwIfAborted(signal)
     counters.rowsProcessed += 1
@@ -134,6 +135,10 @@ export async function runObjectProjection(
     ...snapshotCounters(counters),
     firstErrorMessage,
   }
+}
+
+function objectProjectionReadColumns(projection: ObjectProjectionDefinition): readonly string[] {
+  return [...new Set(Object.values(projection.properties))]
 }
 
 async function upsertForeignKeyLinks(input: {

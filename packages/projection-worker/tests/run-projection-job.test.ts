@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type BeginDatasetWriteInput,
   col,
   type DatasetDefinition,
   type DatasetRow,
@@ -21,6 +22,7 @@ import {
   type ProjectionDefinition,
   type ProjectionRunStorage,
   prop,
+  type ReadDatasetRowsInput,
   stringEnum,
   valueTypeRef,
 } from "@pario/core"
@@ -80,6 +82,55 @@ const roomSensorProjection = defineLinkProjection("room-sensor-proj", Room.l.has
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")
   .targetField("sensor_id")
+
+class RecordingLakeStorage implements LakeStorage {
+  readonly standard: LakeStorage["standard"]
+  readonly readInputs: ReadDatasetRowsInput[] = []
+
+  constructor(private readonly delegate: LakeStorage) {
+    this.standard = delegate.standard
+  }
+
+  assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
+    return this.delegate.assertDatasetDefinitionCompatible(definition)
+  }
+
+  createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {
+    return this.delegate.createDataset(definition)
+  }
+
+  getDataset(datasetId: string): Promise<DatasetDefinition | null> {
+    return this.delegate.getDataset(datasetId)
+  }
+
+  listDatasets(): Promise<readonly DatasetDefinition[]> {
+    return this.delegate.listDatasets()
+  }
+
+  listVersions(datasetId: string, limit?: number) {
+    return this.delegate.listVersions(datasetId, limit)
+  }
+
+  beginWrite(input: BeginDatasetWriteInput) {
+    return this.delegate.beginWrite(input)
+  }
+
+  getLatestVersion(datasetId: string) {
+    return this.delegate.getLatestVersion(datasetId)
+  }
+
+  getVersion(datasetId: string, versionId: string) {
+    return this.delegate.getVersion(datasetId, versionId)
+  }
+
+  readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
+    this.readInputs.push({
+      ...input,
+      columns: input.columns === undefined ? undefined : [...input.columns],
+    })
+    return this.delegate.readRows(input)
+  }
+}
 
 interface TestRuntimeDeps {
   readonly broker: InMemoryBroker
@@ -170,7 +221,7 @@ function createPario(
     datasets: readonly DatasetDefinition[]
     projections: readonly ProjectionDefinition[]
   },
-  deps = createDeps()
+  deps: Omit<TestRuntimeDeps, "lakeStorage"> & { readonly lakeStorage: LakeStorage } = createDeps()
 ) {
   return new Pario({
     id: "projection-worker-tests",
@@ -235,6 +286,46 @@ describe("runProjectionJob", () => {
       primaryId: "r1",
     })
     expect(room?.properties.name).toBe("Kitchen")
+  })
+
+  test("object projections read only mapped dataset columns", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const wideRoomsDataset = defineDataset("canonical.wide-rooms", {
+      schema: [
+        col("room_id", "string"),
+        col("room_name", "string"),
+        col("unused_a", "string", { nullable: true }),
+        col("unused_b", "json", { nullable: true }),
+      ],
+    })
+    const wideRoomProjection = defineProjection("wide-room-proj", Room)
+      .fromDataset(wideRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+    const pario = createPario(
+      {
+        datasets: [wideRoomsDataset],
+        projections: [wideRoomProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    const version = await commitDatasetVersion(lakeStorage, wideRoomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", unused_a: "ignored", unused_b: { ignored: true } },
+    ])
+
+    await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-column-pruning-object",
+        projectionId: "wide-room-proj",
+        projectionKind: "object",
+        datasetId: wideRoomsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "room_name"])
   })
 
   test("materializes FK links after object upserts", async () => {
@@ -348,6 +439,51 @@ describe("runProjectionJob", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.targetId).toBe("s1")
+  })
+
+  test("link projections read only source and target columns", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const wideRoomSensorsDataset = defineDataset("canonical.wide-room-sensors", {
+      schema: [
+        col("room_id", "string"),
+        col("sensor_id", "string"),
+        col("unused_weight", "float64", { nullable: true }),
+      ],
+    })
+    const wideRoomSensorProjection = defineLinkProjection(
+      "wide-room-sensor-proj",
+      Room.l.hasSensors
+    )
+      .fromDataset(wideRoomSensorsDataset)
+      .sourceField("room_id")
+      .targetField("sensor_id")
+    const pario = createPario(
+      {
+        datasets: [wideRoomSensorsDataset],
+        projections: [wideRoomSensorProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await pario.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await pario.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    const version = await commitDatasetVersion(lakeStorage, wideRoomSensorsDataset, [
+      { room_id: "r1", sensor_id: "s1", unused_weight: 0.75 },
+    ])
+
+    await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-column-pruning-link",
+        projectionId: "wide-room-sensor-proj",
+        projectionKind: "link",
+        datasetId: wideRoomSensorsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "sensor_id"])
   })
 
   test("skips blank object primary values and blank link fields", async () => {

@@ -55,13 +55,13 @@ export class DuckLakeRowReader {
     const tableSql = qualifiedTableName(this.options, tableName)
     const limitSql = input.limit === undefined ? "" : ` LIMIT ${Math.max(0, input.limit)}`
     const offsetSql = input.offset === undefined ? "" : ` OFFSET ${Math.max(0, input.offset)}`
-    const rows = await runtime.query(
+    const rows = runtime.streamRows(
       `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
     )
 
     // Step 3: DuckDB returns driver-native values. Normalize each projected
     // column through the schema that was active at the resolved version.
-    for (const row of rows) {
+    for await (const row of rows) {
       const output: Record<string, unknown> = {}
       for (const column of selectedColumns) {
         output[column.name] = normalizeReadValue(row[column.name], column)

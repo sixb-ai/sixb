@@ -93,6 +93,7 @@ export async function runLinkProjection(
   for await (const row of runtime.lakeStorage.readRows({
     datasetId: projection.datasetId,
     versionId,
+    columns: linkProjectionReadColumns(projection),
   })) {
     throwIfAborted(signal)
     counters.rowsProcessed += 1
@@ -132,6 +133,10 @@ export async function runLinkProjection(
     ...snapshotCounters(counters),
     firstErrorMessage,
   }
+}
+
+function linkProjectionReadColumns(projection: LinkProjectionDefinition): readonly string[] {
+  return [...new Set([projection.sourceField, projection.targetField])]
 }
 
 function collectLinkRow(
