@@ -328,6 +328,47 @@ describe("runProjectionJob", () => {
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "room_name"])
   })
 
+  test("object projections tolerate required unmapped dataset columns", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const requiredExtraRoomsDataset = defineDataset("canonical.required-extra-rooms", {
+      schema: [
+        col("room_id", "string"),
+        col("room_name", "string"),
+        col("relationship_ref", "string"),
+      ],
+    })
+    const requiredExtraRoomProjection = defineProjection("required-extra-room-proj", Room)
+      .fromDataset(requiredExtraRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+    const pario = createPario(
+      {
+        datasets: [requiredExtraRoomsDataset],
+        projections: [requiredExtraRoomProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    const version = await commitDatasetVersion(lakeStorage, requiredExtraRoomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", relationship_ref: "b1" },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-required-unmapped-object",
+        projectionId: "required-extra-room-proj",
+        projectionKind: "object",
+        datasetId: requiredExtraRoomsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.objectsUpserted).toBe(1)
+    expect(result.rowsSkipped).toBe(0)
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "room_name"])
+  })
+
   test("materializes FK links after object upserts", async () => {
     const deps = createDeps()
     const pario = createPario(
@@ -482,6 +523,53 @@ describe("runProjectionJob", () => {
       },
     })
 
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "sensor_id"])
+  })
+
+  test("link projections tolerate required unmapped dataset columns", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const requiredExtraRoomSensorsDataset = defineDataset("canonical.required-extra-room-sensors", {
+      schema: [
+        col("room_id", "string"),
+        col("sensor_id", "string"),
+        col("relationship_weight", "float64"),
+      ],
+    })
+    const requiredExtraRoomSensorProjection = defineLinkProjection(
+      "required-extra-room-sensor-proj",
+      Room.l.hasSensors
+    )
+      .fromDataset(requiredExtraRoomSensorsDataset)
+      .sourceField("room_id")
+      .targetField("sensor_id")
+    const pario = createPario(
+      {
+        datasets: [requiredExtraRoomSensorsDataset],
+        projections: [requiredExtraRoomSensorProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await pario.upsertObject("Room", { id: "r1", name: "Kitchen" })
+    await pario.upsertObject("Sensor", { id: "s1", name: "Motion" })
+    const version = await commitDatasetVersion(lakeStorage, requiredExtraRoomSensorsDataset, [
+      { room_id: "r1", sensor_id: "s1", relationship_weight: 0.75 },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "projrun-required-unmapped-link",
+        projectionId: "required-extra-room-sensor-proj",
+        projectionKind: "link",
+        datasetId: requiredExtraRoomSensorsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.linksUpserted).toBe(1)
+    expect(result.rowsSkipped).toBe(0)
     expect(lakeStorage.readInputs).toHaveLength(1)
     expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "sensor_id"])
   })
