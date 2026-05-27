@@ -8,7 +8,7 @@ import {
   type WorkflowRunDetail,
   type WorkflowRunNode,
   type WorkflowRunStatus,
-} from "../utils/workflows"
+} from "../../utils/workflows"
 
 export function RunTimelineCard({
   run,

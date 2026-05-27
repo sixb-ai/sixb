@@ -7,7 +7,7 @@ import {
   statusLabels,
   type WorkflowNodeStatus,
   type WorkflowRunStatus,
-} from "../utils/workflows"
+} from "../../utils/workflows"
 
 export function StatusBadge({ status }: { status: WorkflowRunStatus }) {
   return (

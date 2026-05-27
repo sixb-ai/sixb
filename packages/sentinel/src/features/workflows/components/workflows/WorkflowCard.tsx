@@ -1,8 +1,8 @@
 import { Card } from "@pario/ui/components"
 import { ArrowRight, GitBranch } from "lucide-react"
 import { Link } from "react-router-dom"
-import { runTimeLabel, type WorkflowSummary } from "../utils/workflows"
-import { StatusBadge } from "./StatusBadge"
+import { runTimeLabel, type WorkflowSummary } from "../../utils/workflows"
+import { StatusBadge } from "../runs/StatusBadge"
 
 export function WorkflowCard({ workflow }: { workflow: WorkflowSummary }) {
   const inputFieldCount = Object.keys(workflow.input ?? {}).length

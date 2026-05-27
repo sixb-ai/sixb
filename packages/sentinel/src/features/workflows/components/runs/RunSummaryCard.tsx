@@ -1,11 +1,11 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@pario/ui/components"
-import { KeyValue } from "../../../components/common"
+import { KeyValue } from "../../../../components/common"
 import {
   formatDate,
   formatRunDuration,
   formatRunStartedDate,
   type WorkflowRunDetail,
-} from "../utils/workflows"
+} from "../../utils/workflows"
 import { StatusBadge } from "./StatusBadge"
 
 export function RunSummaryCard({ run }: { run: WorkflowRunDetail }) {

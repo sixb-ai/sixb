@@ -1,8 +1,8 @@
 import { Badge, Card, CardContent } from "@pario/ui/components"
 import { Workflow, Zap } from "lucide-react"
-import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../utils/workflows"
-import { RunIOShape } from "./RunIOShape"
-import { NodeStatusBadge } from "./StatusBadge"
+import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"
+import { RunIOShape } from "../runs/RunIOShape"
+import { NodeStatusBadge } from "../runs/StatusBadge"
 
 export function RunNodeRow({ node }: { node: WorkflowRunNode }) {
   const isStep = node.nodeType === "step"
