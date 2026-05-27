@@ -1,10 +1,10 @@
-import {
-  type DatasetColumnDefinition,
-  type DatasetDefinition,
-  type DatasetRow,
-  type ObjectProjectionDefinition,
-  type OntologyRegistry,
-  type Schema,
+import type {
+  DatasetColumnDefinition,
+  DatasetDefinition,
+  DatasetRow,
+  ObjectProjectionDefinition,
+  OntologyRegistry,
+  Schema,
 } from "@pario/core"
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
