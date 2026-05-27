@@ -130,6 +130,28 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ])
   })
 
+  test("supports breaking out of streamed reads without blocking later reads", async () => {
+    const write = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+
+    await write.writeRows([
+      { orderId: "ord_1", customerName: "Ada", orderCount: 1 },
+      { orderId: "ord_2", customerName: "Grace", orderCount: 2 },
+    ])
+    await write.commit()
+
+    for await (const row of storage.readRows({ datasetId: ordersDataset.id })) {
+      expect(row.orderId).toBe("ord_1")
+      break
+    }
+
+    await expect(
+      collectRows(storage.readRows({ datasetId: ordersDataset.id }))
+    ).resolves.toHaveLength(2)
+  })
+
   test("writes large row streams through the appender staging path", async () => {
     const ROW_COUNT = 1001
 

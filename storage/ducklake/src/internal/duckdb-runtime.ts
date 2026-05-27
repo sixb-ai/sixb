@@ -23,6 +23,7 @@ import {
 export interface DuckDbRuntime {
   run(sql: string, values?: readonly DuckDBValue[]): Promise<void>
   query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]>
+  streamRows(sql: string, values?: readonly DuckDBValue[]): AsyncIterable<Record<string, unknown>>
   withAppender<T>(
     tableName: string,
     useAppender: (appender: DuckDbAppender) => T | Promise<T>
@@ -69,6 +70,42 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
       )
       return reader.getRowObjectsJS()
     })
+  }
+
+  async *streamRows(
+    sql: string,
+    values?: readonly DuckDBValue[]
+  ): AsyncIterable<Record<string, unknown>> {
+    this.assertAcceptingOperations()
+
+    let releaseOperation: (() => void) | undefined
+    const operationFinished = new Promise<void>((resolve) => {
+      releaseOperation = resolve
+    })
+    const waitForTurn = this.operations.then(() => {
+      this.assertNotClosed()
+    })
+    this.operations = waitForTurn
+      .then(() => operationFinished)
+      .then(
+        () => {},
+        () => {}
+      )
+
+    try {
+      await waitForTurn
+      const result = await this.connection.stream(
+        sql,
+        values === undefined ? undefined : [...values]
+      )
+      for await (const batch of result.yieldRowObjectJs()) {
+        for (const row of batch) {
+          yield row as Record<string, unknown>
+        }
+      }
+    } finally {
+      releaseOperation?.()
+    }
   }
 
   async withAppender<T>(
