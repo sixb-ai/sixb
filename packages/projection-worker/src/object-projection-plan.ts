@@ -2,7 +2,6 @@ import {
   type DatasetColumnDefinition,
   type DatasetDefinition,
   type DatasetRow,
-  getDatasetRowValidationError,
   type ObjectProjectionDefinition,
   type OntologyRegistry,
   type Schema,
@@ -70,16 +69,10 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
   const { projection, dataset, primaryPropertyId, propertyPlans } = plan
 
   if (!isPlainObject(row)) {
-    const validationError = getDatasetRowValidationError(row, dataset)
     return {
       ok: false,
-      errorMessage: validationError ?? `Dataset '${dataset.id}' rows must be plain objects.`,
+      errorMessage: `Dataset '${dataset.id}' rows must be plain objects.`,
     }
-  }
-
-  const rowValidationError = getDatasetRowValidationError(row, dataset)
-  if (rowValidationError) {
-    return { ok: false, errorMessage: rowValidationError }
   }
 
   const collected = collectProperties(projection, row, propertyPlans)

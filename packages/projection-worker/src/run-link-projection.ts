@@ -1,7 +1,6 @@
 import {
   type DatasetDefinition,
   type DatasetRow,
-  getDatasetRowValidationError,
   type LinkProjectionDefinition,
   ObjectNotFoundError,
   objectService,
@@ -47,7 +46,7 @@ interface LinkItem {
 export async function runLinkProjection(
   input: RunLinkProjectionInput
 ): Promise<ProjectionExecutionResult> {
-  const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
+  const { runtime, projection, versionId, signal, batchSize, onProgress } = input
   const counters = createZeroCounters()
   const seenPairs = new Set<string>()
   const batch: CollectedLinkRow[] = []
@@ -97,13 +96,6 @@ export async function runLinkProjection(
   })) {
     throwIfAborted(signal)
     counters.rowsProcessed += 1
-
-    const validationError = getDatasetRowValidationError(row, dataset)
-    if (validationError) {
-      counters.rowsSkipped += 1
-      rememberError(validationError)
-      continue
-    }
 
     const linkRow = collectLinkRow(projection, row)
     if (!linkRow) {
