@@ -82,6 +82,13 @@ function parseLimit(value: string | number | undefined): string | undefined {
   return undefined
 }
 
+function parseOffset(value: string | undefined): number {
+  if (value === undefined) return 0
+
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 async function loadObjectTypeMap() {
   const { data } = await listObjectTypes({ throwOnError: true })
   return new Map((data ?? []).map((objectType) => [objectType.id, objectType]))
@@ -294,6 +301,9 @@ export const listObjectsInfiniteQueryKey = (options?: ListObjectsOptions): Query
 }
 
 export const listObjectsInfiniteOptions = (options?: ListObjectsOptions) => {
+  const initialOffsetParam = options?.query?.offset ?? "0"
+  const initialOffset = parseOffset(initialOffsetParam)
+
   return infiniteQueryOptions<
     ListObjectSummariesPage,
     Error,
@@ -302,13 +312,13 @@ export const listObjectsInfiniteOptions = (options?: ListObjectsOptions) => {
     string
   >({
     queryKey: listObjectsInfiniteQueryKey(options),
-    initialPageParam: String(options?.query?.offset ?? "0"),
+    initialPageParam: initialOffsetParam,
     getNextPageParam: (lastPage, pages) => {
       if (!lastPage.hasMore) return undefined
-      return String(pages.reduce((total, page) => total + page.objects.length, 0))
+      return String(initialOffset + pages.reduce((total, page) => total + page.objects.length, 0))
     },
     queryFn: async ({ pageParam }) => {
-      return await fetchObjectListPage(options, String(pageParam ?? options?.query?.offset ?? "0"))
+      return await fetchObjectListPage(options, String(pageParam ?? initialOffsetParam))
     },
   })
 }
