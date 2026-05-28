@@ -5,9 +5,16 @@ import { join } from "node:path"
 import { col, type DatasetRow, defineDataset } from "@pario/core"
 import type { DuckLakeStorage } from "../src"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
-import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
+import { duckLakeMetadataTableName } from "../src/internal/sql"
+import { parseCommitMetadata, parseVersionId } from "../src/internal/versions"
+import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
+  readonly connections: {
+    runtime(): Promise<{
+      query(sql: string): Promise<readonly Record<string, unknown>[]>
+    }>
+  }
   readonly snapshotReader: {
     getLatestVersionForDefinition: DuckLakeSnapshotReader["getLatestVersionForDefinition"]
   }
@@ -93,6 +100,49 @@ describe("DuckLakeStorage writes and latest reads", () => {
       { orderId: "ord_2", customerName: "Grace", orderCount: "2", metadata: { source: "erp" } },
       { orderId: "ord_3", customerName: "Katherine", orderCount: "3", metadata: null },
     ])
+  })
+
+  test("does not persist derived row counts for unguarded appends", async () => {
+    const snapshotWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await snapshotWrite.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    const snapshotVersion = await snapshotWrite.commit()
+    const snapshotExtraInfo = await commitExtraInfoForVersion(
+      storage,
+      rootDir,
+      snapshotVersion.versionId
+    )
+    const snapshotMetadata = parseCommitMetadata(snapshotExtraInfo)
+    expect(snapshotMetadata?.rowCount).toBe(1)
+    expect(JSON.parse(String(snapshotExtraInfo)).pario.rowCount).toBe(1)
+
+    const appendWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await appendWrite.writeRows([{ orderId: "ord_2", customerName: "Grace", orderCount: 2 }])
+    const appendVersion = await appendWrite.commit()
+
+    expect(appendVersion.rowCount).toBe(2)
+    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
+      versionId: appendVersion.versionId,
+      rowCount: 2,
+    })
+
+    const metadata = await commitMetadataForVersion(storage, rootDir, appendVersion.versionId)
+    expect(metadata).toMatchObject({
+      datasetId: ordersDataset.id,
+      mode: "append",
+    })
+    expect(metadata?.rowCount).toBeUndefined()
+    const appendExtraInfo = await commitExtraInfoForVersion(
+      storage,
+      rootDir,
+      appendVersion.versionId
+    )
+    expect(JSON.parse(String(appendExtraInfo)).pario).not.toHaveProperty("rowCount")
   })
 
   test("supports projected latest reads with limits", async () => {
@@ -509,3 +559,27 @@ describe("DuckLakeStorage writes and latest reads", () => {
     expect(await storage.listVersions(ordersDataset.id)).toEqual([])
   })
 })
+
+async function commitMetadataForVersion(
+  storage: DuckLakeStorage,
+  rootDir: string,
+  versionId: string
+) {
+  return parseCommitMetadata(await commitExtraInfoForVersion(storage, rootDir, versionId))
+}
+
+async function commitExtraInfoForVersion(
+  storage: DuckLakeStorage,
+  rootDir: string,
+  versionId: string
+) {
+  const runtime = await (storage as unknown as DuckLakeStorageInternals).connections.runtime()
+  const snapshotId = parseVersionId(versionId)
+  const [row] = await runtime.query(`
+    SELECT commit_extra_info
+    FROM ${duckLakeMetadataTableName(localDuckLakeOptions(rootDir), "ducklake_snapshot_changes")}
+    WHERE snapshot_id = ${snapshotId}
+  `)
+
+  return row?.commit_extra_info
+}

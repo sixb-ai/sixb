@@ -26,6 +26,7 @@ describe("DuckLake version metadata", () => {
             mode: "schema",
             producer: { kind: "sync", id: "sync-orders", runId: "run_123" },
             inputs: [{ datasetId: "raw.erp.customers", versionId: "ducklake:7" }],
+            rowCount: 1250,
             schemaChange: { addColumns: ["currency"] },
           },
         })
@@ -37,6 +38,7 @@ describe("DuckLake version metadata", () => {
       mode: "schema",
       producer: { kind: "sync", id: "sync-orders", runId: "run_123" },
       inputs: [{ datasetId: "raw.erp.customers", versionId: "ducklake:7" }],
+      rowCount: 1250,
       schemaChange: { addColumns: ["currency"] },
     })
   })

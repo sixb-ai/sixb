@@ -12,6 +12,7 @@ export interface ParioCommitMetadata {
   readonly mode?: DatasetVersion["mode"]
   readonly producer?: DatasetVersion["producer"]
   readonly inputs?: DatasetVersion["inputs"]
+  readonly rowCount?: number
   readonly schemaChange?: ParioSchemaChangeMetadata
 }
 
@@ -55,6 +56,7 @@ export function parseCommitMetadata(value: unknown): ParioCommitMetadata | undef
 
   const mode = parsed.pario.mode
   const commitId = parsed.pario.commitId
+  const rowCount = parsed.pario.rowCount
 
   return {
     kind: "datasetVersion",
@@ -63,6 +65,7 @@ export function parseCommitMetadata(value: unknown): ParioCommitMetadata | undef
     ...(mode === "snapshot" || mode === "append" || mode === "schema" ? { mode } : {}),
     ...(isDatasetProducer(parsed.pario.producer) ? { producer: parsed.pario.producer } : {}),
     ...(isDatasetVersionRefs(parsed.pario.inputs) ? { inputs: parsed.pario.inputs } : {}),
+    ...(typeof commitId === "string" && isRowCount(rowCount) ? { rowCount } : {}),
     ...(isSchemaChangeMetadata(parsed.pario.schemaChange)
       ? { schemaChange: parsed.pario.schemaChange }
       : {}),
@@ -130,4 +133,8 @@ function isSchemaChangeMetadata(value: unknown): value is ParioSchemaChangeMetad
 
 function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === "string"
+}
+
+function isRowCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 }

@@ -8,12 +8,21 @@ import type {
 } from "@pario/core"
 import { LakeStorageError } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
-import { applyDatasetRowsFromRelation, assertDatasetWriteMode } from "./dataset-row-commit"
+import {
+  type ApplyDatasetRowsResult,
+  applyDatasetRowsFromRelation,
+  assertDatasetWriteMode,
+  type CommitRowCount,
+} from "./dataset-row-commit"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbRuntime } from "./duckdb-runtime"
-import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
+import type {
+  DuckLakeCommittedWriteRuntimeRelease,
+  DuckLakeConnectionManager,
+  DuckLakeWriteRuntimeLease,
+} from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
-import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
+import type { DuckLakeSnapshotReader, DuckLakeVersionSummary } from "./ducklake-snapshot-reader"
 import { createDuckLakeWriteSession, type DuckLakeCommitWriteInput } from "./ducklake-write-session"
 import {
   buildAttachSql,
@@ -32,7 +41,15 @@ export interface DuckLakeCommitDatasetVersionInput {
   readonly commitMessage: string
   readonly producer?: BeginDatasetWriteInput["producer"]
   readonly inputs?: BeginDatasetWriteInput["inputs"]
-  applyChanges(runtime: DuckDbRuntime): Promise<boolean>
+  committedReadRuntime(release: DuckLakeCommittedWriteRuntimeRelease): Promise<DuckDbRuntime>
+  applyChanges(
+    runtime: DuckDbRuntime,
+    context: DuckLakeApplyChangesContext
+  ): Promise<ApplyDatasetRowsResult>
+}
+
+export interface DuckLakeApplyChangesContext {
+  readonly previousRowCount?: number
 }
 
 /**
@@ -63,12 +80,12 @@ export class DuckLakeWriteCoordinator {
     const mode = input.mode ?? "snapshot"
     assertDatasetWriteMode(mode, "write")
 
-    // Staging tables are connection-scoped in DuckDB, so every write session
-    // owns a dedicated runtime until commit or abort closes it.
-    const runtime = await this.connections.createRuntime()
+    // Staging tables are connection-scoped in DuckDB, so every active write
+    // session owns a dedicated runtime lease until commit or abort releases it.
+    const lease = await this.connections.acquireWriteLease()
     return createDuckLakeWriteSession({
-      commitWrite: (options) => this.commitWrite(options),
-      runtime,
+      commitWrite: (options) => this.commitWrite(options, lease),
+      lease,
       write: {
         ...input,
         dataset: definition,
@@ -77,7 +94,10 @@ export class DuckLakeWriteCoordinator {
     })
   }
 
-  private async commitWrite(input: DuckLakeCommitWriteInput): Promise<DatasetVersion> {
+  private async commitWrite(
+    input: DuckLakeCommitWriteInput,
+    lease: DuckLakeWriteRuntimeLease
+  ): Promise<DatasetVersion> {
     const definition = await this.datasets.getDataset(input.write.dataset.id)
     if (!definition) {
       throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.write.dataset.id}'.`)
@@ -94,7 +114,13 @@ export class DuckLakeWriteCoordinator {
       commitMessage: input.commit?.commitMessage ?? `write dataset ${input.write.dataset.id}`,
       producer: input.write.producer,
       inputs: input.write.inputs,
-      applyChanges: (runtime) => this.applyStagedRows({ ...input, runtime }),
+      committedReadRuntime: (release) => lease.committedReadRuntime(release),
+      applyChanges: (runtime, context) =>
+        this.applyStagedRows({
+          ...input,
+          runtime,
+          previousRowCount: context.previousRowCount,
+        }),
     })
   }
 
@@ -113,61 +139,43 @@ export class DuckLakeWriteCoordinator {
       // Guarded Pario commits need compare-and-swap semantics. DuckLake can
       // automatically retry non-conflicting commits, so guarded transactions
       // disable retries and re-check the dataset head after BEGIN.
-      const latestVersionRef = await this.snapshots.getLatestVersionRefForDefinition(
-        input.runtime,
-        input.dataset
-      )
-      this.assertExpectedLatestVersion({
-        datasetId: input.dataset.id,
-        expectedLatestVersionId: input.expectedLatestVersionId,
-        actualLatestVersionId: latestVersionRef?.versionId ?? null,
-      })
+      const latestVersion = await this.latestVersionForCommit(input)
+      if (input.expectedLatestVersionId !== undefined) {
+        this.assertExpectedLatestVersion({
+          datasetId: input.dataset.id,
+          expectedLatestVersionId: input.expectedLatestVersionId,
+          actualLatestVersionId: latestVersion?.versionId ?? null,
+        })
+      }
 
-      const dataChangeExpected = await input.applyChanges(input.runtime)
+      const changeResult = await input.applyChanges(input.runtime, {
+        previousRowCount: latestVersion?.rowCount,
+      })
       const commitId = randomUUID()
-      await this.setCommitMetadata(input, commitId)
+      await this.setCommitMetadata(
+        input,
+        commitId,
+        commitRowCount(input, changeResult, latestVersion)
+      )
 
       await input.runtime.run("COMMIT")
       committed = true
 
       const committedWriteSnapshotId = await this.lastCommittedSnapshotId(input.runtime)
-      await this.connections.resetRuntime()
-      await input.runtime.close()
-      const readRuntime = await this.connections.runtime()
-      const ownSnapshotId = await this.findSnapshotIdByCommitId(
+      const readRuntime = await input.committedReadRuntime({
+        kind: "committed",
+        guarded: input.expectedLatestVersionId !== undefined,
+        reusable: true,
+      })
+      const version = await this.versionForCommittedWrite({
+        ...input,
         readRuntime,
-        input.dataset.id,
-        commitId
-      )
-
-      if (ownSnapshotId !== null) {
-        const version = await this.snapshots.getVersionForSnapshot(
-          readRuntime,
-          input.dataset,
-          ownSnapshotId
-        )
-        if (version) {
-          return version
-        }
-
-        throw new LakeStorageError(
-          `[ParioDuckLake] DuckLake committed snapshot '${ownSnapshotId}' for dataset '${input.dataset.id}', but Pario could not hydrate it as a dataset version.`
-        )
-      }
-
-      if (!dataChangeExpected) {
-        return this.versionForNoOpCommit(readRuntime, input.dataset)
-      }
-
-      if (committedWriteSnapshotId === previousWriteSnapshotId) {
-        throw new LakeStorageError(
-          `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed without producing a snapshot for this non-empty write.`
-        )
-      }
-
-      throw new LakeStorageError(
-        `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed, but Pario could not find a matching snapshot for this write.`
-      )
+        commitId,
+        previousWriteSnapshotId,
+        committedWriteSnapshotId,
+        changeResult,
+      })
+      return version
     } catch (error) {
       if (!committed) {
         await this.rollbackTransaction(input.runtime)
@@ -177,7 +185,61 @@ export class DuckLakeWriteCoordinator {
     }
   }
 
-  private async applyStagedRows(input: DuckLakeCommitWriteInput): Promise<boolean> {
+  private async versionForCommittedWrite(
+    input: DuckLakeCommitDatasetVersionInput & {
+      readonly readRuntime: DuckDbRuntime
+      readonly commitId: string
+      readonly previousWriteSnapshotId: string | null
+      readonly committedWriteSnapshotId: string | null
+      readonly changeResult: ApplyDatasetRowsResult
+    }
+  ): Promise<DatasetVersion> {
+    // The lease chooses the correct post-commit read runtime. Local catalogs
+    // close the writer before returning a fresh reader; PostgreSQL catalogs
+    // refresh the shared reader while keeping the writer lease available for
+    // cleanup and possible reuse.
+    const readRuntime = input.readRuntime
+    const ownSnapshotId = await this.findOwnSnapshotId(
+      readRuntime,
+      input.dataset.id,
+      input.commitId,
+      input.previousWriteSnapshotId,
+      input.committedWriteSnapshotId
+    )
+
+    if (ownSnapshotId !== null) {
+      const version = await this.snapshots.getVersionForSnapshot(
+        readRuntime,
+        input.dataset,
+        ownSnapshotId
+      )
+      if (version) {
+        return version
+      }
+
+      throw new LakeStorageError(
+        `[ParioDuckLake] DuckLake committed snapshot '${ownSnapshotId}' for dataset '${input.dataset.id}', but Pario could not hydrate it as a dataset version.`
+      )
+    }
+
+    if (!input.changeResult.dataChangeExpected) {
+      return this.versionForNoOpCommit(readRuntime, input.dataset)
+    }
+
+    if (input.committedWriteSnapshotId === input.previousWriteSnapshotId) {
+      throw new LakeStorageError(
+        `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed without producing a snapshot for this non-empty write.`
+      )
+    }
+
+    throw new LakeStorageError(
+      `[ParioDuckLake] DuckLake commit for dataset '${input.dataset.id}' completed, but Pario could not find a matching snapshot for this write.`
+    )
+  }
+
+  private async applyStagedRows(
+    input: DuckLakeCommitWriteInput & { readonly previousRowCount?: number }
+  ): Promise<ApplyDatasetRowsResult> {
     const mode = input.write.mode ?? "snapshot"
     return applyDatasetRowsFromRelation({
       options: this.options,
@@ -185,18 +247,19 @@ export class DuckLakeWriteCoordinator {
       dataset: input.write.dataset,
       mode,
       sourceRelationSql: quoteIdentifier(input.stagingTableName),
+      previousRowCount: input.previousRowCount,
     })
   }
 
   private async setCommitMetadata(
     input: DuckLakeCommitDatasetVersionInput,
-    commitId: string
+    commitId: string,
+    rowCount: CommitRowCount
   ): Promise<void> {
     // DuckLake stores this JSON on the snapshot it creates for the current
-    // transaction. Keep it Pario-semantic only: version id, timestamp, row
-    // count, and data-change detection all come from DuckLake itself. commitId
-    // is only a transaction correlation token so concurrent writers do not
-    // accidentally hydrate each other's snapshots.
+    // transaction. Version id, timestamp, and data-change detection still come
+    // from DuckLake itself. commitId is only a transaction correlation token so
+    // concurrent writers do not accidentally hydrate each other's snapshots.
     const metadata: ParioCommitMetadata = {
       kind: "datasetVersion",
       datasetId: input.dataset.id,
@@ -204,6 +267,7 @@ export class DuckLakeWriteCoordinator {
       mode: input.mode,
       producer: input.producer ? structuredClone(input.producer) : undefined,
       inputs: input.inputs ? structuredClone(input.inputs) : undefined,
+      ...(rowCount.kind === "exact" ? { rowCount: rowCount.value } : {}),
     }
 
     await input.runtime.run(
@@ -246,8 +310,20 @@ export class DuckLakeWriteCoordinator {
     // Write sessions can live long enough for other connections to commit.
     // Re-attaching refreshes DuckLake metadata while preserving temp staging
     // tables on the same DuckDB connection.
-    await runtime.run(`DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`)
-    await runtime.run(buildAttachSql(this.options))
+    await runtime.runStatements([
+      `DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`,
+      buildAttachSql(this.options),
+    ])
+  }
+
+  private async latestVersionForCommit(
+    input: DuckLakeCommitDatasetVersionInput
+  ): Promise<DuckLakeVersionSummary | null> {
+    if (input.expectedLatestVersionId === undefined && input.mode !== "append") {
+      return null
+    }
+
+    return this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
   }
 
   private async lastCommittedSnapshotId(runtime: DuckDbRuntime): Promise<string | null> {
@@ -266,16 +342,24 @@ export class DuckLakeWriteCoordinator {
   private async findSnapshotIdByCommitId(
     runtime: DuckDbRuntime,
     datasetId: string,
-    commitId: string
+    commitId: string,
+    snapshotId?: string
   ): Promise<string | null> {
+    if (snapshotId !== undefined) {
+      assertDuckLakeSnapshotId(snapshotId)
+    }
+
     const ducklakeSnapshotChanges = duckLakeMetadataTableName(
       this.options,
       "ducklake_snapshot_changes"
     )
+    const whereSql = snapshotId === undefined ? "" : `WHERE snapshot_id = ${snapshotId}`
+    const orderSql = snapshotId === undefined ? "ORDER BY snapshot_id DESC" : ""
     const rows = await runtime.query(`
       SELECT snapshot_id, commit_extra_info
       FROM ${ducklakeSnapshotChanges}
-      ORDER BY snapshot_id DESC
+      ${whereSql}
+      ${orderSql}
     `)
 
     for (const row of rows) {
@@ -286,6 +370,32 @@ export class DuckLakeWriteCoordinator {
     }
 
     return null
+  }
+
+  private async findOwnSnapshotId(
+    runtime: DuckDbRuntime,
+    datasetId: string,
+    commitId: string,
+    previousWriteSnapshotId: string | null,
+    committedWriteSnapshotId: string | null
+  ): Promise<string | null> {
+    if (committedWriteSnapshotId === null || committedWriteSnapshotId === previousWriteSnapshotId) {
+      return null
+    }
+
+    const exactMatch = await this.findSnapshotIdByCommitId(
+      runtime,
+      datasetId,
+      commitId,
+      committedWriteSnapshotId
+    )
+    if (exactMatch !== null) {
+      return exactMatch
+    }
+
+    // Defensive fallback for driver/version edge cases. The expected hot path
+    // above reads a single metadata row keyed by last_committed_snapshot().
+    return this.findSnapshotIdByCommitId(runtime, datasetId, commitId)
   }
 
   private assertExpectedLatestVersion(input: {
@@ -302,5 +412,35 @@ export class DuckLakeWriteCoordinator {
         `[ParioDuckLake] Optimistic commit failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId}', found '${input.actualLatestVersionId ?? "none"}'.`
       )
     }
+  }
+}
+
+function commitRowCount(
+  input: Pick<DuckLakeCommitDatasetVersionInput, "expectedLatestVersionId" | "mode">,
+  changeResult: ApplyDatasetRowsResult,
+  latestVersion: DuckLakeVersionSummary | null
+): CommitRowCount {
+  // Unguarded append commits can be retried by DuckLake after this transaction
+  // read the previous latest version. In that case previousRowCount +
+  // sourceRowCount can underreport the committed snapshot, so omit metadata
+  // and let hydration count the exact committed snapshot instead.
+  if (input.mode === "append" && input.expectedLatestVersionId === undefined) {
+    return { kind: "unknown" }
+  }
+
+  if (changeResult.resultingRowCount.kind === "exact") {
+    return changeResult.resultingRowCount
+  }
+
+  if (input.mode === "append" && latestVersion === null) {
+    return { kind: "exact", value: changeResult.sourceRowCount }
+  }
+
+  return { kind: "unknown" }
+}
+
+function assertDuckLakeSnapshotId(snapshotId: string): void {
+  if (!/^\d+$/.test(snapshotId)) {
+    throw new LakeStorageError(`[ParioDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
 }

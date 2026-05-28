@@ -12,7 +12,11 @@ import {
   type PreviewSqlTransformInput,
 } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
-import { applyDatasetRowsFromRelation, assertDatasetWriteMode } from "./dataset-row-commit"
+import {
+  type ApplyDatasetRowsResult,
+  applyDatasetRowsFromRelation,
+  assertDatasetWriteMode,
+} from "./dataset-row-commit"
 import { getString } from "./duckdb-row"
 import type { DuckDbRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -40,6 +44,7 @@ interface ApplySqlTransformInput {
   readonly target: DatasetDefinition
   readonly mode: DatasetWriteMode
   readonly sql: string
+  readonly previousRowCount?: number
 }
 
 /**
@@ -83,9 +88,8 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     assertDatasetWriteMode(input.mode, "SQL transform")
 
     const target = await this.resolveTargetDataset(input.target)
-    const runtime = await this.connections.createRuntime()
-
-    try {
+    return this.connections.withWriteRuntime(async (lease) => {
+      const runtime = lease.runtime
       const sources = await this.resolveSources(runtime, input.sources)
       const sql = renderDuckLakeSqlTransformSql({
         options: this.options,
@@ -95,7 +99,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 
       await this.assertResultSchemaMatchesTarget(runtime, target, sql)
 
-      return await this.writes.commitDatasetVersion({
+      const version = await this.writes.commitDatasetVersion({
         runtime,
         dataset: target,
         mode: input.mode,
@@ -103,18 +107,26 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
         commitMessage: input.commitMessage ?? `execute SQL transform for dataset ${target.id}`,
         producer: input.producer,
         inputs: sources.inputs,
-        applyChanges: (runtime) =>
+        committedReadRuntime: (release) => lease.committedReadRuntime(release),
+        applyChanges: (runtime, context) =>
           this.applySqlTransform({
             runtime,
             target,
             mode: input.mode,
             sql,
+            previousRowCount: context.previousRowCount,
           }),
       })
-    } catch (error) {
-      await runtime.close()
-      throw error
-    }
+
+      return {
+        value: version,
+        release: {
+          kind: "committed",
+          guarded: input.expectedLatestVersionId !== undefined,
+          reusable: true,
+        },
+      }
+    })
   }
 
   private async resolveSources(
@@ -228,7 +240,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     }
   }
 
-  private async applySqlTransform(input: ApplySqlTransformInput): Promise<boolean> {
+  private async applySqlTransform(input: ApplySqlTransformInput): Promise<ApplyDatasetRowsResult> {
     const tempTableName = `pario_sql_transform_${randomUUID().replaceAll("-", "")}`
     const tempTable = quoteIdentifier(tempTableName)
 
@@ -236,13 +248,18 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
       `CREATE TEMP TABLE ${tempTable} AS SELECT * FROM (${input.sql}) AS pario_sql_transform_result`
     )
 
-    return applyDatasetRowsFromRelation({
-      options: this.options,
-      runtime: input.runtime,
-      dataset: input.target,
-      mode: input.mode,
-      sourceRelationSql: tempTable,
-    })
+    try {
+      return await applyDatasetRowsFromRelation({
+        options: this.options,
+        runtime: input.runtime,
+        dataset: input.target,
+        mode: input.mode,
+        sourceRelationSql: tempTable,
+        previousRowCount: input.previousRowCount,
+      })
+    } finally {
+      await input.runtime.run(`DROP TABLE IF EXISTS ${tempTable}`)
+    }
   }
 }
 

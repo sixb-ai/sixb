@@ -52,6 +52,12 @@ interface VisibleSnapshotRowsInput {
   readonly visibleRowLimit?: number
 }
 
+export interface DuckLakeVersionSummary {
+  readonly datasetId: string
+  readonly versionId: string
+  readonly rowCount?: number
+}
+
 const SNAPSHOT_ROW_BATCH_SIZE = 128
 
 /**
@@ -119,8 +125,24 @@ export class DuckLakeSnapshotReader {
     runtime: DuckDbRuntime,
     dataset: DatasetDefinition
   ): Promise<DatasetVersionRef | null> {
+    const summary = await this.getLatestVersionSummaryForDefinition(runtime, dataset)
+    return summary ? { datasetId: summary.datasetId, versionId: summary.versionId } : null
+  }
+
+  async getLatestVersionSummaryForDefinition(
+    runtime: DuckDbRuntime,
+    dataset: DatasetDefinition
+  ): Promise<DuckLakeVersionSummary | null> {
     const row = await this.getLatestSnapshotRowForDefinition(runtime, dataset)
-    return row ? { datasetId: dataset.id, versionId: toVersionId(row.snapshotId) } : null
+    if (!row) {
+      return null
+    }
+
+    return {
+      datasetId: dataset.id,
+      versionId: toVersionId(row.snapshotId),
+      ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
+    }
   }
 
   async getVersionForSnapshot(
@@ -455,8 +477,12 @@ export class DuckLakeSnapshotReader {
 
     // DuckLake gives us version id, timestamp, and time travel. Pario metadata
     // fills in caller intent such as append vs snapshot and producer lineage.
-    // Parent ids and row counts are derived from DuckLake snapshot order and
-    // time travel instead of duplicated in commit metadata.
+    // New Pario commits include exact row counts to avoid full table counts on
+    // the write hot path; legacy or external snapshots still fall back to
+    // DuckLake time travel.
+    const rowCount =
+      row.metadata?.rowCount ?? (await this.countRowsAtSnapshot(runtime, dataset, row.snapshotId))
+
     return {
       datasetId: dataset.id,
       versionId: toVersionId(row.snapshotId),
@@ -467,7 +493,7 @@ export class DuckLakeSnapshotReader {
       schema: schemaAtSnapshot,
       producer: row.metadata?.producer,
       inputs: row.metadata?.inputs,
-      rowCount: await this.countRowsAtSnapshot(runtime, dataset, row.snapshotId),
+      rowCount,
     }
   }
 

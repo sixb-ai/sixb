@@ -22,6 +22,7 @@ import {
  */
 export interface DuckDbRuntime {
   run(sql: string, values?: readonly DuckDBValue[]): Promise<void>
+  runStatements(statements: readonly string[]): Promise<void>
   query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]>
   streamRows(sql: string, values?: readonly DuckDBValue[]): AsyncIterable<Record<string, unknown>>
   withAppender<T>(
@@ -41,6 +42,10 @@ export interface DuckDbAppender {
   endRow(): void
 }
 
+interface SetupDuckLakeOptions {
+  readonly installExtensions?: boolean
+}
+
 class NodeDuckDbRuntime implements DuckDbRuntime {
   private closing = false
   private closed = false
@@ -56,6 +61,14 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
   async run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
     await this.enqueue(async () => {
       await this.connection.run(sql, values === undefined ? undefined : [...values])
+    })
+  }
+
+  async runStatements(statements: readonly string[]): Promise<void> {
+    await this.enqueue(async () => {
+      for (const sql of statements) {
+        await this.connection.run(sql)
+      }
     })
   }
 
@@ -208,18 +221,37 @@ export async function createDuckDbRuntime(
 }
 
 /**
- * Install/load DuckLake, install/load catalog extensions, run caller setup SQL,
- * and attach the configured DuckLake catalog.
+ * Install DuckLake and any catalog/data-path extensions into DuckDB's local
+ * extension directory. Installation is idempotent and can be shared by many
+ * short-lived runtimes created by one provider instance.
  */
-export async function setupDuckLake(
+export async function installDuckLakeExtensions(
   runtime: DuckDbRuntime,
   options: DuckLakeStorageOptions
 ): Promise<void> {
   await runtime.run("INSTALL ducklake")
-  await runtime.run("LOAD ducklake")
 
   for (const extension of requiredExtensions(options)) {
     await runtime.run(`INSTALL ${quoteIdentifier(extension)}`)
+  }
+}
+
+/**
+ * Load DuckLake, load catalog extensions, run caller setup SQL, and attach the
+ * configured DuckLake catalog.
+ */
+export async function setupDuckLake(
+  runtime: DuckDbRuntime,
+  options: DuckLakeStorageOptions,
+  setupOptions: SetupDuckLakeOptions = {}
+): Promise<void> {
+  if (setupOptions.installExtensions ?? true) {
+    await installDuckLakeExtensions(runtime, options)
+  }
+
+  await runtime.run("LOAD ducklake")
+
+  for (const extension of requiredExtensions(options)) {
     await runtime.run(`LOAD ${quoteIdentifier(extension)}`)
   }
 

@@ -6,6 +6,16 @@ import { encodeDatasetTableName } from "./names"
 import { datasetSchemaColumnNamesSql } from "./schema"
 import { qualifiedTableName } from "./sql"
 
+export type CommitRowCount =
+  | { readonly kind: "exact"; readonly value: number }
+  | { readonly kind: "unknown" }
+
+export interface ApplyDatasetRowsResult {
+  readonly dataChangeExpected: boolean
+  readonly sourceRowCount: number
+  readonly resultingRowCount: CommitRowCount
+}
+
 export function assertDatasetWriteMode(
   mode: unknown,
   operation: string
@@ -24,12 +34,16 @@ export async function applyDatasetRowsFromRelation(input: {
   readonly mode: DatasetWriteMode
   /** Provider-rendered relation SQL, such as a quoted staging or temp table. */
   readonly sourceRelationSql: string
-}): Promise<boolean> {
+  readonly previousRowCount?: number
+}): Promise<ApplyDatasetRowsResult> {
   const tableName = encodeDatasetTableName(input.dataset.id)
   const table = qualifiedTableName(input.options, tableName)
   const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
   const sourceRowCount = await countRows(input.runtime, input.sourceRelationSql)
-  const existingRowCount = input.mode === "snapshot" ? await countRows(input.runtime, table) : 0
+  const existingRowCount =
+    input.mode === "snapshot" && sourceRowCount === 0
+      ? (input.previousRowCount ?? (await countRows(input.runtime, table)))
+      : 0
 
   if (input.mode === "snapshot") {
     await input.runtime.run(`DELETE FROM ${table}`)
@@ -39,7 +53,22 @@ export async function applyDatasetRowsFromRelation(input: {
     `INSERT INTO ${table} (${columnsSql}) SELECT ${columnsSql} FROM ${input.sourceRelationSql}`
   )
 
-  return input.mode === "append" ? sourceRowCount > 0 : sourceRowCount > 0 || existingRowCount > 0
+  if (input.mode === "append") {
+    return {
+      dataChangeExpected: sourceRowCount > 0,
+      sourceRowCount,
+      resultingRowCount:
+        input.previousRowCount === undefined
+          ? { kind: "unknown" }
+          : { kind: "exact", value: input.previousRowCount + sourceRowCount },
+    }
+  }
+
+  return {
+    dataChangeExpected: sourceRowCount > 0 || existingRowCount > 0,
+    sourceRowCount,
+    resultingRowCount: { kind: "exact", value: sourceRowCount },
+  }
 }
 
 async function countRows(runtime: DuckDbRuntime, relationSql: string): Promise<number> {

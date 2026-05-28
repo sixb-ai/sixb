@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset } from "@pario/core"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
+import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
@@ -24,8 +25,13 @@ describe("DuckLakeStorage remote catalogs", () => {
       await write.writeRows([{ orderId: "ord_1" }])
       await write.commit()
 
+      const append = await storage.beginWrite({ dataset, mode: "append" })
+      await append.writeRows([{ orderId: "ord_2" }])
+      await append.commit()
+
       expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
         { orderId: "ord_1" },
+        { orderId: "ord_2" },
       ])
     } finally {
       await storage.close()
@@ -114,6 +120,35 @@ describe("DuckLakeStorage remote catalogs", () => {
     } finally {
       await first.close()
       await second.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
+  test("reuses clean PostgreSQL write leases after committed reads", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-pg-lease-"))
+    const connections = new DuckLakeConnectionManager({
+      catalog: postgresCatalog(),
+      dataPath: join(rootDir, "data"),
+    })
+
+    try {
+      const lease = await connections.acquireWriteLease()
+      const writeRuntime = lease.runtime
+      const readRuntime = await lease.committedReadRuntime({
+        kind: "committed",
+        guarded: false,
+        reusable: true,
+      })
+
+      expect(readRuntime).not.toBe(writeRuntime)
+      await lease.release({ kind: "committed", guarded: false, reusable: true })
+
+      const nextLease = await connections.acquireWriteLease()
+      expect(nextLease.runtime).toBe(writeRuntime)
+      await expect(nextLease.runtime.query("SELECT 1 AS value")).resolves.toEqual([{ value: 1 }])
+      await nextLease.release({ kind: "aborted" })
+    } finally {
+      await connections.close()
       await rm(rootDir, { recursive: true, force: true })
     }
   })
