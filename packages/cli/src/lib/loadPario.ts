@@ -6,6 +6,7 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
+  FunctionDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ObjectRow,
@@ -13,6 +14,7 @@ import type {
   PipelineDefinition,
   ProjectionDefinition,
   RuleDefinition,
+  ScheduleDefinition,
   SyncDefinition,
   WorkflowDefinition,
 } from "@pario/core"
@@ -21,11 +23,13 @@ export interface LoadedPario extends ParioRuntimeContext {
   readonly id: string
   readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
+  getFunctionDefinitions(): readonly FunctionDefinition[]
   getActionDefinitions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
   getSyncDefinitions(): readonly SyncDefinition[]
   getPipelineDefinitions(): readonly PipelineDefinition[]
   getPipelineById(pipelineId: string): PipelineDefinition | null
+  getScheduleDefinitions(): readonly ScheduleDefinition[]
   getWorkflowDefinitions(): readonly WorkflowDefinition[]
   getWorkflowById(workflowId: string): WorkflowDefinition | null
   getObjectProjections(): readonly ObjectProjectionDefinition[]
@@ -73,11 +77,13 @@ function isParioInstance(value: unknown): value is LoadedPario {
     "auth" in value &&
     typeof (value as { listObjectTypes?: unknown }).listObjectTypes === "function" &&
     typeof (value as { getSubTypes?: unknown }).getSubTypes === "function" &&
+    typeof (value as { getFunctionDefinitions?: unknown }).getFunctionDefinitions === "function" &&
     typeof (value as { getActionDefinitions?: unknown }).getActionDefinitions === "function" &&
     typeof (value as { getActionById?: unknown }).getActionById === "function" &&
     typeof (value as { getSyncDefinitions?: unknown }).getSyncDefinitions === "function" &&
     typeof (value as { getPipelineDefinitions?: unknown }).getPipelineDefinitions === "function" &&
     typeof (value as { getPipelineById?: unknown }).getPipelineById === "function" &&
+    typeof (value as { getScheduleDefinitions?: unknown }).getScheduleDefinitions === "function" &&
     typeof (value as { getWorkflowDefinitions?: unknown }).getWorkflowDefinitions === "function" &&
     typeof (value as { getWorkflowById?: unknown }).getWorkflowById === "function" &&
     typeof (value as { getObjectProjections?: unknown }).getObjectProjections === "function" &&

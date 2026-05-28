@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { createCustomApp } from "@pario/app"
+import { buildAtlasAssets } from "@pario/atlas"
+import { buildSentinelAssets } from "@pario/sentinel"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
 export interface BuildOptions {
@@ -51,6 +53,21 @@ export async function runBuild(options: BuildOptions = {}) {
       )
       process.exit(1)
     }
+  }
+
+  try {
+    await buildAtlasAssets({ outdir: resolve(outdir, "atlas") })
+    await buildSentinelAssets({ outdir: resolve(outdir, "sentinel") })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    await renderStatic(
+      <ErrorView
+        title="Built-in UI build failed"
+        message="Failed to build production UI assets"
+        details={[message]}
+      />
+    )
+    process.exit(1)
   }
 
   await renderStatic(<BuildView entry={entry} outdir={outdir} />)

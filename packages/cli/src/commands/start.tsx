@@ -1,178 +1,140 @@
-import { stat } from "node:fs/promises"
-import { dirname, resolve, sep } from "node:path"
-import { type CustomAppDevServer, createCustomApp } from "@pario/app"
-import { type AtlasAppServer, createAtlasApp } from "@pario/atlas"
-import { createSentinelApp, type SentinelAppServer } from "@pario/sentinel"
-import { createParioServer, type ParioServer } from "@pario/server"
-import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
-import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
-import { runUntilSignal, startParioRuntime, stopQuietly } from "../lib/runtime"
-import { ErrorView, LoadingView, renderPersistent, renderStatic, StartView } from "../ui"
+import {
+  resolveStartProcessPlan,
+  type StartOptions,
+  type StartProcessSpec,
+} from "../lib/start-process-plan"
+import { ErrorView, renderStatic } from "../ui"
 
-export interface StartOptions {
-  entry?: string
-  port?: string
-  host?: string
-  apiPort?: string
-  apiHost?: string
-  apiPublicOrigin?: string
-  atlasPublicOrigin?: string
-  sentinelPublicOrigin?: string
-  appPublicOrigin?: string
+interface RunningStartProcess {
+  readonly spec: StartProcessSpec
+  readonly process: ReturnType<typeof Bun.spawn>
 }
 
 export async function runStart(options: StartOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const sourceEntry = resolve("pario.config.ts")
-  const defaultBuiltEntry = resolve(".pario/dist/pario.config.js")
-  const host = options.host ?? "0.0.0.0"
-
-  let entry = sourceEntry
-  if (options.entry) {
-    entry = resolve(options.entry)
-  } else {
-    const builtInfo = await stat(defaultBuiltEntry).catch(() => null)
-    entry = builtInfo ? defaultBuiltEntry : sourceEntry
-  }
-
-  const app = renderPersistent(
-    <LoadingView title="Starting pario" subtitle={entry} status="Loading runtime" />
-  )
-
-  let server: ParioServer | null = null
-  let atlasServer: AtlasAppServer | null = null
-  let sentinelServer: SentinelAppServer | null = null
-  let customAppServer: CustomAppDevServer | null = null
-  let pario: LoadedPario | null = null
-  let runtime: Awaited<ReturnType<typeof startParioRuntime>> | null = null
-  const warnings: string[] = []
+  const running: RunningStartProcess[] = []
+  let shuttingDown = false
 
   try {
-    pario = await loadParioFromEntry(entry)
-    runtime = await startParioRuntime(pario, { cohostWorkers: false })
-    const authEnabled = pario.auth.isEnabled()
-    const projectRoot = resolveProjectRoot(entry)
+    const plan = await resolveStartProcessPlan(options)
 
-    const builtAppEntry = resolve(projectRoot, ".pario", "dist", "app", "index.html")
-    const hasBuiltCustomApp = await stat(builtAppEntry)
-      .then(() => true)
-      .catch(() => false)
-    const topology = resolveBrowserTopology({
-      mode: "production",
-      host,
-      apiHost: options.apiHost,
-      port: options.port,
-      apiPort: options.apiPort,
-      apiPublicOrigin: options.apiPublicOrigin,
-      atlasPublicOrigin: options.atlasPublicOrigin,
-      sentinelPublicOrigin: options.sentinelPublicOrigin,
-      appPublicOrigin: options.appPublicOrigin,
-      includeCustomApp: hasBuiltCustomApp,
-    })
-
-    server = createParioServer({
-      pario: pario as unknown as never,
-      port: topology.apiPort,
-      host: topology.apiHost,
-      quiet: true,
-      browser: {
-        publicOrigin: topology.apiPublicOrigin,
-        allowedOrigins: topology.allowedBrowserOrigins,
-      },
-    })
-    await server.start()
-
-    const atlas = createAtlasApp({
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "atlas",
-      authEnabled,
-    })
-    atlasServer = await atlas.start({
-      host: topology.host,
-      port: topology.atlasPort,
-      development: false,
-    })
-
-    const sentinel = createSentinelApp({
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "sentinel",
-      authEnabled,
-    })
-    sentinelServer = await sentinel.start({
-      host: topology.host,
-      port: topology.sentinelPort,
-      development: false,
-    })
-
-    const customApp = await createCustomApp({
-      rootDir: projectRoot,
-      apiBaseUrl: topology.apiPublicOrigin,
-      audience: "app",
-      authEnabled,
-    })
-
-    let appUrl: string | null = null
-    if (hasBuiltCustomApp) {
-      customAppServer = await customApp.start({
-        host: topology.host,
-        port: topology.appPort,
-        outdir: resolve(projectRoot, ".pario", "dist", "app"),
-        apiBaseUrl: topology.apiPublicOrigin,
-        audience: "app",
-        authEnabled,
-      })
-      appUrl = topology.appPublicOrigin
-    } else if (await customApp.hasRoutes()) {
-      warnings.push(
-        "Custom app source found, but no production build exists at .pario/dist/app. Run `pario build` first."
-      )
+    console.log(`Starting pario production roles for ${plan.projectId}`)
+    for (const warning of plan.warnings) {
+      console.warn(`[start] ${warning}`)
     }
 
-    app.rerender(
-      <StartView
-        name={pario.id}
-        apiUrl={apiUrl(topology)}
-        apiDocsUrl={apiDocsUrl(topology)}
-        wsUrl={apiEventsUrl(topology)}
-        uiUrl={topology.atlasPublicOrigin}
-        uiStatus={null}
-        sentinelUrl={topology.sentinelPublicOrigin}
-        appUrl={appUrl}
-        warnings={warnings}
-      />
-    )
+    for (const spec of plan.specs) {
+      const child = spawnRole(spec)
+      running.push(child)
+      pipeOutput(child)
+      console.log(`[start] ${spec.role}: started`)
+    }
 
-    await runUntilSignal(async () => {
-      app.unmount()
-      console.log("\nShutting down...")
-      await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-      await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
-      await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-      await stopQuietly(() => server?.stop() ?? Promise.resolve())
-      await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-    })
+    const failure = waitForUnexpectedExit(running, () => shuttingDown)
+    const signal = waitForSignal()
+    const result = await Promise.race([failure, signal])
+
+    shuttingDown = true
+    if (result.kind === "signal") {
+      console.log(`\n[start] received ${result.signal}; stopping roles...`)
+      await stopRunningProcesses(running)
+      return
+    }
+
+    console.error(
+      `[start] ${result.role} exited with code ${result.exitCode}. Stopping remaining roles...`
+    )
+    await stopRunningProcesses(running)
+    process.exit(result.exitCode === 0 ? 1 : result.exitCode)
   } catch (error) {
-    app.unmount()
-    await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    await stopQuietly(() => sentinelServer?.stop() ?? Promise.resolve())
-    await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-    await stopQuietly(() => server?.stop() ?? Promise.resolve())
-    await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
+    shuttingDown = true
+    await stopRunningProcesses(running)
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)
     process.exit(1)
   }
 }
 
-function resolveProjectRoot(entry: string): string {
-  const resolvedEntry = resolve(entry)
-  const distMarker = `${sep}.pario${sep}dist${sep}`
-  const distIndex = resolvedEntry.lastIndexOf(distMarker)
+function spawnRole(spec: StartProcessSpec): RunningStartProcess {
+  return {
+    spec,
+    process: Bun.spawn([process.execPath, process.argv[1] ?? "pario", ...spec.args], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+    }),
+  }
+}
 
-  if (distIndex >= 0) {
-    return resolvedEntry.slice(0, distIndex)
+function pipeOutput(child: RunningStartProcess): void {
+  void prefixStream(child.process.stdout, child.spec.role, (line) => process.stdout.write(line))
+  void prefixStream(child.process.stderr, child.spec.role, (line) => process.stderr.write(line))
+}
+
+async function prefixStream(
+  stream: unknown,
+  role: string,
+  write: (line: string) => void
+): Promise<void> {
+  if (!(stream instanceof ReadableStream)) return
+
+  const decoder = new TextDecoder()
+  const reader = stream.getReader()
+  let buffer = ""
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split(/\r?\n/)
+    buffer = lines.pop() ?? ""
+    for (const line of lines) {
+      write(`[${role}] ${line}\n`)
+    }
   }
 
-  return dirname(resolvedEntry)
+  buffer += decoder.decode()
+  if (buffer.length > 0) {
+    write(`[${role}] ${buffer}\n`)
+  }
+}
+
+async function waitForUnexpectedExit(
+  children: readonly RunningStartProcess[],
+  isShuttingDown: () => boolean
+): Promise<{ kind: "exit"; role: string; exitCode: number }> {
+  return await Promise.race(
+    children.map(async (child) => {
+      const exitCode = await child.process.exited
+      if (isShuttingDown()) {
+        return await new Promise<{ kind: "exit"; role: string; exitCode: number }>(() => {})
+      }
+      return { kind: "exit" as const, role: child.spec.role, exitCode }
+    })
+  )
+}
+
+async function waitForSignal(): Promise<{ kind: "signal"; signal: "SIGINT" | "SIGTERM" }> {
+  return await new Promise((resolvePromise) => {
+    process.once("SIGINT", () => resolvePromise({ kind: "signal", signal: "SIGINT" }))
+    process.once("SIGTERM", () => resolvePromise({ kind: "signal", signal: "SIGTERM" }))
+  })
+}
+
+async function stopRunningProcesses(children: readonly RunningStartProcess[]): Promise<void> {
+  for (const child of [...children].reverse()) {
+    child.process.kill("SIGTERM")
+  }
+
+  await Promise.race([
+    Promise.all(children.map((child) => child.process.exited.catch(() => 1))),
+    Bun.sleep(5_000).then(() => {
+      for (const child of children) {
+        child.process.kill("SIGKILL")
+      }
+    }),
+  ])
 }

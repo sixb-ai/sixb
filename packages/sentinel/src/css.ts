@@ -13,8 +13,12 @@ const packageRoot = join(import.meta.dir, "..")
 const sourceDir = join(packageRoot, "src")
 const generatedDir = join(packageRoot, ".pario")
 
+export interface BuiltInUiCssOptions {
+  readonly watch?: boolean
+}
+
 export async function ensureBuiltInUiCss(
-  options: { watch?: boolean } = {}
+  options: BuiltInUiCssOptions = {}
 ): Promise<BuiltInUiCssHandle> {
   const inputPath = join(sourceDir, "index.css")
   const outputPath = join(generatedDir, "ui.css")
@@ -80,7 +84,12 @@ export async function ensureBuiltInUiCss(
   }
 }
 
-async function buildBuiltInUiCss(inputPath: string, outputPath: string): Promise<void> {
+export async function buildBuiltInUiCss(inputPath?: string, outputPath?: string): Promise<void> {
+  const resolvedInputPath = inputPath ?? join(sourceDir, "index.css")
+  const resolvedOutputPath = outputPath ?? join(generatedDir, "ui.css")
+
+  await mkdir(dirname(resolvedOutputPath), { recursive: true })
+
   if (activeCssBuild) {
     await activeCssBuild
     return
@@ -88,7 +97,14 @@ async function buildBuiltInUiCss(inputPath: string, outputPath: string): Promise
 
   activeCssBuild = (async () => {
     const proc = Bun.spawn(
-      [process.execPath, await resolveTailwindCliEntry(), "-i", inputPath, "-o", outputPath],
+      [
+        process.execPath,
+        await resolveTailwindCliEntry(),
+        "-i",
+        resolvedInputPath,
+        "-o",
+        resolvedOutputPath,
+      ],
       {
         cwd: sourceDir,
         stdout: "ignore",

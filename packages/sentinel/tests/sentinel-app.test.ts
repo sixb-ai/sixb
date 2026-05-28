@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:net"
-import { createSentinelApp } from "../src"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { buildSentinelAssets, createSentinelApp } from "../src"
+
+let assetsRoot: string
+let assetsOutdir: string
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -25,6 +31,18 @@ async function getFreePort(): Promise<number> {
 }
 
 describe("createSentinelApp", () => {
+  beforeAll(async () => {
+    assetsRoot = await mkdtemp(join(tmpdir(), "pario-sentinel-assets-"))
+    assetsOutdir = join(assetsRoot, "sentinel")
+    await buildSentinelAssets({ outdir: assetsOutdir })
+  })
+
+  afterAll(async () => {
+    if (assetsRoot) {
+      await rm(assetsRoot, { recursive: true, force: true })
+    }
+  })
+
   test("serves the public Sentinel shell with API runtime config", async () => {
     const port = await getFreePort()
     const sentinel = createSentinelApp({
@@ -34,6 +52,7 @@ describe("createSentinelApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -88,6 +107,7 @@ describe("createSentinelApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -142,6 +162,7 @@ describe("createSentinelApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -153,6 +174,22 @@ describe("createSentinelApp", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("fails clearly when production assets are missing", async () => {
+    const port = await getFreePort()
+    const sentinel = createSentinelApp({
+      apiBaseUrl: "http://api.localhost",
+    })
+
+    await expect(
+      sentinel.start({
+        host: "127.0.0.1",
+        port,
+        development: false,
+        outdir: join(assetsRoot, "missing"),
+      })
+    ).rejects.toThrow("Run `pario build`")
   })
 })
 

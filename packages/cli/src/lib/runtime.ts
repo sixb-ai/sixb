@@ -33,6 +33,105 @@ export interface StartParioRuntimeOptions {
   readonly cohostWorkers?: boolean
 }
 
+export interface RunningRulesRuntime {
+  readonly rulesWorker: RulesWorker | null
+  stop(): Promise<void>
+}
+
+export interface RunningFunctionsRuntime {
+  stop(): Promise<void>
+}
+
+export interface RunningSchedulerRuntime {
+  stop(): Promise<void>
+}
+
+export interface RunningOrchestratorRuntime {
+  readonly orchestratorWorker: OrchestratorWorker | null
+  readonly warnings: readonly string[]
+  stop(): Promise<void>
+}
+
+export async function prepareParioRuntime(pario: LoadedPario): Promise<void> {
+  await migrateStorage(pario.storage)
+  await assertLakeDatasetDefinitionsCompatible({
+    lakeStorage: pario.lakeStorage,
+    definitions: pario.getDatasetDefinitions(),
+  })
+}
+
+export async function stopParioProviders(pario: LoadedPario): Promise<void> {
+  await stopQuietly(() => pario.disconnectConnectors())
+  await stopQuietly(() => pario.closeBroker())
+}
+
+export async function startRulesRuntime(pario: LoadedPario): Promise<RunningRulesRuntime> {
+  let rulesWorker: RulesWorker | null = null
+
+  if (pario.getRuleDefinitions().length > 0) {
+    rulesWorker = new RulesWorker(pario)
+    await rulesWorker.start()
+  }
+
+  return {
+    rulesWorker,
+    async stop() {
+      await stopQuietly(() => rulesWorker?.stop() ?? Promise.resolve())
+    },
+  }
+}
+
+export async function startFunctionsRuntime(pario: LoadedPario): Promise<RunningFunctionsRuntime> {
+  await pario.startFunctions()
+
+  return {
+    async stop() {
+      await stopQuietly(() => pario.stopFunctions())
+    },
+  }
+}
+
+export async function startSchedulerRuntime(pario: LoadedPario): Promise<RunningSchedulerRuntime> {
+  await pario.startScheduler()
+
+  return {
+    async stop() {
+      await stopQuietly(() => pario.stopScheduler())
+    },
+  }
+}
+
+export async function startOrchestratorRuntime(
+  pario: LoadedPario
+): Promise<RunningOrchestratorRuntime> {
+  const { routes, diagnostics } = compileRoutesWithDiagnostics({
+    syncs: pario.getSyncDefinitions(),
+    pipelines: pario.getPipelineDefinitions(),
+    projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
+    workflows: pario.getWorkflowDefinitions(),
+  })
+  const warnings = diagnostics.map(formatRouteDiagnosticWarning)
+  let orchestratorWorker: OrchestratorWorker | null = null
+
+  if (routes.size > 0) {
+    orchestratorWorker = new OrchestratorWorker({
+      projectId: pario.id,
+      events: pario.events,
+      queues: pario.queues,
+      routes,
+    })
+    await orchestratorWorker.start()
+  }
+
+  return {
+    orchestratorWorker,
+    warnings,
+    async stop() {
+      await stopQuietly(() => orchestratorWorker?.stop() ?? Promise.resolve())
+    },
+  }
+}
+
 /**
  * Starts the background runtimes owned by the CLI host.
  *
@@ -63,12 +162,12 @@ export async function startParioRuntime(
   pario: LoadedPario,
   options: StartParioRuntimeOptions = {}
 ): Promise<RunningParioRuntime> {
-  await migrateStorage(pario.storage)
-  await assertLakeDatasetDefinitionsCompatible({
-    lakeStorage: pario.lakeStorage,
-    definitions: pario.getDatasetDefinitions(),
-  })
+  await prepareParioRuntime(pario)
 
+  let rulesRuntime: RunningRulesRuntime | null = null
+  let functionsRuntime: RunningFunctionsRuntime | null = null
+  let schedulerRuntime: RunningSchedulerRuntime | null = null
+  let orchestratorRuntime: RunningOrchestratorRuntime | null = null
   let rulesWorker: RulesWorker | null = null
   let syncWorker: SyncWorker | null = null
   let actionWorker: ActionWorker | null = null
@@ -79,36 +178,25 @@ export async function startParioRuntime(
   const warnings: string[] = []
 
   async function stop() {
-    await stopQuietly(() => (options.cohostWorkers ? pario.stopScheduler() : Promise.resolve()))
-    await stopQuietly(() => orchestratorWorker?.stop() ?? Promise.resolve())
+    await stopQuietly(() => schedulerRuntime?.stop() ?? Promise.resolve())
+    await stopQuietly(() => orchestratorRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => syncWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => pipelineWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => projectionWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => actionWorker?.stop() ?? Promise.resolve())
-    await stopQuietly(() => pario.stopFunctions())
-    await stopQuietly(() => rulesWorker?.stop() ?? Promise.resolve())
-    await stopQuietly(() => pario.disconnectConnectors())
-    await stopQuietly(() => pario.closeBroker())
+    await stopQuietly(() => functionsRuntime?.stop() ?? Promise.resolve())
+    await stopQuietly(() => rulesRuntime?.stop() ?? Promise.resolve())
+    await stopParioProviders(pario)
   }
 
   try {
-    if (pario.getRuleDefinitions().length > 0) {
-      rulesWorker = new RulesWorker(pario)
-      await rulesWorker.start()
-    }
+    rulesRuntime = await startRulesRuntime(pario)
+    rulesWorker = rulesRuntime.rulesWorker
 
-    await pario.startFunctions()
+    functionsRuntime = await startFunctionsRuntime(pario)
 
     if (options.cohostWorkers) {
-      const { routes, diagnostics } = compileRoutesWithDiagnostics({
-        syncs: pario.getSyncDefinitions(),
-        pipelines: pario.getPipelineDefinitions(),
-        projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
-        workflows: pario.getWorkflowDefinitions(),
-      })
-      warnings.push(...diagnostics.map(formatRouteDiagnosticWarning))
-
       if (pario.getActionDefinitions().length > 0) {
         actionWorker = new ActionWorker(pario)
         await actionWorker.start()
@@ -136,17 +224,11 @@ export async function startParioRuntime(
         await syncWorker.start()
       }
 
-      if (routes.size > 0) {
-        orchestratorWorker = new OrchestratorWorker({
-          projectId: pario.id,
-          events: pario.events,
-          queues: pario.queues,
-          routes,
-        })
-        await orchestratorWorker.start()
-      }
+      orchestratorRuntime = await startOrchestratorRuntime(pario)
+      orchestratorWorker = orchestratorRuntime.orchestratorWorker
+      warnings.push(...orchestratorRuntime.warnings)
 
-      await pario.startScheduler()
+      schedulerRuntime = await startSchedulerRuntime(pario)
     }
   } catch (error) {
     await stop()

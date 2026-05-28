@@ -22,6 +22,45 @@ function hasFlag(name: string): boolean {
   return args.includes(`--${name}`)
 }
 
+function hasFlagValue(name: string): boolean {
+  return hasFlag(name) || args.some((arg) => arg.startsWith(`--${name}=`))
+}
+
+const flagsWithValues = new Set([
+  "entry",
+  "port",
+  "host",
+  "api-port",
+  "api-host",
+  "api-public-origin",
+  "atlas-public-origin",
+  "sentinel-public-origin",
+  "app-public-origin",
+  "outdir",
+  "dir",
+])
+
+function getCommandPositionals(): string[] {
+  const values: string[] = []
+
+  for (let index = 1; index < args.length; index++) {
+    const arg = args[index]
+    if (!arg) continue
+
+    if (arg.startsWith("--")) {
+      const flagName = arg.slice(2).split("=")[0] ?? ""
+      if (!arg.includes("=") && flagsWithValues.has(flagName)) {
+        index++
+      }
+      continue
+    }
+
+    values.push(arg)
+  }
+
+  return values
+}
+
 function getCommand(): string {
   if (executable.startsWith("create-pario")) return "create"
   if (args[0] === "db") {
@@ -61,8 +100,91 @@ async function main(): Promise<void> {
     }
 
     case "worker": {
+      if (hasFlagValue("type") || hasFlagValue("worker")) {
+        throw new Error("[ParioWorker] Use `pario worker <type>`.")
+      }
+
       const { runWorker } = await import("./commands/worker")
-      await runWorker({ entry: getFlag("entry"), worker: getFlag("worker") })
+      await runWorker({
+        entry: getFlag("entry"),
+        workerType: getCommandPositionals()[0],
+      })
+      break
+    }
+
+    case "api": {
+      const { runApi } = await import("./commands/api")
+      await runApi({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        host: getFlag("host"),
+        apiPort: getFlag("api-port"),
+        apiHost: getFlag("api-host"),
+        apiPublicOrigin: getFlag("api-public-origin"),
+        atlasPublicOrigin: getFlag("atlas-public-origin"),
+        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
+      })
+      break
+    }
+
+    case "atlas": {
+      const { runAtlas } = await import("./commands/atlas")
+      await runAtlas({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        host: getFlag("host"),
+        apiPublicOrigin: getFlag("api-public-origin"),
+        atlasPublicOrigin: getFlag("atlas-public-origin"),
+      })
+      break
+    }
+
+    case "sentinel": {
+      const { runSentinel } = await import("./commands/sentinel")
+      await runSentinel({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        host: getFlag("host"),
+        apiPublicOrigin: getFlag("api-public-origin"),
+        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
+      })
+      break
+    }
+
+    case "app": {
+      const { runApp } = await import("./commands/app")
+      await runApp({
+        entry: getFlag("entry"),
+        port: getFlag("port"),
+        host: getFlag("host"),
+        apiPublicOrigin: getFlag("api-public-origin"),
+        appPublicOrigin: getFlag("app-public-origin"),
+      })
+      break
+    }
+
+    case "scheduler": {
+      const { runScheduler } = await import("./commands/scheduler")
+      await runScheduler({ entry: getFlag("entry") })
+      break
+    }
+
+    case "orchestrator": {
+      const { runOrchestrator } = await import("./commands/orchestrator")
+      await runOrchestrator({ entry: getFlag("entry") })
+      break
+    }
+
+    case "functions": {
+      const { runFunctions } = await import("./commands/functions")
+      await runFunctions({ entry: getFlag("entry") })
+      break
+    }
+
+    case "rules": {
+      const { runRules } = await import("./commands/rules")
+      await runRules({ entry: getFlag("entry") })
       break
     }
 

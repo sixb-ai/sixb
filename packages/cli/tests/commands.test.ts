@@ -1,0 +1,138 @@
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
+import {
+  builtAtlasOutdir,
+  builtSentinelOutdir,
+  resolveProductionPaths,
+} from "../src/lib/production"
+import { resolveStartProcessPlan } from "../src/lib/start-process-plan"
+
+function runCli(args: readonly string[]): { exitCode: number; stdout: string; stderr: string } {
+  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
+  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+
+  const result = Bun.spawnSync({
+    cmd: ["bun", cliEntry, ...args],
+    cwd: repoRoot,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  return {
+    exitCode: result.exitCode,
+    stdout: Buffer.from(result.stdout).toString("utf-8"),
+    stderr: Buffer.from(result.stderr).toString("utf-8"),
+  }
+}
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()
+    if (dir) {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+describe("pario command dispatch", () => {
+  test("lists split production commands in help", () => {
+    const result = runCli(["help"])
+
+    expect(result.exitCode).toBe(0)
+    for (const command of [
+      "api",
+      "atlas",
+      "sentinel",
+      "app",
+      "scheduler",
+      "orchestrator",
+      "functions",
+      "rules",
+      "worker",
+    ]) {
+      expect(result.stdout).toContain(command)
+    }
+    expect(result.stdout).toContain("pario worker pipeline")
+    expect(result.stderr).toBe("")
+  })
+
+  test("dispatches a split production command instead of treating it as unknown", () => {
+    const result = runCli(["api", "--entry", "fixtures/missing/pario.config.ts"])
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).not.toContain("Unknown command: api")
+    expect(result.stderr).toBe("")
+  })
+
+  test("plans pario start as separate child role commands", async () => {
+    const entry = resolve(import.meta.dir, "fixtures", "valid-project", "pario.config.ts")
+    const plan = await resolveStartProcessPlan({
+      entry,
+      port: "4100",
+      apiPublicOrigin: "http://localhost:4102",
+      atlasPublicOrigin: "http://localhost:4100",
+      sentinelPublicOrigin: "http://localhost:4103",
+    })
+
+    expect(plan.specs.map((spec) => spec.role)).toEqual(["api", "atlas", "sentinel"])
+    expect(plan.specs.map((spec) => spec.args[0])).toEqual(["api", "atlas", "sentinel"])
+    for (const spec of plan.specs) {
+      expect(spec.args).toContain("--entry")
+      expect(spec.args).toContain(entry)
+    }
+  })
+
+  test("starts event subscribers before startup event producers", async () => {
+    const entry = resolve(import.meta.dir, "fixtures", "start-order-project", "pario.config.ts")
+    const plan = await resolveStartProcessPlan({
+      entry,
+      port: "4100",
+      apiPublicOrigin: "http://localhost:4102",
+      atlasPublicOrigin: "http://localhost:4100",
+      sentinelPublicOrigin: "http://localhost:4103",
+    })
+    const roles = plan.specs.map((spec) => spec.role)
+
+    expect(roles).toContain("orchestrator")
+    expect(roles).toContain("scheduler")
+    expect(roles).toContain("rules")
+    expect(roles).toContain("functions")
+    expect(roles.indexOf("orchestrator")).toBeLessThan(roles.indexOf("scheduler"))
+    expect(roles.indexOf("rules")).toBeLessThan(roles.indexOf("functions"))
+  })
+})
+
+describe("production asset paths", () => {
+  test("resolves default .pario/dist assets from the source project root", async () => {
+    const projectRoot = resolve(import.meta.dir, "fixtures", "valid-project")
+    const paths = await resolveProductionPaths(
+      join(projectRoot, ".pario", "dist", "pario.config.js")
+    )
+
+    expect(paths.projectRoot).toBe(projectRoot)
+    expect(paths.buildOutdir).toBe(join(projectRoot, ".pario", "dist"))
+    expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(projectRoot, ".pario", "dist", "atlas"))
+    expect(builtSentinelOutdir(paths.buildOutdir)).toBe(
+      join(projectRoot, ".pario", "dist", "sentinel")
+    )
+  })
+
+  test("resolves custom build assets next to the built entry", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-production-"))
+    tempDirs.push(tempDir)
+    const outdir = join(tempDir, "dist")
+    await mkdir(join(outdir, "atlas"), { recursive: true })
+    await mkdir(join(outdir, "sentinel"), { recursive: true })
+
+    const paths = await resolveProductionPaths(join(outdir, "pario.config.js"))
+
+    expect(paths.projectRoot).toBe(outdir)
+    expect(paths.buildOutdir).toBe(outdir)
+    expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(outdir, "atlas"))
+    expect(builtSentinelOutdir(paths.buildOutdir)).toBe(join(outdir, "sentinel"))
+  })
+})

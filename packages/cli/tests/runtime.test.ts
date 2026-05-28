@@ -26,7 +26,13 @@ import {
   type RuleDefinition,
   type StorageMigrator,
 } from "@pario/core"
-import { startParioRuntime } from "../src/lib/runtime"
+import {
+  startFunctionsRuntime,
+  startOrchestratorRuntime,
+  startParioRuntime,
+  startRulesRuntime,
+  startSchedulerRuntime,
+} from "../src/lib/runtime"
 
 const Zone = defineObjectType({
   id: "Zone",
@@ -733,18 +739,147 @@ describe("startParioRuntime", () => {
 
     const runtime = await startParioRuntime(pario)
 
-    expect(calls).toEqual(["functions:start", "rules:start"])
+    expect(calls).toEqual(["rules:start", "functions:start"])
 
     await runtime.stop()
 
     expect(calls).toEqual([
-      "functions:start",
       "rules:start",
+      "functions:start",
       "functions:stop",
       "rules:stop",
       "connectors:stop",
       "broker:stop",
     ])
+  })
+})
+
+describe("split production runtime roles", () => {
+  test("starts only registered functions for the functions role", async () => {
+    const calls: string[] = []
+    const pario = new Pario({
+      id: "cli-functions-role",
+      ontology: [Transaction],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      rules: [postedRule],
+    })
+    pario.startFunctions = async () => {
+      calls.push("functions:start")
+    }
+    pario.stopFunctions = async () => {
+      calls.push("functions:stop")
+    }
+    pario.startScheduler = async () => {
+      calls.push("scheduler:start")
+    }
+
+    const runtime = await startFunctionsRuntime(pario)
+
+    expect(calls).toEqual(["functions:start"])
+
+    await runtime.stop()
+
+    expect(calls).toEqual(["functions:start", "functions:stop"])
+  })
+
+  test("starts only the scheduler for the scheduler role", async () => {
+    const calls: string[] = []
+    const pario = new Pario({
+      id: "cli-scheduler-role",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      schedules: [defineSchedule("role-daily").cron("0 2 * * *")],
+    })
+    pario.startScheduler = async () => {
+      calls.push("scheduler:start")
+    }
+    pario.stopScheduler = async () => {
+      calls.push("scheduler:stop")
+    }
+    pario.startFunctions = async () => {
+      calls.push("functions:start")
+    }
+
+    const runtime = await startSchedulerRuntime(pario)
+
+    expect(calls).toEqual(["scheduler:start"])
+
+    await runtime.stop()
+
+    expect(calls).toEqual(["scheduler:start", "scheduler:stop"])
+  })
+
+  test("starts only rules evaluation for the rules role", async () => {
+    const calls: string[] = []
+    const pario = new Pario({
+      id: "cli-rules-role",
+      ontology: [Transaction],
+      broker: new LifecycleBroker(calls),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      rules: [postedRule],
+    })
+    pario.startFunctions = async () => {
+      calls.push("functions:start")
+    }
+    pario.startScheduler = async () => {
+      calls.push("scheduler:start")
+    }
+
+    const runtime = await startRulesRuntime(pario)
+
+    expect(runtime.rulesWorker).not.toBeNull()
+    expect(calls).toEqual(["rules:start"])
+
+    await runtime.stop()
+
+    expect(calls).toEqual(["rules:start", "rules:stop"])
+  })
+
+  test("starts only the event orchestrator for the orchestrator role", async () => {
+    const calls: string[] = []
+    const daily = defineSchedule("role-workflow-daily").cron("0 2 * * *")
+    const workflow = defineWorkflow("role-scheduled-workflow")
+      .input({})
+      .when(daily)
+      .then(workflowStep)
+    const pario = new Pario({
+      id: "cli-orchestrator-role",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      schedules: [daily],
+      workflows: [workflow],
+    })
+    pario.startFunctions = async () => {
+      calls.push("functions:start")
+    }
+    pario.startScheduler = async () => {
+      calls.push("scheduler:start")
+    }
+
+    const runtime = await startOrchestratorRuntime(pario)
+
+    expect(runtime.orchestratorWorker).not.toBeNull()
+    expect(runtime.warnings).toHaveLength(0)
+    expect(calls).toEqual([])
+
+    await runtime.stop()
+
+    expect(calls).toEqual([])
   })
 })
 
