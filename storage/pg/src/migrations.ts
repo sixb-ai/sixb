@@ -47,22 +47,26 @@ export function createPostgresMigrator(params: {
   readonly schemaName: string
   readonly migrations: MigrationSet<PostgresMigrationContext>
 }): StorageMigrator {
-  const session = postgresMigrationSession(params.sql, params.schemaName)
-
   return {
     adapterId: params.migrations.adapterId,
     latestVersion: params.migrations.latestVersion,
     plan() {
-      return planMigrationSet({
-        migrations: params.migrations,
-        state: session.state,
+      return withPostgresMigrationLock(params, async (sql) => {
+        const session = postgresMigrationSession(sql, params.schemaName)
+        return planMigrationSet({
+          migrations: params.migrations,
+          state: session.state,
+        })
       })
     },
     migrate() {
-      return runMigrationSet({
-        context: session.context,
-        migrations: params.migrations,
-        state: session.state,
+      return withPostgresMigrationLock(params, async (sql) => {
+        const session = postgresMigrationSession(sql, params.schemaName)
+        return runMigrationSet({
+          context: session.context,
+          migrations: params.migrations,
+          state: session.state,
+        })
       })
     },
   }
@@ -168,6 +172,36 @@ function postgresMigrationSession(
       },
     },
   }
+}
+
+async function withPostgresMigrationLock<T>(
+  params: {
+    readonly sql: SQL
+    readonly schemaName: string
+    readonly migrations: MigrationSet<PostgresMigrationContext>
+  },
+  run: (sql: SQL) => Promise<T>
+): Promise<T> {
+  const sql = await params.sql.reserve()
+  const [first, second] = advisoryLockParts(
+    `storage:migration:${params.schemaName}:${params.migrations.adapterId}`
+  )
+
+  try {
+    await sql`SELECT pg_advisory_lock(${first}, ${second})`
+    try {
+      return await run(sql)
+    } finally {
+      await sql`SELECT pg_advisory_unlock(${first}, ${second})`
+    }
+  } finally {
+    sql.release()
+  }
+}
+
+function advisoryLockParts(key: string): readonly [number, number] {
+  const hash = createHash("sha256").update(key).digest()
+  return [hash.readInt32BE(0), hash.readInt32BE(4)]
 }
 
 function rowToMigrationRecord(row: PostgresMigrationRow): MigrationRecord {

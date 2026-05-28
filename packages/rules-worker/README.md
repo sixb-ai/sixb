@@ -21,7 +21,8 @@ arrive.
 ## Usage
 
 Most projects should use the CLI host. When rules are registered, `pario dev`
-and `pario start` co-host the worker automatically:
+co-hosts the worker automatically for local development; production deployments should run
+`pario rules` as a dedicated role:
 
 ```ts
 const pario = createPario({

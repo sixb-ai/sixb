@@ -6,7 +6,6 @@
     "dev": "pario dev",
     "check": "pario check",
     "build": "pario build",
-    "start": "pario start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

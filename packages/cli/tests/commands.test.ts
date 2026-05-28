@@ -7,7 +7,6 @@ import {
   builtSentinelOutdir,
   resolveProductionPaths,
 } from "../src/lib/production"
-import { resolveStartProcessPlan } from "../src/lib/start-process-plan"
 
 function runCli(args: readonly string[]): { exitCode: number; stdout: string; stderr: string } {
   const repoRoot = resolve(import.meta.dir, "..", "..", "..")
@@ -68,41 +67,12 @@ describe("pario command dispatch", () => {
     expect(result.stderr).toBe("")
   })
 
-  test("plans pario start as separate child role commands", async () => {
-    const entry = resolve(import.meta.dir, "fixtures", "valid-project", "pario.config.ts")
-    const plan = await resolveStartProcessPlan({
-      entry,
-      port: "4100",
-      apiPublicOrigin: "http://localhost:4102",
-      atlasPublicOrigin: "http://localhost:4100",
-      sentinelPublicOrigin: "http://localhost:4103",
-    })
+  test("does not expose the removed production supervisor command", () => {
+    const result = runCli(["start"])
 
-    expect(plan.specs.map((spec) => spec.role)).toEqual(["api", "atlas", "sentinel"])
-    expect(plan.specs.map((spec) => spec.args[0])).toEqual(["api", "atlas", "sentinel"])
-    for (const spec of plan.specs) {
-      expect(spec.args).toContain("--entry")
-      expect(spec.args).toContain(entry)
-    }
-  })
-
-  test("starts event subscribers before startup event producers", async () => {
-    const entry = resolve(import.meta.dir, "fixtures", "start-order-project", "pario.config.ts")
-    const plan = await resolveStartProcessPlan({
-      entry,
-      port: "4100",
-      apiPublicOrigin: "http://localhost:4102",
-      atlasPublicOrigin: "http://localhost:4100",
-      sentinelPublicOrigin: "http://localhost:4103",
-    })
-    const roles = plan.specs.map((spec) => spec.role)
-
-    expect(roles).toContain("orchestrator")
-    expect(roles).toContain("scheduler")
-    expect(roles).toContain("rules")
-    expect(roles).toContain("functions")
-    expect(roles.indexOf("orchestrator")).toBeLessThan(roles.indexOf("scheduler"))
-    expect(roles.indexOf("rules")).toBeLessThan(roles.indexOf("functions"))
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("Unknown command: start")
+    expect(result.stderr).toBe("")
   })
 })
 

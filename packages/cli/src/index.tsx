@@ -200,22 +200,6 @@ async function main(): Promise<void> {
       break
     }
 
-    case "start": {
-      const { runStart } = await import("./commands/start")
-      await runStart({
-        entry: getFlag("entry"),
-        port: getFlag("port"),
-        host: getFlag("host"),
-        apiPort: getFlag("api-port"),
-        apiHost: getFlag("api-host"),
-        apiPublicOrigin: getFlag("api-public-origin"),
-        atlasPublicOrigin: getFlag("atlas-public-origin"),
-        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
-        appPublicOrigin: getFlag("app-public-origin"),
-      })
-      break
-    }
-
     case "db:migrate": {
       const { runDbMigrate } = await import("./commands/db-migrate")
       await runDbMigrate({ entry: getFlag("entry") })

@@ -17,6 +17,12 @@ export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | nu
   await stopFn().catch(() => {})
 }
 
+async function closeProvider(provider: unknown): Promise<void> {
+  const close = (provider as { close?: unknown } | null | undefined)?.close
+  if (typeof close !== "function") return
+  await close.call(provider)
+}
+
 export interface RunningParioRuntime {
   readonly rulesWorker: RulesWorker | null
   readonly syncWorker: SyncWorker | null
@@ -62,6 +68,10 @@ export async function prepareParioRuntime(pario: LoadedPario): Promise<void> {
 
 export async function stopParioProviders(pario: LoadedPario): Promise<void> {
   await stopQuietly(() => pario.disconnectConnectors())
+  await stopQuietly(() => closeProvider(pario.queues))
+  await stopQuietly(() => closeProvider(pario.storage))
+  await stopQuietly(() => closeProvider(pario.lakeStorage))
+  await stopQuietly(() => closeProvider(pario.blobStorage))
   await stopQuietly(() => pario.closeBroker())
 }
 
