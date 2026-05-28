@@ -97,8 +97,8 @@ describe("pario build", () => {
     const builtEntry = join(outdir, "pario.config.js")
     await stat(builtEntry)
 
-    const builtConfig = await import(builtEntry)
-    expect(typeof builtConfig.duckLakeStorageConstructor).toBe("function")
-    expect(builtConfig.duckLakeStorageConstructor.name).toBe("DuckLakeStorage")
+    const builtJs = await readFile(builtEntry, "utf-8")
+    expect(builtJs).toContain('"@pario/ducklake"')
+    expect(builtJs).not.toContain("@duckdb/node-api")
   })
 })
