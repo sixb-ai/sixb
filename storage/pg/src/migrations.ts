@@ -10,7 +10,6 @@ import type {
 import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@pario/core"
 import type { SQL } from "bun"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
-import syncRunCheckpointsSql from "./migrations/002-sync-run-checkpoints.sql" with { type: "text" }
 
 export interface PostgresMigrationContext {
   exec(sqlText: string): Promise<void>
@@ -193,10 +192,7 @@ function checksum(value: string): string {
 
 export const postgresStorageMigrations = defineMigrations<PostgresMigrationContext>({
   adapterId: POSTGRES_STORAGE_ADAPTER_ID,
-  steps: [
-    pgSql("001-initial-schema", initialSchemaSql),
-    pgSql("002-sync-run-checkpoints", syncRunCheckpointsSql),
-  ],
+  steps: [pgSql("001-initial-schema", initialSchemaSql)],
 })
 
 interface PostgresMigrationRow {
