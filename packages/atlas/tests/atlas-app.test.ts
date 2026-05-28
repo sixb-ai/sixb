@@ -1,6 +1,12 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:net"
-import { createAtlasApp } from "../src"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { buildAtlasAssets, createAtlasApp } from "../src"
+
+let assetsRoot: string
+let assetsOutdir: string
 
 async function getFreePort(): Promise<number> {
   return await new Promise<number>((resolvePromise, reject) => {
@@ -25,6 +31,18 @@ async function getFreePort(): Promise<number> {
 }
 
 describe("createAtlasApp", () => {
+  beforeAll(async () => {
+    assetsRoot = await mkdtemp(join(tmpdir(), "pario-atlas-assets-"))
+    assetsOutdir = join(assetsRoot, "atlas")
+    await buildAtlasAssets({ outdir: assetsOutdir })
+  })
+
+  afterAll(async () => {
+    if (assetsRoot) {
+      await rm(assetsRoot, { recursive: true, force: true })
+    }
+  })
+
   test("serves the public Atlas shell with API runtime config", async () => {
     const port = await getFreePort()
     const atlas = createAtlasApp({
@@ -35,6 +53,7 @@ describe("createAtlasApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -85,6 +104,7 @@ describe("createAtlasApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -141,6 +161,7 @@ describe("createAtlasApp", () => {
       host: "127.0.0.1",
       port,
       development: false,
+      outdir: assetsOutdir,
     })
 
     try {
@@ -152,6 +173,23 @@ describe("createAtlasApp", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("fails clearly when production assets are missing", async () => {
+    const port = await getFreePort()
+    const atlas = createAtlasApp({
+      apiBaseUrl: "http://api.localhost",
+      audience: "atlas",
+    })
+
+    await expect(
+      atlas.start({
+        host: "127.0.0.1",
+        port,
+        development: false,
+        outdir: join(assetsRoot, "missing"),
+      })
+    ).rejects.toThrow("Run `pario build`")
   })
 })
 

@@ -4,8 +4,13 @@ import {
   DEFAULT_AUTH_SESSION_AUDIENCE,
   resolveAuthSessionAudience,
 } from "@pario/core"
-import { ensureBuiltInUiBundle, ensureBuiltInUiDevBundle, renderBuiltInUiShell } from "./assets"
-import { type BuiltInUiCssHandle, ensureBuiltInUiCss } from "./css"
+import {
+  buildBuiltInUiBundle,
+  ensureBuiltInUiDevBundle,
+  loadBuiltInUiBundle,
+  renderBuiltInUiShell,
+} from "./assets"
+import { type BuiltInUiCssHandle, buildBuiltInUiCss, ensureBuiltInUiCss } from "./css"
 
 type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
 type BunServeRoute = BunServeRoutes[string]
@@ -22,6 +27,7 @@ export interface AtlasAppStartOptions {
   readonly host?: string
   readonly port?: number
   readonly development?: boolean
+  readonly outdir?: string
 }
 
 export interface AtlasAppServer {
@@ -35,12 +41,25 @@ export interface AtlasAppInstance {
   start(options?: AtlasAppStartOptions): Promise<AtlasAppServer>
 }
 
+export interface BuildAtlasAssetsOptions {
+  readonly outdir?: string
+}
+
 interface BuiltInUiServerOptions {
   readonly host: string
   readonly port: number
   readonly apiBaseUrl: string
   readonly audience: AuthSessionAudience
   readonly authEnabled: boolean
+  readonly outdir?: string
+}
+
+export async function buildAtlasAssets(
+  options: BuildAtlasAssetsOptions = {}
+): Promise<{ outdir: string }> {
+  await buildBuiltInUiCss()
+  const bundle = await buildBuiltInUiBundle({ outdir: options.outdir })
+  return { outdir: bundle.outdir }
 }
 
 export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance {
@@ -56,10 +75,22 @@ export function createAtlasApp(options: CreateAtlasAppOptions): AtlasAppInstance
       let css: BuiltInUiCssHandle | null = null
 
       try {
-        css = await ensureBuiltInUiCss({ watch: development })
-        const server = development
-          ? await startDevelopmentServer({ host, port, apiBaseUrl, audience, authEnabled })
-          : await startProductionServer({ host, port, apiBaseUrl, audience, authEnabled })
+        // Development compiles and watches CSS in-process. Production serves the
+        // prebuilt assets produced by `pario build` and never compiles at startup.
+        let server: ReturnType<typeof Bun.serve>
+        if (development) {
+          css = await ensureBuiltInUiCss({ watch: true })
+          server = await startDevelopmentServer({ host, port, apiBaseUrl, audience, authEnabled })
+        } else {
+          server = await startProductionServer({
+            host,
+            port,
+            apiBaseUrl,
+            audience,
+            authEnabled,
+            outdir: startOptions.outdir,
+          })
+        }
         const displayHost = host === "0.0.0.0" ? "localhost" : host
 
         return {
@@ -106,7 +137,7 @@ async function startDevelopmentServer(
 async function startProductionServer(
   input: BuiltInUiServerOptions
 ): Promise<ReturnType<typeof Bun.serve>> {
-  const bundle = await ensureBuiltInUiBundle()
+  const bundle = await loadBuiltInUiBundle({ outdir: input.outdir })
   const shell = renderBuiltInUiShell({
     apiBaseUrl: input.apiBaseUrl,
     audience: input.audience,

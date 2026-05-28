@@ -91,6 +91,34 @@ pario dev
 Open `http://localhost:3000` to see the starter app, built-in UI, and local runtime. Generated
 API docs are available at `http://localhost:3000/docs`.
 
+## Production
+
+Use `pario dev` for local all-in-one development. For production, build once and run each role as a
+separate process so scaling and failure boundaries stay explicit:
+
+```bash
+pario build
+pario api
+pario atlas
+pario sentinel
+pario app
+pario scheduler
+pario orchestrator
+pario functions
+pario rules
+pario worker sync
+pario worker pipeline
+pario worker projection
+pario worker action
+pario worker workflow
+```
+
+`pario start` remains available as a local or single-node convenience supervisor. It starts the
+same production role commands as child processes and shuts them down together, but each role still
+runs in its own OS process. The split commands are the recommended production layout for Docker,
+Kubernetes, systemd, and other process managers. `pario atlas`, `pario sentinel`, and `pario app`
+serve only assets prepared by `pario build`.
+
 ## Where To Go Next
 
 - [`docs/`](./docs) for the simplified framework overview and concepts

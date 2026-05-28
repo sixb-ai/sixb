@@ -8,30 +8,23 @@ import type { LoadedPario } from "./loadPario"
 
 interface WorkerFactory {
   readonly create: (pario: LoadedPario) => Worker
-  readonly hasRegisteredDefinitions: (pario: LoadedPario) => boolean
 }
 
 const workerFactories: Record<string, WorkerFactory> = {
   sync: {
     create: (pario) => new SyncWorker(pario),
-    hasRegisteredDefinitions: (pario) => pario.getSyncDefinitions().length > 0,
   },
   action: {
     create: (pario) => new ActionWorker(pario),
-    hasRegisteredDefinitions: (pario) => pario.getActionDefinitions().length > 0,
   },
   pipeline: {
     create: (pario) => new PipelineWorker(pario),
-    hasRegisteredDefinitions: (pario) => pario.getPipelineDefinitions().length > 0,
   },
   projection: {
     create: (pario) => new ProjectionWorker(pario),
-    hasRegisteredDefinitions: (pario) =>
-      pario.getObjectProjections().length + pario.getLinkProjections().length > 0,
   },
   workflow: {
     create: (pario) => new WorkflowWorker(pario),
-    hasRegisteredDefinitions: (pario) => pario.getWorkflowDefinitions().length > 0,
   },
 }
 
@@ -44,30 +37,44 @@ export function createWorkerForType(pario: LoadedPario, workerType: string): Wor
   return factory.create(pario)
 }
 
-export function resolveWorkerTypesToStart(
-  pario: LoadedPario,
-  requestedWorker?: string
-): readonly string[] {
-  if (requestedWorker) {
-    if (!workerFactories[requestedWorker]) {
-      throw new Error(
-        `[ParioWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
-      )
-    }
-    return [requestedWorker]
+export function resolveWorkerTypeToStart(requestedWorker?: string): string {
+  if (!requestedWorker) {
+    throw new Error(`[ParioWorker] Usage: pario worker <${knownWorkers().replaceAll(", ", "|")}>`)
   }
 
-  const registeredWorkers = Object.entries(workerFactories)
-    .filter(([, factory]) => factory.hasRegisteredDefinitions(pario))
-    .map(([workerType]) => workerType)
-
-  if (registeredWorkers.length === 0) {
+  if (!workerFactories[requestedWorker]) {
     throw new Error(
-      "[ParioWorker] No worker definitions are registered. Add a sync, action, pipeline, projection, or workflow, or pass --worker <type> to start a specific worker."
+      `[ParioWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
     )
   }
 
-  return registeredWorkers
+  return requestedWorker
+}
+
+export function resolveRegisteredWorkerTypes(pario: LoadedPario): readonly string[] {
+  const workerTypes: string[] = []
+
+  if (pario.getSyncDefinitions().length > 0) {
+    workerTypes.push("sync")
+  }
+
+  if (pario.getPipelineDefinitions().length > 0) {
+    workerTypes.push("pipeline")
+  }
+
+  if (pario.getObjectProjections().length + pario.getLinkProjections().length > 0) {
+    workerTypes.push("projection")
+  }
+
+  if (pario.getActionDefinitions().length > 0) {
+    workerTypes.push("action")
+  }
+
+  if (pario.getWorkflowDefinitions().length > 0) {
+    workerTypes.push("workflow")
+  }
+
+  return workerTypes
 }
 
 function knownWorkers(): string {

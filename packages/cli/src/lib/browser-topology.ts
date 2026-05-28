@@ -5,11 +5,15 @@ export interface BrowserTopologyOptions {
   readonly host?: string
   readonly apiHost?: string
   readonly port?: string
+  readonly appPort?: string
   readonly apiPort?: string
+  readonly sentinelPort?: string
   readonly apiPublicOrigin?: string
   readonly atlasPublicOrigin?: string
   readonly sentinelPublicOrigin?: string
   readonly appPublicOrigin?: string
+  readonly includeAtlas?: boolean
+  readonly includeSentinel?: boolean
   readonly includeCustomApp: boolean
 }
 
@@ -21,8 +25,8 @@ export interface BrowserTopology {
   readonly apiPort: number
   readonly sentinelPort: number
   readonly apiPublicOrigin: string
-  readonly atlasPublicOrigin: string
-  readonly sentinelPublicOrigin: string
+  readonly atlasPublicOrigin: string | null
+  readonly sentinelPublicOrigin: string | null
   readonly appPublicOrigin: string | null
   readonly allowedBrowserOrigins: readonly ParioBrowserOrigin[]
 }
@@ -41,8 +45,8 @@ interface BrowserPorts {
 
 interface BrowserPublicOrigins {
   readonly apiPublicOrigin: string
-  readonly atlasPublicOrigin: string
-  readonly sentinelPublicOrigin: string
+  readonly atlasPublicOrigin: string | null
+  readonly sentinelPublicOrigin: string | null
   readonly appPublicOrigin: string | null
 }
 
@@ -75,9 +79,13 @@ function resolveBrowserHosts(options: BrowserTopologyOptions): BrowserHosts {
 
 function resolveBrowserPorts(options: BrowserTopologyOptions): BrowserPorts {
   const atlasPort = parsePort(options.port, "port", DEFAULT_ATLAS_PORT)
-  const appPort = atlasPort + DEFAULT_APP_PORT_OFFSET
+  const appPort = parsePort(options.appPort, "app-port", atlasPort + DEFAULT_APP_PORT_OFFSET)
   const apiPort = parsePort(options.apiPort, "api-port", atlasPort + DEFAULT_API_PORT_OFFSET)
-  const sentinelPort = atlasPort + DEFAULT_SENTINEL_PORT_OFFSET
+  const sentinelPort = parsePort(
+    options.sentinelPort,
+    "sentinel-port",
+    atlasPort + DEFAULT_SENTINEL_PORT_OFFSET
+  )
 
   return {
     atlasPort,
@@ -98,20 +106,26 @@ function resolveBrowserPublicOrigins(
     localDefault: `http://localhost:${ports.apiPort}`,
     mode: options.mode,
   })
-  const atlasPublicOrigin = resolvePublicOrigin({
-    value: options.atlasPublicOrigin,
-    envName: "PARIO_ATLAS_PUBLIC_ORIGIN",
-    label: "Atlas public origin",
-    localDefault: `http://localhost:${ports.atlasPort}`,
-    mode: options.mode,
-  })
-  const sentinelPublicOrigin = resolvePublicOrigin({
-    value: options.sentinelPublicOrigin,
-    envName: "PARIO_SENTINEL_PUBLIC_ORIGIN",
-    label: "Sentinel public origin",
-    localDefault: `http://localhost:${ports.sentinelPort}`,
-    mode: options.mode,
-  })
+  const includeAtlas = options.includeAtlas ?? true
+  const includeSentinel = options.includeSentinel ?? true
+  const atlasPublicOrigin = includeAtlas
+    ? resolvePublicOrigin({
+        value: options.atlasPublicOrigin,
+        envName: "PARIO_ATLAS_PUBLIC_ORIGIN",
+        label: "Atlas public origin",
+        localDefault: `http://localhost:${ports.atlasPort}`,
+        mode: options.mode,
+      })
+    : null
+  const sentinelPublicOrigin = includeSentinel
+    ? resolvePublicOrigin({
+        value: options.sentinelPublicOrigin,
+        envName: "PARIO_SENTINEL_PUBLIC_ORIGIN",
+        label: "Sentinel public origin",
+        localDefault: `http://localhost:${ports.sentinelPort}`,
+        mode: options.mode,
+      })
+    : null
   const appPublicOrigin = options.includeCustomApp
     ? resolvePublicOrigin({
         value: options.appPublicOrigin,
@@ -131,10 +145,19 @@ function resolveBrowserPublicOrigins(
 }
 
 function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly ParioBrowserOrigin[] {
-  const allowedOrigins: ParioBrowserOrigin[] = [
-    { origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" },
-    { origin: origins.sentinelPublicOrigin, audience: "sentinel", kind: "sentinel" },
-  ]
+  const allowedOrigins: ParioBrowserOrigin[] = []
+
+  if (origins.atlasPublicOrigin) {
+    allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" })
+  }
+
+  if (origins.sentinelPublicOrigin) {
+    allowedOrigins.push({
+      origin: origins.sentinelPublicOrigin,
+      audience: "sentinel",
+      kind: "sentinel",
+    })
+  }
 
   if (origins.appPublicOrigin) {
     allowedOrigins.push({ origin: origins.appPublicOrigin, audience: "app", kind: "app" })

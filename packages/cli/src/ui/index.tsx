@@ -164,10 +164,21 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "dev", value: "Start local development (server + built-in UI + app)" },
-          { label: "worker", value: "Start the dedicated worker runtime" },
+          { label: "api", value: "Start production API/docs/WebSocket server" },
+          { label: "atlas", value: "Start production Atlas UI server" },
+          { label: "sentinel", value: "Start production Sentinel UI server" },
+          { label: "app", value: "Start production custom app server" },
+          { label: "scheduler", value: "Start production scheduler event producer" },
+          { label: "orchestrator", value: "Start production event-to-queue dispatcher" },
+          { label: "functions", value: "Start production functions runtime" },
+          { label: "rules", value: "Start production rules runtime" },
+          {
+            label: "worker <type>",
+            value: "Start production queue worker: sync, action, pipeline, projection, workflow",
+          },
           { label: "check", value: "Validate project configuration and health" },
-          { label: "build", value: "Build for production" },
-          { label: "start", value: "Start production server" },
+          { label: "build", value: "Build runtime and production UI/app assets" },
+          { label: "start", value: "Start production role supervisor" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
           { label: "init [dir]", value: "Initialize pario project in directory" },
           { label: "create <name>", value: "Create a new pario project" },
@@ -179,7 +190,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "--entry <path>", value: "Entry file (default: pario.config.ts)" },
-          { label: "--port <port>", value: "Atlas UI port (default: 3000)" },
+          { label: "--port <port>", value: "Role port; dev/start use Atlas base port" },
           { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
@@ -187,10 +198,6 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
           { label: "--sentinel-public-origin <origin>", value: "Public Sentinel origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
-          {
-            label: "--worker <type>",
-            value: "Worker type: sync, action, pipeline, projection, workflow",
-          },
           { label: "--outdir <path>", value: "Build output directory" },
           { label: "--help", value: "Show this help message" },
           { label: "--version", value: "Show version" },
@@ -202,13 +209,20 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         dim
         items={[
           "pario dev",
-          "pario worker",
-          "pario worker --worker pipeline",
-          "pario worker --worker workflow",
+          "pario build",
+          "pario api",
+          "pario atlas",
+          "pario sentinel",
+          "pario app",
+          "pario scheduler",
+          "pario orchestrator",
+          "pario functions",
+          "pario rules",
+          "pario worker pipeline",
+          "pario worker workflow",
           "pario dev --entry examples/mac-os/pario.config.ts --port 8080",
           "pario check",
           "pario db migrate",
-          "pario build",
           "pario create my-project",
         ]}
       />
@@ -398,6 +412,40 @@ export function WorkerView({
       <Text dimColor>{name}</Text>
       <Spacer />
       <ServicePanel name="Worker" items={[{ label: "ID", value: workerId }]} />
+      {warnings.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Warnings</SectionTitle>
+          <BulletList items={warnings} />
+        </>
+      ) : null}
+      <Spacer />
+      <Text dimColor>Press Ctrl+C to stop</Text>
+    </Box>
+  )
+}
+
+export function RoleView({
+  title,
+  name,
+  serviceName,
+  items,
+  warnings = [],
+}: {
+  title: string
+  name: string
+  serviceName: string
+  items: KeyValueItem[]
+  warnings?: readonly string[]
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {title}
+      </Text>
+      <Text dimColor>{name}</Text>
+      <Spacer />
+      <ServicePanel name={serviceName} items={items} />
       {warnings.length > 0 ? (
         <>
           <Spacer />

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -62,6 +62,13 @@ describe("pario build", () => {
 
     await stat(join(outdir, "pario.config.js"))
     await stat(join(outdir, "app", "index.html"))
+    const atlasAssets = await readdir(join(outdir, "atlas"))
+    const sentinelAssets = await readdir(join(outdir, "sentinel"))
+
+    expect(atlasAssets.some((file) => /^main-[^.]+\.js$/.test(file))).toBe(true)
+    expect(atlasAssets.some((file) => /^main-[^.]+\.css$/.test(file))).toBe(true)
+    expect(sentinelAssets.some((file) => /^main-[^.]+\.js$/.test(file))).toBe(true)
+    expect(sentinelAssets.some((file) => /^main-[^.]+\.css$/.test(file))).toBe(true)
 
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
     expect(html).toContain('<div id="root"></div>')
