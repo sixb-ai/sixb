@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   commit_message TEXT,
   error_name TEXT,
   error_message TEXT,
-  metadata JSONB,
+  checkpoint JSONB,
   PRIMARY KEY (project_id, id)
 );
 

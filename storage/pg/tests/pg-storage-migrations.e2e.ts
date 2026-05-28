@@ -15,7 +15,7 @@ describe("Postgres storage migrations", () => {
         {
           adapterId: POSTGRES_STORAGE_ADAPTER_ID,
           status: "migrated",
-          applied: ["001-initial-schema", "002-sync-run-checkpoints"],
+          applied: ["001-initial-schema"],
         },
       ])
       expect(await readMigrationRows(schemaName)).toEqual([
@@ -25,13 +25,6 @@ describe("Postgres storage migrations", () => {
           id: "001-initial-schema",
           status: "applied",
           version: 1,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "002-sync-run-checkpoints",
-          status: "applied",
-          version: 2,
         },
       ])
     })

@@ -12,7 +12,6 @@ import type {
 } from "@pario/core"
 import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@pario/core"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
-import syncRunCheckpointsSql from "./migrations/002-sync-run-checkpoints.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS pario_migrations (
@@ -32,7 +31,7 @@ export const SQLITE_STORAGE_FILE = "storage.sqlite"
 
 export const sqliteStorageMigrations = defineMigrations({
   adapterId: SQLITE_STORAGE_ADAPTER_ID,
-  steps: [sqliteSql("001-initial-schema", initialSchemaSql), syncRunCheckpointsMigration()],
+  steps: [sqliteSql("001-initial-schema", initialSchemaSql)],
 })
 
 export function sqliteStoragePath(basePath: string): string {
@@ -55,24 +54,6 @@ export function sqliteStep(
   options: MigrationStepOptions = {}
 ): MigrationStep<Database> {
   return step<Database>(id, up, options)
-}
-
-function syncRunCheckpointsMigration(): MigrationStep<Database> {
-  return sqliteStep(
-    "002-sync-run-checkpoints",
-    (db) => {
-      const columns = new Set(readTableColumnNames(db, "sync_runs"))
-
-      if (!columns.has("checkpoint")) {
-        db.run("ALTER TABLE sync_runs ADD COLUMN checkpoint TEXT")
-      }
-
-      if (columns.has("metadata")) {
-        db.run("ALTER TABLE sync_runs DROP COLUMN metadata")
-      }
-    },
-    { checksum: checksum(syncRunCheckpointsSql) }
-  )
 }
 
 export function installFreshSqliteSchema(db: Database): void {
@@ -178,14 +159,6 @@ function sqliteMigrationHistoryStore(db: Database): MigrationHistoryStore {
       }
     },
   }
-}
-
-function readTableColumnNames(db: Database, tableName: string): readonly string[] {
-  const rows = db.query(`PRAGMA table_info(${tableName})`).all() as Array<{
-    readonly name: string
-  }>
-
-  return rows.map((row) => row.name)
 }
 
 function rowToMigrationRecord(row: unknown): MigrationRecord {
