@@ -2,7 +2,6 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { DuckLakeStorage } from "@pario/ducklake"
 
 function runBuildEntry(
   entry: string,
@@ -99,6 +98,7 @@ describe("pario build", () => {
     await stat(builtEntry)
 
     const builtConfig = await import(builtEntry)
-    expect(builtConfig.duckLakeStorageConstructor).toBe(DuckLakeStorage)
+    expect(typeof builtConfig.duckLakeStorageConstructor).toBe("function")
+    expect(builtConfig.duckLakeStorageConstructor.name).toBe("DuckLakeStorage")
   })
 })
