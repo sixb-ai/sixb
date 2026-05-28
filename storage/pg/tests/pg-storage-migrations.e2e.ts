@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { migrateStorage } from "@pario/core"
 import { SQL } from "bun"
-import type { PostgresStorage } from "../src"
-import { POSTGRES_STORAGE_ADAPTER_ID, quoteIdent } from "../src"
+import {
+  POSTGRES_STORAGE_ADAPTER_ID,
+  PostgresStorage,
+  type PostgresStorage as PostgresStorageType,
+  quoteIdent,
+} from "../src"
 import { createTestStorage } from "./helpers"
 
 describe("Postgres storage migrations", () => {
@@ -126,11 +130,43 @@ describe("Postgres storage migrations", () => {
       await expect(migrateStorage(storage)).rejects.toThrow("dirty migration state")
     })
   })
+
+  test("serializes concurrent storage migrations for the same schema", async () => {
+    const connectionString = process.env.DATABASE_URL
+    if (!connectionString) {
+      throw new Error("[ParioPg] DATABASE_URL is required for Postgres migration tests.")
+    }
+
+    const schemaName = `pario_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const storages = Array.from(
+      { length: 4 },
+      () => new PostgresStorage({ connectionString, schemaName, max: 2 })
+    )
+
+    try {
+      const results = await Promise.all(storages.map((storage) => migrateStorage(storage)))
+      const statuses = results.map((result) => result.status).sort()
+
+      expect(statuses).toEqual(["current", "current", "current", "migrated"])
+      expect(await readMigrationRows(schemaName)).toEqual([
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "001-initial-schema",
+          status: "applied",
+          version: 1,
+        },
+      ])
+    } finally {
+      await storages[0]?.dropSchema()
+      await Promise.all(storages.map((storage) => storage.close()))
+    }
+  })
 })
 
 async function withStorage(
   migrate: boolean,
-  run: (storage: PostgresStorage, schemaName: string) => Promise<void>
+  run: (storage: PostgresStorageType, schemaName: string) => Promise<void>
 ): Promise<void> {
   const { storage, schemaName } = await createTestStorage({ migrate })
 

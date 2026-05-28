@@ -113,11 +113,9 @@ pario worker action
 pario worker workflow
 ```
 
-`pario start` remains available as a local or single-node convenience supervisor. It starts the
-same production role commands as child processes and shuts them down together, but each role still
-runs in its own OS process. The split commands are the recommended production layout for Docker,
-Kubernetes, systemd, and other process managers. `pario atlas`, `pario sentinel`, and `pario app`
-serve only assets prepared by `pario build`.
+The split commands are the production layout for Docker, Kubernetes, systemd, and other process
+managers. `pario atlas`, `pario sentinel`, and `pario app` serve only assets prepared by
+`pario build`.
 
 ## Where To Go Next
 

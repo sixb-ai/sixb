@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
+import { mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
+import { DuckLakeStorage } from "@pario/ducklake"
 
 function runBuildEntry(
   entry: string,
@@ -72,5 +73,32 @@ describe("pario build", () => {
 
     const html = await readFile(join(outdir, "app", "index.html"), "utf-8")
     expect(html).toContain('<div id="root"></div>')
+  })
+
+  test("externalizes DuckDB native bindings when bundling runtime config", async () => {
+    const repoRoot = resolve(import.meta.dir, "..", "..", "..")
+    const tempDir = await mkdtemp(join(repoRoot, ".tmp-pario-cli-build-duckdb-"))
+    tempDirs.push(tempDir)
+    const entry = join(tempDir, "pario.config.ts")
+    const outdir = join(tempDir, "dist")
+
+    await writeFile(
+      entry,
+      [
+        'import { DuckLakeStorage } from "@pario/ducklake"',
+        "",
+        "export const duckLakeStorageConstructor = DuckLakeStorage",
+      ].join("\n")
+    )
+
+    const result = runBuildEntry(entry, outdir)
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stderr).toBe("")
+    const builtEntry = join(outdir, "pario.config.js")
+    await stat(builtEntry)
+
+    const builtConfig = await import(builtEntry)
+    expect(builtConfig.duckLakeStorageConstructor).toBe(DuckLakeStorage)
   })
 })

@@ -32,6 +32,7 @@ import {
   startParioRuntime,
   startRulesRuntime,
   startSchedulerRuntime,
+  stopParioProviders,
 } from "../src/lib/runtime"
 
 const Zone = defineObjectType({
@@ -752,6 +753,33 @@ describe("startParioRuntime", () => {
       "broker:stop",
     ])
   })
+
+  test("closes optional provider handles during runtime cleanup", async () => {
+    const calls: string[] = []
+    const pario = new Pario({
+      id: "cli-provider-cleanup",
+      ontology: [Transaction],
+      broker: new LifecycleBroker(calls),
+      storage: new ClosableStorage(calls),
+      lakeStorage: new ClosableLakeStorage(calls),
+      blobStorage: new ClosableBlobStorage(calls),
+      queues: new ClosableQueues(calls),
+    })
+    pario.disconnectConnectors = async () => {
+      calls.push("connectors:stop")
+    }
+
+    await stopParioProviders(pario)
+
+    expect(calls).toEqual([
+      "connectors:stop",
+      "queues:stop",
+      "storage:stop",
+      "lake-storage:stop",
+      "blob-storage:stop",
+      "broker:stop",
+    ])
+  })
 })
 
 describe("split production runtime roles", () => {
@@ -907,5 +935,45 @@ class LifecycleBroker extends InMemoryBroker {
 
   async close(): Promise<void> {
     this.calls.push("broker:stop")
+  }
+}
+
+class ClosableStorage extends InMemoryStorage {
+  constructor(private readonly calls: string[]) {
+    super()
+  }
+
+  async close(): Promise<void> {
+    this.calls.push("storage:stop")
+  }
+}
+
+class ClosableLakeStorage extends InMemoryLakeStorage {
+  constructor(private readonly calls: string[]) {
+    super()
+  }
+
+  async close(): Promise<void> {
+    this.calls.push("lake-storage:stop")
+  }
+}
+
+class ClosableBlobStorage extends InMemoryBlobStorage {
+  constructor(private readonly calls: string[]) {
+    super()
+  }
+
+  async close(): Promise<void> {
+    this.calls.push("blob-storage:stop")
+  }
+}
+
+class ClosableQueues extends InMemoryQueues {
+  constructor(private readonly calls: string[]) {
+    super()
+  }
+
+  async close(): Promise<void> {
+    this.calls.push("queues:stop")
   }
 }

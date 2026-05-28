@@ -24,7 +24,6 @@ bun add @pario/cli
 | `pario worker <type>` | Start a production queue worker |
 | `pario check` | Validate project configuration and provider health |
 | `pario build` | Bundle the project runtime, custom app, Atlas assets, and Sentinel assets |
-| `pario start` | Start a local production role supervisor |
 | `pario db migrate` | Run adapter-owned database migrations for the configured storage |
 | `pario init [dir]` | Initialize a new pario project in a directory |
 | `pario create <name>` | Scaffold a new pario project from the built-in template |
@@ -38,14 +37,14 @@ Also available as `create-pario <name>` (alias for `pario create`).
 | Flag | Applies to | Default | Description |
 |---|---|---|---|
 | `--entry <path>` | all | `pario.config.ts` | Path to the pario config module |
-| `--port <port>` | serving commands | role default | Role bind port. For `dev`/`start`, this is the Atlas base port. |
+| `--port <port>` | serving commands | role default | Role bind port. For `dev`, this is the Atlas base port. |
 | `--host <host>` | browser serving commands | `0.0.0.0` | Browser app bind host |
-| `--api-port <port>` | `dev`, `start`, `api` | `port + 2` | API/auth/docs/WebSocket port |
-| `--api-host <host>` | `dev`, `start`, `api` | `--host` | API bind host |
+| `--api-port <port>` | `dev`, `api` | `port + 2` | API/auth/docs/WebSocket port |
+| `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
-| `--atlas-public-origin <origin>` | `dev`, `start`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
-| `--sentinel-public-origin <origin>` | `dev`, `start`, `api`, `sentinel` | dev: `http://localhost:<port+3>` | Public Sentinel UI origin |
-| `--app-public-origin <origin>` | `dev`, `start`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
+| `--atlas-public-origin <origin>` | `dev`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
+| `--sentinel-public-origin <origin>` | `dev`, `api`, `sentinel` | dev: `http://localhost:<port+3>` | Public Sentinel UI origin |
+| `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
 | `--outdir <path>` | `build` | `.pario/dist` | Build output directory |
 
 ## Usage
@@ -81,9 +80,6 @@ pario check
 # Run storage migrations
 pario db migrate
 
-# Convenience supervisor that starts the production roles as child processes
-pario start
-
 # Scaffold a new project
 pario create my-project
 cd my-project && bun install && pario dev
@@ -94,14 +90,10 @@ pario init .
 
 `pario dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, functions, rules, and queue workers can scale and fail independently.
 
-`pario start` is a local or single-node convenience supervisor. It starts the same production role
-commands as child processes and shuts them down together, but each role still runs in its own OS
-process. Use the individual role commands with Docker, Kubernetes, systemd, or other process
-managers.
-
 `pario api`, worker/runtime role commands, and `pario dev` run adapter migrations and lake
 definition compatibility checks before starting their role when the configured adapters expose
-migration support. `pario start` relies on those child role commands for the same checks.
+migration support. Production deployments can also run `pario db migrate` as a dedicated release
+step before starting roles.
 
 `pario dev` uses separated local ports by default:
 

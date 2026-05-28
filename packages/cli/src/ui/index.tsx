@@ -178,7 +178,6 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           },
           { label: "check", value: "Validate project configuration and health" },
           { label: "build", value: "Build runtime and production UI/app assets" },
-          { label: "start", value: "Start production role supervisor" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
           { label: "init [dir]", value: "Initialize pario project in directory" },
           { label: "create <name>", value: "Create a new pario project" },
@@ -190,7 +189,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
         labelWidth={22}
         items={[
           { label: "--entry <path>", value: "Entry file (default: pario.config.ts)" },
-          { label: "--port <port>", value: "Role port; dev/start use Atlas base port" },
+          { label: "--port <port>", value: "Role port; dev uses Atlas base port" },
           { label: "--host <host>", value: "Browser app bind host (default: 0.0.0.0)" },
           { label: "--api-port <port>", value: "API port (default: Atlas port + 2)" },
           { label: "--api-host <host>", value: "API bind host (default: --host)" },
