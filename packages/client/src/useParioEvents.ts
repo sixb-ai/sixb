@@ -166,7 +166,7 @@ export function useParioEvents<
       wsRef.current?.close()
       wsRef.current = null
     }
-  }, [enabled, topic, typesKey, limit, reconnect, reconnectDelayMs, afterCursor])
+  }, [enabled, topic, typesKey, limit, reconnect, reconnectDelayMs])
 
   return state
 }
