@@ -4,9 +4,15 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { startRoleUntilBannerThenStop } from "./shared/cli-process"
 
+// These boot a full production role (a long-running bun runtime) and wait for it
+// to start, so they live as e2e tests: `bun test` skips `*.e2e.ts`, keeping them
+// out of the heavily parallel unit run where subprocess cold-starts get starved.
+
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "pario.config.ts")
+
+const ROLE_TIMEOUT_MS = 30_000
 
 const tempDirs: string[] = []
 
@@ -41,35 +47,43 @@ const backgroundRoles: Array<{ name: string; command: readonly string[] }> = [
 
 describe("role startup connection budget", () => {
   for (const role of backgroundRoles) {
-    test(`pario ${role.name} starts without migrating storage or touching lake storage`, async () => {
-      const { bannerSeen, logEntries } = await startRole(role.command)
+    test(
+      `pario ${role.name} starts without migrating storage or touching lake storage`,
+      async () => {
+        const { bannerSeen, logEntries } = await startRole(role.command)
 
-      expect(bannerSeen).toBe(true)
-      // Production roles do not stampede storage migrations at startup; that is a
-      // dedicated `pario db migrate` release step.
-      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
-      // Roles do not open the lake catalog at startup either.
-      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
-    })
+        expect(bannerSeen).toBe(true)
+        // Production roles do not stampede storage migrations at startup; that is a
+        // dedicated `pario db migrate` release step.
+        expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+        // Roles do not open the lake catalog at startup either.
+        expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+      },
+      ROLE_TIMEOUT_MS
+    )
   }
 
-  test("pario api starts without migrating storage or touching lake storage", async () => {
-    const { bannerSeen, logEntries } = await startRole([
-      "api",
-      "--port",
-      "47821",
-      "--api-port",
-      "47822",
-      "--api-public-origin",
-      "http://localhost:47822",
-      "--atlas-public-origin",
-      "http://localhost:47821",
-      "--sentinel-public-origin",
-      "http://localhost:47823",
-    ])
+  test(
+    "pario api starts without migrating storage or touching lake storage",
+    async () => {
+      const { bannerSeen, logEntries } = await startRole([
+        "api",
+        "--port",
+        "47821",
+        "--api-port",
+        "47822",
+        "--api-public-origin",
+        "http://localhost:47822",
+        "--atlas-public-origin",
+        "http://localhost:47821",
+        "--sentinel-public-origin",
+        "http://localhost:47823",
+      ])
 
-    expect(bannerSeen).toBe(true)
-    expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
-    expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
-  })
+      expect(bannerSeen).toBe(true)
+      expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
+      expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+    },
+    ROLE_TIMEOUT_MS
+  )
 })
