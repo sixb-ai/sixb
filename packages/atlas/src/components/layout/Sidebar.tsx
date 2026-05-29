@@ -1,6 +1,8 @@
 import { client, type ProjectInfo } from "@pario/client"
+import { getAuthSessionOptions, signOutMutation } from "@pario/client/hooks"
 import {
   Sidebar as ShadcnSidebar,
+  SidebarCollapseToggle,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -11,17 +13,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  ThemeSwitcher,
-  useSidebar,
+  SidebarUserMenu,
 } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Box,
   Cable,
-  ChevronsLeft,
-  ChevronsRight,
   Database,
-  ExternalLink,
+  Globe,
   LayoutGrid,
   ListChecks,
   RefreshCw,
@@ -62,7 +61,6 @@ function apiDocsUrl(): string {
 
 interface SidebarProps {
   selectedProject: ProjectInfo | null
-  connected: boolean
   viewMode: ViewMode
   onViewChange: (mode: ViewMode) => void
   datasetCount?: number
@@ -76,7 +74,6 @@ interface SidebarProps {
 
 export function Sidebar({
   selectedProject,
-  connected,
   viewMode,
   onViewChange,
   datasetCount,
@@ -98,47 +95,35 @@ export function Sidebar({
     return undefined
   }
 
+  const session = useQuery(getAuthSessionOptions()).data
+  const signOut = useMutation(signOutMutation())
+  const user =
+    session?.authenticated === true
+      ? {
+          name: session.user.displayName ?? session.user.email,
+          email: session.user.displayName ? session.user.email : undefined,
+          avatarUrl: session.user.avatarUrl,
+        }
+      : null
+  const handleSignOut = () => {
+    signOut.mutate({}, { onSettled: () => window.location.reload() })
+  }
+
   return (
     <ShadcnSidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border">
         <div className="flex items-center gap-3 px-2 py-2 group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:justify-center">
-          {/* Avatar */}
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sm font-semibold text-sidebar-accent-foreground">
-            {selectedProject ? selectedProject.name[0]?.toUpperCase() : "P"}
+          {/* App icon */}
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-accent-foreground">
+            <Globe className="h-4 w-4" />
           </div>
-          {/* Name + status */}
+          {/* App name + project slug */}
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-            {selectedProject ? (
-              <>
-                <p className="truncate text-sm font-semibold text-sidebar-foreground">
-                  {selectedProject.name}
-                </p>
-                <p className="truncate text-xs text-sidebar-foreground">{selectedProject.type}</p>
-              </>
-            ) : (
-              <p className="text-sm font-medium text-sidebar-foreground">Loading…</p>
-            )}
+            <p className="truncate text-sm font-semibold text-sidebar-foreground">Atlas</p>
+            <p className="truncate text-xs text-sidebar-foreground">
+              {selectedProject ? selectedProject.name : "Loading project"}
+            </p>
           </div>
-          {/* Connection dot */}
-          {selectedProject ? (
-            <div
-              className="relative flex h-2 w-2 shrink-0 group-data-[collapsible=icon]:hidden"
-              title={connected ? "Live" : "Disconnected"}
-            >
-              <span
-                className={cn(
-                  "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
-                  connected ? "bg-emerald-500" : "bg-red-500"
-                )}
-              />
-              <span
-                className={cn(
-                  "relative inline-flex h-2 w-2 rounded-full",
-                  connected ? "bg-emerald-500" : "bg-red-500"
-                )}
-              />
-            </div>
-          ) : null}
         </div>
       </SidebarHeader>
 
@@ -181,40 +166,10 @@ export function Sidebar({
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        <div className="flex items-center justify-between gap-2 px-2 group-data-[collapsible=icon]:hidden">
-          <ThemeSwitcher />
-          <a
-            href={apiDocsUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            API
-          </a>
-        </div>
+        <SidebarUserMenu user={user} apiHref={apiDocsUrl()} onSignOut={handleSignOut} />
       </SidebarFooter>
 
       <SidebarRail />
     </ShadcnSidebar>
-  )
-}
-
-function SidebarCollapseToggle() {
-  const { state, toggleSidebar } = useSidebar()
-  const collapsed = state === "collapsed"
-  const label = collapsed ? "Expand sidebar" : "Collapse sidebar"
-  const Icon = collapsed ? ChevronsRight : ChevronsLeft
-
-  return (
-    <SidebarMenuButton
-      onClick={toggleSidebar}
-      tooltip={`${label} (⌘B)`}
-      aria-label={label}
-      className="text-sidebar-foreground"
-    >
-      <Icon />
-      <span>{label}</span>
-    </SidebarMenuButton>
   )
 }

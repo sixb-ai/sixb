@@ -282,7 +282,7 @@ export function ProjectWorkspace() {
     [resolvedProjectName]
   )
 
-  const { connected } = useParioEvents({
+  useParioEvents({
     topic: "telemetry",
     types: ["telemetry.appended"],
     enabled: Boolean(resolvedProjectName),
@@ -303,7 +303,6 @@ export function ProjectWorkspace() {
       pipelineCount: pipelines.length,
       ruleCount: rules.length,
       ontologyCount: objectTypes.length,
-      connected,
     })
   }, [
     globalObjectCountQuery.data,
@@ -314,7 +313,6 @@ export function ProjectWorkspace() {
     pipelines.length,
     rules.length,
     objectTypes.length,
-    connected,
     setSidebarData,
   ])
 

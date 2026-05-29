@@ -10,6 +10,11 @@ export {
   CollectionViewToggle,
 } from "./collection-view"
 export { EmptyState } from "./empty-state"
+export {
+  SidebarCollapseToggle,
+  type SidebarUser,
+  SidebarUserMenu,
+} from "./sidebar-user-menu"
 export { ThemeSwitcher } from "./theme-switcher"
 export { Alert, AlertDescription, AlertTitle } from "./ui/alert"
 export { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
