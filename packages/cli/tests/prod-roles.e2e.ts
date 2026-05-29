@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { startRoleUntilBannerThenStop } from "./shared/cli-process"
+import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // These boot a full production role (a long-running bun runtime) and wait for it
 // to start, so they live as e2e tests: `bun test` skips `*.e2e.ts`, keeping them
@@ -30,7 +30,7 @@ async function startRole(args: readonly string[]) {
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
-  return startRoleUntilBannerThenStop({
+  return startRoleUntilReadyThenStop({
     cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry],
     cwd: repoRoot,
     logPath,
@@ -50,9 +50,9 @@ describe("role startup connection budget", () => {
     test(
       `pario ${role.name} starts without migrating storage or touching lake storage`,
       async () => {
-        const { bannerSeen, logEntries } = await startRole(role.command)
+        const { ready, logEntries } = await startRole(role.command)
 
-        expect(bannerSeen).toBe(true)
+        expect(ready).toBe(true)
         // Production roles do not stampede storage migrations at startup; that is a
         // dedicated `pario db migrate` release step.
         expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
@@ -66,7 +66,7 @@ describe("role startup connection budget", () => {
   test(
     "pario api starts without migrating storage or touching lake storage",
     async () => {
-      const { bannerSeen, logEntries } = await startRole([
+      const { ready, logEntries } = await startRole([
         "api",
         "--port",
         "47821",
@@ -80,7 +80,7 @@ describe("role startup connection budget", () => {
         "http://localhost:47823",
       ])
 
-      expect(bannerSeen).toBe(true)
+      expect(ready).toBe(true)
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
     },

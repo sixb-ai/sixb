@@ -68,23 +68,36 @@ class TrackingLakeStorage extends InMemoryLakeStorage {
   }
 }
 
+// Wraps a queue so the first `claim` poll logs which worker type came online.
+// Workers poll their queue immediately on start, so this reveals exactly which
+// workers a `worker-group` invocation booted — without relying on Ink output.
+function claimLoggingQueue<T extends object>(queue: T, workerType: string): T {
+  let logged = false
+  return new Proxy(queue, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver)
+      if (prop === "claim" && typeof value === "function") {
+        return (...args: unknown[]) => {
+          if (!logged) {
+            logged = true
+            logFixtureEvent({ type: "claim", workerType })
+          }
+          return (value as (...a: unknown[]) => unknown).apply(target, args)
+        }
+      }
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
+
 // Not an `InMemoryQueues` instance, so it passes the shared-queue guard while
 // still backed by real in-memory queues for the workers to poll.
 class SharedQueues implements Queues {
   private readonly inner = new InMemoryQueues()
-
-  get syncRuns() {
-    return this.inner.syncRuns
-  }
-  get pipelines() {
-    return this.inner.pipelines
-  }
-  get projections() {
-    return this.inner.projections
-  }
-  get workflows() {
-    return this.inner.workflows
-  }
+  readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")
+  readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")
+  readonly projections = claimLoggingQueue(this.inner.projections, "projection")
+  readonly workflows = claimLoggingQueue(this.inner.workflows, "workflow")
 
   async close(): Promise<void> {
     logFixtureEvent({ type: "queues:close" })

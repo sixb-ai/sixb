@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@pario/action-worker"
 import { assertLakeDatasetDefinitionsCompatible, migrateStorage } from "@pario/core"
 import {
@@ -270,6 +271,15 @@ function formatRouteDiagnosticWarning(diagnostic: CompileRoutesDiagnostic): stri
 }
 
 export async function runUntilSignal(onShutdown: () => Promise<void>): Promise<void> {
+  // Test-only readiness hook: e2e tests detect that a long-running role finished
+  // starting by watching for this marker. It avoids depending on Ink's rendered
+  // output, which is suppressed when stdout is not a TTY (e.g. under CI). Unset in
+  // production, so this is a no-op there.
+  const readyLog = process.env.PARIO_CLI_TEST_READY_LOG
+  if (readyLog) {
+    appendFileSync(readyLog, `${JSON.stringify({ type: "role:ready" })}\n`, "utf-8")
+  }
+
   await new Promise<void>((resolvePromise) => {
     let shuttingDown = false
 
