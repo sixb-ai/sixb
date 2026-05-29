@@ -8,7 +8,6 @@ export interface ProjectSidebarData {
   pipelineCount: number
   ruleCount: number
   ontologyCount: number
-  connected: boolean
 }
 
 export const SidebarDataContext = createContext<{

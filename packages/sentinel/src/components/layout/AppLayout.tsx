@@ -25,14 +25,11 @@ export function AppLayout() {
     enabled: projectQuery.isSuccess,
   })
 
-  const selectedProject = projectQuery.data
-    ? { name: projectQuery.data.id, type: projectQuery.data.type }
-    : null
+  const selectedProject = projectQuery.data ? { name: projectQuery.data.id } : null
   const viewMode = getViewModeFromPath(location.pathname)
   const sidebar = (
     <Sidebar
       selectedProject={selectedProject}
-      connected={projectQuery.isSuccess}
       viewMode={viewMode}
       onViewChange={(mode) => navigate(mode === "workflows" ? "/" : "/runs")}
       workflowCount={workflowsQuery.data?.length}

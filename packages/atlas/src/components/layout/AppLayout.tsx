@@ -17,12 +17,7 @@ export function AppLayout() {
     retry: false,
   })
 
-  const selectedProject = projectInfo
-    ? {
-        name: projectInfo.id,
-        type: projectInfo.type,
-      }
-    : null
+  const selectedProject = projectInfo ? { name: projectInfo.id } : null
   const viewMode = getViewModeFromPath(location.pathname)
 
   const handleViewChange = (mode: ViewMode) => {
@@ -40,7 +35,6 @@ export function AppLayout() {
   const sidebar = (
     <Sidebar
       selectedProject={selectedProject}
-      connected={sidebarData?.connected ?? false}
       viewMode={viewMode}
       onViewChange={handleViewChange}
       objectCount={sidebarData?.objectCount}

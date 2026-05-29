@@ -1,6 +1,8 @@
 import { client } from "@pario/client"
+import { getAuthSessionOptions, signOutMutation } from "@pario/client/hooks"
 import {
   Sidebar as ShadcnSidebar,
+  SidebarCollapseToggle,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -11,25 +13,16 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  ThemeSwitcher,
-  useSidebar,
+  SidebarUserMenu,
 } from "@pario/ui/components"
-import { cn } from "@pario/ui/lib/utils"
-import {
-  Activity,
-  ChevronsLeft,
-  ChevronsRight,
-  ExternalLink,
-  GitBranch,
-  History,
-} from "lucide-react"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import { Activity, GitBranch, History } from "lucide-react"
 import type { ComponentType } from "react"
 
 export type ViewMode = "workflows" | "runs"
 
 interface ProjectSummary {
   readonly name: string
-  readonly type: string
 }
 
 interface NavItem {
@@ -49,7 +42,6 @@ function apiDocsUrl(): string {
 
 interface SidebarProps {
   selectedProject: ProjectSummary | null
-  connected: boolean
   viewMode: ViewMode
   onViewChange: (mode: ViewMode) => void
   workflowCount?: number
@@ -58,7 +50,6 @@ interface SidebarProps {
 
 export function Sidebar({
   selectedProject,
-  connected,
   viewMode,
   onViewChange,
   workflowCount,
@@ -68,6 +59,20 @@ export function Sidebar({
     if (id === "workflows") return workflowCount
     if (id === "runs") return runCount
     return undefined
+  }
+
+  const session = useQuery(getAuthSessionOptions()).data
+  const signOut = useMutation(signOutMutation())
+  const user =
+    session?.authenticated === true
+      ? {
+          name: session.user.displayName ?? session.user.email,
+          email: session.user.displayName ? session.user.email : undefined,
+          avatarUrl: session.user.avatarUrl,
+        }
+      : null
+  const handleSignOut = () => {
+    signOut.mutate({}, { onSettled: () => window.location.reload() })
   }
 
   return (
@@ -80,30 +85,9 @@ export function Sidebar({
           <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
             <p className="truncate text-sm font-semibold text-sidebar-foreground">Sentinel</p>
             <p className="truncate text-xs text-sidebar-foreground">
-              {selectedProject
-                ? `${selectedProject.name} · ${selectedProject.type}`
-                : "Loading project"}
+              {selectedProject ? selectedProject.name : "Loading project"}
             </p>
           </div>
-          {selectedProject ? (
-            <div
-              className="relative flex h-2 w-2 shrink-0 group-data-[collapsible=icon]:hidden"
-              title={connected ? "API ready" : "Disconnected"}
-            >
-              <span
-                className={cn(
-                  "absolute inline-flex h-full w-full animate-ping rounded-full opacity-75",
-                  connected ? "bg-emerald-500" : "bg-red-500"
-                )}
-              />
-              <span
-                className={cn(
-                  "relative inline-flex h-2 w-2 rounded-full",
-                  connected ? "bg-emerald-500" : "bg-red-500"
-                )}
-              />
-            </div>
-          ) : null}
         </div>
       </SidebarHeader>
 
@@ -145,40 +129,10 @@ export function Sidebar({
       </SidebarContent>
 
       <SidebarFooter className="border-t border-sidebar-border">
-        <div className="flex items-center justify-between gap-2 px-2 group-data-[collapsible=icon]:hidden">
-          <ThemeSwitcher />
-          <a
-            href={apiDocsUrl()}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-xs text-sidebar-foreground transition-colors hover:text-sidebar-accent-foreground"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            API
-          </a>
-        </div>
+        <SidebarUserMenu user={user} apiHref={apiDocsUrl()} onSignOut={handleSignOut} />
       </SidebarFooter>
 
       <SidebarRail />
     </ShadcnSidebar>
-  )
-}
-
-function SidebarCollapseToggle() {
-  const { state, toggleSidebar } = useSidebar()
-  const collapsed = state === "collapsed"
-  const label = collapsed ? "Expand sidebar" : "Collapse sidebar"
-  const Icon = collapsed ? ChevronsRight : ChevronsLeft
-
-  return (
-    <SidebarMenuButton
-      onClick={toggleSidebar}
-      tooltip={`${label} (⌘B)`}
-      aria-label={label}
-      className="text-sidebar-foreground"
-    >
-      <Icon />
-      <span>{label}</span>
-    </SidebarMenuButton>
   )
 }
