@@ -1,7 +1,6 @@
 import type { LoadedPario } from "../lib/loadPario"
 import { loadProductionPario } from "../lib/production"
 import {
-  prepareParioRuntime,
   type RunningRulesRuntime,
   runUntilSignal,
   startRulesRuntime,
@@ -26,7 +25,6 @@ export async function runRules(options: RulesOptions = {}) {
   let runtime: RunningRulesRuntime | null = null
 
   try {
-    await prepareParioRuntime(pario)
     runtime = await startRulesRuntime(pario)
 
     const warnings =

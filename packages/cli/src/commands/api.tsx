@@ -4,12 +4,7 @@ import { createParioServer, type ParioServer } from "@pario/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedPario } from "../lib/loadPario"
 import { builtAppOutdir, loadProductionPario } from "../lib/production"
-import {
-  prepareParioRuntime,
-  runUntilSignal,
-  stopParioProviders,
-  stopQuietly,
-} from "../lib/runtime"
+import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
 export interface ApiOptions {
@@ -37,8 +32,6 @@ export async function runApi(options: ApiOptions = {}) {
   let server: ParioServer | null = null
 
   try {
-    await prepareParioRuntime(pario)
-
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
     const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
       .then(() => true)

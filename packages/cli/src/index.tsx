@@ -66,6 +66,9 @@ function getCommand(): string {
   if (args[0] === "db") {
     return args[1] ? `db:${args[1]}` : "db"
   }
+  if (args[0] === "lake") {
+    return args[1] ? `lake:${args[1]}` : "lake"
+  }
   return args[0] ?? "help"
 }
 
@@ -108,6 +111,15 @@ async function main(): Promise<void> {
       await runWorker({
         entry: getFlag("entry"),
         workerType: getCommandPositionals()[0],
+      })
+      break
+    }
+
+    case "worker-group": {
+      const { runWorkerGroup } = await import("./commands/worker-group")
+      await runWorkerGroup({
+        entry: getFlag("entry"),
+        workerTypes: getCommandPositionals(),
       })
       break
     }
@@ -206,6 +218,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "lake:check": {
+      const { runLakeCheck } = await import("./commands/lake-check")
+      await runLakeCheck({ entry: getFlag("entry") })
+      break
+    }
+
     case "panasonic:login": {
       try {
         // Resolve from cwd so the user's project dependencies are used, not the CLI's
@@ -246,6 +264,11 @@ async function main(): Promise<void> {
 
     case "db":
       await renderStatic(<HelpView errorMessage="Usage: pario db <migrate>" />)
+      process.exit(1)
+      break
+
+    case "lake":
+      await renderStatic(<HelpView errorMessage="Usage: pario lake <check>" />)
       process.exit(1)
       break
 

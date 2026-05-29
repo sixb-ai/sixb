@@ -21,10 +21,12 @@ bun add @pario/cli
 | `pario orchestrator` | Start the production event-to-queue dispatcher |
 | `pario functions` | Start registered functions |
 | `pario rules` | Start rules evaluation |
-| `pario worker <type>` | Start a production queue worker |
+| `pario worker <type>` | Start a production queue worker (one queue type per process) |
+| `pario worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
 | `pario check` | Validate project configuration and provider health |
 | `pario build` | Bundle the project runtime, custom app, Atlas assets, and Sentinel assets |
 | `pario db migrate` | Run adapter-owned database migrations for the configured storage |
+| `pario lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `pario init [dir]` | Initialize a new pario project in a directory |
 | `pario create <name>` | Scaffold a new pario project from the built-in template |
 | `pario help` | Show help |
@@ -80,6 +82,9 @@ pario check
 # Run storage migrations
 pario db migrate
 
+# Check lake dataset definitions for drift during deploy
+pario lake check
+
 # Scaffold a new project
 pario create my-project
 cd my-project && bun install && pario dev
@@ -90,10 +95,56 @@ pario init .
 
 `pario dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, functions, rules, and queue workers can scale and fail independently.
 
-`pario api`, worker/runtime role commands, and `pario dev` run adapter migrations and lake
-definition compatibility checks before starting their role when the configured adapters expose
-migration support. Production deployments can also run `pario db migrate` as a dedicated release
-step before starting roles.
+### Release order
+
+Run deployment checks as explicit release steps, then start the services. This keeps service
+startup cheap and role-local: roles no longer open the lake catalog at boot, so starting every
+process at once (e.g. with PM2) does not stampede a Postgres-backed DuckLake catalog.
+
+```bash
+pario build        # bundle runtime and UI/app assets
+pario db migrate   # run adapter-owned storage migrations
+pario lake check   # verify lake dataset definitions are compatible with the catalog
+pm2 start ecosystem.config.cjs
+```
+
+`pario lake check` is the single place that attaches the lake and validates every dataset
+definition during deploy. Service commands (`api`, `scheduler`, `orchestrator`, `functions`,
+`rules`, `worker`, `worker-group`) no longer run lake checks or storage migrations at startup, so
+starting them together does not stampede shared infrastructure. Run `pario db migrate` as a
+required release step before starting roles — `pario dev` still migrates in-process for local use.
+
+The lake is opened only when a role actually does lake work — API dataset routes, sync jobs,
+pipeline jobs, and projection jobs. Write paths re-validate their target dataset through the lake
+provider's `createDataset` before committing, so drift still fails clearly even between deploys.
+
+### Production topologies
+
+Both layouts are valid; choose based on the deployment's Postgres/DuckLake connection budget.
+
+**Scaled** — one process per queue type, each independently scalable with its own lake pool:
+
+```bash
+pario api
+pario scheduler
+pario orchestrator
+pario worker sync
+pario worker pipeline
+pario worker projection
+```
+
+**Constrained** — co-host the queue workers in one process to shrink the provider footprint
+(one lake pool instead of one per worker), trading per-worker event-loop isolation:
+
+```bash
+pario api
+pario scheduler
+pario orchestrator
+pario worker-group sync pipeline projection
+```
+
+`pario worker-group` with no positional types starts every registered queue worker type in one
+process.
 
 `pario dev` uses separated local ports by default:
 
@@ -112,5 +163,7 @@ requires `PARIO_API_PUBLIC_ORIGIN`, `PARIO_ATLAS_PUBLIC_ORIGIN`,
 before starting them. They fail with a clear error instead of compiling assets at startup.
 
 `pario worker <type>` is intended for queue backends that can be shared across processes. Each
-worker process owns exactly one queue type. With the built-in `InMemoryQueues`, use `pario dev`,
-which co-hosts workers in-process.
+worker process owns exactly one queue type. `pario worker-group [types...]` co-hosts several queue
+workers in a single process for constrained deployments; with no positional types it starts every
+registered worker type. Both reject the built-in `InMemoryQueues` — use `pario dev`, which co-hosts
+workers in-process.

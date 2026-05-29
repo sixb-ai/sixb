@@ -1,7 +1,6 @@
 import type { LoadedPario } from "../lib/loadPario"
 import { loadProductionPario } from "../lib/production"
 import {
-  prepareParioRuntime,
   type RunningOrchestratorRuntime,
   runUntilSignal,
   startOrchestratorRuntime,
@@ -30,7 +29,6 @@ export async function runOrchestrator(options: OrchestratorOptions = {}) {
   let runtime: RunningOrchestratorRuntime | null = null
 
   try {
-    await prepareParioRuntime(pario)
     runtime = await startOrchestratorRuntime(pario)
 
     const warnings = [...runtime.warnings]

@@ -176,9 +176,14 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
             label: "worker <type>",
             value: "Start production queue worker: sync, action, pipeline, projection, workflow",
           },
+          {
+            label: "worker-group [types...]",
+            value: "Co-host multiple queue workers in one process (constrained resources)",
+          },
           { label: "check", value: "Validate project configuration and health" },
           { label: "build", value: "Build runtime and production UI/app assets" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
+          { label: "lake check", value: "Check lake dataset definitions for drift" },
           { label: "init [dir]", value: "Initialize pario project in directory" },
           { label: "create <name>", value: "Create a new pario project" },
         ]}
@@ -219,9 +224,11 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "pario rules",
           "pario worker pipeline",
           "pario worker workflow",
+          "pario worker-group sync pipeline projection",
           "pario dev --entry examples/mac-os/pario.config.ts --port 8080",
           "pario check",
           "pario db migrate",
+          "pario lake check",
           "pario create my-project",
         ]}
       />
@@ -424,6 +431,39 @@ export function WorkerView({
   )
 }
 
+export function WorkerGroupView({
+  name,
+  workerTypes,
+  warnings = [],
+}: {
+  name: string
+  workerTypes: readonly string[]
+  warnings?: readonly string[]
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        Pario worker group started
+      </Text>
+      <Text dimColor>{name}</Text>
+      <Spacer />
+      <ServicePanel
+        name="Workers"
+        items={workerTypes.map((workerType) => ({ label: workerType, value: "running" }))}
+      />
+      {warnings.length > 0 ? (
+        <>
+          <Spacer />
+          <SectionTitle>Warnings</SectionTitle>
+          <BulletList items={warnings} />
+        </>
+      ) : null}
+      <Spacer />
+      <Text dimColor>Press Ctrl+C to stop</Text>
+    </Box>
+  )
+}
+
 export function RoleView({
   title,
   name,
@@ -576,6 +616,19 @@ export function DbMigrateView({
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <KeyValueList items={[{ label: "Storage", value: status }]} />
+    </Box>
+  )
+}
+
+export function LakeCheckView({ projectId, status }: { projectId: string; status: "ok" }) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        Lake definitions compatible
+      </Text>
+      <Text dimColor>{projectId}</Text>
+      <Spacer />
+      <KeyValueList items={[{ label: "Lake", value: status }]} />
     </Box>
   )
 }

@@ -1,18 +1,17 @@
-import { InMemoryQueues, type Worker } from "@pario/core"
+import type { Worker } from "@pario/core"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
 import { resolveRuntimeEntry } from "../lib/production"
-import { prepareParioRuntime, runUntilSignal, stopQuietly } from "../lib/runtime"
-import { createWorkerForType, resolveWorkerTypeToStart } from "../lib/worker-registry"
+import { runUntilSignal, stopQuietly } from "../lib/runtime"
+import {
+  createWorkerForType,
+  resolveWorkerTypeToStart,
+  usesInMemoryQueues,
+} from "../lib/worker-registry"
 import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } from "../ui"
 
 export interface WorkerOptions {
   entry?: string
   workerType?: string
-}
-
-function usesInMemoryQueues(pario: LoadedPario): boolean {
-  const queues = pario.queues as { constructor?: { name?: string }; provider?: unknown }
-  return queues instanceof InMemoryQueues || queues.provider === "in-memory"
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
@@ -36,11 +35,6 @@ export async function runWorker(options: WorkerOptions = {}) {
         "[ParioWorker] `pario worker` requires a queue provider that can be shared across processes. `InMemoryQueues` is for `pario dev` only."
       )
     }
-
-    app.rerender(
-      <LoadingView title="Starting pario worker" subtitle={entry} status="Running migrations" />
-    )
-    await prepareParioRuntime(pario)
 
     app.rerender(
       <LoadingView title="Starting pario worker" subtitle={entry} status="Starting worker" />

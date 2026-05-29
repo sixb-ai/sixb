@@ -58,8 +58,11 @@ export interface RunningOrchestratorRuntime {
   stop(): Promise<void>
 }
 
-export async function prepareParioRuntime(pario: LoadedPario): Promise<void> {
+export async function migrateRuntimeStorage(pario: LoadedPario): Promise<void> {
   await migrateStorage(pario.storage)
+}
+
+export async function checkRuntimeLakeDefinitions(pario: LoadedPario): Promise<void> {
   await assertLakeDatasetDefinitionsCompatible({
     lakeStorage: pario.lakeStorage,
     definitions: pario.getDatasetDefinitions(),
@@ -172,7 +175,8 @@ export async function startParioRuntime(
   pario: LoadedPario,
   options: StartParioRuntimeOptions = {}
 ): Promise<RunningParioRuntime> {
-  await prepareParioRuntime(pario)
+  await migrateRuntimeStorage(pario)
+  await checkRuntimeLakeDefinitions(pario)
 
   let rulesRuntime: RunningRulesRuntime | null = null
   let functionsRuntime: RunningFunctionsRuntime | null = null

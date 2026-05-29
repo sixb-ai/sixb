@@ -27,6 +27,8 @@ import {
   type StorageMigrator,
 } from "@pario/core"
 import {
+  checkRuntimeLakeDefinitions,
+  migrateRuntimeStorage,
   startFunctionsRuntime,
   startOrchestratorRuntime,
   startParioRuntime,
@@ -910,6 +912,136 @@ describe("split production runtime roles", () => {
     expect(calls).toEqual([])
   })
 })
+
+describe("split runtime preparation", () => {
+  test("migrateRuntimeStorage runs storage migrations without touching lake storage", async () => {
+    const calls: string[] = []
+    const migrator: StorageMigrator = {
+      adapterId: "FixtureStorage",
+      latestVersion: 1,
+      async plan() {
+        throw new Error("plan should not run")
+      },
+      async migrate() {
+        calls.push("storage")
+        return {
+          adapterId: "FixtureStorage",
+          latestVersion: 1,
+          status: "migrated",
+          applied: ["001-fixture"],
+          skipped: [],
+        }
+      },
+    }
+    const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
+    const lakeStorage = new LakeAccessTrackingStorage(calls)
+
+    const pario = new Pario({
+      id: "cli-migrate-runtime-storage",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage,
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [rawOrdersDataset],
+    })
+
+    await migrateRuntimeStorage(pario)
+
+    expect(calls).toEqual(["storage"])
+  })
+
+  test("checkRuntimeLakeDefinitions reports incompatible lake definitions", async () => {
+    const lakeStorage = createLakeStorage()
+    await lakeStorage.createDataset(rawOrdersDataset)
+
+    const changedDataset = defineDataset("raw.erp.orders", {
+      schema: [
+        col("orderId", "string", { nullable: true }),
+        col("currency", "string", { nullable: true }),
+      ],
+    })
+    const pario = new Pario({
+      id: "cli-check-lake-definitions-drift",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [changedDataset],
+    })
+
+    await expect(checkRuntimeLakeDefinitions(pario)).rejects.toThrow(
+      "Lake dataset definition check failed"
+    )
+  })
+
+  test("checkRuntimeLakeDefinitions passes when definitions are compatible", async () => {
+    const lakeStorage = createLakeStorage()
+    await lakeStorage.createDataset(rawOrdersDataset)
+
+    const pario = new Pario({
+      id: "cli-check-lake-definitions-ok",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      datasets: [rawOrdersDataset],
+    })
+
+    await checkRuntimeLakeDefinitions(pario)
+  })
+
+  test("service startup helpers can start without calling lake storage", async () => {
+    const calls: string[] = []
+    const pario = new Pario({
+      id: "cli-startup-without-lake-access",
+      ontology: [Transaction],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new LakeAccessTrackingStorage(calls),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      rules: [postedRule],
+    })
+
+    const rules = await startRulesRuntime(pario)
+    const functions = await startFunctionsRuntime(pario)
+    const scheduler = await startSchedulerRuntime(pario)
+    const orchestrator = await startOrchestratorRuntime(pario)
+
+    expect(calls).toEqual([])
+
+    await orchestrator.stop()
+    await scheduler.stop()
+    await functions.stop()
+    await rules.stop()
+  })
+})
+
+class LakeAccessTrackingStorage extends InMemoryLakeStorage {
+  constructor(private readonly calls: string[]) {
+    super()
+  }
+
+  override async createDataset(
+    ...args: Parameters<InMemoryLakeStorage["createDataset"]>
+  ): ReturnType<InMemoryLakeStorage["createDataset"]> {
+    this.calls.push("lake:createDataset")
+    return super.createDataset(...args)
+  }
+
+  override async getDataset(
+    ...args: Parameters<InMemoryLakeStorage["getDataset"]>
+  ): ReturnType<InMemoryLakeStorage["getDataset"]> {
+    this.calls.push("lake:getDataset")
+    return super.getDataset(...args)
+  }
+}
 
 class LifecycleBroker extends InMemoryBroker {
   constructor(private readonly calls: string[]) {

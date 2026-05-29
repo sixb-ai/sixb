@@ -1,7 +1,6 @@
 import type { LoadedPario } from "../lib/loadPario"
 import { loadProductionPario } from "../lib/production"
 import {
-  prepareParioRuntime,
   type RunningFunctionsRuntime,
   runUntilSignal,
   startFunctionsRuntime,
@@ -30,7 +29,6 @@ export async function runFunctions(options: FunctionsOptions = {}) {
   let runtime: RunningFunctionsRuntime | null = null
 
   try {
-    await prepareParioRuntime(pario)
     runtime = await startFunctionsRuntime(pario)
 
     app.rerender(
