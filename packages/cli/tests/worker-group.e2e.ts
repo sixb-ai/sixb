@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { startRoleUntilBannerThenStop } from "./shared/cli-process"
+import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // These boot worker processes and wait for them to start, so they live as e2e
 // tests: `bun test` skips `*.e2e.ts`, keeping them out of the heavily parallel
@@ -16,6 +16,8 @@ function fixtureEntry(name: string): string {
 }
 
 const WORKER_GROUP_TIMEOUT_MS = 30_000
+// Give the started worker poll loops time to claim their queues at least once.
+const CLAIM_GRACE_MS = 1_500
 
 const tempDirs: string[] = []
 
@@ -33,27 +35,31 @@ async function startThenStop(args: readonly string[], fixture: string) {
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
-  return startRoleUntilBannerThenStop({
+  return startRoleUntilReadyThenStop({
     cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry(fixture)],
     cwd: repoRoot,
     logPath,
+    graceMs: CLAIM_GRACE_MS,
   })
+}
+
+function claimedWorkerTypes(logEntries: Array<Record<string, unknown>>): Set<string> {
+  return new Set(
+    logEntries.filter((entry) => entry.type === "claim").map((entry) => entry.workerType as string)
+  )
 }
 
 describe("pario worker-group (e2e)", () => {
   test(
     "starts all registered worker types by default",
     async () => {
-      const { bannerSeen, stdout, logEntries } = await startThenStop(
-        ["worker-group"],
-        "worker-group"
-      )
+      const { ready, logEntries } = await startThenStop(["worker-group"], "worker-group")
 
-      expect(bannerSeen).toBe(true)
-      expect(stdout).toContain("worker group started")
-      expect(stdout).toContain("sync")
-      expect(stdout).toContain("pipeline")
-      expect(stdout).toContain("projection")
+      expect(ready).toBe(true)
+      const claimed = claimedWorkerTypes(logEntries)
+      expect(claimed.has("sync")).toBe(true)
+      expect(claimed.has("pipeline")).toBe(true)
+      expect(claimed.has("projection")).toBe(true)
       // Does not migrate storage at startup.
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       // Clean shutdown stops queues and lake storage.
@@ -66,16 +72,13 @@ describe("pario worker-group (e2e)", () => {
   test(
     "starts only the selected worker types from positionals",
     async () => {
-      const { bannerSeen, stdout, logEntries } = await startThenStop(
-        ["worker-group", "sync"],
-        "worker-group"
-      )
+      const { ready, logEntries } = await startThenStop(["worker-group", "sync"], "worker-group")
 
-      expect(bannerSeen).toBe(true)
-      expect(stdout).toContain("worker group started")
-      expect(stdout).toContain("sync")
-      expect(stdout).not.toContain("pipeline")
-      expect(stdout).not.toContain("projection")
+      expect(ready).toBe(true)
+      const claimed = claimedWorkerTypes(logEntries)
+      expect(claimed.has("sync")).toBe(true)
+      expect(claimed.has("pipeline")).toBe(false)
+      expect(claimed.has("projection")).toBe(false)
       expect(logEntries).toContainEqual({ type: "queues:close" })
       expect(logEntries).toContainEqual({ type: "lake-storage:close" })
     },
