@@ -63,8 +63,11 @@ export function resolveRateLimitOptions(
     return false
   }
 
-  const perMinute = options?.perMinute ?? 1
-  const perHour = options?.perHour ?? 5
+  // Defaults accommodate a single user signing into multiple audiences (Atlas,
+  // Sentinel, app) in one burst. The limiter is keyed per email and shared across
+  // audiences, so the per-minute default must cover the number of browser roles.
+  const perMinute = options?.perMinute ?? 5
+  const perHour = options?.perHour ?? 20
 
   if (!Number.isInteger(perMinute) || perMinute <= 0) {
     throw new MagicLinkConfigError("Magic-link auth rateLimit.perMinute must be positive.")

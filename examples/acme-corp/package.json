@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@pario/app": "workspace:*",
-    "@pario/auth-oidc": "workspace:*",
     "@pario/blob-local": "workspace:*",
     "@pario/client": "workspace:*",
     "@pario/core": "workspace:*",

@@ -351,7 +351,11 @@ export function registerAuthRoutes(
             requestOrigin: authRedirect.requestOrigin,
           })
 
-          return htmlMessageResponse("If this email can sign in, we sent a link.")
+          return htmlMessageResponse(
+            "If this email can sign in, we sent a link. Check your inbox to continue.",
+            200,
+            "Check your email"
+          )
         }
 
         if (isOidcAuthStrategy(strategy)) {
@@ -661,37 +665,150 @@ function strategyNotImplementedResponse(message: string): Response {
   })
 }
 
+// Mirrors the Atlas/Sentinel design tokens (packages/ui/src/styles/globals.css) so the
+// server-rendered auth pages feel familiar. Self-contained: no external CSS, and dark mode
+// follows the system preference since these standalone pages have no client theme runtime.
+const AUTH_PAGE_STYLE = `<style>
+:root {
+  color-scheme: light dark;
+  --background: #fafafa;
+  --foreground: #101010;
+  --card: #ffffff;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --border: #e2e2e2;
+  --muted-foreground: #5f5f5f;
+  --ring: #0a0a0a;
+  --radius: 0.5rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #f4f4f4;
+    --card: #141414;
+    --primary: #f4f4f4;
+    --primary-foreground: #0a0a0a;
+    --border: #262626;
+    --muted-foreground: #8a8a8a;
+    --ring: #f4f4f4;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  font-family: "SF Pro Text", "SF Pro Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+.shell {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.card {
+  width: 100%;
+  max-width: 20rem;
+  /* Nudge above dead-center so the form sits a touch higher on the page. */
+  transform: translateY(-6vh);
+}
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+form { margin: 1.75rem 0 0; }
+input[type="email"] {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 0.875rem;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+}
+input[type="email"]::placeholder { color: var(--muted-foreground); }
+input[type="email"]:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 18%, transparent);
+}
+button {
+  width: 100%;
+  height: 2.5rem;
+  margin-top: 0.75rem;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--primary-foreground);
+  background: var(--primary);
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  cursor: pointer;
+}
+button:hover { opacity: 0.9; }
+button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+</style>`
+
+function authPageDocument(body: string, title = "Sign in"): string {
+  return [
+    "<!doctype html>",
+    '<html lang="en">',
+    "<head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${escapeHtml(title)}</title>`,
+    AUTH_PAGE_STYLE,
+    "</head>",
+    "<body>",
+    '<main class="shell">',
+    '<section class="card">',
+    body,
+    "</section>",
+    "</main>",
+    "</body>",
+    "</html>",
+  ].join("")
+}
+
+function authPageResponse(body: string, status = 200): Response {
+  return new Response(authPageDocument(body), {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  })
+}
+
 function signInFormResponse(context: AuthRedirectContext): Response {
-  return new Response(
+  return authPageResponse(
     [
-      "<!doctype html>",
-      '<html lang="en">',
-      "<head>",
-      '<meta charset="utf-8">',
-      '<meta name="viewport" content="width=device-width, initial-scale=1">',
-      "<title>Sign in</title>",
-      "</head>",
-      "<body>",
-      '<main style="font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem;">',
       "<h1>Sign in</h1>",
+      "<p>We'll email you a sign-in link.</p>",
       '<form method="post" action="/auth/sign-in">',
       `<input type="hidden" name="audience" value="${escapeHtml(context.audience)}">`,
       `<input type="hidden" name="returnTo" value="${escapeHtml(context.returnTo)}">`,
-      '<label for="email">Email</label>',
-      '<input id="email" name="email" type="email" autocomplete="email" required style="display: block; width: 100%; box-sizing: border-box; margin: 0.5rem 0 1rem; padding: 0.625rem;">',
+      '<input name="email" type="email" autocomplete="email" placeholder="you@example.com" aria-label="Email address" required autofocus>',
       '<button type="submit">Send sign-in link</button>',
       "</form>",
-      "</main>",
-      "</body>",
-      "</html>",
-    ].join(""),
-    {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-      },
-    }
+    ].join("")
   )
 }
 
@@ -703,30 +820,10 @@ function resolveNavigateToSources(returnTo: string): string {
   }
 }
 
-function htmlMessageResponse(message: string, status = 200): Response {
-  return new Response(
-    [
-      "<!doctype html>",
-      '<html lang="en">',
-      "<head>",
-      '<meta charset="utf-8">',
-      '<meta name="viewport" content="width=device-width, initial-scale=1">',
-      "<title>Sign in</title>",
-      "</head>",
-      "<body>",
-      '<main style="font-family: system-ui, sans-serif; max-width: 28rem; margin: 4rem auto; padding: 0 1rem;">',
-      `<p>${escapeHtml(message)}</p>`,
-      "</main>",
-      "</body>",
-      "</html>",
-    ].join(""),
-    {
-      status,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-store",
-      },
-    }
+function htmlMessageResponse(message: string, status = 200, heading?: string): Response {
+  return authPageResponse(
+    [heading ? `<h1>${escapeHtml(heading)}</h1>` : "", `<p>${escapeHtml(message)}</p>`].join(""),
+    status
   )
 }
 

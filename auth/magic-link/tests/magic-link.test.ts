@@ -47,13 +47,14 @@ async function requestMagicLink(input: {
   readonly storage: InMemoryAuthStorage
   readonly strategy: ReturnType<typeof magicLink>
   readonly email: string
+  readonly audience?: string
   readonly now?: Date
 }) {
   return input.strategy.requestMagicLink({
     projectId,
     authStorage: input.storage,
     email: input.email,
-    audience: "atlas",
+    audience: input.audience ?? "atlas",
     returnTo: "/dashboard",
     requestOrigin,
     now: input.now ?? at("2026-05-16T10:00:00.000Z"),
@@ -383,6 +384,71 @@ describe("magicLink", () => {
       })
     ).resolves.toEqual({ status: "rate_limited" })
     expect(messages).toHaveLength(5)
+  })
+
+  test("applies default rate limit of 5/minute", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      sendMagicLink,
+    })
+
+    await storage.users.create({
+      id: "usr_1",
+      projectId,
+      email: "ava@acme.com",
+    })
+
+    for (let index = 0; index < 5; index++) {
+      await expect(
+        requestMagicLink({
+          storage,
+          strategy,
+          email: "ava@acme.com",
+          now: new Date(at("2026-05-16T10:00:00.000Z").getTime() + index * 5_000),
+        })
+      ).resolves.toEqual({ status: "sent" })
+    }
+
+    await expect(
+      requestMagicLink({
+        storage,
+        strategy,
+        email: "ava@acme.com",
+        now: at("2026-05-16T10:00:30.000Z"),
+      })
+    ).resolves.toEqual({ status: "rate_limited" })
+    expect(messages).toHaveLength(5)
+  })
+
+  test("allows a multi-audience login burst under defaults", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      sendMagicLink,
+    })
+
+    await storage.users.create({
+      id: "usr_1",
+      projectId,
+      email: "ava@acme.com",
+    })
+
+    for (const audience of ["atlas", "sentinel", "app"]) {
+      await expect(
+        requestMagicLink({
+          storage,
+          strategy,
+          email: "ava@acme.com",
+          audience,
+          now: at("2026-05-16T10:00:00.000Z"),
+        })
+      ).resolves.toEqual({ status: "sent" })
+    }
+
+    expect(messages).toHaveLength(3)
   })
 
   test("revokes the created magic link if sending fails", async () => {
