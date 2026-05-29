@@ -1,5 +1,6 @@
 import type {
   BeginDatasetWriteInput,
+  DatasetCatalogState,
   DatasetDefinition,
   DatasetRow,
   DatasetVersion,
@@ -85,6 +86,12 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   async listDatasets(): Promise<readonly DatasetDefinition[]> {
     return this.datasets.listDatasets()
+  }
+
+  async listDatasetCatalogState(
+    datasetIds: readonly string[]
+  ): Promise<readonly DatasetCatalogState[]> {
+    return this.snapshotReader.listDatasetCatalogState(datasetIds)
   }
 
   async listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]> {

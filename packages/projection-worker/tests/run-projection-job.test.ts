@@ -107,6 +107,10 @@ class RecordingLakeStorage implements LakeStorage {
     return this.delegate.listDatasets()
   }
 
+  listDatasetCatalogState(datasetIds: readonly string[]) {
+    return this.delegate.listDatasetCatalogState(datasetIds)
+  }
+
   listVersions(datasetId: string, limit?: number) {
     return this.delegate.listVersions(datasetId, limit)
   }

@@ -2,6 +2,7 @@ import type {
   GetDatasetResponse,
   ListDatasetRowsResponse,
   ListDatasetsResponse,
+  ListDatasetVersionsResponse,
 } from "@pario/client"
 import {
   getDatasetOptions,
@@ -52,7 +53,10 @@ import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPrefe
 
 type Dataset = ListDatasetsResponse[number] | GetDatasetResponse
 type DatasetListItem = ListDatasetsResponse[number]
-type DatasetVersion = NonNullable<GetDatasetResponse["latestVersion"]>
+// The catalog list/detail routes return a lightweight `latestVersion` summary.
+// Full version metadata (schema, producer, sizeBytes) comes from the versions
+// route, so detail views type their versions from that response.
+type DatasetVersion = ListDatasetVersionsResponse["versions"][number]
 type DatasetColumn = Dataset["schema"]["columns"][number]
 type DatasetListViewStyle = "cards" | "table"
 
@@ -784,9 +788,10 @@ export function DatasetDetailPage() {
     }
   }, [dataset?.latestVersion?.versionId, selectedVersionId, versions])
 
+  // Full version metadata lives in the versions route; the catalog summary on
+  // `dataset.latestVersion` only drives selection defaults above.
   const selectedVersion =
-    versions.find((version) => version.versionId === selectedVersionId) ??
-    (dataset?.latestVersion?.versionId === selectedVersionId ? dataset.latestVersion : null)
+    versions.find((version) => version.versionId === selectedVersionId) ?? null
 
   const handleSelectVersion = (versionId: string) => {
     setSelectedVersionId(versionId)

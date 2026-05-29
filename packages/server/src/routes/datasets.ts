@@ -1,4 +1,11 @@
-import type { DatasetDefinition, DatasetVersion, OntologySource, Pario } from "@pario/core"
+import type {
+  DatasetCatalogState,
+  DatasetDefinition,
+  DatasetLatestVersionSummary,
+  DatasetVersion,
+  OntologySource,
+  Pario,
+} from "@pario/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -49,88 +56,104 @@ function serializeDatasetVersion(version: DatasetVersion) {
   })
 }
 
-function getDatasetReferences(pario: Pario<readonly OntologySource[]>, datasetId: string) {
-  const pipelines = pario.getPipelineDefinitions()
-  const projections = [...pario.getObjectProjections(), ...pario.getLinkProjections()]
+interface DatasetReferences {
+  readonly syncIds: string[]
+  readonly sourcePipelineIds: string[]
+  readonly targetPipelineIds: string[]
+  readonly projectionIds: string[]
+}
 
-  const syncIds = pario
-    .getSyncDefinitions()
-    .filter((sync) => sync.target.dataset.id === datasetId)
-    .map((sync) => sync.id)
+const EMPTY_DATASET_REFERENCES: DatasetReferences = {
+  syncIds: [],
+  sourcePipelineIds: [],
+  targetPipelineIds: [],
+  projectionIds: [],
+}
 
-  const sourcePipelineIds = pipelines
-    .filter((pipeline) =>
-      pipeline.graph.nodes.some((node) =>
-        Object.values(node.step.inputs).some((input) => input.id === datasetId)
-      )
-    )
-    .map((pipeline) => pipeline.id)
+/**
+ * Index dataset references in a single pass so the catalog routes never rescan
+ * syncs, pipelines, and projections once per dataset.
+ */
+function buildDatasetReferenceIndex(
+  pario: Pario<readonly OntologySource[]>
+): Map<string, DatasetReferences> {
+  const index = new Map<string, DatasetReferences>()
+  const referencesFor = (datasetId: string): DatasetReferences => {
+    let references = index.get(datasetId)
+    if (!references) {
+      references = { syncIds: [], sourcePipelineIds: [], targetPipelineIds: [], projectionIds: [] }
+      index.set(datasetId, references)
+    }
+    return references
+  }
 
-  const targetPipelineIds = pipelines
-    .filter((pipeline) => pipeline.graph.nodes.some((node) => node.step.output.id === datasetId))
-    .map((pipeline) => pipeline.id)
+  for (const sync of pario.getSyncDefinitions()) {
+    referencesFor(sync.target.dataset.id).syncIds.push(sync.id)
+  }
 
-  const projectionIds = projections
-    .filter((projection) => projection.datasetId === datasetId)
-    .map((projection) => projection.id)
+  for (const pipeline of pario.getPipelineDefinitions()) {
+    const sourceDatasetIds = new Set<string>()
+    const targetDatasetIds = new Set<string>()
+    for (const node of pipeline.graph.nodes) {
+      for (const input of Object.values(node.step.inputs)) {
+        sourceDatasetIds.add(input.id)
+      }
+      targetDatasetIds.add(node.step.output.id)
+    }
+    for (const datasetId of sourceDatasetIds) {
+      referencesFor(datasetId).sourcePipelineIds.push(pipeline.id)
+    }
+    for (const datasetId of targetDatasetIds) {
+      referencesFor(datasetId).targetPipelineIds.push(pipeline.id)
+    }
+  }
 
+  for (const projection of [...pario.getObjectProjections(), ...pario.getLinkProjections()]) {
+    referencesFor(projection.datasetId).projectionIds.push(projection.id)
+  }
+
+  return index
+}
+
+function serializeLatestVersionSummary(summary: DatasetLatestVersionSummary) {
   return {
-    syncIds,
-    sourcePipelineIds,
-    targetPipelineIds,
-    projectionIds,
+    datasetId: summary.datasetId,
+    versionId: summary.versionId,
+    mode: summary.mode,
+    createdAt: toIsoString(summary.createdAt),
+    rowCount: summary.rowCount,
   }
 }
 
-async function serializeDatasetCatalogItem(
-  pario: Pario<readonly OntologySource[]>,
-  dataset: DatasetDefinition
+function serializeDatasetCatalogItem(
+  dataset: DatasetDefinition,
+  state: DatasetCatalogState | undefined,
+  references: DatasetReferences
 ) {
-  const [storedDataset, latestVersion] = await Promise.all([
-    pario.lakeStorage.getDataset(dataset.id),
-    pario.lakeStorage.getLatestVersion(dataset.id),
-  ])
-
-  return serializeDatasetCatalogItemFromState(pario, dataset, {
-    materialized: storedDataset !== null,
-    latestVersion,
+  return DatasetCatalogItemSchema.parse({
+    ...dataset,
+    materialized: state?.materialized ?? false,
+    latestVersion: state?.latestVersion ? serializeLatestVersionSummary(state.latestVersion) : null,
+    syncIds: references.syncIds,
+    sourcePipelineIds: references.sourcePipelineIds,
+    targetPipelineIds: references.targetPipelineIds,
+    projectionIds: references.projectionIds,
   })
 }
 
 async function serializeDatasetCatalogItems(pario: Pario<readonly OntologySource[]>) {
-  const storedDatasets = new Set(
-    (await pario.lakeStorage.listDatasets()).map((dataset) => dataset.id)
+  const definitions = pario.getDatasetDefinitions()
+  const references = buildDatasetReferenceIndex(pario)
+  const states = await pario.lakeStorage.listDatasetCatalogState(definitions.map((d) => d.id))
+  const stateByDatasetId = new Map(states.map((state) => [state.datasetId, state]))
+
+  return definitions.map((definition) =>
+    serializeDatasetCatalogItem(
+      definition,
+      stateByDatasetId.get(definition.id),
+      references.get(definition.id) ?? EMPTY_DATASET_REFERENCES
+    )
   )
-
-  return Promise.all(
-    pario.getDatasetDefinitions().map(async (dataset) => {
-      const materialized = storedDatasets.has(dataset.id)
-      const latestVersion = materialized
-        ? await pario.lakeStorage.getLatestVersion(dataset.id)
-        : null
-
-      return serializeDatasetCatalogItemFromState(pario, dataset, {
-        materialized,
-        latestVersion,
-      })
-    })
-  )
-}
-
-function serializeDatasetCatalogItemFromState(
-  pario: Pario<readonly OntologySource[]>,
-  dataset: DatasetDefinition,
-  state: {
-    readonly materialized: boolean
-    readonly latestVersion: DatasetVersion | null
-  }
-) {
-  return DatasetCatalogItemSchema.parse({
-    ...dataset,
-    materialized: state.materialized,
-    latestVersion: state.latestVersion ? serializeDatasetVersion(state.latestVersion) : null,
-    ...getDatasetReferences(pario, dataset.id),
-  })
 }
 
 function requireDataset(pario: Pario<readonly OntologySource[]>, datasetId: string) {
@@ -201,7 +224,9 @@ export function registerDatasetRoutes(app: Elysia, pario: Pario<readonly Ontolog
       async ({ params, set }) => {
         try {
           const dataset = requireDataset(pario, params.datasetId)
-          return await serializeDatasetCatalogItem(pario, dataset)
+          const [state] = await pario.lakeStorage.listDatasetCatalogState([dataset.id])
+          const references = buildDatasetReferenceIndex(pario).get(dataset.id)
+          return serializeDatasetCatalogItem(dataset, state, references ?? EMPTY_DATASET_REFERENCES)
         } catch (error) {
           return handleRouteError(error, set)
         }

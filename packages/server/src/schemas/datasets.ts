@@ -70,10 +70,18 @@ export const DatasetVersionSchema = z.object({
   sizeBytes: z.number().optional(),
 })
 
+export const DatasetLatestVersionSummarySchema = z.object({
+  datasetId: z.string(),
+  versionId: z.string(),
+  mode: z.enum(["snapshot", "append", "schema"]),
+  createdAt: z.string(),
+  rowCount: z.number().optional(),
+})
+
 export const DatasetCatalogItemSchema = DatasetDefinitionSchema.extend({
   kind: z.literal("dataset"),
   materialized: z.boolean(),
-  latestVersion: DatasetVersionSchema.nullable(),
+  latestVersion: DatasetLatestVersionSummarySchema.nullable(),
   syncIds: z.array(z.string()),
   sourcePipelineIds: z.array(z.string()),
   targetPipelineIds: z.array(z.string()),

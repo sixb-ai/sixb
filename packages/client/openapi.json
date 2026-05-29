@@ -1300,9 +1300,6 @@
                           "versionId": {
                             "type": "string"
                           },
-                          "parentVersionId": {
-                            "type": "string"
-                          },
                           "mode": {
                             "type": "string",
                             "enum": ["snapshot", "append", "schema"]
@@ -1310,84 +1307,11 @@
                           "createdAt": {
                             "type": "string"
                           },
-                          "schema": {
-                            "type": "object",
-                            "properties": {
-                              "columns": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "name": {
-                                      "type": "string"
-                                    },
-                                    "type": {
-                                      "type": "string",
-                                      "enum": [
-                                        "string",
-                                        "boolean",
-                                        "int64",
-                                        "float64",
-                                        "decimal",
-                                        "date",
-                                        "timestamp",
-                                        "json",
-                                        "fileRef"
-                                      ]
-                                    },
-                                    "nullable": {
-                                      "type": "boolean"
-                                    }
-                                  },
-                                  "required": ["name", "type"],
-                                  "additionalProperties": false
-                                }
-                              }
-                            },
-                            "required": ["columns"],
-                            "additionalProperties": false
-                          },
-                          "producer": {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": ["sync", "pipeline"]
-                              },
-                              "id": {
-                                "type": "string"
-                              },
-                              "runId": {
-                                "type": "string"
-                              }
-                            },
-                            "required": ["kind"],
-                            "additionalProperties": false
-                          },
-                          "inputs": {
-                            "type": "array",
-                            "items": {
-                              "type": "object",
-                              "properties": {
-                                "datasetId": {
-                                  "type": "string"
-                                },
-                                "versionId": {
-                                  "type": "string"
-                                }
-                              },
-                              "required": ["datasetId", "versionId"],
-                              "additionalProperties": false
-                            }
-                          },
                           "rowCount": {
-                            "type": "number"
-                          },
-                          "sizeBytes": {
                             "type": "number"
                           }
                         },
-                        "required": ["datasetId", "versionId", "mode", "createdAt", "schema"],
+                        "required": ["datasetId", "versionId", "mode", "createdAt"],
                         "additionalProperties": false,
                         "nullable": true
                       },
@@ -1542,9 +1466,6 @@
                         "versionId": {
                           "type": "string"
                         },
-                        "parentVersionId": {
-                          "type": "string"
-                        },
                         "mode": {
                           "type": "string",
                           "enum": ["snapshot", "append", "schema"]
@@ -1552,84 +1473,11 @@
                         "createdAt": {
                           "type": "string"
                         },
-                        "schema": {
-                          "type": "object",
-                          "properties": {
-                            "columns": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "type": {
-                                    "type": "string",
-                                    "enum": [
-                                      "string",
-                                      "boolean",
-                                      "int64",
-                                      "float64",
-                                      "decimal",
-                                      "date",
-                                      "timestamp",
-                                      "json",
-                                      "fileRef"
-                                    ]
-                                  },
-                                  "nullable": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "required": ["name", "type"],
-                                "additionalProperties": false
-                              }
-                            }
-                          },
-                          "required": ["columns"],
-                          "additionalProperties": false
-                        },
-                        "producer": {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": ["sync", "pipeline"]
-                            },
-                            "id": {
-                              "type": "string"
-                            },
-                            "runId": {
-                              "type": "string"
-                            }
-                          },
-                          "required": ["kind"],
-                          "additionalProperties": false
-                        },
-                        "inputs": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "datasetId": {
-                                "type": "string"
-                              },
-                              "versionId": {
-                                "type": "string"
-                              }
-                            },
-                            "required": ["datasetId", "versionId"],
-                            "additionalProperties": false
-                          }
-                        },
                         "rowCount": {
-                          "type": "number"
-                        },
-                        "sizeBytes": {
                           "type": "number"
                         }
                       },
-                      "required": ["datasetId", "versionId", "mode", "createdAt", "schema"],
+                      "required": ["datasetId", "versionId", "mode", "createdAt"],
                       "additionalProperties": false,
                       "nullable": true
                     },

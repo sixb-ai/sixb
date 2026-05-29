@@ -37,6 +37,20 @@ export interface DatasetVersion {
   readonly sizeBytes?: number
 }
 
+export interface DatasetLatestVersionSummary {
+  readonly datasetId: string
+  readonly versionId: string
+  readonly mode: DatasetVersionMode
+  readonly createdAt: Date
+  readonly rowCount?: number
+}
+
+export interface DatasetCatalogState {
+  readonly datasetId: string
+  readonly materialized: boolean
+  readonly latestVersion?: DatasetLatestVersionSummary | null
+}
+
 export interface BeginDatasetWriteInput {
   readonly dataset: DatasetDefinition
   readonly mode?: DatasetWriteMode
@@ -78,6 +92,18 @@ export interface LakeStorage {
   createDataset(definition: DatasetDefinition): Promise<DatasetDefinition>
   getDataset(datasetId: string): Promise<DatasetDefinition | null>
   listDatasets(): Promise<readonly DatasetDefinition[]>
+
+  /**
+   * Bulk catalog-summary read for the dataset list view.
+   *
+   * Returns lightweight materialized + latest-version state for the requested
+   * dataset ids using a bounded number of catalog calls, never a per-dataset
+   * full version hydration or a count(*) over dataset contents. Row counts are
+   * only populated when storage already knows them cheaply (such as Pario commit
+   * metadata); otherwise `rowCount` is omitted.
+   */
+  listDatasetCatalogState(datasetIds: readonly string[]): Promise<readonly DatasetCatalogState[]>
+
   listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]>
 
   beginWrite(input: BeginDatasetWriteInput): Promise<LakeWriteSession>

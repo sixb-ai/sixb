@@ -195,6 +195,61 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
       })
     })
 
+    describe("catalog state", () => {
+      test("reports materialized state and latest version summaries in bulk", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const write = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await write.writeRows([
+            { orderId: "ord_1", customerName: "Ada" },
+            { orderId: "ord_2", customerName: "Grace" },
+          ])
+          const version = await write.commit()
+
+          await storage.createDataset(definitionDataset)
+
+          const state = await storage.listDatasetCatalogState([
+            writeDataset.id,
+            definitionDataset.id,
+            "contract.missing.dataset",
+          ])
+
+          const byId = new Map(state.map((entry) => [entry.datasetId, entry]))
+
+          expect(byId.get(writeDataset.id)).toMatchObject({
+            datasetId: writeDataset.id,
+            materialized: true,
+          })
+          expect(byId.get(writeDataset.id)?.latestVersion).toMatchObject({
+            datasetId: writeDataset.id,
+            versionId: version.versionId,
+            mode: "snapshot",
+            rowCount: 2,
+          })
+
+          // Created without a committed write: materialized, but no version.
+          expect(byId.get(definitionDataset.id)).toEqual({
+            datasetId: definitionDataset.id,
+            materialized: true,
+            latestVersion: null,
+          })
+
+          // Registered but never created.
+          expect(byId.get("contract.missing.dataset")).toEqual({
+            datasetId: "contract.missing.dataset",
+            materialized: false,
+            latestVersion: null,
+          })
+        })
+      })
+
+      test("returns an empty result for an empty request", async () => {
+        await withStorage(async (storage) => {
+          expect(await storage.listDatasetCatalogState([])).toEqual([])
+        })
+      })
+    })
+
     describe("writes and reads", () => {
       test("rejects writes for unknown datasets", async () => {
         await withStorage(async (storage) => {

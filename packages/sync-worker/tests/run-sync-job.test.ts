@@ -130,6 +130,9 @@ describe("runSyncJob", () => {
       listDatasets() {
         return lakeStorage.listDatasets()
       },
+      listDatasetCatalogState(datasetIds) {
+        return lakeStorage.listDatasetCatalogState(datasetIds)
+      },
       listVersions(datasetId, limit) {
         return lakeStorage.listVersions(datasetId, limit)
       },
@@ -490,6 +493,9 @@ describe("runSyncJob", () => {
       },
       listDatasets() {
         return lakeStorage.listDatasets()
+      },
+      listDatasetCatalogState(datasetIds) {
+        return lakeStorage.listDatasetCatalogState(datasetIds)
       },
       listVersions(datasetId, limit) {
         return lakeStorage.listVersions(datasetId, limit)

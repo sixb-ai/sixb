@@ -910,7 +910,9 @@ function DatasetPreviewDrawer({
               Size
             </p>
             <p className="mt-0.5 truncate text-sm text-foreground">
-              {version?.sizeBytes !== undefined ? formatBytes(version.sizeBytes) : "—"}
+              {rowsData?.version?.sizeBytes !== undefined
+                ? formatBytes(rowsData.version.sizeBytes)
+                : "—"}
             </p>
           </div>
           <div className="bg-card px-4 py-2">

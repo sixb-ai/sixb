@@ -14,6 +14,7 @@ import { basename, join, resolve } from "node:path"
 import {
   type BeginDatasetWriteInput,
   type CommitDatasetWriteInput,
+  type DatasetCatalogState,
   type DatasetDefinition,
   type DatasetRow,
   type DatasetVersion,
@@ -171,6 +172,33 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     return datasets.sort((left, right) => left.id.localeCompare(right.id))
+  }
+
+  async listDatasetCatalogState(
+    datasetIds: readonly string[]
+  ): Promise<readonly DatasetCatalogState[]> {
+    return Promise.all(
+      datasetIds.map(async (datasetId) => {
+        if (!(await this.getDataset(datasetId))) {
+          return { datasetId, materialized: false, latestVersion: null }
+        }
+
+        const latest = await this.getLatestVersion(datasetId)
+        return {
+          datasetId,
+          materialized: true,
+          latestVersion: latest
+            ? {
+                datasetId: latest.datasetId,
+                versionId: latest.versionId,
+                mode: latest.mode,
+                createdAt: latest.createdAt,
+                ...(latest.rowCount !== undefined ? { rowCount: latest.rowCount } : {}),
+              }
+            : null,
+        }
+      })
+    )
   }
 
   async listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]> {
