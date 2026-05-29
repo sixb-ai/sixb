@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset } from "@pario/core"
-import type { DuckLakeStorage } from "../src"
+import { type DuckLakeStorage, DuckLakeStorage as DuckLakeStorageProvider } from "../src"
 import { collectRows, createLocalDuckLakeStorage } from "./test-utils"
 
 const ordersDataset = defineDataset("raw.erp.orders", {
@@ -114,6 +114,44 @@ describe("DuckLakeStorage optimistic concurrency", () => {
       { orderId: "ord_1", customerName: "Ada" },
       { orderId: "ord_3", customerName: "Katherine" },
     ])
+  })
+
+  test("lets an attached local DuckDB peer observe another provider's commit", async () => {
+    const secondStorage = createLocalDuckLakeStorage(rootDir)
+    extraStorages.push(secondStorage)
+
+    expect(await secondStorage.listDatasets()).toEqual([ordersDataset])
+
+    const committedVersion = await seedInitialVersion(storage)
+
+    await expect(secondStorage.getLatestVersion(ordersDataset.id)).resolves.toMatchObject({
+      versionId: committedVersion.versionId,
+    })
+    await expect(
+      collectRows(secondStorage.readRows({ datasetId: ordersDataset.id }))
+    ).resolves.toEqual([{ orderId: "ord_1", customerName: "Ada" }])
+  })
+
+  test("coordinates local catalog peers with equivalent path spellings", async () => {
+    await mkdir(join(rootDir, "alias"))
+    const firstStorage = new DuckLakeStorageProvider({
+      catalog: { type: "sqlite", path: join(rootDir, "metadata.sqlite") },
+      dataPath: join(rootDir, "sqlite-data"),
+    })
+    const secondStorage = new DuckLakeStorageProvider({
+      catalog: { type: "sqlite", path: `${rootDir}/alias/../metadata.sqlite` },
+      dataPath: join(rootDir, "sqlite-data"),
+    })
+    extraStorages.push(firstStorage, secondStorage)
+
+    await firstStorage.createDataset(ordersDataset)
+    expect(await secondStorage.listDatasets()).toEqual([ordersDataset])
+
+    const committedVersion = await seedInitialVersion(firstStorage)
+
+    await expect(secondStorage.getLatestVersion(ordersDataset.id)).resolves.toMatchObject({
+      versionId: committedVersion.versionId,
+    })
   })
 
   test("does not report another session's concurrent commit as successful", async () => {

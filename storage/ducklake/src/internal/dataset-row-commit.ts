@@ -1,7 +1,7 @@
 import { type DatasetDefinition, type DatasetWriteMode, LakeStorageError } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike } from "./duckdb-row"
-import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import { encodeDatasetTableName } from "./names"
 import { datasetSchemaColumnNamesSql } from "./schema"
 import { qualifiedTableName } from "./sql"
@@ -29,7 +29,7 @@ export function assertDatasetWriteMode(
 
 export async function applyDatasetRowsFromRelation(input: {
   readonly options: DuckLakeStorageOptions
-  readonly runtime: DuckDbRuntime
+  readonly runtime: DuckDbQueryRuntime
   readonly dataset: DatasetDefinition
   readonly mode: DatasetWriteMode
   /** Provider-rendered relation SQL, such as a quoted staging or temp table. */
@@ -71,7 +71,7 @@ export async function applyDatasetRowsFromRelation(input: {
   }
 }
 
-async function countRows(runtime: DuckDbRuntime, relationSql: string): Promise<number> {
+async function countRows(runtime: DuckDbQueryRuntime, relationSql: string): Promise<number> {
   const [row] = await runtime.query(`SELECT count(*) AS row_count FROM ${relationSql}`)
   if (row === undefined) {
     return 0

@@ -8,7 +8,7 @@ import type {
 import { LakeStorageError, planDatasetDefinitionUpdate } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getOptionalString, getString } from "./duckdb-row"
-import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
 import {
@@ -59,6 +59,7 @@ export class DuckLakeDatasetCatalog {
       const plan = planDatasetDefinitionUpdate(existing, definition)
       if (plan.changed) {
         await this.applyExistingDatasetUpdate(plan)
+        this.connections.markLocalCatalogChanged()
         await this.connections.resetRuntime()
       }
 
@@ -69,19 +70,23 @@ export class DuckLakeDatasetCatalog {
     // table name is reversible, so no sidecar mapping is needed.
     const tableName = encodeDatasetTableName(definition.id)
     const qualifiedName = qualifiedTableName(this.options, tableName)
-    const runtime = await this.runtime()
 
-    await runtime.run(
-      `CREATE TABLE ${qualifiedName} (${datasetSchemaToDuckDbColumnsSql(definition.schema)})`
-    )
-
-    if (definition.description !== undefined) {
+    // Creating a dataset can be several catalog DDL statements. Keep them in
+    // one runtime slot so writes cannot observe a half-created table.
+    await this.connections.withExclusiveAttached(async (runtime) => {
       await runtime.run(
-        `COMMENT ON TABLE ${qualifiedName} IS ${quoteSqlString(definition.description)}`
+        `CREATE TABLE ${qualifiedName} (${datasetSchemaToDuckDbColumnsSql(definition.schema)})`
       )
-    }
 
-    await this.applyPartitionBy(runtime, qualifiedName, definition)
+      if (definition.description !== undefined) {
+        await runtime.run(
+          `COMMENT ON TABLE ${qualifiedName} IS ${quoteSqlString(definition.description)}`
+        )
+      }
+
+      await this.applyPartitionBy(runtime, qualifiedName, definition)
+    })
+    this.connections.markLocalCatalogChanged()
 
     return structuredClone(definition)
   }
@@ -100,16 +105,25 @@ export class DuckLakeDatasetCatalog {
   async getDataset(datasetId: string): Promise<DatasetDefinition | null> {
     this.connections.assertOpen()
 
+    return this.connections.withAttachedRuntime((runtime) =>
+      this.getDatasetOnRuntime(runtime, datasetId)
+    )
+  }
+
+  async getDatasetOnRuntime(
+    runtime: DuckDbQueryRuntime,
+    datasetId: string
+  ): Promise<DatasetDefinition | null> {
     // Reconstruct definitions from DuckLake instead of trusting caller input.
     // This keeps repeated createDataset calls honest across provider instances.
     const tableName = encodeDatasetTableName(datasetId)
-    const table = await this.getDatasetTable(tableName)
+    const table = await this.getDatasetTable(runtime, tableName)
     if (!table) {
       return null
     }
 
-    const schema = await this.describeDatasetSchema(await this.runtime(), tableName)
-    const partitionBy = await this.getDatasetPartitionBy(tableName)
+    const schema = await this.describeDatasetSchema(runtime, tableName)
+    const partitionBy = await this.getDatasetPartitionBy(runtime, tableName)
 
     return {
       kind: "dataset",
@@ -123,34 +137,35 @@ export class DuckLakeDatasetCatalog {
   async listDatasets(): Promise<readonly DatasetDefinition[]> {
     this.connections.assertOpen()
 
-    // Only Pario-encoded dataset tables are surfaced. Any DuckLake metadata,
-    // internal tables, or unrelated user tables remain invisible to LakeStorage.
-    const runtime = await this.runtime()
-    const rows = await runtime.query(
-      `SELECT table_name FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
-        duckLakeAlias(this.options)
-      )} AND schema_name = 'main' AND NOT internal ORDER BY table_name`
-    )
+    return this.connections.withAttachedRuntime(async (runtime) => {
+      // Only Pario-encoded dataset tables are surfaced. Any DuckLake metadata,
+      // internal tables, or unrelated user tables remain invisible to LakeStorage.
+      const rows = await runtime.query(
+        `SELECT table_name FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
+          duckLakeAlias(this.options)
+        )} AND schema_name = 'main' AND NOT internal ORDER BY table_name`
+      )
 
-    const datasets: DatasetDefinition[] = []
-    for (const row of rows) {
-      const tableName = getString(row, "table_name")
-      const datasetId = decodeDatasetTableName(tableName)
-      if (datasetId === null) {
-        continue
+      const datasets: DatasetDefinition[] = []
+      for (const row of rows) {
+        const tableName = getString(row, "table_name")
+        const datasetId = decodeDatasetTableName(tableName)
+        if (datasetId === null) {
+          continue
+        }
+
+        const definition = await this.getDatasetOnRuntime(runtime, datasetId)
+        if (definition) {
+          datasets.push(definition)
+        }
       }
 
-      const definition = await this.getDataset(datasetId)
-      if (definition) {
-        datasets.push(definition)
-      }
-    }
-
-    return datasets.sort((left, right) => left.id.localeCompare(right.id))
+      return datasets.sort((left, right) => left.id.localeCompare(right.id))
+    })
   }
 
   async getDatasetSchemaAtSnapshot(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     datasetId: string,
     snapshotId: string
   ): Promise<DatasetSchema> {
@@ -168,42 +183,39 @@ export class DuckLakeDatasetCatalog {
     }
   }
 
-  private async runtime() {
-    return this.connections.runtime()
-  }
-
   private async applyExistingDatasetUpdate(plan: DatasetDefinitionUpdatePlan): Promise<void> {
     const tableName = encodeDatasetTableName(plan.definition.id)
     const qualifiedName = qualifiedTableName(this.options, tableName)
-    const runtime = await this.runtime()
 
-    if (plan.schema.kind === "none") {
-      await this.applyMetadataDelta(runtime, qualifiedName, plan)
-      return
-    }
-
-    // Schema-only DuckLake snapshots still matter to Pario. Apply schema and
-    // compatible metadata DDL atomically, then tag the commit so versions can
-    // treat it as this dataset's schema-change version.
-    await runtime.run("BEGIN TRANSACTION")
-    let committed = false
-    try {
-      await this.applySchemaEvolutionDdl(runtime, qualifiedName, plan.schema)
-      await this.applyMetadataDelta(runtime, qualifiedName, plan)
-      await this.setSchemaEvolutionCommitMetadata(runtime, plan.definition.id, plan.schema)
-
-      await runtime.run("COMMIT")
-      committed = true
-    } catch (error) {
-      if (!committed) {
-        await this.rollbackTransaction(runtime)
+    await this.connections.withExclusiveAttached(async (runtime) => {
+      if (plan.schema.kind === "none") {
+        await this.applyMetadataDelta(runtime, qualifiedName, plan)
+        return
       }
-      throw error
-    }
+
+      // Schema-only DuckLake snapshots still matter to Pario. Apply schema and
+      // compatible metadata DDL atomically, then tag the commit so versions can
+      // treat it as this dataset's schema-change version.
+      await runtime.run("BEGIN TRANSACTION")
+      let committed = false
+      try {
+        await this.applySchemaEvolutionDdl(runtime, qualifiedName, plan.schema)
+        await this.applyMetadataDelta(runtime, qualifiedName, plan)
+        await this.setSchemaEvolutionCommitMetadata(runtime, plan.definition.id, plan.schema)
+
+        await runtime.run("COMMIT")
+        committed = true
+      } catch (error) {
+        if (!committed) {
+          await this.rollbackTransaction(runtime)
+        }
+        throw error
+      }
+    })
   }
 
   private async applySchemaEvolutionDdl(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     qualifiedName: string,
     plan: Extract<DatasetSchemaUpdatePlan, { readonly kind: "addNullableColumns" }>
   ): Promise<void> {
@@ -215,7 +227,7 @@ export class DuckLakeDatasetCatalog {
   }
 
   private async applyMetadataDelta(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     qualifiedName: string,
     plan: DatasetDefinitionUpdatePlan
   ): Promise<void> {
@@ -234,7 +246,7 @@ export class DuckLakeDatasetCatalog {
   }
 
   private async applyPartitionBy(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     qualifiedName: string,
     definition: DatasetDefinition
   ): Promise<void> {
@@ -260,7 +272,7 @@ export class DuckLakeDatasetCatalog {
   }
 
   private async setSchemaEvolutionCommitMetadata(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     datasetId: string,
     plan: Extract<DatasetSchemaUpdatePlan, { readonly kind: "addNullableColumns" }>
   ): Promise<void> {
@@ -283,7 +295,7 @@ export class DuckLakeDatasetCatalog {
     )
   }
 
-  private async rollbackTransaction(runtime: DuckDbRuntime): Promise<void> {
+  private async rollbackTransaction(runtime: DuckDbQueryRuntime): Promise<void> {
     try {
       await runtime.run("ROLLBACK")
     } catch {
@@ -292,10 +304,12 @@ export class DuckLakeDatasetCatalog {
     }
   }
 
-  private async getDatasetTable(tableName: string): Promise<DatasetTableRow | null> {
+  private async getDatasetTable(
+    runtime: DuckDbQueryRuntime,
+    tableName: string
+  ): Promise<DatasetTableRow | null> {
     // duckdb_tables() gives us the user-facing table comment without reaching
     // into DuckLake's private metadata tables.
-    const runtime = await this.runtime()
     const rows = await runtime.query(
       `SELECT table_name, comment FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
         duckLakeAlias(this.options)
@@ -313,7 +327,7 @@ export class DuckLakeDatasetCatalog {
   }
 
   private async describeDatasetSchema(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     tableName: string,
     snapshotId?: string
   ): Promise<DatasetSchema> {
@@ -331,8 +345,10 @@ export class DuckLakeDatasetCatalog {
     return duckDbColumnsToDatasetSchema(columns)
   }
 
-  private async getDatasetPartitionBy(tableName: string): Promise<readonly string[]> {
-    const runtime = await this.runtime()
+  private async getDatasetPartitionBy(
+    runtime: DuckDbQueryRuntime,
+    tableName: string
+  ): Promise<readonly string[]> {
     const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
     const ducklakePartitionInfo = duckLakeMetadataTableName(this.options, "ducklake_partition_info")
     const ducklakePartitionColumn = duckLakeMetadataTableName(

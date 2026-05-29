@@ -5,8 +5,6 @@ import { join } from "node:path"
 import { col, defineDataset } from "@pario/core"
 import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
-import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
-import { localDuckLakeOptions } from "./test-utils"
 
 const ordersDataset = defineDataset("raw.erp.orders", {
   schema: [col("orderId", "string")],
@@ -172,31 +170,6 @@ describe("DuckLakeStorage catalog options", () => {
     await expect(storage.listDatasets()).rejects.toThrow()
     await storage.close()
     await storage.close()
-  })
-
-  test("closes local committed write leases before returning a read runtime", async () => {
-    const connections = new DuckLakeConnectionManager(localDuckLakeOptions(rootDir))
-
-    try {
-      const lease = await connections.acquireWriteLease()
-      const writeRuntime = lease.runtime
-      const readRuntime = await lease.committedReadRuntime({
-        kind: "committed",
-        guarded: false,
-        reusable: true,
-      })
-
-      expect(readRuntime).not.toBe(writeRuntime)
-      await expect(writeRuntime.query("SELECT 1 AS value")).rejects.toThrow(
-        "DuckDB runtime is closed"
-      )
-
-      const nextLease = await connections.acquireWriteLease()
-      expect(nextLease.runtime).not.toBe(writeRuntime)
-      await nextLease.release({ kind: "aborted" })
-    } finally {
-      await connections.close()
-    }
   })
 
   function track(storage: DuckLakeStorage): DuckLakeStorage {

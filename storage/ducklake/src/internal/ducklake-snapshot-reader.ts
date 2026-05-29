@@ -7,7 +7,7 @@ import type {
 import { LakeStorageError } from "@pario/core"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getDate, getString } from "./duckdb-row"
-import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { encodeDatasetTableName } from "./names"
@@ -82,39 +82,45 @@ export class DuckLakeSnapshotReader {
   async listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]> {
     this.connections.assertOpen()
 
-    const definition = await this.datasets.getDataset(datasetId)
-    if (!definition) {
-      return []
-    }
+    return this.connections.withAttachedRuntime(async (runtime) => {
+      const definition = await this.datasets.getDatasetOnRuntime(runtime, datasetId)
+      if (!definition) {
+        return []
+      }
 
-    return this.listVersionsForDefinition(await this.connections.runtime(), definition, limit)
+      return this.listVersionsForDefinition(runtime, definition, limit)
+    })
   }
 
   async getLatestVersion(datasetId: string): Promise<DatasetVersion | null> {
     this.connections.assertOpen()
 
-    const definition = await this.datasets.getDataset(datasetId)
-    if (!definition) {
-      return null
-    }
+    return this.connections.withAttachedRuntime(async (runtime) => {
+      const definition = await this.datasets.getDatasetOnRuntime(runtime, datasetId)
+      if (!definition) {
+        return null
+      }
 
-    return this.getLatestVersionForDefinition(await this.connections.runtime(), definition)
+      return this.getLatestVersionForDefinition(runtime, definition)
+    })
   }
 
   async getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null> {
     const snapshotId = parseVersionId(versionId)
     this.connections.assertOpen()
 
-    const definition = await this.datasets.getDataset(datasetId)
-    if (!definition) {
-      return null
-    }
+    return this.connections.withAttachedRuntime(async (runtime) => {
+      const definition = await this.datasets.getDatasetOnRuntime(runtime, datasetId)
+      if (!definition) {
+        return null
+      }
 
-    return this.getVersionForSnapshot(await this.connections.runtime(), definition, snapshotId)
+      return this.getVersionForSnapshot(runtime, definition, snapshotId)
+    })
   }
 
   async getLatestVersionForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DatasetVersion | null> {
     const [latest] = await this.listVersionsForDefinition(runtime, dataset, 1)
@@ -122,7 +128,7 @@ export class DuckLakeSnapshotReader {
   }
 
   async getLatestVersionRefForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DatasetVersionRef | null> {
     const summary = await this.getLatestVersionSummaryForDefinition(runtime, dataset)
@@ -130,7 +136,7 @@ export class DuckLakeSnapshotReader {
   }
 
   async getLatestVersionSummaryForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DuckLakeVersionSummary | null> {
     const row = await this.getLatestSnapshotRowForDefinition(runtime, dataset)
@@ -146,7 +152,7 @@ export class DuckLakeSnapshotReader {
   }
 
   async getVersionForSnapshot(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     snapshotId: string
   ): Promise<DatasetVersion | null> {
@@ -157,7 +163,7 @@ export class DuckLakeSnapshotReader {
   }
 
   async getVersionRefForSnapshot(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     snapshotId: string
   ): Promise<DatasetVersionRef | null> {
@@ -168,7 +174,7 @@ export class DuckLakeSnapshotReader {
   }
 
   async listVersionsForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     limit?: number
   ): Promise<readonly DatasetVersion[]> {
@@ -183,7 +189,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async getLatestSnapshotRowForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DatasetSnapshotRow | null> {
     const tableName = encodeDatasetTableName(dataset.id)
@@ -201,7 +207,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async getSnapshotRowForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     snapshotId: string,
     options: { readonly includeParent: boolean }
@@ -239,7 +245,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async getSnapshotRowsForDefinition(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     limit?: number
   ): Promise<readonly DatasetSnapshotRow[]> {
@@ -264,7 +270,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async collectVisibleSnapshotRows(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     input: VisibleSnapshotRowsInput
   ): Promise<readonly DatasetSnapshotRow[]> {
     if (input.visibleRowLimit !== undefined && input.visibleRowLimit <= 0) {
@@ -307,7 +313,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async querySnapshotCandidates(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     input: SnapshotCandidateQueryInput
   ): Promise<readonly DatasetSnapshotCandidateRow[]> {
     if (input.limit !== undefined && input.limit <= 0) {
@@ -408,7 +414,7 @@ export class DuckLakeSnapshotReader {
     })
   }
 
-  private async getTableId(runtime: DuckDbRuntime, tableName: string): Promise<bigint | null> {
+  private async getTableId(runtime: DuckDbQueryRuntime, tableName: string): Promise<bigint | null> {
     const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
     const [row] = await runtime.query(`
       SELECT table_id
@@ -465,7 +471,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async snapshotToVersion(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     row: DatasetSnapshotRow
   ): Promise<DatasetVersion> {
@@ -498,7 +504,7 @@ export class DuckLakeSnapshotReader {
   }
 
   private async countRowsAtSnapshot(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     snapshotId: string
   ): Promise<number> {

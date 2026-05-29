@@ -18,7 +18,7 @@ import {
   assertDatasetWriteMode,
 } from "./dataset-row-commit"
 import { getString } from "./duckdb-row"
-import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
@@ -40,7 +40,7 @@ interface ResolvedDuckLakeSqlTransformSources {
 }
 
 interface ApplySqlTransformInput {
-  readonly runtime: DuckDbRuntime
+  readonly runtime: DuckDbQueryRuntime
   readonly target: DatasetDefinition
   readonly mode: DatasetWriteMode
   readonly sql: string
@@ -69,14 +69,15 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   async *preview(input: PreviewSqlTransformInput<"duckdb">): AsyncIterable<DatasetRow> {
     this.connections.assertOpen()
 
-    const runtime = await this.connections.runtime()
-    const sources = await this.resolveSources(runtime, input.sources)
-    const sql = renderDuckLakeSqlTransformSql({
-      options: this.options,
-      sources: sources.relations,
-      sql: input.sql,
+    const rows = await this.connections.withAttachedRuntime(async (runtime) => {
+      const sources = await this.resolveSources(runtime, input.sources)
+      const sql = renderDuckLakeSqlTransformSql({
+        options: this.options,
+        sources: sources.relations,
+        sql: input.sql,
+      })
+      return runtime.query(buildPreviewSql(sql, previewLimit(input.limit)))
     })
-    const rows = await runtime.query(buildPreviewSql(sql, previewLimit(input.limit)))
 
     for (const row of rows) {
       yield normalizePreviewRow(row)
@@ -87,9 +88,8 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     this.connections.assertOpen()
     assertDatasetWriteMode(input.mode, "SQL transform")
 
-    const target = await this.resolveTargetDataset(input.target)
-    return this.connections.withWriteRuntime(async (lease) => {
-      const runtime = lease.runtime
+    return this.writes.withCommitRuntime(async (runtime) => {
+      const target = await this.resolveTargetDataset(runtime, input.target)
       const sources = await this.resolveSources(runtime, input.sources)
       const sql = renderDuckLakeSqlTransformSql({
         options: this.options,
@@ -99,15 +99,13 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
 
       await this.assertResultSchemaMatchesTarget(runtime, target, sql)
 
-      const version = await this.writes.commitDatasetVersion({
-        runtime,
+      return this.writes.commitDatasetVersionOnExclusiveRuntime(runtime, {
         dataset: target,
         mode: input.mode,
         expectedLatestVersionId: input.expectedLatestVersionId,
         commitMessage: input.commitMessage ?? `execute SQL transform for dataset ${target.id}`,
         producer: input.producer,
         inputs: sources.inputs,
-        committedReadRuntime: (release) => lease.committedReadRuntime(release),
         applyChanges: (runtime, context) =>
           this.applySqlTransform({
             runtime,
@@ -117,27 +115,18 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
             previousRowCount: context.previousRowCount,
           }),
       })
-
-      return {
-        value: version,
-        release: {
-          kind: "committed",
-          guarded: input.expectedLatestVersionId !== undefined,
-          reusable: true,
-        },
-      }
     })
   }
 
   private async resolveSources(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     sources: PreviewSqlTransformInput<"duckdb">["sources"]
   ): Promise<ResolvedDuckLakeSqlTransformSources> {
     const relations: Record<string, DuckLakeSqlTransformSourceRelation> = Object.create(null)
     const inputs: DatasetVersionRef[] = []
 
     for (const [sourceName, source] of Object.entries(sources)) {
-      const definition = await this.resolveSourceDataset(source.dataset)
+      const definition = await this.resolveSourceDataset(runtime, source.dataset)
       const versionRef = await this.resolveSourceVersion(runtime, definition, source.versionId)
 
       relations[sourceName] = {
@@ -156,8 +145,11 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     }
   }
 
-  private async resolveSourceDataset(dataset: DatasetDefinition): Promise<DatasetDefinition> {
-    const definition = await this.datasets.getDataset(dataset.id)
+  private async resolveSourceDataset(
+    runtime: DuckDbQueryRuntime,
+    dataset: DatasetDefinition
+  ): Promise<DatasetDefinition> {
+    const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
       throw new LakeStorageError(
         `[ParioDuckLake] Unknown SQL transform source dataset '${dataset.id}'.`
@@ -167,8 +159,11 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
     return definition
   }
 
-  private async resolveTargetDataset(dataset: DatasetDefinition): Promise<DatasetDefinition> {
-    const definition = await this.datasets.getDataset(dataset.id)
+  private async resolveTargetDataset(
+    runtime: DuckDbQueryRuntime,
+    dataset: DatasetDefinition
+  ): Promise<DatasetDefinition> {
+    const definition = await this.datasets.getDatasetOnRuntime(runtime, dataset.id)
     if (!definition) {
       throw new LakeStorageError(
         `[ParioDuckLake] Unknown SQL transform target dataset '${dataset.id}'.`
@@ -180,7 +175,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   }
 
   private async resolveSourceVersion(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition,
     versionId?: string
   ): Promise<DatasetVersionRef> {
@@ -203,7 +198,7 @@ export class DuckLakeSqlExecutor implements LakeSqlExecutor<"duckdb"> {
   }
 
   private async assertResultSchemaMatchesTarget(
-    runtime: DuckDbRuntime,
+    runtime: DuckDbQueryRuntime,
     target: DatasetDefinition,
     sql: string
   ): Promise<void> {

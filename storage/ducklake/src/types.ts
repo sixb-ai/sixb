@@ -45,6 +45,20 @@ export interface DuckDbRuntimeOptions {
 }
 
 /**
+ * DuckDB PostgreSQL extension pool settings for a Postgres-backed DuckLake
+ * metadata catalog.
+ */
+export interface DuckLakePostgresPoolOptions {
+  readonly maxConnections?: number
+  readonly waitTimeoutMillis?: number
+  readonly maxLifetimeMillis?: number
+  readonly idleTimeoutMillis?: number
+  readonly enableThreadLocalCache?: boolean
+  readonly enableReaperThread?: boolean
+  readonly healthCheckQuery?: string
+}
+
+/**
  * Common CREATE SECRET options shared by DuckDB object-store integrations.
  */
 interface BaseSecretOptions {
@@ -118,6 +132,7 @@ export interface DuckLakeStorageOptions {
   readonly dataPath?: string
   readonly alias?: string
   readonly duckdb?: DuckDbRuntimeOptions
+  readonly postgresPool?: DuckLakePostgresPoolOptions
   readonly secrets?: readonly DuckDbSecretOptions[]
   /** Runs after DuckLake/catalog extensions load and before ATTACH. */
   readonly setupSql?: readonly string[]

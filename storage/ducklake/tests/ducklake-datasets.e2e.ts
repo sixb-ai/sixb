@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset, LakeStorageError } from "@pario/core"
 import type { DuckLakeStorage } from "../src"
-import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
+import {
+  createDuckDbRuntime,
+  type DuckDbExclusiveRuntime,
+  type DuckDbRuntime,
+  setupDuckLake,
+} from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
 import { createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
@@ -198,6 +203,56 @@ describe("DuckLakeStorage dataset metadata", () => {
     })
   })
 
+  test("keeps schema evolution transaction exclusive from concurrent commit blocks", async () => {
+    const initialSchemaDataset = defineDataset("raw.erp.concurrent_schema", {
+      schema: [col("invoiceId", "string")],
+    })
+    const evolvedSchemaDataset = defineDataset("raw.erp.concurrent_schema", {
+      schema: [col("invoiceId", "string"), col("currency", "string", { nullable: true })],
+    })
+
+    await storage.createDataset(initialSchemaDataset)
+
+    const runtime = await runtimeForStorage(storage)
+    const pause = pauseAfterNextBeginTransaction(runtime)
+
+    const schemaEvolution = storage.createDataset(evolvedSchemaDataset)
+    await withTimeout(pause.paused, "schema evolution did not begin a transaction")
+
+    const concurrentCommitBlock = runtime.withExclusive(async (runtime) => {
+      await runtime.run("BEGIN TRANSACTION")
+      await runtime.run("COMMIT")
+    })
+    expect(await settlesWithin(concurrentCommitBlock, 25)).toBe(false)
+
+    pause.resume()
+
+    await expect(schemaEvolution).resolves.toEqual(evolvedSchemaDataset)
+    await expect(concurrentCommitBlock).resolves.toBeUndefined()
+  })
+
+  test("does not detach the local catalog during a whole dataset list read", async () => {
+    await storage.createDataset(ordersDataset)
+
+    const runtime = await runtimeForStorage(storage)
+    const pause = pauseAfterNextQuery(runtime, (sql) => sql.includes("duckdb_tables()"))
+
+    const listing = storage.listDatasets()
+    await withTimeout(pause.paused, "listDatasets did not reach its first metadata query")
+
+    const beginWrite = storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    expect(await settlesWithin(beginWrite, 25)).toBe(false)
+
+    pause.resume()
+
+    await expect(listing).resolves.toEqual([ordersDataset])
+    const write = await beginWrite
+    await write.abort()
+  })
+
   test("listDatasets filters non-dataset provider tables", async () => {
     const runtime = await createDuckDbRuntime()
 
@@ -258,3 +313,139 @@ describe("DuckLakeStorage dataset metadata", () => {
     )
   })
 })
+
+async function runtimeForStorage(storage: DuckLakeStorage): Promise<DuckDbRuntime> {
+  return (
+    storage as unknown as { readonly connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+  ).connections.attachedRuntime()
+}
+
+function pauseAfterNextBeginTransaction(runtime: DuckDbRuntime): {
+  readonly paused: Promise<void>
+  resume(): void
+} {
+  const paused = createDeferred<void>()
+  const resumed = createDeferred<void>()
+  const originalRun = runtime.run.bind(runtime)
+  const originalWithExclusive = runtime.withExclusive.bind(runtime)
+  let didPause = false
+
+  async function pauseIfNeeded(sql: string): Promise<void> {
+    if (didPause || sql !== "BEGIN TRANSACTION") {
+      return
+    }
+
+    didPause = true
+    paused.resolve()
+    await resumed.promise
+  }
+
+  runtime.run = async (sql, values) => {
+    await originalRun(sql, values)
+    await pauseIfNeeded(sql)
+  }
+
+  runtime.withExclusive = (useRuntime) =>
+    originalWithExclusive((exclusiveRuntime) =>
+      useRuntime(wrapExclusiveRuntime(exclusiveRuntime, pauseIfNeeded))
+    )
+
+  return {
+    paused: paused.promise,
+    resume: () => resumed.resolve(),
+  }
+}
+
+function pauseAfterNextQuery(
+  runtime: DuckDbRuntime,
+  matches: (sql: string) => boolean
+): {
+  readonly paused: Promise<void>
+  resume(): void
+} {
+  const paused = createDeferred<void>()
+  const resumed = createDeferred<void>()
+  const originalQuery = runtime.query.bind(runtime)
+  let didPause = false
+
+  runtime.query = async (sql, values) => {
+    const rows = await originalQuery(sql, values)
+    if (!didPause && matches(sql)) {
+      didPause = true
+      paused.resolve()
+      await resumed.promise
+    }
+
+    return rows
+  }
+
+  return {
+    paused: paused.promise,
+    resume: () => resumed.resolve(),
+  }
+}
+
+function wrapExclusiveRuntime(
+  runtime: DuckDbExclusiveRuntime,
+  afterRun: (sql: string) => Promise<void>
+): DuckDbExclusiveRuntime {
+  return {
+    run: async (sql, values) => {
+      await runtime.run(sql, values)
+      await afterRun(sql)
+    },
+    runStatements: (statements) => runtime.runStatements(statements),
+    query: (sql, values) => runtime.query(sql, values),
+    withAppender: (tableName, useAppender) => runtime.withAppender(tableName, useAppender),
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timeout: Timer | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), 1_000)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+async function settlesWithin(promise: Promise<unknown>, milliseconds: number): Promise<boolean> {
+  let timeout: Timer | undefined
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => true
+      ),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), milliseconds)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+function createDeferred<T = void>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T | PromiseLike<T>) => void
+} {
+  let resolve: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+
+  return {
+    promise,
+    resolve: resolve!,
+  }
+}

@@ -8,10 +8,6 @@ import type {
 } from "@pario/core"
 import { getDatasetRowValidationError, LakeStorageError } from "@pario/core"
 import type { DuckDbRuntime } from "./duckdb-runtime"
-import type {
-  DuckLakeWriteRuntimeLease,
-  DuckLakeWriteRuntimeRelease,
-} from "./ducklake-connection-manager"
 import { appendDatasetRow } from "./row-appender"
 import { datasetSchemaToDuckDbColumnsSql } from "./schema"
 import { quoteIdentifier } from "./sql"
@@ -19,15 +15,15 @@ import { quoteIdentifier } from "./sql"
 export interface DuckLakeCommitWriteInput {
   readonly write: BeginDatasetWriteInput
   readonly commit?: CommitDatasetWriteInput
-  readonly runtime: DuckDbRuntime
   readonly stagingTableName: string
+  readonly rowsWritten: number
 }
 
 type DuckLakeCommitWrite = (options: DuckLakeCommitWriteInput) => Promise<DatasetVersion>
 
 interface CreateDuckLakeWriteSessionInput {
   readonly commitWrite: DuckLakeCommitWrite
-  readonly lease: DuckLakeWriteRuntimeLease
+  readonly runtime: DuckDbRuntime
   readonly write: BeginDatasetWriteInput
 }
 
@@ -36,21 +32,16 @@ export async function createDuckLakeWriteSession(
 ): Promise<LakeWriteSession> {
   const stagingTableName = `pario_write_${randomUUID().replaceAll("-", "")}`
 
-  try {
-    // The temp table lives only on this write connection. That keeps partially
-    // written rows invisible until DuckLakeStorage commits them into the
-    // durable dataset table.
-    await input.lease.runtime.run(
-      `CREATE TEMP TABLE ${quoteIdentifier(stagingTableName)} (${datasetSchemaToDuckDbColumnsSql(
-        input.write.dataset.schema
-      )})`
-    )
-  } catch (error) {
-    await input.lease.release({ kind: "failed" })
-    throw error
-  }
+  // The temp table lives only on this runtime connection. That keeps
+  // partially written rows invisible until DuckLakeStorage commits them into
+  // the durable dataset table.
+  await input.runtime.run(
+    `CREATE TEMP TABLE ${quoteIdentifier(stagingTableName)} (${datasetSchemaToDuckDbColumnsSql(
+      input.write.dataset.schema
+    )})`
+  )
 
-  return new DuckLakeWriteSession(input.commitWrite, input.lease, input.write, stagingTableName)
+  return new DuckLakeWriteSession(input.commitWrite, input.runtime, input.write, stagingTableName)
 }
 
 /**
@@ -63,10 +54,11 @@ export async function createDuckLakeWriteSession(
 class DuckLakeWriteSession implements LakeWriteSession {
   private closed = false
   private cleanedUp = false
+  private rowsWritten = 0
 
   constructor(
     private readonly commitWrite: DuckLakeCommitWrite,
-    private readonly lease: DuckLakeWriteRuntimeLease,
+    private readonly runtime: DuckDbRuntime,
     private readonly input: BeginDatasetWriteInput,
     private readonly stagingTableName: string
   ) {}
@@ -74,7 +66,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
   async writeRows(rows: Iterable<DatasetRow> | AsyncIterable<DatasetRow>): Promise<void> {
     this.assertOpen()
 
-    await this.lease.runtime.withAppender(this.stagingTableName, async (appender) => {
+    await this.runtime.withAppender(this.stagingTableName, async (appender) => {
       for await (const row of rows) {
         const validationError = getDatasetRowValidationError(row, this.input.dataset)
         if (validationError) {
@@ -82,6 +74,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
         }
 
         appendDatasetRow(appender, this.input.dataset.schema, row)
+        this.rowsWritten += 1
       }
     })
   }
@@ -95,21 +88,17 @@ class DuckLakeWriteSession implements LakeWriteSession {
       const version = await this.commitWrite({
         write: this.input,
         commit: input,
-        runtime: this.lease.runtime,
+        rowsWritten: this.rowsWritten,
         stagingTableName: this.stagingTableName,
       })
       committed = true
-      // Even successful commits no longer need the staging table or dedicated
-      // lease once rows have been inserted into the DuckLake table.
-      await this.cleanup({
-        kind: "committed",
-        guarded: input?.expectedLatestVersionId !== undefined,
-        reusable: true,
-      })
+      // Even successful commits no longer need the staging table once rows
+      // have been inserted into the durable DuckLake table.
+      await this.cleanup()
       return version
     } catch (error) {
       if (!committed) {
-        await this.cleanup({ kind: "failed" })
+        await this.cleanup()
       }
       throw error
     }
@@ -121,7 +110,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
     }
 
     this.closed = true
-    await this.cleanup({ kind: "aborted" })
+    await this.cleanup()
   }
 
   private assertOpen(): void {
@@ -130,33 +119,21 @@ class DuckLakeWriteSession implements LakeWriteSession {
     }
   }
 
-  private async cleanup(release: DuckLakeWriteRuntimeRelease): Promise<void> {
+  private async cleanup(): Promise<void> {
     if (this.cleanedUp) {
       return
     }
 
     this.cleanedUp = true
-
-    if (release.kind === "failed") {
-      await this.lease.release(release)
-      return
-    }
-
-    const reusable = await this.dropStagingTable()
-    const releaseResult =
-      release.kind === "committed"
-        ? { ...release, reusable: release.reusable && reusable }
-        : { ...release, reusable }
-
-    await this.lease.release(releaseResult)
+    await this.dropStagingTable()
   }
 
-  private async dropStagingTable(): Promise<boolean> {
+  private async dropStagingTable(): Promise<void> {
     try {
-      await this.lease.runtime.run(`DROP TABLE IF EXISTS ${quoteIdentifier(this.stagingTableName)}`)
-      return true
+      await this.runtime.run(`DROP TABLE IF EXISTS ${quoteIdentifier(this.stagingTableName)}`)
     } catch {
-      return false
+      // Preserve the commit/abort failure. Temp tables are connection-scoped
+      // and will disappear when the storage runtime closes.
     }
   }
 }
