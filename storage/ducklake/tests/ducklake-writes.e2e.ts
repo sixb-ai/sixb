@@ -11,7 +11,7 @@ import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from ".
 
 interface DuckLakeStorageInternals {
   readonly connections: {
-    runtime(): Promise<{
+    attachedRuntime(): Promise<{
       query(sql: string): Promise<readonly Record<string, unknown>[]>
     }>
   }
@@ -573,7 +573,9 @@ async function commitExtraInfoForVersion(
   rootDir: string,
   versionId: string
 ) {
-  const runtime = await (storage as unknown as DuckLakeStorageInternals).connections.runtime()
+  const runtime = await (
+    storage as unknown as DuckLakeStorageInternals
+  ).connections.attachedRuntime()
   const snapshotId = parseVersionId(versionId)
   const [row] = await runtime.query(`
     SELECT commit_extra_info

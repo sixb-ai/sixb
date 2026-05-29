@@ -23,6 +23,68 @@ const lakeStorage = new DuckLakeStorage({
 await lakeStorage.close()
 ```
 
+## Runtime and Connections
+
+`DuckLakeStorage` creates one embedded DuckDB runtime for each provider
+instance. DuckLake attaches lazily on the first lake operation, so constructing
+the provider does not immediately open catalog connections.
+
+Within one provider instance, DuckDB work is queued on that runtime. This keeps
+writes, SQL transforms, and metadata reads predictable and keeps PostgreSQL
+connection use bounded.
+
+```txt
+one DuckLakeStorage instance
+  -> one DuckDB runtime
+  -> one DuckLake attachment
+  -> one bounded PostgreSQL extension pool, when catalog.type is "postgres"
+```
+
+For PostgreSQL catalogs, `postgresPool.maxConnections` is a per-instance budget.
+If four production processes each create a `DuckLakeStorage` with
+`maxConnections: 4`, the deployment can use about sixteen PostgreSQL catalog
+connections for DuckLake metadata.
+
+```ts
+const lakeStorage = new DuckLakeStorage({
+  catalog: { type: "postgres", host, database, user, password },
+  dataPath: "s3://pario-lake/data",
+  duckdb: {
+    config: {
+      threads: "1",
+    },
+  },
+  postgresPool: {
+    maxConnections: 4,
+    idleTimeoutMillis: 1_000,
+    enableThreadLocalCache: false,
+  },
+})
+```
+
+Use `close()` during service shutdown so DuckDB can close its runtime and release
+catalog connections cleanly.
+
+### Read and Write Concurrency
+
+Reads, writes, SQL previews, and SQL transforms use the same DuckDB runtime and
+the same DuckLake PostgreSQL metadata pool. Work is serialized inside one
+`DuckLakeStorage` instance, so a large write can make later reads wait. A large
+streaming read can also make a later write wait until the stream is consumed or
+closed.
+
+```txt
+same provider instance:
+  read -> write -> read
+
+the operations run in order on one DuckDB runtime
+```
+
+This is the simplest and most predictable default, especially for small
+PostgreSQL plans. A future provider option could add a bounded read-runtime pool
+for deployments that have enough PostgreSQL capacity and need more concurrent
+read throughput.
+
 Datasets must declare a schema before they can be stored in DuckLake:
 
 ```ts
@@ -200,6 +262,143 @@ const lakeStorage = new DuckLakeStorage({
   ],
 })
 ```
+
+## PostgreSQL Configuration
+
+Use a PostgreSQL catalog for production or any deployment where multiple Pario
+processes need to see the same DuckLake snapshots. Local DuckDB or SQLite
+catalogs are better suited to development and tests.
+
+PostgreSQL stores only DuckLake metadata. Dataset table data still lives under
+`dataPath`, usually in object storage such as S3, R2, GCS, or Azure Blob.
+
+```txt
+PostgreSQL catalog  -> snapshots, schemas, transactions, metadata
+dataPath            -> physical DuckLake table data and files
+BlobStorage         -> Pario fileRef payload bytes
+```
+
+Recommended production shape:
+
+```ts
+const lakeStorage = new DuckLakeStorage({
+  catalog: {
+    type: "postgres",
+    host: process.env.PGHOST!,
+    port: Number(process.env.PGPORT ?? 5432),
+    database: process.env.PGDATABASE!,
+    user: process.env.PGUSER!,
+    password: process.env.PGPASSWORD!,
+    sslMode: "require",
+    applicationName: "pario-api",
+    connectTimeoutSeconds: 10,
+    metadataSchema: "pario_lake",
+  },
+  dataPath: "s3://pario-lake/data",
+  duckdb: {
+    config: {
+      threads: "2",
+    },
+  },
+  postgresPool: {
+    maxConnections: 8,
+    waitTimeoutMillis: 30_000,
+    idleTimeoutMillis: 1_000,
+    maxLifetimeMillis: 300_000,
+    enableThreadLocalCache: false,
+  },
+  secrets: [
+    {
+      type: "s3",
+      keyId: process.env.AWS_ACCESS_KEY_ID,
+      secret: process.env.AWS_SECRET_ACCESS_KEY,
+      region: "us-east-1",
+      scope: "s3://pario-lake",
+    },
+  ],
+})
+```
+
+### What Each Setting Controls
+
+| Setting | Controls |
+| --- | --- |
+| `catalog` | The PostgreSQL database DuckLake uses for metadata. |
+| `catalog.metadataSchema` | The schema that holds DuckLake metadata tables. |
+| `dataPath` | Where DuckLake stores physical table data. |
+| `duckdb.config.threads` | Local DuckDB worker threads inside this process. |
+| `postgresPool` | DuckDB PostgreSQL extension connections for DuckLake metadata. |
+
+This pool is separate from any normal Pario `PostgresStorage` pool. Count both
+when sizing a small database.
+
+### Connection Sizing
+
+Start with the smallest budget that supports your workload, then raise it after
+observing real latency and PostgreSQL connection use.
+
+| Deployment | `duckdb.config.threads` | `postgresPool.maxConnections` | Notes |
+| --- | ---: | ---: | --- |
+| Small managed PostgreSQL, about 20 connections | `"1"` | `4` | Run only the services that need the lake provider. |
+| Normal production service | `"2"` to `"4"` | `8` to `16` | Good default range for API and worker processes. |
+| Larger read-heavy deployment | `"4"` or more | `16` or more | Scale only with PostgreSQL headroom and monitoring. |
+
+The budget multiplies by process count:
+
+```txt
+estimated DuckLake catalog connections =
+  number of processes with DuckLakeStorage * postgresPool.maxConnections
+```
+
+If the PostgreSQL role has a `CONNECTION LIMIT`, size it for the whole
+deployment:
+
+```txt
+role connection limit >=
+  DuckLake catalog connections
+  + normal application PostgreSQL pool connections
+  + migration, admin, and monitoring headroom
+```
+
+Leave headroom for the normal Pario PostgreSQL storage provider, migrations,
+admin sessions, monitoring, and PostgreSQL reserved connections.
+
+### Pool Options
+
+`postgresPool` maps to DuckDB's PostgreSQL extension pool settings for the
+DuckLake metadata catalog.
+
+| Option | Use it for |
+| --- | --- |
+| `maxConnections` | Hard cap for DuckDB PostgreSQL extension connections. |
+| `waitTimeoutMillis` | How long a request can wait for a pool connection. |
+| `idleTimeoutMillis` | How quickly unused pool connections are released. |
+| `maxLifetimeMillis` | Recycling long-lived PostgreSQL connections. |
+| `enableThreadLocalCache` | Keep `false` for constrained databases. |
+| `healthCheckQuery` | Custom pool connection health checks, rarely needed. |
+
+Prefer `postgresPool` over raw `setupSql` for PostgreSQL pool tuning. The
+provider applies the settings before and after DuckLake attachment so the
+metadata catalog uses the intended pool.
+
+### Service Layout
+
+Each service process that constructs `DuckLakeStorage` owns its own DuckDB
+runtime and PostgreSQL pool. Avoid creating the lake provider in services that
+do not need it.
+
+```txt
+needs DuckLakeStorage:
+  api reads, sync worker, pipeline worker, projection worker
+
+does not need DuckLakeStorage:
+  static app server, health-only process, services that only use BlobStorage
+```
+
+On very small PostgreSQL plans, run fewer lake-owning processes or group workers
+into one process before lowering `maxConnections` too far. A pool budget below
+`4` can become fragile because one runtime may need several metadata operations
+during attach, commit, and snapshot hydration.
 
 Use `custom` when you need to pass a DuckLake catalog URI that Pario does not
 model directly:

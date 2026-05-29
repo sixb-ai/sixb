@@ -1,16 +1,107 @@
 import { describe, expect, test } from "bun:test"
 import type { DuckDBValue } from "@duckdb/node-api"
 import type { DuckLakeStorageOptions } from "../src"
-import type { DuckDbAppender, DuckDbRuntime } from "../src/internal/duckdb-runtime"
+import type {
+  DuckDbAppender,
+  DuckDbExclusiveRuntime,
+  DuckDbRuntime,
+} from "../src/internal/duckdb-runtime"
 import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 
 describe("DuckLakeConnectionManager", () => {
-  test("does not run shared-runtime readers between PostgreSQL DETACH and ATTACH", async () => {
-    const runtime = new PausedRefreshRuntime()
-    const connections = new TestConnectionManager(runtime)
+  test("starts the shared runtime unattached and attaches only once", async () => {
+    const runtime = new RecordingRuntime()
+    const connections = new TestConnectionManager(() => runtime)
 
     try {
-      const sharedRuntime = await connections.runtime()
+      expect(await connections.runtime()).toBe(runtime)
+      expect(runtime.attachCount()).toBe(0)
+
+      expect(await connections.attachedRuntime()).toBe(runtime)
+      expect(await connections.attachedRuntime()).toBe(runtime)
+      expect(runtime.attachCount()).toBe(1)
+    } finally {
+      await connections.close()
+    }
+
+    expect(runtime.detachCount()).toBe(1)
+    expect(runtime.closed).toBe(true)
+  })
+
+  test("does not detach an unattached runtime on close", async () => {
+    const runtime = new RecordingRuntime()
+    const connections = new TestConnectionManager(() => runtime)
+
+    await connections.runtime()
+    await connections.close()
+
+    expect(runtime.attachCount()).toBe(0)
+    expect(runtime.detachCount()).toBe(0)
+    expect(runtime.closed).toBe(true)
+  })
+
+  test("clears failed attachments so the next request can retry with a fresh runtime", async () => {
+    const first = new RecordingRuntime({ failOnAttach: true })
+    const second = new RecordingRuntime()
+    const runtimes = [first, second]
+    const connections = new TestConnectionManager(() => {
+      const runtime = runtimes.shift()
+      if (!runtime) {
+        throw new Error("test did not expect another runtime")
+      }
+      return runtime
+    })
+
+    try {
+      await expect(connections.attachedRuntime()).rejects.toThrow("attach failed")
+      expect(first.attachCount()).toBe(1)
+      expect(first.closed).toBe(true)
+
+      await expect(connections.attachedRuntime()).resolves.toBe(second)
+      expect(second.attachCount()).toBe(1)
+    } finally {
+      await connections.close()
+    }
+  })
+
+  test("recycles a poisoned runtime on release so leaked session state cannot reach a later lease", async () => {
+    const first = new RecordingRuntime()
+    const second = new RecordingRuntime()
+    const runtimes = [first, second]
+    const connections = new TestConnectionManager(() => {
+      const runtime = runtimes.shift()
+      if (!runtime) {
+        throw new Error("test did not expect another runtime")
+      }
+      return runtime
+    })
+
+    try {
+      const lease = await connections.acquireAttachedRuntime()
+      expect(lease.runtime).toBe(first)
+
+      // A guarded commit that could not RESET a session pragma poisons the
+      // runtime. Release must then drop the connection instead of detaching and
+      // reusing it, so the leftover setting cannot affect a later commit.
+      connections.poisonRuntime()
+      await lease.release()
+      expect(first.closed).toBe(true)
+
+      const next = await connections.acquireAttachedRuntime()
+      expect(next.runtime).toBe(second)
+      expect(second.closed).toBe(false)
+      await next.release()
+    } finally {
+      await connections.close()
+    }
+  })
+
+  test("does not run readers between DuckLake DETACH and ATTACH during reset", async () => {
+    const runtime = new PausedRefreshRuntime()
+    const connections = new TestConnectionManager(() => runtime)
+
+    try {
+      const sharedRuntime = await connections.attachedRuntime()
       const refresh = connections.resetRuntime()
 
       await withTimeout(runtime.detached(), "refresh did not reach DETACH")
@@ -23,6 +114,7 @@ describe("DuckLakeConnectionManager", () => {
         })
       )
 
+      expect(await resolvesWithin(readResult, 25)).toBe(false)
       runtime.resumeDetach()
 
       await withTimeout(refresh, "refresh did not finish")
@@ -37,13 +129,11 @@ describe("DuckLakeConnectionManager", () => {
   })
 })
 
-const postgresOptions: DuckLakeStorageOptions = {
+const localOptions: DuckLakeStorageOptions = {
   catalog: {
-    type: "postgres",
-    host: "127.0.0.1",
-    database: "postgres",
+    type: "duckdb",
+    path: ":memory:",
   },
-  dataPath: "/tmp/pario-ducklake-test-data",
 }
 
 async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
@@ -62,20 +152,127 @@ async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> 
   }
 }
 
-class TestConnectionManager extends DuckLakeConnectionManager {
-  private created = false
+async function resolvesWithin(promise: Promise<unknown>, milliseconds: number): Promise<boolean> {
+  let timeout: Timer | undefined
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => true
+      ),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), milliseconds)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
 
-  constructor(private readonly testRuntime: DuckDbRuntime) {
-    super(postgresOptions)
+class TestConnectionManager extends DuckLakeConnectionManager {
+  constructor(private readonly createTestRuntime: () => DuckDbRuntime) {
+    super(localOptions)
   }
 
   override async createRuntime(): Promise<DuckDbRuntime> {
-    if (this.created) {
-      throw new Error("test expected a single shared runtime")
-    }
+    return this.createTestRuntime()
+  }
+}
 
-    this.created = true
-    return this.testRuntime
+class RecordingRuntime implements DuckDbRuntime {
+  readonly statements: string[] = []
+  closed = false
+
+  constructor(private readonly options: { readonly failOnAttach?: boolean } = {}) {}
+
+  attachCount(): number {
+    return this.statements.filter((sql) => sql.startsWith("ATTACH ")).length
+  }
+
+  detachCount(): number {
+    return this.statements.filter((sql) => sql.startsWith("DETACH ")).length
+  }
+
+  run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
+    void values
+    this.assertOpen()
+    this.statements.push(sql)
+    if (this.options.failOnAttach && sql.startsWith("ATTACH ")) {
+      throw new Error("attach failed")
+    }
+    return Promise.resolve()
+  }
+
+  async runStatements(statements: readonly string[]): Promise<void> {
+    for (const sql of statements) {
+      await this.run(sql)
+    }
+  }
+
+  query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]> {
+    void sql
+    void values
+    this.assertOpen()
+    return Promise.resolve([{ value: 1 }])
+  }
+
+  async *streamRows(
+    sql: string,
+    values?: readonly DuckDBValue[]
+  ): AsyncIterable<Record<string, unknown>> {
+    void sql
+    void values
+    this.assertOpen()
+    yield* []
+  }
+
+  withAppender<T>(
+    tableName: string,
+    useAppender: (appender: DuckDbAppender) => T | Promise<T>
+  ): Promise<T> {
+    void tableName
+    void useAppender
+    throw new Error("withAppender is not needed in this test")
+  }
+
+  async withExclusive<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
+    return useRuntime(new RecordingExclusiveRuntime(this))
+  }
+
+  close(): Promise<void> {
+    this.closed = true
+    return Promise.resolve()
+  }
+
+  assertOpen(): void {
+    if (this.closed) {
+      throw new Error("runtime is closed")
+    }
+  }
+}
+
+class RecordingExclusiveRuntime implements DuckDbExclusiveRuntime {
+  constructor(private readonly runtime: RecordingRuntime) {}
+
+  run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
+    return this.runtime.run(sql, values)
+  }
+
+  runStatements(statements: readonly string[]): Promise<void> {
+    return this.runtime.runStatements(statements)
+  }
+
+  query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]> {
+    return this.runtime.query(sql, values)
+  }
+
+  withAppender<T>(
+    tableName: string,
+    useAppender: (appender: DuckDbAppender) => T | Promise<T>
+  ): Promise<T> {
+    return this.runtime.withAppender(tableName, useAppender)
   }
 }
 
@@ -84,7 +281,7 @@ class PausedRefreshRuntime implements DuckDbRuntime {
   private readonly resumeDetachDeferred = createDeferred<void>()
   private operations: Promise<void> = Promise.resolve()
   private closed = false
-  private aliasAttached = true
+  private aliasAttached = false
   private detachResumed = false
 
   detached(): Promise<void> {
@@ -113,7 +310,7 @@ class PausedRefreshRuntime implements DuckDbRuntime {
     })
   }
 
-  private async runStatement(sql: string): Promise<void> {
+  async runStatement(sql: string): Promise<void> {
     if (sql.startsWith("DETACH ")) {
       this.aliasAttached = false
       this.detachedDeferred.resolve()
@@ -155,6 +352,10 @@ class PausedRefreshRuntime implements DuckDbRuntime {
     throw new Error("withAppender is not needed in this test")
   }
 
+  withExclusive<T>(useRuntime: (runtime: DuckDbExclusiveRuntime) => Promise<T>): Promise<T> {
+    return this.enqueue(() => useRuntime(new PausedRefreshExclusiveRuntime(this)))
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return
@@ -184,10 +385,41 @@ class PausedRefreshRuntime implements DuckDbRuntime {
     return result
   }
 
-  private assertAliasAttached(): void {
+  assertAliasAttached(): void {
     if (!this.aliasAttached) {
       throw new Error("DuckLake alias is detached")
     }
+  }
+}
+
+class PausedRefreshExclusiveRuntime implements DuckDbExclusiveRuntime {
+  constructor(private readonly runtime: PausedRefreshRuntime) {}
+
+  run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
+    void values
+    return this.runtime.runStatement(sql)
+  }
+
+  async runStatements(statements: readonly string[]): Promise<void> {
+    for (const sql of statements) {
+      await this.runtime.runStatement(sql)
+    }
+  }
+
+  query(sql: string, values?: readonly DuckDBValue[]): Promise<readonly Record<string, unknown>[]> {
+    void sql
+    void values
+    this.runtime.assertAliasAttached()
+    return Promise.resolve([{ value: 1 }])
+  }
+
+  withAppender<T>(
+    tableName: string,
+    useAppender: (appender: DuckDbAppender) => T | Promise<T>
+  ): Promise<T> {
+    void tableName
+    void useAppender
+    throw new Error("withAppender is not needed in this test")
   }
 }
 

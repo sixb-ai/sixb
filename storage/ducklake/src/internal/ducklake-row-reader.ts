@@ -34,39 +34,45 @@ export class DuckLakeRowReader {
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     this.connections.assertOpen()
 
-    // Step 1: use the catalog definition, not caller-provided shape. That
-    // keeps projection validation and value normalization aligned with the
-    // physical DuckLake table.
-    const definition = await this.datasets.getDataset(input.datasetId)
-    if (!definition) {
-      throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.datasetId}'.`)
-    }
+    const lease = await this.connections.acquireAttachedRuntime()
+    try {
+      const runtime = lease.runtime
 
-    const runtime = await this.connections.runtime()
-    const version = await this.resolveVersion(runtime, definition, input.versionId)
-    const snapshotId = parseVersionId(version.versionId)
-    const selectedColumns = this.resolveReadColumns(definition.id, version.schema, input.columns)
-
-    // Step 2: query DuckLake at the exact snapshot id. Version ids are just
-    // `ducklake:<snapshot_id>`, so reads can use native DuckLake time travel
-    // directly after validation.
-    const tableName = encodeDatasetTableName(input.datasetId)
-    const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
-    const tableSql = qualifiedTableName(this.options, tableName)
-    const limitSql = input.limit === undefined ? "" : ` LIMIT ${Math.max(0, input.limit)}`
-    const offsetSql = input.offset === undefined ? "" : ` OFFSET ${Math.max(0, input.offset)}`
-    const rows = runtime.streamRows(
-      `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
-    )
-
-    // Step 3: DuckDB returns driver-native values. Normalize each projected
-    // column through the schema that was active at the resolved version.
-    for await (const row of rows) {
-      const output: Record<string, unknown> = {}
-      for (const column of selectedColumns) {
-        output[column.name] = normalizeReadValue(row[column.name], column)
+      // Step 1: use the catalog definition, not caller-provided shape. That
+      // keeps projection validation and value normalization aligned with the
+      // physical DuckLake table.
+      const definition = await this.datasets.getDatasetOnRuntime(runtime, input.datasetId)
+      if (!definition) {
+        throw new LakeStorageError(`[ParioDuckLake] Unknown dataset '${input.datasetId}'.`)
       }
-      yield output
+
+      const version = await this.resolveVersion(runtime, definition, input.versionId)
+      const snapshotId = parseVersionId(version.versionId)
+      const selectedColumns = this.resolveReadColumns(definition.id, version.schema, input.columns)
+
+      // Step 2: query DuckLake at the exact snapshot id. Version ids are just
+      // `ducklake:<snapshot_id>`, so reads can use native DuckLake time travel
+      // directly after validation.
+      const tableName = encodeDatasetTableName(input.datasetId)
+      const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
+      const tableSql = qualifiedTableName(this.options, tableName)
+      const limitSql = input.limit === undefined ? "" : ` LIMIT ${Math.max(0, input.limit)}`
+      const offsetSql = input.offset === undefined ? "" : ` OFFSET ${Math.max(0, input.offset)}`
+      const rows = runtime.streamRows(
+        `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
+      )
+
+      // Step 3: DuckDB returns driver-native values. Normalize each projected
+      // column through the schema that was active at the resolved version.
+      for await (const row of rows) {
+        const output: Record<string, unknown> = {}
+        for (const column of selectedColumns) {
+          output[column.name] = normalizeReadValue(row[column.name], column)
+        }
+        yield output
+      }
+    } finally {
+      await lease.release()
     }
   }
 

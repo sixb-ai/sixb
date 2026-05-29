@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { localCatalogCoordinationKey } from "../src/internal/catalog-key"
 import {
   buildAttachSql,
   buildConfigurePostgresMetadataPoolSql,
   buildCreateSecretSql,
+  buildSetPostgresPoolSql,
   catalogUri,
   duckLakeMetadataTableName,
   postgresConnectionString,
@@ -117,6 +122,42 @@ describe("DuckLake SQL rendering", () => {
     expect(buildConfigurePostgresMetadataPoolSql({ alias: "lake" })).toBe(
       "FROM postgres_configure_pool(catalog_name='__ducklake_metadata_lake', enable_thread_local_cache=false)"
     )
+
+    expect(
+      buildSetPostgresPoolSql({
+        postgresPool: {
+          maxConnections: 4,
+          waitTimeoutMillis: 10_000,
+          idleTimeoutMillis: 1_000,
+          enableThreadLocalCache: false,
+          enableReaperThread: true,
+          healthCheckQuery: "SELECT 1",
+        },
+      })
+    ).toEqual([
+      "SET pg_pool_enable_thread_local_cache = false",
+      "SET pg_pool_max_connections = 4",
+      "SET pg_pool_wait_timeout_millis = 10000",
+      "SET pg_pool_idle_timeout_millis = 1000",
+      "SET pg_pool_enable_reaper_thread = true",
+      "SET pg_pool_health_check_query = 'SELECT 1'",
+    ])
+
+    expect(
+      buildConfigurePostgresMetadataPoolSql({
+        alias: "lake",
+        postgresPool: {
+          maxConnections: 4,
+          waitTimeoutMillis: 10_000,
+          idleTimeoutMillis: 1_000,
+          enableThreadLocalCache: false,
+          enableReaperThread: true,
+          healthCheckQuery: "SELECT 1",
+        },
+      })
+    ).toBe(
+      "FROM postgres_configure_pool(catalog_name='__ducklake_metadata_lake', enable_thread_local_cache=false, max_connections=4, wait_timeout_millis=10000, idle_timeout_millis=1000, enable_reaper_thread=true, health_check_query='SELECT 1')"
+    )
   })
 
   test("loads extensions required by catalogs, data paths, and secrets", () => {
@@ -201,5 +242,36 @@ describe("DuckLake SQL rendering", () => {
     ).toBe(
       "CREATE OR REPLACE TEMPORARY SECRET (TYPE azure, CONNECTION_STRING 'DefaultEndpointsProtocol=https;AccountName=storage;AccountKey=account-key;EndpointSuffix=core.windows.net')"
     )
+  })
+
+  test("normalizes local catalog coordination keys", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "pario-ducklake-catalog-key-"))
+
+    try {
+      await mkdir(join(rootDir, "alias"))
+      const directPath = join(rootDir, "metadata.ducklake")
+      const equivalentPath = `${rootDir}/alias/../metadata.ducklake`
+
+      expect(
+        localCatalogCoordinationKey({
+          catalog: { type: "duckdb", path: directPath },
+        })
+      ).toBe(
+        localCatalogCoordinationKey({
+          catalog: { type: "duckdb", path: equivalentPath },
+        })
+      )
+      expect(
+        localCatalogCoordinationKey({
+          catalog: { type: "sqlite", path: directPath },
+        })
+      ).toBe(
+        localCatalogCoordinationKey({
+          catalog: { type: "sqlite", path: equivalentPath },
+        })
+      )
+    } finally {
+      await rm(rootDir, { recursive: true, force: true })
+    }
   })
 })

@@ -83,4 +83,139 @@ describe("DuckLakeStorage", () => {
       await runtime.close()
     }
   })
+
+  test("runtime withExclusive blocks normal operations until the callback finishes", async () => {
+    const runtime = await createDuckDbRuntime()
+    const enteredExclusive = createDeferred<void>()
+    const releaseExclusive = createDeferred<void>()
+
+    try {
+      await runtime.run("CREATE TEMP TABLE exclusive_rows (id INTEGER)")
+
+      const exclusive = runtime.withExclusive(async (exclusiveRuntime) => {
+        await exclusiveRuntime.run("INSERT INTO exclusive_rows VALUES (1)")
+        enteredExclusive.resolve()
+        await releaseExclusive.promise
+        await exclusiveRuntime.run("INSERT INTO exclusive_rows VALUES (2)")
+      })
+
+      await withTimeout(enteredExclusive.promise, "exclusive block did not start")
+
+      const blockedQuery = runtime.query("SELECT count(*) AS row_count FROM exclusive_rows")
+      expect(await resolvesWithin(blockedQuery, 25)).toBe(false)
+
+      releaseExclusive.resolve()
+
+      await exclusive
+      await expect(blockedQuery).resolves.toEqual([{ row_count: 2n }])
+    } finally {
+      releaseExclusive.resolve()
+      await runtime.close()
+    }
+  })
+
+  test("runtime withExclusive releases the queue after a failed callback", async () => {
+    const runtime = await createDuckDbRuntime()
+
+    try {
+      await runtime.run("CREATE TEMP TABLE exclusive_failures (id INTEGER)")
+
+      await expect(
+        runtime.withExclusive(async (exclusiveRuntime) => {
+          await exclusiveRuntime.run("INSERT INTO exclusive_failures VALUES (1)")
+          throw new Error("exclusive failure")
+        })
+      ).rejects.toThrow("exclusive failure")
+
+      await expect(
+        runtime.query("SELECT count(*) AS row_count FROM exclusive_failures")
+      ).resolves.toEqual([{ row_count: 1n }])
+    } finally {
+      await runtime.close()
+    }
+  })
+
+  test("runtime withExclusive waits for active streams", async () => {
+    const runtime = await createDuckDbRuntime()
+    const enteredExclusive = createDeferred<void>()
+
+    try {
+      await runtime.run(
+        "CREATE TEMP TABLE stream_rows AS SELECT i::INTEGER AS id FROM range(3) AS t(i)"
+      )
+
+      const iterator = runtime
+        .streamRows("SELECT id FROM stream_rows ORDER BY id")
+        [Symbol.asyncIterator]()
+      expect(await iterator.next()).toEqual({ done: false, value: { id: 0 } })
+
+      const exclusive = runtime.withExclusive(async (exclusiveRuntime) => {
+        enteredExclusive.resolve()
+        await exclusiveRuntime.run("INSERT INTO stream_rows VALUES (99)")
+      })
+
+      expect(await resolvesWithin(enteredExclusive.promise, 25)).toBe(false)
+      expect(await iterator.next()).toEqual({ done: false, value: { id: 1 } })
+      expect(await iterator.next()).toEqual({ done: false, value: { id: 2 } })
+      expect(await iterator.next()).toEqual({ done: true, value: undefined })
+
+      await withTimeout(enteredExclusive.promise, "exclusive block did not start after stream")
+      await exclusive
+      await expect(runtime.query("SELECT count(*) AS row_count FROM stream_rows")).resolves.toEqual(
+        [{ row_count: 4n }]
+      )
+    } finally {
+      await runtime.close()
+    }
+  })
 })
+
+async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timeout: Timer | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), 1_000)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+async function resolvesWithin(promise: Promise<unknown>, milliseconds: number): Promise<boolean> {
+  let timeout: Timer | undefined
+  try {
+    return await Promise.race([
+      promise.then(
+        () => true,
+        () => true
+      ),
+      new Promise<boolean>((resolve) => {
+        timeout = setTimeout(() => resolve(false), milliseconds)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+    }
+  }
+}
+
+function createDeferred<T>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T | PromiseLike<T>) => void
+} {
+  let resolve: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+
+  return {
+    promise,
+    resolve: resolve!,
+  }
+}

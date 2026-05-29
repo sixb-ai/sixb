@@ -34,11 +34,26 @@ function duckLakeMetadataCatalog(options: Pick<DuckLakeStorageOptions, "alias">)
  * DuckLake metadata reads.
  */
 export function buildConfigurePostgresMetadataPoolSql(
-  options: Pick<DuckLakeStorageOptions, "alias">
+  options: Pick<DuckLakeStorageOptions, "alias" | "postgresPool">
 ): string {
-  return `FROM postgres_configure_pool(catalog_name=${quoteSqlString(
-    duckLakeMetadataCatalog(options)
-  )}, enable_thread_local_cache=false)`
+  const parameters = [
+    `catalog_name=${quoteSqlString(duckLakeMetadataCatalog(options))}`,
+    ...postgresPoolParameters(options.postgresPool).map(({ name, value }) => `${name}=${value}`),
+  ]
+
+  return `FROM postgres_configure_pool(${parameters.join(", ")})`
+}
+
+/**
+ * Configure DuckDB's PostgreSQL extension before ATTACH. These settings only
+ * affect databases attached after they are set.
+ */
+export function buildSetPostgresPoolSql(
+  options: Pick<DuckLakeStorageOptions, "postgresPool">
+): readonly string[] {
+  return postgresPoolParameters(options.postgresPool).map(
+    ({ name, value }) => `SET pg_pool_${name} = ${value}`
+  )
 }
 
 /**
@@ -233,6 +248,48 @@ function storageExtensions(path: string | undefined): readonly string[] {
     default:
       return []
   }
+}
+
+/**
+ * The single source of truth for PostgreSQL pool options. Both the pre-attach
+ * `SET pg_pool_*` form and the post-attach `postgres_configure_pool(...)` form
+ * render from this list so the two stay in sync. `name` is the unprefixed
+ * option key; `value` is already rendered (numbers/booleans bare, strings
+ * quoted as SQL literals).
+ */
+function postgresPoolParameters(
+  pool: DuckLakeStorageOptions["postgresPool"]
+): readonly { readonly name: string; readonly value: string }[] {
+  const parameters: { name: string; value: string }[] = [
+    { name: "enable_thread_local_cache", value: String(pool?.enableThreadLocalCache ?? false) },
+  ]
+
+  appendPoolNumber(parameters, "max_connections", pool?.maxConnections)
+  appendPoolNumber(parameters, "wait_timeout_millis", pool?.waitTimeoutMillis)
+  appendPoolNumber(parameters, "max_lifetime_millis", pool?.maxLifetimeMillis)
+  appendPoolNumber(parameters, "idle_timeout_millis", pool?.idleTimeoutMillis)
+
+  if (pool?.enableReaperThread !== undefined) {
+    parameters.push({ name: "enable_reaper_thread", value: String(pool.enableReaperThread) })
+  }
+
+  if (pool?.healthCheckQuery !== undefined) {
+    parameters.push({ name: "health_check_query", value: quoteSqlString(pool.healthCheckQuery) })
+  }
+
+  return parameters
+}
+
+function appendPoolNumber(
+  parameters: { name: string; value: string }[],
+  name: string,
+  value: number | undefined
+): void {
+  if (value === undefined) {
+    return
+  }
+
+  parameters.push({ name, value: String(value) })
 }
 
 function secretExtensions(secret: DuckDbSecretOptions): readonly string[] {
