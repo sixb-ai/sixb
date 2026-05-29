@@ -135,7 +135,7 @@ describe("server auth guard", () => {
     const response = await app.fetch(new Request("http://localhost/api/project"))
 
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ id: "test-project", type: "local" })
+    expect(await response.json()).toEqual({ id: "test-project" })
   })
 
   test("fails closed in production when auth is missing", () => {

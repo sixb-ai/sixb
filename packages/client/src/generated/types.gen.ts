@@ -348,7 +348,6 @@ export type GetProjectInfoResponses = {
    */
   200: {
     id: string
-    type: "local"
   }
 }
 
