@@ -1,4 +1,4 @@
-import { getWorkflowRunOptions } from "@pario/client/hooks"
+import { getWorkflowOptions, getWorkflowRunOptions } from "@pario/client/hooks"
 import { Badge, Button, Card, CardContent, CardTitle, EmptyState } from "@pario/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Check, Copy, GitBranch, Play } from "lucide-react"
@@ -8,6 +8,7 @@ import { Link, Navigate, useParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { RunNodeRow } from "../features/workflows/components/nodes/RunNodeRow"
 import { RunIOShape } from "../features/workflows/components/runs/RunIOShape"
+import { RunProgress } from "../features/workflows/components/runs/RunProgress"
 import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
 import {
   formatDate,
@@ -28,6 +29,11 @@ export function RunDetailPage() {
       return status && isActiveRunStatus(status) ? 5000 : false
     },
   })
+  const workflowId = runQuery.data?.run.workflowId
+  const workflowQuery = useQuery({
+    ...getWorkflowOptions({ path: { workflowId: workflowId ?? "" } }),
+    enabled: Boolean(workflowId),
+  })
 
   if (!runId) {
     return <Navigate to="/runs" replace />
@@ -42,6 +48,7 @@ export function RunDetailPage() {
   }
 
   const { run, nodes } = runQuery.data
+  const totalSteps = workflowQuery.data?.nodes.length ?? 0
 
   return (
     <PageFrame
@@ -55,12 +62,15 @@ export function RunDetailPage() {
         <RunHeaderStats run={run} />
 
         <section className="space-y-3">
-          <div>
-            <h2 className="text-sm font-medium text-foreground">Timeline</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Run input followed by {nodes.length} recorded node
-              {nodes.length === 1 ? "" : "s"}.
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-medium text-foreground">Timeline</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Run input followed by {nodes.length} recorded node
+                {nodes.length === 1 ? "" : "s"}.
+              </p>
+            </div>
+            <RunProgress status={run.status} nodes={nodes} totalSteps={totalSteps} />
           </div>
 
           <RunInputCard value={run.input} />
@@ -75,8 +85,14 @@ export function RunDetailPage() {
             </Card>
           ) : (
             <div className="space-y-3">
-              {nodes.map((node) => (
-                <RunNodeRow key={`${node.workflowRunId}:${node.nodeIndex}`} node={node} />
+              {nodes.map((node, index) => (
+                <RunNodeRow
+                  key={`${node.workflowRunId}:${node.nodeIndex}`}
+                  node={node}
+                  // Collapse finished steps so the run reads as a scannable flow;
+                  // keep the last step (final output) and any non-succeeded step open.
+                  defaultOpen={node.status !== "succeeded" || index === nodes.length - 1}
+                />
               ))}
             </div>
           )}

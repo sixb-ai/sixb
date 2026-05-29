@@ -1,8 +1,7 @@
 import { listWorkflowsOptions } from "@pario/client/hooks"
-import { Card } from "@pario/ui/components"
+import { Card, EmptyState } from "@pario/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Workflow } from "lucide-react"
-import type { ReactNode } from "react"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { WorkflowCard } from "../features/workflows/components/workflows/WorkflowCard"
 
@@ -29,8 +28,8 @@ export function WorkflowsPage() {
       <section className="space-y-3">
         {workflows.length === 0 ? (
           <Card>
-            <QuietEmptyState
-              icon={<Workflow className="h-5 w-5" />}
+            <EmptyState
+              icon={<Workflow className="size-12 stroke-1" />}
               title="No workflows registered"
               description="Create a workflow definition to see it appear here."
             />
@@ -44,23 +43,5 @@ export function WorkflowsPage() {
         )}
       </section>
     </PageFrame>
-  )
-}
-
-function QuietEmptyState({
-  icon,
-  title,
-  description,
-}: {
-  icon: ReactNode
-  title: string
-  description: string
-}) {
-  return (
-    <div className="px-5 py-14 text-center">
-      <div className="mx-auto text-muted-foreground">{icon}</div>
-      <p className="mt-4 font-medium text-foreground">{title}</p>
-      <p className="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">{description}</p>
-    </div>
   )
 }
