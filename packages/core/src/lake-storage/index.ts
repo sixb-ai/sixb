@@ -31,6 +31,8 @@ export type {
 export type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
+  DatasetCatalogState,
+  DatasetLatestVersionSummary,
   DatasetProducer,
   DatasetRow,
   DatasetVersion,

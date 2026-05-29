@@ -6,6 +6,7 @@ import { LakeStorageError } from "./errors"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
+  DatasetCatalogState,
   DatasetRow,
   DatasetVersion,
   LakeStorage,
@@ -127,6 +128,33 @@ export class InMemoryLakeStorage implements LakeStorage {
 
   async listDatasets(): Promise<readonly DatasetDefinition[]> {
     return [...this.datasets.values()].map((definition) => cloneDatasetDefinition(definition))
+  }
+
+  async listDatasetCatalogState(
+    datasetIds: readonly string[]
+  ): Promise<readonly DatasetCatalogState[]> {
+    return Promise.all(
+      datasetIds.map(async (datasetId) => {
+        if (!this.datasets.has(datasetId)) {
+          return { datasetId, materialized: false, latestVersion: null }
+        }
+
+        const latest = await this.getLatestVersion(datasetId)
+        return {
+          datasetId,
+          materialized: true,
+          latestVersion: latest
+            ? {
+                datasetId: latest.datasetId,
+                versionId: latest.versionId,
+                mode: latest.mode,
+                createdAt: latest.createdAt,
+                ...(latest.rowCount !== undefined ? { rowCount: latest.rowCount } : {}),
+              }
+            : null,
+        }
+      })
+    )
   }
 
   async listVersions(datasetId: string, limit?: number): Promise<readonly DatasetVersion[]> {

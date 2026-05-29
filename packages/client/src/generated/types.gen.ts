@@ -490,36 +490,9 @@ export type ListDatasetsResponses = {
     latestVersion: {
       datasetId: string
       versionId: string
-      parentVersionId?: string
       mode: "snapshot" | "append" | "schema"
       createdAt: string
-      schema: {
-        columns: Array<{
-          name: string
-          type:
-            | "string"
-            | "boolean"
-            | "int64"
-            | "float64"
-            | "decimal"
-            | "date"
-            | "timestamp"
-            | "json"
-            | "fileRef"
-          nullable?: boolean
-        }>
-      }
-      producer?: {
-        kind: "sync" | "pipeline"
-        id?: string
-        runId?: string
-      }
-      inputs?: Array<{
-        datasetId: string
-        versionId: string
-      }>
       rowCount?: number
-      sizeBytes?: number
     } | null
     syncIds: Array<string>
     sourcePipelineIds: Array<string>
@@ -585,36 +558,9 @@ export type GetDatasetResponses = {
     latestVersion: {
       datasetId: string
       versionId: string
-      parentVersionId?: string
       mode: "snapshot" | "append" | "schema"
       createdAt: string
-      schema: {
-        columns: Array<{
-          name: string
-          type:
-            | "string"
-            | "boolean"
-            | "int64"
-            | "float64"
-            | "decimal"
-            | "date"
-            | "timestamp"
-            | "json"
-            | "fileRef"
-          nullable?: boolean
-        }>
-      }
-      producer?: {
-        kind: "sync" | "pipeline"
-        id?: string
-        runId?: string
-      }
-      inputs?: Array<{
-        datasetId: string
-        versionId: string
-      }>
       rowCount?: number
-      sizeBytes?: number
     } | null
     syncIds: Array<string>
     sourcePipelineIds: Array<string>

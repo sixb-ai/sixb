@@ -573,7 +573,9 @@ export {
 export type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
+  DatasetCatalogState,
   DatasetDefinitionUpdatePlan,
+  DatasetLatestVersionSummary,
   DatasetMetadataUpdatePlan,
   DatasetProducer,
   DatasetRow,
