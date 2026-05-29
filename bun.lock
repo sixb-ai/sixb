@@ -96,7 +96,6 @@
       "name": "@pario/example-acme-corp",
       "dependencies": {
         "@pario/app": "workspace:*",
-        "@pario/auth-oidc": "workspace:*",
         "@pario/blob-local": "workspace:*",
         "@pario/client": "workspace:*",
         "@pario/core": "workspace:*",
@@ -112,6 +111,19 @@
         "@types/node": "^22.15.30",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",
+      },
+    },
+    "examples/auth": {
+      "name": "@pario/example-auth",
+      "dependencies": {
+        "@pario/auth-magic-link": "workspace:*",
+        "@pario/auth-oidc": "workspace:*",
+        "@pario/core": "workspace:*",
+        "@pario/sqlite": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "@types/node": "^22.15.30",
       },
     },
     "examples/panasonic-ac": {
@@ -675,6 +687,8 @@
     "@pario/ducklake": ["@pario/ducklake@workspace:storage/ducklake"],
 
     "@pario/example-acme-corp": ["@pario/example-acme-corp@workspace:examples/acme-corp"],
+
+    "@pario/example-auth": ["@pario/example-auth@workspace:examples/auth"],
 
     "@pario/example-panasonic-ac": ["@pario/example-panasonic-ac@workspace:examples/panasonic-ac"],
 

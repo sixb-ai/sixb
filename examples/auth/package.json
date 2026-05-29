@@ -1,0 +1,22 @@
+{
+  "name": "@pario/example-auth",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun ../../packages/cli/src/index.tsx dev",
+    "build": "bun ../../packages/cli/src/index.tsx build",
+    "start": "bun ../../packages/cli/src/index.tsx start",
+    "check": "bun ../../packages/cli/src/index.tsx check",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pario/auth-magic-link": "workspace:*",
+    "@pario/auth-oidc": "workspace:*",
+    "@pario/core": "workspace:*",
+    "@pario/sqlite": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.15.30"
+  }
+}
