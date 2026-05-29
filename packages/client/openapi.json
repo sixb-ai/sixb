@@ -997,13 +997,9 @@
                   "properties": {
                     "id": {
                       "type": "string"
-                    },
-                    "type": {
-                      "type": "string",
-                      "enum": ["local"]
                     }
                   },
-                  "required": ["id", "type"],
+                  "required": ["id"],
                   "additionalProperties": false
                 }
               }

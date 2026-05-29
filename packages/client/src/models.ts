@@ -50,7 +50,6 @@ export interface TelemetryProperty {
 
 export interface ProjectInfo {
   name: string
-  type: string
 }
 
 export type ObjectSummary = {
@@ -281,7 +280,6 @@ function mapTelemetryProperties(
 export function toProjectInfo(project: GetProjectInfoResponse): ProjectInfo {
   return {
     name: project.id,
-    type: project.type,
   }
 }
 

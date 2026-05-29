@@ -402,7 +402,7 @@ describe("ParioServer HTTP contract", () => {
     await withHttpContractServer(async ({ baseUrl }) => {
       const projectResponse = await fetch(`${baseUrl}/api/project`)
       expect(projectResponse.status).toBe(200)
-      expect(await projectResponse.json()).toEqual({ id: "contract-project", type: "local" })
+      expect(await projectResponse.json()).toEqual({ id: "contract-project" })
 
       const statusResponse = await fetch(`${baseUrl}/api/status`)
       expect(statusResponse.status).toBe(200)
