@@ -72,9 +72,11 @@ describe("DuckLakeStorage bulk catalog state", () => {
 
   // Performance regression: the bulk read must not fan out into one query per
   // dataset. Many materialized datasets are resolved with the same small,
-  // bounded set of metadata queries as a few would need.
+  // bounded set of metadata queries as a few would need. The dataset count is
+  // kept modest (and the timeout generous) because the slow part is the
+  // sequential write setup, not the bulk read under test.
   test("resolves many datasets with a bounded, count-independent query set", async () => {
-    const datasetCount = 30
+    const datasetCount = 12
     const datasetIds: string[] = []
     for (let index = 0; index < datasetCount; index += 1) {
       const dataset = defineDataset(`raw.erp.dataset_${index}`, {
@@ -115,7 +117,7 @@ describe("DuckLakeStorage bulk catalog state", () => {
       expect(sql.toLowerCase()).not.toContain("count(*)")
       expect(sql).not.toContain("AT (VERSION")
     }
-  })
+  }, 30_000)
 
   test("carries row counts from Pario commit metadata, omitting unguarded appends", async () => {
     await storage.createDataset(ordersDataset)
