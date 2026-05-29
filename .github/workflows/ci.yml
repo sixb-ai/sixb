@@ -57,6 +57,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: cli
+            package: "@pario/cli"
           - name: blob-s3
             package: "@pario/blob-s3"
           - name: ducklake

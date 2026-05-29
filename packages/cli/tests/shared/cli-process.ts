@@ -35,7 +35,9 @@ export async function startRoleUntilBannerThenStop(options: {
   readonly timeoutMs?: number
 }): Promise<StartRoleResult> {
   const banner = options.banner ?? "Ctrl+C to stop"
-  const timeoutMs = options.timeoutMs ?? 15_000
+  // Long-running roles cold-start a full bun runtime; give that generous headroom
+  // for slow/contended CI machines before declaring a hang.
+  const timeoutMs = options.timeoutMs ?? 25_000
 
   const proc = Bun.spawn({
     cmd: [...options.cmd],
@@ -49,12 +51,16 @@ export async function startRoleUntilBannerThenStop(options: {
   const decoder = new TextDecoder()
   let accumulated = ""
   let bannerSeen = false
+  let exitedEarly = false
   const killTimer = setTimeout(() => proc.kill("SIGKILL"), timeoutMs)
 
   try {
     while (true) {
       const { value, done } = await reader.read()
-      if (done) break
+      if (done) {
+        exitedEarly = true
+        break
+      }
       accumulated += decoder.decode(value, { stream: true })
       if (stripAnsi(accumulated).includes(banner)) {
         bannerSeen = true
@@ -64,6 +70,21 @@ export async function startRoleUntilBannerThenStop(options: {
   } finally {
     clearTimeout(killTimer)
     reader.releaseLock()
+  }
+
+  if (!bannerSeen) {
+    // The role exited (or was killed at timeout) before reaching its started
+    // banner. Surface stderr so the failure is diagnosable instead of a bare
+    // "bannerSeen === false".
+    const exitCode = await proc.exited
+    const stderr = await new Response(proc.stderr).text()
+    throw new Error(
+      `[cli-process] Role command did not reach its started banner ` +
+        `(exitedEarly=${exitedEarly}, exitCode=${exitCode}).\n` +
+        `cmd: ${options.cmd.join(" ")}\n` +
+        `stdout:\n${stripAnsi(accumulated).slice(-1000)}\n` +
+        `stderr:\n${stderr.slice(-1000)}`
+    )
   }
 
   proc.kill("SIGTERM")
