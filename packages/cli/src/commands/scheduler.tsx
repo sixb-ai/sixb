@@ -1,7 +1,6 @@
 import type { LoadedPario } from "../lib/loadPario"
 import { loadProductionPario } from "../lib/production"
 import {
-  prepareParioRuntime,
   type RunningSchedulerRuntime,
   runUntilSignal,
   startSchedulerRuntime,
@@ -30,7 +29,6 @@ export async function runScheduler(options: SchedulerOptions = {}) {
   let runtime: RunningSchedulerRuntime | null = null
 
   try {
-    await prepareParioRuntime(pario)
     runtime = await startSchedulerRuntime(pario)
 
     app.rerender(

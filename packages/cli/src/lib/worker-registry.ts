@@ -1,5 +1,5 @@
 import { ActionWorker } from "@pario/action-worker"
-import type { Worker } from "@pario/core"
+import { InMemoryQueues, type Worker } from "@pario/core"
 import { PipelineWorker } from "@pario/pipeline-worker"
 import { ProjectionWorker } from "@pario/projection-worker"
 import { SyncWorker } from "@pario/sync-worker"
@@ -79,4 +79,9 @@ export function resolveRegisteredWorkerTypes(pario: LoadedPario): readonly strin
 
 function knownWorkers(): string {
   return Object.keys(workerFactories).join(", ")
+}
+
+export function usesInMemoryQueues(pario: LoadedPario): boolean {
+  const queues = pario.queues as { provider?: unknown }
+  return pario.queues instanceof InMemoryQueues || queues.provider === "in-memory"
 }
