@@ -1,15 +1,30 @@
 import { Badge, Card, CardContent } from "@pario/ui/components"
-import { Workflow, Zap } from "lucide-react"
+import { cn } from "@pario/ui/lib/utils"
+import { ChevronRight, Workflow, Zap } from "lucide-react"
+import { useState } from "react"
 import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"
 import { RunIOShape } from "../runs/RunIOShape"
 import { NodeStatusBadge } from "../runs/StatusBadge"
 
-export function RunNodeRow({ node }: { node: WorkflowRunNode }) {
+export function RunNodeRow({
+  node,
+  defaultOpen = true,
+}: {
+  node: WorkflowRunNode
+  defaultOpen?: boolean
+}) {
   const isStep = node.nodeType === "step"
+  const [open, setOpen] = useState(defaultOpen)
+
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <CardContent className="p-0">
-        <div className="flex items-start gap-3 p-4">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          aria-expanded={open}
+          className="flex w-full items-start gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+        >
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted font-mono text-sm font-medium tabular-nums text-muted-foreground">
             {node.nodeIndex + 1}
           </span>
@@ -31,15 +46,23 @@ export function RunNodeRow({ node }: { node: WorkflowRunNode }) {
             </div>
           </div>
           <NodeStatusBadge status={node.status} />
-        </div>
-
-        <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
-          <JsonPanel label="Input" value={node.input} />
-          <JsonPanel
-            label={node.error ? "Error" : "Output"}
-            value={node.output ?? node.error ?? null}
+          <ChevronRight
+            className={cn(
+              "mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+              open && "rotate-90"
+            )}
           />
-        </div>
+        </button>
+
+        {open ? (
+          <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
+            <JsonPanel label="Input" value={node.input} />
+            <JsonPanel
+              label={node.error ? "Error" : "Output"}
+              value={node.output ?? node.error ?? null}
+            />
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   )

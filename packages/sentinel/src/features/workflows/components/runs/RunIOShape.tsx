@@ -1,5 +1,6 @@
 import { cn } from "@pario/ui/lib/utils"
-import { Box, Braces, Brackets, Check, Hash, Minus, Type } from "lucide-react"
+import { Box, Braces, Brackets, Check, Copy, Hash, Minus, Type } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 
 export function RunIOShape({
   value,
@@ -64,7 +65,7 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
           <TypeChip icon="array" label="array" detail={`${value.length} items`} />
         </div>
         {value.length > 0 ? (
-          <div className="rounded-md border border-border bg-background/60 px-3">
+          <div className="border-l border-border pl-3">
             <RunIOShape value={value} />
           </div>
         ) : null}
@@ -81,10 +82,19 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
           <TypeChip icon="object" label="object" detail={`${entries.length} fields`} />
         </div>
         {entries.length > 0 ? (
-          <div className="rounded-md border border-border bg-background/60 px-3">
+          <div className="border-l border-border pl-3">
             <RunIOShape value={value} />
           </div>
         ) : null}
+      </div>
+    )
+  }
+
+  if (isLongString(value)) {
+    return (
+      <div className="space-y-1.5">
+        {label ? <FieldLabel>{label}</FieldLabel> : null}
+        <ExpandableText text={value} />
       </div>
     )
   }
@@ -153,6 +163,87 @@ function TypeChip({
       <span className="truncate">{label}</span>
       {detail ? <span className="text-muted-foreground">{detail}</span> : null}
     </span>
+  )
+}
+
+const LONG_STRING_THRESHOLD = 80
+
+function isLongString(value: unknown): value is string {
+  return typeof value === "string" && (value.length > LONG_STRING_THRESHOLD || value.includes("\n"))
+}
+
+function ExpandableText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflowing, setOverflowing] = useState(false)
+  const textRef = useRef<HTMLParagraphElement>(null)
+
+  // Measure overflow only while clamped — once expanded the element grows to fit.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the text content changes (e.g. live output)
+  useEffect(() => {
+    const element = textRef.current
+    if (!element || expanded) return
+    setOverflowing(element.scrollHeight > element.clientHeight + 1)
+  }, [expanded, text])
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-start gap-2">
+        <p
+          ref={textRef}
+          className={cn(
+            "min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground",
+            expanded ? "max-h-80 overflow-y-auto" : "line-clamp-3"
+          )}
+        >
+          {text}
+        </p>
+        <CopyButton text={text} />
+      </div>
+      {overflowing ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
+          className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timeout = window.setTimeout(() => setCopied(false), 1600)
+    return () => window.clearTimeout(timeout)
+  }, [copied])
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be blocked; failing silently is acceptable here.
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      aria-label="Copy value"
+      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-600" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+    </button>
   )
 }
 
