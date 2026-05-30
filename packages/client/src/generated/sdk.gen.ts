@@ -6,6 +6,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
+  CancelWorkflowInterventionData,
+  CancelWorkflowInterventionErrors,
+  CancelWorkflowInterventionResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
@@ -59,6 +62,9 @@ import type {
   GetTelemetryHistoryResponses,
   GetWorkflowData,
   GetWorkflowErrors,
+  GetWorkflowInterventionData,
+  GetWorkflowInterventionErrors,
+  GetWorkflowInterventionResponses,
   GetWorkflowResponses,
   GetWorkflowRunData,
   GetWorkflowRunErrors,
@@ -110,6 +116,9 @@ import type {
   ListWebhookRunsData,
   ListWebhookRunsErrors,
   ListWebhookRunsResponses,
+  ListWorkflowInterventionsData,
+  ListWorkflowInterventionsErrors,
+  ListWorkflowInterventionsResponses,
   ListWorkflowRunsData,
   ListWorkflowRunsErrors,
   ListWorkflowRunsResponses,
@@ -136,6 +145,9 @@ import type {
   SignOutData,
   SignOutErrors,
   SignOutResponses,
+  SubmitWorkflowInterventionData,
+  SubmitWorkflowInterventionErrors,
+  SubmitWorkflowInterventionResponses,
   UpsertObjectData,
   UpsertObjectErrors,
   UpsertObjectLinkData,
@@ -472,6 +484,70 @@ export const getWorkflow = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError>({
     url: "/api/workflows/{workflowId}",
     ...options,
+  })
+
+/**
+ * List workflow interventions
+ */
+export const listWorkflowInterventions = <ThrowOnError extends boolean = false>(
+  options?: Options<ListWorkflowInterventionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListWorkflowInterventionsResponses,
+    ListWorkflowInterventionsErrors,
+    ThrowOnError
+  >({ url: "/api/workflow-interventions", ...options })
+
+/**
+ * Get workflow intervention detail
+ */
+export const getWorkflowIntervention = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowInterventionData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetWorkflowInterventionResponses,
+    GetWorkflowInterventionErrors,
+    ThrowOnError
+  >({ url: "/api/workflow-interventions/{interventionId}", ...options })
+
+/**
+ * Submit a workflow intervention response
+ */
+export const submitWorkflowIntervention = <ThrowOnError extends boolean = false>(
+  options: Options<SubmitWorkflowInterventionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SubmitWorkflowInterventionResponses,
+    SubmitWorkflowInterventionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    url: "/api/workflow-interventions/{interventionId}/submit",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Cancel a workflow intervention
+ */
+export const cancelWorkflowIntervention = <ThrowOnError extends boolean = false>(
+  options: Options<CancelWorkflowInterventionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CancelWorkflowInterventionResponses,
+    CancelWorkflowInterventionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-pario-csrf", type: "apiKey" }],
+    url: "/api/workflow-interventions/{interventionId}/cancel",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**
