@@ -1,9 +1,19 @@
 import type { JsonValue } from "../json"
 import { isObjectRefSchema, type Schema, type SchemaOrRef, type ValueType } from "../ontology"
 import { WorkflowValidationError } from "./errors"
-import type { StepDefinition, WorkflowDefinition, WorkflowIOSnapshot } from "./types"
+import type {
+  InterventionDefinition,
+  InterventionResponseConfig,
+  StepDefinition,
+  WorkflowDefinition,
+  WorkflowIOSnapshot,
+} from "./types"
 import {
+  interventionResponseFieldSchema,
   validateWorkflowInput,
+  validateWorkflowInterventionDefaultResponse,
+  validateWorkflowInterventionInput,
+  validateWorkflowInterventionResponse,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
 } from "./validation"
@@ -52,6 +62,51 @@ export function snapshotWorkflowStepOutput(params: {
   })
 }
 
+export function snapshotWorkflowInterventionInput(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const value = validateWorkflowInterventionInput(params)
+  return snapshotWorkflowContractRecord({
+    shape: params.intervention.input as Readonly<Record<string, SchemaOrRef>>,
+    value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" input`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function snapshotWorkflowInterventionResponse(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const value = validateWorkflowInterventionResponse(params)
+  return snapshotWorkflowInterventionResponseRecord({
+    response: params.intervention.response,
+    value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" response`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function snapshotWorkflowInterventionDefaultResponse(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const value = validateWorkflowInterventionDefaultResponse(params)
+  return snapshotWorkflowInterventionResponseRecord({
+    response: params.intervention.response,
+    value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" defaultResponse`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
 export function snapshotWorkflowActionInput(params: {
   readonly target: { readonly objectTypeId: string; readonly primaryId: string }
   readonly params: Readonly<Record<string, unknown>>
@@ -77,6 +132,30 @@ function snapshotWorkflowContractRecord(params: {
     snapshot[fieldId] = snapshotSchemaOrRefValue({
       schema,
       value: params.value[fieldId],
+      path: `${params.path}.${fieldId}`,
+      valueTypesById: params.valueTypesById,
+    })
+  }
+
+  return snapshot
+}
+
+function snapshotWorkflowInterventionResponseRecord(params: {
+  readonly response: InterventionResponseConfig
+  readonly value: Readonly<Record<string, unknown>>
+  readonly path: string
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowIOSnapshot {
+  const snapshot: Record<string, JsonValue> = {}
+
+  for (const [fieldId, value] of Object.entries(params.value)) {
+    if (value === undefined) {
+      continue
+    }
+
+    snapshot[fieldId] = snapshotSchemaOrRefValue({
+      schema: interventionResponseFieldSchema(params.response[fieldId]),
+      value,
       path: `${params.path}.${fieldId}`,
       valueTypesById: params.valueTypesById,
     })

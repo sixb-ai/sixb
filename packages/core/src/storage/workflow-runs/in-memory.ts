@@ -16,8 +16,11 @@ import type {
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
+  ResumeWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
+  WaitWorkflowNodeRunInput,
+  WaitWorkflowRunInput,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
@@ -38,6 +41,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   constructor() {
     this.nodes = new InMemoryWorkflowNodeRunStorage({
       requireRunningWorkflowRun: (projectId, id) => this.requireRunningWorkflowRun(projectId, id),
+      requireActiveWorkflowRun: (projectId, id) => this.requireActiveWorkflowRun(projectId, id),
     })
   }
 
@@ -130,6 +134,32 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     return cloneRecord(next)
   }
 
+  async wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const existing = this.requireRunningWorkflowRun(input.projectId, input.id)
+    const next: WorkflowRunRecord = {
+      ...existing,
+      status: "waiting",
+      finishedAt: undefined,
+      error: undefined,
+    }
+
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord> {
+    const existing = this.requireWaitingWorkflowRun(input.projectId, input.id)
+    const next: WorkflowRunRecord = {
+      ...existing,
+      status: "running",
+      finishedAt: undefined,
+      error: undefined,
+    }
+
+    this.runs.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
   async getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null> {
     const record = this.runs.get(storageKey(params.projectId, params.id))
     return record ? cloneRecord(record) : null
@@ -182,6 +212,28 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     const record = this.requireExistingWorkflowRun(projectId, id)
     if (record.status !== "running") {
       throw new WorkflowRunError(
+        `[Pario] Workflow run '${id}' for project '${projectId}' must be running.`
+      )
+    }
+
+    return record
+  }
+
+  private requireWaitingWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
+    const record = this.requireExistingWorkflowRun(projectId, id)
+    if (record.status !== "waiting") {
+      throw new WorkflowRunError(
+        `[Pario] Workflow run '${id}' for project '${projectId}' must be waiting.`
+      )
+    }
+
+    return record
+  }
+
+  private requireActiveWorkflowRun(projectId: string, id: string): WorkflowRunRecord {
+    const record = this.requireExistingWorkflowRun(projectId, id)
+    if (record.status !== "running" && record.status !== "waiting") {
+      throw new WorkflowRunError(
         `[Pario] Workflow run '${id}' for project '${projectId}' is already terminal.`
       )
     }
@@ -192,6 +244,10 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   private requireFinishableWorkflowRun(input: FinishWorkflowRunInput): WorkflowRunRecord {
     const record = this.requireExistingWorkflowRun(input.projectId, input.id)
     if (record.status === "running") {
+      return record
+    }
+
+    if (record.status === "waiting" && input.status === "cancelled") {
       return record
     }
 
@@ -211,6 +267,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   constructor(
     private readonly workflowRuns: {
       requireRunningWorkflowRun(projectId: string, id: string): WorkflowRunRecord
+      requireActiveWorkflowRun(projectId: string, id: string): WorkflowRunRecord
     }
   ) {}
 
@@ -253,7 +310,7 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   }
 
   async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
-    const existing = this.requireRunningNodeRun(input.projectId, input.id)
+    const existing = this.requireActiveNodeRun(input.projectId, input.id)
     const base: WorkflowNodeRunRecord = {
       ...existing,
       status: input.status,
@@ -272,6 +329,22 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
             output: undefined,
             error: input.error,
           }
+
+    this.nodes.set(storageKey(input.projectId, input.id), cloneRecord(next))
+    return cloneRecord(next)
+  }
+
+  async wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    const existing = this.requireRunningNodeRun(input.projectId, input.id)
+    this.workflowRuns.requireActiveWorkflowRun(input.projectId, existing.workflowRunId)
+
+    const next: WorkflowNodeRunRecord = {
+      ...existing,
+      status: "waiting",
+      finishedAt: undefined,
+      output: undefined,
+      error: undefined,
+    }
 
     this.nodes.set(storageKey(input.projectId, input.id), cloneRecord(next))
     return cloneRecord(next)
@@ -329,6 +402,23 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     }
 
     if (record.status !== "running") {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${id}' for project '${projectId}' must be running.`
+      )
+    }
+
+    return record
+  }
+
+  private requireActiveNodeRun(projectId: string, id: string): WorkflowNodeRunRecord {
+    const record = this.nodes.get(storageKey(projectId, id))
+    if (!record) {
+      throw new WorkflowRunError(
+        `[Pario] Workflow node run '${id}' not found for project '${projectId}'.`
+      )
+    }
+
+    if (record.status !== "running" && record.status !== "waiting") {
       throw new WorkflowRunError(
         `[Pario] Workflow node run '${id}' for project '${projectId}' is already terminal.`
       )

@@ -86,6 +86,86 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(finished.error).toBe("queue dispatch failed")
   })
 
+  test("waits and resumes workflow and node runs", async () => {
+    const storage = new InMemoryWorkflowRunStorage()
+
+    await storage.start({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+      workflowId: "review-workflow",
+      input: { draftId: "draft-1" },
+    })
+    await storage.nodes.start({
+      id: "node-waiting",
+      projectId: "my-app",
+      workflowRunId: "wf-run-waiting",
+      workflowId: "review-workflow",
+      nodeIndex: 0,
+      nodeType: "intervention",
+      nodeId: "review-draft",
+      nodeKey: "reviewDraft",
+      input: { draftId: "draft-1" },
+    })
+
+    const waitingNode = await storage.nodes.wait({
+      id: "node-waiting",
+      projectId: "my-app",
+    })
+    const waitingRun = await storage.wait({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+    })
+
+    expect(waitingNode.status).toBe("waiting")
+    expect(waitingRun.status).toBe("waiting")
+    await expect(
+      storage.finish({
+        id: "wf-run-waiting",
+        projectId: "my-app",
+        status: "succeeded",
+      })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+
+    const resumedRun = await storage.resume({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+    })
+    const finishedNode = await storage.nodes.finish({
+      id: "node-waiting",
+      projectId: "my-app",
+      status: "succeeded",
+      output: { decision: "approve" },
+    })
+    const finishedRun = await storage.finish({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+      status: "succeeded",
+    })
+
+    expect(resumedRun.status).toBe("running")
+    expect(finishedNode.output).toEqual({ decision: "approve" })
+    expect(finishedRun.status).toBe("succeeded")
+
+    await storage.start({
+      id: "wf-run-cancelled-while-waiting",
+      projectId: "my-app",
+      workflowId: "review-workflow",
+      input: {},
+    })
+    await storage.wait({
+      id: "wf-run-cancelled-while-waiting",
+      projectId: "my-app",
+    })
+
+    const cancelled = await storage.finish({
+      id: "wf-run-cancelled-while-waiting",
+      projectId: "my-app",
+      status: "cancelled",
+      error: "Reviewer cancelled",
+    })
+    expect(cancelled.status).toBe("cancelled")
+  })
+
   test("stores failed workflow runs and lists with filters, ordering, and paging", async () => {
     const storage = new InMemoryWorkflowRunStorage()
 

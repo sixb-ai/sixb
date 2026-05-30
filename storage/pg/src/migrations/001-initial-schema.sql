@@ -169,7 +169,9 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  status TEXT NOT NULL CHECK (
+    status IN ('queued', 'running', 'waiting', 'succeeded', 'failed', 'cancelled')
+  ),
   input JSONB NOT NULL,
   queued_at TIMESTAMPTZ,
   started_at TIMESTAMPTZ NOT NULL,
@@ -192,10 +194,10 @@ CREATE TABLE IF NOT EXISTS workflow_node_runs (
   workflow_run_id TEXT NOT NULL,
   workflow_id TEXT NOT NULL,
   node_index INTEGER NOT NULL CHECK (node_index >= 0),
-  node_type TEXT NOT NULL CHECK (node_type IN ('step', 'action')),
+  node_type TEXT NOT NULL CHECK (node_type IN ('step', 'action', 'intervention')),
   node_id TEXT NOT NULL,
   node_key TEXT NOT NULL,
-  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
+  status TEXT NOT NULL CHECK (status IN ('running', 'waiting', 'succeeded', 'failed', 'cancelled')),
   input JSONB NOT NULL,
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
@@ -216,6 +218,47 @@ CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_key_started
   ON workflow_node_runs (project_id, node_key, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_workflow_node_runs_project_status_started
   ON workflow_node_runs (project_id, status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS workflow_interventions (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  workflow_id TEXT NOT NULL,
+  workflow_run_id TEXT NOT NULL,
+  node_run_id TEXT NOT NULL,
+  node_index INTEGER NOT NULL CHECK (node_index >= 0),
+  node_id TEXT NOT NULL,
+  node_key TEXT NOT NULL,
+  intervention_id TEXT NOT NULL,
+  input JSONB NOT NULL,
+  default_response JSONB NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'submitted', 'cancelled', 'expired')),
+  requested_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ,
+  submitted_at TIMESTAMPTZ,
+  submitted_by JSONB,
+  response JSONB,
+  cancelled_at TIMESTAMPTZ,
+  cancelled_by JSONB,
+  expired_at TIMESTAMPTZ,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_requested
+  ON workflow_interventions (project_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_status_requested
+  ON workflow_interventions (project_id, status, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_workflow_requested
+  ON workflow_interventions (project_id, workflow_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_run_requested
+  ON workflow_interventions (project_id, workflow_run_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_node_run_requested
+  ON workflow_interventions (project_id, node_run_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_node_requested
+  ON workflow_interventions (project_id, node_id, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_key_requested
+  ON workflow_interventions (project_id, node_key, requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_workflow_interventions_project_intervention_requested
+  ON workflow_interventions (project_id, intervention_id, requested_at DESC);
 
 CREATE TABLE IF NOT EXISTS webhook_deliveries (
   project_id TEXT NOT NULL,

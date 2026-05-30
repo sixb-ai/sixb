@@ -16,6 +16,8 @@ type InferSchemaOrRefRecord<TShape extends Record<string, unknown>> = Simplify<{
 type WordSeparator = "-" | "_" | "." | " "
 declare const stepInputValueType: unique symbol
 declare const stepOutputValueType: unique symbol
+declare const interventionInputValueType: unique symbol
+declare const interventionResponseValueType: unique symbol
 
 export type DerivedWorkflowNodeKey<TId extends string> = string extends TId
   ? string
@@ -114,6 +116,8 @@ export type InferStepOutput<TStep extends StepDefinition> = TStep extends {
 
 export type WorkflowStepOutputs = Record<string, Record<string, unknown>>
 export type WorkflowIOSnapshot = Readonly<Record<string, JsonValue>>
+export type InferWorkflowContract<TShape extends Record<string, unknown>> =
+  InferSchemaOrRefRecord<TShape>
 
 export interface WorkflowMapperContext<
   TInput extends Record<string, unknown>,
@@ -128,6 +132,151 @@ export type WorkflowStepMapper<
   TSteps extends WorkflowStepOutputs,
   TStepInput extends Record<string, unknown>,
 > = (ctx: WorkflowMapperContext<TInput, TSteps>) => TStepInput
+
+export interface InterventionFieldConfig<
+  TSchema extends SchemaOrRef = SchemaOrRef,
+  TRequired extends boolean = boolean,
+> {
+  readonly schema: TSchema
+  readonly required?: TRequired
+  readonly description?: string
+}
+
+export type InterventionResponseField = SchemaOrRef | InterventionFieldConfig
+export type InterventionResponseConfig = Record<string, InterventionResponseField>
+type InterventionResponseInput<TShape extends Record<string, unknown>> = {
+  readonly [K in keyof TShape]: TShape[K] extends InterventionResponseField ? TShape[K] : never
+}
+
+type InterventionResponseSchema<TField extends InterventionResponseField> =
+  TField extends InterventionFieldConfig<infer TSchema, boolean> ? TSchema : TField
+
+type RequiredInterventionResponseKeys<TResponse extends InterventionResponseConfig> = {
+  [K in keyof TResponse]-?: TResponse[K] extends InterventionFieldConfig<
+    SchemaOrRef,
+    infer TRequired
+  >
+    ? TRequired extends false
+      ? never
+      : K
+    : K
+}[keyof TResponse]
+
+type OptionalInterventionResponseKeys<TResponse extends InterventionResponseConfig> = Exclude<
+  keyof TResponse,
+  RequiredInterventionResponseKeys<TResponse>
+>
+
+type InferInterventionResponseRecord<TResponse extends InterventionResponseConfig> = Simplify<
+  {
+    [K in RequiredInterventionResponseKeys<TResponse>]: InferSchemaOrRef<
+      InterventionResponseSchema<TResponse[K]>
+    >
+  } & {
+    [K in OptionalInterventionResponseKeys<TResponse>]?: InferSchemaOrRef<
+      InterventionResponseSchema<TResponse[K]>
+    >
+  }
+>
+
+export type InterventionDefaultsHandler<
+  TInput extends Record<string, unknown>,
+  TResponse extends InterventionResponseConfig,
+> = (ctx: {
+  readonly input: InferWorkflowContract<TInput>
+  readonly workflowInput: Readonly<Record<string, unknown>>
+  readonly steps: Readonly<Record<string, Record<string, unknown>>>
+}) =>
+  | Partial<InferInterventionResponseRecord<TResponse>>
+  | Promise<Partial<InferInterventionResponseRecord<TResponse>>>
+
+export type InterventionDefaultsRuntimeHandler = (ctx: {
+  readonly input: Readonly<Record<string, unknown>>
+  readonly workflowInput: Readonly<Record<string, unknown>>
+  readonly steps: Readonly<Record<string, Record<string, unknown>>>
+}) => Partial<Record<string, unknown>> | Promise<Partial<Record<string, unknown>>>
+
+export interface InterventionDefinition<
+  TId extends string = string,
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+  TResponse extends InterventionResponseConfig = InterventionResponseConfig,
+  TInputValue extends Record<string, unknown> = Record<string, unknown>,
+  TResponseValue extends Record<string, unknown> = Record<string, unknown>,
+> {
+  readonly kind: "intervention"
+  readonly id: TId
+  readonly description?: string
+  readonly input: TInput
+  readonly response: TResponse
+  readonly defaults?: InterventionDefaultsRuntimeHandler
+  readonly [interventionInputValueType]?: TInputValue
+  readonly [interventionResponseValueType]?: TResponseValue
+}
+
+type InterventionDefaultsBuilderMethod<
+  TId extends string,
+  TInput extends Record<string, unknown>,
+  TResponse extends InterventionResponseConfig,
+  TInputValue extends Record<string, unknown>,
+  TResponseValue extends Record<string, unknown>,
+> = InterventionDefaultsRuntimeHandler &
+  ((
+    handler: InterventionDefaultsHandler<TInput, TResponse>
+  ) => InterventionDefinition<TId, TInput, TResponse, TInputValue, TResponseValue>)
+
+export type InterventionResponseBuilder<
+  TId extends string,
+  TInput extends Record<string, unknown>,
+  TResponse extends InterventionResponseConfig,
+  TInputValue extends Record<string, unknown>,
+  TResponseValue extends Record<string, unknown>,
+> = Omit<
+  InterventionDefinition<TId, TInput, TResponse, TInputValue, TResponseValue>,
+  "defaults"
+> & {
+  readonly defaults: InterventionDefaultsBuilderMethod<
+    TId,
+    TInput,
+    TResponse,
+    TInputValue,
+    TResponseValue
+  >
+}
+
+export interface InterventionResponseDraftBuilder<
+  TId extends string,
+  TInput extends Record<string, unknown>,
+> {
+  response<const TResponse extends InterventionResponseConfig>(
+    response: TResponse & InterventionResponseInput<TResponse>
+  ): InterventionResponseBuilder<
+    TId,
+    TInput,
+    TResponse,
+    InferWorkflowContract<TInput>,
+    InferInterventionResponseRecord<TResponse>
+  >
+}
+
+export interface InterventionBuilder<TId extends string> {
+  input<const TInput extends Record<string, unknown>>(
+    input: TInput & SchemaOrRefInput<TInput>
+  ): InterventionResponseDraftBuilder<TId, TInput>
+}
+
+export type InferInterventionInput<TIntervention extends InterventionDefinition> =
+  TIntervention extends {
+    readonly [interventionInputValueType]?: infer TInputValue
+  }
+    ? NonNullable<TInputValue>
+    : never
+
+export type InferInterventionResponse<TIntervention extends InterventionDefinition> =
+  TIntervention extends {
+    readonly [interventionResponseValueType]?: infer TResponseValue
+  }
+    ? NonNullable<TResponseValue>
+    : never
 
 export interface WorkflowActionDefinition<
   TId extends string = string,
@@ -174,7 +323,21 @@ export interface WorkflowActionNodeDefinition<
   readonly mapper: TMapper
 }
 
-export type WorkflowNodeDefinition = WorkflowStepNodeDefinition | WorkflowActionNodeDefinition
+export interface WorkflowInterventionNodeDefinition<
+  TIntervention extends InterventionDefinition = InterventionDefinition,
+  TMapper = unknown,
+> {
+  readonly type: "intervention"
+  readonly id: TIntervention["id"]
+  readonly key: DerivedWorkflowNodeKey<TIntervention["id"]>
+  readonly intervention: TIntervention
+  readonly mapper?: TMapper
+}
+
+export type WorkflowNodeDefinition =
+  | WorkflowStepNodeDefinition
+  | WorkflowActionNodeDefinition
+  | WorkflowInterventionNodeDefinition
 
 type AddStepOutput<TSteps extends WorkflowStepOutputs, TStep extends StepDefinition> = Simplify<
   TSteps & {
@@ -182,8 +345,22 @@ type AddStepOutput<TSteps extends WorkflowStepOutputs, TStep extends StepDefinit
   }
 >
 
+type AddInterventionOutput<
+  TSteps extends WorkflowStepOutputs,
+  TIntervention extends InterventionDefinition,
+> = Simplify<
+  TSteps & {
+    [K in DerivedWorkflowNodeKey<TIntervention["id"]>]: InferInterventionResponse<TIntervention>
+  }
+>
+
 type DirectDataflowGuard<TCurrent extends Record<string, unknown>, TStep extends StepDefinition> =
   TCurrent extends InferStepInput<TStep> ? unknown : never
+
+type DirectInterventionDataflowGuard<
+  TCurrent extends Record<string, unknown>,
+  TIntervention extends InterventionDefinition,
+> = TCurrent extends InferInterventionInput<TIntervention> ? unknown : never
 
 export interface WorkflowDefinition<
   TId extends string = string,
@@ -233,6 +410,39 @@ export interface WorkflowChainDefinition<
     >,
     InferStepOutput<TStep>,
     AddStepOutput<TSteps, TStep>
+  >
+  then<const TIntervention extends InterventionDefinition>(
+    intervention: TIntervention & DirectInterventionDataflowGuard<TCurrent, TIntervention>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    Append<TNodes, WorkflowInterventionNodeDefinition<TIntervention, undefined>>,
+    InferInterventionResponse<TIntervention>,
+    AddInterventionOutput<TSteps, TIntervention>
+  >
+  then<const TIntervention extends InterventionDefinition>(
+    intervention: TIntervention,
+    mapper: WorkflowStepMapper<
+      InferSchemaOrRefRecord<TInput>,
+      TSteps,
+      InferInterventionInput<TIntervention>
+    >
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    Append<
+      TNodes,
+      WorkflowInterventionNodeDefinition<
+        TIntervention,
+        WorkflowStepMapper<
+          InferSchemaOrRefRecord<TInput>,
+          TSteps,
+          InferInterventionInput<TIntervention>
+        >
+      >
+    >,
+    InferInterventionResponse<TIntervention>,
+    AddInterventionOutput<TSteps, TIntervention>
   >
   then<
     const TAction extends WorkflowActionDefinition,
@@ -285,6 +495,38 @@ export interface WorkflowDraftBuilder<
     ],
     InferStepOutput<TStep>,
     AddStepOutput<TSteps, TStep>
+  >
+  then<const TIntervention extends InterventionDefinition>(
+    intervention: TIntervention & DirectInterventionDataflowGuard<TCurrent, TIntervention>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    [WorkflowInterventionNodeDefinition<TIntervention, undefined>],
+    InferInterventionResponse<TIntervention>,
+    AddInterventionOutput<TSteps, TIntervention>
+  >
+  then<const TIntervention extends InterventionDefinition>(
+    intervention: TIntervention,
+    mapper: WorkflowStepMapper<
+      InferSchemaOrRefRecord<TInput>,
+      TSteps,
+      InferInterventionInput<TIntervention>
+    >
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    [
+      WorkflowInterventionNodeDefinition<
+        TIntervention,
+        WorkflowStepMapper<
+          InferSchemaOrRefRecord<TInput>,
+          TSteps,
+          InferInterventionInput<TIntervention>
+        >
+      >,
+    ],
+    InferInterventionResponse<TIntervention>,
+    AddInterventionOutput<TSteps, TIntervention>
   >
   then<
     const TAction extends WorkflowActionDefinition,

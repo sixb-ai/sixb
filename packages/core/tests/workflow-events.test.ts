@@ -121,6 +121,51 @@ describe("workflow runtime events", () => {
     })
   })
 
+  test("stores workflow waiting and intervention events with workflow topic", () => {
+    const waiting = toStoredEvent({
+      projectId: "project-a",
+      cursor: "1",
+      event: {
+        type: "workflow.run.waiting",
+        payload: {
+          workflowId: "reconcile-transaction",
+          runId: "wfrun_1",
+          waitingAt: "2026-05-08T10:00:03.000Z",
+        },
+      },
+    })
+    const requested = toStoredEvent({
+      projectId: "project-a",
+      cursor: "2",
+      event: {
+        type: "workflow.intervention.requested",
+        payload: {
+          workflowId: "reconcile-transaction",
+          runId: "wfrun_1",
+          nodeRunId: "wfrun_1:node:1",
+          interventionId: "review-draft",
+          pendingInterventionId: "wfi_1",
+          requestedAt: "2026-05-08T10:00:03.000Z",
+        },
+      },
+    })
+
+    expect([waiting, requested]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "workflow.run.waiting",
+          topic: "workflows",
+          partitionKey: "reconcile-transaction:wfrun_1",
+        }),
+        expect.objectContaining({
+          type: "workflow.intervention.requested",
+          topic: "workflows",
+          partitionKey: "reconcile-transaction:wfrun_1",
+        }),
+      ])
+    )
+  })
+
   test("appends and reads workflow lifecycle events through the events runtime", async () => {
     const eventsRuntime = new EventsRuntime({
       projectId: "project-a",

@@ -133,11 +133,35 @@ export const WORKFLOW_EVENT_DEFINITIONS = defineEventGroup<WorkflowEvent>({
     topic: "workflows",
     partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
   },
+  "workflow.run.waiting": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
+  "workflow.run.node.waiting": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
   "workflow.run.node.finished": {
     topic: "workflows",
     partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
   },
   "workflow.run.finished": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
+  "workflow.intervention.requested": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
+  "workflow.intervention.submitted": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
+  "workflow.intervention.cancelled": {
+    topic: "workflows",
+    partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
+  },
+  "workflow.intervention.expired": {
     topic: "workflows",
     partitionKey: (payload) => `${payload.workflowId}:${payload.runId}`,
   },

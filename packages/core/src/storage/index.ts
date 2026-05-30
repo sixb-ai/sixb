@@ -145,6 +145,22 @@ export type {
 } from "./webhook-runs"
 export { InMemoryWebhookRunStorage, WebhookRunError } from "./webhook-runs"
 export type {
+  CancelWorkflowInterventionInput,
+  CreateWorkflowInterventionInput,
+  ExpireWorkflowInterventionInput,
+  ListWorkflowInterventionsInput,
+  ListWorkflowInterventionsResult,
+  SubmitWorkflowInterventionInput,
+  WorkflowInterventionActor,
+  WorkflowInterventionRecord,
+  WorkflowInterventionStatus,
+  WorkflowInterventionStorage,
+} from "./workflow-interventions"
+export {
+  InMemoryWorkflowInterventionStorage,
+  WorkflowInterventionError,
+} from "./workflow-interventions"
+export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListWorkflowNodeRunsInput,
@@ -152,8 +168,11 @@ export type {
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
+  ResumeWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
+  WaitWorkflowNodeRunInput,
+  WaitWorkflowRunInput,
   WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStatus,
@@ -180,6 +199,7 @@ import { InMemoryTimeseriesStorage } from "./timeseries"
 import type { Storage } from "./types"
 import { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
 import { InMemoryWebhookRunStorage } from "./webhook-runs"
+import { InMemoryWorkflowInterventionStorage } from "./workflow-interventions"
 import { InMemoryWorkflowRunStorage } from "./workflow-runs"
 
 export class InMemoryStorage implements Storage {
@@ -191,6 +211,7 @@ export class InMemoryStorage implements Storage {
   readonly pipelineRuns = new InMemoryPipelineRunStorage()
   readonly projectionRuns = new InMemoryProjectionRunStorage()
   readonly workflowRuns = new InMemoryWorkflowRunStorage()
+  readonly workflowInterventions = new InMemoryWorkflowInterventionStorage()
   readonly webhookDeliveries = new InMemoryWebhookDeliveryStorage()
   readonly webhookRuns = new InMemoryWebhookRunStorage()
   readonly rules = new InMemoryRulesStorage()
