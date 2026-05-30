@@ -138,7 +138,7 @@ function createRuntime(pario: {
   readonly blobStorage: WorkflowWorkerContext["blobStorage"]
   readonly queues: WorkflowWorkerContext["queues"]
   readonly rules?: WorkflowWorkerContext["rules"]
-  getWorkflowById: WorkflowWorkerContext["getWorkflowById"]
+  readonly workflows: { getById(workflowId: string): WorkflowDefinition | null }
 }) {
   return {
     projectId: pario.projectId,
@@ -153,7 +153,7 @@ function createRuntime(pario: {
     workflowRuns: requireWorkflowRunsStorage(pario),
     pario: pario as unknown as Pario<readonly OntologySource[]>,
     getWorkflowById(workflowId: string) {
-      return pario.getWorkflowById(workflowId)
+      return pario.workflows.getById(workflowId)
     },
   } satisfies WorkflowWorkerContext
 }

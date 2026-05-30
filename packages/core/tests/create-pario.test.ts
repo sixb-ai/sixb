@@ -173,9 +173,9 @@ export const syncOrders = defineSync("sync-orders")
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getWorkflowDefinitions()).toEqual([workflow])
-    expect(pario.getWorkflowById("explicit-transaction-workflow")).toBe(workflow)
-    expect(pario.getWorkflowById("missing-workflow")).toBeNull()
+    expect(pario.workflows.list()).toEqual([workflow])
+    expect(pario.workflows.getById("explicit-transaction-workflow")).toBe(workflow)
+    expect(pario.workflows.getById("missing-workflow")).toBeNull()
   })
 
   test("discovers workflows from workflows directory", async () => {
@@ -267,13 +267,11 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getWorkflowDefinitions().map((workflow) => workflow.id)).toEqual([
-      "reconcile-transaction",
-    ])
-    expect(pario.getWorkflowById("reconcile-transaction")?.triggers).toEqual([
+    expect(pario.workflows.list().map((workflow) => workflow.id)).toEqual(["reconcile-transaction"])
+    expect(pario.workflows.getById("reconcile-transaction")?.triggers).toEqual([
       { type: "schedule", scheduleId: "daily-reconciliation" },
     ])
-    expect(pario.getWorkflowById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
+    expect(pario.workflows.getById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
       "find-best-invoice",
       "attach-invoice",
     ])

@@ -43,7 +43,7 @@ import type { SecurityRegistry } from "../security"
 import type { ObjectLinkRow, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
-import type { WorkflowDefinition } from "../workflows"
+import type { WorkflowsRuntime } from "../workflows"
 
 // ── Shared runtime context ──────────────────────────────────
 
@@ -325,6 +325,7 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
   readonly actions: ActionsRuntime
+  readonly workflows: WorkflowsRuntime
 
   /** All registered object types. */
   listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]
@@ -376,12 +377,6 @@ export interface ParioInstance<_ extends readonly OntologySource[]> {
 
   /** Lookup a rule definition by id. */
   getRuleById(ruleId: string): RuleDefinition | null
-
-  /** All registered workflow definitions. */
-  getWorkflowDefinitions(): readonly WorkflowDefinition[]
-
-  /** Lookup a workflow definition by id. */
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
 
   /** All registered connector definitions. */
   listConnectors(): readonly ConnectorDefinition[]

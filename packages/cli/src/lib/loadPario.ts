@@ -16,7 +16,7 @@ import type {
   RuleDefinition,
   ScheduleDefinition,
   SyncDefinition,
-  WorkflowDefinition,
+  WorkflowsRuntime,
 } from "@pario/core"
 
 export interface LoadedPario extends ParioRuntimeContext {
@@ -30,8 +30,7 @@ export interface LoadedPario extends ParioRuntimeContext {
   getPipelineDefinitions(): readonly PipelineDefinition[]
   getPipelineById(pipelineId: string): PipelineDefinition | null
   getScheduleDefinitions(): readonly ScheduleDefinition[]
-  getWorkflowDefinitions(): readonly WorkflowDefinition[]
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
+  readonly workflows: WorkflowsRuntime
   getObjectProjections(): readonly ObjectProjectionDefinition[]
   getLinkProjections(): readonly LinkProjectionDefinition[]
   getDatasetDefinitions(): readonly DatasetDefinition[]
@@ -84,8 +83,8 @@ function isParioInstance(value: unknown): value is LoadedPario {
     typeof (value as { getPipelineDefinitions?: unknown }).getPipelineDefinitions === "function" &&
     typeof (value as { getPipelineById?: unknown }).getPipelineById === "function" &&
     typeof (value as { getScheduleDefinitions?: unknown }).getScheduleDefinitions === "function" &&
-    typeof (value as { getWorkflowDefinitions?: unknown }).getWorkflowDefinitions === "function" &&
-    typeof (value as { getWorkflowById?: unknown }).getWorkflowById === "function" &&
+    typeof (value as { workflows?: { list?: unknown } }).workflows?.list === "function" &&
+    typeof (value as { workflows?: { getById?: unknown } }).workflows?.getById === "function" &&
     typeof (value as { getObjectProjections?: unknown }).getObjectProjections === "function" &&
     typeof (value as { getLinkProjections?: unknown }).getLinkProjections === "function" &&
     typeof (value as { getDatasetDefinitions?: unknown }).getDatasetDefinitions === "function" &&

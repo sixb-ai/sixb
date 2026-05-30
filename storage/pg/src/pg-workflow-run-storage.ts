@@ -12,6 +12,7 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
+  WorkflowRunSource,
   WorkflowRunStorage,
 } from "@pario/core"
 import { WorkflowRunError } from "@pario/core"
@@ -38,7 +39,8 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           status,
           input,
           queued_at,
-          started_at
+          started_at,
+          source
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -46,7 +48,8 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           ${"queued"},
           ${serializeRecord(input.input)}::text::jsonb,
           ${queuedAt},
-          ${queuedAt}
+          ${queuedAt},
+          ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
         )
         RETURNING *
       `) as WorkflowRunDatabaseRow[]
@@ -436,7 +439,16 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
+    source: parseSource(row.source),
   }
+}
+
+function parseSource(value: WorkflowRunSource | string | null): WorkflowRunSource | undefined {
+  if (value === null || value === undefined) {
+    return undefined
+  }
+
+  return typeof value === "string" ? (JSON.parse(value) as WorkflowRunSource) : value
 }
 
 function rowToWorkflowNodeRunRecord(row: WorkflowNodeRunDatabaseRow): WorkflowNodeRunRecord {
@@ -483,6 +495,7 @@ interface WorkflowRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   error: string | null
+  source: WorkflowRunSource | string | null
 }
 
 interface WorkflowNodeRunDatabaseRow {

@@ -1,3 +1,4 @@
+import type { WorkflowRunSource } from "../../workflows/types"
 import type { EventEnvelope } from "../envelope"
 
 export interface WorkflowRunQueuedEvent extends EventEnvelope {
@@ -9,10 +10,7 @@ export interface WorkflowRunQueuedEvent extends EventEnvelope {
     runId: string
     queuedAt: string
     jobId?: string
-    source?: {
-      type: "manual" | "schedule" | "event"
-      id?: string
-    }
+    source?: WorkflowRunSource
   }
 }
 

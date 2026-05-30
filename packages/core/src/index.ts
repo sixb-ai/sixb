@@ -734,6 +734,7 @@ export type {
   InferStepInput,
   InferStepOutput,
   InferWorkflowInput,
+  RequestWorkflowRunInput,
   StepBuilder,
   StepDefinition,
   StepHandler,
@@ -751,6 +752,9 @@ export type {
   WorkflowIOSnapshot,
   WorkflowMapperContext,
   WorkflowNodeDefinition,
+  WorkflowRunRequestOptions,
+  WorkflowRunRequestResult,
+  WorkflowRunSource,
   WorkflowStepMapper,
   WorkflowStepNodeDefinition,
   WorkflowStepOutputs,
@@ -761,6 +765,7 @@ export {
   defineWorkflowStep,
   isStepDefinition,
   isWorkflowDefinition,
+  requestWorkflowRun,
   snapshotWorkflowActionInput,
   snapshotWorkflowInput,
   snapshotWorkflowStepInput,
@@ -770,6 +775,7 @@ export {
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
   WorkflowDefinitionError,
+  WorkflowsRuntime,
   WorkflowValidationError,
 } from "./workflows"
 

@@ -122,7 +122,7 @@ export async function startOrchestratorRuntime(
     syncs: pario.getSyncDefinitions(),
     pipelines: pario.getPipelineDefinitions(),
     projections: [...pario.getObjectProjections(), ...pario.getLinkProjections()],
-    workflows: pario.getWorkflowDefinitions(),
+    workflows: pario.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
@@ -229,7 +229,7 @@ export async function startParioRuntime(
         await pipelineWorker.start()
       }
 
-      if (pario.getWorkflowDefinitions().length > 0) {
+      if (pario.workflows.list().length > 0) {
         workflowWorker = new WorkflowWorker(pario)
         await workflowWorker.start()
       }

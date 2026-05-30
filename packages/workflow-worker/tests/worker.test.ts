@@ -134,8 +134,7 @@ describe("WorkflowWorker", () => {
       lakeStorage: pario.lakeStorage,
       blobStorage: pario.blobStorage,
       queues: pario.queues,
-      getWorkflowDefinitions: () => pario.getWorkflowDefinitions(),
-      getWorkflowById: (workflowId: string) => pario.getWorkflowById(workflowId),
+      workflows: pario.workflows,
     }
 
     expect(() => new WorkflowWorker(withoutWorkflowRuns)).toThrow("storage.workflowRuns")

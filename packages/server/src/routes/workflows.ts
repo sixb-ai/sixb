@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import type {
   OntologySource,
   Pario,
@@ -6,7 +5,6 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
 } from "@pario/core"
-import { snapshotWorkflowInput } from "@pario/core"
 import type { Elysia } from "elysia"
 import { PARIO_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -111,7 +109,7 @@ export function registerWorkflowRoutes(app: Elysia, pario: Pario<readonly Ontolo
       "/api/workflows",
       async () => {
         return await Promise.all(
-          pario.getWorkflowDefinitions().map((workflow) => serializeWorkflow(pario, workflow))
+          pario.workflows.list().map((workflow) => serializeWorkflow(pario, workflow))
         )
       },
       {
@@ -126,7 +124,7 @@ export function registerWorkflowRoutes(app: Elysia, pario: Pario<readonly Ontolo
     .get(
       "/api/workflows/:workflowId",
       async ({ params, set }) => {
-        const workflow = pario.getWorkflowById(params.workflowId)
+        const workflow = pario.workflows.getById(params.workflowId)
         if (!workflow) {
           set.status = 404
           return { error: "Workflow not found" }
@@ -232,83 +230,30 @@ export function registerWorkflowRoutes(app: Elysia, pario: Pario<readonly Ontolo
       "/api/workflows/:workflowId/runs",
       async ({ params, body, set }) => {
         try {
-          const workflow = pario.getWorkflowById(params.workflowId)
+          const workflow = pario.workflows.getById(params.workflowId)
           if (!workflow) {
             set.status = 404
             return { error: "Workflow not found" }
           }
 
-          const storage = pario.storage.workflowRuns
-          if (!storage) {
+          if (!pario.storage.workflowRuns) {
             set.status = 400
             return { error: "Workflow run storage is not configured" }
           }
 
           const parsedBody = RequestWorkflowRunBodySchema.parse(body)
-          const input = parsedBody.input ?? {}
-          const snapshot = snapshotWorkflowInput({
-            workflow,
-            value: input,
-            valueTypesById: pario.ontology.getValueTypesById(),
-          })
-          const runId = `run_${randomUUID()}`
-          const queuedAt = new Date()
-
-          await storage.queue({
-            projectId: pario.id,
-            id: runId,
+          const result = await pario.workflows.requestById({
             workflowId: workflow.id,
-            input: snapshot,
-            queuedAt,
+            input: parsedBody.input ?? {},
+            source: { type: "manual" },
           })
-
-          let jobId = ""
-          try {
-            const [job] = await pario.queues.workflows.enqueue({
-              projectId: pario.id,
-              jobs: [
-                {
-                  type: "workflow.run.requested",
-                  payload: { workflowId: workflow.id, runId, input },
-                },
-              ],
-            })
-            jobId = job?.id ?? ""
-          } catch (error) {
-            await storage.finish({
-              projectId: pario.id,
-              id: runId,
-              status: "failed",
-              error: error instanceof Error ? error.message : String(error),
-            })
-            throw error
-          }
-
-          await pario.events
-            .append({
-              events: [
-                {
-                  type: "workflow.run.queued",
-                  payload: {
-                    workflowId: workflow.id,
-                    runId,
-                    queuedAt: queuedAt.toISOString(),
-                    ...(jobId ? { jobId } : {}),
-                    source: { type: "manual" },
-                  },
-                },
-              ],
-            })
-            .catch((error: unknown) => {
-              console.error("[ParioServer] Failed to emit workflow.run.queued:", error)
-            })
 
           set.status = 202
           return RequestWorkflowRunResponseSchema.parse({
-            runId,
-            jobId,
-            workflowId: workflow.id,
-            queuedAt: queuedAt.toISOString(),
+            runId: result.runId,
+            jobId: result.jobId ?? "",
+            workflowId: result.workflowId,
+            queuedAt: result.queuedAt,
           })
         } catch (error) {
           return handleRouteError(error, set)

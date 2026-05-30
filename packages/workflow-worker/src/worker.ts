@@ -19,7 +19,7 @@ export class WorkflowWorker extends QueueWorker<WorkflowRunRequestedQueueJob> {
   private readonly observer: WorkflowRunObserver
 
   constructor(pario: WorkflowWorkerPario) {
-    if (pario.getWorkflowDefinitions().length === 0) {
+    if (pario.workflows.list().length === 0) {
       throw new Error("[ParioWorkflowWorker] No workflow definitions are registered.")
     }
 
@@ -95,7 +95,7 @@ function buildWorkflowContext(
     workflowRuns,
     pario: pario as unknown as WorkflowWorkerContext["pario"],
     getWorkflowById(workflowId) {
-      return pario.getWorkflowById(workflowId)
+      return pario.workflows.getById(workflowId)
     },
   }
 }

@@ -1,6 +1,6 @@
-import type { WorkflowIOSnapshot } from "../../workflows/types"
+import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 
-export type { WorkflowIOSnapshot } from "../../workflows/types"
+export type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 
 export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
@@ -16,6 +16,7 @@ export interface WorkflowRunRecord {
   readonly startedAt: Date
   readonly finishedAt?: Date
   readonly error?: string
+  readonly source?: WorkflowRunSource
 }
 
 export interface WorkflowNodeRunRecord {
@@ -49,6 +50,7 @@ export interface QueueWorkflowRunInput {
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly queuedAt?: Date
+  readonly source?: WorkflowRunSource
 }
 
 export type FinishWorkflowRunInput =
