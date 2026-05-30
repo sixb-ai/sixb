@@ -1,7 +1,7 @@
 import { workflowNodeExecutors } from "./execution/node-executors"
 import { WorkflowRunSession } from "./execution/workflow-run-session"
 import { statusForFailure, toWorkflowRunError } from "./normalize"
-import type { RunWorkflowJobInput, WorkflowRunResult } from "./types"
+import type { RunWorkflowJobInput, RunWorkflowResumeJobInput, WorkflowRunResult } from "./types"
 
 export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<WorkflowRunResult> {
   let session: WorkflowRunSession
@@ -18,13 +18,35 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
     await session.start()
     const waitingRun = await session.runAllNodes()
     if (waitingRun) {
-      return session.waitingResult(waitingRun)
+      return session.finishWaiting(waitingRun)
     }
-
     return await session.finishSucceeded()
   } catch (error) {
     await session.finishAfterError(error)
     await failQueuedRun(input, error)
+    throw error
+  }
+}
+
+export async function runWorkflowResumeJob(
+  input: RunWorkflowResumeJobInput
+): Promise<WorkflowRunResult> {
+  const sessionOrResult = await WorkflowRunSession.createForResume(input, {
+    executors: workflowNodeExecutors,
+  })
+  if (!(sessionOrResult instanceof WorkflowRunSession)) {
+    return sessionOrResult
+  }
+
+  const session = sessionOrResult
+  try {
+    const waitingRun = await session.runAllNodes()
+    if (waitingRun) {
+      return session.finishWaiting(waitingRun)
+    }
+    return await session.finishSucceeded()
+  } catch (error) {
+    await session.finishAfterError(error)
     throw error
   }
 }

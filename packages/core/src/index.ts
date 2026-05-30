@@ -635,7 +635,9 @@ export type {
   QueueJobError,
   Queues,
   SyncRunRequestedQueueJob,
+  WorkflowQueueJob,
   WorkflowRunRequestedQueueJob,
+  WorkflowRunResumeRequestedQueueJob,
 } from "./queues"
 export { InMemoryQueues, QueueError } from "./queues"
 

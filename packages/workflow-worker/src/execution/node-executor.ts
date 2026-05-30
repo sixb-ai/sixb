@@ -35,11 +35,16 @@ export interface WorkflowNodeStatePatch {
   readonly steps?: WorkflowStepOutputs
 }
 
-export interface WorkflowNodeOutcome {
-  readonly outputSnapshot?: WorkflowIOSnapshot
-  readonly statePatch?: WorkflowNodeStatePatch
-  readonly waitForIntervention?: WorkflowInterventionRecord
-}
+export type WorkflowNodeOutcome =
+  | {
+      readonly status?: "succeeded"
+      readonly outputSnapshot?: WorkflowIOSnapshot
+      readonly statePatch?: WorkflowNodeStatePatch
+    }
+  | {
+      readonly status: "waiting"
+      readonly intervention: WorkflowInterventionRecord
+    }
 
 export interface WorkflowNodePrepareInput<TNode extends WorkflowNodeDefinition> {
   readonly node: TNode

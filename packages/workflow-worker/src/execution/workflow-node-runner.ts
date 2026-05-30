@@ -1,4 +1,4 @@
-import type { WorkflowNodeDefinition } from "@pario/core"
+import type { WorkflowNodeDefinition, WorkflowRunRecord } from "@pario/core"
 import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"
@@ -45,22 +45,25 @@ export class WorkflowNodeRunner {
       context: input.context,
     })
 
-    if (outcome.waitForIntervention) {
-      if (outcome.waitForIntervention.nodeRunId !== nodeRun.id) {
+    if (outcome.status === "waiting") {
+      if (outcome.intervention.nodeRunId !== nodeRun.id) {
         throw new WorkflowWorkerError(
           `[ParioWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
         )
       }
 
-      await this.dependencies.recorder.recordInterventionRequested(outcome.waitForIntervention)
+      await this.dependencies.recorder.recordInterventionRequested(outcome.intervention)
       await this.dependencies.recorder.waitActiveNode({
         nodeRunId: nodeRun.id,
-        waitingAt: outcome.waitForIntervention.requestedAt,
+        waitingAt: outcome.intervention.requestedAt,
+      })
+      const run = await this.dependencies.recorder.waitRun({
+        waitingAt: outcome.intervention.requestedAt,
       })
 
       return {
         status: "waiting",
-        waitingAt: outcome.waitForIntervention.requestedAt,
+        run,
       }
     }
 
@@ -70,7 +73,10 @@ export class WorkflowNodeRunner {
     })
 
     applyStatePatch(input.context.state, outcome.statePatch)
-    return { status: "completed" }
+
+    return {
+      status: "succeeded",
+    }
   }
 
   private executorFor<TNode extends WorkflowNodeDefinition>(
@@ -80,9 +86,9 @@ export class WorkflowNodeRunner {
   }
 }
 
-type WorkflowNodeRunResult =
-  | { readonly status: "completed" }
-  | { readonly status: "waiting"; readonly waitingAt: Date }
+export type WorkflowNodeRunResult =
+  | { readonly status: "succeeded" }
+  | { readonly status: "waiting"; readonly run: WorkflowRunRecord }
 
 function applyStatePatch(
   state: WorkflowNodeExecutionContext["state"],

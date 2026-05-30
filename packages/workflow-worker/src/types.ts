@@ -28,9 +28,22 @@ export interface WorkflowJob {
   readonly input?: Readonly<Record<string, unknown>>
 }
 
+export interface WorkflowResumeJob {
+  readonly id: string
+  readonly workflowId: string
+  readonly pendingInterventionId: string
+}
+
 export interface RunWorkflowJobInput {
   readonly runtime: WorkflowWorkerContext
   readonly job: WorkflowJob
+  readonly signal?: AbortSignal
+  readonly observer?: WorkflowRunObserver
+}
+
+export interface RunWorkflowResumeJobInput {
+  readonly runtime: WorkflowWorkerContext
+  readonly job: WorkflowResumeJob
   readonly signal?: AbortSignal
   readonly observer?: WorkflowRunObserver
 }

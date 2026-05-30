@@ -11,5 +11,7 @@ export type {
   QueueJobError,
   Queues,
   SyncRunRequestedQueueJob,
+  WorkflowQueueJob,
   WorkflowRunRequestedQueueJob,
+  WorkflowRunResumeRequestedQueueJob,
 } from "./types"

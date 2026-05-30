@@ -1,14 +1,31 @@
 import type {
   ValueType,
   WorkflowDefinition,
+  WorkflowInterventionNodeDefinition,
+  WorkflowInterventionRecord,
+  WorkflowInterventionStorage,
   WorkflowIOSnapshot,
+  WorkflowNodeDefinition,
+  WorkflowNodeRunRecord,
   WorkflowRunRecord,
+  WorkflowRunStorage,
 } from "@pario/core"
-import { snapshotWorkflowInput, validateWorkflowInput } from "@pario/core"
+import {
+  snapshotWorkflowInput,
+  snapshotWorkflowInterventionResponse,
+  validateWorkflowInput,
+  validateWorkflowInterventionResponse,
+  validateWorkflowStepOutput,
+} from "@pario/core"
 import { WorkflowWorkerError } from "../errors"
 import { statusForFailure, throwIfAborted, toWorkflowRunError } from "../normalize"
 import { noopWorkflowRunObserver, WorkflowRunRecorder } from "../recorder"
-import type { RunWorkflowJobInput, WorkflowJob, WorkflowRunResult } from "../types"
+import type {
+  RunWorkflowJobInput,
+  RunWorkflowResumeJobInput,
+  WorkflowJob,
+  WorkflowRunResult,
+} from "../types"
 import type { WorkflowExecutionState, WorkflowNodeExecutorRegistry } from "./node-executor"
 import { WorkflowNodeRunner } from "./workflow-node-runner"
 
@@ -79,6 +96,149 @@ export class WorkflowRunSession {
     })
   }
 
+  static async createForResume(
+    input: RunWorkflowResumeJobInput,
+    options: { readonly executors: WorkflowNodeExecutorRegistry }
+  ): Promise<WorkflowRunSession | WorkflowRunResult> {
+    const { runtime, job } = input
+    const signal = input.signal ?? new AbortController().signal
+    const workflow = requireWorkflow(runtime.getWorkflowById(job.workflowId), job)
+    const valueTypesById = runtime.ontology.getValueTypesById()
+    const workflowInterventions = runtime.storage.workflowInterventions
+
+    if (!workflowInterventions) {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow '${job.workflowId}' resume requires storage.workflowInterventions.`
+      )
+    }
+
+    throwIfAborted(signal)
+
+    const intervention = await requireInterventionRecord({
+      storage: workflowInterventions,
+      projectId: runtime.projectId,
+      id: job.pendingInterventionId,
+    })
+    const run = await requireWorkflowRun({
+      workflowRuns: runtime.workflowRuns,
+      projectId: runtime.projectId,
+      id: job.id,
+    })
+    const nodeRuns = await runtime.workflowRuns.nodes.list({
+      projectId: runtime.projectId,
+      workflowRunId: job.id,
+      order: "asc",
+    })
+    const waitingNode = await requireWorkflowNodeRun({
+      workflowRuns: runtime.workflowRuns,
+      projectId: runtime.projectId,
+      id: intervention.nodeRunId,
+    })
+
+    assertResumeMatchesRun({ workflow, job, run, intervention, waitingNode })
+
+    if (run.status === "succeeded" && waitingNode.status === "succeeded") {
+      return {
+        id: job.id,
+        workflowId: workflow.id,
+        status: "succeeded",
+        run,
+        nodes: nodeRuns.nodes,
+        steps: reconstructWorkflowState({
+          workflow,
+          run,
+          nodeRuns: nodeRuns.nodes,
+          upToNodeIndex: workflow.nodes.length,
+          valueTypesById,
+        }).steps,
+      }
+    }
+
+    if (run.status !== "waiting") {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow run '${job.id}' must be waiting to resume.`
+      )
+    }
+
+    if (waitingNode.status !== "waiting") {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow node run '${waitingNode.id}' must be waiting to resume.`
+      )
+    }
+
+    if (intervention.status !== "submitted" || !intervention.response) {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow intervention '${intervention.id}' must be submitted to resume.`
+      )
+    }
+
+    const interventionNode = requireInterventionNode(workflow, intervention)
+    const state = reconstructWorkflowState({
+      workflow,
+      run,
+      nodeRuns: nodeRuns.nodes,
+      upToNodeIndex: intervention.nodeIndex,
+      valueTypesById,
+    })
+    const recorder = new WorkflowRunRecorder({
+      projectId: runtime.projectId,
+      workflow,
+      runId: job.id,
+      workflowRuns: runtime.workflowRuns,
+      observer: input.observer ?? noopWorkflowRunObserver,
+      initialCompletedNodes: nodeRuns.nodes.filter(
+        (nodeRun) => nodeRun.nodeIndex < intervention.nodeIndex && nodeRun.status === "succeeded"
+      ),
+      alreadyStarted: true,
+    })
+    const session = new WorkflowRunSession({
+      runtime,
+      job,
+      workflow,
+      signal,
+      valueTypesById,
+      workflowInputSnapshot: run.input,
+      state,
+      recorder,
+      runner: new WorkflowNodeRunner({
+        recorder,
+        executors: options.executors,
+      }),
+    })
+
+    await runtime.workflowRuns.resume({
+      projectId: runtime.projectId,
+      id: job.id,
+    })
+
+    session.markSideEffectBoundaryPassed()
+    const response = validateWorkflowInterventionResponse({
+      workflowId: workflow.id,
+      intervention: interventionNode.intervention,
+      value: intervention.response,
+      valueTypesById,
+    })
+    const responseSnapshot = snapshotWorkflowInterventionResponse({
+      workflowId: workflow.id,
+      intervention: interventionNode.intervention,
+      value: response,
+      valueTypesById,
+    })
+    const responseOutput: Record<string, unknown> = { ...response }
+
+    await recorder.finishNodeSucceeded({
+      nodeRunId: waitingNode.id,
+      output: responseSnapshot,
+    })
+    state.current = responseOutput
+    state.steps[interventionNode.key] = responseOutput
+    session.resumeFromIndex = intervention.nodeIndex + 1
+
+    return session
+  }
+
+  private resumeFromIndex = 0
+
   async start(): Promise<void> {
     await this.dependencies.recorder.startRun({
       input: this.dependencies.workflowInputSnapshot,
@@ -86,7 +246,20 @@ export class WorkflowRunSession {
   }
 
   async runAllNodes(): Promise<WorkflowRunRecord | null> {
-    for (const [nodeIndex, node] of this.dependencies.workflow.nodes.entries()) {
+    return this.runNodesFrom(this.resumeFromIndex)
+  }
+
+  async runNodesFrom(startIndex: number): Promise<WorkflowRunRecord | null> {
+    for (
+      let nodeIndex = startIndex;
+      nodeIndex < this.dependencies.workflow.nodes.length;
+      nodeIndex++
+    ) {
+      const node = this.dependencies.workflow.nodes[nodeIndex]
+      if (!node) {
+        continue
+      }
+
       throwIfAborted(this.dependencies.signal)
 
       const result = await this.dependencies.runner.runNode({
@@ -104,7 +277,7 @@ export class WorkflowRunSession {
       })
 
       if (result.status === "waiting") {
-        return await this.dependencies.recorder.waitRun({ waitingAt: result.waitingAt })
+        return result.run
       }
     }
 
@@ -124,7 +297,7 @@ export class WorkflowRunSession {
     }
   }
 
-  waitingResult(run: WorkflowRunRecord): WorkflowRunResult {
+  finishWaiting(run: WorkflowRunRecord): WorkflowRunResult {
     return {
       id: this.dependencies.job.id,
       workflowId: this.dependencies.workflow.id,
@@ -192,13 +365,199 @@ export class WorkflowRunSession {
 
 function requireWorkflow(
   workflow: WorkflowDefinition | null,
-  job: WorkflowJob
+  job: { readonly workflowId: string }
 ): WorkflowDefinition {
   if (!workflow) {
     throw new WorkflowWorkerError(`[ParioWorkflowWorker] Unknown workflow '${job.workflowId}'.`)
   }
 
   return workflow
+}
+
+async function requireInterventionRecord(input: {
+  readonly storage: WorkflowInterventionStorage
+  readonly projectId: string
+  readonly id: string
+}): Promise<WorkflowInterventionRecord> {
+  const intervention = await input.storage.getById({
+    projectId: input.projectId,
+    id: input.id,
+  })
+
+  if (!intervention) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow intervention '${input.id}' not found.`
+    )
+  }
+
+  return intervention
+}
+
+async function requireWorkflowRun(input: {
+  readonly workflowRuns: WorkflowRunStorage
+  readonly projectId: string
+  readonly id: string
+}): Promise<WorkflowRunRecord> {
+  const run = await input.workflowRuns.getById({
+    projectId: input.projectId,
+    id: input.id,
+  })
+
+  if (!run) {
+    throw new WorkflowWorkerError(`[ParioWorkflowWorker] Workflow run '${input.id}' not found.`)
+  }
+
+  return run
+}
+
+async function requireWorkflowNodeRun(input: {
+  readonly workflowRuns: WorkflowRunStorage
+  readonly projectId: string
+  readonly id: string
+}): Promise<WorkflowNodeRunRecord> {
+  const node = await input.workflowRuns.nodes.getById({
+    projectId: input.projectId,
+    id: input.id,
+  })
+
+  if (!node) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow node run '${input.id}' not found.`
+    )
+  }
+
+  return node
+}
+
+function assertResumeMatchesRun(input: {
+  readonly workflow: WorkflowDefinition
+  readonly job: { readonly id: string; readonly workflowId: string }
+  readonly run: WorkflowRunRecord
+  readonly intervention: WorkflowInterventionRecord
+  readonly waitingNode: WorkflowNodeRunRecord
+}): void {
+  if (input.run.workflowId !== input.workflow.id || input.job.workflowId !== input.workflow.id) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow resume job for '${input.job.workflowId}' does not match run '${input.run.workflowId}'.`
+    )
+  }
+
+  if (
+    input.intervention.workflowId !== input.workflow.id ||
+    input.intervention.workflowRunId !== input.job.id
+  ) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow intervention '${input.intervention.id}' does not match run '${input.job.id}'.`
+    )
+  }
+
+  if (
+    input.waitingNode.workflowId !== input.workflow.id ||
+    input.waitingNode.workflowRunId !== input.job.id ||
+    input.waitingNode.id !== input.intervention.nodeRunId
+  ) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow node run '${input.waitingNode.id}' does not match intervention '${input.intervention.id}'.`
+    )
+  }
+}
+
+function requireInterventionNode(
+  workflow: WorkflowDefinition,
+  intervention: WorkflowInterventionRecord
+): WorkflowInterventionNodeDefinition {
+  const node = workflow.nodes[intervention.nodeIndex]
+
+  if (
+    !node ||
+    node.type !== "intervention" ||
+    node.id !== intervention.nodeId ||
+    node.key !== intervention.nodeKey
+  ) {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow '${workflow.id}' does not contain intervention node '${intervention.nodeId}' at index ${intervention.nodeIndex}.`
+    )
+  }
+
+  return node
+}
+
+function reconstructWorkflowState(input: {
+  readonly workflow: WorkflowDefinition
+  readonly run: WorkflowRunRecord
+  readonly nodeRuns: readonly WorkflowNodeRunRecord[]
+  readonly upToNodeIndex: number
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): WorkflowExecutionState {
+  const workflowInput = validateWorkflowInput({
+    workflow: input.workflow,
+    value: input.run.input,
+    valueTypesById: input.valueTypesById,
+  })
+  const state: WorkflowExecutionState = {
+    workflowInput,
+    current: workflowInput,
+    steps: {},
+  }
+  const nodeRunsByIndex = new Map(input.nodeRuns.map((nodeRun) => [nodeRun.nodeIndex, nodeRun]))
+
+  for (let nodeIndex = 0; nodeIndex < input.upToNodeIndex; nodeIndex++) {
+    const node = input.workflow.nodes[nodeIndex]
+    const nodeRun = nodeRunsByIndex.get(nodeIndex)
+    if (!node || !nodeRun) {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow run '${input.run.id}' is missing node run at index ${nodeIndex}.`
+      )
+    }
+
+    applyCompletedNodeToState({
+      workflowId: input.workflow.id,
+      node,
+      nodeRun,
+      state,
+      valueTypesById: input.valueTypesById,
+    })
+  }
+
+  return state
+}
+
+function applyCompletedNodeToState(input: {
+  readonly workflowId: string
+  readonly node: WorkflowNodeDefinition
+  readonly nodeRun: WorkflowNodeRunRecord
+  readonly state: WorkflowExecutionState
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): void {
+  if (input.nodeRun.status !== "succeeded") {
+    throw new WorkflowWorkerError(
+      `[ParioWorkflowWorker] Workflow node run '${input.nodeRun.id}' must be succeeded to reconstruct workflow state.`
+    )
+  }
+
+  if (input.node.type === "action") {
+    return
+  }
+
+  const output = input.nodeRun.output ?? {}
+  const validatedOutput =
+    input.node.type === "step"
+      ? validateWorkflowStepOutput({
+          workflowId: input.workflowId,
+          step: input.node.step,
+          value: output,
+          valueTypesById: input.valueTypesById,
+        })
+      : validateWorkflowInterventionResponse({
+          workflowId: input.workflowId,
+          intervention: input.node.intervention,
+          value: output,
+          valueTypesById: input.valueTypesById,
+        })
+  const stateOutput: Record<string, unknown> = { ...validatedOutput }
+
+  input.state.current = stateOutput
+  input.state.steps[input.node.key] = stateOutput
 }
 
 function createWorkflowBookkeepingError(input: {

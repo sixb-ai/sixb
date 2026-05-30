@@ -2,11 +2,11 @@ import type { WorkflowInterventionNodeDefinition } from "@pario/core"
 import {
   snapshotWorkflowInterventionDefaultResponse,
   snapshotWorkflowInterventionInput,
-  validateWorkflowInterventionDefaultResponse,
   validateWorkflowInterventionInput,
 } from "@pario/core"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
+import { throwIfAborted } from "../normalize"
 import { callWorkflowMapper, requireRecordInput } from "./mapper"
 
 export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowInterventionNodeDefinition> = {
@@ -48,30 +48,20 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
   },
 
   async execute({ node, nodeIndex, nodeRun, prepared, context }) {
-    const interventionStorage = context.runtime.storage.workflowInterventions
-    if (!interventionStorage) {
-      throw new WorkflowWorkerError(
-        "[ParioWorkflowWorker] Workflow intervention nodes require storage.workflowInterventions."
-      )
-    }
-
     const interventionInput = requireRecordInput({
       value: prepared.input,
       workflowId: context.workflow.id,
       nodeId: node.id,
     })
-    const rawDefaultResponse =
-      (await node.intervention.defaults?.({
-        input: interventionInput,
-        workflowInput: context.state.workflowInput,
-        steps: context.state.steps,
-      })) ?? {}
-    const defaultResponse = validateWorkflowInterventionDefaultResponse({
-      workflowId: context.workflow.id,
-      intervention: node.intervention,
-      value: rawDefaultResponse,
-      valueTypesById: context.valueTypesById,
-    })
+    const defaultResponse = node.intervention.defaults
+      ? await node.intervention.defaults({
+          input: interventionInput,
+          workflowInput: context.state.workflowInput,
+          steps: context.state.steps,
+        })
+      : {}
+    throwIfAborted(context.signal)
+
     const defaultResponseSnapshot = snapshotWorkflowInterventionDefaultResponse({
       workflowId: context.workflow.id,
       intervention: node.intervention,
@@ -79,9 +69,15 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
       valueTypesById: context.valueTypesById,
     })
     const requestedAt = new Date()
+    const workflowInterventions = context.runtime.storage.workflowInterventions
+    if (!workflowInterventions) {
+      throw new WorkflowWorkerError(
+        `[ParioWorkflowWorker] Workflow '${context.workflow.id}' intervention node '${node.id}' requires storage.workflowInterventions.`
+      )
+    }
 
     context.markSideEffectBoundaryPassed()
-    const pendingIntervention = await interventionStorage.create({
+    const intervention = await workflowInterventions.create({
       id: `${context.job.id}:intervention:${nodeIndex}`,
       projectId: context.runtime.projectId,
       workflowId: context.workflow.id,
@@ -97,7 +93,8 @@ export const interventionNodeExecutor: WorkflowNodeExecutor<WorkflowIntervention
     })
 
     return {
-      waitForIntervention: pendingIntervention,
+      status: "waiting",
+      intervention,
     }
   },
 }
