@@ -19,6 +19,7 @@ export const RUN_HISTORY_PAGE_SIZE = 20
 export const allWorkflowRunStatuses = [
   "queued",
   "running",
+  "waiting",
   "succeeded",
   "failed",
   "cancelled",
@@ -39,7 +40,7 @@ export const statusClasses: Record<WorkflowRunStatus, string> = {
   running:
     "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
   waiting:
-    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+    "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300",
   succeeded:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
   failed:
