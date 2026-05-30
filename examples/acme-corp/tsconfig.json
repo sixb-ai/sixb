@@ -6,6 +6,8 @@
   },
   "include": [
     "actions/**/*.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
     "connectors/**/*.ts",
     "datasets/**/*.ts",
     "functions/**/*.ts",
@@ -17,6 +19,7 @@
     "schedules/**/*.ts",
     "scripts/**/*.ts",
     "syncs/**/*.ts",
+    "tests/**/*.ts",
     "workflows/**/*.ts",
     "pario.config.ts"
   ]
