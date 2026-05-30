@@ -19,9 +19,9 @@ export const noopWorkflowRunObserver: WorkflowRunObserver = {
 }
 
 export class WorkflowRunRecorder {
-  private readonly nodeRuns: WorkflowNodeRunRecord[] = []
+  private readonly nodeRuns: WorkflowNodeRunRecord[]
   private activeNodeRunId: string | null = null
-  private started = false
+  private started: boolean
   private finished = false
 
   constructor(
@@ -31,8 +31,13 @@ export class WorkflowRunRecorder {
       readonly runId: string
       readonly workflowRuns: WorkflowRunStorage
       readonly observer: WorkflowRunObserver
+      readonly initialCompletedNodes?: readonly WorkflowNodeRunRecord[]
+      readonly alreadyStarted?: boolean
     }
-  ) {}
+  ) {
+    this.nodeRuns = [...(dependencies.initialCompletedNodes ?? [])]
+    this.started = dependencies.alreadyStarted ?? false
+  }
 
   get hasStarted(): boolean {
     return this.started

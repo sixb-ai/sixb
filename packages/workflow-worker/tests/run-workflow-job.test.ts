@@ -23,6 +23,7 @@ import {
 import {
   EventsRuntimeWorkflowRunObserver,
   runWorkflowJob,
+  runWorkflowResumeJob,
   type WorkflowRunObserver,
   type WorkflowWorkerContext,
   WorkflowWorkerError,
@@ -79,6 +80,30 @@ const reviewInvoiceDecision = defineIntervention("review-invoice-decision")
   })
   .defaults(({ input }) => ({
     approved: input.confidence >= 0.95,
+  }))
+
+const reviewBeforeAttach = defineIntervention("review-before-attach")
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .response({
+    invoice: ref(Invoice),
+  })
+  .defaults(({ input }) => ({
+    invoice: input.invoice,
+  }))
+
+const attachReviewedInvoice = defineWorkflowStep("attach-reviewed-invoice")
+  .input({
+    invoice: ref(Invoice),
+  })
+  .output({
+    invoice: ref(Invoice),
+  })
+  .run(({ input }) => ({
+    invoice: input.invoice,
   }))
 
 const failingStep = defineWorkflowStep("explode")
@@ -356,6 +381,201 @@ describe("runWorkflowJob", () => {
       objectTypeId: "Invoice",
       primaryId: "inv_1",
     })
+  })
+
+  test("suspends workflow runs at intervention nodes", async () => {
+    const workflow = defineWorkflow("intervention-suspends")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(reviewBeforeAttach)
+    const pario = createPario({ workflows: [workflow] })
+
+    const result = await runWorkflowJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "wfrun_intervention_waiting",
+        workflowId: workflow.id,
+        input: {
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      },
+      observer: new EventsRuntimeWorkflowRunObserver(pario.events),
+    })
+
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_intervention_waiting",
+    })
+    const nodes = await pario.storage.workflowRuns!.nodes.list({
+      projectId: pario.id,
+      workflowRunId: "wfrun_intervention_waiting",
+      order: "asc",
+    })
+    const interventions = await pario.storage.workflowInterventions!.list({
+      projectId: pario.id,
+    })
+    const events = await pario.events.read({
+      types: [
+        "workflow.run.started",
+        "workflow.run.node.started",
+        "workflow.run.node.finished",
+        "workflow.intervention.requested",
+        "workflow.run.node.waiting",
+        "workflow.run.waiting",
+        "workflow.run.finished",
+      ],
+    })
+
+    expect(result.status).toBe("waiting")
+    expect(run?.status).toBe("waiting")
+    expect(nodes.nodes.map((node) => `${node.nodeId}:${node.status}`)).toEqual([
+      "find-best-invoice:succeeded",
+      "review-before-attach:waiting",
+    ])
+    expect(interventions.total).toBe(1)
+    expect(interventions.interventions[0]).toMatchObject({
+      id: "wfrun_intervention_waiting:intervention:1",
+      workflowId: workflow.id,
+      workflowRunId: "wfrun_intervention_waiting",
+      nodeRunId: "wfrun_intervention_waiting:node:1",
+      nodeIndex: 1,
+      nodeId: "review-before-attach",
+      nodeKey: "reviewBeforeAttach",
+      interventionId: "review-before-attach",
+      status: "pending",
+      input: {
+        transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        confidence: 0.98,
+      },
+      defaultResponse: {
+        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+      },
+    })
+    expect(events.map((event) => event.type)).toEqual([
+      "workflow.run.started",
+      "workflow.run.node.started",
+      "workflow.run.node.finished",
+      "workflow.run.node.started",
+      "workflow.intervention.requested",
+      "workflow.run.node.waiting",
+      "workflow.run.waiting",
+    ])
+    expect(events[4]?.payload).toMatchObject({
+      workflowId: workflow.id,
+      runId: "wfrun_intervention_waiting",
+      nodeRunId: "wfrun_intervention_waiting:node:1",
+      interventionId: "review-before-attach",
+      pendingInterventionId: "wfrun_intervention_waiting:intervention:1",
+    })
+  })
+
+  test("resumes submitted interventions and continues workflow dataflow", async () => {
+    const workflow = defineWorkflow("intervention-resumes")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(reviewBeforeAttach)
+      .then(attachReviewedInvoice, ({ steps }) => ({
+        invoice: steps.reviewBeforeAttach.invoice,
+      }))
+    const pario = createPario({ workflows: [workflow] })
+    const runtime = createRuntime(pario)
+    const observer = new EventsRuntimeWorkflowRunObserver(pario.events)
+
+    const waiting = await runWorkflowJob({
+      runtime,
+      job: {
+        id: "wfrun_resume",
+        workflowId: workflow.id,
+        input: {
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      },
+      observer,
+    })
+
+    expect(waiting.status).toBe("waiting")
+    await pario.storage.workflowInterventions!.submit({
+      projectId: pario.id,
+      id: "wfrun_resume:intervention:1",
+      response: {
+        invoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
+      },
+      submittedAt: new Date("2026-05-08T12:00:00.000Z"),
+    })
+
+    const resumed = await runWorkflowResumeJob({
+      runtime,
+      job: {
+        id: "wfrun_resume",
+        workflowId: workflow.id,
+        pendingInterventionId: "wfrun_resume:intervention:1",
+      },
+      observer,
+    })
+
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_resume",
+    })
+    const nodes = await pario.storage.workflowRuns!.nodes.list({
+      projectId: pario.id,
+      workflowRunId: "wfrun_resume",
+      order: "asc",
+    })
+    const events = await pario.events.read({
+      types: ["workflow.run.node.finished", "workflow.run.node.started", "workflow.run.finished"],
+    })
+
+    expect(resumed.status).toBe("succeeded")
+    expect(run?.status).toBe("succeeded")
+    expect(nodes.nodes.map((node) => `${node.nodeId}:${node.status}`)).toEqual([
+      "find-best-invoice:succeeded",
+      "review-before-attach:succeeded",
+      "attach-reviewed-invoice:succeeded",
+    ])
+    expect(nodes.nodes[1]?.output).toEqual({
+      invoice: { objectTypeId: "Invoice", primaryId: "inv_reviewed" },
+    })
+    expect(resumed.steps.reviewBeforeAttach.invoice).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv_reviewed",
+    })
+    expect(resumed.steps.attachReviewedInvoice.invoice).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv_reviewed",
+    })
+    expect(events.map((event) => event.type)).toEqual([
+      "workflow.run.node.started",
+      "workflow.run.node.finished",
+      "workflow.run.node.started",
+      "workflow.run.node.finished",
+      "workflow.run.node.started",
+      "workflow.run.node.finished",
+      "workflow.run.finished",
+    ])
+
+    const duplicate = await runWorkflowResumeJob({
+      runtime,
+      job: {
+        id: "wfrun_resume",
+        workflowId: workflow.id,
+        pendingInterventionId: "wfrun_resume:intervention:1",
+      },
+      observer,
+    })
+    const afterDuplicate = await pario.storage.workflowRuns!.nodes.list({
+      projectId: pario.id,
+      workflowRunId: "wfrun_resume",
+      order: "asc",
+    })
+
+    expect(duplicate.status).toBe("succeeded")
+    expect(afterDuplicate.nodes.map((node) => node.id)).toEqual(nodes.nodes.map((node) => node.id))
   })
 
   test("validates workflow input before starting the run", async () => {

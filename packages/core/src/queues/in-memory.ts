@@ -10,7 +10,7 @@ import type {
   QueueJobError,
   Queues,
   SyncRunRequestedQueueJob,
-  WorkflowRunRequestedQueueJob,
+  WorkflowQueueJob,
 } from "./types"
 
 type QueueRecordState = "queued" | "completed" | "failed"
@@ -345,5 +345,5 @@ export class InMemoryQueues implements Queues {
     this.store,
     "projection.runs"
   )
-  readonly workflows = new InMemoryQueue<WorkflowRunRequestedQueueJob>(this.store, "workflow.runs")
+  readonly workflows = new InMemoryQueue<WorkflowQueueJob>(this.store, "workflow.runs")
 }
