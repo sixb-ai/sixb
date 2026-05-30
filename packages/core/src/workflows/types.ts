@@ -84,6 +84,23 @@ export type WorkflowTriggerDefinition = {
   readonly scheduleId: string
 }
 
+/**
+ * Origin of a workflow run request.
+ *
+ * Captured on the queued run record and emitted with `workflow.run.queued`
+ * so downstream consumers can trace why a run started. Intentionally minimal
+ * for now — additional sources (schedule, sync, pipeline, ...) can be added
+ * when the triggers that produce them land.
+ */
+export type WorkflowRunSource =
+  | { readonly type: "manual" }
+  | {
+      readonly type: "webhook"
+      readonly connectorId: string
+      readonly webhookId: string
+      readonly deliveryId?: string
+    }
+
 export type InferStepInput<TStep extends StepDefinition> = TStep extends {
   readonly [stepInputValueType]?: infer TInputValue
 }

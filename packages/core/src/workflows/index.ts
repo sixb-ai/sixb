@@ -1,5 +1,12 @@
 export { defineWorkflow, defineWorkflowStep } from "./builders"
 export { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
+export type {
+  RequestWorkflowRunInput,
+  WorkflowRunRequestOptions,
+  WorkflowRunRequestResult,
+} from "./request"
+export { requestWorkflowRun } from "./request"
+export { WorkflowsRuntime } from "./runtime"
 export {
   snapshotWorkflowActionInput,
   snapshotWorkflowInput,
@@ -28,6 +35,7 @@ export type {
   WorkflowIOSnapshot,
   WorkflowMapperContext,
   WorkflowNodeDefinition,
+  WorkflowRunSource,
   WorkflowStepMapper,
   WorkflowStepNodeDefinition,
   WorkflowStepOutputs,

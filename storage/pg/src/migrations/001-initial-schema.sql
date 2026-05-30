@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   started_at TIMESTAMPTZ NOT NULL,
   finished_at TIMESTAMPTZ,
   error TEXT,
+  source JSONB,
   PRIMARY KEY (project_id, id)
 );
 

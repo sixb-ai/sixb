@@ -297,9 +297,9 @@ describe("Pario workflow registration", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(pario.getWorkflowDefinitions()).toEqual([workflow])
-    expect(pario.getWorkflowById("reconcile-transaction")).toBe(workflow)
-    expect(pario.getWorkflowById("missing-workflow")).toBeNull()
+    expect(pario.workflows.list()).toEqual([workflow])
+    expect(pario.workflows.getById("reconcile-transaction")).toBe(workflow)
+    expect(pario.workflows.getById("missing-workflow")).toBeNull()
   })
 
   test("rejects duplicate workflow ids", () => {

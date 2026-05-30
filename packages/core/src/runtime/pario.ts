@@ -48,7 +48,7 @@ import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
-import { validateWorkflowsAtStartup } from "../workflows"
+import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
 import type {
   BatchItemResult,
@@ -96,7 +96,6 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   private readonly syncsById = new Map<string, SyncDefinition>()
   private readonly pipelinesById = new Map<string, PipelineDefinition>()
   private readonly rulesById = new Map<string, RuleDefinition>()
-  private readonly workflowsById = new Map<string, WorkflowDefinition>()
   private readonly connectorRuntime: ConnectorRuntime
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
@@ -107,6 +106,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
   readonly actions: ActionsRuntime
+  readonly workflows: WorkflowsRuntime
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -237,11 +237,12 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       registeredActionIds: new Set(this.actionRegistry.list().map((action) => action.id)),
     })
 
+    const workflowIds = new Set<string>()
     for (const workflow of workflows) {
-      if (this.workflowsById.has(workflow.id)) {
+      if (workflowIds.has(workflow.id)) {
         throw new RuntimeError(`Duplicate workflow id: ${workflow.id}`)
       }
-      this.workflowsById.set(workflow.id, workflow)
+      workflowIds.add(workflow.id)
     }
     this.runtimeContext = {
       projectId: this.projectId,
@@ -254,6 +255,7 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
       queues: this.queues,
     }
     this.actions = new ActionsRuntime(this.runtimeContext)
+    this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
 
     const { objectProjections, linkProjections } = categorizeProjections(options.projections ?? [])
     this.objectProjections = objectProjections
@@ -342,14 +344,6 @@ export class Pario<TOntologySources extends readonly OntologySource[]>
 
   getRuleById(ruleId: string): RuleDefinition | null {
     return this.rulesById.get(ruleId) ?? null
-  }
-
-  getWorkflowDefinitions(): readonly WorkflowDefinition[] {
-    return [...this.workflowsById.values()]
-  }
-
-  getWorkflowById(workflowId: string): WorkflowDefinition | null {
-    return this.workflowsById.get(workflowId) ?? null
   }
 
   /** All connector definitions registered with this runtime. */

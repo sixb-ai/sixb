@@ -70,7 +70,7 @@ export function resolveRegisteredWorkerTypes(pario: LoadedPario): readonly strin
     workerTypes.push("action")
   }
 
-  if (pario.getWorkflowDefinitions().length > 0) {
+  if (pario.workflows.list().length > 0) {
     workerTypes.push("workflow")
   }
 

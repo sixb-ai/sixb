@@ -7,6 +7,7 @@ import type {
   WorkflowRunRecord,
   WorkflowRunStorage,
   WorkflowStepOutputs,
+  WorkflowsRuntime,
 } from "@pario/core"
 
 export interface WorkflowWorkerContext extends ParioRuntimeContext {
@@ -17,8 +18,7 @@ export interface WorkflowWorkerContext extends ParioRuntimeContext {
 
 export interface WorkflowWorkerPario extends ParioRuntimeContext {
   readonly id: string
-  getWorkflowDefinitions(): readonly WorkflowDefinition[]
-  getWorkflowById(workflowId: string): WorkflowDefinition | null
+  readonly workflows: WorkflowsRuntime
 }
 
 export interface WorkflowJob {

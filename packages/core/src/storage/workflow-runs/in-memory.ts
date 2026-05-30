@@ -58,6 +58,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       input: cloneRecord(input.input),
       queuedAt,
       startedAt: queuedAt,
+      ...(input.source ? { source: cloneRecord(input.source) } : {}),
     }
 
     this.runs.set(key, cloneRecord(record))

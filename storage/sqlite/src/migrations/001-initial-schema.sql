@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   started_at TEXT NOT NULL,
   finished_at TEXT,
   error TEXT,
+  source TEXT,
   PRIMARY KEY (project_id, id)
 );
 

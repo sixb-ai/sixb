@@ -15,6 +15,7 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
   WorkflowRunRecord,
+  WorkflowRunSource,
   WorkflowRunStorage,
 } from "@pario/core"
 import { WorkflowRunError } from "@pario/core"
@@ -63,8 +64,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             status,
             input,
             queued_at,
-            started_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            started_at,
+            source
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -74,7 +76,8 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           "queued",
           serializeRecord(input.input),
           queuedAt.toISOString(),
-          queuedAt.toISOString()
+          queuedAt.toISOString(),
+          input.source ? JSON.stringify(input.source) : null
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -496,6 +499,7 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error ?? undefined,
+    source: row.source ? (JSON.parse(row.source) as WorkflowRunSource) : undefined,
   }
 }
 
@@ -543,6 +547,7 @@ interface WorkflowRunDatabaseRow {
   started_at: string
   finished_at: string | null
   error: string | null
+  source: string | null
 }
 
 interface WorkflowNodeRunDatabaseRow {
