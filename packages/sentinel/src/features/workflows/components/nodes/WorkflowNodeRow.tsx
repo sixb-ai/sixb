@@ -1,11 +1,9 @@
 import { Badge, Card, CardContent } from "@pario/ui/components"
-import { Box, Workflow, Zap } from "lucide-react"
+import { Box, UserCheck, Workflow, Zap } from "lucide-react"
 import type { WorkflowNode } from "../../utils/workflows"
 import { SchemaShape } from "./SchemaShape"
 
 export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: number }) {
-  const isStep = node.type === "step"
-  const isAction = node.type === "action"
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <CardContent className="p-0">
@@ -20,7 +18,7 @@ export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: nu
                 variant="secondary"
                 className="shrink-0 gap-1 rounded-md px-1.5 py-0 text-[10px]"
               >
-                {isStep ? <Workflow className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
+                <NodeTypeIcon type={node.type} />
                 {node.type}
               </Badge>
             </div>
@@ -29,16 +27,25 @@ export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: nu
           <NodeSummary node={node} />
         </div>
 
-        {isStep ? (
+        {node.type === "step" ? (
           <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
             <SchemaSection label="Input" fields={node.input} emptyLabel="No input fields" />
             <SchemaSection label="Output" fields={node.output} emptyLabel="No output fields" />
           </div>
-        ) : isAction ? (
+        ) : node.type === "intervention" ? (
+          <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
+            <SchemaSection label="Input" fields={node.input} emptyLabel="No input fields" />
+            <SchemaSection
+              label="Response"
+              fields={node.response}
+              emptyLabel="No response fields"
+            />
+          </div>
+        ) : (
           <div className="border-t border-border/60 bg-muted/20">
             <SchemaSection label="Params" fields={node.params} emptyLabel="No params" />
           </div>
-        ) : null}
+        )}
       </CardContent>
     </Card>
   )
@@ -53,11 +60,15 @@ function NodeMeta({ node }: { node: WorkflowNode }) {
     )
   }
 
-  if (node.type === "step") {
-    return <p className="mt-0.5 text-xs text-muted-foreground">Transforms workflow data.</p>
+  if (node.type === "intervention") {
+    return (
+      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+        {node.description ?? "Waits for a human response."}
+      </p>
+    )
   }
 
-  return null
+  return <p className="mt-0.5 text-xs text-muted-foreground">Transforms workflow data.</p>
 }
 
 function NodeSummary({ node }: { node: WorkflowNode }) {
@@ -73,16 +84,27 @@ function NodeSummary({ node }: { node: WorkflowNode }) {
     )
   }
 
-  if (node.type === "step") {
+  if (node.type === "intervention") {
     return (
       <span className="hidden shrink-0 text-xs tabular-nums text-muted-foreground sm:inline">
         {fieldCountLabel(Object.keys(node.input ?? {}).length, "input")} ·{" "}
-        {fieldCountLabel(Object.keys(node.output ?? {}).length, "output")}
+        {fieldCountLabel(Object.keys(node.response ?? {}).length, "response")}
       </span>
     )
   }
 
-  return null
+  return (
+    <span className="hidden shrink-0 text-xs tabular-nums text-muted-foreground sm:inline">
+      {fieldCountLabel(Object.keys(node.input ?? {}).length, "input")} ·{" "}
+      {fieldCountLabel(Object.keys(node.output ?? {}).length, "output")}
+    </span>
+  )
+}
+
+function NodeTypeIcon({ type }: { type: WorkflowNode["type"] }) {
+  if (type === "step") return <Workflow className="h-3 w-3" />
+  if (type === "intervention") return <UserCheck className="h-3 w-3" />
+  return <Zap className="h-3 w-3" />
 }
 
 function SchemaSection({
