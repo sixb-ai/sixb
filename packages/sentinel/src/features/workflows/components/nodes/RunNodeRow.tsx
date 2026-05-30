@@ -1,10 +1,11 @@
 import { Badge, Card, CardContent } from "@pario/ui/components"
 import { cn } from "@pario/ui/lib/utils"
-import { ChevronRight, Workflow, Zap } from "lucide-react"
+import { ChevronRight, UserCheck, Workflow, Zap } from "lucide-react"
 import { useState } from "react"
 import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"
 import { RunIOShape } from "../runs/RunIOShape"
 import { NodeStatusBadge } from "../runs/StatusBadge"
+import { WorkflowInterventionPanel } from "./WorkflowInterventionPanel"
 
 export function RunNodeRow({
   node,
@@ -13,8 +14,12 @@ export function RunNodeRow({
   node: WorkflowRunNode
   defaultOpen?: boolean
 }) {
-  const isStep = node.nodeType === "step"
   const [open, setOpen] = useState(defaultOpen)
+  const outputLabel = node.error
+    ? "Error"
+    : node.nodeType === "intervention"
+      ? "Response"
+      : "Output"
 
   return (
     <Card className="gap-0 overflow-hidden py-0">
@@ -35,8 +40,8 @@ export function RunNodeRow({
                 variant="secondary"
                 className="shrink-0 gap-1 rounded-md px-1.5 py-0 text-[10px]"
               >
-                {isStep ? <Workflow className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
-                {isStep ? "step" : "action"}
+                <NodeTypeIcon type={node.nodeType} />
+                {node.nodeType}
               </Badge>
             </div>
             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -55,17 +60,26 @@ export function RunNodeRow({
         </button>
 
         {open ? (
-          <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
-            <JsonPanel label="Input" value={node.input} />
-            <JsonPanel
-              label={node.error ? "Error" : "Output"}
-              value={node.output ?? node.error ?? null}
-            />
-          </div>
+          <>
+            {node.nodeType === "intervention" && node.status === "waiting" ? (
+              <WorkflowInterventionPanel node={node} />
+            ) : null}
+
+            <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
+              <JsonPanel label="Input" value={node.input} />
+              <JsonPanel label={outputLabel} value={node.output ?? node.error ?? null} />
+            </div>
+          </>
         ) : null}
       </CardContent>
     </Card>
   )
+}
+
+function NodeTypeIcon({ type }: { type: WorkflowRunNode["nodeType"] }) {
+  if (type === "step") return <Workflow className="h-3 w-3" />
+  if (type === "intervention") return <UserCheck className="h-3 w-3" />
+  return <Zap className="h-3 w-3" />
 }
 
 function JsonPanel({ label, value }: { label: string; value: unknown }) {

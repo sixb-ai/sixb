@@ -16,6 +16,13 @@ export const Invoice = defineObjectType({
     prop("dueDate", "date"),
     prop("customerRef", "string"),
     prop("projectRef", "string"),
+    prop(
+      "reminderReviewStatus",
+      stringEnum(["not_requested", "needs_review", "approved", "revision_requested", "cancelled"])
+    ),
+    prop("reminderReviewRequestedAt", "timestamp"),
+    prop("reminderReviewedAt", "timestamp"),
+    prop("reminderReviewerNote", "string"),
   ],
   links: [
     link("customer", Customer, { cardinality: "one" }),

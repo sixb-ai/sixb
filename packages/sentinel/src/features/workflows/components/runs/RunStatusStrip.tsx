@@ -3,7 +3,7 @@ import { StatusBadge } from "./StatusBadge"
 
 export function RunStatusStrip({ counts }: { counts: Record<WorkflowRunStatus, number> }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
       {allWorkflowRunStatuses.map((status) => (
         <div
           key={status}

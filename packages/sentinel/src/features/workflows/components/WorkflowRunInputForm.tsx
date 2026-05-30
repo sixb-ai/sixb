@@ -30,17 +30,19 @@ export function WorkflowRunInputFields({
   values,
   errors,
   onChange,
+  emptyLabel = "This workflow does not require any input.",
 }: {
   fields: Readonly<Record<string, unknown>>
   values: WorkflowInputFormValues
   errors: WorkflowInputFormErrors
   onChange: (path: readonly string[], value: string) => void
+  emptyLabel?: string
 }) {
   const entries = Object.entries(fields)
   if (entries.length === 0) {
     return (
       <div className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
-        This workflow does not require any input.
+        {emptyLabel}
       </div>
     )
   }
@@ -64,11 +66,17 @@ export function WorkflowRunInputFields({
 }
 
 export function createInitialWorkflowInputFormValues(
-  fields: Readonly<Record<string, unknown>>
+  fields: Readonly<Record<string, unknown>>,
+  initialValue: Readonly<Record<string, unknown>> = {}
 ): WorkflowInputFormValues {
   const values: WorkflowInputFormValues = {}
   for (const [name, descriptor] of Object.entries(fields)) {
-    collectInitialFormValues(unwrapFieldDescriptor(descriptor, true), [name], values)
+    collectInitialFormValues(
+      unwrapFieldDescriptor(descriptor, true),
+      [name],
+      values,
+      initialValue[name]
+    )
   }
   return values
 }
@@ -438,20 +446,28 @@ function FieldError({ id, message }: { id: string; message: string }) {
 function collectInitialFormValues(
   spec: FieldSpec,
   path: readonly string[],
-  values: WorkflowInputFormValues
+  values: WorkflowInputFormValues,
+  initialValue: unknown
 ): void {
   const schema = resolveRenderableSchema(spec.schema)
+  const initialFormValue = initialFormValueForSchema(schema, initialValue)
+  if (initialFormValue !== null) {
+    values[pathKey(path)] = initialFormValue
+  }
+
   const defaultJson = defaultJsonForSchema(schema)
-  if (spec.required && defaultJson) {
+  if (initialFormValue === null && spec.required && defaultJson) {
     values[pathKey(path)] = defaultJson
   }
 
   if (isObjectSchema(schema)) {
+    const initialObject = isRecord(initialValue) ? initialValue : {}
     for (const [fieldName, fieldDescriptor] of Object.entries(schema.properties)) {
       collectInitialFormValues(
         unwrapFieldDescriptor(fieldDescriptor, false),
         [...path, fieldName],
-        values
+        values,
+        initialObject[fieldName]
       )
     }
   }
@@ -627,6 +643,55 @@ function defaultJsonForSchema(schema: unknown): string {
   if (isArraySchema(schema)) return "[]"
   if (isMapSchema(schema)) return "{}"
   return ""
+}
+
+function initialFormValueForSchema(schema: unknown, value: unknown): string | null {
+  if (value === undefined || value === null || isObjectSchema(schema)) return null
+
+  if (isObjectRefSchema(schema)) {
+    if (typeof value === "string") return value
+    if (isRecord(value) && typeof value.primaryId === "string") return value.primaryId
+    return null
+  }
+
+  if (isEnumSchema(schema)) {
+    const matchingOption = schema.values.find((option) => String(option) === String(value))
+    return matchingOption === undefined ? null : String(matchingOption)
+  }
+
+  if (schema === "boolean") {
+    return typeof value === "boolean" ? String(value) : null
+  }
+
+  if (schema === "date" && typeof value === "string") {
+    return value.slice(0, 10)
+  }
+
+  if (schema === "timestamp" && typeof value === "string") {
+    return timestampInputValue(value)
+  }
+
+  if (isPrimitiveSchema(schema) && schema !== "fileRef") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return String(value)
+    }
+    return null
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return null
+  }
+}
+
+function timestampInputValue(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+
+  // datetime-local inputs expect wall-clock time, so preserve the instant by displaying local time.
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
 }
 
 function inputTypeForPrimitive(schema: PrimitiveSchema): string {

@@ -1,4 +1,10 @@
-import { defineWorkflow, defineWorkflowStep, ref } from "@pario/core"
+import {
+  defineIntervention,
+  defineWorkflow,
+  defineWorkflowStep,
+  interventionField,
+  ref,
+} from "@pario/core"
 import { sendReminder } from "../actions/sendReminder"
 import { Invoice } from "../ontology/invoice"
 
@@ -76,19 +82,55 @@ const composeInvoiceReminder = defineWorkflowStep("compose-invoice-reminder")
     channel: "string",
     deliveryBatchId: "string",
   })
-  .run(async ({ input }) => {
+  .run(async ({ input, pario }) => {
     await wait(750)
+
+    const message =
+      input.urgency === "high"
+        ? `Invoice ${input.invoiceNumber} for ${input.amountLabel} is overdue. Please review and submit payment.`
+        : `Please review invoice ${input.invoiceNumber} for ${input.amountLabel} and submit payment when convenient.`
+    const invoice = await pario.objects(Invoice).get(input.invoice.primaryId)
+    if (!invoice) {
+      throw new Error(`[AcmeCorp] Invoice '${input.invoice.primaryId}' was not found.`)
+    }
+
+    // Business review state stays on the invoice; workflow interventions only track the runtime
+    // pause and submitted response.
+    await pario.objects(Invoice).upsert({
+      properties: {
+        ...invoice.properties,
+        id: invoice.primaryId,
+        reminderReviewStatus: "needs_review",
+        reminderReviewRequestedAt: new Date().toISOString(),
+      },
+    })
 
     return {
       invoice: input.invoice,
-      message:
-        input.urgency === "high"
-          ? `Invoice ${input.invoiceNumber} for ${input.amountLabel} is overdue. Please review and submit payment.`
-          : `Please review invoice ${input.invoiceNumber} for ${input.amountLabel} and submit payment when convenient.`,
+      message,
       channel: input.channel,
       deliveryBatchId: `reminder-${new Date().toISOString()}`,
     }
   })
+
+export const reviewInvoiceReminder = defineIntervention("review-invoice-reminder", {
+  description: "Approve or request changes before sending the invoice reminder.",
+})
+  .input({
+    invoice: ref(Invoice),
+    message: "string",
+    channel: "string",
+    deliveryBatchId: "string",
+  })
+  .response({
+    approved: interventionField("boolean", { required: true }),
+    message: interventionField("string", { required: true }),
+    reviewerNote: interventionField("string", { required: false }),
+  })
+  .defaults(({ input }) => ({
+    approved: true,
+    message: input.message,
+  }))
 
 export const invoiceReminderWorkflow = defineWorkflow("invoice-reminder-workflow")
   .input({
@@ -97,10 +139,13 @@ export const invoiceReminderWorkflow = defineWorkflow("invoice-reminder-workflow
   .then(loadInvoiceContext)
   .then(evaluateReminderPolicy)
   .then(composeInvoiceReminder)
+  .then(reviewInvoiceReminder)
   .then(sendReminder, ({ steps }) => ({
     target: steps.composeInvoiceReminder.invoice,
     params: {
-      message: steps.composeInvoiceReminder.message,
+      approved: steps.reviewInvoiceReminder.approved,
+      message: steps.reviewInvoiceReminder.message,
+      reviewerNote: steps.reviewInvoiceReminder.reviewerNote,
     },
   }))
 
