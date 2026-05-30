@@ -10,6 +10,7 @@ import {
   defineAction,
   defineConnector,
   defineDataset,
+  defineIntervention,
   defineObjectType,
   definePipeline,
   definePipelineStep,
@@ -24,6 +25,7 @@ import {
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
+  interventionField,
   link,
   type OntologySource,
   Pario,
@@ -37,6 +39,7 @@ import {
   SqliteSyncRunStorage,
   SqliteTimeseriesStorage,
   SqliteWebhookRunStorage,
+  SqliteWorkflowInterventionStorage,
   SqliteWorkflowRunStorage,
 } from "@pario/sqlite"
 import { ParioServer } from "../src/server"
@@ -135,6 +138,21 @@ const inspectDeviceWorkflow = defineWorkflow("inspect-device-workflow")
   .when(nightlyGithub)
   .then(inspectDeviceStep)
 
+const reviewDeviceHealth = defineIntervention("review-device-health", {
+  description: "Review the device health result before downstream work continues.",
+})
+  .input({ deviceId: "string", healthy: "boolean" })
+  .response({
+    approved: interventionField("boolean", { required: true }),
+    note: interventionField("string", { required: false }),
+  })
+  .defaults(({ input }) => ({ approved: input.healthy }))
+
+const reviewDeviceHealthWorkflow = defineWorkflow("review-device-health-workflow")
+  .input({ deviceId: "string" })
+  .then(inspectDeviceStep)
+  .then(reviewDeviceHealth)
+
 const setSpeed = defineAction("setSpeed")
   .target(Device)
   .params({ speed: actionParam("double", { required: true }) })
@@ -171,6 +189,87 @@ async function getFreePort(): Promise<number> {
   })
 }
 
+async function seedPendingReviewIntervention(
+  pario: Pario<readonly OntologySource[]>,
+  suffix: string
+) {
+  const workflowRuns = pario.storage.workflowRuns
+  const workflowInterventions = pario.storage.workflowInterventions
+  if (!workflowRuns || !workflowInterventions) {
+    throw new Error("Expected workflow run and intervention storage in test runtime.")
+  }
+
+  const runId = `workflow-run-waiting-${suffix}`
+  const stepNodeRunId = `workflow-node-run-step-${suffix}`
+  const interventionNodeRunId = `workflow-node-run-intervention-${suffix}`
+  const pendingInterventionId = `workflow-intervention-${suffix}`
+  const stepOutput = { deviceId: "fan-1", healthy: true }
+
+  await workflowRuns.start({
+    id: runId,
+    projectId: pario.id,
+    workflowId: "review-device-health-workflow",
+    input: { deviceId: "fan-1" },
+    startedAt: new Date("2026-02-18T09:20:00.000Z"),
+  })
+  await workflowRuns.nodes.start({
+    id: stepNodeRunId,
+    projectId: pario.id,
+    workflowRunId: runId,
+    workflowId: "review-device-health-workflow",
+    nodeIndex: 0,
+    nodeType: "step",
+    nodeId: "inspect-device",
+    nodeKey: "inspectDevice",
+    input: { deviceId: "fan-1" },
+    startedAt: new Date("2026-02-18T09:20:01.000Z"),
+  })
+  await workflowRuns.nodes.finish({
+    id: stepNodeRunId,
+    projectId: pario.id,
+    status: "succeeded",
+    finishedAt: new Date("2026-02-18T09:20:02.000Z"),
+    output: stepOutput,
+  })
+  await workflowRuns.nodes.start({
+    id: interventionNodeRunId,
+    projectId: pario.id,
+    workflowRunId: runId,
+    workflowId: "review-device-health-workflow",
+    nodeIndex: 1,
+    nodeType: "intervention",
+    nodeId: "review-device-health",
+    nodeKey: "reviewDeviceHealth",
+    input: stepOutput,
+    startedAt: new Date("2026-02-18T09:20:03.000Z"),
+  })
+  await workflowRuns.nodes.wait({
+    id: interventionNodeRunId,
+    projectId: pario.id,
+    waitingAt: new Date("2026-02-18T09:20:04.000Z"),
+  })
+  await workflowRuns.wait({
+    id: runId,
+    projectId: pario.id,
+    waitingAt: new Date("2026-02-18T09:20:04.000Z"),
+  })
+
+  return await workflowInterventions.create({
+    id: pendingInterventionId,
+    projectId: pario.id,
+    workflowId: "review-device-health-workflow",
+    workflowRunId: runId,
+    nodeRunId: interventionNodeRunId,
+    nodeIndex: 1,
+    nodeId: "review-device-health",
+    nodeKey: "reviewDeviceHealth",
+    interventionId: "review-device-health",
+    input: stepOutput,
+    defaultResponse: { approved: true },
+    requestedAt: new Date("2026-02-18T09:20:04.000Z"),
+  })
+}
+
 describe("ParioServer HTTP contract", () => {
   async function withHttpContractServer(
     run: (context: {
@@ -193,6 +292,7 @@ describe("ParioServer HTTP contract", () => {
         syncRuns: new SqliteSyncRunStorage(),
         pipelineRuns: new SqlitePipelineRunStorage(),
         workflowRuns: new SqliteWorkflowRunStorage(),
+        workflowInterventions: new SqliteWorkflowInterventionStorage(),
         webhookRuns: new SqliteWebhookRunStorage(),
         rules: new SqliteRulesStorage(),
       },
@@ -204,7 +304,7 @@ describe("ParioServer HTTP contract", () => {
       datasets: [githubEventsDataset, auditLogDataset, cleanGithubEventsDataset],
       syncs: [githubEventsSync],
       pipelines: [githubEventsPipeline],
-      workflows: [inspectDeviceWorkflow],
+      workflows: [inspectDeviceWorkflow, reviewDeviceHealthWorkflow],
       rules: [highRpmRule],
     })
 
@@ -795,8 +895,13 @@ describe("ParioServer HTTP contract", () => {
 
       const workflowsResponse = await fetch(`${baseUrl}/api/workflows`)
       expect(workflowsResponse.status).toBe(200)
-      expect(await workflowsResponse.json()).toEqual([
-        expect.objectContaining({
+      const workflows = (await workflowsResponse.json()) as Array<{
+        id: string
+        nodes: readonly unknown[]
+      }>
+      expect(workflows).toHaveLength(2)
+      expect(workflows.find((workflow) => workflow.id === "inspect-device-workflow")).toMatchObject(
+        {
           id: "inspect-device-workflow",
           input: { deviceId: "string" },
           triggers: [{ type: "schedule", scheduleId: "nightly-github" }],
@@ -814,8 +919,31 @@ describe("ParioServer HTTP contract", () => {
             status: "succeeded",
             input: { deviceId: "fan-1" },
           }),
-        }),
-      ])
+        }
+      )
+      expect(
+        workflows.find((workflow) => workflow.id === "review-device-health-workflow")
+      ).toMatchObject({
+        id: "review-device-health-workflow",
+        nodes: [
+          {
+            type: "step",
+            id: "inspect-device",
+            key: "inspectDevice",
+          },
+          {
+            type: "intervention",
+            id: "review-device-health",
+            key: "reviewDeviceHealth",
+            input: { deviceId: "string", healthy: "boolean" },
+            response: {
+              approved: { schema: "boolean", required: true },
+              note: { schema: "string", required: false },
+            },
+            description: "Review the device health result before downstream work continues.",
+          },
+        ],
+      })
 
       const workflowResponse = await fetch(`${baseUrl}/api/workflows/inspect-device-workflow`)
       expect(workflowResponse.status).toBe(200)
@@ -1068,6 +1196,205 @@ describe("ParioServer HTTP contract", () => {
       }
       expect(events.count).toBeGreaterThanOrEqual(2)
       expect(events.events.some((event) => event.type === "telemetry.appended")).toBe(true)
+    })
+  })
+
+  test("supports workflow intervention review endpoints", async () => {
+    await withHttpContractServer(async ({ baseUrl, events, pario }) => {
+      const pending = await seedPendingReviewIntervention(pario, "submit")
+
+      const listResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions?status=pending&workflowId=review-device-health-workflow`
+      )
+      expect(listResponse.status).toBe(200)
+      expect(await listResponse.json()).toMatchObject({
+        total: 1,
+        hasMore: false,
+        interventions: [
+          {
+            id: pending.id,
+            workflowId: "review-device-health-workflow",
+            workflowRunId: pending.workflowRunId,
+            nodeRunId: pending.nodeRunId,
+            nodeId: "review-device-health",
+            nodeKey: "reviewDeviceHealth",
+            interventionId: "review-device-health",
+            status: "pending",
+            input: { deviceId: "fan-1", healthy: true },
+            defaultResponse: { approved: true },
+            requestedAt: "2026-02-18T09:20:04.000Z",
+          },
+        ],
+      })
+
+      const detailResponse = await fetch(`${baseUrl}/api/workflow-interventions/${pending.id}`)
+      expect(detailResponse.status).toBe(200)
+      expect(await detailResponse.json()).toMatchObject({
+        id: pending.id,
+        workflowId: "review-device-health-workflow",
+        status: "pending",
+      })
+
+      const invalidSubmitResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions/${pending.id}/submit`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ response: { approved: "yes" } }),
+        }
+      )
+      expect(invalidSubmitResponse.status).toBe(400)
+
+      const validSubmitResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions/${pending.id}/submit`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            response: { approved: false, note: "Needs inspection." },
+            submittedBy: { principalType: "user", principalId: "reviewer-1" },
+          }),
+        }
+      )
+      expect(validSubmitResponse.status).toBe(202)
+      const validSubmitBody = (await validSubmitResponse.json()) as {
+        jobId: string
+        intervention: {
+          id: string
+          status: string
+          response: Record<string, unknown>
+          submittedBy: { principalType: string; principalId: string }
+        }
+      }
+      expect(validSubmitBody.jobId).toBeTruthy()
+      expect(validSubmitBody.intervention).toMatchObject({
+        id: pending.id,
+        status: "submitted",
+        response: { approved: false, note: "Needs inspection." },
+        submittedBy: { principalType: "user", principalId: "reviewer-1" },
+      })
+
+      const [resumeJob] = await pario.queues.workflows.claim({
+        projectId: pario.id,
+        workerId: "contract-test",
+      })
+      expect(resumeJob?.job.id).toBe(validSubmitBody.jobId)
+      expect(resumeJob?.job).toEqual({
+        id: validSubmitBody.jobId,
+        projectId: pario.id,
+        createdAt: expect.any(String),
+        availableAt: expect.any(String),
+        attempt: 1,
+        metadata: undefined,
+        type: "workflow.run.resume.requested",
+        payload: {
+          workflowId: "review-device-health-workflow",
+          runId: pending.workflowRunId,
+          pendingInterventionId: pending.id,
+        },
+      })
+
+      const duplicateSubmitResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions/${pending.id}/submit`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ response: { approved: true } }),
+        }
+      )
+      expect(duplicateSubmitResponse.status).toBe(400)
+
+      const duplicateResumeJobs = await pario.queues.workflows.claim({
+        projectId: pario.id,
+        workerId: "contract-test-duplicate",
+      })
+      expect(duplicateResumeJobs).toEqual([])
+
+      const workflowEvents = await events.read({
+        topics: ["workflows"],
+        types: ["workflow.intervention.submitted"],
+        limit: 10,
+      })
+      expect(workflowEvents).toEqual([
+        expect.objectContaining({
+          type: "workflow.intervention.submitted",
+          payload: expect.objectContaining({
+            workflowId: "review-device-health-workflow",
+            runId: pending.workflowRunId,
+            nodeRunId: pending.nodeRunId,
+            interventionId: "review-device-health",
+            pendingInterventionId: pending.id,
+          }),
+        }),
+      ])
+    })
+  })
+
+  test("cancels pending workflow interventions and waiting runs", async () => {
+    await withHttpContractServer(async ({ baseUrl, events, pario }) => {
+      const pending = await seedPendingReviewIntervention(pario, "cancel")
+
+      const cancelResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions/${pending.id}/cancel`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            cancelledBy: { principalType: "user", principalId: "reviewer-1" },
+          }),
+        }
+      )
+      expect(cancelResponse.status).toBe(200)
+      expect(await cancelResponse.json()).toMatchObject({
+        intervention: {
+          id: pending.id,
+          status: "cancelled",
+          cancelledBy: { principalType: "user", principalId: "reviewer-1" },
+        },
+      })
+
+      const cancelledRun = await pario.storage.workflowRuns!.getById({
+        projectId: pario.id,
+        id: pending.workflowRunId,
+      })
+      expect(cancelledRun).toMatchObject({
+        id: pending.workflowRunId,
+        status: "cancelled",
+        error: "Workflow intervention cancelled.",
+      })
+
+      const cancelledNode = await pario.storage.workflowRuns!.nodes.getById({
+        projectId: pario.id,
+        id: pending.nodeRunId,
+      })
+      expect(cancelledNode).toMatchObject({
+        id: pending.nodeRunId,
+        status: "cancelled",
+        error: "Workflow intervention cancelled.",
+      })
+
+      const workflowEvents = await events.read({
+        topics: ["workflows"],
+        types: [
+          "workflow.intervention.cancelled",
+          "workflow.run.node.finished",
+          "workflow.run.finished",
+        ],
+        limit: 10,
+      })
+      expect(workflowEvents.map((event) => event.type)).toEqual([
+        "workflow.intervention.cancelled",
+        "workflow.run.node.finished",
+        "workflow.run.finished",
+      ])
+      expect(workflowEvents[0]).toMatchObject({
+        payload: expect.objectContaining({
+          workflowId: "review-device-health-workflow",
+          runId: pending.workflowRunId,
+          nodeRunId: pending.nodeRunId,
+          pendingInterventionId: pending.id,
+        }),
+      })
     })
   })
 

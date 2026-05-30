@@ -4591,6 +4591,967 @@
         }
       }
     },
+    "/api/workflow-interventions": {
+      "get": {
+        "summary": "List workflow interventions",
+        "tags": ["Workflows"],
+        "operationId": "listWorkflowInterventions",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowRunId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "nodeRunId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "nodeId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "nodeKey",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "interventionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "submitted", "cancelled", "expired"]
+            }
+          },
+          {
+            "name": "requestedAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "requestedBefore",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "interventions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "workflowId": {
+                            "type": "string"
+                          },
+                          "workflowRunId": {
+                            "type": "string"
+                          },
+                          "nodeRunId": {
+                            "type": "string"
+                          },
+                          "nodeIndex": {
+                            "type": "number"
+                          },
+                          "nodeId": {
+                            "type": "string"
+                          },
+                          "nodeKey": {
+                            "type": "string"
+                          },
+                          "interventionId": {
+                            "type": "string"
+                          },
+                          "input": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "defaultResponse": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["pending", "submitted", "cancelled", "expired"]
+                          },
+                          "requestedAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "submittedAt": {
+                            "type": "string"
+                          },
+                          "submittedBy": {
+                            "type": "object",
+                            "properties": {
+                              "principalType": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "principalId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["principalType", "principalId"],
+                            "additionalProperties": false
+                          },
+                          "response": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "cancelledAt": {
+                            "type": "string"
+                          },
+                          "cancelledBy": {
+                            "type": "object",
+                            "properties": {
+                              "principalType": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "principalId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["principalType", "principalId"],
+                            "additionalProperties": false
+                          },
+                          "expiredAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "workflowId",
+                          "workflowRunId",
+                          "nodeRunId",
+                          "nodeIndex",
+                          "nodeId",
+                          "nodeKey",
+                          "interventionId",
+                          "input",
+                          "defaultResponse",
+                          "status",
+                          "requestedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["interventions", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflow-interventions/{interventionId}": {
+      "get": {
+        "summary": "Get workflow intervention detail",
+        "tags": ["Workflows"],
+        "operationId": "getWorkflowIntervention",
+        "parameters": [
+          {
+            "name": "interventionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "workflowId": {
+                      "type": "string"
+                    },
+                    "workflowRunId": {
+                      "type": "string"
+                    },
+                    "nodeRunId": {
+                      "type": "string"
+                    },
+                    "nodeIndex": {
+                      "type": "number"
+                    },
+                    "nodeId": {
+                      "type": "string"
+                    },
+                    "nodeKey": {
+                      "type": "string"
+                    },
+                    "interventionId": {
+                      "type": "string"
+                    },
+                    "input": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "defaultResponse": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["pending", "submitted", "cancelled", "expired"]
+                    },
+                    "requestedAt": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    },
+                    "submittedAt": {
+                      "type": "string"
+                    },
+                    "submittedBy": {
+                      "type": "object",
+                      "properties": {
+                        "principalType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "principalId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["principalType", "principalId"],
+                      "additionalProperties": false
+                    },
+                    "response": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "cancelledAt": {
+                      "type": "string"
+                    },
+                    "cancelledBy": {
+                      "type": "object",
+                      "properties": {
+                        "principalType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "principalId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["principalType", "principalId"],
+                      "additionalProperties": false
+                    },
+                    "expiredAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "workflowId",
+                    "workflowRunId",
+                    "nodeRunId",
+                    "nodeIndex",
+                    "nodeId",
+                    "nodeKey",
+                    "interventionId",
+                    "input",
+                    "defaultResponse",
+                    "status",
+                    "requestedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflow-interventions/{interventionId}/submit": {
+      "post": {
+        "summary": "Submit a workflow intervention response",
+        "tags": ["Workflows"],
+        "operationId": "submitWorkflowIntervention",
+        "security": [
+          {
+            "parioCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interventionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "response": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "submittedBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["response"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "response": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "submittedBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["response"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "response": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "submittedBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["response"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intervention": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "workflowId": {
+                          "type": "string"
+                        },
+                        "workflowRunId": {
+                          "type": "string"
+                        },
+                        "nodeRunId": {
+                          "type": "string"
+                        },
+                        "nodeIndex": {
+                          "type": "number"
+                        },
+                        "nodeId": {
+                          "type": "string"
+                        },
+                        "nodeKey": {
+                          "type": "string"
+                        },
+                        "interventionId": {
+                          "type": "string"
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "defaultResponse": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["pending", "submitted", "cancelled", "expired"]
+                        },
+                        "requestedAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "submittedAt": {
+                          "type": "string"
+                        },
+                        "submittedBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
+                        },
+                        "response": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "cancelledAt": {
+                          "type": "string"
+                        },
+                        "cancelledBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
+                        },
+                        "expiredAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "workflowId",
+                        "workflowRunId",
+                        "nodeRunId",
+                        "nodeIndex",
+                        "nodeId",
+                        "nodeKey",
+                        "interventionId",
+                        "input",
+                        "defaultResponse",
+                        "status",
+                        "requestedAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "jobId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["intervention", "jobId"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workflow-interventions/{interventionId}/cancel": {
+      "post": {
+        "summary": "Cancel a workflow intervention",
+        "tags": ["Workflows"],
+        "operationId": "cancelWorkflowIntervention",
+        "security": [
+          {
+            "parioCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "interventionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cancelledBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false,
+                "default": {}
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cancelledBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false,
+                "default": {}
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cancelledBy": {
+                    "type": "object",
+                    "properties": {
+                      "principalType": {
+                        "type": "string",
+                        "enum": ["user", "serviceAccount", "system"]
+                      },
+                      "principalId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": ["principalType", "principalId"],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false,
+                "default": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "intervention": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "workflowId": {
+                          "type": "string"
+                        },
+                        "workflowRunId": {
+                          "type": "string"
+                        },
+                        "nodeRunId": {
+                          "type": "string"
+                        },
+                        "nodeIndex": {
+                          "type": "number"
+                        },
+                        "nodeId": {
+                          "type": "string"
+                        },
+                        "nodeKey": {
+                          "type": "string"
+                        },
+                        "interventionId": {
+                          "type": "string"
+                        },
+                        "input": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "defaultResponse": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["pending", "submitted", "cancelled", "expired"]
+                        },
+                        "requestedAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "submittedAt": {
+                          "type": "string"
+                        },
+                        "submittedBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
+                        },
+                        "response": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "cancelledAt": {
+                          "type": "string"
+                        },
+                        "cancelledBy": {
+                          "type": "object",
+                          "properties": {
+                            "principalType": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "principalId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["principalType", "principalId"],
+                          "additionalProperties": false
+                        },
+                        "expiredAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "workflowId",
+                        "workflowRunId",
+                        "nodeRunId",
+                        "nodeIndex",
+                        "nodeId",
+                        "nodeKey",
+                        "interventionId",
+                        "input",
+                        "defaultResponse",
+                        "status",
+                        "requestedAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["intervention"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workflow-runs": {
       "get": {
         "summary": "List workflow run history",

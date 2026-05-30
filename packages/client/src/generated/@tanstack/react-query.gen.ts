@@ -11,6 +11,7 @@ import {
 import { client } from "../client.gen"
 import {
   appendTelemetry,
+  cancelWorkflowIntervention,
   createAuthInvitation,
   getAction,
   getAuthInvitationOptions,
@@ -30,6 +31,7 @@ import {
   getSync,
   getTelemetryHistory,
   getWorkflow,
+  getWorkflowIntervention,
   getWorkflowRun,
   listActions,
   listAuthInvitations,
@@ -49,6 +51,7 @@ import {
   listSyncRuns,
   listSyncs,
   listWebhookRuns,
+  listWorkflowInterventions,
   listWorkflowRuns,
   listWorkflows,
   type Options,
@@ -59,6 +62,7 @@ import {
   requestWorkflowRun,
   revokeAuthInvitation,
   signOut,
+  submitWorkflowIntervention,
   upsertObject,
   upsertObjectLink,
 } from "../sdk.gen"
@@ -66,6 +70,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
+  CancelWorkflowInterventionData,
+  CancelWorkflowInterventionError,
+  CancelWorkflowInterventionResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
@@ -119,6 +126,9 @@ import type {
   GetTelemetryHistoryResponse,
   GetWorkflowData,
   GetWorkflowError,
+  GetWorkflowInterventionData,
+  GetWorkflowInterventionError,
+  GetWorkflowInterventionResponse,
   GetWorkflowResponse,
   GetWorkflowRunData,
   GetWorkflowRunError,
@@ -170,6 +180,9 @@ import type {
   ListWebhookRunsData,
   ListWebhookRunsError,
   ListWebhookRunsResponse,
+  ListWorkflowInterventionsData,
+  ListWorkflowInterventionsError,
+  ListWorkflowInterventionsResponse,
   ListWorkflowRunsData,
   ListWorkflowRunsError,
   ListWorkflowRunsResponse,
@@ -196,6 +209,9 @@ import type {
   SignOutData,
   SignOutError,
   SignOutResponse,
+  SubmitWorkflowInterventionData,
+  SubmitWorkflowInterventionError,
+  SubmitWorkflowInterventionResponse,
   UpsertObjectData,
   UpsertObjectError,
   UpsertObjectLinkData,
@@ -1092,6 +1108,163 @@ export const getWorkflowOptions = (options: Options<GetWorkflowData>) =>
     },
     queryKey: getWorkflowQueryKey(options),
   })
+
+export const listWorkflowInterventionsQueryKey = (
+  options?: Options<ListWorkflowInterventionsData>
+) => createQueryKey("listWorkflowInterventions", options)
+
+/**
+ * List workflow interventions
+ */
+export const listWorkflowInterventionsOptions = (
+  options?: Options<ListWorkflowInterventionsData>
+) =>
+  queryOptions<
+    ListWorkflowInterventionsResponse,
+    ListWorkflowInterventionsError,
+    ListWorkflowInterventionsResponse,
+    ReturnType<typeof listWorkflowInterventionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listWorkflowInterventions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listWorkflowInterventionsQueryKey(options),
+  })
+
+export const listWorkflowInterventionsInfiniteQueryKey = (
+  options?: Options<ListWorkflowInterventionsData>
+): QueryKey<Options<ListWorkflowInterventionsData>> =>
+  createQueryKey("listWorkflowInterventions", options, true)
+
+/**
+ * List workflow interventions
+ */
+export const listWorkflowInterventionsInfiniteOptions = (
+  options?: Options<ListWorkflowInterventionsData>
+) =>
+  infiniteQueryOptions<
+    ListWorkflowInterventionsResponse,
+    ListWorkflowInterventionsError,
+    InfiniteData<ListWorkflowInterventionsResponse>,
+    QueryKey<Options<ListWorkflowInterventionsData>>,
+    | string
+    | Pick<
+        QueryKey<Options<ListWorkflowInterventionsData>>[0],
+        "body" | "headers" | "path" | "query"
+      >
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListWorkflowInterventionsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listWorkflowInterventions({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listWorkflowInterventionsInfiniteQueryKey(options),
+    }
+  )
+
+export const getWorkflowInterventionQueryKey = (options: Options<GetWorkflowInterventionData>) =>
+  createQueryKey("getWorkflowIntervention", options)
+
+/**
+ * Get workflow intervention detail
+ */
+export const getWorkflowInterventionOptions = (options: Options<GetWorkflowInterventionData>) =>
+  queryOptions<
+    GetWorkflowInterventionResponse,
+    GetWorkflowInterventionError,
+    GetWorkflowInterventionResponse,
+    ReturnType<typeof getWorkflowInterventionQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflowIntervention({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowInterventionQueryKey(options),
+  })
+
+/**
+ * Submit a workflow intervention response
+ */
+export const submitWorkflowInterventionMutation = (
+  options?: Partial<Options<SubmitWorkflowInterventionData>>
+): UseMutationOptions<
+  SubmitWorkflowInterventionResponse,
+  SubmitWorkflowInterventionError,
+  Options<SubmitWorkflowInterventionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SubmitWorkflowInterventionResponse,
+    SubmitWorkflowInterventionError,
+    Options<SubmitWorkflowInterventionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await submitWorkflowIntervention({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Cancel a workflow intervention
+ */
+export const cancelWorkflowInterventionMutation = (
+  options?: Partial<Options<CancelWorkflowInterventionData>>
+): UseMutationOptions<
+  CancelWorkflowInterventionResponse,
+  CancelWorkflowInterventionError,
+  Options<CancelWorkflowInterventionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CancelWorkflowInterventionResponse,
+    CancelWorkflowInterventionError,
+    Options<CancelWorkflowInterventionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await cancelWorkflowIntervention({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listWorkflowRunsQueryKey = (options?: Options<ListWorkflowRunsData>) =>
   createQueryKey("listWorkflowRuns", options)

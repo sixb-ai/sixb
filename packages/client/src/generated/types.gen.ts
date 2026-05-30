@@ -1667,6 +1667,313 @@ export type GetWorkflowResponses = {
 
 export type GetWorkflowResponse = GetWorkflowResponses[keyof GetWorkflowResponses]
 
+export type ListWorkflowInterventionsData = {
+  body?: never
+  path?: never
+  query?: {
+    workflowId?: string
+    workflowRunId?: string
+    nodeRunId?: string
+    nodeId?: string
+    nodeKey?: string
+    interventionId?: string
+    status?: "pending" | "submitted" | "cancelled" | "expired"
+    requestedAfter?: string
+    requestedBefore?: string
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/workflow-interventions"
+}
+
+export type ListWorkflowInterventionsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListWorkflowInterventionsError =
+  ListWorkflowInterventionsErrors[keyof ListWorkflowInterventionsErrors]
+
+export type ListWorkflowInterventionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    interventions: Array<{
+      id: string
+      projectId: string
+      workflowId: string
+      workflowRunId: string
+      nodeRunId: string
+      nodeIndex: number
+      nodeId: string
+      nodeKey: string
+      interventionId: string
+      input: {
+        [key: string]: unknown
+      }
+      defaultResponse: {
+        [key: string]: unknown
+      }
+      status: "pending" | "submitted" | "cancelled" | "expired"
+      requestedAt: string
+      expiresAt?: string
+      submittedAt?: string
+      submittedBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      response?: {
+        [key: string]: unknown
+      }
+      cancelledAt?: string
+      cancelledBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      expiredAt?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListWorkflowInterventionsResponse =
+  ListWorkflowInterventionsResponses[keyof ListWorkflowInterventionsResponses]
+
+export type GetWorkflowInterventionData = {
+  body?: never
+  path: {
+    interventionId: string
+  }
+  query?: never
+  url: "/api/workflow-interventions/{interventionId}"
+}
+
+export type GetWorkflowInterventionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetWorkflowInterventionError =
+  GetWorkflowInterventionErrors[keyof GetWorkflowInterventionErrors]
+
+export type GetWorkflowInterventionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    projectId: string
+    workflowId: string
+    workflowRunId: string
+    nodeRunId: string
+    nodeIndex: number
+    nodeId: string
+    nodeKey: string
+    interventionId: string
+    input: {
+      [key: string]: unknown
+    }
+    defaultResponse: {
+      [key: string]: unknown
+    }
+    status: "pending" | "submitted" | "cancelled" | "expired"
+    requestedAt: string
+    expiresAt?: string
+    submittedAt?: string
+    submittedBy?: {
+      principalType: "user" | "serviceAccount" | "system"
+      principalId: string
+    }
+    response?: {
+      [key: string]: unknown
+    }
+    cancelledAt?: string
+    cancelledBy?: {
+      principalType: "user" | "serviceAccount" | "system"
+      principalId: string
+    }
+    expiredAt?: string
+  }
+}
+
+export type GetWorkflowInterventionResponse =
+  GetWorkflowInterventionResponses[keyof GetWorkflowInterventionResponses]
+
+export type SubmitWorkflowInterventionData = {
+  body: {
+    response: {
+      [key: string]: unknown
+    }
+    submittedBy?: {
+      principalType: "user" | "serviceAccount" | "system"
+      principalId: string
+    }
+  }
+  path: {
+    interventionId: string
+  }
+  query?: never
+  url: "/api/workflow-interventions/{interventionId}/submit"
+}
+
+export type SubmitWorkflowInterventionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type SubmitWorkflowInterventionError =
+  SubmitWorkflowInterventionErrors[keyof SubmitWorkflowInterventionErrors]
+
+export type SubmitWorkflowInterventionResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    intervention: {
+      id: string
+      projectId: string
+      workflowId: string
+      workflowRunId: string
+      nodeRunId: string
+      nodeIndex: number
+      nodeId: string
+      nodeKey: string
+      interventionId: string
+      input: {
+        [key: string]: unknown
+      }
+      defaultResponse: {
+        [key: string]: unknown
+      }
+      status: "pending" | "submitted" | "cancelled" | "expired"
+      requestedAt: string
+      expiresAt?: string
+      submittedAt?: string
+      submittedBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      response?: {
+        [key: string]: unknown
+      }
+      cancelledAt?: string
+      cancelledBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      expiredAt?: string
+    }
+    jobId: string
+  }
+}
+
+export type SubmitWorkflowInterventionResponse =
+  SubmitWorkflowInterventionResponses[keyof SubmitWorkflowInterventionResponses]
+
+export type CancelWorkflowInterventionData = {
+  body: {
+    cancelledBy?: {
+      principalType: "user" | "serviceAccount" | "system"
+      principalId: string
+    }
+  }
+  path: {
+    interventionId: string
+  }
+  query?: never
+  url: "/api/workflow-interventions/{interventionId}/cancel"
+}
+
+export type CancelWorkflowInterventionErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type CancelWorkflowInterventionError =
+  CancelWorkflowInterventionErrors[keyof CancelWorkflowInterventionErrors]
+
+export type CancelWorkflowInterventionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    intervention: {
+      id: string
+      projectId: string
+      workflowId: string
+      workflowRunId: string
+      nodeRunId: string
+      nodeIndex: number
+      nodeId: string
+      nodeKey: string
+      interventionId: string
+      input: {
+        [key: string]: unknown
+      }
+      defaultResponse: {
+        [key: string]: unknown
+      }
+      status: "pending" | "submitted" | "cancelled" | "expired"
+      requestedAt: string
+      expiresAt?: string
+      submittedAt?: string
+      submittedBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      response?: {
+        [key: string]: unknown
+      }
+      cancelledAt?: string
+      cancelledBy?: {
+        principalType: "user" | "serviceAccount" | "system"
+        principalId: string
+      }
+      expiredAt?: string
+    }
+  }
+}
+
+export type CancelWorkflowInterventionResponse =
+  CancelWorkflowInterventionResponses[keyof CancelWorkflowInterventionResponses]
+
 export type ListWorkflowRunsData = {
   body?: never
   path?: never
