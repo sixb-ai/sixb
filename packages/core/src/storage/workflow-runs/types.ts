@@ -2,9 +2,15 @@ import type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/type
 
 export type { WorkflowIOSnapshot, WorkflowRunSource } from "../../workflows/types"
 
-export type WorkflowRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+export type WorkflowRunStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
 export type WorkflowNodeRunStatus = Exclude<WorkflowRunStatus, "queued">
-export type WorkflowNodeRunType = "step" | "action"
+export type WorkflowNodeRunType = "step" | "action" | "intervention"
 
 export interface WorkflowRunRecord {
   readonly id: string
@@ -53,6 +59,18 @@ export interface QueueWorkflowRunInput {
   readonly source?: WorkflowRunSource
 }
 
+export interface WaitWorkflowRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly waitingAt?: Date
+}
+
+export interface ResumeWorkflowRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly resumedAt?: Date
+}
+
 export type FinishWorkflowRunInput =
   | {
       readonly id: string
@@ -79,6 +97,12 @@ export interface StartWorkflowNodeRunInput {
   readonly nodeKey: string
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
+}
+
+export interface WaitWorkflowNodeRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly waitingAt?: Date
 }
 
 export type FinishWorkflowNodeRunInput =
@@ -140,6 +164,8 @@ export interface WorkflowRunStorage {
 
   queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord>
   start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord>
+  wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord>
+  resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>
   list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult>
@@ -147,6 +173,7 @@ export interface WorkflowRunStorage {
 
 export interface WorkflowNodeRunStorage {
   start(input: StartWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord>
+  wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord>
   finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowNodeRunRecord | null>
   list(input: ListWorkflowNodeRunsInput): Promise<ListWorkflowNodeRunsResult>

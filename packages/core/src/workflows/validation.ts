@@ -3,15 +3,23 @@ import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 import type {
+  InterventionDefinition,
+  InterventionFieldConfig,
+  InterventionResponseConfig,
   StepDefinition,
   WorkflowActionNodeDefinition,
   WorkflowDefinition,
+  WorkflowInterventionNodeDefinition,
   WorkflowNodeDefinition,
   WorkflowStepNodeDefinition,
   WorkflowTriggerDefinition,
 } from "./types"
 
-export function assertNonEmpty(value: string, subject: "Step" | "Workflow", field: string): void {
+export function assertNonEmpty(
+  value: string,
+  subject: "Step" | "Workflow" | "Intervention",
+  field: string
+): void {
   if (!value.trim()) {
     throw new WorkflowDefinitionError(`${subject} ${field} must not be empty.`)
   }
@@ -25,6 +33,17 @@ export function isStepDefinition(value: unknown): value is StepDefinition {
     isRecord(value.input) &&
     isRecord(value.output) &&
     typeof value.handler === "function"
+  )
+}
+
+export function isInterventionDefinition(value: unknown): value is InterventionDefinition {
+  return (
+    isRecord(value) &&
+    value.kind === "intervention" &&
+    typeof value.id === "string" &&
+    isRecord(value.input) &&
+    isRecord(value.response) &&
+    (value.defaults === undefined || typeof value.defaults === "function")
   )
 }
 
@@ -137,6 +156,50 @@ export function validateWorkflowStepOutput(params: {
   })
 }
 
+export function validateWorkflowInterventionInput(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  return validateWorkflowContractRecord({
+    shape: params.intervention.input,
+    value: params.value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" input`,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function validateWorkflowInterventionResponse(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  return validateWorkflowInterventionResponseRecord({
+    response: params.intervention.response,
+    value: params.value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" response`,
+    partial: false,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
+export function validateWorkflowInterventionDefaultResponse(params: {
+  readonly workflowId: string
+  readonly intervention: InterventionDefinition
+  readonly value: unknown
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  return validateWorkflowInterventionResponseRecord({
+    response: params.intervention.response,
+    value: params.value,
+    path: `Workflow "${params.workflowId}" intervention "${params.intervention.id}" defaultResponse`,
+    partial: true,
+    valueTypesById: params.valueTypesById,
+  })
+}
+
 function validateWorkflowTriggerAtStartup(
   workflowId: string,
   trigger: WorkflowTriggerDefinition,
@@ -168,6 +231,11 @@ function validateWorkflowNodeDefinition(workflowId: string, node: WorkflowNodeDe
 
   if (node.type === "step") {
     validateStepNodeDefinition(workflowId, node)
+    return
+  }
+
+  if (node.type === "intervention") {
+    validateInterventionNodeDefinition(workflowId, node)
     return
   }
 
@@ -205,6 +273,41 @@ function validateStepNodeDefinition(workflowId: string, node: WorkflowStepNodeDe
   if (node.mapper !== undefined && typeof node.mapper !== "function") {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" step node "${node.id}" mapper must be a function.`
+    )
+  }
+}
+
+function validateInterventionNodeDefinition(
+  workflowId: string,
+  node: WorkflowInterventionNodeDefinition
+): void {
+  if (typeof node.id !== "string" || !node.id.trim()) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains an intervention with an empty id.`
+    )
+  }
+
+  if (typeof node.key !== "string" || !node.key.trim()) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains intervention "${node.id}" with an empty derived key.`
+    )
+  }
+
+  if (!isInterventionDefinition(node.intervention)) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" contains an invalid intervention node "${node.id}".`
+    )
+  }
+
+  if (node.id !== node.intervention.id) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" intervention node id "${node.id}" does not match intervention definition id "${node.intervention.id}".`
+    )
+  }
+
+  if (node.mapper !== undefined && typeof node.mapper !== "function") {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" intervention node "${node.id}" mapper must be a function.`
     )
   }
 }
@@ -282,6 +385,62 @@ function validateWorkflowContractRecord(params: {
   }
 
   return params.value
+}
+
+function validateWorkflowInterventionResponseRecord(params: {
+  readonly response: InterventionResponseConfig
+  readonly value: unknown
+  readonly path: string
+  readonly partial: boolean
+  readonly valueTypesById: ReadonlyMap<string, ValueType>
+}): Readonly<Record<string, unknown>> {
+  if (!isRecord(params.value)) {
+    throw new WorkflowValidationError(`[Pario] ${params.path} must be an object`)
+  }
+
+  const fieldIds = new Set(Object.keys(params.response))
+  for (const fieldId of Object.keys(params.value)) {
+    if (!fieldIds.has(fieldId)) {
+      throw new WorkflowValidationError(`[Pario] Unknown field '${params.path}.${fieldId}'`)
+    }
+  }
+
+  for (const [fieldId, field] of Object.entries(params.response)) {
+    const fieldValue = params.value[fieldId]
+    if (fieldValue === undefined) {
+      if (!params.partial && isInterventionResponseFieldRequired(field)) {
+        throw new WorkflowValidationError(
+          `[Pario] Missing required field '${params.path}.${fieldId}'`
+        )
+      }
+      continue
+    }
+
+    try {
+      validateSchemaOrRefValue(
+        interventionResponseFieldSchema(field),
+        fieldValue,
+        `${params.path}.${fieldId}`,
+        params.valueTypesById
+      )
+    } catch (error) {
+      throw toWorkflowValidationError(error)
+    }
+  }
+
+  return params.value
+}
+
+export function isInterventionFieldConfig(value: unknown): value is InterventionFieldConfig {
+  return isRecord(value) && "schema" in value
+}
+
+export function interventionResponseFieldSchema(field: unknown): SchemaOrRef {
+  return (isInterventionFieldConfig(field) ? field.schema : field) as SchemaOrRef
+}
+
+export function isInterventionResponseFieldRequired(field: unknown): boolean {
+  return !isInterventionFieldConfig(field) || field.required !== false
 }
 
 function toWorkflowValidationError(error: unknown): WorkflowValidationError {

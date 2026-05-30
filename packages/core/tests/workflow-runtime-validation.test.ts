@@ -1,15 +1,24 @@
 import { describe, expect, test } from "bun:test"
 import {
+  defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
+  interventionField,
   prop,
   ref,
   snapshotWorkflowActionInput,
   snapshotWorkflowInput,
+  snapshotWorkflowInterventionDefaultResponse,
+  snapshotWorkflowInterventionInput,
+  snapshotWorkflowInterventionResponse,
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
+  stringEnum,
   validateWorkflowInput,
+  validateWorkflowInterventionDefaultResponse,
+  validateWorkflowInterventionInput,
+  validateWorkflowInterventionResponse,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
   WorkflowValidationError,
@@ -56,6 +65,20 @@ const timestampStep = defineWorkflowStep("record-review-window")
     reviewedAt: "timestamp",
   })
   .run(({ input }) => input)
+
+const reviewDraftDocument = defineIntervention("review-draft-document")
+  .input({
+    invoice: ref(Invoice),
+    proposedTotalCents: "integer",
+  })
+  .response({
+    decision: interventionField(stringEnum(["approve", "request_changes", "reject"]), {
+      required: true,
+    }),
+    finalTotalCents: interventionField("integer", { required: true }),
+    reviewerNote: interventionField("string", { required: false }),
+    reviewedAt: interventionField("timestamp", { required: false }),
+  })
 
 describe("workflow runtime validation", () => {
   test("validates workflow input with object refs", () => {
@@ -193,6 +216,95 @@ describe("workflow runtime validation", () => {
     ).toThrow('Workflow "reconcile-transaction" step "find-best-invoice" output.invoice')
   })
 
+  test("validates intervention input, response, and default response contracts", () => {
+    const interventionInput = validateWorkflowInterventionInput({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+        proposedTotalCents: 12500,
+      },
+      valueTypesById,
+    })
+    const response = validateWorkflowInterventionResponse({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        decision: "approve",
+        finalTotalCents: 12500,
+      },
+      valueTypesById,
+    })
+    const defaultResponse = validateWorkflowInterventionDefaultResponse({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        finalTotalCents: 12500,
+      },
+      valueTypesById,
+    })
+
+    expect(interventionInput.invoice).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "invoice:1",
+    })
+    expect(response).toEqual({
+      decision: "approve",
+      finalTotalCents: 12500,
+    })
+    expect(defaultResponse).toEqual({
+      finalTotalCents: 12500,
+    })
+  })
+
+  test("rejects invalid intervention responses and defaults", () => {
+    expect(() =>
+      validateWorkflowInterventionResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value: {
+          decision: "approve",
+        },
+        valueTypesById,
+      })
+    ).toThrow("Missing required field")
+
+    expect(() =>
+      validateWorkflowInterventionResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value: {
+          decision: "approve",
+          finalTotalCents: 12500,
+          unknown: true,
+        },
+        valueTypesById,
+      })
+    ).toThrow("Unknown field")
+
+    expect(() =>
+      validateWorkflowInterventionDefaultResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value: {
+          decision: "escalate",
+        },
+        valueTypesById,
+      })
+    ).toThrow(WorkflowValidationError)
+
+    expect(() =>
+      validateWorkflowInterventionDefaultResponse({
+        workflowId: "draft-invoice-proposal",
+        intervention: reviewDraftDocument,
+        value: {
+          extra: true,
+        },
+        valueTypesById,
+      })
+    ).toThrow("Unknown field")
+  })
+
   test("accepts Date values for timestamp contracts", () => {
     const reviewedAt = new Date("2026-05-08T10:00:00.000Z")
 
@@ -237,6 +349,34 @@ describe("workflow runtime validation", () => {
         invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
       },
     })
+    const interventionInputSnapshot = snapshotWorkflowInterventionInput({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+        proposedTotalCents: 12500,
+      },
+      valueTypesById,
+    })
+    const interventionResponseSnapshot = snapshotWorkflowInterventionResponse({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        decision: "approve",
+        finalTotalCents: 12500,
+        reviewedAt,
+      },
+      valueTypesById,
+    })
+    const interventionDefaultSnapshot = snapshotWorkflowInterventionDefaultResponse({
+      workflowId: "draft-invoice-proposal",
+      intervention: reviewDraftDocument,
+      value: {
+        decision: "approve",
+        reviewedAt,
+      },
+      valueTypesById,
+    })
 
     expect(inputSnapshot).toEqual({
       transaction: { objectTypeId: "Transaction", primaryId: "txn_123" },
@@ -253,6 +393,19 @@ describe("workflow runtime validation", () => {
         reviewedAt: "2026-05-08T10:00:00.000Z",
         invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
       },
+    })
+    expect(interventionInputSnapshot).toEqual({
+      invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+      proposedTotalCents: 12500,
+    })
+    expect(interventionResponseSnapshot).toEqual({
+      decision: "approve",
+      finalTotalCents: 12500,
+      reviewedAt: "2026-05-08T10:00:00.000Z",
+    })
+    expect(interventionDefaultSnapshot).toEqual({
+      decision: "approve",
+      reviewedAt: "2026-05-08T10:00:00.000Z",
     })
   })
 

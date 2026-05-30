@@ -2,16 +2,20 @@ import { describe, expect, test } from "bun:test"
 import {
   actionParam,
   defineAction,
+  defineIntervention,
   defineObjectType,
   defineSchedule,
   defineWorkflow,
   defineWorkflowStep,
+  interventionField,
+  isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
   Pario,
   prop,
   RuntimeError,
   ref,
+  stringEnum,
   validateWorkflowDefinition,
   type WorkflowDefinition,
   WorkflowDefinitionError,
@@ -90,6 +94,20 @@ const attachInvoice = defineAction("attach-invoice")
   })
   .run(async () => {})
 
+const approveInvoiceMatch = defineIntervention("approve-invoice-match", {
+  description: "Approve the proposed invoice match before attaching it.",
+})
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .response({
+    decision: interventionField(stringEnum(["approve", "reject"]), { required: true }),
+    invoice: ref(Invoice),
+    reviewerNote: interventionField("string", { required: false }),
+  })
+
 describe("defineWorkflowStep", () => {
   test("builds an inert step definition", () => {
     expect(findBestInvoice.kind).toBe("step")
@@ -109,6 +127,79 @@ describe("defineWorkflowStep", () => {
   test("rejects empty step ids", () => {
     expect(() => runtimeDefineWorkflowStep("")).toThrow(WorkflowDefinitionError)
     expect(() => runtimeDefineWorkflowStep("")).toThrow("Step id must not be empty")
+  })
+})
+
+describe("defineIntervention", () => {
+  test("builds an inert intervention definition", () => {
+    expect(approveInvoiceMatch.kind).toBe("intervention")
+    expect(approveInvoiceMatch.id).toBe("approve-invoice-match")
+    expect(approveInvoiceMatch.description).toBe(
+      "Approve the proposed invoice match before attaching it."
+    )
+    expect(approveInvoiceMatch.input).toEqual({
+      transaction: { type: "objectRef", objectTypeId: "Transaction" },
+      invoice: { type: "objectRef", objectTypeId: "Invoice" },
+      confidence: "double",
+    })
+    expect(approveInvoiceMatch.response).toEqual({
+      decision: {
+        schema: { type: "enum", valueType: "string", values: ["approve", "reject"] },
+        required: true,
+      },
+      invoice: { type: "objectRef", objectTypeId: "Invoice" },
+      reviewerNote: { schema: "string", required: false },
+    })
+    expect(isInterventionDefinition(approveInvoiceMatch)).toBe(true)
+  })
+
+  test("supports optional default response values", async () => {
+    const intervention = defineIntervention("review-with-defaults")
+      .input({
+        invoice: ref(Invoice),
+        proposedDecision: stringEnum(["approve", "reject"]),
+      })
+      .response({
+        decision: stringEnum(["approve", "reject"]),
+        note: interventionField("string", { required: false }),
+      })
+      .defaults(({ input }) => ({ decision: input.proposedDecision }))
+
+    await expect(
+      Promise.resolve(
+        intervention.defaults?.({
+          input: {
+            invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+            proposedDecision: "approve",
+          },
+          workflowInput: {},
+          steps: {},
+        })
+      )
+    ).resolves.toEqual({ decision: "approve" })
+  })
+
+  test("uses an empty default response when .defaults(...) is not called", async () => {
+    await expect(
+      Promise.resolve(
+        approveInvoiceMatch.defaults?.({
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+            invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+            confidence: 0.98,
+          },
+          workflowInput: {},
+          steps: {},
+        })
+      )
+    ).resolves.toEqual({})
+  })
+
+  test("rejects empty intervention ids", () => {
+    const runtimeDefineIntervention = defineIntervention as unknown as (id: string) => unknown
+
+    expect(() => runtimeDefineIntervention("")).toThrow(WorkflowDefinitionError)
+    expect(() => runtimeDefineIntervention("")).toThrow("Intervention id must not be empty")
   })
 })
 
@@ -179,6 +270,38 @@ describe("defineWorkflow", () => {
     expect(typeof workflow.nodes[2].mapper).toBe("function")
   })
 
+  test("stores intervention nodes in linear order", () => {
+    const workflow = runtimeDefineWorkflow("review-then-attach")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(approveInvoiceMatch)
+      .then(attachInvoice, () => ({
+        target: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+        params: {
+          invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+        },
+      }))
+
+    expect(workflow.nodes).toHaveLength(3)
+    expect(workflow.nodes.map((node) => node.type)).toEqual(["step", "intervention", "action"])
+    expect(workflow.nodes.map((node) => node.id)).toEqual([
+      "find-best-invoice",
+      "approve-invoice-match",
+      "attach-invoice",
+    ])
+    expect(workflow.nodes.map((node) => node.key)).toEqual([
+      "findBestInvoice",
+      "approveInvoiceMatch",
+      "attachInvoice",
+    ])
+    expect(workflow.nodes[1]).toMatchObject({
+      type: "intervention",
+      intervention: approveInvoiceMatch,
+    })
+  })
+
   test("rejects duplicate node ids", () => {
     expect(() => {
       runtimeDefineWorkflow("duplicate-node-id")
@@ -200,6 +323,20 @@ describe("defineWorkflow", () => {
           transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
         }))
     }).toThrow('Duplicate workflow node id "find-best-invoice"')
+
+    expect(() => {
+      runtimeDefineWorkflow("duplicate-intervention-node-id")
+        .input({
+          transaction: ref(Transaction),
+        })
+        .then(findBestInvoice)
+        .then(approveInvoiceMatch)
+        .then(approveInvoiceMatch, () => ({
+          transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+          invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
+          confidence: 0.98,
+        }))
+    }).toThrow('Duplicate workflow node id "approve-invoice-match"')
   })
 
   test("rejects duplicate derived node keys", () => {
@@ -250,6 +387,7 @@ describe("defineWorkflow", () => {
     expect(() => then(attachInvoice)).toThrow('action node "attach-invoice" requires a mapper')
     expect(() => then(findBestInvoice, "alias")).toThrow(WorkflowDefinitionError)
     expect(() => then(findBestInvoice, () => ({}), "alias")).toThrow(WorkflowDefinitionError)
+    expect(() => then(approveInvoiceMatch, "alias")).toThrow(WorkflowDefinitionError)
   })
 })
 
@@ -300,6 +438,23 @@ describe("Pario workflow registration", () => {
     expect(pario.workflows.list()).toEqual([workflow])
     expect(pario.workflows.getById("reconcile-transaction")).toBe(workflow)
     expect(pario.workflows.getById("missing-workflow")).toBeNull()
+  })
+
+  test("accepts workflows with intervention nodes during startup validation", () => {
+    const workflow = defineWorkflow("review-match")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(approveInvoiceMatch)
+
+    const pario = new Pario({
+      ontology: [Transaction, Invoice],
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(pario.workflows.getById("review-match")).toBe(workflow)
   })
 
   test("rejects duplicate workflow ids", () => {

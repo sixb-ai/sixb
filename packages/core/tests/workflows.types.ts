@@ -1,13 +1,17 @@
 import {
   actionParam,
   defineAction,
+  defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
+  type InferInterventionResponse,
   type InferSchemaOrRef,
+  interventionField,
   type ObjectRef,
   prop,
   ref,
+  stringEnum,
 } from "../src"
 
 type Equal<A, B> =
@@ -100,6 +104,65 @@ const attachInvoice = defineAction("attach-invoice")
   })
   .run(async () => {})
 
+const approveInvoiceMatch = defineIntervention("approve-invoice-match")
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .response({
+    decision: interventionField(stringEnum(["approve", "reject"]), { required: true }),
+    invoice: ref(Invoice),
+    reviewerNote: interventionField("string", { required: false }),
+  })
+
+type ApproveInvoiceResponse = InferInterventionResponse<typeof approveInvoiceMatch>
+type _approveInvoiceResponse = Expect<
+  Equal<
+    ApproveInvoiceResponse,
+    {
+      decision: "approve" | "reject"
+      invoice: ObjectRef<"Invoice">
+      reviewerNote?: string
+    }
+  >
+>
+
+defineIntervention("review-with-defaults")
+  .input({
+    invoice: ref(Invoice),
+    proposedDecision: stringEnum(["approve", "reject"]),
+  })
+  .response({
+    decision: stringEnum(["approve", "reject"]),
+    invoice: ref(Invoice),
+  })
+  .defaults(({ input, workflowInput, steps }) => {
+    const invoice: ObjectRef<"Invoice"> = input.invoice
+    const workflowRecord: Readonly<Record<string, unknown>> = workflowInput
+    const previousSteps: Readonly<Record<string, Record<string, unknown>>> = steps
+
+    void workflowRecord
+    void previousSteps
+
+    return {
+      decision: input.proposedDecision,
+      invoice,
+    }
+  })
+
+defineIntervention("bad-default")
+  .input({
+    invoice: ref(Invoice),
+  })
+  .response({
+    invoice: ref(Invoice),
+  })
+  // @ts-expect-error default response fields must match the response contract
+  .defaults(() => ({
+    invoice: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+  }))
+
 const workflow = defineWorkflow("reconcile-transaction")
   .input(workflowInput)
   .then(findBestInvoice)
@@ -132,6 +195,27 @@ const workflow = defineWorkflow("reconcile-transaction")
     }
   })
 
+defineWorkflow("intervention-direct-dataflow")
+  .input(workflowInput)
+  .then(findBestInvoice)
+  .then(approveInvoiceMatch)
+  .then(persistReview, ({ steps }) => {
+    const invoice: ObjectRef<"Invoice"> = steps.approveInvoiceMatch.invoice
+    const reviewerNote: string | undefined = steps.approveInvoiceMatch.reviewerNote
+
+    void reviewerNote
+
+    return { invoice }
+  })
+
+defineWorkflow("intervention-mapped-dataflow")
+  .input(workflowInput)
+  .then(approveInvoiceMatch, ({ input }) => ({
+    transaction: input.transaction,
+    invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" } as const,
+    confidence: 0.7,
+  }))
+
 defineWorkflow("direct-step-dataflow")
   .input(workflowInput)
   .then(findBestInvoice)
@@ -139,6 +223,9 @@ defineWorkflow("direct-step-dataflow")
 
 // @ts-expect-error workflow input has no invoice for this direct first step
 defineWorkflow("direct-step-mismatch").input(workflowInput).then(persistReview)
+
+// @ts-expect-error workflow input has no invoice/confidence for this direct first intervention
+defineWorkflow("direct-intervention-mismatch").input(workflowInput).then(approveInvoiceMatch)
 
 // @ts-expect-error action mapper is mandatory
 defineWorkflow("missing-action-mapper").input(workflowInput).then(attachInvoice)

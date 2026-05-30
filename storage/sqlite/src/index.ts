@@ -14,6 +14,7 @@ import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
 import { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
 import { SqliteWebhookRunStorage } from "./webhook-run-storage"
+import { SqliteWorkflowInterventionStorage } from "./workflow-intervention-storage"
 import { SqliteWorkflowRunStorage } from "./workflow-run-storage"
 
 export interface SqliteStorageOptions {
@@ -45,6 +46,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly syncRuns: SqliteSyncRunStorage
   readonly projectionRuns: SqliteProjectionRunStorage
   readonly workflowRuns: SqliteWorkflowRunStorage
+  readonly workflowInterventions: SqliteWorkflowInterventionStorage
   readonly timeseries: SqliteTimeseriesStorage
   readonly webhookDeliveries: SqliteWebhookDeliveryStorage
   readonly webhookRuns: SqliteWebhookRunStorage
@@ -77,6 +79,9 @@ export class SqliteStorage implements MigrationCapableStorage {
       path,
     })
     this.workflowRuns = new SqliteWorkflowRunStorage({
+      path,
+    })
+    this.workflowInterventions = new SqliteWorkflowInterventionStorage({
       path,
     })
     this.webhookDeliveries = new SqliteWebhookDeliveryStorage({
@@ -124,5 +129,7 @@ export type { SqliteWebhookDeliveryStorageOptions } from "./webhook-delivery-sto
 export { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
 export type { SqliteWebhookRunStorageOptions } from "./webhook-run-storage"
 export { SqliteWebhookRunStorage } from "./webhook-run-storage"
+export type { SqliteWorkflowInterventionStorageOptions } from "./workflow-intervention-storage"
+export { SqliteWorkflowInterventionStorage } from "./workflow-intervention-storage"
 export type { SqliteWorkflowRunStorageOptions } from "./workflow-run-storage"
 export { SqliteWorkflowNodeRunStorage, SqliteWorkflowRunStorage } from "./workflow-run-storage"

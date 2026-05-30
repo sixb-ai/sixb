@@ -6,8 +6,11 @@ import type {
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
   QueueWorkflowRunInput,
+  ResumeWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
+  WaitWorkflowNodeRunInput,
+  WaitWorkflowRunInput,
   WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStorage,
@@ -181,6 +184,74 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     })
   }
 
+  async wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord> {
+    return this.sql.begin(async (tx) => {
+      const [existing] = (await tx`
+        SELECT * FROM workflow_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `) as WorkflowRunDatabaseRow[]
+
+      if (!existing) {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "running") {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' must be running.`
+        )
+      }
+
+      const [updated] = (await tx`
+        UPDATE workflow_runs
+        SET
+          status = ${"waiting"},
+          finished_at = ${null},
+          error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `) as WorkflowRunDatabaseRow[]
+
+      return rowToWorkflowRunRecord(updated)
+    })
+  }
+
+  async resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord> {
+    return this.sql.begin(async (tx) => {
+      const [existing] = (await tx`
+        SELECT * FROM workflow_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `) as WorkflowRunDatabaseRow[]
+
+      if (!existing) {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "waiting") {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow run '${input.id}' for project '${input.projectId}' must be waiting.`
+        )
+      }
+
+      const [updated] = (await tx`
+        UPDATE workflow_runs
+        SET
+          status = ${"running"},
+          finished_at = ${null},
+          error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `) as WorkflowRunDatabaseRow[]
+
+      return rowToWorkflowRunRecord(updated)
+    })
+  }
+
   async getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null> {
     const [row] = (await this.sql`
       SELECT * FROM workflow_runs
@@ -251,7 +322,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       if (workflowRun.status !== "running") {
         throw new WorkflowRunError(
-          `[ParioPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' is already terminal.`
+          `[ParioPg] Workflow run '${input.workflowRunId}' for project '${input.projectId}' must be running.`
         )
       }
 
@@ -318,7 +389,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         )
       }
 
-      if (existing.status !== "running") {
+      if (existing.status !== "running" && existing.status !== "waiting") {
         throw new WorkflowRunError(
           `[ParioPg] Workflow node run '${input.id}' for project '${input.projectId}' is already terminal.`
         )
@@ -346,6 +417,41 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
             `) as WorkflowNodeRunDatabaseRow[])
+
+      return rowToWorkflowNodeRunRecord(updated)
+    })
+  }
+
+  async wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
+    return this.sql.begin(async (tx) => {
+      const [existing] = (await tx`
+        SELECT * FROM workflow_node_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `) as WorkflowNodeRunDatabaseRow[]
+
+      if (!existing) {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow node run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "running") {
+        throw new WorkflowRunError(
+          `[ParioPg] Workflow node run '${input.id}' for project '${input.projectId}' must be running.`
+        )
+      }
+
+      const [updated] = (await tx`
+        UPDATE workflow_node_runs
+        SET
+          status = ${"waiting"},
+          finished_at = ${null},
+          output = ${null},
+          error = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `) as WorkflowNodeRunDatabaseRow[]
 
       return rowToWorkflowNodeRunRecord(updated)
     })
@@ -482,7 +588,11 @@ function canFinishWorkflowRun(
   current: WorkflowRunRecord["status"],
   next: FinishWorkflowRunInput["status"]
 ): boolean {
-  return current === "running" || (current === "queued" && next !== "succeeded")
+  return (
+    current === "running" ||
+    (current === "waiting" && next === "cancelled") ||
+    (current === "queued" && next !== "succeeded")
+  )
 }
 
 interface WorkflowRunDatabaseRow {

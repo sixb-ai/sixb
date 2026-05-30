@@ -15,6 +15,7 @@ import { PgSyncRunStorage } from "./pg-sync-run-storage"
 import { PgTimeseriesStorage } from "./pg-timeseries-storage"
 import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
+import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
 
 export interface PostgresStorageOptions {
@@ -71,6 +72,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
+  readonly workflowInterventions: PgWorkflowInterventionStorage
   readonly syncRuns: PgSyncRunStorage
   readonly projectionRuns: PgProjectionRunStorage
   readonly timeseries: PgTimeseriesStorage
@@ -131,6 +133,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.actionRuns = new PgActionRunStorage(this.sql)
     this.pipelineRuns = new PgPipelineRunStorage(this.sql)
     this.workflowRuns = new PgWorkflowRunStorage(this.sql)
+    this.workflowInterventions = new PgWorkflowInterventionStorage(this.sql)
     this.syncRuns = new PgSyncRunStorage(this.sql)
     this.projectionRuns = new PgProjectionRunStorage(this.sql)
     this.timeseries = new PgTimeseriesStorage(this.sql)
@@ -178,4 +181,5 @@ export { PgSyncRunStorage } from "./pg-sync-run-storage"
 export { PgTimeseriesStorage } from "./pg-timeseries-storage"
 export { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 export { PgWebhookRunStorage } from "./pg-webhook-run-storage"
+export { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 export { PgWorkflowNodeRunStorage, PgWorkflowRunStorage } from "./pg-workflow-run-storage"

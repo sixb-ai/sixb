@@ -447,6 +447,7 @@ function closeStorage(storage: SqliteStorage): void {
   storage.pipelineRuns.close()
   storage.projectionRuns.close()
   storage.workflowRuns.close()
+  storage.workflowInterventions.close()
   storage.syncRuns.close()
   storage.timeseries.close()
   storage.webhookDeliveries.close()

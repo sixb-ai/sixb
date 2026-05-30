@@ -8,6 +8,7 @@ import type { SyncRunStorage } from "./sync-runs"
 import type { TimeseriesStorage } from "./timeseries/types"
 import type { WebhookDeliveryStorage } from "./webhook-deliveries"
 import type { WebhookRunStorage } from "./webhook-runs"
+import type { WorkflowInterventionStorage } from "./workflow-interventions"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
 export type {
@@ -129,14 +130,31 @@ export type {
 } from "./webhook-runs"
 export { WebhookRunError } from "./webhook-runs"
 export type {
+  CancelWorkflowInterventionInput,
+  CreateWorkflowInterventionInput,
+  ExpireWorkflowInterventionInput,
+  ListWorkflowInterventionsInput,
+  ListWorkflowInterventionsResult,
+  SubmitWorkflowInterventionInput,
+  WorkflowInterventionActor,
+  WorkflowInterventionRecord,
+  WorkflowInterventionStatus,
+  WorkflowInterventionStorage,
+} from "./workflow-interventions"
+export { WorkflowInterventionError } from "./workflow-interventions"
+export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
   ListWorkflowRunsResult,
+  QueueWorkflowRunInput,
+  ResumeWorkflowRunInput,
   StartWorkflowNodeRunInput,
   StartWorkflowRunInput,
+  WaitWorkflowNodeRunInput,
+  WaitWorkflowRunInput,
   WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowNodeRunStatus,
@@ -157,6 +175,7 @@ export interface Storage {
   pipelineRuns?: PipelineRunStorage
   projectionRuns?: ProjectionRunStorage
   workflowRuns?: WorkflowRunStorage
+  workflowInterventions?: WorkflowInterventionStorage
   webhookDeliveries?: WebhookDeliveryStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage

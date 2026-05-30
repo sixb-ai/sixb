@@ -1,4 +1,9 @@
-export { defineWorkflow, defineWorkflowStep } from "./builders"
+export {
+  defineIntervention,
+  defineWorkflow,
+  defineWorkflowStep,
+  interventionField,
+} from "./builders"
 export { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 export type {
   RequestWorkflowRunInput,
@@ -10,14 +15,29 @@ export { WorkflowsRuntime } from "./runtime"
 export {
   snapshotWorkflowActionInput,
   snapshotWorkflowInput,
+  snapshotWorkflowInterventionDefaultResponse,
+  snapshotWorkflowInterventionInput,
+  snapshotWorkflowInterventionResponse,
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
 } from "./snapshot"
 export type {
   DerivedWorkflowNodeKey,
+  InferInterventionInput,
+  InferInterventionResponse,
   InferStepInput,
   InferStepOutput,
+  InferWorkflowContract,
   InferWorkflowInput,
+  InterventionBuilder,
+  InterventionDefaultsHandler,
+  InterventionDefaultsRuntimeHandler,
+  InterventionDefinition,
+  InterventionFieldConfig,
+  InterventionResponseBuilder,
+  InterventionResponseConfig,
+  InterventionResponseDraftBuilder,
+  InterventionResponseField,
   StepBuilder,
   StepDefinition,
   StepHandler,
@@ -32,6 +52,7 @@ export type {
   WorkflowChainDefinition,
   WorkflowDefinition,
   WorkflowDraftBuilder,
+  WorkflowInterventionNodeDefinition,
   WorkflowIOSnapshot,
   WorkflowMapperContext,
   WorkflowNodeDefinition,
@@ -42,10 +63,14 @@ export type {
   WorkflowTriggerDefinition,
 } from "./types"
 export {
+  isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
   validateWorkflowDefinition,
   validateWorkflowInput,
+  validateWorkflowInterventionDefaultResponse,
+  validateWorkflowInterventionInput,
+  validateWorkflowInterventionResponse,
   validateWorkflowStepInput,
   validateWorkflowStepOutput,
   validateWorkflowsAtStartup,

@@ -38,11 +38,17 @@ export type { SyncEvent, SyncRunFinishedEvent, SyncRunStartedEvent } from "./syn
 export type { TelemetryAppendedEvent, TelemetryEvent } from "./telemetry"
 export type {
   WorkflowEvent,
+  WorkflowInterventionCancelledEvent,
+  WorkflowInterventionExpiredEvent,
+  WorkflowInterventionRequestedEvent,
+  WorkflowInterventionSubmittedEvent,
   WorkflowRunFinishedEvent,
   WorkflowRunNodeFinishedEvent,
   WorkflowRunNodeStartedEvent,
+  WorkflowRunNodeWaitingEvent,
   WorkflowRunQueuedEvent,
   WorkflowRunStartedEvent,
+  WorkflowRunWaitingEvent,
 } from "./workflows"
 
 export type DomainEvent =
@@ -117,6 +123,14 @@ export type StoredWorkflowRunNodeStartedEvent = Extract<
   StoredDomainEvent,
   { type: "workflow.run.node.started" }
 >
+export type StoredWorkflowRunWaitingEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.run.waiting" }
+>
+export type StoredWorkflowRunNodeWaitingEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.run.node.waiting" }
+>
 export type StoredWorkflowRunNodeFinishedEvent = Extract<
   StoredDomainEvent,
   { type: "workflow.run.node.finished" }
@@ -124,6 +138,22 @@ export type StoredWorkflowRunNodeFinishedEvent = Extract<
 export type StoredWorkflowRunFinishedEvent = Extract<
   StoredDomainEvent,
   { type: "workflow.run.finished" }
+>
+export type StoredWorkflowInterventionRequestedEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.intervention.requested" }
+>
+export type StoredWorkflowInterventionSubmittedEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.intervention.submitted" }
+>
+export type StoredWorkflowInterventionCancelledEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.intervention.cancelled" }
+>
+export type StoredWorkflowInterventionExpiredEvent = Extract<
+  StoredDomainEvent,
+  { type: "workflow.intervention.expired" }
 >
 export type StoredDatasetVersionCommittedEvent = Extract<
   StoredDomainEvent,

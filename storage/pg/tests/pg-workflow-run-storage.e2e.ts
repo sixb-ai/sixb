@@ -48,6 +48,65 @@ describe("PgWorkflowRunStorage", () => {
     expect(stored?.finishedAt?.toISOString()).toBe("2026-05-08T10:00:04.500Z")
   })
 
+  test("waits and resumes workflow and intervention node runs", async () => {
+    await storage.workflowRuns.start({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+      workflowId: "review-workflow",
+      input: { draftId: "draft-1" },
+    })
+    await storage.workflowRuns.nodes.start({
+      id: "node-waiting",
+      projectId: "my-app",
+      workflowRunId: "wf-run-waiting",
+      workflowId: "review-workflow",
+      nodeIndex: 0,
+      nodeType: "intervention",
+      nodeId: "review-draft",
+      nodeKey: "reviewDraft",
+      input: { draftId: "draft-1" },
+    })
+
+    const waitingNode = await storage.workflowRuns.nodes.wait({
+      id: "node-waiting",
+      projectId: "my-app",
+    })
+    const waitingRun = await storage.workflowRuns.wait({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+    })
+
+    expect(waitingNode.status).toBe("waiting")
+    expect(waitingRun.status).toBe("waiting")
+    await expect(
+      storage.workflowRuns.finish({
+        id: "wf-run-waiting",
+        projectId: "my-app",
+        status: "succeeded",
+      })
+    ).rejects.toBeInstanceOf(WorkflowRunError)
+
+    const resumedRun = await storage.workflowRuns.resume({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+    })
+    const finishedNode = await storage.workflowRuns.nodes.finish({
+      id: "node-waiting",
+      projectId: "my-app",
+      status: "succeeded",
+      output: { decision: "approve" },
+    })
+    const finishedRun = await storage.workflowRuns.finish({
+      id: "wf-run-waiting",
+      projectId: "my-app",
+      status: "succeeded",
+    })
+
+    expect(resumedRun.status).toBe("running")
+    expect(finishedNode.output).toEqual({ decision: "approve" })
+    expect(finishedRun.status).toBe("succeeded")
+  })
+
   test("stores failures and supports filtered workflow run paging", async () => {
     await storage.workflowRuns.start({
       id: "run-1",

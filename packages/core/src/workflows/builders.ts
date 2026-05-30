@@ -5,6 +5,10 @@ import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import { WorkflowDefinitionError } from "./errors"
 import type {
+  InterventionBuilder,
+  InterventionDefaultsRuntimeHandler,
+  InterventionDefinition,
+  InterventionFieldConfig,
   StepBuilder,
   StepDefinition,
   StepHandler,
@@ -13,7 +17,47 @@ import type {
   WorkflowNodeDefinition,
   WorkflowTriggerDefinition,
 } from "./types"
-import { assertNonEmpty, isStepDefinition } from "./validation"
+import { assertNonEmpty, isInterventionDefinition, isStepDefinition } from "./validation"
+
+type InterventionOptions = {
+  description?: string
+}
+
+/**
+ * See the action-param helper for why widened booleans are rejected. Optional
+ * response fields must be an explicit literal decision so inference stays honest.
+ */
+type StrictBoolean<T extends boolean> = boolean extends T ? never : T
+
+type InterventionFieldResult<TSchema extends SchemaOrRef, TRequired extends boolean> = {
+  readonly schema: TSchema
+  readonly required: TRequired
+  readonly description?: string
+}
+
+export function interventionField<const TSchema extends SchemaOrRef>(
+  schema: TSchema
+): InterventionFieldResult<TSchema, true>
+export function interventionField<
+  const TSchema extends SchemaOrRef,
+  const TRequired extends boolean = true,
+>(
+  schema: TSchema,
+  options: {
+    required?: StrictBoolean<TRequired>
+    description?: string
+  }
+): InterventionFieldResult<TSchema, TRequired>
+export function interventionField(
+  schema: SchemaOrRef,
+  options?: { required?: boolean; description?: string }
+): InterventionFieldConfig {
+  return {
+    schema,
+    required: options?.required ?? true,
+    ...(options?.description !== undefined ? { description: options.description } : {}),
+  }
+}
 
 export function defineWorkflowStep<const TId extends string>(id: TId): StepBuilder<TId> {
   assertNonEmpty(id, "Step", "id")
@@ -37,6 +81,28 @@ export function defineWorkflowStep<const TId extends string>(id: TId): StepBuild
       }
     },
   } as unknown as StepBuilder<TId>
+}
+
+export function defineIntervention<const TId extends string>(
+  id: TId,
+  options?: InterventionOptions
+): InterventionBuilder<TId> {
+  assertNonEmpty(id, "Intervention", "id")
+
+  return {
+    input(input: Record<string, SchemaOrRef>): unknown {
+      return {
+        response(response: Record<string, unknown>): unknown {
+          return createInterventionDefinition({
+            id,
+            input,
+            response,
+            description: options?.description,
+          })
+        },
+      }
+    },
+  } as unknown as InterventionBuilder<TId>
 }
 
 export function defineWorkflow<const TId extends string>(id: TId): WorkflowBuilder<TId> {
@@ -69,6 +135,16 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
       }
 
       nodes.push(createStepNode(id, nodes, target, mapper))
+      definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
+      return definition
+    }
+
+    if (isInterventionDefinition(target)) {
+      if (mapper !== undefined && typeof mapper !== "function") {
+        throw invalidThenOverload(id)
+      }
+
+      nodes.push(createInterventionNode(id, nodes, target, mapper))
       definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
       return definition
     }
@@ -148,6 +224,42 @@ function createStepNode(
   }
 }
 
+function createInterventionDefinition(input: {
+  readonly id: string
+  readonly input: Record<string, SchemaOrRef>
+  readonly response: Record<string, unknown>
+  readonly description?: string
+}): unknown {
+  const base = {
+    kind: "intervention" as const,
+    id: input.id,
+    input: input.input,
+    response: input.response,
+    ...(input.description !== undefined ? { description: input.description } : {}),
+  }
+
+  const defaults = (handlerOrContext: unknown) => {
+    if (typeof handlerOrContext === "function") {
+      return {
+        ...base,
+        defaults: handlerOrContext as InterventionDefaultsRuntimeHandler,
+      }
+    }
+
+    // A no-defaults intervention is still usable as a definition immediately after
+    // `.response(...)`. Treating the builder method as an empty default handler keeps
+    // future executor code simple if it calls `definition.defaults?.(ctx) ?? {}`.
+    return {}
+  }
+
+  Object.defineProperty(base, "defaults", {
+    value: defaults,
+    enumerable: false,
+  })
+
+  return base
+}
+
 function createActionNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
@@ -165,6 +277,25 @@ function createActionNode(
     action,
     mapper,
   }
+}
+
+function createInterventionNode(
+  workflowId: string,
+  nodes: readonly WorkflowNodeDefinition[],
+  intervention: InterventionDefinition,
+  mapper: unknown
+): WorkflowNodeDefinition {
+  const key = deriveWorkflowNodeKey(intervention.id)
+  assertNodeKey(workflowId, intervention.id, key)
+  assertUniqueNode(workflowId, nodes, intervention.id, key)
+
+  return {
+    type: "intervention",
+    id: intervention.id,
+    key,
+    intervention,
+    ...(mapper !== undefined ? { mapper } : {}),
+  } as WorkflowNodeDefinition
 }
 
 function assertNodeKey(workflowId: string, nodeId: string, key: string): void {
@@ -220,6 +351,6 @@ function capitalize(value: string): string {
 
 function invalidThenOverload(workflowId: string): WorkflowDefinitionError {
   return new WorkflowDefinitionError(
-    `Invalid workflow "${workflowId}" .then(...) overload. V1 supports then(step), then(step, mapper), and then(action, mapper).`
+    `Invalid workflow "${workflowId}" .then(...) overload. V1 supports then(step), then(step, mapper), then(intervention), then(intervention, mapper), and then(action, mapper).`
   )
 }
