@@ -117,8 +117,8 @@ describe("runSyncJob", () => {
     const calls: string[] = []
     const lakeStorage = new InMemoryLakeStorage()
     const wrappedLakeStorage: LakeStorage = {
-      assertDatasetDefinitionCompatible(definition) {
-        return lakeStorage.assertDatasetDefinitionCompatible(definition)
+      assertDatasetDefinitionsCompatible(definitions) {
+        return lakeStorage.assertDatasetDefinitionsCompatible(definitions)
       },
       createDataset(definition) {
         calls.push(`create:${definition.id}`)
@@ -482,8 +482,8 @@ describe("runSyncJob", () => {
     let abortCalls = 0
 
     const wrappedLakeStorage: LakeStorage = {
-      assertDatasetDefinitionCompatible(definition) {
-        return lakeStorage.assertDatasetDefinitionCompatible(definition)
+      assertDatasetDefinitionsCompatible(definitions) {
+        return lakeStorage.assertDatasetDefinitionsCompatible(definitions)
       },
       createDataset(definition) {
         return lakeStorage.createDataset(definition)

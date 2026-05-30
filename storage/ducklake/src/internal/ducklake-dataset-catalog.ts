@@ -7,32 +7,18 @@ import type {
 } from "@sixb/core"
 import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
-import { getOptionalString, getString } from "./duckdb-row"
+import { getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
-import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
+import { readCurrentDatasetDefinitions } from "./ducklake-current-dataset-definitions"
+import { encodeDatasetTableName } from "./names"
 import {
   type DuckDbColumnMetadata,
   datasetColumnToDuckDbSql,
   datasetSchemaToDuckDbColumnsSql,
   duckDbColumnsToDatasetSchema,
 } from "./schema"
-import {
-  duckLakeAlias,
-  duckLakeMetadataTableName,
-  qualifiedTableName,
-  quoteIdentifier,
-  quoteSqlString,
-} from "./sql"
-
-interface DatasetTableRow {
-  readonly comment?: string
-}
-
-interface PartitionColumnRow {
-  readonly columnName: string
-  readonly transform: string
-}
+import { duckLakeAlias, qualifiedTableName, quoteIdentifier, quoteSqlString } from "./sql"
 
 /**
  * Translates between Sixb dataset definitions and DuckLake table metadata.
@@ -91,15 +77,46 @@ export class DuckLakeDatasetCatalog {
     return structuredClone(definition)
   }
 
-  async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    this.assertSchema(definition)
+  async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    const failures: string[] = []
+    const checkedDefinitions: DatasetDefinition[] = []
 
-    const existing = await this.getDataset(definition.id)
-    if (!existing) {
-      return
+    for (const definition of definitions) {
+      try {
+        this.assertSchema(definition)
+        checkedDefinitions.push(definition)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failures.push(`- ${definition.id}: ${message}`)
+      }
     }
 
-    planDatasetDefinitionUpdate(existing, definition)
+    const existingById = await this.readCurrentDatasetDefinitions({
+      datasetIds: checkedDefinitions.map((definition) => definition.id),
+    })
+
+    for (const definition of checkedDefinitions) {
+      const existing = existingById.get(definition.id)
+      if (!existing) {
+        continue
+      }
+
+      try {
+        planDatasetDefinitionUpdate(existing, definition)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        failures.push(`- ${definition.id}: ${message}`)
+      }
+    }
+
+    if (failures.length > 0) {
+      const details = failures.join("\n")
+      throw new LakeStorageError(
+        `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
+      )
+    }
   }
 
   async getDataset(datasetId: string): Promise<DatasetDefinition | null> {
@@ -114,53 +131,45 @@ export class DuckLakeDatasetCatalog {
     runtime: DuckDbQueryRuntime,
     datasetId: string
   ): Promise<DatasetDefinition | null> {
-    // Reconstruct definitions from DuckLake instead of trusting caller input.
-    // This keeps repeated createDataset calls honest across provider instances.
-    const tableName = encodeDatasetTableName(datasetId)
-    const table = await this.getDatasetTable(runtime, tableName)
-    if (!table) {
-      return null
-    }
-
-    const schema = await this.describeDatasetSchema(runtime, tableName)
-    const partitionBy = await this.getDatasetPartitionBy(runtime, tableName)
-
-    return {
-      kind: "dataset",
-      id: datasetId,
-      schema,
-      ...(partitionBy.length > 0 ? { partitionBy } : {}),
-      ...(table.comment !== undefined ? { description: table.comment } : {}),
-    }
+    return (
+      (
+        await this.readCurrentDatasetDefinitionsOnRuntime(runtime, {
+          datasetIds: [datasetId],
+        })
+      ).get(datasetId) ?? null
+    )
   }
 
   async listDatasets(): Promise<readonly DatasetDefinition[]> {
     this.connections.assertOpen()
 
     return this.connections.withAttachedRuntime(async (runtime) => {
-      // Only Sixb-encoded dataset tables are surfaced. Any DuckLake metadata,
-      // internal tables, or unrelated user tables remain invisible to LakeStorage.
-      const rows = await runtime.query(
-        `SELECT table_name FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
-          duckLakeAlias(this.options)
-        )} AND schema_name = 'main' AND NOT internal ORDER BY table_name`
+      return [...(await this.readCurrentDatasetDefinitionsOnRuntime(runtime)).values()].sort(
+        (left, right) => left.id.localeCompare(right.id)
       )
+    })
+  }
 
-      const datasets: DatasetDefinition[] = []
-      for (const row of rows) {
-        const tableName = getString(row, "table_name")
-        const datasetId = decodeDatasetTableName(tableName)
-        if (datasetId === null) {
-          continue
-        }
+  private async readCurrentDatasetDefinitions(options?: {
+    readonly datasetIds?: readonly string[]
+  }): Promise<Map<string, DatasetDefinition>> {
+    if (options?.datasetIds?.length === 0) {
+      return new Map()
+    }
 
-        const definition = await this.getDatasetOnRuntime(runtime, datasetId)
-        if (definition) {
-          datasets.push(definition)
-        }
-      }
+    return this.connections.withAttachedRuntime((runtime) =>
+      this.readCurrentDatasetDefinitionsOnRuntime(runtime, options)
+    )
+  }
 
-      return datasets.sort((left, right) => left.id.localeCompare(right.id))
+  private async readCurrentDatasetDefinitionsOnRuntime(
+    runtime: DuckDbQueryRuntime,
+    options?: { readonly datasetIds?: readonly string[] }
+  ): Promise<Map<string, DatasetDefinition>> {
+    return readCurrentDatasetDefinitions({
+      options: this.options,
+      runtime,
+      datasetIds: options?.datasetIds,
     })
   }
 
@@ -304,28 +313,6 @@ export class DuckLakeDatasetCatalog {
     }
   }
 
-  private async getDatasetTable(
-    runtime: DuckDbQueryRuntime,
-    tableName: string
-  ): Promise<DatasetTableRow | null> {
-    // duckdb_tables() gives us the user-facing table comment without reaching
-    // into DuckLake's private metadata tables.
-    const rows = await runtime.query(
-      `SELECT table_name, comment FROM duckdb_tables() WHERE database_name = ${quoteSqlString(
-        duckLakeAlias(this.options)
-      )} AND schema_name = 'main' AND table_name = ${quoteSqlString(tableName)} AND NOT internal`
-    )
-
-    const row = rows[0]
-    if (row === undefined) {
-      return null
-    }
-
-    return {
-      comment: getOptionalString(row, "comment"),
-    }
-  }
-
   private async describeDatasetSchema(
     runtime: DuckDbQueryRuntime,
     tableName: string,
@@ -343,56 +330,6 @@ export class DuckLakeDatasetCatalog {
     })) satisfies DuckDbColumnMetadata[]
 
     return duckDbColumnsToDatasetSchema(columns)
-  }
-
-  private async getDatasetPartitionBy(
-    runtime: DuckDbQueryRuntime,
-    tableName: string
-  ): Promise<readonly string[]> {
-    const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
-    const ducklakePartitionInfo = duckLakeMetadataTableName(this.options, "ducklake_partition_info")
-    const ducklakePartitionColumn = duckLakeMetadataTableName(
-      this.options,
-      "ducklake_partition_column"
-    )
-    const ducklakeColumn = duckLakeMetadataTableName(this.options, "ducklake_column")
-
-    // DuckLake exposes current partition metadata through the metadata catalog
-    // attached beside the user-facing lake catalog. V1 only accepts identity
-    // transforms because Sixb's dataset definition stores partition columns,
-    // not arbitrary partition expressions such as year(orderDate).
-    const rows = await runtime.query(`
-      SELECT column_meta.column_name, partition_column.transform
-      FROM ${ducklakeTable} table_meta
-      JOIN ${ducklakePartitionInfo} partition_info
-        ON partition_info.table_id = table_meta.table_id
-        AND partition_info.end_snapshot IS NULL
-      JOIN ${ducklakePartitionColumn} partition_column
-        ON partition_column.table_id = table_meta.table_id
-        AND partition_column.partition_id = partition_info.partition_id
-      JOIN ${ducklakeColumn} column_meta
-        ON column_meta.table_id = table_meta.table_id
-        AND column_meta.column_id = partition_column.column_id
-        AND column_meta.end_snapshot IS NULL
-      WHERE table_meta.end_snapshot IS NULL
-        AND table_meta.table_name = ${quoteSqlString(tableName)}
-      ORDER BY partition_column.partition_key_index
-    `)
-
-    return rows.map((row) => {
-      const partition = {
-        columnName: getString(row, "column_name"),
-        transform: getString(row, "transform"),
-      } satisfies PartitionColumnRow
-
-      if (partition.transform !== "identity") {
-        throw new LakeStorageError(
-          `[SixbDuckLake] Dataset table '${tableName}' uses unsupported DuckLake partition transform '${partition.transform}'.`
-        )
-      }
-
-      return partition.columnName
-    })
   }
 }
 

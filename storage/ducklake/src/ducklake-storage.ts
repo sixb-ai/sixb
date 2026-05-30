@@ -76,8 +76,10 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
     return this.datasets.createDataset(definition)
   }
 
-  async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    await this.datasets.assertDatasetDefinitionCompatible(definition)
+  async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    await this.datasets.assertDatasetDefinitionsCompatible(definitions)
   }
 
   async getDataset(datasetId: string): Promise<DatasetDefinition | null> {

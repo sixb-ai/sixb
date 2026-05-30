@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset, LakeStorageError } from "@sixb/core"
+import { col, type DatasetDefinition, defineDataset, LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
 import {
   createDuckDbRuntime,
@@ -12,6 +12,39 @@ import {
 } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
 import { createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
+
+interface DuckLakeStorageInternals {
+  readonly connections: {
+    runtime(): Promise<{
+      query: (
+        sql: string,
+        values?: readonly unknown[]
+      ) => Promise<readonly Record<string, unknown>[]>
+    }>
+  }
+}
+
+async function captureStorageQueries(
+  storage: DuckLakeStorage,
+  run: () => Promise<unknown>
+): Promise<readonly string[]> {
+  const runtime = await (storage as unknown as DuckLakeStorageInternals).connections.runtime()
+  const originalQuery = runtime.query.bind(runtime)
+  const queries: string[] = []
+
+  runtime.query = async (sql, values) => {
+    queries.push(sql)
+    return originalQuery(sql, values)
+  }
+
+  try {
+    await run()
+  } finally {
+    runtime.query = originalQuery
+  }
+
+  return queries
+}
 
 describe("DuckLakeStorage dataset metadata", () => {
   let rootDir: string
@@ -171,6 +204,64 @@ describe("DuckLakeStorage dataset metadata", () => {
     ).rejects.toThrow("changing column 'notes' nullability is not supported")
 
     await expect(storage.getDataset(initialDataset.id)).resolves.toEqual(initialDataset)
+  })
+
+  test("checks many dataset definitions with bounded catalog metadata reads", async () => {
+    const definitions: DatasetDefinition[] = []
+
+    for (let index = 0; index < 12; index += 1) {
+      const dataset = defineDataset(`raw.erp.compat_${index}`, {
+        schema: [
+          col("id", "string"),
+          col("isActive", "boolean"),
+          col("count", "int64"),
+          col("score", "float64"),
+          col("amount", "decimal"),
+          col("orderDate", "date"),
+          col("createdAt", "timestamp"),
+          col("metadata", "json", { nullable: true }),
+          col("attachment", "fileRef", { nullable: true }),
+        ],
+      })
+      await storage.createDataset(dataset)
+      definitions.push(dataset)
+    }
+
+    const missingDataset = defineDataset("raw.erp.compat_missing", {
+      schema: [col("id", "string")],
+    })
+    const queries = await captureStorageQueries(storage, () =>
+      storage.assertDatasetDefinitionsCompatible([...definitions, missingDataset])
+    )
+
+    expect(queries.length).toBeLessThanOrEqual(3)
+    for (const sql of queries) {
+      expect(sql).not.toContain("DESCRIBE SELECT")
+      expect(sql).not.toContain("AT (VERSION")
+    }
+  })
+
+  test("bulk definition compatibility rejects incompatible materialized definitions", async () => {
+    await storage.createDataset(ordersDataset)
+
+    await expect(
+      storage.assertDatasetDefinitionsCompatible([
+        defineDataset(ordersDataset.id, {
+          schema: [
+            col("orderId", "int64"),
+            col("customerId", "string", { nullable: true }),
+            col("isOpen", "boolean"),
+            col("count", "int64"),
+            col("score", "float64"),
+            col("amount", "decimal"),
+            col("orderDate", "date"),
+            col("createdAt", "timestamp"),
+            col("metadata", "json", { nullable: true }),
+            col("attachment", "fileRef", { nullable: true }),
+          ],
+        }),
+      ])
+    ).rejects.toThrow(/Lake dataset definition check failed[\s\S]*changing column 'orderId' type/)
   })
 
   test("applies schema evolution and partition changes in one definition update", async () => {

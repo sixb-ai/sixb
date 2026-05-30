@@ -87,22 +87,7 @@ export interface AssertLakeDatasetDefinitionsCompatibleOptions {
 export async function assertLakeDatasetDefinitionsCompatible(
   options: AssertLakeDatasetDefinitionsCompatibleOptions
 ): Promise<void> {
-  const failures: string[] = []
-
-  for (const definition of options.definitions) {
-    try {
-      await options.lakeStorage.assertDatasetDefinitionCompatible(definition)
-    } catch (error) {
-      failures.push(`- ${definition.id}: ${errorMessage(error)}`)
-    }
-  }
-
-  if (failures.length > 0) {
-    const details = failures.join("\n")
-    throw new LakeStorageError(
-      `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
-    )
-  }
+  await options.lakeStorage.assertDatasetDefinitionsCompatible(options.definitions)
 }
 
 function assertSameDataset(existing: DatasetDefinition, requested: DatasetDefinition): void {
@@ -275,8 +260,4 @@ function throwUnsupportedSchemaUpdate(datasetId: string, detail: string): never 
   throw new LakeStorageError(
     `[SixbLake] Dataset '${datasetId}' cannot apply schema update because ${detail}. ${SCHEMA_UPDATE_V1_POLICY}`
   )
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }

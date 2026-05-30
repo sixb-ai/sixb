@@ -47,6 +47,10 @@ function assertDatasetId(datasetId: string): void {
   }
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 class InMemoryLakeWriteSession implements LakeWriteSession {
   private readonly rows: DatasetRow[] = []
   private closed = false
@@ -108,17 +112,34 @@ export class InMemoryLakeStorage implements LakeStorage {
     return cloneDatasetDefinition(stored)
   }
 
-  async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    assertDatasetId(definition.id)
-    const existing = this.datasets.get(definition.id)
-    if (!existing) {
-      return
+  async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    const failures: string[] = []
+
+    for (const definition of definitions) {
+      try {
+        assertDatasetId(definition.id)
+        const existing = this.datasets.get(definition.id)
+        if (!existing) {
+          continue
+        }
+
+        mergeStrictDatasetDefinition({
+          existing,
+          next: definition,
+        })
+      } catch (error) {
+        failures.push(`- ${definition.id}: ${errorMessage(error)}`)
+      }
     }
 
-    mergeStrictDatasetDefinition({
-      existing,
-      next: definition,
-    })
+    if (failures.length > 0) {
+      const details = failures.join("\n")
+      throw new LakeStorageError(
+        `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
+      )
+    }
   }
 
   async getDataset(datasetId: string): Promise<DatasetDefinition | null> {

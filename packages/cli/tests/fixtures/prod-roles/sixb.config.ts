@@ -59,9 +59,13 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
 // Logs every lake definition probe so tests can assert role startup never opens
 // the lake catalog (the thundering-herd regression this slice removes).
 class TrackingLakeStorage extends InMemoryLakeStorage {
-  override async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    logFixtureEvent({ type: "lake:assert", datasetId: definition.id })
-    return super.assertDatasetDefinitionCompatible(definition)
+  override async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    for (const definition of definitions) {
+      logFixtureEvent({ type: "lake:assert", datasetId: definition.id })
+    }
+    return super.assertDatasetDefinitionsCompatible(definitions)
   }
 
   async close(): Promise<void> {

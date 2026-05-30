@@ -95,7 +95,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
       test("treats same-column declaration reorders as a no-op", async () => {
         await withStorage(async (storage) => {
           await storage.createDataset(definitionDataset)
-          await storage.assertDatasetDefinitionCompatible(reorderedDefinitionDataset)
+          await storage.assertDatasetDefinitionsCompatible([reorderedDefinitionDataset])
 
           expect(await storage.getDataset(definitionDataset.id)).toEqual(definitionDataset)
           await expect(storage.createDataset(reorderedDefinitionDataset)).resolves.toEqual(
@@ -117,7 +117,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
           })
 
           await storage.createDataset(minimalDataset)
-          await storage.assertDatasetDefinitionCompatible(documentedDataset)
+          await storage.assertDatasetDefinitionsCompatible([documentedDataset])
 
           expect(await storage.getDataset(minimalDataset.id)).toEqual(minimalDataset)
           await expect(storage.createDataset(documentedDataset)).resolves.toEqual(documentedDataset)
@@ -134,9 +134,9 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
           await storage.createDataset(definitionDataset)
 
-          await expect(storage.assertDatasetDefinitionCompatible(changedDataset)).rejects.toThrow(
-            "changing column 'orderId' type"
-          )
+          await expect(
+            storage.assertDatasetDefinitionsCompatible([changedDataset])
+          ).rejects.toThrow("changing column 'orderId' type")
           await expect(storage.createDataset(changedDataset)).rejects.toBeInstanceOf(
             LakeStorageError
           )
@@ -160,7 +160,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
           if (schemaEvolution === "strict") {
             await expect(
-              storage.assertDatasetDefinitionCompatible(requestedDataset)
+              storage.assertDatasetDefinitionsCompatible([requestedDataset])
             ).rejects.toThrow("incompatible schema")
             await expect(storage.createDataset(requestedDataset)).rejects.toThrow(
               "incompatible schema"
@@ -169,7 +169,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
             return
           }
 
-          await storage.assertDatasetDefinitionCompatible(requestedDataset)
+          await storage.assertDatasetDefinitionsCompatible([requestedDataset])
           expect(await storage.getDataset(initialDataset.id)).toEqual(initialDataset)
           expect(await storage.listVersions(initialDataset.id)).toEqual([])
 
@@ -187,7 +187,7 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
 
       test("keeps compatibility checks read-only for missing datasets", async () => {
         await withStorage(async (storage) => {
-          await storage.assertDatasetDefinitionCompatible(definitionDataset)
+          await storage.assertDatasetDefinitionsCompatible([definitionDataset])
 
           expect(await storage.getDataset(definitionDataset.id)).toBeNull()
           expect(await storage.listDatasets()).toEqual([])
