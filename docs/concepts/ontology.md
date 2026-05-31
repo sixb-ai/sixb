@@ -71,6 +71,54 @@ prop("tier", stringEnum(["free", "team", "enterprise"]))
 prop("monthlySpend", "double", { mode: "telemetry", semanticType: "Currency" })
 ```
 
+`prop(...)` takes these parameters:
+
+| Parameter | Required | Expected |
+| --- | --- | --- |
+| `id` | Yes | A stable property key, unique within the object type |
+| `schema` | Yes | A `Schema` value that describes which values the property accepts |
+| `options` | No | An object for metadata and behavior |
+
+`options` accepts these fields:
+
+| Option | Expected | Meaning |
+| --- | --- | --- |
+| `name` | `string` | Display name. Defaults to the property `id`. |
+| `description` | `string` | Human-readable context for the property. |
+| `required` | `boolean` | The property must be present when writing an object. |
+| `nullable` | `boolean` | The property may be set to `null`. |
+| `primary` | `true` | Marks the property as the object identifier. |
+| `mode` | `"static"` or `"telemetry"` | Controls how the value is stored over time. |
+| `semanticType` | Quantitative type id | Declares the unit family for numeric values. |
+
+When omitted, `mode` is `"static"`: the value is stored as a fact on the object record.
+Use `mode: "telemetry"` for time-varying measurements, readings, or counters. Telemetry
+values are appended over time, and the object record keeps the latest value.
+
+Each object type must have exactly one primary property. The primary property must use
+`{ required: true, primary: true }` with a `"string"` schema. `semanticType` is only useful
+with numeric schemas like `"double"`, `"integer"`, or `"decimal"`.
+
+The schema is usually one of these forms:
+
+| Form | Examples | Use it for |
+| --- | --- | --- |
+| Primitive | `"string"`, `"boolean"`, `"integer"`, `"double"`, `"decimal"` | Scalar values |
+| Date/time | `"date"`, `"timestamp"` | Dates or timestamps, as `Date` values or ISO strings |
+| Identifier | `"uuid"` | String identifiers that should be treated as UUIDs |
+| File reference | `"fileRef"` | Blob-backed documents, images, and attachments |
+| Enum | `stringEnum([...])`, `integerEnum([...])` | A fixed set of string or integer values |
+| Value type ref | `valueTypeRef("temperatureReading")` | Reusing a named value shape |
+
+The primitive schemas are `string`, `integer`, `double`, `decimal`, `boolean`, `date`,
+`timestamp`, `uuid`, and `fileRef`.
+
+Keep ontology properties shallow. Avoid complex nested shapes such as object fields that contain
+arrays, arrays of objects, or deeply nested records. When a value starts to behave like another
+thing in your domain, model it as a separate object type and connect it with a link.
+
+Telemetry properties cannot use `fileRef`.
+
 There are two common property styles:
 
 | Style | Use it for |
