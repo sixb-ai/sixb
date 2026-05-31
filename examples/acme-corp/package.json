@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "bun ../../packages/cli/src/index.tsx dev",
     "build": "bun ../../packages/cli/src/index.tsx build",
-    "start": "bun ../../packages/cli/src/index.tsx start",
     "check": "bun ../../packages/cli/src/index.tsx check",
     "sync:erp": "bun scripts/sync-erp.ts",
     "webhooks:demo": "bun scripts/send-webhooks.ts",

@@ -12,7 +12,7 @@
     "build": "bun build ./src/index.tsx --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/*.e2e.ts"
+    "test:e2e": "bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts"
   },
   "dependencies": {
     "@pario/app": "workspace:*",

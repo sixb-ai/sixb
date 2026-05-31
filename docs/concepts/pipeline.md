@@ -83,8 +83,7 @@ handler writes through a worker-owned output writer.
 For a separate worker process:
 
 ```bash
-pario worker --worker pipeline
+pario worker pipeline
 ```
 
-Running all workers with `pario worker` starts the worker types that have registered definitions in
-the project.
+To co-host every registered queue worker type in one process, use `pario worker-group`.
