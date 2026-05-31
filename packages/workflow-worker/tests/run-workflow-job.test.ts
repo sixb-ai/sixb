@@ -578,6 +578,65 @@ describe("runWorkflowJob", () => {
     expect(afterDuplicate.nodes.map((node) => node.id)).toEqual(nodes.nodes.map((node) => node.id))
   })
 
+  test("keeps runs waiting when submitted intervention responses are invalid", async () => {
+    const workflow = defineWorkflow("intervention-invalid-response")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(reviewBeforeAttach)
+      .then(attachReviewedInvoice, ({ steps }) => ({
+        invoice: steps.reviewBeforeAttach.invoice,
+      }))
+    const pario = createPario({ workflows: [workflow] })
+    const runtime = createRuntime(pario)
+
+    await runWorkflowJob({
+      runtime,
+      job: {
+        id: "wfrun_invalid_resume_response",
+        workflowId: workflow.id,
+        input: {
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      },
+    })
+    await pario.storage.workflowInterventions!.submit({
+      projectId: pario.id,
+      id: "wfrun_invalid_resume_response:intervention:1",
+      response: {
+        invoice: { objectTypeId: "Transaction", primaryId: "txn_1" },
+      },
+    })
+
+    await expect(
+      runWorkflowResumeJob({
+        runtime,
+        job: {
+          id: "wfrun_invalid_resume_response",
+          workflowId: workflow.id,
+          pendingInterventionId: "wfrun_invalid_resume_response:intervention:1",
+        },
+      })
+    ).rejects.toBeInstanceOf(WorkflowValidationError)
+
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_invalid_resume_response",
+    })
+    const nodes = await pario.storage.workflowRuns!.nodes.list({
+      projectId: pario.id,
+      workflowRunId: "wfrun_invalid_resume_response",
+      order: "asc",
+    })
+
+    expect(run?.status).toBe("waiting")
+    expect(nodes.nodes.map((node) => `${node.nodeId}:${node.status}`)).toEqual([
+      "find-best-invoice:succeeded",
+      "review-before-attach:waiting",
+    ])
+  })
+
   test("validates workflow input before starting the run", async () => {
     const workflow = defineWorkflow("requires-transaction")
       .input({

@@ -124,11 +124,6 @@ export class WorkflowRunSession {
       projectId: runtime.projectId,
       id: job.id,
     })
-    const nodeRuns = await runtime.workflowRuns.nodes.list({
-      projectId: runtime.projectId,
-      workflowRunId: job.id,
-      order: "asc",
-    })
     const waitingNode = await requireWorkflowNodeRun({
       workflowRuns: runtime.workflowRuns,
       projectId: runtime.projectId,
@@ -136,6 +131,12 @@ export class WorkflowRunSession {
     })
 
     assertResumeMatchesRun({ workflow, job, run, intervention, waitingNode })
+
+    const nodeRuns = await runtime.workflowRuns.nodes.list({
+      projectId: runtime.projectId,
+      workflowRunId: job.id,
+      order: "asc",
+    })
 
     if (run.status === "succeeded" && waitingNode.status === "succeeded") {
       return {
@@ -173,6 +174,19 @@ export class WorkflowRunSession {
     }
 
     const interventionNode = requireInterventionNode(workflow, intervention)
+    const response = validateWorkflowInterventionResponse({
+      workflowId: workflow.id,
+      intervention: interventionNode.intervention,
+      value: intervention.response,
+      valueTypesById,
+    })
+    const responseSnapshot = snapshotWorkflowInterventionResponse({
+      workflowId: workflow.id,
+      intervention: interventionNode.intervention,
+      value: response,
+      valueTypesById,
+    })
+    const responseOutput: Record<string, unknown> = { ...response }
     const state = reconstructWorkflowState({
       workflow,
       run,
@@ -212,24 +226,17 @@ export class WorkflowRunSession {
     })
 
     session.markSideEffectBoundaryPassed()
-    const response = validateWorkflowInterventionResponse({
-      workflowId: workflow.id,
-      intervention: interventionNode.intervention,
-      value: intervention.response,
-      valueTypesById,
-    })
-    const responseSnapshot = snapshotWorkflowInterventionResponse({
-      workflowId: workflow.id,
-      intervention: interventionNode.intervention,
-      value: response,
-      valueTypesById,
-    })
-    const responseOutput: Record<string, unknown> = { ...response }
 
-    await recorder.finishNodeSucceeded({
-      nodeRunId: waitingNode.id,
-      output: responseSnapshot,
-    })
+    try {
+      await recorder.finishNodeSucceeded({
+        nodeRunId: waitingNode.id,
+        output: responseSnapshot,
+      })
+    } catch (error) {
+      await session.finishAfterError(error)
+      throw error
+    }
+
     state.current = responseOutput
     state.steps[interventionNode.key] = responseOutput
     session.resumeFromIndex = intervention.nodeIndex + 1
