@@ -206,7 +206,7 @@ In local development, `sixb dev` can run workflow workers when workflows are reg
 For a separate worker process:
 
 ```bash
-sixb worker --worker workflow
+sixb worker workflow
 ```
 
 ## Extra details

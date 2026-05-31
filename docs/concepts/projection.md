@@ -173,7 +173,7 @@ registered.
 For a separate worker process:
 
 ```bash
-sixb worker --worker projection
+sixb worker projection
 ```
 
 ## Extra details

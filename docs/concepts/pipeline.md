@@ -197,10 +197,17 @@ Good pipeline names describe the data they produce:
 
 In local development, `sixb dev` can co-host pipeline workers when pipelines are registered.
 
-For a separate worker process:
+In production, start a dedicated pipeline worker process:
 
 ```bash
-sixb worker --worker pipeline
+sixb worker pipeline
+```
+
+For constrained deployments, `sixb worker-group` can co-host several queue workers in one
+process, for example:
+
+```bash
+sixb worker-group sync pipeline projection
 ```
 
 ## Extra details
