@@ -1,5 +1,6 @@
 import type {
   WorkflowDefinition,
+  WorkflowInterventionRecord,
   WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
@@ -10,6 +11,9 @@ import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
 export const noopWorkflowRunObserver: WorkflowRunObserver = {
   onRunStarted: async () => undefined,
   onNodeStarted: async () => undefined,
+  onRunWaiting: async () => undefined,
+  onNodeWaiting: async () => undefined,
+  onInterventionRequested: async () => undefined,
   onNodeFinished: async () => undefined,
   onRunFinished: async () => undefined,
 }
@@ -82,6 +86,29 @@ export class WorkflowRunRecorder {
     return node
   }
 
+  async waitActiveNode(params: {
+    readonly nodeRunId: string
+    readonly waitingAt?: Date
+  }): Promise<WorkflowNodeRunRecord> {
+    const waitingAt = params.waitingAt ?? new Date()
+    const node = await this.dependencies.workflowRuns.nodes.wait({
+      projectId: this.dependencies.projectId,
+      id: params.nodeRunId,
+      waitingAt,
+    })
+    this.nodeRuns.push(node)
+    if (this.activeNodeRunId === node.id) {
+      this.activeNodeRunId = null
+    }
+    await this.notify(async () => {
+      await this.dependencies.observer.onNodeWaiting?.(node, {
+        ...this.nodeContext(),
+        waitingAt,
+      })
+    })
+    return node
+  }
+
   async finishNodeSucceeded(params: {
     readonly nodeRunId: string
     readonly output?: WorkflowIOSnapshot
@@ -133,6 +160,25 @@ export class WorkflowRunRecorder {
     this.finished = true
     await this.notify(() => this.dependencies.observer.onRunFinished(run))
     return run
+  }
+
+  async waitRun(params: { readonly waitingAt?: Date } = {}): Promise<WorkflowRunRecord> {
+    const waitingAt = params.waitingAt ?? new Date()
+    const run = await this.dependencies.workflowRuns.wait({
+      projectId: this.dependencies.projectId,
+      id: this.dependencies.runId,
+      waitingAt,
+    })
+    await this.notify(async () => {
+      await this.dependencies.observer.onRunWaiting?.(run, { waitingAt })
+    })
+    return run
+  }
+
+  async recordInterventionRequested(intervention: WorkflowInterventionRecord): Promise<void> {
+    await this.notify(async () => {
+      await this.dependencies.observer.onInterventionRequested?.(intervention)
+    })
   }
 
   async finishRunAfterError(params: {

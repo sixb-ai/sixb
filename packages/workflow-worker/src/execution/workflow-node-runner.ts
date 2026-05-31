@@ -1,4 +1,5 @@
 import type { WorkflowNodeDefinition } from "@pario/core"
+import { WorkflowWorkerError } from "../errors"
 import { throwIfAborted } from "../normalize"
 import type { WorkflowRunRecorder } from "../recorder"
 import type {
@@ -20,7 +21,7 @@ export class WorkflowNodeRunner {
     readonly node: WorkflowNodeDefinition
     readonly nodeIndex: number
     readonly context: WorkflowNodeExecutionContext
-  }): Promise<void> {
+  }): Promise<WorkflowNodeRunResult> {
     const executor = this.executorFor(input.node)
     const prepared = await executor.prepare({
       node: input.node,
@@ -44,12 +45,32 @@ export class WorkflowNodeRunner {
       context: input.context,
     })
 
+    if (outcome.waitForIntervention) {
+      if (outcome.waitForIntervention.nodeRunId !== nodeRun.id) {
+        throw new WorkflowWorkerError(
+          `[ParioWorkflowWorker] Workflow '${input.context.workflow.id}' intervention node '${input.node.id}' returned an intervention for a different node run.`
+        )
+      }
+
+      await this.dependencies.recorder.recordInterventionRequested(outcome.waitForIntervention)
+      await this.dependencies.recorder.waitActiveNode({
+        nodeRunId: nodeRun.id,
+        waitingAt: outcome.waitForIntervention.requestedAt,
+      })
+
+      return {
+        status: "waiting",
+        waitingAt: outcome.waitForIntervention.requestedAt,
+      }
+    }
+
     await this.dependencies.recorder.finishNodeSucceeded({
       nodeRunId: nodeRun.id,
       output: outcome.outputSnapshot,
     })
 
     applyStatePatch(input.context.state, outcome.statePatch)
+    return { status: "completed" }
   }
 
   private executorFor<TNode extends WorkflowNodeDefinition>(
@@ -58,6 +79,10 @@ export class WorkflowNodeRunner {
     return this.dependencies.executors[node.type] as WorkflowNodeExecutor<TNode>
   }
 }
+
+type WorkflowNodeRunResult =
+  | { readonly status: "completed" }
+  | { readonly status: "waiting"; readonly waitingAt: Date }
 
 function applyStatePatch(
   state: WorkflowNodeExecutionContext["state"],

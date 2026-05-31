@@ -3,6 +3,7 @@ import type {
   Pario,
   ParioRuntimeContext,
   WorkflowDefinition,
+  WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStorage,
@@ -37,7 +38,7 @@ export interface RunWorkflowJobInput {
 export interface WorkflowRunResult {
   readonly id: string
   readonly workflowId: string
-  readonly status: "succeeded"
+  readonly status: "succeeded" | "waiting"
   readonly run: WorkflowRunRecord
   readonly nodes: readonly WorkflowNodeRunRecord[]
   readonly steps: WorkflowStepOutputs
@@ -47,9 +48,19 @@ export interface WorkflowNodeLifecycleContext {
   readonly totalNodes: number
 }
 
+export interface WorkflowWaitingLifecycleContext {
+  readonly waitingAt: Date
+}
+
 export interface WorkflowRunObserver {
   onRunStarted(run: WorkflowRunRecord): Promise<void>
   onNodeStarted(node: WorkflowNodeRunRecord, context: WorkflowNodeLifecycleContext): Promise<void>
+  onRunWaiting?(run: WorkflowRunRecord, context: WorkflowWaitingLifecycleContext): Promise<void>
+  onNodeWaiting?(
+    node: WorkflowNodeRunRecord,
+    context: WorkflowNodeLifecycleContext & WorkflowWaitingLifecycleContext
+  ): Promise<void>
+  onInterventionRequested?(intervention: WorkflowInterventionRecord): Promise<void>
   onNodeFinished(node: WorkflowNodeRunRecord, context: WorkflowNodeLifecycleContext): Promise<void>
   onRunFinished(run: WorkflowRunRecord): Promise<void>
 }

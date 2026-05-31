@@ -4294,6 +4294,34 @@
                               },
                               "required": ["type", "id", "key", "targetObjectTypeId", "params"],
                               "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "enum": ["intervention"]
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "key": {
+                                  "type": "string"
+                                },
+                                "input": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "response": {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                "description": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["type", "id", "key", "input", "response"],
+                              "additionalProperties": false
                             }
                           ]
                         }
@@ -4312,7 +4340,14 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                            "enum": [
+                              "queued",
+                              "running",
+                              "waiting",
+                              "succeeded",
+                              "failed",
+                              "cancelled"
+                            ]
                           },
                           "input": {
                             "type": "object",
@@ -4453,6 +4488,34 @@
                             },
                             "required": ["type", "id", "key", "targetObjectTypeId", "params"],
                             "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["intervention"]
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "key": {
+                                "type": "string"
+                              },
+                              "input": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "response": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id", "key", "input", "response"],
+                            "additionalProperties": false
                           }
                         ]
                       }
@@ -4471,7 +4534,14 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          "enum": [
+                            "queued",
+                            "running",
+                            "waiting",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ]
                         },
                         "input": {
                           "type": "object",
@@ -4541,7 +4611,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+              "enum": ["queued", "running", "waiting", "succeeded", "failed", "cancelled"]
             }
           },
           {
@@ -4610,7 +4680,14 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                            "enum": [
+                              "queued",
+                              "running",
+                              "waiting",
+                              "succeeded",
+                              "failed",
+                              "cancelled"
+                            ]
                           },
                           "input": {
                             "type": "object",
@@ -4711,7 +4788,14 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          "enum": [
+                            "queued",
+                            "running",
+                            "waiting",
+                            "succeeded",
+                            "failed",
+                            "cancelled"
+                          ]
                         },
                         "input": {
                           "type": "object",
@@ -4755,7 +4839,7 @@
                           },
                           "nodeType": {
                             "type": "string",
-                            "enum": ["step", "action"]
+                            "enum": ["step", "action", "intervention"]
                           },
                           "nodeId": {
                             "type": "string"
@@ -4765,7 +4849,7 @@
                           },
                           "status": {
                             "type": "string",
-                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                            "enum": ["running", "waiting", "succeeded", "failed", "cancelled"]
                           },
                           "input": {
                             "type": "object",

@@ -85,11 +85,11 @@ export class WorkflowRunSession {
     })
   }
 
-  async runAllNodes(): Promise<void> {
+  async runAllNodes(): Promise<WorkflowRunRecord | null> {
     for (const [nodeIndex, node] of this.dependencies.workflow.nodes.entries()) {
       throwIfAborted(this.dependencies.signal)
 
-      await this.dependencies.runner.runNode({
+      const result = await this.dependencies.runner.runNode({
         node,
         nodeIndex,
         context: {
@@ -102,7 +102,13 @@ export class WorkflowRunSession {
           markSideEffectBoundaryPassed: () => this.markSideEffectBoundaryPassed(),
         },
       })
+
+      if (result.status === "waiting") {
+        return await this.dependencies.recorder.waitRun({ waitingAt: result.waitingAt })
+      }
     }
+
+    return null
   }
 
   async finishSucceeded(): Promise<WorkflowRunResult> {
@@ -112,6 +118,17 @@ export class WorkflowRunSession {
       id: this.dependencies.job.id,
       workflowId: this.dependencies.workflow.id,
       status: "succeeded",
+      run,
+      nodes: this.dependencies.recorder.completedNodes,
+      steps: this.dependencies.state.steps,
+    }
+  }
+
+  waitingResult(run: WorkflowRunRecord): WorkflowRunResult {
+    return {
+      id: this.dependencies.job.id,
+      workflowId: this.dependencies.workflow.id,
+      status: "waiting",
       run,
       nodes: this.dependencies.recorder.completedNodes,
       steps: this.dependencies.state.steps,

@@ -27,6 +27,7 @@ export const allWorkflowRunStatuses = [
 export const statusLabels: Record<WorkflowRunStatus, string> = {
   queued: "Queued",
   running: "Running",
+  waiting: "Waiting",
   succeeded: "Succeeded",
   failed: "Failed",
   cancelled: "Cancelled",
@@ -36,6 +37,8 @@ export const statusClasses: Record<WorkflowRunStatus, string> = {
   queued:
     "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300",
   running:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  waiting:
     "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
   succeeded:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
@@ -47,6 +50,7 @@ export const statusClasses: Record<WorkflowRunStatus, string> = {
 
 export const nodeStatusClasses: Record<WorkflowNodeStatus, string> = {
   running: statusClasses.running,
+  waiting: statusClasses.waiting,
   succeeded: statusClasses.succeeded,
   failed: statusClasses.failed,
   cancelled: statusClasses.cancelled,
@@ -61,7 +65,7 @@ export function readStatusFilter(value: string): WorkflowRunStatusFilter {
 }
 
 export function isActiveRunStatus(status: WorkflowRunStatus): boolean {
-  return status === "queued" || status === "running"
+  return status === "queued" || status === "running" || status === "waiting"
 }
 
 export function formatDate(value?: string): string {
@@ -141,12 +145,17 @@ export function formatRunStartedDate(run: WorkflowRunSummary | WorkflowRunDetail
 }
 
 export function formatNodeDuration(node: WorkflowRunNode): string {
-  return formatDuration(node.startedAt, node.finishedAt, node.status === "running")
+  return formatDuration(
+    node.startedAt,
+    node.finishedAt,
+    node.status === "running" || node.status === "waiting"
+  )
 }
 
 export function runTimeLabel(run: WorkflowRunSummary | WorkflowRunDetail): string {
   if (run.status === "queued") return `Queued ${formatRelativeTime(run.queuedAt ?? run.startedAt)}`
   if (run.status === "running") return `Started ${formatRelativeTime(run.startedAt)}`
+  if (run.status === "waiting") return `Waiting since ${formatRelativeTime(run.startedAt)}`
   if (run.finishedAt) return `Finished ${formatRelativeTime(run.finishedAt)}`
   return `Started ${formatRelativeTime(run.startedAt)}`
 }
@@ -155,6 +164,7 @@ export function initialStatusCounts(): Record<WorkflowRunStatus, number> {
   return {
     queued: 0,
     running: 0,
+    waiting: 0,
     succeeded: 0,
     failed: 0,
     cancelled: 0,

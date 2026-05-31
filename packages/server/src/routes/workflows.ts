@@ -91,12 +91,23 @@ async function serializeWorkflow(
         }
       }
 
+      if (node.type === "action") {
+        return {
+          type: "action" as const,
+          id: node.id,
+          key: node.key,
+          targetObjectTypeId: node.action.target.id,
+          params: node.action.params,
+        }
+      }
+
       return {
-        type: "action" as const,
+        type: "intervention" as const,
         id: node.id,
         key: node.key,
-        targetObjectTypeId: node.action.target.id,
-        params: node.action.params,
+        input: node.intervention.input,
+        response: node.intervention.response,
+        description: node.intervention.description,
       }
     }),
     latestRun: await getLatestWorkflowRun(pario, workflow.id),
