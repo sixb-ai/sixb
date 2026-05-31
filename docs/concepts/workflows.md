@@ -279,7 +279,7 @@ pario dev
 For a dedicated process, use:
 
 ```bash
-pario worker --worker workflow
+pario worker workflow
 ```
 
 ## Current Scope

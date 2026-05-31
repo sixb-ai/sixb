@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
+import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { startRoleUntilReadyThenStop } from "./shared/cli-process"
@@ -16,6 +17,11 @@ const ROLE_TIMEOUT_MS = 30_000
 
 const tempDirs: string[] = []
 
+interface PortReservation {
+  readonly port: number
+  readonly close: () => Promise<void>
+}
+
 afterEach(async () => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
@@ -24,6 +30,55 @@ afterEach(async () => {
     }
   }
 })
+
+async function reserveFreePort(): Promise<PortReservation> {
+  return await new Promise<PortReservation>((resolvePromise, reject) => {
+    const server = createServer()
+    const fail = (error: Error) => {
+      reject(error)
+    }
+
+    server.once("error", fail)
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", fail)
+      const address = server.address()
+      if (!address || typeof address === "string") {
+        server.close()
+        reject(new Error("Could not reserve a free TCP port"))
+        return
+      }
+
+      resolvePromise({
+        port: address.port,
+        close: async () => {
+          await new Promise<void>((resolveClose, rejectClose) => {
+            server.close((error) => {
+              if (error) {
+                rejectClose(error)
+              } else {
+                resolveClose()
+              }
+            })
+          })
+        },
+      })
+    })
+  })
+}
+
+async function getFreePorts(count: number): Promise<readonly number[]> {
+  const reservations: PortReservation[] = []
+
+  try {
+    for (let index = 0; index < count; index += 1) {
+      reservations.push(await reserveFreePort())
+    }
+
+    return reservations.map((reservation) => reservation.port)
+  } finally {
+    await Promise.all(reservations.map((reservation) => reservation.close()))
+  }
+}
 
 async function startRole(args: readonly string[]) {
   const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-roles-"))
@@ -74,18 +129,23 @@ describe("role startup connection budget", () => {
   test(
     "pario api starts without migrating storage or touching lake storage",
     async () => {
+      const [atlasPort, apiPort, sentinelPort] = await getFreePorts(3)
       const { ready, logEntries } = await startRole([
         "api",
         "--port",
-        "47821",
+        String(atlasPort),
+        "--host",
+        "127.0.0.1",
+        "--api-host",
+        "127.0.0.1",
         "--api-port",
-        "47822",
+        String(apiPort),
         "--api-public-origin",
-        "http://localhost:47822",
+        `http://localhost:${apiPort}`,
         "--atlas-public-origin",
-        "http://localhost:47821",
+        `http://localhost:${atlasPort}`,
         "--sentinel-public-origin",
-        "http://localhost:47823",
+        `http://localhost:${sentinelPort}`,
       ])
 
       expect(ready).toBe(true)

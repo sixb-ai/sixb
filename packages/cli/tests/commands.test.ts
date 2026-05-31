@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import {
@@ -8,10 +8,10 @@ import {
   resolveProductionPaths,
 } from "../src/lib/production"
 
-function runCli(args: readonly string[]): { exitCode: number; stdout: string; stderr: string } {
-  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
-  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+const repoRoot = resolve(import.meta.dir, "..", "..", "..")
+const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 
+function runCli(args: readonly string[]): { exitCode: number; stdout: string; stderr: string } {
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, ...args],
     cwd: repoRoot,
@@ -73,6 +73,24 @@ describe("pario command dispatch", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Unknown command: start")
     expect(result.stderr).toBe("")
+  })
+
+  test("does not document removed production command shapes", async () => {
+    const staleCommandFiles = [
+      "docs/concepts/pipeline.md",
+      "docs/concepts/workflows.md",
+      "examples/acme-corp/package.json",
+      "examples/panasonic-ac/package.json",
+      "examples/roku-tv/package.json",
+    ]
+
+    for (const file of staleCommandFiles) {
+      const source = await readFile(join(repoRoot, file), "utf-8")
+
+      expect(source).not.toContain("pario start")
+      expect(source).not.toContain("pario worker --worker")
+      expect(source).not.toContain("bun ../../packages/cli/src/index.tsx start")
+    }
   })
 })
 
