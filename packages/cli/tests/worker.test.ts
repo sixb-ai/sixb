@@ -1,10 +1,39 @@
-import { describe, expect, test } from "bun:test"
-import { resolve } from "node:path"
+import { afterEach, describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join, resolve } from "node:path"
 import { resolveWorkerTypeToStart } from "../src/lib/worker-registry"
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()
+    if (dir) {
+      await rm(dir, { recursive: true, force: true })
+    }
+  }
+})
+
+async function tempLogPath(): Promise<string> {
+  const tempDir = await mkdtemp(join(tmpdir(), "pario-cli-worker-"))
+  tempDirs.push(tempDir)
+  return join(tempDir, "operations.log")
+}
+
+async function readLogEntries(logPath: string): Promise<Array<Record<string, unknown>>> {
+  const source = await readFile(logPath, "utf-8").catch(() => "")
+  return source
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+}
 
 function runWorkerFixture(
   fixtureName: string,
-  args: readonly string[] = []
+  args: readonly string[] = [],
+  options: { logPath?: string } = {}
 ): {
   exitCode: number
   stdout: string
@@ -17,6 +46,12 @@ function runWorkerFixture(
   const result = Bun.spawnSync({
     cmd: ["bun", cliEntry, "worker", "--entry", fixtureEntry, ...args],
     cwd: repoRoot,
+    env: options.logPath
+      ? {
+          ...process.env,
+          PARIO_CLI_TEST_LOG: options.logPath,
+        }
+      : process.env,
     stdout: "pipe",
     stderr: "pipe",
   })
@@ -93,6 +128,19 @@ describe("pario worker", () => {
     expect(result.exitCode).toBe(1)
     expect(result.stdout).toContain("Use `pario worker <type>`")
     expect(result.stderr).toBe("")
+  })
+
+  test("closes runtime providers when startup fails after loading the runtime", async () => {
+    const logPath = await tempLogPath()
+    const result = runWorkerFixture("prod-roles", ["projection"], { logPath })
+
+    expect(result.exitCode).toBe(1)
+    expect(result.stdout).toContain("No projection definitions are registered")
+    expect(result.stderr).toBe("")
+
+    const logEntries = await readLogEntries(logPath)
+    expect(logEntries).toContainEqual({ type: "queues:close" })
+    expect(logEntries).toContainEqual({ type: "lake-storage:close" })
   })
 
   test("is listed in the CLI help", () => {

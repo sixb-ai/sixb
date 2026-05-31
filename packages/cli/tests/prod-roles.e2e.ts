@@ -37,12 +37,16 @@ async function startRole(args: readonly string[]) {
   })
 }
 
-const backgroundRoles: Array<{ name: string; command: readonly string[] }> = [
+const backgroundRoles: Array<{
+  name: string
+  command: readonly string[]
+  expectProviderClose?: boolean
+}> = [
   { name: "orchestrator", command: ["orchestrator"] },
   { name: "scheduler", command: ["scheduler"] },
   { name: "functions", command: ["functions"] },
   { name: "rules", command: ["rules"] },
-  { name: "worker sync", command: ["worker", "sync"] },
+  { name: "worker sync", command: ["worker", "sync"], expectProviderClose: true },
 ]
 
 describe("role startup connection budget", () => {
@@ -58,6 +62,10 @@ describe("role startup connection budget", () => {
         expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
         // Roles do not open the lake catalog at startup either.
         expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
+        if (role.expectProviderClose) {
+          expect(logEntries).toContainEqual({ type: "queues:close" })
+          expect(logEntries).toContainEqual({ type: "lake-storage:close" })
+        }
       },
       ROLE_TIMEOUT_MS
     )
