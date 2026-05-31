@@ -164,6 +164,42 @@ export const Customer = defineObjectType({
 })
 ```
 
+`link(...)` takes these parameters:
+
+| Parameter | Required | Expected |
+| --- | --- | --- |
+| `id` | Yes | A stable relationship key, unique within the source object type |
+| `target` | No | The object type this link can point to |
+| `options` | No | An object for metadata and relationship behavior |
+
+The `target` can be an object type, an object type id, or an array of allowed object types or ids:
+
+```ts
+link("belongsTo", Organization)
+link("belongsTo", "Organization")
+link("relatedTo", [Organization, Customer])
+```
+
+When the target is omitted or set to `"*"`, the link is a wildcard link and can point to any
+object type. Prefer a specific target for relationships your app understands.
+
+`options` accepts these fields:
+
+| Option | Expected | Meaning |
+| --- | --- | --- |
+| `name` | `string` | Display name. Defaults to the link `id`. |
+| `description` | `string` | Human-readable context for the relationship. |
+| `cardinality` | `"one"` or `"many"` | Whether each source links to one or many targets. |
+| `properties` | `Property[]` | Metadata stored on each relationship instance. |
+
+Use `cardinality: "one"` when each source object should have at most one target for this link,
+like one customer belonging to one organization. Use `cardinality: "many"` when the source can
+point to multiple targets.
+
+Link `properties` use `prop(...)` too, but they describe the relationship itself, not either
+object. Good examples are `installedAt`, `commissionedBy`, or `confidence`. If a link does not
+declare properties, writes with link properties are rejected.
+
 Use links for relationships your app needs to navigate or query.
 
 ## Use objects from code
