@@ -11,6 +11,7 @@ export const WorkflowRunParamsSchema = z.object({
 export const WorkflowRunStatusSchema = z.enum([
   "queued",
   "running",
+  "waiting",
   "succeeded",
   "failed",
   "cancelled",
@@ -52,6 +53,14 @@ const WorkflowNodeSchema = z.union([
     targetObjectTypeId: z.string(),
     params: z.record(z.unknown()),
   }),
+  z.object({
+    type: z.literal("intervention"),
+    id: z.string(),
+    key: z.string(),
+    input: z.record(z.unknown()),
+    response: z.record(z.unknown()),
+    description: z.string().optional(),
+  }),
 ])
 
 export const WorkflowRunSchema = z.object({
@@ -72,10 +81,10 @@ export const WorkflowNodeRunSchema = z.object({
   workflowRunId: z.string(),
   workflowId: z.string(),
   nodeIndex: z.number(),
-  nodeType: z.enum(["step", "action"]),
+  nodeType: z.enum(["step", "action", "intervention"]),
   nodeId: z.string(),
   nodeKey: z.string(),
-  status: z.enum(["running", "succeeded", "failed", "cancelled"]),
+  status: z.enum(["running", "waiting", "succeeded", "failed", "cancelled"]),
   input: z.record(z.unknown()),
   startedAt: z.string(),
   finishedAt: z.string().optional(),

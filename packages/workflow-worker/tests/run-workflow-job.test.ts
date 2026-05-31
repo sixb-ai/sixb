@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   actionParam,
   defineAction,
+  defineIntervention,
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
@@ -20,6 +21,7 @@ import {
   WorkflowValidationError,
 } from "@pario/core"
 import {
+  EventsRuntimeWorkflowRunObserver,
   runWorkflowJob,
   type WorkflowRunObserver,
   type WorkflowWorkerContext,
@@ -64,6 +66,19 @@ const reviewInvoiceMatch = defineWorkflowStep("review-invoice-match")
   })
   .run(({ input }) => ({
     invoice: input.invoice,
+  }))
+
+const reviewInvoiceDecision = defineIntervention("review-invoice-decision")
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .response({
+    approved: "boolean",
+  })
+  .defaults(({ input }) => ({
+    approved: input.confidence >= 0.95,
   }))
 
 const failingStep = defineWorkflowStep("explode")
@@ -535,6 +550,75 @@ describe("runWorkflowJob", () => {
     } finally {
       unsubscribe()
     }
+  })
+
+  test("parks workflow runs at intervention nodes and creates pending interventions", async () => {
+    const workflow = defineWorkflow("review-invoice-intervention-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(reviewInvoiceDecision)
+    const pario = createPario({ workflows: [workflow] })
+
+    const result = await runWorkflowJob({
+      runtime: createRuntime(pario),
+      job: {
+        id: "wfrun_intervention",
+        workflowId: workflow.id,
+        input: {
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      },
+      observer: new EventsRuntimeWorkflowRunObserver(pario.events),
+    })
+
+    const run = await pario.storage.workflowRuns!.getById({
+      projectId: pario.id,
+      id: "wfrun_intervention",
+    })
+    const nodes = await pario.storage.workflowRuns!.nodes.list({
+      projectId: pario.id,
+      workflowRunId: "wfrun_intervention",
+      order: "asc",
+    })
+    const intervention = await pario.storage.workflowInterventions!.getById({
+      projectId: pario.id,
+      id: "wfrun_intervention:intervention:1",
+    })
+    const events = await pario.events.read({
+      topics: ["workflows"],
+    })
+
+    expect(result.status).toBe("waiting")
+    expect(run?.status).toBe("waiting")
+    expect(result.nodes.map((node) => node.status)).toEqual(["succeeded", "waiting"])
+    expect(nodes.nodes.map((node) => [node.nodeType, node.status])).toEqual([
+      ["step", "succeeded"],
+      ["intervention", "waiting"],
+    ])
+    expect(intervention).toMatchObject({
+      workflowId: workflow.id,
+      workflowRunId: "wfrun_intervention",
+      nodeRunId: "wfrun_intervention:node:1",
+      interventionId: "review-invoice-decision",
+      status: "pending",
+      input: {
+        confidence: 0.98,
+        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+      },
+      defaultResponse: { approved: true },
+    })
+    expect(events.map((event) => event.type)).toEqual([
+      "workflow.run.started",
+      "workflow.run.node.started",
+      "workflow.run.node.finished",
+      "workflow.run.node.started",
+      "workflow.intervention.requested",
+      "workflow.run.node.waiting",
+      "workflow.run.waiting",
+    ])
   })
 
   test("marks action node and workflow failed when the action run fails", async () => {

@@ -1,6 +1,7 @@
 import type {
   ValueType,
   WorkflowDefinition,
+  WorkflowInterventionRecord,
   WorkflowIOSnapshot,
   WorkflowNodeDefinition,
   WorkflowNodeRunRecord,
@@ -37,6 +38,7 @@ export interface WorkflowNodeStatePatch {
 export interface WorkflowNodeOutcome {
   readonly outputSnapshot?: WorkflowIOSnapshot
   readonly statePatch?: WorkflowNodeStatePatch
+  readonly waitForIntervention?: WorkflowInterventionRecord
 }
 
 export interface WorkflowNodePrepareInput<TNode extends WorkflowNodeDefinition> {

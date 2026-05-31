@@ -4,6 +4,7 @@ import type { WorkflowRunNode, WorkflowRunStatus } from "../../utils/workflows"
 const barColorByStatus: Record<WorkflowRunStatus, string> = {
   queued: "bg-sky-500",
   running: "bg-amber-500",
+  waiting: "bg-amber-500",
   succeeded: "bg-emerald-500",
   failed: "bg-red-500",
   cancelled: "bg-zinc-400",

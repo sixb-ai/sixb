@@ -1551,12 +1551,24 @@ export type ListWorkflowsResponses = {
             [key: string]: unknown
           }
         }
+      | {
+          type: "intervention"
+          id: string
+          key: string
+          input: {
+            [key: string]: unknown
+          }
+          response: {
+            [key: string]: unknown
+          }
+          description?: string
+        }
     >
     latestRun: {
       id: string
       projectId: string
       workflowId: string
-      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
         [key: string]: unknown
       }
@@ -1624,12 +1636,24 @@ export type GetWorkflowResponses = {
             [key: string]: unknown
           }
         }
+      | {
+          type: "intervention"
+          id: string
+          key: string
+          input: {
+            [key: string]: unknown
+          }
+          response: {
+            [key: string]: unknown
+          }
+          description?: string
+        }
     >
     latestRun: {
       id: string
       projectId: string
       workflowId: string
-      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
         [key: string]: unknown
       }
@@ -1648,7 +1672,7 @@ export type ListWorkflowRunsData = {
   path?: never
   query?: {
     workflowId?: string
-    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    status?: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
     startedAfter?: string
     startedBefore?: string
     limit?: string
@@ -1678,7 +1702,7 @@ export type ListWorkflowRunsResponses = {
       id: string
       projectId: string
       workflowId: string
-      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
         [key: string]: unknown
       }
@@ -1729,7 +1753,7 @@ export type GetWorkflowRunResponses = {
       id: string
       projectId: string
       workflowId: string
-      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
         [key: string]: unknown
       }
@@ -1744,10 +1768,10 @@ export type GetWorkflowRunResponses = {
       workflowRunId: string
       workflowId: string
       nodeIndex: number
-      nodeType: "step" | "action"
+      nodeType: "step" | "action" | "intervention"
       nodeId: string
       nodeKey: string
-      status: "running" | "succeeded" | "failed" | "cancelled"
+      status: "running" | "waiting" | "succeeded" | "failed" | "cancelled"
       input: {
         [key: string]: unknown
       }

@@ -1,12 +1,17 @@
 import type {
   EventsRuntime,
+  WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
   WorkflowRunStatus,
 } from "@pario/core"
-import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
+import type {
+  WorkflowNodeLifecycleContext,
+  WorkflowRunObserver,
+  WorkflowWaitingLifecycleContext,
+} from "./types"
 
-type TerminalWorkflowRunStatus = Exclude<WorkflowRunStatus, "queued" | "running">
+type TerminalWorkflowRunStatus = Exclude<WorkflowRunStatus, "queued" | "running" | "waiting">
 
 export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
   constructor(private readonly events: EventsRuntime) {}
@@ -44,6 +49,72 @@ export class EventsRuntimeWorkflowRunObserver implements WorkflowRunObserver {
             nodeId: node.nodeId,
             nodeKey: node.nodeKey,
             startedAt: node.startedAt.toISOString(),
+          },
+        },
+      ],
+    })
+  }
+
+  async onRunWaiting(
+    run: WorkflowRunRecord,
+    context: WorkflowWaitingLifecycleContext
+  ): Promise<void> {
+    await this.events.append({
+      events: [
+        {
+          type: "workflow.run.waiting",
+          payload: {
+            workflowId: run.workflowId,
+            runId: run.id,
+            waitingAt: context.waitingAt.toISOString(),
+          },
+        },
+      ],
+    })
+  }
+
+  async onNodeWaiting(
+    node: WorkflowNodeRunRecord,
+    context: WorkflowNodeLifecycleContext & WorkflowWaitingLifecycleContext
+  ): Promise<void> {
+    if (node.nodeType !== "intervention") {
+      throw new Error(
+        `[ParioWorkflowWorker] Workflow node run '${node.id}' is waiting, but is not an intervention node.`
+      )
+    }
+
+    await this.events.append({
+      events: [
+        {
+          type: "workflow.run.node.waiting",
+          payload: {
+            workflowId: node.workflowId,
+            runId: node.workflowRunId,
+            nodeRunId: node.id,
+            nodeIndex: node.nodeIndex,
+            totalNodes: context.totalNodes,
+            nodeType: node.nodeType,
+            nodeId: node.nodeId,
+            nodeKey: node.nodeKey,
+            waitingAt: context.waitingAt.toISOString(),
+          },
+        },
+      ],
+    })
+  }
+
+  async onInterventionRequested(intervention: WorkflowInterventionRecord): Promise<void> {
+    await this.events.append({
+      events: [
+        {
+          type: "workflow.intervention.requested",
+          payload: {
+            workflowId: intervention.workflowId,
+            runId: intervention.workflowRunId,
+            nodeRunId: intervention.nodeRunId,
+            interventionId: intervention.interventionId,
+            pendingInterventionId: intervention.id,
+            requestedAt: intervention.requestedAt.toISOString(),
           },
         },
       ],
@@ -106,7 +177,7 @@ function requireTerminalStatus(
   status: WorkflowRunStatus,
   context: string
 ): TerminalWorkflowRunStatus {
-  if (status === "queued" || status === "running") {
+  if (status === "queued" || status === "running" || status === "waiting") {
     throw new Error(`[ParioWorkflowWorker] ${context} is not terminal.`)
   }
 

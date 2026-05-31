@@ -16,7 +16,11 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
 
   try {
     await session.start()
-    await session.runAllNodes()
+    const waitingRun = await session.runAllNodes()
+    if (waitingRun) {
+      return session.waitingResult(waitingRun)
+    }
+
     return await session.finishSucceeded()
   } catch (error) {
     await session.finishAfterError(error)

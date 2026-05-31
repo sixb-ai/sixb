@@ -5,6 +5,7 @@ import { SchemaShape } from "./SchemaShape"
 
 export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: number }) {
   const isStep = node.type === "step"
+  const isAction = node.type === "action"
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <CardContent className="p-0">
@@ -20,7 +21,7 @@ export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: nu
                 className="shrink-0 gap-1 rounded-md px-1.5 py-0 text-[10px]"
               >
                 {isStep ? <Workflow className="h-3 w-3" /> : <Zap className="h-3 w-3" />}
-                {isStep ? "step" : "action"}
+                {node.type}
               </Badge>
             </div>
             <NodeMeta node={node} />
@@ -33,11 +34,11 @@ export function WorkflowNodeRow({ node, index }: { node: WorkflowNode; index: nu
             <SchemaSection label="Input" fields={node.input} emptyLabel="No input fields" />
             <SchemaSection label="Output" fields={node.output} emptyLabel="No output fields" />
           </div>
-        ) : (
+        ) : isAction ? (
           <div className="border-t border-border/60 bg-muted/20">
             <SchemaSection label="Params" fields={node.params} emptyLabel="No params" />
           </div>
-        )}
+        ) : null}
       </CardContent>
     </Card>
   )
@@ -52,7 +53,11 @@ function NodeMeta({ node }: { node: WorkflowNode }) {
     )
   }
 
-  return <p className="mt-0.5 text-xs text-muted-foreground">Transforms workflow data.</p>
+  if (node.type === "step") {
+    return <p className="mt-0.5 text-xs text-muted-foreground">Transforms workflow data.</p>
+  }
+
+  return null
 }
 
 function NodeSummary({ node }: { node: WorkflowNode }) {
@@ -68,12 +73,16 @@ function NodeSummary({ node }: { node: WorkflowNode }) {
     )
   }
 
-  return (
-    <span className="hidden shrink-0 text-xs tabular-nums text-muted-foreground sm:inline">
-      {fieldCountLabel(Object.keys(node.input ?? {}).length, "input")} ·{" "}
-      {fieldCountLabel(Object.keys(node.output ?? {}).length, "output")}
-    </span>
-  )
+  if (node.type === "step") {
+    return (
+      <span className="hidden shrink-0 text-xs tabular-nums text-muted-foreground sm:inline">
+        {fieldCountLabel(Object.keys(node.input ?? {}).length, "input")} ·{" "}
+        {fieldCountLabel(Object.keys(node.output ?? {}).length, "output")}
+      </span>
+    )
+  }
+
+  return null
 }
 
 function SchemaSection({
