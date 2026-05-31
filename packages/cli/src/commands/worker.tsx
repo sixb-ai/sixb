@@ -1,7 +1,7 @@
 import type { Worker } from "@pario/core"
 import { type LoadedPario, loadParioFromEntry } from "../lib/loadPario"
 import { resolveRuntimeEntry } from "../lib/production"
-import { runUntilSignal, stopQuietly } from "../lib/runtime"
+import { runUntilSignal, stopParioProviders, stopQuietly } from "../lib/runtime"
 import {
   createWorkerForType,
   resolveWorkerTypeToStart,
@@ -50,14 +50,17 @@ export async function runWorker(options: WorkerOptions = {}) {
       app.unmount()
       console.log("\nShutting down worker...")
       await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-      await stopQuietly(() => pario?.disconnectConnectors() ?? Promise.resolve())
-      await stopQuietly(() => pario?.closeBroker() ?? Promise.resolve())
+      if (pario) {
+        await stopParioProviders(pario)
+      }
+      pario = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-    await stopQuietly(() => pario?.disconnectConnectors() ?? Promise.resolve())
-    await stopQuietly(() => pario?.closeBroker() ?? Promise.resolve())
+    if (pario) {
+      await stopParioProviders(pario)
+    }
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(<ErrorView message={message} />)
     process.exit(1)
