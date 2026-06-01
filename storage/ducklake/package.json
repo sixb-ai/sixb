@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "test:e2e": "bun run test:e2e:local && bun run test:e2e:remote",
-    "test:e2e:local": "bun test ./tests/ducklake-contract.e2e.ts ./tests/ducklake-file-refs.e2e.ts ./tests/ducklake-catalog-state.e2e.ts ./tests/ducklake-catalogs.e2e.ts ./tests/ducklake-concurrency.e2e.ts ./tests/ducklake-datasets.e2e.ts ./tests/ducklake-driver.e2e.ts ./tests/ducklake-sql-transforms.e2e.ts ./tests/ducklake-versions.e2e.ts ./tests/ducklake-writes.e2e.ts",
+    "test:e2e:local": "bun test ./tests/ducklake-contract.e2e.ts ./tests/ducklake-file-refs.e2e.ts ./tests/ducklake-catalog-state.e2e.ts ./tests/ducklake-catalogs.e2e.ts ./tests/ducklake-concurrency.e2e.ts ./tests/ducklake-datasets.e2e.ts ./tests/ducklake-driver.e2e.ts ./tests/ducklake-maintenance.e2e.ts ./tests/ducklake-sql-transforms.e2e.ts ./tests/ducklake-versions.e2e.ts ./tests/ducklake-writes.e2e.ts",
     "test:e2e:remote": "bun test --preload ./tests/setup.ts ./tests/ducklake-remote.e2e.ts"
   },
   "dependencies": {

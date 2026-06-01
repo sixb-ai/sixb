@@ -52,6 +52,117 @@ describe("DuckLakeStorage", () => {
     await expect(rejected).rejects.toThrow("Invalid DuckLake version id")
   })
 
+  test("registers a default maintenance function", async () => {
+    const storage = new DuckLakeStorage({
+      catalog: {
+        type: "duckdb",
+        path: ":memory:",
+      },
+    })
+
+    try {
+      const functions = storage.getScheduledFunctions()
+
+      expect(functions).toHaveLength(1)
+      expect(functions[0]?.id).toBe("ducklake-maintenance")
+      expect(functions[0]?.trigger).toMatchObject({
+        type: "cron",
+        expression: "0 3 * * *",
+      })
+    } finally {
+      await storage.close()
+    }
+  })
+
+  test("does not register maintenance when disabled or read-only", async () => {
+    const disabled = new DuckLakeStorage({
+      catalog: {
+        type: "duckdb",
+        path: ":memory:",
+      },
+      maintenance: false,
+    })
+    const readOnly = new DuckLakeStorage({
+      catalog: {
+        type: "duckdb",
+        path: ":memory:",
+      },
+      readOnly: true,
+    })
+
+    try {
+      expect(disabled.getScheduledFunctions()).toEqual([])
+      expect(readOnly.getScheduledFunctions()).toEqual([])
+    } finally {
+      await disabled.close()
+      await readOnly.close()
+    }
+  })
+
+  test("maintenance function uses configured retention", async () => {
+    const storage = new DuckLakeStorage({
+      catalog: {
+        type: "duckdb",
+        path: ":memory:",
+      },
+      maintenance: {
+        cron: "15 4 * * *",
+        expireOlderThan: "3 days",
+        deleteOlderThan: "2 days",
+      },
+    })
+    const calls: unknown[] = []
+    const report = {
+      dryRun: false,
+      expireOlderThan: "3 days",
+      deleteOlderThan: "2 days",
+      snapshots: 0,
+      oldFiles: 0,
+      orphanedFiles: 0,
+    }
+
+    try {
+      const patchedStorage = storage as unknown as {
+        runMaintenance(options: unknown): Promise<typeof report>
+      }
+      patchedStorage.runMaintenance = async (options) => {
+        calls.push(options)
+        return report
+      }
+
+      const [fn] = storage.getScheduledFunctions()
+
+      expect(fn?.trigger).toMatchObject({
+        type: "cron",
+        expression: "15 4 * * *",
+      })
+      await fn?.trigger.handler({
+        sixb: undefined as never,
+        fn: { id: fn.id, trigger: fn.trigger },
+      })
+
+      expect(calls).toEqual([{ expireOlderThan: "3 days", deleteOlderThan: "2 days" }])
+    } finally {
+      await storage.close()
+    }
+  })
+
+  test("rejects non-dry-run maintenance in read-only mode", async () => {
+    const storage = new DuckLakeStorage({
+      catalog: {
+        type: "duckdb",
+        path: ":memory:",
+      },
+      readOnly: true,
+    })
+
+    try {
+      await expect(storage.runMaintenance()).rejects.toThrow("read-only")
+    } finally {
+      await storage.close()
+    }
+  })
+
   test("runtime close waits for accepted operations and rejects new operations", async () => {
     const runtime = await createDuckDbRuntime()
     const running = runtime.query("SELECT sum(sin(i)) AS total FROM range(50000000) AS t(i)")

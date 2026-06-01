@@ -184,6 +184,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "build", value: "Build runtime and production UI/app assets" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
           { label: "lake check", value: "Check lake dataset definitions for drift" },
+          { label: "lake cleanup", value: "Run lake storage maintenance cleanup" },
           { label: "init [dir]", value: "Initialize sixb project in directory" },
           { label: "create <name>", value: "Create a new sixb project" },
         ]}
@@ -203,6 +204,9 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--sentinel-public-origin <origin>", value: "Public Sentinel origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
           { label: "--outdir <path>", value: "Build output directory" },
+          { label: "--dry-run", value: "Preview lake cleanup without changing storage" },
+          { label: "--expire-older-than <interval>", value: "Lake snapshot expiration window" },
+          { label: "--delete-older-than <interval>", value: "Lake file deletion window" },
           { label: "--help", value: "Show this help message" },
           { label: "--version", value: "Show version" },
         ]}
@@ -229,6 +233,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "sixb check",
           "sixb db migrate",
           "sixb lake check",
+          "sixb lake cleanup --dry-run",
           "sixb create my-project",
         ]}
       />
@@ -629,6 +634,57 @@ export function LakeCheckView({ projectId, status }: { projectId: string; status
       <Text dimColor>{projectId}</Text>
       <Spacer />
       <KeyValueList items={[{ label: "Lake", value: status }]} />
+    </Box>
+  )
+}
+
+export interface LakeCleanupReport {
+  readonly dryRun: boolean
+  readonly expireOlderThan: string
+  readonly deleteOlderThan: string
+  readonly snapshots: number
+  readonly oldFiles: number
+  readonly orphanedFiles: number
+}
+
+const RESTORE_RETENTION_COMMAND =
+  'sixb lake cleanup --expire-older-than "7 days" --delete-older-than "7 days"'
+
+export function LakeCleanupView({
+  projectId,
+  report,
+  retentionWarning,
+}: {
+  projectId: string
+  report: LakeCleanupReport
+  retentionWarning: boolean
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {report.dryRun ? "Lake cleanup dry run complete" : "Lake cleanup complete"}
+      </Text>
+      <Text dimColor>{projectId}</Text>
+      <Spacer />
+      <KeyValueList
+        items={[
+          { label: "Dry run", value: String(report.dryRun) },
+          { label: "Expire older than", value: report.expireOlderThan },
+          { label: "Delete older than", value: report.deleteOlderThan },
+          { label: "Snapshots", value: String(report.snapshots) },
+          { label: "Old files", value: String(report.oldFiles) },
+          { label: "Orphaned files", value: String(report.orphanedFiles) },
+        ]}
+      />
+      {retentionWarning ? (
+        <>
+          <Spacer />
+          <Text color="yellow">
+            DuckLake retention options persist. Restore normal retention with{" "}
+            {RESTORE_RETENTION_COMMAND}.
+          </Text>
+        </>
+      ) : null}
     </Box>
   )
 }

@@ -8,6 +8,7 @@ import {
   createSixb,
   defineConnector,
   defineDataset,
+  defineFunction,
   defineLinkProjection,
   defineObjectType,
   defineProjection,
@@ -407,6 +408,80 @@ export const Room = defineObjectType({
     expect(sixb.listConnectors()).toEqual([])
     await expect(sixb.startFunctions()).resolves.toBeUndefined()
     await expect(sixb.stopFunctions()).resolves.toBeUndefined()
+  })
+
+  test("registers provider scheduled functions after user functions", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [prop("id", "string", { required: true, primary: true })],
+    })
+    const userFunction = defineFunction("user-function")
+      .cron("0 * * * *")
+      .run(async () => {})
+    const providerFunction = defineFunction("provider-maintenance")
+      .cron("0 3 * * *")
+      .run(async () => {})
+    const deps = createTestRuntimeDeps()
+    const lakeStorage = Object.assign(deps.lakeStorage, {
+      getScheduledFunctions: () => [providerFunction],
+    })
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      ...deps,
+      lakeStorage,
+      functions: [userFunction],
+    })
+
+    expect(sixb.getFunctionDefinitions().map((fn) => fn.id)).toEqual([
+      "user-function",
+      "provider-maintenance",
+    ])
+  })
+
+  test("lets user functions override provider scheduled functions", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [prop("id", "string", { required: true, primary: true })],
+    })
+    const userFunction = defineFunction("ducklake-maintenance")
+      .cron("0 4 * * *")
+      .run(async () => {})
+    const providerFunction = defineFunction("ducklake-maintenance")
+      .cron("0 3 * * *")
+      .run(async () => {})
+    const deps = createTestRuntimeDeps()
+    const lakeStorage = Object.assign(deps.lakeStorage, {
+      getScheduledFunctions: () => [providerFunction],
+    })
+    const warn = console.warn
+    const warnings: string[] = []
+    console.warn = (...data: unknown[]) => {
+      warnings.push(String(data[0]))
+    }
+
+    try {
+      const sixb = await createSixb({
+        projectRoot,
+        ontologies: [Room],
+        ...deps,
+        lakeStorage,
+        functions: [userFunction],
+      })
+
+      expect(sixb.getFunctionDefinitions()).toEqual([userFunction])
+      expect(warnings).toEqual([
+        "[Sixb] Skipping provider scheduled function 'ducklake-maintenance' because " +
+          "a user-defined function with that id is registered.",
+      ])
+    } finally {
+      console.warn = warn
+    }
   })
 
   test("merges explicit connectors with auto-discovery", async () => {

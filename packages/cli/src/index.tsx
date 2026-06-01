@@ -38,6 +38,8 @@ const flagsWithValues = new Set([
   "app-public-origin",
   "outdir",
   "dir",
+  "expire-older-than",
+  "delete-older-than",
 ])
 
 function getCommandPositionals(): string[] {
@@ -224,6 +226,17 @@ async function main(): Promise<void> {
       break
     }
 
+    case "lake:cleanup": {
+      const { runLakeCleanup } = await import("./commands/lake-cleanup")
+      await runLakeCleanup({
+        entry: getFlag("entry"),
+        dryRun: hasFlag("dry-run"),
+        expireOlderThan: getFlag("expire-older-than"),
+        deleteOlderThan: getFlag("delete-older-than"),
+      })
+      break
+    }
+
     case "panasonic:login": {
       try {
         // Resolve from cwd so the user's project dependencies are used, not the CLI's
@@ -268,7 +281,7 @@ async function main(): Promise<void> {
       break
 
     case "lake":
-      await renderStatic(<HelpView errorMessage="Usage: sixb lake <check>" />)
+      await renderStatic(<HelpView errorMessage="Usage: sixb lake <check|cleanup>" />)
       process.exit(1)
       break
 

@@ -50,12 +50,44 @@ class FixtureLakeStorage extends InMemoryLakeStorage {
   }
 }
 
+class MaintenanceLakeStorage extends FixtureLakeStorage {
+  async runMaintenance(options?: {
+    readonly dryRun?: boolean
+    readonly expireOlderThan?: string
+    readonly deleteOlderThan?: string
+  }) {
+    logFixtureEvent({
+      type: "lake:maintenance",
+      dryRun: options?.dryRun ?? false,
+      expireOlderThan: options?.expireOlderThan,
+      deleteOlderThan: options?.deleteOlderThan,
+    })
+
+    return {
+      dryRun: options?.dryRun ?? false,
+      expireOlderThan: options?.expireOlderThan ?? "7 days",
+      deleteOlderThan: options?.deleteOlderThan ?? options?.expireOlderThan ?? "7 days",
+      snapshots: 2,
+      oldFiles: 3,
+      orphanedFiles: 4,
+    }
+  }
+}
+
+function createLakeStorage(): FixtureLakeStorage {
+  if (process.env.SIXB_CLI_TEST_LAKE_NO_MAINTENANCE === "1") {
+    return new FixtureLakeStorage()
+  }
+
+  return new MaintenanceLakeStorage()
+}
+
 export const sixb = new Sixb({
   id: "cli-lake-project",
   ontology: [Room],
   broker: new InMemoryBroker(),
   storage: new InMemoryStorage(),
-  lakeStorage: new FixtureLakeStorage(),
+  lakeStorage: createLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),
   queues: new InMemoryQueues(),
   datasets: [things],

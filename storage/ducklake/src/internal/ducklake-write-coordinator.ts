@@ -302,9 +302,9 @@ export class DuckLakeWriteCoordinator {
       previousRowCount: input.previousRowCount,
     })
 
-    if (input.rowsWritten > 0 && !result.dataChangeExpected) {
+    if (result.sourceRowCount !== input.rowsWritten) {
       throw new LakeStorageError(
-        `[SixbDuckLake] Staged write for dataset '${input.write.dataset.id}' accepted ${input.rowsWritten} row(s), but DuckLake did not apply any row changes.`
+        `[SixbDuckLake] Staged write for dataset '${input.write.dataset.id}' accepted ${input.rowsWritten} row(s), but DuckLake saw ${result.sourceRowCount} source row(s) at commit time.`
       )
     }
 
