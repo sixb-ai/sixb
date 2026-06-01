@@ -27,6 +27,7 @@ bun add @sixb/cli
 | `sixb build` | Bundle the project runtime, custom app, Atlas assets, and Sentinel assets |
 | `sixb db migrate` | Run adapter-owned database migrations for the configured storage |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
+| `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
 | `sixb init [dir]` | Initialize a new sixb project in a directory |
 | `sixb create <name>` | Scaffold a new sixb project from the built-in template |
 | `sixb help` | Show help |
@@ -48,6 +49,9 @@ Also available as `create-sixb <name>` (alias for `sixb create`).
 | `--sentinel-public-origin <origin>` | `dev`, `api`, `sentinel` | dev: `http://localhost:<port+3>` | Public Sentinel UI origin |
 | `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
 | `--outdir <path>` | `build` | `.sixb/dist` | Build output directory |
+| `--dry-run` | `lake cleanup` | false | Preview cleanup without changing storage |
+| `--expire-older-than <interval>` | `lake cleanup` | `7 days` | Snapshot expiration window |
+| `--delete-older-than <interval>` | `lake cleanup` | expire window | File deletion window |
 
 ## Usage
 
@@ -85,6 +89,11 @@ sixb db migrate
 # Check lake dataset definitions for drift during deploy
 sixb lake check
 
+# Preview or run lake maintenance cleanup
+sixb lake cleanup --dry-run
+sixb lake cleanup --expire-older-than "1 hour" --delete-older-than "1 hour"
+sixb lake cleanup --expire-older-than "7 days" --delete-older-than "7 days"
+
 # Scaffold a new project
 sixb create my-project
 cd my-project && bun install && sixb dev
@@ -117,6 +126,11 @@ required release step before starting roles — `sixb dev` still migrates in-pro
 The lake is opened only when a role actually does lake work — API dataset routes, sync jobs,
 pipeline jobs, and projection jobs. Write paths re-validate their target dataset through the lake
 provider's `createDataset` before committing, so drift still fails clearly even between deploys.
+
+Use `sixb lake cleanup` for operator-run lake maintenance on providers that expose
+`runMaintenance`. It defaults to a seven-day snapshot expiration and file deletion window. Start
+with `--dry-run`; after a short-retention DuckLake cleanup, run the seven-day command again because
+DuckLake retention options persist.
 
 ### Production topologies
 

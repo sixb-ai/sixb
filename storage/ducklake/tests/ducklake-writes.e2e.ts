@@ -485,6 +485,91 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await expect(write.writeRows([])).rejects.toThrow("already closed")
   })
 
+  test("skips snapshot commits when source content is unchanged", async () => {
+    const seedRows = [
+      { orderId: "ord_1", customerName: "Ada", orderCount: 1 },
+      {
+        orderId: "ord_2",
+        customerName: "Grace",
+        orderCount: 2,
+        metadata: { source: "erp" },
+      },
+    ]
+    const seed = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await seed.writeRows(seedRows)
+    const seedVersion = await seed.commit()
+    const snapshotCountAfterSeed = await duckLakeSnapshotCount(storage, rootDir)
+
+    const identical = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await identical.writeRows(seedRows)
+    const identicalVersion = await identical.commit()
+
+    expect(identicalVersion.versionId).toBe(seedVersion.versionId)
+    expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed)
+
+    const reordered = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await reordered.writeRows([...seedRows].reverse())
+    const reorderedVersion = await reordered.commit()
+
+    expect(reorderedVersion.versionId).toBe(seedVersion.versionId)
+    expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed)
+
+    const changed = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await changed.writeRows([
+      { orderId: "ord_1", customerName: "Ada", orderCount: 1 },
+      {
+        orderId: "ord_2",
+        customerName: "Hedy",
+        orderCount: 2,
+        metadata: { source: "erp" },
+      },
+    ])
+    const changedVersion = await changed.commit()
+
+    expect(changedVersion.versionId).not.toBe(seedVersion.versionId)
+    expect(await duckLakeSnapshotCount(storage, rootDir)).toBe(snapshotCountAfterSeed + 1)
+    await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
+      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
+      { orderId: "ord_2", customerName: "Hedy", orderCount: "2", metadata: { source: "erp" } },
+    ])
+  })
+
+  test("append mode still commits duplicate source rows", async () => {
+    const seed = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await seed.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    const seedVersion = await seed.commit()
+
+    const append = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+    })
+    await append.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    const appendVersion = await append.commit()
+
+    expect(appendVersion.versionId).not.toBe(seedVersion.versionId)
+    expect(appendVersion.mode).toBe("append")
+    expect(appendVersion.rowCount).toBe(2)
+    await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
+      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
+      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
+    ])
+  })
+
   test("commits a snapshot replacement to empty rows", async () => {
     const seed = await storage.beginWrite({
       dataset: ordersDataset,
@@ -587,4 +672,16 @@ async function commitExtraInfoForVersion(
   `)
 
   return row?.commit_extra_info
+}
+
+async function duckLakeSnapshotCount(storage: DuckLakeStorage, rootDir: string): Promise<number> {
+  const runtime = await (
+    storage as unknown as DuckLakeStorageInternals
+  ).connections.attachedRuntime()
+  const [row] = await runtime.query(`
+    SELECT count(*) AS row_count
+    FROM ${duckLakeMetadataTableName(localDuckLakeOptions(rootDir), "ducklake_snapshot")}
+  `)
+
+  return Number(row?.row_count ?? 0)
 }

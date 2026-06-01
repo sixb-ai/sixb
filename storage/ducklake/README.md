@@ -65,6 +65,42 @@ const lakeStorage = new DuckLakeStorage({
 Use `close()` during service shutdown so DuckDB can close its runtime and release
 catalog connections cleanly.
 
+### Maintenance
+
+DuckLake keeps historical snapshots and deleted files until maintenance runs.
+`DuckLakeStorage` ships a default Sixb function named `ducklake-maintenance`
+when the provider is created through `createSixb()`. It runs daily at
+`0 3 * * *` using the existing function runtime semantics and keeps seven days
+of snapshots/files by default.
+
+```ts
+const lakeStorage = new DuckLakeStorage({
+  catalog,
+  dataPath,
+  maintenance: {
+    cron: "0 4 * * *",
+    expireOlderThan: "14 days",
+    deleteOlderThan: "14 days",
+  },
+})
+```
+
+Set `maintenance: false` to disable the provider function, or define a project
+function with id `ducklake-maintenance` to replace it.
+
+You can also run maintenance directly:
+
+```ts
+const report = await lakeStorage.runMaintenance({
+  dryRun: true,
+  expireOlderThan: "7 days",
+})
+```
+
+DuckLake retention options persist in the catalog. Scheduled maintenance
+re-applies the configured retention each run; after any one-off aggressive
+cleanup, run maintenance again with the normal retention window.
+
 ### Read and Write Concurrency
 
 Reads, writes, SQL previews, and SQL transforms use the same DuckDB runtime and
