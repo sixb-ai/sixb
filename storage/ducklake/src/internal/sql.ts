@@ -96,6 +96,10 @@ export function quoteSqlString(value: string): string {
   return `'${value.replaceAll("'", "''")}'`
 }
 
+export function quoteSqlStringList(values: readonly string[]): string {
+  return values.map((value) => quoteSqlString(value)).join(", ")
+}
+
 /**
  * Render a fully-qualified table path.
  */

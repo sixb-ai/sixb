@@ -91,8 +91,8 @@ class RecordingLakeStorage implements LakeStorage {
     this.standard = delegate.standard
   }
 
-  assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    return this.delegate.assertDatasetDefinitionCompatible(definition)
+  assertDatasetDefinitionsCompatible(definitions: readonly DatasetDefinition[]): Promise<void> {
+    return this.delegate.assertDatasetDefinitionsCompatible(definitions)
   }
 
   createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {

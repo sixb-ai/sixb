@@ -9,6 +9,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  LakeStorageError,
   prop,
   Sixb,
 } from "@sixb/core"
@@ -32,11 +33,16 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
 // Mirrors the real lake drift failure without needing a Postgres-backed catalog:
 // the command path is what these tests exercise, not the diff algorithm itself.
 class FixtureLakeStorage extends InMemoryLakeStorage {
-  override async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
+  override async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
     if (process.env.SIXB_CLI_TEST_LAKE_DRIFT === "1") {
-      throw new Error(`dataset '${definition.id}' has drifted from the lake catalog`)
+      const datasetId = definitions[0]?.id ?? "unknown"
+      throw new LakeStorageError(
+        `[SixbLake] Lake dataset definition check failed for 1 dataset(s).\n- ${datasetId}: dataset '${datasetId}' has drifted from the lake catalog`
+      )
     }
-    return super.assertDatasetDefinitionCompatible(definition)
+    return super.assertDatasetDefinitionsCompatible(definitions)
   }
 
   async close(): Promise<void> {

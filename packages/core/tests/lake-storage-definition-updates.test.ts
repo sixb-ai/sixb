@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { DatasetDefinition, LakeStorage } from "../src"
 import {
   assertLakeDatasetDefinitionsCompatible,
   col,
@@ -208,5 +209,24 @@ describe("dataset definition update planning", () => {
         definitions: [requested],
       })
     ).rejects.toThrow(/Lake dataset definition check failed[\s\S]*incompatible schema/)
+  })
+
+  test("lake compatibility preflight delegates to provider bulk checks", async () => {
+    const dataset = defineDataset("raw.erp.invoices", {
+      schema: [col("invoiceId", "string")],
+    })
+    let bulkDefinitions: readonly DatasetDefinition[] | undefined
+    const storage = {
+      async assertDatasetDefinitionsCompatible(definitions: readonly DatasetDefinition[]) {
+        bulkDefinitions = definitions
+      },
+    } as unknown as LakeStorage
+
+    await assertLakeDatasetDefinitionsCompatible({
+      lakeStorage: storage,
+      definitions: [dataset],
+    })
+
+    expect(bulkDefinitions).toEqual([dataset])
   })
 })

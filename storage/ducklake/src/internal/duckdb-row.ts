@@ -58,6 +58,15 @@ export function getBigIntLike(row: DuckDbRow, key: string): bigint {
   )
 }
 
+export function getOptionalBigIntLike(row: DuckDbRow, key: string): bigint | undefined {
+  const value = row[key]
+  if (value === null || value === undefined) {
+    return undefined
+  }
+
+  return getBigIntLike(row, key)
+}
+
 export function getDate(row: DuckDbRow, key: string): Date {
   const value = row[key]
   if (value instanceof Date) {

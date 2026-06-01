@@ -134,18 +134,34 @@ export class LocalLakeStorage implements LakeStorage {
     return structuredClone(merged)
   }
 
-  async assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void> {
-    assertDatasetId(definition.id)
+  async assertDatasetDefinitionsCompatible(
+    definitions: readonly DatasetDefinition[]
+  ): Promise<void> {
+    const failures: string[] = []
 
-    const existing = await this.getDataset(definition.id)
-    if (!existing) {
-      return
+    for (const definition of definitions) {
+      try {
+        assertDatasetId(definition.id)
+        const existing = await this.getDataset(definition.id)
+        if (!existing) {
+          continue
+        }
+
+        mergeStrictDatasetDefinition({
+          existing,
+          next: definition,
+        })
+      } catch (error) {
+        failures.push(`- ${definition.id}: ${errorMessage(error)}`)
+      }
     }
 
-    mergeStrictDatasetDefinition({
-      existing,
-      next: definition,
-    })
+    if (failures.length > 0) {
+      const details = failures.join("\n")
+      throw new LakeStorageError(
+        `[SixbLake] Lake dataset definition check failed for ${failures.length} dataset(s).\n${details}`
+      )
+    }
   }
 
   async getDataset(datasetId: string): Promise<DatasetDefinition | null> {
@@ -461,4 +477,8 @@ export class LocalLakeStorage implements LakeStorage {
   private rowsPath(datasetId: string, versionId: string): string {
     return join(this.rowsDir(datasetId), `${encodeSegment(versionId)}.jsonl`)
   }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }

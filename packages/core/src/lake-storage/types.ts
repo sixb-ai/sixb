@@ -87,7 +87,7 @@ export interface LakeStorage {
    * versions from this method. Missing persisted datasets should be treated as
    * compatible because createDataset remains the materialization path.
    */
-  assertDatasetDefinitionCompatible(definition: DatasetDefinition): Promise<void>
+  assertDatasetDefinitionsCompatible(definitions: readonly DatasetDefinition[]): Promise<void>
 
   createDataset(definition: DatasetDefinition): Promise<DatasetDefinition>
   getDataset(datasetId: string): Promise<DatasetDefinition | null>
