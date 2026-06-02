@@ -95,6 +95,44 @@ describe("RedisBroker", () => {
     }
   })
 
+  test("handles concurrent appends and retained reads on the shared command client", async () => {
+    const { broker, projectId, cleanup } = createTestBroker()
+    const stream = { id: "__concurrent_events" }
+    try {
+      await broker.ensureStream({ projectId, stream })
+
+      const appendTasks = Array.from({ length: 100 }, (_, index) =>
+        broker.append({
+          projectId,
+          streamId: stream.id,
+          records: [
+            {
+              name: "workflow.run.queued",
+              key: `workflow:run-${index}`,
+              payload: {
+                workflowId: "workflow",
+                runId: `run-${index}`,
+                queuedAt: new Date().toISOString(),
+                source: { type: "manual" },
+              },
+            },
+          ],
+        })
+      )
+      const readTasks = Array.from({ length: 50 }, () =>
+        broker.read({ projectId, streamId: stream.id, limit: 25 })
+      )
+
+      const results = await Promise.all([...appendTasks, ...readTasks])
+      expect(results.slice(0, appendTasks.length).flat()).toHaveLength(100)
+
+      const retained = await broker.read({ projectId, streamId: stream.id, limit: 200 })
+      expect(retained).toHaveLength(100)
+    } finally {
+      await cleanup()
+    }
+  })
+
   test("deduplicates records inside a bulk append before retention trims them", async () => {
     const { broker, projectId, cleanup } = createTestBroker()
     const stream = { id: "__bulk_dedupe_retained", retention: { maxRecords: 1 } }
@@ -217,6 +255,75 @@ describe("RedisBroker", () => {
     ).rejects.toThrow("broker has been closed")
 
     expect(received).toEqual([{ id: "room-before-close" }])
+  })
+
+  test("close rejects operations that have not enqueued their command yet", async () => {
+    const { broker, projectId } = createTestBroker()
+    const stream = { id: "__close_race" }
+    await broker.ensureStream({ projectId, stream })
+
+    const manager = (
+      broker as unknown as {
+        streamManager: {
+          requireStream(projectId: string, streamId: string): Promise<unknown>
+        }
+      }
+    ).streamManager
+    const originalRequireStream = manager.requireStream.bind(manager)
+    let releaseRequireStream!: () => void
+    const requireStreamGate = new Promise<void>((resolve) => {
+      releaseRequireStream = resolve
+    })
+    const blockedInRequireStream = new Promise<void>((resolve) => {
+      manager.requireStream = async (projectId, streamId) => {
+        const ensured = await originalRequireStream(projectId, streamId)
+        resolve()
+        await requireStreamGate
+        return ensured
+      }
+    })
+
+    const append = broker.append({
+      projectId,
+      streamId: stream.id,
+      records: [{ name: "object.upserted", payload: { id: "room-after-close" } }],
+    })
+
+    await blockedInRequireStream
+    await broker.close()
+    releaseRequireStream()
+
+    await expect(append).rejects.toThrow("closed")
+  })
+
+  test("close rejects subscriptions that are still resolving their starting cursor", async () => {
+    const { broker, projectId } = createTestBroker()
+    const stream = { id: "__subscribe_close_race" }
+    await broker.ensureStream({ projectId, stream })
+
+    const brokerInternals = broker as unknown as {
+      latestCursor(client: unknown, ensured: unknown): Promise<string>
+    }
+    const originalLatestCursor = brokerInternals.latestCursor.bind(broker)
+    let releaseLatestCursor!: () => void
+    const latestCursorGate = new Promise<void>((resolve) => {
+      releaseLatestCursor = resolve
+    })
+    const blockedInLatestCursor = new Promise<void>((resolve) => {
+      brokerInternals.latestCursor = async (client, ensured) => {
+        resolve()
+        await latestCursorGate
+        return originalLatestCursor(client, ensured)
+      }
+    })
+
+    const subscribe = broker.subscribe({ projectId, streamId: stream.id }, () => {})
+
+    await blockedInLatestCursor
+    await broker.close()
+    releaseLatestCursor()
+
+    await expect(subscribe).rejects.toThrow()
   })
 
   test("allows reads after the latest trimmed cursor boundary", async () => {

@@ -18,6 +18,8 @@ export class RedisConnectionManager {
   private readonly options: RedisOptions | undefined
   private connectPromise: Promise<RedisBrokerClient> | undefined
   private client: RedisBrokerClient | undefined
+  private commandQueue: Promise<void> = Promise.resolve()
+  private closed = false
 
   constructor(options: RedisBrokerConnectionOptions = {}) {
     const { url, ...redisOptions } = options
@@ -25,7 +27,7 @@ export class RedisConnectionManager {
     this.options = Object.keys(redisOptions).length === 0 ? undefined : redisOptions
   }
 
-  async connect(): Promise<RedisBrokerClient> {
+  private async connect(): Promise<RedisBrokerClient> {
     if (this.client !== undefined) {
       // Bun owns reconnects and offline queueing for the client. Keep returning
       // the same main client while it reconnects instead of opening duplicates.
@@ -53,10 +55,49 @@ export class RedisConnectionManager {
   }
 
   async createSubscriptionClient(): Promise<RedisBrokerClient> {
-    return this.openClient("Failed to connect Redis subscription client")
+    this.assertOpen()
+    const client = await this.openClient("Failed to connect Redis subscription client")
+    if (this.closed) {
+      this.closeClient(client)
+      this.assertOpen()
+    }
+    return client
+  }
+
+  /**
+   * Serializes commands sent through the shared main client.
+   *
+   * Subscription pumps use dedicated clients, but ordinary broker reads/appends share one
+   * Bun Redis client. Keeping one in-flight command at a time avoids response interleaving
+   * across mixed `send()` calls under concurrent API traffic.
+   */
+  async useCommandClient<T>(operation: (client: RedisBrokerClient) => Promise<T>): Promise<T> {
+    this.assertOpen()
+
+    const previous = this.commandQueue
+    let release!: () => void
+    this.commandQueue = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    await previous
+    try {
+      this.assertOpen()
+      const client = await this.connect()
+      return await operation(client)
+    } finally {
+      release()
+    }
   }
 
   async close(): Promise<void> {
+    if (this.closed) {
+      await this.commandQueue
+      return
+    }
+    this.closed = true
+    await this.commandQueue
+
     const client = this.client
     this.client = undefined
     this.connectPromise = undefined
@@ -82,6 +123,12 @@ export class RedisConnectionManager {
     } catch (error) {
       this.closeClient(client)
       throw new RedisBrokerError(errorMessage, { cause: error })
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) {
+      throw new RedisBrokerError("broker connection has been closed")
     }
   }
 }

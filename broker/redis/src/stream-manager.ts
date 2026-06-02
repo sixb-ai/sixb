@@ -39,25 +39,25 @@ export class StreamManager {
     }
 
     const retention = normalizeRetention(stream.retention)
-    const client = await this.connectionManager.connect()
-
-    try {
-      // The script creates metadata only when absent. That mirrors NATS'
-      // "bind to existing stream config" behavior and avoids changing
-      // production retention if a later runtime starts with different options.
-      await client.send("EVAL", [
-        ENSURE_STREAM_SCRIPT,
-        "1",
-        keys.metaKey,
-        projectId,
-        stream.id,
-        new Date().toISOString(),
-        retention.maxAgeMs === undefined ? "" : String(retention.maxAgeMs),
-        retention.maxRecords === undefined ? "" : String(retention.maxRecords),
-      ])
-    } catch (error) {
-      throw new RedisBrokerError(`Failed to ensure stream "${stream.id}"`, { cause: error })
-    }
+    await this.connectionManager.useCommandClient(async (client) => {
+      try {
+        // The script creates metadata only when absent. That mirrors NATS'
+        // "bind to existing stream config" behavior and avoids changing
+        // production retention if a later runtime starts with different options.
+        await client.send("EVAL", [
+          ENSURE_STREAM_SCRIPT,
+          "1",
+          keys.metaKey,
+          projectId,
+          stream.id,
+          new Date().toISOString(),
+          retention.maxAgeMs === undefined ? "" : String(retention.maxAgeMs),
+          retention.maxRecords === undefined ? "" : String(retention.maxRecords),
+        ])
+      } catch (error) {
+        throw new RedisBrokerError(`Failed to ensure stream "${stream.id}"`, { cause: error })
+      }
+    })
 
     const ensured = { projectId, streamId: stream.id, keys }
     this.knownStreams.set(keys.metaKey, ensured)
@@ -74,13 +74,13 @@ export class StreamManager {
       return cached
     }
 
-    const client = await this.connectionManager.connect()
-    let exists: boolean
-    try {
-      exists = await client.exists(keys.metaKey)
-    } catch (error) {
-      throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
-    }
+    const exists = await this.connectionManager.useCommandClient(async (client) => {
+      try {
+        return await client.exists(keys.metaKey)
+      } catch (error) {
+        throw new RedisBrokerError(`Failed to inspect stream "${streamId}"`, { cause: error })
+      }
+    })
 
     if (!exists) {
       return null
