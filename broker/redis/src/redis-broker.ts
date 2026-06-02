@@ -114,7 +114,6 @@ export class RedisBroker implements Broker {
     }
 
     const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
-    const client = await this.connectionManager.connect()
     const encodedRecords: EncodedAppendRecord[] = params.records.map((input) => {
       const publishedAt = new Date().toISOString()
       return {
@@ -124,11 +123,13 @@ export class RedisBroker implements Broker {
       }
     })
 
-    const appendResults = await this.appendBatch({
-      client,
-      ensured,
-      records: encodedRecords,
-    })
+    const appendResults = await this.connectionManager.useCommandClient((client) =>
+      this.appendBatch({
+        client,
+        ensured,
+        records: encodedRecords,
+      })
+    )
 
     if (appendResults.length !== encodedRecords.length) {
       throw new RedisBrokerError(
@@ -150,7 +151,9 @@ export class RedisBroker implements Broker {
                 cursor: result.cursor,
                 fallbackPublishedAt: new Date().toISOString(),
               })
-            : await this.fetchRecordByCursor(client, ensured, result.cursor)
+            : await this.connectionManager.useCommandClient((client) =>
+                this.fetchRecordByCursor(client, ensured, result.cursor)
+              )
         )
         continue
       }
@@ -189,9 +192,12 @@ export class RedisBroker implements Broker {
       return []
     }
 
-    const client = await this.connectionManager.connect()
-    await this.enforceAgeRetention(client, ensured)
-    const lastTrimmedId = await this.readLastTrimmedId(client, ensured)
+    await this.connectionManager.useCommandClient((client) =>
+      this.enforceAgeRetention(client, ensured)
+    )
+    const lastTrimmedId = await this.connectionManager.useCommandClient((client) =>
+      this.readLastTrimmedId(client, ensured)
+    )
     this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
 
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
@@ -205,7 +211,9 @@ export class RedisBroker implements Broker {
         : `(${params.afterCursor}`
 
     while (params.limit === undefined || records.length < params.limit) {
-      const entries = await this.readRange(client, ensured, start, this.readBatchSize)
+      const entries = await this.connectionManager.useCommandClient((client) =>
+        this.readRange(client, ensured, start, this.readBatchSize)
+      )
       if (entries.length === 0) {
         break
       }
@@ -257,73 +265,17 @@ export class RedisBroker implements Broker {
     assertCursor(params.afterCursor)
 
     const ensured = await this.streamManager.requireStream(params.projectId, params.streamId)
-    const commandClient = await this.connectionManager.connect()
-    await this.enforceAgeRetention(commandClient, ensured)
-    const lastTrimmedId = await this.readLastTrimmedId(commandClient, ensured)
+    const lastTrimmedId = await this.connectionManager.useCommandClient(async (commandClient) => {
+      await this.enforceAgeRetention(commandClient, ensured)
+      return this.readLastTrimmedId(commandClient, ensured)
+    })
     if (params.afterCursor !== undefined) {
       this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
     }
 
     const client = await this.connectionManager.createSubscriptionClient()
-    const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
-    // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK
-    // timeout can skip records written between two XREAD calls.
-    let lastSeenId =
-      params.afterCursor ??
-      (params.from === "earliest"
-        ? (lastTrimmedId ?? "0-0")
-        : await this.latestCursor(client, ensured))
     let stopped = false
-
-    const pump = (async () => {
-      try {
-        while (!stopped) {
-          const entries = await this.xread(client, ensured, lastSeenId)
-          const records: BrokerRecord[] = []
-
-          for (const entry of entries) {
-            // Advance even for records filtered out by name so the loop never
-            // replays unmatched entries forever.
-            lastSeenId = entry.id
-
-            let record: BrokerRecord
-            try {
-              record = decodeRecord({
-                streamId: ensured.streamId,
-                body: bodyFromEntry(entry),
-                cursor: entry.id,
-                fallbackPublishedAt: new Date().toISOString(),
-              })
-            } catch (error) {
-              console.error("[RedisBroker] Failed to decode subscribed record:", error)
-              continue
-            }
-
-            if (names && (!record.name || !names.has(record.name))) {
-              continue
-            }
-            records.push(record)
-          }
-
-          if (records.length === 0) {
-            continue
-          }
-
-          try {
-            handler(records)
-          } catch {
-            // Handler failures are swallowed per the Broker subscribe contract.
-          }
-        }
-      } catch (error) {
-        if (!stopped) {
-          console.error("[RedisBroker] Subscription pump failed:", error)
-        }
-      } finally {
-        this.connectionManager.closeClient(client)
-      }
-    })()
-
+    let pump: Promise<void> = Promise.resolve()
     const subscription: ActiveSubscription = {
       stop: () => {
         if (stopped) {
@@ -336,8 +288,73 @@ export class RedisBroker implements Broker {
         await pump
       },
     }
+    const unsubscribe = this.subscriptionRegistry.register(subscription)
 
-    return this.subscriptionRegistry.register(subscription)
+    try {
+      const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
+      // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK
+      // timeout can skip records written between two XREAD calls.
+      let lastSeenId =
+        params.afterCursor ??
+        (params.from === "earliest"
+          ? (lastTrimmedId ?? "0-0")
+          : await this.latestCursor(client, ensured))
+      this.assertOpen()
+
+      pump = (async () => {
+        try {
+          while (!stopped) {
+            const entries = await this.xread(client, ensured, lastSeenId)
+            const records: BrokerRecord[] = []
+
+            for (const entry of entries) {
+              // Advance even for records filtered out by name so the loop never
+              // replays unmatched entries forever.
+              lastSeenId = entry.id
+
+              let record: BrokerRecord
+              try {
+                record = decodeRecord({
+                  streamId: ensured.streamId,
+                  body: bodyFromEntry(entry),
+                  cursor: entry.id,
+                  fallbackPublishedAt: new Date().toISOString(),
+                })
+              } catch (error) {
+                console.error("[RedisBroker] Failed to decode subscribed record:", error)
+                continue
+              }
+
+              if (names && (!record.name || !names.has(record.name))) {
+                continue
+              }
+              records.push(record)
+            }
+
+            if (records.length === 0) {
+              continue
+            }
+
+            try {
+              handler(records)
+            } catch {
+              // Handler failures are swallowed per the Broker subscribe contract.
+            }
+          }
+        } catch (error) {
+          if (!stopped) {
+            console.error("[RedisBroker] Subscription pump failed:", error)
+          }
+        } finally {
+          this.connectionManager.closeClient(client)
+        }
+      })()
+
+      return unsubscribe
+    } catch (error) {
+      unsubscribe()
+      throw error
+    }
   }
 
   async close(): Promise<void> {
@@ -346,9 +363,9 @@ export class RedisBroker implements Broker {
     }
     this.closed = true
     try {
-      await this.subscriptionRegistry.drain()
-    } finally {
       await this.connectionManager.close()
+    } finally {
+      await this.subscriptionRegistry.drain()
     }
   }
 
