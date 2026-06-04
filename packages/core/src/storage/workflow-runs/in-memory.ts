@@ -2,6 +2,7 @@ import {
   cloneRecord,
   compareStartedAt,
   hasEmptyStatuses,
+  latestStartedAtByOwnerId,
   matchesRunListDateFilters,
   paginate,
   storageKey,
@@ -11,6 +12,8 @@ import { WorkflowRunError } from "./errors"
 import type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
+  ListLatestWorkflowRunsInput,
+  ListLatestWorkflowRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
@@ -194,6 +197,20 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       runs: page.map(cloneRecord),
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByWorkflowIds(
+    input: ListLatestWorkflowRunsInput
+  ): Promise<ListLatestWorkflowRunsResult> {
+    const runs = latestStartedAtByOwnerId(
+      [...this.runs.values()].filter((record) => record.projectId === input.projectId),
+      input.workflowIds,
+      (record) => record.workflowId
+    )
+
+    return {
+      runs: runs.map(cloneRecord),
     }
   }
 

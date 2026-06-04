@@ -1,7 +1,10 @@
 import { cloneJsonValue, type JsonValue } from "../../json"
+import { latestStartedAtByOwnerId } from "../run-listing"
 import { SyncRunError } from "./errors"
 import type {
   FinishSyncRunInput,
+  ListLatestSyncRunsInput,
+  ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
@@ -136,6 +139,18 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
       runs,
       hasMore: offset + runs.length < total,
       total,
+    }
+  }
+
+  async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
+    const runs = latestStartedAtByOwnerId(
+      [...this.rows.values()].filter((record) => record.projectId === input.projectId),
+      input.syncIds,
+      (record) => record.syncId
+    )
+
+    return {
+      runs: runs.map(cloneSyncRunRecord),
     }
   }
 }

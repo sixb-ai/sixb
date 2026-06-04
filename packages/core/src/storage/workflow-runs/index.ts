@@ -3,6 +3,8 @@ export { InMemoryWorkflowNodeRunStorage, InMemoryWorkflowRunStorage } from "./in
 export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
+  ListLatestWorkflowRunsInput,
+  ListLatestWorkflowRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,

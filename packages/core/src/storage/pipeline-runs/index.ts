@@ -3,6 +3,8 @@ export { InMemoryPipelineRunStorage } from "./in-memory"
 export type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
+  ListLatestPipelineRunsInput,
+  ListLatestPipelineRunsResult,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,

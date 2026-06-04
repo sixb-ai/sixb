@@ -72,3 +72,36 @@ export function compareStartedAt(
 
   return order === "asc" ? left.id.localeCompare(right.id) : right.id.localeCompare(left.id)
 }
+
+export function latestStartedAtByOwnerId<
+  TRecord extends { readonly id: string; readonly startedAt: Date },
+>(
+  records: readonly TRecord[],
+  ownerIds: readonly string[],
+  ownerIdFor: (record: TRecord) => string
+): readonly TRecord[] {
+  const uniqueOwnerIds = [...new Set(ownerIds)]
+  if (uniqueOwnerIds.length === 0) {
+    return []
+  }
+
+  const requested = new Set(uniqueOwnerIds)
+  const latestByOwnerId = new Map<string, TRecord>()
+
+  for (const record of records) {
+    const ownerId = ownerIdFor(record)
+    if (!requested.has(ownerId)) {
+      continue
+    }
+
+    const current = latestByOwnerId.get(ownerId)
+    if (!current || compareStartedAt(record, current, "desc") < 0) {
+      latestByOwnerId.set(ownerId, record)
+    }
+  }
+
+  return uniqueOwnerIds.flatMap((ownerId) => {
+    const record = latestByOwnerId.get(ownerId)
+    return record ? [record] : []
+  })
+}

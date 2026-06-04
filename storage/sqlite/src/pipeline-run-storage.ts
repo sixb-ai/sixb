@@ -5,6 +5,8 @@ import type {
   DatasetVersionRef,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
+  ListLatestPipelineRunsInput,
+  ListLatestPipelineRunsResult,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -17,6 +19,7 @@ import type {
   StartPipelineStepRunInput,
 } from "@sixb/core"
 import { PipelineRunError } from "@sixb/core"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -312,6 +315,23 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
       runs: rows.map(rowToPipelineRunRecord),
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByPipelineIds(
+    input: ListLatestPipelineRunsInput
+  ): Promise<ListLatestPipelineRunsResult> {
+    const rows = queryLatestRunsByOwnerId<PipelineRunDatabaseRow>({
+      db: this.db,
+      tableName: "pipeline_runs",
+      ownerColumn: "pipeline_id",
+      ownerIds: input.pipelineIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.pipeline_id,
+    })
+
+    return {
+      runs: rows.map(rowToPipelineRunRecord),
     }
   }
 

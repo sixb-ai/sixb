@@ -2,6 +2,8 @@ import type {
   DatasetVersionRef,
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
+  ListLatestPipelineRunsInput,
+  ListLatestPipelineRunsResult,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -15,6 +17,7 @@ import type {
 } from "@sixb/core"
 import { PipelineRunError } from "@sixb/core"
 import type { SQL } from "bun"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -271,6 +274,23 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       runs,
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByPipelineIds(
+    input: ListLatestPipelineRunsInput
+  ): Promise<ListLatestPipelineRunsResult> {
+    const rows = await queryLatestRunsByOwnerId<PipelineRunDatabaseRow>({
+      sql: this.sql,
+      tableName: "pipeline_runs",
+      ownerColumn: "pipeline_id",
+      ownerIds: input.pipelineIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.pipeline_id,
+    })
+
+    return {
+      runs: rows.map(rowToPipelineRunRecord),
     }
   }
 

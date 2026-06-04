@@ -106,6 +106,15 @@ export interface ListPipelineRunsResult {
   readonly total: number
 }
 
+export interface ListLatestPipelineRunsInput {
+  readonly projectId: string
+  readonly pipelineIds: readonly string[]
+}
+
+export interface ListLatestPipelineRunsResult {
+  readonly runs: readonly PipelineRunRecord[]
+}
+
 export interface ListPipelineStepRunsInput {
   readonly projectId: string
   readonly pipelineRunId?: string
@@ -133,5 +142,6 @@ export interface PipelineRunStorage {
   finishStep(input: FinishPipelineStepRunInput): Promise<PipelineStepRunRecord>
   getById(params: { projectId: string; id: string }): Promise<PipelineRunRecord | null>
   list(input: ListPipelineRunsInput): Promise<ListPipelineRunsResult>
+  listLatestByPipelineIds(input: ListLatestPipelineRunsInput): Promise<ListLatestPipelineRunsResult>
   listSteps(input: ListPipelineStepRunsInput): Promise<ListPipelineStepRunsResult>
 }

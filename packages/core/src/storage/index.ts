@@ -77,6 +77,8 @@ export { InMemoryObjectStorage } from "./objects"
 export type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
+  ListLatestPipelineRunsInput,
+  ListLatestPipelineRunsResult,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -112,6 +114,8 @@ export type {
 export { InMemoryRulesStorage } from "./rules"
 export type {
   FinishSyncRunInput,
+  ListLatestSyncRunsInput,
+  ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
@@ -163,6 +167,8 @@ export {
 export type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
+  ListLatestWorkflowRunsInput,
+  ListLatestWorkflowRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,

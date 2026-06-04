@@ -179,6 +179,50 @@ describe("InMemorySyncRunStorage", () => {
     })
   })
 
+  test("lists the latest run for multiple sync ids", async () => {
+    const storage = new InMemorySyncRunStorage()
+
+    await storage.start({
+      id: "run-orders-a",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-orders-z",
+      projectId: "my-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-customers",
+      projectId: "my-app",
+      syncId: "sync-customers",
+      datasetId: "raw.crm.customers",
+      mode: "append",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-other-project",
+      projectId: "other-app",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-04-06T17:00:00.000Z"),
+    })
+
+    const latest = await storage.listLatestBySyncIds({
+      projectId: "my-app",
+      syncIds: ["sync-customers", "sync-missing", "sync-orders", "sync-orders"],
+    })
+
+    expect(latest.runs.map((run) => run.id)).toEqual(["run-customers", "run-orders-z"])
+  })
+
   test("rejects success outputs for a different dataset", async () => {
     const storage = new InMemorySyncRunStorage()
 

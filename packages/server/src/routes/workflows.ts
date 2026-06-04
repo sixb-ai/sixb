@@ -45,6 +45,8 @@ function serializeWorkflowRun(run: WorkflowRunRecord) {
   }
 }
 
+type SerializedWorkflowRun = ReturnType<typeof serializeWorkflowRun>
+
 function serializeWorkflowNodeRun(node: WorkflowNodeRunRecord) {
   return {
     id: node.id,
@@ -92,26 +94,42 @@ function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord)
 async function getLatestWorkflowRun(
   sixb: Sixb<readonly OntologySource[]>,
   workflowId: string
-): Promise<ReturnType<typeof serializeWorkflowRun> | null> {
+): Promise<SerializedWorkflowRun | null> {
   if (!sixb.storage.workflowRuns) {
     return null
   }
 
-  const result = await sixb.storage.workflowRuns.list({
+  const storage = sixb.storage.workflowRuns
+  const result = await storage.listLatestByWorkflowIds({
     projectId: sixb.id,
-    workflowId,
-    limit: 1,
-    order: "desc",
+    workflowIds: [workflowId],
   })
 
   const [latest] = result.runs
   return latest ? serializeWorkflowRun(latest) : null
 }
 
-async function serializeWorkflow(
+async function getLatestWorkflowRuns(
   sixb: Sixb<readonly OntologySource[]>,
-  workflow: WorkflowDefinition
-): Promise<ReturnType<typeof WorkflowSchema.parse>> {
+  workflowIds: readonly string[]
+): Promise<Map<string, SerializedWorkflowRun>> {
+  const storage = sixb.storage.workflowRuns
+  if (!storage || workflowIds.length === 0) {
+    return new Map()
+  }
+
+  const result = await storage.listLatestByWorkflowIds({
+    projectId: sixb.id,
+    workflowIds,
+  })
+
+  return new Map(result.runs.map((run) => [run.workflowId, serializeWorkflowRun(run)]))
+}
+
+function serializeWorkflow(
+  workflow: WorkflowDefinition,
+  latestRun: SerializedWorkflowRun | null
+): ReturnType<typeof WorkflowSchema.parse> {
   return WorkflowSchema.parse({
     id: workflow.id,
     input: workflow.input,
@@ -146,7 +164,7 @@ async function serializeWorkflow(
         description: node.intervention.description,
       }
     }),
-    latestRun: await getLatestWorkflowRun(sixb, workflow.id),
+    latestRun,
   })
 }
 
@@ -266,8 +284,14 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     .get(
       "/api/workflows",
       async () => {
-        return await Promise.all(
-          sixb.workflows.list().map((workflow) => serializeWorkflow(sixb, workflow))
+        const workflows = sixb.workflows.list()
+        const latestRuns = await getLatestWorkflowRuns(
+          sixb,
+          workflows.map((workflow) => workflow.id)
+        )
+
+        return workflows.map((workflow) =>
+          serializeWorkflow(workflow, latestRuns.get(workflow.id) ?? null)
         )
       },
       {
@@ -288,7 +312,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           return { error: "Workflow not found" }
         }
 
-        return await serializeWorkflow(sixb, workflow)
+        return serializeWorkflow(workflow, await getLatestWorkflowRun(sixb, workflow.id))
       },
       {
         params: WorkflowParamsSchema,

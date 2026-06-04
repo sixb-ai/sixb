@@ -138,6 +138,15 @@ export interface ListWorkflowRunsResult {
   readonly total: number
 }
 
+export interface ListLatestWorkflowRunsInput {
+  readonly projectId: string
+  readonly workflowIds: readonly string[]
+}
+
+export interface ListLatestWorkflowRunsResult {
+  readonly runs: readonly WorkflowRunRecord[]
+}
+
 export interface ListWorkflowNodeRunsInput {
   readonly projectId: string
   readonly workflowRunId?: string
@@ -169,6 +178,7 @@ export interface WorkflowRunStorage {
   finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord>
   getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null>
   list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult>
+  listLatestByWorkflowIds(input: ListLatestWorkflowRunsInput): Promise<ListLatestWorkflowRunsResult>
 }
 
 export interface WorkflowNodeRunStorage {

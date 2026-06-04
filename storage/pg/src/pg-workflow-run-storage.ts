@@ -1,6 +1,8 @@
 import type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
+  ListLatestWorkflowRunsInput,
+  ListLatestWorkflowRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
@@ -20,6 +22,7 @@ import type {
 } from "@sixb/core"
 import { WorkflowRunError } from "@sixb/core"
 import type { SQL } from "bun"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -297,6 +300,23 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
       runs,
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByWorkflowIds(
+    input: ListLatestWorkflowRunsInput
+  ): Promise<ListLatestWorkflowRunsResult> {
+    const rows = await queryLatestRunsByOwnerId<WorkflowRunDatabaseRow>({
+      sql: this.sql,
+      tableName: "workflow_runs",
+      ownerColumn: "workflow_id",
+      ownerIds: input.workflowIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.workflow_id,
+    })
+
+    return {
+      runs: rows.map(rowToWorkflowRunRecord),
     }
   }
 }

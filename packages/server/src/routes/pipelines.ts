@@ -34,6 +34,8 @@ function serializePipelineRun(run: PipelineRunRecord) {
   }
 }
 
+type SerializedPipelineRun = ReturnType<typeof serializePipelineRun>
+
 function serializePipelineStepRun(step: PipelineStepRunRecord) {
   return {
     id: step.id,
@@ -70,26 +72,42 @@ function serializeExecutor(executor: PipelineStepExecutor) {
 async function getLatestPipelineRun(
   sixb: Sixb<readonly OntologySource[]>,
   pipelineId: string
-): Promise<ReturnType<typeof serializePipelineRun> | null> {
+): Promise<SerializedPipelineRun | null> {
   if (!sixb.storage.pipelineRuns) {
     return null
   }
 
-  const result = await sixb.storage.pipelineRuns.list({
+  const storage = sixb.storage.pipelineRuns
+  const result = await storage.listLatestByPipelineIds({
     projectId: sixb.id,
-    pipelineId,
-    limit: 1,
-    order: "desc",
+    pipelineIds: [pipelineId],
   })
 
   const [latest] = result.runs
   return latest ? serializePipelineRun(latest) : null
 }
 
-async function serializePipeline(
+async function getLatestPipelineRuns(
   sixb: Sixb<readonly OntologySource[]>,
-  pipeline: PipelineDefinition
-): Promise<ReturnType<typeof PipelineSchema.parse>> {
+  pipelineIds: readonly string[]
+): Promise<Map<string, SerializedPipelineRun>> {
+  const storage = sixb.storage.pipelineRuns
+  if (!storage || pipelineIds.length === 0) {
+    return new Map()
+  }
+
+  const result = await storage.listLatestByPipelineIds({
+    projectId: sixb.id,
+    pipelineIds,
+  })
+
+  return new Map(result.runs.map((run) => [run.pipelineId, serializePipelineRun(run)]))
+}
+
+function serializePipeline(
+  pipeline: PipelineDefinition,
+  latestRun: SerializedPipelineRun | null
+): ReturnType<typeof PipelineSchema.parse> {
   return PipelineSchema.parse({
     id: pipeline.id,
     triggers: pipeline.triggers,
@@ -109,7 +127,7 @@ async function serializePipeline(
         },
       })),
     },
-    latestRun: await getLatestPipelineRun(sixb, pipeline.id),
+    latestRun,
   })
 }
 
@@ -118,8 +136,14 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     .get(
       "/api/pipelines",
       async () => {
-        return await Promise.all(
-          sixb.getPipelineDefinitions().map((pipeline) => serializePipeline(sixb, pipeline))
+        const pipelines = sixb.getPipelineDefinitions()
+        const latestRuns = await getLatestPipelineRuns(
+          sixb,
+          pipelines.map((pipeline) => pipeline.id)
+        )
+
+        return pipelines.map((pipeline) =>
+          serializePipeline(pipeline, latestRuns.get(pipeline.id) ?? null)
         )
       },
       {
@@ -140,7 +164,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           return { error: "Pipeline not found" }
         }
 
-        return await serializePipeline(sixb, pipeline)
+        return serializePipeline(pipeline, await getLatestPipelineRun(sixb, pipeline.id))
       },
       {
         params: PipelineParamsSchema,
