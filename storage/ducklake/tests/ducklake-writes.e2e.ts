@@ -88,7 +88,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
 
     expect(version2.versionId).toStartWith("ducklake:")
     expect(version2.parentVersionId).toBe(version1.versionId)
-    expect(version2.rowCount).toBe(3)
+    expect(version2).not.toHaveProperty("rowCount")
     expect(version2.inputs).toEqual([
       { datasetId: "raw.erp.orders", versionId: version1.versionId },
     ])
@@ -102,7 +102,7 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ])
   })
 
-  test("does not persist derived row counts for unguarded appends", async () => {
+  test("omits derived row counts for unguarded appends", async () => {
     const snapshotWrite = await storage.beginWrite({
       dataset: ordersDataset,
       mode: "snapshot",
@@ -125,11 +125,12 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await appendWrite.writeRows([{ orderId: "ord_2", customerName: "Grace", orderCount: 2 }])
     const appendVersion = await appendWrite.commit()
 
-    expect(appendVersion.rowCount).toBe(2)
-    expect(await storage.getLatestVersion(ordersDataset.id)).toMatchObject({
+    expect(appendVersion).not.toHaveProperty("rowCount")
+    const latestVersion = await storage.getLatestVersion(ordersDataset.id)
+    expect(latestVersion).toMatchObject({
       versionId: appendVersion.versionId,
-      rowCount: 2,
     })
+    expect(latestVersion).not.toHaveProperty("rowCount")
 
     const metadata = await commitMetadataForVersion(storage, rootDir, appendVersion.versionId)
     expect(metadata).toMatchObject({
@@ -349,9 +350,9 @@ describe("DuckLakeStorage writes and latest reads", () => {
     expect(schemaVersion).toMatchObject({
       mode: "schema",
       parentVersionId: initialVersion.versionId,
-      rowCount: 1,
       schema: storedEvolvedDataset.schema,
     })
+    expect(schemaVersion).not.toHaveProperty("rowCount")
 
     const versionsAfterSchemaEvolution = await storage.listVersions(initialDataset.id)
     expect(versionsAfterSchemaEvolution).toHaveLength(2)
@@ -359,9 +360,9 @@ describe("DuckLakeStorage writes and latest reads", () => {
       versionId: schemaVersion?.versionId,
       mode: "schema",
       parentVersionId: initialVersion.versionId,
-      rowCount: 1,
       schema: storedEvolvedDataset.schema,
     })
+    expect(versionsAfterSchemaEvolution[0]).not.toHaveProperty("rowCount")
     expect(versionsAfterSchemaEvolution[1]).toMatchObject({
       versionId: initialVersion.versionId,
       rowCount: 1,
@@ -378,10 +379,12 @@ describe("DuckLakeStorage writes and latest reads", () => {
 
     expect(evolvedVersion.parentVersionId).toBe(schemaVersion?.versionId)
     expect(evolvedVersion.schema).toEqual(storedEvolvedDataset.schema)
-    await expect(storage.getLatestVersion(initialDataset.id)).resolves.toMatchObject({
+    expect(evolvedVersion).not.toHaveProperty("rowCount")
+    const latestVersionAfterAppend = await storage.getLatestVersion(initialDataset.id)
+    expect(latestVersionAfterAppend).toMatchObject({
       versionId: evolvedVersion.versionId,
-      rowCount: 2,
     })
+    expect(latestVersionAfterAppend).not.toHaveProperty("rowCount")
     await expect(collectRows(storage.readRows({ datasetId: initialDataset.id }))).resolves.toEqual([
       { invoiceId: "inv_1", total: "100", currency: null },
       { invoiceId: "inv_2", total: "200", currency: "EUR" },

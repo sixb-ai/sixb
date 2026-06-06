@@ -7,18 +7,23 @@ import type {
 } from "@sixb/core"
 import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
-import { getString } from "./duckdb-row"
+import { getBigIntLike, getBoolean, getOptionalBigIntLike, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
+import {
+  type DuckLakeCatalogColumn,
+  duckLakeCatalogColumnsToDatasetSchema,
+} from "./ducklake-catalog-schema"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { readCurrentDatasetDefinitions } from "./ducklake-current-dataset-definitions"
 import { encodeDatasetTableName } from "./names"
+import { datasetColumnToDuckDbSql, datasetSchemaToDuckDbColumnsSql } from "./schema"
 import {
-  type DuckDbColumnMetadata,
-  datasetColumnToDuckDbSql,
-  datasetSchemaToDuckDbColumnsSql,
-  duckDbColumnsToDatasetSchema,
-} from "./schema"
-import { duckLakeAlias, qualifiedTableName, quoteIdentifier, quoteSqlString } from "./sql"
+  duckLakeAlias,
+  duckLakeMetadataTableName,
+  qualifiedTableName,
+  quoteIdentifier,
+  quoteSqlString,
+} from "./sql"
 
 /**
  * Translates between Sixb dataset definitions and DuckLake table metadata.
@@ -176,12 +181,20 @@ export class DuckLakeDatasetCatalog {
   async getDatasetSchemaAtSnapshot(
     runtime: DuckDbQueryRuntime,
     datasetId: string,
+    tableId: bigint,
     snapshotId: string
   ): Promise<DatasetSchema> {
     assertDuckLakeSnapshotId(snapshotId)
 
     const tableName = encodeDatasetTableName(datasetId)
-    return this.describeDatasetSchema(runtime, tableName, snapshotId)
+    const columns = await this.readDatasetColumnsAtSnapshot(runtime, tableName, tableId, snapshotId)
+    if (columns.length === 0) {
+      throw new LakeStorageError(
+        `[SixbDuckLake] Could not reconstruct schema for dataset '${datasetId}' at DuckLake snapshot '${snapshotId}'.`
+      )
+    }
+
+    return duckLakeCatalogColumnsToDatasetSchema(tableName, columns)
   }
 
   assertSchema(definition: DatasetDefinition): void {
@@ -313,23 +326,37 @@ export class DuckLakeDatasetCatalog {
     }
   }
 
-  private async describeDatasetSchema(
+  private async readDatasetColumnsAtSnapshot(
     runtime: DuckDbQueryRuntime,
     tableName: string,
-    snapshotId?: string
-  ): Promise<DatasetSchema> {
-    const tableSql = qualifiedTableName(this.options, tableName)
-    const versionSql = snapshotId === undefined ? "" : ` AT (VERSION => ${snapshotId})`
-    const relationSql = `${tableSql}${versionSql}`
-    const rows = await runtime.query(`DESCRIBE SELECT * FROM ${relationSql}`)
+    tableId: bigint,
+    snapshotId: string
+  ): Promise<readonly DuckLakeCatalogColumn[]> {
+    const ducklakeColumn = duckLakeMetadataTableName(this.options, "ducklake_column")
+    const rows = await runtime.query(`
+      SELECT
+        column_id,
+        column_order,
+        column_name,
+        column_type,
+        CAST(nulls_allowed AS BOOLEAN) AS nulls_allowed,
+        parent_column
+      FROM ${ducklakeColumn}
+      WHERE table_id = ${tableId}
+        AND begin_snapshot <= ${snapshotId}
+        AND (end_snapshot IS NULL OR end_snapshot > ${snapshotId})
+      ORDER BY column_order
+    `)
 
-    const columns = rows.map((row) => ({
-      name: getString(row, "column_name"),
-      type: getString(row, "column_type"),
-      nullable: getDescribeColumnNullable(row),
-    })) satisfies DuckDbColumnMetadata[]
-
-    return duckDbColumnsToDatasetSchema(columns)
+    return rows.map((row) => ({
+      tableName,
+      columnId: getBigIntLike(row, "column_id"),
+      columnOrder: getBigIntLike(row, "column_order"),
+      columnName: getString(row, "column_name"),
+      columnType: getString(row, "column_type"),
+      nullsAllowed: getBoolean(row, "nulls_allowed"),
+      parentColumnId: getOptionalBigIntLike(row, "parent_column"),
+    }))
   }
 }
 
@@ -337,21 +364,4 @@ function assertDuckLakeSnapshotId(snapshotId: string): void {
   if (!/^\d+$/.test(snapshotId)) {
     throw new LakeStorageError(`[SixbDuckLake] Invalid DuckLake snapshot id '${snapshotId}'.`)
   }
-}
-
-function getDescribeColumnNullable(row: Readonly<Record<string, unknown>>): boolean {
-  // DuckDB DESCRIBE reports nullability as text in a column named "null".
-  // Normalize that provider shape into the boolean used by DatasetColumnDefinition.
-  const value = getString(row, "null")
-  if (value === "YES") {
-    return true
-  }
-
-  if (value === "NO") {
-    return false
-  }
-
-  throw new LakeStorageError(
-    `[SixbDuckLake] Expected DuckDB DESCRIBE column 'null' to be YES or NO.`
-  )
 }

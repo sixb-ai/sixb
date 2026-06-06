@@ -290,8 +290,8 @@ describe("DuckLakeStorage dataset metadata", () => {
       datasetId: initialDataset.id,
       mode: "schema",
       schema: evolvedPartitionedDataset.schema,
-      rowCount: 0,
     })
+    expect(versions[0]).not.toHaveProperty("rowCount")
   })
 
   test("keeps schema evolution transaction exclusive from concurrent commit blocks", async () => {
