@@ -1,300 +1,223 @@
 # Workflow
 
-A workflow describes an ordered business process over typed inputs, step outputs, and action
-requests.
+A workflow runs a business process in a known order.
 
-## What It Is
+Use workflows when work needs multiple named steps, typed data between those steps, and a run
+history you can inspect.
 
-- an inert definition built with `defineWorkflow(...)`
-- a typed input contract using the same schema language as ontology values and action params
-- a linear sequence of step and action nodes
-- optionally triggered by a schedule
-- registered explicitly or discovered from `workflows/`
-- routable by the orchestrator when a scheduled workflow has empty input
+## Why it is useful
 
-Workflows are useful when business logic needs to move through several named stages and keep the
-data passed between those stages typed.
+Workflows are useful when a process should be more than one function call.
 
-## Parts
+Use a workflow to:
 
-| Piece | Role |
-| --- | --- |
-| `defineWorkflowStep` | Defines one reusable step handler with input and output schemas |
-| `defineWorkflow` | Defines the workflow input and ordered node list |
-| `.then(step)` | Adds a step when previous output already matches the step input |
-| `.then(step, mapper)` | Adds a step with an explicit input mapper |
-| `.then(action, mapper)` | Adds an action request node with target and params mapping |
-| `.when(schedule)` | Adds a schedule trigger to the definition |
-| `compileRoutes(...)` | Routes eligible scheduled workflows to `queues.workflows` |
-| `WorkflowWorker` | Consumes queued workflow runs and executes nodes sequentially |
+- prepare data before an action
+- break a process into clear steps
+- pass typed outputs from one step to the next
+- request object actions at the right time
+- track whether a process is running, succeeded, or failed
 
-## Define a Step
+A workflow is made of steps and optional actions. Steps create data. Actions do something to an
+object.
 
-File: `workflows/reconcileTransaction.ts`
+## Define a step
+
+File: `workflows/invoice-reminder.ts`
 
 ```ts
 import { defineWorkflowStep, ref } from "@sixb/core"
-import { Invoice, Transaction } from "../ontology/transaction"
+import { Invoice } from "../ontology/invoice"
 
-export const findBestInvoice = defineWorkflowStep("find-best-invoice")
+export const prepareInvoiceReminder = defineWorkflowStep("prepare-invoice-reminder")
   .input({
-    transaction: ref(Transaction),
+    invoice: ref(Invoice),
   })
   .output({
-    transaction: ref(Transaction),
     invoice: ref(Invoice),
-    confidence: "double",
+    message: "string",
   })
-  .run(async ({ input, sixb }) => {
-    return {
-      transaction: input.transaction,
-      invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
-      confidence: 0.98,
-    }
-  })
+  .run(({ input }) => ({
+    invoice: input.invoice,
+    message: "Please review this invoice and submit payment when convenient.",
+  }))
 ```
 
-Step ids are also used to derive keys for `steps` data. For example, `find-best-invoice` becomes
-`steps.findBestInvoice`.
+A step is a typed function. It declares the input it needs, the output it returns, and the code
+that runs.
 
-## Compose a Workflow
+## Compose a workflow
 
 ```ts
-import { actionParam, defineAction, defineWorkflow, ref } from "@sixb/core"
-import { Invoice, Transaction } from "../ontology/transaction"
-import { findBestInvoice } from "./reconcileTransaction"
+import { defineWorkflow, ref } from "@sixb/core"
+import { sendReminder } from "../actions/send-reminder"
+import { Invoice } from "../ontology/invoice"
+import { prepareInvoiceReminder } from "./invoice-reminder"
 
-export const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
-  .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
-  })
-  .run(async () => {})
-
-export const reconcileTransaction = defineWorkflow("reconcile-transaction")
+export const invoiceReminderWorkflow = defineWorkflow("invoice-reminder")
   .input({
-    transaction: ref(Transaction),
+    invoice: ref(Invoice),
   })
-  .then(findBestInvoice)
-  .then(attachInvoice, ({ input, steps }) => ({
-    target: input.transaction,
+  .then(prepareInvoiceReminder)
+  .then(sendReminder, ({ steps }) => ({
+    target: steps.prepareInvoiceReminder.invoice,
     params: {
-      invoice: steps.findBestInvoice.invoice,
+      message: steps.prepareInvoiceReminder.message,
     },
   }))
 ```
 
-The action mapper must return:
+This workflow prepares a reminder message, then requests the `sendReminder` action for the
+invoice.
+
+`sendReminder` is an object action defined elsewhere. The workflow decides when to call it and
+what params to pass.
+
+## What each part does
+
+| Part | Meaning |
+| --- | --- |
+| `defineWorkflow("invoice-reminder")` | Names the workflow |
+| `.input({ invoice })` | Declares the input needed to start the workflow |
+| `.then(prepareInvoiceReminder)` | Runs a step |
+| `.then(sendReminder, mapper)` | Requests an action |
+| `steps.prepareInvoiceReminder` | Reads output from the earlier step |
+
+Step ids become camelCase keys in `steps`. For example, `prepare-invoice-reminder` becomes
+`steps.prepareInvoiceReminder`.
+
+## Pass data between steps
+
+Use direct `.then(step)` when the previous output already matches the next step input.
 
 ```ts
-{
-  target: { objectTypeId: "Transaction", primaryId: "txn_123" },
-  params: { invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" } },
-}
+export const reviewInvoiceWorkflow = defineWorkflow("review-invoice")
+  .input({
+    invoice: ref(Invoice),
+  })
+  .then(prepareInvoiceReminder)
+  .then(reviewReminderMessage)
 ```
 
-Action nodes do not add business output to `steps`.
-
-## Step Dataflow
-
-When the previous workflow state already matches the next step input, use direct dataflow:
+Use a mapper when the next step or action needs a specific shape.
 
 ```ts
-defineWorkflow("direct-reconciliation")
-  .input({ transaction: ref(Transaction) })
-  .then(findBestInvoice)
-  .then(reviewInvoiceMatch)
-```
-
-Use a mapper when the next step needs a different shape:
-
-```ts
-defineWorkflow("mapped-reconciliation")
-  .input({ transaction: ref(Transaction) })
-  .then(findBestInvoice)
-  .then(reviewInvoiceMatch, ({ input, steps }) => ({
-    transaction: input.transaction,
-    invoice: steps.findBestInvoice.invoice,
-    confidence: steps.findBestInvoice.confidence,
+export const reviewInvoiceWorkflow = defineWorkflow("review-invoice")
+  .input({
+    invoice: ref(Invoice),
+  })
+  .then(prepareInvoiceReminder)
+  .then(reviewReminderMessage, ({ input, steps }) => ({
+    invoice: input.invoice,
+    message: steps.prepareInvoiceReminder.message,
   }))
 ```
 
-Mappers receive:
+Mappers can read the original workflow `input` and outputs from earlier `steps`.
 
-- `input`: the original workflow input
-- `steps`: outputs from earlier step nodes, keyed by derived step key
+## Add a schedule
 
-Later step outputs are not available yet, and action nodes do not expose step output.
-
-## Schedule Triggers
-
-Workflows can attach schedule triggers:
+Workflows can start from a schedule.
 
 ```ts
 import { defineSchedule, defineWorkflow } from "@sixb/core"
 
-export const daily = defineSchedule("daily-reconciliation").cron("0 6 * * *")
+export const daily = defineSchedule("daily-invoice-reminders").cron("0 9 * * *")
 
-export const nightlyReconciliation = defineWorkflow("nightly-reconciliation")
+export const dailyInvoiceReminders = defineWorkflow("daily-invoice-reminders")
   .input({})
   .when(daily)
-  .then(findTransactionsToReview)
+  .then(findInvoicesToRemind)
 ```
 
-A schedule event has no business payload. Because of that, the orchestrator only auto-routes
-scheduled workflows whose input shape is empty.
+Scheduled workflows should use empty input. A schedule says "run now"; it does not provide an
+invoice, customer, or other business object.
 
-This is routable:
+If a workflow needs input, start it from your app or API with that input.
 
-```ts
-defineWorkflow("nightly-reconciliation").input({}).when(daily).then(findTransactionsToReview)
-```
+## Workflow vs other concepts
 
-This is registered and valid, but not auto-routed from the schedule:
+| Need | Use |
+| --- | --- |
+| Move data from an external system | Sync |
+| Clean or join table data | Pipeline |
+| Turn rows into objects | Projection |
+| Watch whether an object needs attention | Rule |
+| Run a multi-step business process | Workflow |
+| Perform one command on one object | Action |
 
-```ts
-defineWorkflow("reconcile-transaction")
-  .input({ transaction: ref(Transaction) })
-  .when(daily)
-  .then(findBestInvoice)
-```
+A good rule: workflows coordinate work; steps and actions do the work.
 
-Use `compileRoutesWithDiagnostics(...)` to see skipped scheduled workflows:
+## Convention
 
-```ts
-import { compileRoutesWithDiagnostics } from "@sixb/orchestrator"
-
-const { routes, diagnostics } = compileRoutesWithDiagnostics({
-  syncs: sixb.getSyncDefinitions(),
-  pipelines: sixb.getPipelineDefinitions(),
-  projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
-  workflows: sixb.getWorkflowDefinitions(),
-})
-```
-
-The diagnostic type is:
-
-```ts
-{
-  type: "workflow.schedule.input-required",
-  workflowId: "reconcile-transaction",
-  scheduleId: "daily-reconciliation",
-  inputFields: ["transaction"],
-}
-```
-
-## Discovery
-
-Export workflow definitions from `workflows/`:
+Put workflow definitions in `workflows/` and export them.
 
 ```txt
 your-project/
   actions/
-    attachInvoice.ts
+    send-reminder.ts
   ontology/
-    transaction.ts
-  schedules/
-    daily.ts
+    invoice.ts
   workflows/
-    reconcileTransaction.ts
+    invoice-reminder.ts
   sixb.config.ts
 ```
 
-`createSixb()` scans `workflows/` and registers exported workflow definitions automatically.
+`createSixb()` discovers exported workflow definitions from `workflows/` automatically.
 
 You can also register workflows explicitly:
 
 ```ts
-createSixb({
-  ontologies: [Transaction, Invoice],
-  actions: [attachInvoice],
-  schedules: [daily],
-  workflows: [reconcileTransaction],
-  // ...
+import { createSixb } from "@sixb/core"
+import { sendReminder } from "./actions/send-reminder"
+import { Invoice } from "./ontology/invoice"
+import { invoiceReminderWorkflow } from "./workflows/invoice-reminder"
+
+export const sixb = createSixb({
+  ontology: [Invoice],
+  actions: [sendReminder],
+  workflows: [invoiceReminderWorkflow],
 })
 ```
 
-Registered workflows can be inspected from the runtime:
+## How to model workflows
 
-```ts
-sixb.getWorkflowDefinitions()
-sixb.getWorkflowById("reconcile-transaction")
-```
+Start with the business process, not the code.
 
-## Runtime Validation
+1. Name the outcome the workflow should produce.
+2. Decide what input is needed to start.
+3. Define the smallest first step.
+4. Add another step only when it has a clear job.
+5. Use actions for side effects on objects.
+6. Add a schedule only when the workflow can start without business input.
 
-At startup, Sixb rejects:
+Good workflow names describe the process:
 
-- duplicate workflow ids
-- workflows with no nodes
-- workflow triggers that are not schedules
-- workflows referencing unknown schedules
-- workflows referencing unknown actions
-- duplicate node ids
-- duplicate derived node keys
-- action nodes without a mapper
+- `invoice-reminder`
+- `review-invoice`
+- `close-stale-projects`
+- `daily-health-check`
 
-## How Scheduled Routing Fits
+## Starting workflows
 
-The orchestrator compiles routes at startup:
+A workflow can be started by your app, by the API, or by a schedule.
 
-```text
-workflow definitions
-  -> compileRoutes(...)
-  -> route table
-```
+In local development, `sixb dev` can run workflow workers when workflows are registered.
 
-When a matching schedule event is observed, the orchestrator enqueues a workflow run request:
-
-```text
-schedule.triggered
-  -> OrchestratorWorker
-  -> queues.workflows.enqueue(workflow.run.requested)
-```
-
-The queued payload for an empty-input scheduled workflow looks like:
-
-```ts
-{
-  type: "workflow.run.requested",
-  payload: {
-    workflowId: "nightly-reconciliation",
-    input: {},
-  },
-}
-```
-
-Source event metadata is attached to the queue job envelope.
-
-In local development, `sixb dev` co-hosts `WorkflowWorker` when workflows are registered:
-
-```text
-sixb dev
-  -> compile workflow routes
-  -> start WorkflowWorker
-  -> start OrchestratorWorker
-  -> start scheduler
-```
-
-For a dedicated process, use:
+For a separate worker process:
 
 ```bash
 sixb worker workflow
 ```
 
-## Current Scope
+## Extra details
 
-The current workflow surface defines, registers, validates, discovers, routes, and executes
-sequential workflow definitions. It does not add branching, parallel execution, nested workflows, trigger admission mappers, or aliases for workflow node keys.
+- workflows run nodes sequentially in V1.
+- a workflow must contain at least one node.
+- step input and output are validated at runtime.
+- action nodes must use a mapper.
+- action nodes request object actions and wait for them to finish.
+- scheduled auto-start works for workflows with empty input.
+- registered workflows can be inspected with `sixb.getWorkflowDefinitions()` and
+  `sixb.getWorkflowById(...)`.
 
-Scheduled auto-routing only supports empty workflow input. Workflows with required input need an
-explicit caller or a future trigger-admission mapper that can build input from the triggering event.
-
-## Guidelines
-
-- Keep workflow ids stable and business-readable.
-- Use step ids that produce readable derived keys, such as `find-best-invoice`.
-- Prefer direct `.then(step)` when the previous output already matches the next input.
-- Use mappers when passing a small, explicit shape is clearer.
-- Keep action nodes for side-effect requests and step nodes for workflow dataflow.
-- Use empty workflow input for scheduled workflows in V1.
+The important first step is to make each workflow read like the business process it represents.

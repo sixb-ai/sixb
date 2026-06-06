@@ -1,151 +1,171 @@
 # Connector
 
-A connector gives Sixb access to an external system.
+A connector is Sixb's reusable connection to an external system.
 
-## What it does
+Most connectors should feel boring. Pick a connector package, give it config, and use the
+connected client from syncs, functions, or app code.
 
-- handles how Sixb connects: auth, config, transport, retries, lifecycle
-- returns a connected client from `connect()`
-- connects only when resolved with `sixb.connector(...)`
-- can clean up with `disconnect()`
+## When to use a connector
 
-## Parts
+Create a connector when your project needs to:
 
-| Piece | Role |
-| --- | --- |
-| adapter | Knows how to open and optionally close the connection |
-| definition | `defineConnector("erpDb", adapter)` |
-| runtime | Registers definitions, connects lazily, caches clients, runs cleanup |
-| client | The connected value returned by `connect()` |
+- read data from an external system
+- call a third-party API
+- reuse the same database or API client in multiple places
+- keep credentials and connection setup out of syncs, functions, and app code
 
-## Adapter shape
+Do not use a connector to describe data shape. Use a [dataset](./datasets.md) for tables and
+an [ontology](./ontology.md) for objects.
 
-```ts
-const adapter = {
-  type: "sql",
-  connect(context) {
-    return createClient(context)
-  },
-  disconnect(client) {
-    return client.close()
-  },
-}
-```
+## Start with a connector package
 
-`context` includes:
+For common systems, define the connector with a package.
 
-- `projectId`
-- `connectorId`
-- `signal`
-
-`disconnect(client)` is optional.
-
-## Define a connector
-
-File: `connectors/erpDb.ts`
+File: `connectors/erp-db.ts`
 
 ```ts
 import { defineConnector } from "@sixb/core"
+import { sql } from "@sixb/connector-sql"
 
-const adapter = {
-  type: "sql",
-  connect(context) {
-    return {
-      async query(sql: string) {
-        console.log(`[${context.projectId}:${context.connectorId}] ${sql}`)
-        return []
-      },
-    }
-  },
-}
-
-export const erpDb = defineConnector("erpDb", adapter)
+export const erpDb = defineConnector("erp-db", sql(process.env.DATABASE_URL!))
 ```
 
-`defineConnector()` names the adapter so the runtime can register and resolve it.
+That is the whole connector. Sixb now has one named place to get an ERP database client.
 
-## Common definition styles
+## Use it from a sync
 
-### Use an adapter package
+Syncs receive the connected client from `.from(...)`.
+
+```ts
+import { defineSync } from "@sixb/core"
+import { erpDb } from "../connectors/erp-db"
+import { rawOrdersDataset } from "../datasets/orders"
+
+export const syncOrders = defineSync("sync-orders")
+  .from(erpDb)
+  .read((db) => db`select * from orders`)
+  .intoDataset(rawOrdersDataset)
+```
+
+This keeps the sync focused on one job: read rows and write them into a dataset.
+
+## Another package example
+
+REST APIs work the same way.
+
+File: `connectors/billing-api.ts`
 
 ```ts
 import { defineConnector } from "@sixb/core"
 import { rest } from "@sixb/connector-rest"
-import { sql } from "@sixb/connector-sql"
 
 export const billingApi = defineConnector(
-  "billingApi",
-  rest({ baseUrl: "https://api.example.com" })
-)
-
-export const erpDb = defineConnector(
-  "erpDb",
-  sql(process.env.DATABASE_URL!)
+  "billing-api",
+  rest({
+    baseUrl: "https://api.example.com",
+    headers: {
+      authorization: `Bearer ${process.env.BILLING_API_TOKEN}`,
+    },
+  })
 )
 ```
 
-### Define a custom adapter in the project
+Use package connectors when they already match what you need.
 
-Use this when the connection needs project-specific auth, headers, client setup, or
-protocol behavior.
+## Custom connectors
+
+When there is no package for your system, define the connection yourself.
 
 ```ts
 import { defineConnector } from "@sixb/core"
+import { createScannerClient } from "../lib/scanner"
 
-export const billingApi = defineConnector("billingApi", {
-  type: "rest",
-  connect({ signal }) {
-    return createBillingClient({ signal })
+export const warehouseScanner = defineConnector("warehouse-scanner", {
+  type: "scanner",
+  connect() {
+    return createScannerClient()
   },
 })
 ```
 
-## Convention
+A custom connector can return any client shape. Keep that client small and tailored to the
+calls your project actually makes.
 
-Export connector definitions from `connectors/`:
-
-```txt
-your-project/
-  connectors/
-    billingApi.ts
-    erpDb.ts
-  sixb.config.ts
-```
-
-`createSixb()` scans `connectors/` and registers exported connector definitions
-automatically.
-
-You can also register connectors explicitly with `createSixb({ connectors: [erpDb] })`.
-
-## Resolve a connector
-
-File: `lib/loadOrders.ts`
+Add `disconnect(...)` only when the client needs cleanup.
 
 ```ts
-import { erpDb } from "../connectors/erpDb"
+export const warehouseScanner = defineConnector("warehouse-scanner", {
+  type: "scanner",
+  connect() {
+    return createScannerClient()
+  },
+  disconnect(client) {
+    return client.close()
+  },
+})
+```
+
+## Use a connector directly
+
+You can also resolve a connector from the Sixb runtime.
+
+```ts
+import { erpDb } from "../connectors/erp-db"
 import { sixb } from "../sixb.config"
 
 export async function loadOrders() {
   const runtime = await sixb
   const db = await runtime.connector(erpDb)
-  return db.query("select * from orders")
+
+  return db`select * from orders`
 }
 ```
 
-The first call runs `connect(context)`. Later calls reuse the same client for that
-runtime.
+The first call opens the connection. Later calls reuse the same client for that runtime.
 
-## Lifecycle
+## Convention
 
-1. Define an adapter.
-2. Wrap it with `defineConnector(id, adapter)`.
-3. Register it explicitly or export it from `connectors/`.
-4. Resolve it with `sixb.connector(definition)`.
-5. Sixb caches the connected client.
-6. `sixb.disconnectConnectors()` calls `disconnect(client)` if present.
+Put connector definitions in `connectors/` and export them.
 
-## Guidelines
+```txt
+your-project/
+  connectors/
+    erp-db.ts
+    billing-api.ts
+  datasets/
+    orders.ts
+  syncs/
+    orders.ts
+  sixb.config.ts
+```
 
-- Keep the connector focused on connection setup.
-- Return a small client by default.
-- Add a separate service layer only if it makes project code clearer.
+`createSixb()` discovers exported connector definitions from `connectors/` automatically.
+
+You can also register connectors explicitly:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { erpDb } from "./connectors/erp-db"
+
+export const sixb = createSixb({
+  connectors: [erpDb],
+})
+```
+
+## Core principles
+
+- Start with a connector package.
+- Keep one connector focused on one external system.
+- Keep credentials and connection setup inside the connector.
+- Keep data mapping in syncs, pipelines, or projections.
+- Move to a custom connector when the external system needs special behavior.
+
+## Where connectors fit
+
+| Need | Use |
+| --- | --- |
+| Talk to an external system | Connector |
+| Store rows from that system | Dataset |
+| Move external data into Sixb | Sync |
+| Transform rows into cleaner rows | Pipeline |
+| Turn rows into objects for apps | Projection |

@@ -1,50 +1,34 @@
 # Dataset
 
-A dataset is Sixb's definition for a table of rows.
+A dataset is a typed table of rows.
 
-It gives a table a stable id, a required schema, and optional metadata such as partitioning
-and description.
+Datasets are where Sixb stores table-shaped data: raw rows from external systems, cleaned
+rows from pipelines, and rows that projections can turn into app objects.
 
-Syncs write datasets. Pipelines read datasets and produce new datasets. Storage versions a
-dataset's contents over time.
+## Why it is useful
 
-If ontology types are Sixb's model for objects, datasets are Sixb's model for tables and rows.
+A dataset gives table data a stable contract.
 
-## What It Is
+That contract says:
 
-A dataset is the contract for one table.
+- what the dataset is called
+- which columns exist
+- what type each column has
+- which columns can be missing or `null`
 
-That contract includes:
+Once a dataset is defined, syncs, pipelines, projections, and storage can all point at the
+same shape.
 
-- a stable id
-- a required schema
-- optional partitioning
-- an optional description
+## Core terms
 
-The important idea is that you define this contract once, then reuse it everywhere that table
-appears.
-
-In Sixb, datasets are always schema-first. A dataset is not just "some rows with a name". It
-is a named table with an explicit shape, and there is no schemaless dataset write path.
-
-## What It Gives You
-
-- one place to define a table's shape
-- one shared definition that syncs, pipelines, and storage can all reference
-- row validation before data is committed
-- versioned dataset contents over time
-
-## Parts
-
-| Piece | Role |
+| Concept | Meaning |
 | --- | --- |
-| `defineDataset` | Creates a runtime dataset definition |
-| `col` | Declares one dataset column |
-| `schema` | Lists allowed columns, types, and nullability |
-| `partitionBy` | Declares logical partition columns |
-| `description` | Adds human-readable context |
-| runtime registry | Registers datasets and resolves them by id |
-| lake storage | Materializes dataset definitions and versions writes |
+| Dataset | A named table contract |
+| Column | One typed field in each row |
+| Row | One record written to the dataset |
+| Version | One committed set of rows |
+
+If an [ontology](./ontology.md) is your app's object model, a dataset is your table model.
 
 ## Define a dataset
 
@@ -55,53 +39,87 @@ import { col, defineDataset } from "@sixb/core"
 
 export const rawOrdersDataset = defineDataset("raw.erp.orders", {
   schema: [
-    col("orderId", "string"),
-    col("customerId", "string", { nullable: true }),
-    col("total", "float64", { nullable: true }),
-    col("createdAt", "timestamp", { nullable: true }),
-    col("raw", "json", { nullable: true }),
+    col("order_id", "string"),
+    col("customer_id", "string"),
+    col("total", "decimal", { nullable: true }),
+    col("created_at", "timestamp"),
   ],
-  partitionBy: ["createdAt"],
-  description: "Raw ERP order rows",
+  description: "Raw order rows from the ERP.",
 })
 ```
 
-This defines one reusable dataset contract. Anything that writes to `raw.erp.orders` should use
-this same definition.
+This defines one reusable table shape.
 
-Every dataset must declare a schema. There is no schemaless dataset write path.
+The dataset id, `raw.erp.orders`, is the stable name other parts of the project use.
 
-## Derive a dataset schema
+## Use a dataset from a sync
 
-When a pipeline output keeps the same shape as an input dataset, or only narrows it to a known
-set of columns, derive the output schema from the parent dataset instead of restating every
-column:
+Syncs read from a connector and write into one dataset.
 
 ```ts
-import { col, defineDataset } from "@sixb/core"
-import { rawProjectsDataset } from "./projects"
+import { defineSync } from "@sixb/core"
+import { erpDb } from "../connectors/erp-db"
+import { rawOrdersDataset } from "../datasets/orders"
 
-export const activeProjectsDataset = defineDataset("erp.active_projects").derive(
-  rawProjectsDataset
-)
-
-export const projectSummariesDataset = defineDataset("erp.project_summaries").derive(
-  rawProjectsDataset,
-  {
-    pick: ["project_id", "project_name", "status", "budget_amount"],
-    add: [col("priority", "int64")],
-  }
-)
+export const syncOrders = defineSync("sync-orders")
+  .from(erpDb)
+  .read((db) => db`select * from orders`)
+  .intoDataset(rawOrdersDataset)
 ```
 
-`pick` columns must exist on the parent dataset. TypeScript catches typos for literal parent
-datasets, and runtime validation catches invalid dynamic values. `derive(...)` only derives the
-schema; set `partitionBy` and `description` explicitly when the child dataset needs its own
-metadata.
+The sync does not need to repeat the table shape. It references the dataset definition.
+
+## Use a dataset from a pipeline
+
+Pipelines read datasets and write new datasets.
+
+```ts
+import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@sixb/core"
+import { rawOrdersDataset } from "../datasets/orders"
+
+export const ordersDataset = defineDataset("orders", {
+  schema: [
+    col("id", "string"),
+    col("customer_id", "string"),
+    col("total", "decimal", { nullable: true }),
+  ],
+})
+
+export const cleanOrdersStep = definePipelineStep("clean-orders")
+  .inputs({ rawOrders: rawOrdersDataset })
+  .output(ordersDataset)
+  .sql(({ rawOrders }) => `
+    select
+      order_id as id,
+      customer_id,
+      total
+    from ${rawOrders}
+  `)
+
+export const ordersPipeline = definePipeline("orders")
+  .when(datasetUpdated(rawOrdersDataset.id))
+  .then(cleanOrdersStep)
+```
+
+This keeps raw source data separate from cleaner app-ready table data.
+
+## Dataset vs ontology
+
+Datasets and ontology types solve different problems.
+
+| Use | Choose |
+| --- | --- |
+| Raw source rows | Dataset |
+| Cleaned table rows | Dataset |
+| App objects users interact with | Ontology |
+| Relationships between objects | Ontology links |
+
+Usually, source data lands in a raw dataset, pipelines shape it into a clean dataset, and
+projections turn it into ontology objects.
 
 ## Column types
 
-Supported dataset column types:
+Common column types:
 
 - `string`
 - `boolean`
@@ -113,150 +131,68 @@ Supported dataset column types:
 - `json`
 - `fileRef`
 
-Use `nullable: true` when a column may be `null` or omitted.
+Use `nullable: true` when a column may be missing or `null`.
 
-## Use datasets from syncs
-
-```ts
-import { defineSync } from "@sixb/core"
-import { erpDb } from "../connectors/erpDb"
-import { rawOrdersDataset } from "../datasets/orders"
-
-export const syncOrders = defineSync("sync-orders")
-  .from(erpDb)
-  .read(({ query }) => query("select * from orders"))
-  .intoDataset(rawOrdersDataset)
-```
-
-Syncs reference the dataset definition directly, so the worker can materialize and validate
-against the same schema.
-
-## Use datasets from pipelines
-
-```ts
-import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@sixb/core"
-import { rawOrdersDataset } from "../datasets/orders"
-
-export const canonicalOrdersDataset = defineDataset("canonical.orders", {
-  schema: [
-    col("id", "string"),
-    col("customerId", "string"),
-    col("total", "float64", { nullable: true }),
-  ],
-})
-
-export const normalizeOrdersStep = definePipelineStep("normalize-orders")
-  .inputs({ rawOrders: rawOrdersDataset })
-  .output(canonicalOrdersDataset)
-  .run(async ({ inputs, output }) => {
-    async function* rows() {
-      for await (const order of inputs.rawOrders.readRows()) {
-        yield {
-          id: order.orderId,
-          customerId: order.customerId,
-          total: order.total,
-        }
-      }
-    }
-
-    await output.writeRows(rows())
-  })
-
-export const normalizeOrders = definePipeline("normalize-orders")
-  .when(datasetUpdated(rawOrdersDataset.id))
-  .then(normalizeOrdersStep)
-```
-
-## Convention
-
-Export dataset definitions from `datasets/`:
-
-```txt
-your-project/
-  datasets/
-    orders.ts
-    orderEvents.ts
-  syncs/
-    syncOrders.ts
-  pipelines/
-    normalizeOrders.ts
-  sixb.config.ts
-```
-
-`createSixb()` scans `datasets/` and registers exported dataset definitions automatically.
-
-You can also register them explicitly with:
-
-```ts
-createSixb({
-  datasets: [rawOrdersDataset],
-  // ...
-})
-```
-
-## Runtime lookups
-
-Sixb exposes dataset definitions through the runtime:
-
-```ts
-sixb.getDatasetDefinitions()
-sixb.getDatasetById("raw.erp.orders")
-```
-
-Startup rejects:
-
-- duplicate dataset ids
-- datasets without schemas
-- syncs that target unknown datasets
-- pipelines that reference unknown datasets
-
-## Validation rules
-
-Rows are validated against the dataset schema before commit.
-
-Rules:
-
-- every non-nullable column must be present
-- `null` is allowed only for nullable columns
-- every value must match the declared column type
-- unknown columns are rejected
-
-If you want to keep raw source payloads, declare them explicitly:
+Use `json` when the source payload is intentionally unstructured:
 
 ```ts
 col("raw", "json", { nullable: true })
 ```
 
-## Lake behavior
+## Convention
 
-When a worker writes to a dataset:
+Put dataset definitions in `datasets/` and export them.
 
-1. it resolves the registered dataset definition
-2. it calls `lakeStorage.createDataset(dataset)`
-3. it opens a write with `beginWrite({ dataset, ... })`
-4. it validates rows against `dataset.schema`
-5. it commits a new dataset version
+```txt
+your-project/
+  datasets/
+    orders.ts
+    customers.ts
+  syncs/
+    orders.ts
+  pipelines/
+    orders.ts
+  sixb.config.ts
+```
 
-`createDataset(...)` is idempotent. It does not only create a brand-new dataset. It also lets
-lake storage check whether the dataset definition declared by the current runtime still matches
-the definition already known by that storage provider.
+`createSixb()` discovers exported dataset definitions from `datasets/` automatically.
 
-That comparison is between two dataset definitions:
+You can also register datasets explicitly:
 
-- the persisted definition: the definition storage already knows about
-- the runtime definition: the definition currently declared in code
+```ts
+import { createSixb } from "@sixb/core"
+import { rawOrdersDataset } from "./datasets/orders"
 
-Most providers reject incompatible definition changes. Some durable providers may apply a small
-safe subset of schema or metadata changes, such as adding nullable columns, and then expose that
-definition-only change as a dataset version.
+export const sixb = createSixb({
+  datasets: [rawOrdersDataset],
+})
+```
 
-This is separate from dataset content versioning. A `DatasetVersion` represents committed rows
-at a point in time.
+## How to model datasets
 
-## Guidelines
+Start with the source shape.
 
-- Define datasets once and reuse them everywhere.
-- Keep raw and canonical datasets separate.
-- Be explicit about nullable fields from external systems.
-- Use `json` only when the payload is intentionally unstructured.
-- Treat `partitionBy` as part of the dataset contract, not per-sync behavior.
+1. Define a raw dataset for data coming from an external system.
+2. Keep source column names if that makes debugging easier.
+3. Mark uncertain fields as nullable.
+4. Add a `json` column only when you intentionally want to keep the raw payload.
+5. Create cleaner datasets later with pipelines.
+
+Good dataset names usually describe the layer and source:
+
+- `raw.erp.orders`
+- `raw.stripe.invoices`
+- `orders`
+- `customer_activity`
+
+## Extra details
+
+- `partitionBy` declares logical partition columns.
+- `defineDataset("next").derive(parent)` copies a parent schema.
+- `derive(parent, { pick, add })` narrows or extends a parent schema.
+- rows are validated against the schema before commit.
+- each successful write commits a new dataset version.
+- durable lake storage providers may reject incompatible schema changes.
+
+The important first step is to define the table shape once and reuse that definition wherever
+the table appears.

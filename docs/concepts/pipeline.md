@@ -1,70 +1,112 @@
 # Pipeline
 
-A pipeline is a small ordered graph of dataset transform steps.
+A pipeline transforms datasets.
 
-Each step reads one or more committed dataset versions and commits one normal dataset version.
-Pipeline outputs can trigger projections, downstream pipelines, or any other route that listens for
-`dataset.version.committed`.
+Use pipelines after syncs when raw source rows need to become cleaner, smaller, joined, or more
+useful table data.
 
-## Define SQL Steps
+## Why it is useful
 
-Use SQL steps for dataset-to-dataset transforms that can be expressed by the lake storage SQL
-engine.
+Syncs should stay focused on getting data into Sixb. Pipelines are where you shape that data.
+
+Use a pipeline to:
+
+- clean source rows
+- rename columns
+- filter records
+- join datasets
+- create app-ready tables
+- prepare rows for projections
+
+A pipeline is made of steps. Each step reads one or more input datasets and writes one output
+dataset.
+
+## Define a pipeline
+
+File: `pipelines/orders.ts`
 
 ```ts
 import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
-import { customersDataset, rawCustomersDataset } from "../datasets/customers"
+import { ordersDataset, rawOrdersDataset } from "../datasets/orders"
 
-export const cleanCustomersStep = definePipelineStep("clean-customers")
-  .inputs({ rawCustomers: rawCustomersDataset })
-  .output(customersDataset)
-  .sql(({ rawCustomers }) => `
+export const cleanOrdersStep = definePipelineStep("clean-orders")
+  .inputs({ rawOrders: rawOrdersDataset })
+  .output(ordersDataset)
+  .sql(({ rawOrders }) => `
     select
-      id,
-      trim(name) as name,
-      email
-    from ${rawCustomers}
+      order_id as id,
+      customer_id,
+      total
+    from ${rawOrders}
+    where order_id is not null
   `)
 
-export const customersPipeline = definePipeline("customers")
-  .when(datasetUpdated(rawCustomersDataset.id))
-  .then(cleanCustomersStep)
+export const ordersPipeline = definePipeline("orders")
+  .when(datasetUpdated(rawOrdersDataset.id))
+  .then(cleanOrdersStep)
 ```
 
-SQL steps require a lake storage provider with SQL transform support. Sixb does not fall back to
-JavaScript execution when SQL support is missing.
+This runs when `rawOrdersDataset` gets a new committed version. It reads raw order rows and
+writes cleaner order rows.
 
-`definePipelineStep(...)` is inert by itself. Exporting a standalone step does not register work
-unless a `definePipeline(...)` references it with `.then(step)`.
+## What each part does
 
-## Compose Steps
+| Part | Meaning |
+| --- | --- |
+| `definePipelineStep("clean-orders")` | Defines one transform step |
+| `.inputs({ rawOrders })` | Names the datasets the step reads |
+| `.output(ordersDataset)` | Chooses the dataset the step writes |
+| `.sql(...)` | Defines the transform |
+| `definePipeline("orders")` | Names the pipeline |
+| `.when(datasetUpdated(...))` | Runs after a dataset changes |
+| `.then(cleanOrdersStep)` | Adds the step to the pipeline |
+
+Steps are reusable definitions. A step only runs when a pipeline references it with `.then(...)`.
+
+## SQL steps
+
+Use SQL when the transform can be written as a query.
+
+SQL is usually the best first choice for:
+
+- selecting columns
+- renaming columns
+- filtering rows
+- simple joins
+- aggregations
 
 ```ts
-export const customerInsightsPipeline = definePipeline("customer-insights")
-  .when(datasetUpdated(rawCustomersDataset.id))
-  .then(cleanCustomersStep)
-  .then(customerInsightsStep)
+export const activeCustomersStep = definePipelineStep("active-customers")
+  .inputs({ customers: rawCustomersDataset })
+  .output(activeCustomersDataset)
+  .sql(({ customers }) => `
+    select
+      customer_id as id,
+      contact_name as name,
+      service_tier
+    from ${customers}
+    where status = 'active'
+  `)
 ```
 
-V1 runs steps sequentially. If an earlier step commits successfully and a later step fails, the
-earlier dataset version remains durable and the pipeline run is marked failed.
+SQL steps require a lake storage provider with SQL transform support.
 
-## Define Run Steps
+## TypeScript steps
 
-Use run steps when the transform needs TypeScript logic, library calls, or row-by-row behavior that
-does not fit naturally in SQL.
+Use a TypeScript step when the transform needs application logic, library calls, or row-by-row
+behavior that does not fit naturally in SQL.
 
 ```ts
-export const cleanCustomersRunStep = definePipelineStep("clean-customers")
+export const cleanCustomersStep = definePipelineStep("clean-customers")
   .inputs({ rawCustomers: rawCustomersDataset })
   .output(customersDataset)
   .run(async ({ inputs, output }) => {
     async function* rows() {
-      for await (const row of inputs.rawCustomers.readRows()) {
+      for await (const customer of inputs.rawCustomers.readRows()) {
         yield {
-          id: row.id,
-          name: String(row.name).trim(),
-          email: row.email,
+          id: customer.customer_id,
+          name: String(customer.contact_name).trim(),
+          tier: customer.service_tier,
         }
       }
     }
@@ -73,17 +115,108 @@ export const cleanCustomersRunStep = definePipelineStep("clean-customers")
   })
 ```
 
-The worker pins each input to a committed dataset version before calling the handler, and the
-handler writes through a worker-owned output writer.
+Start with SQL when you can. Use TypeScript when the transform needs code.
 
-## Running Pipelines
+## Compose steps
 
-`sixb dev` co-hosts `PipelineWorker` automatically when pipelines are registered.
+Pipelines can run multiple steps in order.
 
-For a separate worker process:
+```ts
+export const customerPipeline = definePipeline("customers")
+  .when(datasetUpdated(rawCustomersDataset.id))
+  .then(cleanCustomersStep)
+  .then(customerInsightsStep)
+```
+
+Each step writes its output before the next step runs.
+
+## Pipeline vs sync
+
+Syncs and pipelines solve different problems.
+
+| Need | Use |
+| --- | --- |
+| Read from an external system | Sync |
+| Write raw source rows | Sync |
+| Clean or reshape rows | Pipeline |
+| Join datasets | Pipeline |
+| Create projection-ready rows | Pipeline |
+
+A good rule: sync first, shape later.
+
+## Convention
+
+Put pipeline definitions in `pipelines/` and export them.
+
+```txt
+your-project/
+  datasets/
+    orders.ts
+  syncs/
+    orders.ts
+  pipelines/
+    orders.ts
+  projections/
+    orders.ts
+  sixb.config.ts
+```
+
+`createSixb()` discovers exported pipeline definitions from `pipelines/` automatically.
+
+You can also register pipelines explicitly:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { ordersDataset, rawOrdersDataset } from "./datasets/orders"
+import { ordersPipeline } from "./pipelines/orders"
+
+export const sixb = createSixb({
+  datasets: [rawOrdersDataset, ordersDataset],
+  pipelines: [ordersPipeline],
+})
+```
+
+## How to model pipelines
+
+Start with one small transform.
+
+1. Pick the raw dataset you want to clean.
+2. Define the output dataset.
+3. Create one step that writes that output.
+4. Trigger the pipeline with `datasetUpdated(inputDataset.id)`.
+5. Add more steps only when each step has a clear job.
+
+Good pipeline names describe the data they produce:
+
+- `orders`
+- `customers`
+- `project-reporting`
+- `device-inventory`
+
+## Running pipelines
+
+In local development, `sixb dev` can co-host pipeline workers when pipelines are registered.
+
+In production, start a dedicated pipeline worker process:
 
 ```bash
 sixb worker pipeline
 ```
 
-To co-host every registered queue worker type in one process, use `sixb worker-group`.
+For constrained deployments, `sixb worker-group` can co-host several queue workers in one
+process, for example:
+
+```bash
+sixb worker-group sync pipeline projection
+```
+
+## Extra details
+
+- pipeline steps write `snapshot` output by default.
+- step outputs can use `{ mode: "append" }` when needed.
+- V1 runs pipeline steps sequentially.
+- if a later step fails, earlier committed dataset versions remain durable.
+- a pipeline can also be triggered by a schedule with `.when(schedule)`.
+
+The important first step is to keep each pipeline focused on turning one table shape into a
+better table shape.

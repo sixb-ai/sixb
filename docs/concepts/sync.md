@@ -1,222 +1,197 @@
 # Sync
 
-A sync reads data from an external system through a connector and writes it into one Sixb dataset.
+A sync moves data from an external system into a dataset.
 
-Use syncs for source data that should land in the lake first, then be cleaned up by pipelines or
-projected into objects later.
+It uses a [connector](./connector.md) to read from the outside world and writes the result into
+one [dataset](./datasets.md). Syncs are usually the first step in bringing real data into
+Sixb.
 
-## Basic shape
+## Why it is useful
+
+A sync gives data movement a clear shape:
+
+- one source connector
+- one read function
+- one target dataset
+- one write mode
+
+That keeps external access, table shape, and data movement separate.
+
+The connector knows how to talk to the external system. The dataset defines the table shape.
+The sync connects the two.
+
+## Define a sync
+
+File: `syncs/orders.ts`
 
 ```ts
 import { defineSync } from "@sixb/core"
-import { erpDb } from "../connectors/erpDb"
+import { erpDb } from "../connectors/erp-db"
 import { rawOrdersDataset } from "../datasets/orders"
 
 export const syncOrders = defineSync("sync-orders")
   .from(erpDb)
-  .read(({ query }) => query("select * from orders"))
+  .read((db) => db`select * from orders`)
   .intoDataset(rawOrdersDataset)
 ```
 
-| Step | Purpose |
+This reads rows from `erpDb` and writes them into `rawOrdersDataset`.
+
+## What each part does
+
+| Part | Meaning |
 | --- | --- |
-| `defineSync("sync-orders", options?)` | Names the sync and sets options such as `mode` |
-| `.checkpoint<T>()` | Optional: types source cursor state for later runs |
-| `.from(connector)` | Chooses the source connector |
-| `.read((client, context) => rows)` | Reads source rows |
-| `.intoDataset(dataset)` | Chooses the target dataset |
+| `defineSync("sync-orders")` | Names the sync |
+| `.from(erpDb)` | Chooses the source connector |
+| `.read((db) => ...)` | Reads records from the source |
+| `.intoDataset(rawOrdersDataset)` | Chooses the target dataset |
 
-The rows returned by `read(...)` should match the target dataset schema.
+The read handler receives the connected client returned by the connector.
 
-## Modes
+## Snapshot syncs
 
-Syncs support two write modes.
+Snapshot is the default mode.
 
-### `snapshot`
-
-Use `snapshot` when each run returns the full current source state.
+Use a snapshot sync when each run should replace the target dataset with the current full view
+of the source.
 
 ```ts
-export const syncOrders = defineSync("sync-orders", { mode: "snapshot" })
+export const syncOrders = defineSync("sync-orders")
   .from(erpDb)
-  .read(({ query }) => query("select * from orders"))
+  .read((db) => db`select * from orders`)
   .intoDataset(rawOrdersDataset)
 ```
 
-Good for:
+Good snapshot sources:
 
 - current orders
-- active devices
-- files where each run lists the whole folder
+- active customers
+- inventory levels
+- devices currently known by an API
 
-`snapshot` is the default mode, so `{ mode: "snapshot" }` is optional.
+## Append syncs
 
-### `append`
-
-Use `append` when each run returns new rows to add to the dataset.
+Use append mode when each run should add new rows instead of replacing the dataset.
 
 ```ts
 export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
   .from(erpDb)
-  .read(({ query }) => query("select * from order_events"))
+  .read((db) => db`select * from order_events`)
   .intoDataset(rawOrderEventsDataset)
 ```
 
-Good for:
+Good append sources:
 
-- event logs
-- audit trails
-- changes feeds
-- incrementally discovered files
+- audit logs
+- webhook deliveries
+- order events
+- new files arriving over time
 
-Most append syncs should use a checkpoint so they know where to resume.
+## Schedule a sync
 
-## Read context
-
-The read handler receives the connector client and a context:
-
-```ts
-.read(async (client, context) => {
-  context.projectId
-  context.syncId
-  context.signal
-
-  return []
-})
-```
-
-Use `context.signal` with APIs that support cancellation.
-
-If the sync uses `.checkpoint<T>()`, the context also includes:
-
-```ts
-context.checkpoint // T | undefined
-context.setCheckpoint(next) // next must be T
-```
-
-## Checkpoints
-
-A checkpoint is the source cursor for the next successful run. It can be a page token, timestamp,
-incrementing id, high-water mark, or any other small JSON-compatible value.
-
-```ts
-type OrderEventsCheckpoint = {
-  cursor: string
-}
-
-export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
-  .checkpoint<OrderEventsCheckpoint>()
-  .from(erpDb)
-  .read(async ({ query }, context) => {
-    const cursor = context.checkpoint?.cursor ?? "0"
-
-    const rows = await query(`select * from order_events where cursor > ${cursor}`)
-
-    const nextCursor = rows.at(-1)?.cursor
-    if (nextCursor) {
-      context.setCheckpoint({ cursor: String(nextCursor) })
-    }
-
-    return rows
-  })
-  .intoDataset(rawOrderEventsDataset)
-```
-
-Checkpoint rules to know:
-
-- First run: `context.checkpoint` is `undefined`.
-- Later runs: `context.checkpoint` is the last saved checkpoint for that sync.
-- Call `context.setCheckpoint(next)` when you know where the next run should resume.
-- If the run fails or is cancelled, the checkpoint is not advanced.
-- Checkpoints must be JSON-compatible. Store strings for dates, not `Date` objects.
-- Avoid overlapping runs for checkpointed syncs unless replaying rows is safe.
-
-### Changes-feed pattern
-
-For APIs with a changes feed, bookmark the source before the first full scan. This prevents missing
-changes that happen while the baseline scan is running.
-
-```ts
-type FilesCheckpoint = { startPageToken: string }
-
-export const syncFiles = defineSync("sync-files", { mode: "append" })
-  .checkpoint<FilesCheckpoint>()
-  .from(filesApi)
-  .read(async (files, context) => {
-    if (!context.checkpoint) {
-      const startPageToken = await files.getStartPageToken()
-      context.setCheckpoint({ startPageToken })
-      return files.listAllFiles()
-    }
-
-    const rows = []
-    let pageToken: string | undefined = context.checkpoint.startPageToken
-
-    while (pageToken) {
-      const page = await files.listChanges({ pageToken })
-      rows.push(...page.changes)
-      pageToken = page.nextPageToken
-
-      if (page.newStartPageToken) {
-        context.setCheckpoint({ startPageToken: page.newStartPageToken })
-      }
-    }
-
-    return rows
-  })
-  .intoDataset(rawFilesDataset)
-```
-
-## Triggers
-
-Attach triggers with `.when(...)`.
+Define a reusable schedule, then attach it with `.when(...)`.
 
 ```ts
 import { defineSchedule, defineSync } from "@sixb/core"
 
-export const hourly = defineSchedule("hourly-order-events").cron("0 * * * *")
+export const hourly = defineSchedule("hourly").cron("0 * * * *")
 
-export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
+export const syncOrders = defineSync("sync-orders")
   .when(hourly)
   .from(erpDb)
-  .read(({ query }) => query("select * from order_events"))
-  .intoDataset(rawOrderEventsDataset)
+  .read((db) => db`select * from orders`)
+  .intoDataset(rawOrdersDataset)
 ```
 
-## Project layout
+You can also trigger one sync after another:
 
-Export sync definitions from `syncs/` and keep connectors and datasets separate:
+```ts
+import { defineSync, syncFinished } from "@sixb/core"
+
+export const syncCustomers = defineSync("sync-customers")
+  .when(syncFinished(syncDepartments.id))
+  .from(erp)
+  .read((client) => client.listCustomers())
+  .intoDataset(customersDataset)
+```
+
+## Keep syncs small
+
+A sync can do light cleanup when it reads data, but it should not become your whole data
+pipeline.
+
+Good work for a sync:
+
+- call the external system
+- return rows
+- flatten a response
+- drop obviously invalid records
+
+Better left to a [pipeline](./pipeline.md):
+
+- joins
+- heavy reshaping
+- business calculations
+- turning raw rows into canonical rows
+
+## Convention
+
+Put sync definitions in `syncs/` and export them.
 
 ```txt
 your-project/
   connectors/
-    erpDb.ts
+    erp-db.ts
   datasets/
     orders.ts
-    orderEvents.ts
+    order-events.ts
   syncs/
     orders.ts
-    orderEvents.ts
+    order-events.ts
+  schedules/
+    hourly.ts
+  sixb.config.ts
 ```
 
-`createSixb()` discovers exported syncs automatically. You can also register syncs explicitly:
+`createSixb()` discovers exported sync definitions from `syncs/` automatically.
+
+You can also register syncs explicitly:
 
 ```ts
-createSixb({
+import { createSixb } from "@sixb/core"
+import { rawOrdersDataset } from "./datasets/orders"
+import { syncOrders } from "./syncs/orders"
+
+export const sixb = createSixb({
   datasets: [rawOrdersDataset],
-  connectors: [erpDb],
   syncs: [syncOrders],
 })
 ```
 
-## Best practices
+## How to model syncs
 
-- Put auth, connection setup, and provider-specific clients in connectors.
-- Keep sync read handlers focused on fetching and lightly shaping source rows.
-- Use `snapshot` for full current-state reads.
-- Use `append` plus `.checkpoint<T>()` for event streams, cursors, and changes feeds.
-- Keep checkpoint values small, plain JSON, and source-focused.
-- Make append rows replay-safe when possible; failed runs can be retried from the previous
-  checkpoint.
-- Land raw source data in datasets first, then use pipelines/projections for cleanup and modeling.
-- Name syncs by source and entity, such as `sync-orders` or `sync-order-events`.
+Start with one sync per source shape.
+
+1. Define the connector first.
+2. Define the raw dataset shape.
+3. Create a sync that reads from the connector and writes that dataset.
+4. Use snapshot unless the source is event-like.
+5. Move cleanup and reshaping into pipelines as the project grows.
+
+Good sync names usually start with the action and source entity:
+
+- `sync-orders`
+- `sync-order-events`
+- `sync-customers`
+- `sync-device-inventory`
+
+## Extra details
+
+- `read(...)` receives `(client, context)`.
+- `context` includes `projectId`, `syncId`, and `signal`.
+- `read(...)` may return one row, an iterable, or an async iterable.
+- sync definitions are inert until a worker runs them.
+- `sixb dev` can co-host sync workers during local development.
+
+The important first step is to keep each sync focused on moving one source shape into one
+dataset.
