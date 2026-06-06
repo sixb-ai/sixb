@@ -9,8 +9,9 @@
 /**
  * Describes how a foreign key column in a dataset resolves to a link target.
  *
- * The source property holds a value that equals the target object's primary
- * property value, creating an implicit link between source and target.
+ * The source can be either a projected source property or a raw dataset field.
+ * Its value equals the target object's primary property value, creating an
+ * implicit link between source and target.
  *
  * `targetObjectTypeId` declares the concrete target type for this projection.
  * It must be the same type or a subtype (via `extends`) of the link's declared
@@ -19,7 +20,10 @@
  */
 export interface ForeignKeyDescriptor {
   readonly linkId: string
-  readonly sourcePropertyId: string
+  /** Object property holding the target id. Mutually exclusive with sourceField. */
+  readonly sourcePropertyId?: string
+  /** Dataset column holding the target id. Mutually exclusive with sourcePropertyId. */
+  readonly sourceField?: string
   readonly targetObjectTypeId: string
 }
 
@@ -27,8 +31,8 @@ export interface ForeignKeyDescriptor {
  * Lowered, serializable definition for projecting a dataset into object instances.
  *
  * Each row in the dataset becomes an object upsert, with properties mapped
- * from dataset columns to object type properties. FK links are resolved
- * from source property values to target object primary values.
+ * from dataset columns to object type properties. FK links are resolved from
+ * source property or dataset field values to target object primary values.
  */
 export interface ObjectProjectionDefinition {
   readonly _tag: "ObjectProjectionDefinition"

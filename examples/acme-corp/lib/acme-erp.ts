@@ -47,8 +47,8 @@ export interface ErpDocumentRow {
   readonly type: string
   readonly version: string
   readonly createdAt: string
-  readonly projectRef: string
-  readonly authorRef: string
+  readonly project_id: string
+  readonly author_id: string
 }
 
 export interface ErpInvoiceRow {
@@ -59,8 +59,8 @@ export interface ErpInvoiceRow {
   readonly status: string
   readonly issuedAt: string
   readonly dueDate: string
-  readonly customerRef: string
-  readonly projectRef: string
+  readonly customer_id: string
+  readonly project_id: string
 }
 
 export interface ErpTaskRow {
@@ -70,8 +70,8 @@ export interface ErpTaskRow {
   readonly priority: string
   readonly estimate: number
   readonly dueDate: string
-  readonly projectRef: string
-  readonly assigneeRef: string
+  readonly project_id: string
+  readonly assignee_id: string
 }
 
 export interface AcmeErpClient {
@@ -255,8 +255,8 @@ const documents = [
     type: "proposal",
     version: "2.1",
     createdAt: "2024-01-05T10:00:00Z",
-    projectRef: "proj-techstart-platform",
-    authorRef: "emp-alice",
+    project_id: "proj-techstart-platform",
+    author_id: "emp-alice",
   },
   {
     id: "doc-techstart-contract",
@@ -264,8 +264,8 @@ const documents = [
     type: "contract",
     version: "1.0",
     createdAt: "2024-01-12T14:30:00Z",
-    projectRef: "proj-techstart-platform",
-    authorRef: "emp-clara",
+    project_id: "proj-techstart-platform",
+    author_id: "emp-clara",
   },
   {
     id: "doc-greenenergy-spec",
@@ -273,8 +273,8 @@ const documents = [
     type: "specification",
     version: "1.3",
     createdAt: "2024-02-20T09:00:00Z",
-    projectRef: "proj-greenenergy-dashboard",
-    authorRef: "emp-bob",
+    project_id: "proj-greenenergy-dashboard",
+    author_id: "emp-bob",
   },
   {
     id: "doc-healthfirst-report",
@@ -282,8 +282,8 @@ const documents = [
     type: "report",
     version: "1.0",
     createdAt: "2024-01-28T16:00:00Z",
-    projectRef: "proj-healthfirst-portal",
-    authorRef: "emp-alice",
+    project_id: "proj-healthfirst-portal",
+    author_id: "emp-alice",
   },
 ] satisfies readonly ErpDocumentRow[]
 
@@ -296,8 +296,8 @@ const invoices = [
     status: "paid",
     issuedAt: "2024-04-01T00:00:00Z",
     dueDate: "2024-04-30",
-    customerRef: "cust-techstart",
-    projectRef: "proj-techstart-platform",
+    customer_id: "cust-techstart",
+    project_id: "proj-techstart-platform",
   },
   {
     id: "inv-002",
@@ -307,8 +307,8 @@ const invoices = [
     status: "sent",
     issuedAt: "2024-07-01T00:00:00Z",
     dueDate: "2024-07-31",
-    customerRef: "cust-greenenergy",
-    projectRef: "proj-greenenergy-dashboard",
+    customer_id: "cust-greenenergy",
+    project_id: "proj-greenenergy-dashboard",
   },
   {
     id: "inv-003",
@@ -318,8 +318,8 @@ const invoices = [
     status: "paid",
     issuedAt: "2024-07-01T00:00:00Z",
     dueDate: "2024-07-31",
-    customerRef: "cust-techstart",
-    projectRef: "proj-techstart-platform",
+    customer_id: "cust-techstart",
+    project_id: "proj-techstart-platform",
   },
   {
     id: "inv-004",
@@ -329,8 +329,8 @@ const invoices = [
     status: "overdue",
     issuedAt: "2024-05-01T00:00:00Z",
     dueDate: "2024-05-31",
-    customerRef: "cust-healthfirst",
-    projectRef: "proj-healthfirst-portal",
+    customer_id: "cust-healthfirst",
+    project_id: "proj-healthfirst-portal",
   },
   {
     id: "inv-005",
@@ -340,8 +340,8 @@ const invoices = [
     status: "draft",
     issuedAt: "2024-08-01T00:00:00Z",
     dueDate: "2024-08-31",
-    customerRef: "cust-eduplatform",
-    projectRef: "proj-eduplatform-redesign",
+    customer_id: "cust-eduplatform",
+    project_id: "proj-eduplatform-redesign",
   },
 ] satisfies readonly ErpInvoiceRow[]
 
@@ -353,8 +353,8 @@ const tasks = [
     priority: "high",
     estimate: 8,
     dueDate: "2024-02-01",
-    projectRef: "proj-techstart-platform",
-    assigneeRef: "emp-bob",
+    project_id: "proj-techstart-platform",
+    assignee_id: "emp-bob",
   },
   {
     id: "task-002",
@@ -363,8 +363,8 @@ const tasks = [
     priority: "high",
     estimate: 5,
     dueDate: "2024-02-15",
-    projectRef: "proj-techstart-platform",
-    assigneeRef: "emp-emma",
+    project_id: "proj-techstart-platform",
+    assignee_id: "emp-emma",
   },
   {
     id: "task-003",
@@ -373,8 +373,8 @@ const tasks = [
     priority: "critical",
     estimate: 13,
     dueDate: "2024-04-15",
-    projectRef: "proj-techstart-platform",
-    assigneeRef: "emp-alice",
+    project_id: "proj-techstart-platform",
+    assignee_id: "emp-alice",
   },
   {
     id: "task-004",
@@ -383,8 +383,8 @@ const tasks = [
     priority: "high",
     estimate: 21,
     dueDate: "2024-06-30",
-    projectRef: "proj-greenenergy-dashboard",
-    assigneeRef: "emp-bob",
+    project_id: "proj-greenenergy-dashboard",
+    assignee_id: "emp-bob",
   },
   {
     id: "task-005",
@@ -393,8 +393,8 @@ const tasks = [
     priority: "medium",
     estimate: 8,
     dueDate: "2024-07-15",
-    projectRef: "proj-greenenergy-dashboard",
-    assigneeRef: "emp-emma",
+    project_id: "proj-greenenergy-dashboard",
+    assignee_id: "emp-emma",
   },
   {
     id: "task-006",
@@ -403,8 +403,8 @@ const tasks = [
     priority: "medium",
     estimate: 5,
     dueDate: "2024-07-01",
-    projectRef: "proj-eduplatform-redesign",
-    assigneeRef: "emp-emma",
+    project_id: "proj-eduplatform-redesign",
+    assignee_id: "emp-emma",
   },
   {
     id: "task-007",
@@ -413,8 +413,8 @@ const tasks = [
     priority: "low",
     estimate: 3,
     dueDate: "2024-01-25",
-    projectRef: "proj-healthfirst-portal",
-    assigneeRef: "emp-alice",
+    project_id: "proj-healthfirst-portal",
+    assignee_id: "emp-alice",
   },
 ] satisfies readonly ErpTaskRow[]
 

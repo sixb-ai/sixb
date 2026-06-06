@@ -67,8 +67,9 @@ export function validatePropertyMapping(
  * 1. All keys must be valid link ids on the object type.
  * 2. Record key must match descriptor.linkId.
  * 3. Link target must be a single concrete type (not polymorphic or wildcard).
- * 4. Source property must exist on the object type.
- * 5. Source property must be present in the property mapping.
+ * 4. The descriptor must use exactly one source: sourcePropertyId or sourceField.
+ * 5. Source properties must exist and be present in the property mapping.
+ *    Source fields are validated later against the projection dataset.
  */
 export function validateAndLowerLinkMapping(
   objectType: ObjectType,
@@ -111,19 +112,36 @@ export function validateAndLowerLinkMapping(
       )
     }
 
+    const sourcePropertyId = descriptor.sourcePropertyId
+    const sourceField = descriptor.sourceField
+    if (sourcePropertyId && sourceField) {
+      throw new ProjectionValidationError(
+        `FK link '${key}' must use either sourceProperty or sourceField, not both.`
+      )
+    }
+    if (!sourcePropertyId && !sourceField) {
+      throw new ProjectionValidationError(
+        `FK link '${key}' must declare sourceProperty or sourceField.`
+      )
+    }
+
+    if (!sourcePropertyId) {
+      continue
+    }
+
     // Rule 4: source property exists on the type
-    if (!propertyIds.has(descriptor.sourcePropertyId)) {
+    if (!propertyIds.has(sourcePropertyId)) {
       const available = [...propertyIds].sort().join(", ")
       throw new ProjectionValidationError(
-        `Source property '${descriptor.sourcePropertyId}' does not exist on ` +
+        `Source property '${sourcePropertyId}' does not exist on ` +
           `object type '${objectType.id}'. Available properties: ${available}`
       )
     }
 
     // Rule 5: source property is in the property mapping
-    if (!(descriptor.sourcePropertyId in propertyMapping)) {
+    if (!(sourcePropertyId in propertyMapping)) {
       throw new ProjectionValidationError(
-        `Source property '${descriptor.sourcePropertyId}' for link '${key}' ` +
+        `Source property '${sourcePropertyId}' for link '${key}' ` +
           `must be included in the property mapping.`
       )
     }
@@ -232,14 +250,31 @@ export function validateProjectionsAtStartup(
           `${prefix}: FK link "${linkId}" references unknown link on type "${projection.objectTypeId}"`
         )
       }
-      if (!propertyIds.has(fk.sourcePropertyId)) {
+      const sourcePropertyId = fk.sourcePropertyId
+      const sourceField = fk.sourceField
+      if (sourcePropertyId && sourceField) {
         throw new ProjectionValidationError(
-          `${prefix}: FK link "${linkId}" source property "${fk.sourcePropertyId}" does not exist on type "${projection.objectTypeId}"`
+          `${prefix}: FK link "${linkId}" must use either sourcePropertyId or sourceField, not both`
         )
       }
-      if (!(fk.sourcePropertyId in projection.properties)) {
+      if (!sourcePropertyId && !sourceField) {
         throw new ProjectionValidationError(
-          `${prefix}: FK link "${linkId}" source property "${fk.sourcePropertyId}" must be in property mapping`
+          `${prefix}: FK link "${linkId}" must declare sourcePropertyId or sourceField`
+        )
+      }
+      if (sourcePropertyId && !propertyIds.has(sourcePropertyId)) {
+        throw new ProjectionValidationError(
+          `${prefix}: FK link "${linkId}" source property "${sourcePropertyId}" does not exist on type "${projection.objectTypeId}"`
+        )
+      }
+      if (sourcePropertyId && !(sourcePropertyId in projection.properties)) {
+        throw new ProjectionValidationError(
+          `${prefix}: FK link "${linkId}" source property "${sourcePropertyId}" must be in property mapping`
+        )
+      }
+      if (sourceField && !datasetColumnNames.has(sourceField)) {
+        throw new ProjectionValidationError(
+          `${prefix}: FK link "${linkId}" source field "${sourceField}" references unknown dataset column "${sourceField}" on dataset "${projection.datasetId}"`
         )
       }
       if (!objectTypesById.has(fk.targetObjectTypeId)) {

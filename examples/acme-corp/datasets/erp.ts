@@ -63,8 +63,8 @@ export const erpDocumentsDataset = defineDataset("erp.documents", {
     col("type", "string"),
     col("version", "string"),
     col("createdAt", "timestamp"),
-    col("projectRef", "string"),
-    col("authorRef", "string"),
+    col("project_id", "string"),
+    col("author_id", "string"),
   ],
 })
 
@@ -77,8 +77,8 @@ export const erpInvoicesDataset = defineDataset("erp.invoices", {
     col("status", "string"),
     col("issuedAt", "timestamp"),
     col("dueDate", "date"),
-    col("customerRef", "string"),
-    col("projectRef", "string"),
+    col("customer_id", "string"),
+    col("project_id", "string"),
   ],
 })
 
@@ -90,7 +90,7 @@ export const erpTasksDataset = defineDataset("erp.tasks", {
     col("priority", "string"),
     col("estimate", "int64"),
     col("dueDate", "date"),
-    col("projectRef", "string"),
-    col("assigneeRef", "string"),
+    col("project_id", "string"),
+    col("assignee_id", "string"),
   ],
 })

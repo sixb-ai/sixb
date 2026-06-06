@@ -1,9 +1,13 @@
-import { defineProjection, fromForeignKey } from "@sixb/core"
+import type { ObjectProjectionDefinition } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpEmployeesDataset } from "../datasets/erp"
 import { Department } from "../ontology/department"
 import { Employee } from "../ontology/employee"
 
-export const employeeProjection = defineProjection("employee-proj", Employee)
+export const employeeProjection: ObjectProjectionDefinition = defineProjection(
+  "employee-proj",
+  Employee
+)
   .fromDataset(erpEmployeesDataset)
   .properties({
     id: "emp_id",
@@ -12,12 +16,11 @@ export const employeeProjection = defineProjection("employee-proj", Employee)
     role: "job_title",
     seniority: "seniority_level",
     hireDate: "hire_date",
-    departmentRef: "dept_id",
   })
   .withLinks({
-    department: fromForeignKey({
+    department: {
       link: Employee.l.department,
-      sourceProperty: Employee.p.departmentRef,
+      sourceField: "dept_id",
       target: Department,
-    }),
+    },
   })

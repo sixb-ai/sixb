@@ -13,8 +13,6 @@ export const Task = defineObjectType({
     prop("priority", stringEnum(["low", "medium", "high", "critical"])),
     prop("estimate", "integer"),
     prop("dueDate", "date"),
-    prop("projectRef", "string"),
-    prop("assigneeRef", "string"),
   ],
   links: [
     link("project", Project, { cardinality: "one" }),

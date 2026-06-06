@@ -11,7 +11,7 @@ import type {
   DatasetDefinition,
 } from "../datasets"
 import type { LinkToken, PropertyToken } from "../ontology/tokens"
-import type { ObjectType, Schema } from "../ontology/types"
+import type { ObjectLink, ObjectType, Schema } from "../ontology/types"
 import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
@@ -57,6 +57,15 @@ type PropertyById<T extends ObjectType, TPropertyId extends PropertyIdOf<T>> = E
 
 /** Union of link ids from an ObjectType. */
 type LinkIdOf<T extends ObjectType> = T["links"][number]["id"]
+
+type LinkById<T extends ObjectType, TLinkId extends LinkIdOf<T>> = Extract<
+  T["links"][number],
+  { id: TLinkId }
+>
+
+type SingleTargetIdOf<TLink extends ObjectLink> = TLink["targetObjectTypeId"] extends string
+  ? TLink["targetObjectTypeId"]
+  : never
 
 type ResolvedProjectionSchema<TSchema extends Schema> = TSchema extends {
   type: "valueTypeRef"
@@ -139,6 +148,85 @@ type ExactProjectionMapping<TObjectType extends ObjectType, TMapping> = TMapping
   readonly [TKey in Exclude<keyof TMapping, PropertyIdOf<TObjectType>>]: never
 }
 
+type ForeignKeyFromSourceProperty = Omit<
+  ForeignKeyDescriptor,
+  "sourcePropertyId" | "sourceField"
+> & {
+  readonly sourcePropertyId: string
+  readonly sourceField?: never
+}
+
+type ForeignKeyFromSourceField<TSourceField extends string = string> = Omit<
+  ForeignKeyDescriptor,
+  "sourcePropertyId" | "sourceField"
+> & {
+  readonly sourcePropertyId?: never
+  readonly sourceField: TSourceField
+}
+
+type ProjectionForeignKeyDescriptor<TDataset extends DatasetDefinition> =
+  | ForeignKeyFromSourceProperty
+  | ForeignKeyFromSourceField<StringDatasetColumnNameOf<TDataset>>
+
+type ProjectionForeignKeyTokenInput<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+  TLinkId extends LinkIdOf<TObjectType>,
+> =
+  | {
+      readonly link: LinkToken<
+        TObjectType["id"],
+        TLinkId,
+        SingleTargetIdOf<LinkById<TObjectType, TLinkId>>
+      >
+      readonly sourceProperty: PropertyToken<TObjectType["id"]>
+      readonly target: ObjectType &
+        (
+          | { id: NoInfer<SingleTargetIdOf<LinkById<TObjectType, TLinkId>>> }
+          | { extends: NoInfer<SingleTargetIdOf<LinkById<TObjectType, TLinkId>>> }
+        )
+    }
+  | {
+      readonly link: LinkToken<
+        TObjectType["id"],
+        TLinkId,
+        SingleTargetIdOf<LinkById<TObjectType, TLinkId>>
+      >
+      readonly sourceField: StringDatasetColumnNameOf<TDataset>
+      readonly target: ObjectType &
+        (
+          | { id: NoInfer<SingleTargetIdOf<LinkById<TObjectType, TLinkId>>> }
+          | { extends: NoInfer<SingleTargetIdOf<LinkById<TObjectType, TLinkId>>> }
+        )
+    }
+
+type ProjectionForeignKeyInput<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+  TLinkId extends LinkIdOf<TObjectType>,
+> =
+  | ProjectionForeignKeyDescriptor<TDataset>
+  | ProjectionForeignKeyTokenInput<TObjectType, TDataset, TLinkId>
+
+function lowerForeignKeyMapping<TObjectType extends ObjectType, TDataset extends DatasetDefinition>(
+  mapping: {
+    [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K>
+  }
+): Record<string, ForeignKeyDescriptor> {
+  const lowered: Record<string, ForeignKeyDescriptor> = {}
+  for (const [linkId, descriptor] of Object.entries(mapping)) {
+    if (!descriptor) continue
+    lowered[linkId] = isForeignKeyDescriptor(descriptor)
+      ? descriptor
+      : fromForeignKey(descriptor as Parameters<typeof fromForeignKey>[0])
+  }
+  return lowered
+}
+
+function isForeignKeyDescriptor(value: unknown): value is ForeignKeyDescriptor {
+  return isRecord(value) && typeof value.linkId === "string"
+}
+
 // ── defineProjection ─────────────────────────────────────────
 
 interface ProjectionSourceBuilder<TObjectType extends ObjectType> {
@@ -153,12 +241,15 @@ interface ProjectionMappingBuilder<
 > {
   properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
     mapping: ExactProjectionMapping<TObjectType, TMapping>
-  ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType>
+  ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType, TDataset>
 }
 
-interface ProjectionLinkBuilder<TObjectType extends ObjectType> {
+interface ProjectionLinkBuilder<
+  TObjectType extends ObjectType,
+  TDataset extends DatasetDefinition,
+> {
   withLinks(
-    mapping: { [K in LinkIdOf<TObjectType>]?: ForeignKeyDescriptor }
+    mapping: { [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K> }
   ): ObjectProjectionDefinition
 }
 
@@ -168,13 +259,13 @@ interface ProjectionLinkBuilder<TObjectType extends ObjectType> {
  * ```ts
  * defineProjection("room-projection", Room)
  *   .fromDataset(canonicalRoomsDataset)
- *   .properties({ id: "room_id", name: "room_name", buildingRef: "building_id" })
+ *   .properties({ id: "room_id", name: "room_name" })
  *   .withLinks({
- *     inBuilding: fromForeignKey({
+ *     inBuilding: {
  *       link: Room.l.inBuilding,
- *       sourceProperty: Room.p.buildingRef,
+ *       sourceField: "building_id",
  *       target: Building,
- *     }),
+ *     },
  *   })
  * ```
  */
@@ -194,7 +285,7 @@ export function defineProjection<const TObjectType extends ObjectType>(
       return {
         properties<const TMapping extends ProjectionMappingFor<TObjectType, TDataset>>(
           mapping: ExactProjectionMapping<TObjectType, TMapping>
-        ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType> {
+        ): ObjectProjectionDefinition & ProjectionLinkBuilder<TObjectType, TDataset> {
           const propertyMapping = mapping as Record<string, string>
           validatePropertyMapping(objectType, propertyMapping)
 
@@ -209,11 +300,14 @@ export function defineProjection<const TObjectType extends ObjectType>(
 
           return Object.assign(definition, {
             withLinks(
-              linkMapping: { [K in LinkIdOf<TObjectType>]?: ForeignKeyDescriptor }
+              linkMapping: {
+                [K in LinkIdOf<TObjectType>]?: ProjectionForeignKeyInput<TObjectType, TDataset, K>
+              }
             ): ObjectProjectionDefinition {
+              const loweredLinkMapping = lowerForeignKeyMapping(linkMapping)
               const validatedLinks = validateAndLowerLinkMapping(
                 objectType,
-                linkMapping as Record<string, ForeignKeyDescriptor>,
+                loweredLinkMapping,
                 propertyMapping
               )
 
@@ -239,7 +333,8 @@ export function defineProjection<const TObjectType extends ObjectType>(
  * Creates a {@link ForeignKeyDescriptor} from typed tokens.
  *
  * Compile-time constraints:
- * - `TObjectTypeId` ties `link` and `sourceProperty` to the same object type.
+ * - `TObjectTypeId` ties `link` and `sourceProperty` to the same object type
+ *   when a projected source property is used.
  * - `TTargetObjectTypeId` (inferred from the link token) constrains `target`
  *   to an ObjectType whose `id` or `extends` matches the link's declared target.
  *   This covers exact type match and direct subtypes. Multi-level inheritance
@@ -261,12 +356,44 @@ export function fromForeignKey<
   sourceProperty: PropertyToken<TObjectTypeId>
   target: ObjectType &
     ({ id: NoInfer<TTargetObjectTypeId> } | { extends: NoInfer<TTargetObjectTypeId> })
+}): ForeignKeyFromSourceProperty
+export function fromForeignKey<
+  TObjectTypeId extends string,
+  TTargetObjectTypeId extends string,
+  const TSourceField extends string,
+>(input: {
+  link: LinkToken<TObjectTypeId, string, TTargetObjectTypeId>
+  sourceField: TSourceField
+  target: ObjectType &
+    ({ id: NoInfer<TTargetObjectTypeId> } | { extends: NoInfer<TTargetObjectTypeId> })
+}): ForeignKeyFromSourceField<TSourceField>
+export function fromForeignKey<
+  TObjectTypeId extends string,
+  TTargetObjectTypeId extends string,
+>(input: {
+  link: LinkToken<TObjectTypeId, string, TTargetObjectTypeId>
+  sourceProperty?: PropertyToken<TObjectTypeId>
+  sourceField?: string
+  target: ObjectType &
+    ({ id: NoInfer<TTargetObjectTypeId> } | { extends: NoInfer<TTargetObjectTypeId> })
 }): ForeignKeyDescriptor {
   validateLinkProjectionTarget(input.link)
 
+  if (input.sourceProperty) {
+    return {
+      linkId: input.link.id,
+      sourcePropertyId: input.sourceProperty.id,
+      targetObjectTypeId: input.target.id,
+    }
+  }
+
+  if (input.sourceField === undefined) {
+    throw new ProjectionValidationError("Foreign key sourceField is required.")
+  }
+  assertNonEmpty(input.sourceField, "source field")
   return {
     linkId: input.link.id,
-    sourcePropertyId: input.sourceProperty.id,
+    sourceField: input.sourceField,
     targetObjectTypeId: input.target.id,
   }
 }

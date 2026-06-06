@@ -1,4 +1,4 @@
-import { defineProjection, fromForeignKey } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpDocumentsDataset } from "../datasets/erp"
 import { Document } from "../ontology/document"
 import { Employee } from "../ontology/employee"
@@ -12,18 +12,16 @@ export const documentProjection = defineProjection("document-proj", Document)
     type: "type",
     version: "version",
     createdAt: "createdAt",
-    projectRef: "projectRef",
-    authorRef: "authorRef",
   })
   .withLinks({
-    project: fromForeignKey({
+    project: {
       link: Document.l.project,
-      sourceProperty: Document.p.projectRef,
+      sourceField: "project_id",
       target: Project,
-    }),
-    author: fromForeignKey({
+    },
+    author: {
       link: Document.l.author,
-      sourceProperty: Document.p.authorRef,
+      sourceField: "author_id",
       target: Employee,
-    }),
+    },
   })

@@ -21,6 +21,7 @@ export interface ObjectProjectionPlan {
 export interface ProjectedObjectRow {
   readonly properties: Record<string, unknown>
   readonly primaryValue: unknown
+  readonly foreignKeyValues: Readonly<Record<string, unknown>>
 }
 
 export type ProjectObjectRowResult =
@@ -93,6 +94,7 @@ export function projectObjectRow(plan: ObjectProjectionPlan, row: unknown): Proj
     row: {
       properties: collected.properties,
       primaryValue: collected.properties[primaryPropertyId],
+      foreignKeyValues: collectForeignKeyValues(projection, row, collected.properties),
     },
   }
 }
@@ -178,6 +180,27 @@ function collectProperties(
   }
 
   return { ok: true, properties }
+}
+
+function collectForeignKeyValues(
+  projection: ObjectProjectionDefinition,
+  row: DatasetRow,
+  properties: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> {
+  const values: Record<string, unknown> = {}
+
+  for (const descriptor of Object.values(projection.links)) {
+    if (descriptor.sourceField) {
+      values[descriptor.linkId] = row[descriptor.sourceField]
+      continue
+    }
+
+    if (descriptor.sourcePropertyId) {
+      values[descriptor.linkId] = properties[descriptor.sourcePropertyId]
+    }
+  }
+
+  return values
 }
 
 function isPlainObject(value: unknown): value is DatasetRow {

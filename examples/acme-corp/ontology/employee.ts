@@ -12,7 +12,6 @@ export const Employee = defineObjectType({
     prop("role", "string", { required: true }),
     prop("seniority", stringEnum(["junior", "mid", "senior", "lead", "director"])),
     prop("hireDate", "date"),
-    prop("departmentRef", "string"),
   ],
   links: [link("department", Department, { cardinality: "one" })],
 })
