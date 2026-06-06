@@ -13,7 +13,7 @@ import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { encodeDatasetTableName } from "./names"
-import { duckLakeMetadataTableName, qualifiedTableName, quoteSqlString } from "./sql"
+import { duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
   parseCommitMetadata,
   parseInlineDataChange,
@@ -24,6 +24,7 @@ import {
 
 interface DatasetSnapshotRow {
   readonly snapshotId: string
+  readonly tableId: bigint
   readonly createdAt: Date
   readonly mode: DatasetVersionMode
   readonly parentSnapshotId?: string
@@ -736,6 +737,7 @@ export class DuckLakeSnapshotReader {
 
       return {
         snapshotId: candidate.snapshotId,
+        tableId,
         createdAt: candidate.createdAt,
         mode: metadata.mode ?? "schema",
         metadata,
@@ -749,6 +751,7 @@ export class DuckLakeSnapshotReader {
 
     return {
       snapshotId: candidate.snapshotId,
+      tableId,
       createdAt: candidate.createdAt,
       mode: candidate.metadata?.mode ?? (hasDeleteChange ? "snapshot" : "append"),
       ...(candidate.metadata !== undefined ? { metadata: candidate.metadata } : {}),
@@ -763,16 +766,14 @@ export class DuckLakeSnapshotReader {
     const schemaAtSnapshot = await this.datasets.getDatasetSchemaAtSnapshot(
       runtime,
       dataset.id,
+      row.tableId,
       row.snapshotId
     )
 
     // DuckLake gives us version id, timestamp, and time travel. Sixb metadata
     // fills in caller intent such as append vs snapshot and producer lineage.
-    // New Sixb commits include exact row counts to avoid full table counts on
-    // the write hot path; legacy or external snapshots still fall back to
-    // DuckLake time travel.
-    const rowCount =
-      row.metadata?.rowCount ?? (await this.countRowsAtSnapshot(runtime, dataset, row.snapshotId))
+    // Version listing is a metadata path, so it only carries row counts already
+    // stored in Sixb commit metadata and never counts historical table contents.
 
     return {
       datasetId: dataset.id,
@@ -784,27 +785,8 @@ export class DuckLakeSnapshotReader {
       schema: schemaAtSnapshot,
       producer: row.metadata?.producer,
       inputs: row.metadata?.inputs,
-      rowCount,
+      ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
     }
-  }
-
-  private async countRowsAtSnapshot(
-    runtime: DuckDbQueryRuntime,
-    dataset: DatasetDefinition,
-    snapshotId: string
-  ): Promise<number> {
-    const tableName = encodeDatasetTableName(dataset.id)
-    const [result] = await runtime.query(
-      `SELECT count(*) AS row_count FROM ${qualifiedTableName(
-        this.options,
-        tableName
-      )} AT (VERSION => ${snapshotId})`
-    )
-    if (result === undefined) {
-      return 0
-    }
-
-    return Number(getBigIntLike(result, "row_count"))
   }
 
   private withParentSnapshotIds(

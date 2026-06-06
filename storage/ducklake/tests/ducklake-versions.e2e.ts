@@ -4,10 +4,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
+import type { DuckDbQueryRuntime } from "../src/internal/duckdb-runtime"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
 import { quoteSqlString } from "../src/internal/sql"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
+
+interface DuckLakeStorageInternals {
+  readonly connections: {
+    attachedRuntime(): Promise<DuckDbQueryRuntime>
+  }
+}
 
 describe("DuckLakeStorage versions and time travel", () => {
   let rootDir: string
@@ -65,13 +72,14 @@ describe("DuckLakeStorage versions and time travel", () => {
       mode: "snapshot",
       rowCount: 1,
     })
-    expect(await storage.getVersion(ordersDataset.id, version2.versionId)).toMatchObject({
+    const appendVersion = await storage.getVersion(ordersDataset.id, version2.versionId)
+    expect(appendVersion).toMatchObject({
       versionId: version2.versionId,
       parentVersionId: version1.versionId,
       mode: "append",
       inputs: [{ datasetId: ordersDataset.id, versionId: version1.versionId }],
-      rowCount: 3,
     })
+    expect(appendVersion).not.toHaveProperty("rowCount")
 
     const versions = await storage.listVersions(ordersDataset.id)
     expect(versions.map((version) => version.versionId)).toEqual([
@@ -104,6 +112,51 @@ describe("DuckLakeStorage versions and time travel", () => {
     expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
       { orderId: "ord_9", customerName: "Dorothy", orderCount: "9", metadata: null },
     ])
+  })
+
+  test("lists versions without historical table scans when row counts are absent", async () => {
+    const snapshotWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await snapshotWrite.writeRows([{ orderId: "ord_1", customerName: "Ada", orderCount: 1 }])
+    const version1 = await snapshotWrite.commit()
+
+    const appendWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "append",
+      inputs: [{ datasetId: ordersDataset.id, versionId: version1.versionId }],
+    })
+    await appendWrite.writeRows([{ orderId: "ord_2", customerName: "Grace", orderCount: 2 }])
+    const version2 = await appendWrite.commit()
+    expect(version2).not.toHaveProperty("rowCount")
+
+    const runtime = await (
+      storage as unknown as DuckLakeStorageInternals
+    ).connections.attachedRuntime()
+    const originalQuery = runtime.query.bind(runtime)
+    runtime.query = (async (sql, values) => {
+      if (
+        /SELECT\s+count\(\*\)\s+AS\s+row_count/i.test(sql) ||
+        /DESCRIBE\s+SELECT\s+\*\s+FROM[\s\S]*\bAT\s*\(\s*VERSION\s*=>/i.test(sql)
+      ) {
+        throw new Error(`Unexpected historical table scan in version listing: ${sql}`)
+      }
+
+      return originalQuery(sql, values)
+    }) satisfies DuckDbQueryRuntime["query"]
+
+    try {
+      const versions = await storage.listVersions(ordersDataset.id, 2)
+      expect(versions.map((version) => version.versionId)).toEqual([
+        version2.versionId,
+        version1.versionId,
+      ])
+      expect(versions[0]).not.toHaveProperty("rowCount")
+      expect(versions[1]).toMatchObject({ rowCount: 1 })
+    } finally {
+      runtime.query = originalQuery
+    }
   })
 
   test("discovers data changes and Sixb metadata-only snapshots", async () => {
@@ -146,13 +199,13 @@ describe("DuckLakeStorage versions and time travel", () => {
     expect(versions[0]).toMatchObject({
       datasetId: ordersDataset.id,
       mode: "append",
-      rowCount: 1,
     })
+    expect(versions[0]).not.toHaveProperty("rowCount")
     expect(versions[1]).toMatchObject({
       datasetId: ordersDataset.id,
       mode: "append",
-      rowCount: 1,
     })
+    expect(versions[1]).not.toHaveProperty("rowCount")
     expect(await storage.getLatestVersion(ordersDataset.id)).toEqual(versions[0])
     expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
       { orderId: "raw_1", customerName: "External", orderCount: "1", metadata: null },
