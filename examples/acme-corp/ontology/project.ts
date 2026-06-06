@@ -15,8 +15,6 @@ export const Project = defineObjectType({
     prop("deadline", "date"),
     prop("budget", "double"),
     prop("progress", "integer", { mode: "telemetry" }),
-    prop("customerRef", "string"),
-    prop("leadRef", "string"),
   ],
   links: [
     link("customer", Customer, { cardinality: "one" }),

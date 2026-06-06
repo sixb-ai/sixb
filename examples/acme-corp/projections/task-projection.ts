@@ -1,4 +1,4 @@
-import { defineProjection, fromForeignKey } from "@sixb/core"
+import { defineProjection } from "@sixb/core"
 import { erpTasksDataset } from "../datasets/erp"
 import { Employee } from "../ontology/employee"
 import { Project } from "../ontology/project"
@@ -13,18 +13,16 @@ export const taskProjection = defineProjection("task-proj", Task)
     priority: "priority",
     estimate: "estimate",
     dueDate: "dueDate",
-    projectRef: "projectRef",
-    assigneeRef: "assigneeRef",
   })
   .withLinks({
-    project: fromForeignKey({
+    project: {
       link: Task.l.project,
-      sourceProperty: Task.p.projectRef,
+      sourceField: "project_id",
       target: Project,
-    }),
-    assignee: fromForeignKey({
+    },
+    assignee: {
       link: Task.l.assignee,
-      sourceProperty: Task.p.assigneeRef,
+      sourceField: "assignee_id",
       target: Employee,
-    }),
+    },
   })

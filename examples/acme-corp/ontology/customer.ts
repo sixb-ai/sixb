@@ -12,7 +12,6 @@ export const Customer = defineObjectType({
     prop("company", "string", { required: true }),
     prop("industry", "string"),
     prop("tier", stringEnum(["bronze", "silver", "gold", "platinum"])),
-    prop("accountManagerRef", "string"),
   ],
   links: [link("accountManager", Employee, { cardinality: "one" })],
 })

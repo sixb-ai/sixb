@@ -143,6 +143,48 @@ describe("defineProjection", () => {
     })
   })
 
+  test("builds definition with FK links from dataset fields", () => {
+    const result = defineProjection("room-proj", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+      .withLinks({
+        inBuilding: fromForeignKey({
+          link: Room.l.inBuilding,
+          sourceField: "building_id",
+          target: Building,
+        }),
+      })
+
+    expect(result.links).toEqual({
+      inBuilding: {
+        linkId: "inBuilding",
+        sourceField: "building_id",
+        targetObjectTypeId: "building",
+      },
+    })
+  })
+
+  test("builds definition with typed inline FK links from dataset fields", () => {
+    const result = defineProjection("room-proj", Room)
+      .fromDataset(canonicalRoomsDataset)
+      .properties({ id: "room_id", name: "room_name" })
+      .withLinks({
+        inBuilding: {
+          link: Room.l.inBuilding,
+          sourceField: "building_id",
+          target: Building,
+        },
+      })
+
+    expect(result.links).toEqual({
+      inBuilding: {
+        linkId: "inBuilding",
+        sourceField: "building_id",
+        targetObjectTypeId: "building",
+      },
+    })
+  })
+
   test("rejects unknown link id in withLinks mapping", () => {
     const base = defineProjection("p", Room).fromDataset(genericDataset).properties({ id: "col" })
 

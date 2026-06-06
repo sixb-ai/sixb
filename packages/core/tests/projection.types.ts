@@ -136,20 +136,62 @@ fromForeignKey({
 // 9. @ts-expect-error — cross-type fromForeignKey (Room link + Building property)
 fromForeignKey({ link: _Room.l.inBuilding, sourceProperty: _Building.p.name, target: _Building })
 
-// 10. fromForeignKey rejects unrelated target type
+// 10. fromForeignKey accepts raw dataset source fields
+fromForeignKey({
+  link: _Room.l.inBuilding,
+  sourceField: "building_id",
+  target: _Building,
+}) // OK — standalone descriptors are validated against the projection dataset by .withLinks()
+
+defineProjection("test", _Room)
+  .fromDataset(roomDataset)
+  .properties({ id: "col_id" })
+  .withLinks({
+    inBuilding: {
+      link: _Room.l.inBuilding,
+      sourceField: "col_ref",
+      target: _Building,
+    },
+  }) // OK — sourceField auto-completes string columns from the projection dataset
+
+defineProjection("test", _Room)
+  .fromDataset(roomDataset)
+  .properties({ id: "col_id" })
+  .withLinks({
+    // @ts-expect-error — sourceField must exist on the projection dataset
+    inBuilding: {
+      link: _Room.l.inBuilding,
+      sourceField: "missing_column",
+      target: _Building,
+    },
+  })
+
+defineProjection("test", _Room)
+  .fromDataset(roomDataset)
+  .properties({ id: "col_id" })
+  .withLinks({
+    // @ts-expect-error — FK sourceField must be a string dataset column
+    inBuilding: {
+      link: _Room.l.inBuilding,
+      sourceField: "col_room_number",
+      target: _Building,
+    },
+  })
+
+// 11. fromForeignKey rejects unrelated target type
 const _Unrelated = defineObjectType({
   id: "unrelated",
   name: "Unrelated",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+// @ts-expect-error — target "unrelated" is not "building" and doesn't extend it
 fromForeignKey({
   link: _Room.l.inBuilding,
   sourceProperty: _Room.p.buildingRef,
-  // @ts-expect-error — target "unrelated" is not "building" and doesn't extend it
   target: _Unrelated,
 })
 
-// 11. fromForeignKey accepts direct subtype (extends matches link target)
+// 12. fromForeignKey accepts direct subtype (extends matches link target)
 const _OfficeBuilding = defineObjectType({
   id: "office-building",
   name: "Office Building",
@@ -162,7 +204,7 @@ fromForeignKey({
   target: _OfficeBuilding,
 }) // OK — extends "building"
 
-// 12. defineLinkProjection with valid single-target link
+// 13. defineLinkProjection with valid single-target link
 const linkProj = defineLinkProjection("test", _Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")

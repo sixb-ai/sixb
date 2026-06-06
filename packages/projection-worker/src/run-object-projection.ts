@@ -138,7 +138,10 @@ export async function runObjectProjection(
 }
 
 function objectProjectionReadColumns(projection: ObjectProjectionDefinition): readonly string[] {
-  return [...new Set(Object.values(projection.properties))]
+  const linkSourceFields = Object.values(projection.links).flatMap((descriptor) =>
+    descriptor.sourceField ? [descriptor.sourceField] : []
+  )
+  return [...new Set([...Object.values(projection.properties), ...linkSourceFields])]
 }
 
 async function upsertForeignKeyLinks(input: {
@@ -159,7 +162,7 @@ async function upsertForeignKeyLinks(input: {
   const linkItems: ForeignKeyLinkItem[] = []
   for (const row of rows) {
     for (const descriptor of descriptors) {
-      const fkValue = row.properties[descriptor.sourcePropertyId]
+      const fkValue = row.foreignKeyValues[descriptor.linkId]
       if (isBlank(fkValue)) {
         continue
       }

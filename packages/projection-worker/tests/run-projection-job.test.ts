@@ -78,6 +78,17 @@ const roomProjectionWithFk = roomProjection.withLinks({
   }),
 })
 
+const roomProjectionWithDatasetFieldFk = defineProjection("room-dataset-field-fk-proj", Room)
+  .fromDataset(roomsDataset)
+  .properties({ id: "room_id", name: "room_name" })
+  .withLinks({
+    inBuilding: fromForeignKey({
+      link: Room.l.inBuilding,
+      sourceField: "building_ref",
+      target: Building,
+    }),
+  })
+
 const roomSensorProjection = defineLinkProjection("room-sensor-proj", Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")
@@ -400,6 +411,51 @@ describe("runProjectionJob", () => {
 
     expect(result.objectsUpserted).toBe(1)
     expect(result.linksUpserted).toBe(1)
+
+    const links = await deps.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      linkId: "inBuilding",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.targetId).toBe("b1")
+  })
+
+  test("materializes FK links from dataset fields without storing FK properties", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset],
+        projections: [roomProjectionWithDatasetFieldFk],
+      },
+      deps
+    )
+    await sixb.upsertObject("Building", { id: "b1", name: "HQ" })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: "b1" },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-field-fk",
+        projectionId: "room-dataset-field-fk-proj",
+        projectionKind: "object",
+        datasetId: "canonical.rooms",
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.objectsUpserted).toBe(1)
+    expect(result.linksUpserted).toBe(1)
+
+    const room = await deps.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      primaryId: "r1",
+    })
+    expect(room?.properties).toEqual({ id: "r1", name: "Kitchen" })
 
     const links = await deps.storage.objects.listLinks({
       projectId: sixb.id,

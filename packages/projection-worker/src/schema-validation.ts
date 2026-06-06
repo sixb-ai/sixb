@@ -103,17 +103,41 @@ export function assertProjectionCompatibleWithDataset(input: {
       }
 
       const linkDefinition = requireLink(objectType, descriptor.linkId, projection.id)
-      requireProperty(
-        objectType,
-        descriptor.sourcePropertyId,
-        projection.id,
-        `FK link '${descriptor.linkId}' source property`
-      )
-
-      if (!(descriptor.sourcePropertyId in projection.properties)) {
+      const sourcePropertyId = descriptor.sourcePropertyId
+      const sourceField = descriptor.sourceField
+      if (sourcePropertyId && sourceField) {
         throw new ProjectionWorkerError(
-          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${descriptor.sourcePropertyId}' must be mapped as an object property.`
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must use either sourcePropertyId or sourceField, not both.`
         )
+      }
+      if (!sourcePropertyId && !sourceField) {
+        throw new ProjectionWorkerError(
+          `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' must declare sourcePropertyId or sourceField.`
+        )
+      }
+
+      if (sourcePropertyId) {
+        requireProperty(
+          objectType,
+          sourcePropertyId,
+          projection.id,
+          `FK link '${descriptor.linkId}' source property`
+        )
+
+        if (!(sourcePropertyId in projection.properties)) {
+          throw new ProjectionWorkerError(
+            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source property '${sourcePropertyId}' must be mapped as an object property.`
+          )
+        }
+      }
+
+      if (sourceField) {
+        const sourceColumn = requireColumn(columnsByName, dataset.id, sourceField, projection.id)
+        if (sourceColumn.type !== "string") {
+          throw new ProjectionWorkerError(
+            `[SixbProjectionWorker] Projection '${projection.id}' FK link '${descriptor.linkId}' source field '${sourceField}' must be a string dataset column.`
+          )
+        }
       }
 
       requireObjectType(

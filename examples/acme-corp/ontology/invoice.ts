@@ -14,8 +14,6 @@ export const Invoice = defineObjectType({
     prop("status", stringEnum(["draft", "sent", "paid", "overdue", "cancelled"])),
     prop("issuedAt", "timestamp"),
     prop("dueDate", "date"),
-    prop("customerRef", "string"),
-    prop("projectRef", "string"),
     prop(
       "reminderReviewStatus",
       stringEnum(["not_requested", "needs_review", "approved", "revision_requested", "cancelled"])
