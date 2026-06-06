@@ -2,7 +2,8 @@ import { z } from "zod"
 
 export const ForeignKeyDescriptorSchema = z.object({
   linkId: z.string(),
-  sourcePropertyId: z.string(),
+  sourcePropertyId: z.string().optional(),
+  sourceField: z.string().optional(),
   targetObjectTypeId: z.string(),
 })
 

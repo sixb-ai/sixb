@@ -9485,11 +9485,14 @@
                                 "sourcePropertyId": {
                                   "type": "string"
                                 },
+                                "sourceField": {
+                                  "type": "string"
+                                },
                                 "targetObjectTypeId": {
                                   "type": "string"
                                 }
                               },
-                              "required": ["linkId", "sourcePropertyId", "targetObjectTypeId"],
+                              "required": ["linkId", "targetObjectTypeId"],
                               "additionalProperties": false
                             }
                           }
@@ -9615,11 +9618,14 @@
                               "sourcePropertyId": {
                                 "type": "string"
                               },
+                              "sourceField": {
+                                "type": "string"
+                              },
                               "targetObjectTypeId": {
                                 "type": "string"
                               }
                             },
-                            "required": ["linkId", "sourcePropertyId", "targetObjectTypeId"],
+                            "required": ["linkId", "targetObjectTypeId"],
                             "additionalProperties": false
                           }
                         }

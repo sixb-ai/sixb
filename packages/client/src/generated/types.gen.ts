@@ -3296,7 +3296,8 @@ export type ListProjectionsResponses = {
       links: {
         [key: string]: {
           linkId: string
-          sourcePropertyId: string
+          sourcePropertyId?: string
+          sourceField?: string
           targetObjectTypeId: string
         }
       }
@@ -3352,7 +3353,8 @@ export type GetProjectionResponses = {
         links: {
           [key: string]: {
             linkId: string
-            sourcePropertyId: string
+            sourcePropertyId?: string
+            sourceField?: string
             targetObjectTypeId: string
           }
         }

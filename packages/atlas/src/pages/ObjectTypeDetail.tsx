@@ -556,7 +556,10 @@ function ForeignKeys({
   links,
   onSelectType,
 }: {
-  links: Record<string, { sourcePropertyId: string; targetObjectTypeId: string }>
+  links: Record<
+    string,
+    { sourcePropertyId?: string; sourceField?: string; targetObjectTypeId: string }
+  >
   onSelectType: (id: string) => void
 }) {
   const entries = Object.entries(links)
@@ -583,12 +586,16 @@ function ForeignKeys({
             <span aria-hidden="true" className="text-muted-foreground/40">
               via
             </span>
-            <dd className="text-muted-foreground">{fk.sourcePropertyId}</dd>
+            <dd className="text-muted-foreground">{formatForeignKeySource(fk)}</dd>
           </Fragment>
         ))}
       </dl>
     </div>
   )
+}
+
+function formatForeignKeySource(fk: { sourcePropertyId?: string; sourceField?: string }): string {
+  return fk.sourcePropertyId ?? fk.sourceField ?? "unknown"
 }
 
 function formatSchema(schema: unknown): string {
