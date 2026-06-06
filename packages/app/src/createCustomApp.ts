@@ -290,9 +290,57 @@ function isReservedSixbRoute(pathname: string): boolean {
   )
 }
 
+// Static-asset extensions whose absence should 404 rather than fall back to the
+// SPA shell — otherwise the browser would receive HTML for a missing
+// script/style/image and fail with a confusing content-type error.
+const ASSET_EXTENSIONS = new Set([
+  "js",
+  "mjs",
+  "cjs",
+  "css",
+  "map",
+  "json",
+  "wasm",
+  "ico",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "svg",
+  "webp",
+  "avif",
+  "bmp",
+  "woff",
+  "woff2",
+  "ttf",
+  "otf",
+  "eot",
+  "mp4",
+  "webm",
+  "ogg",
+  "mp3",
+  "wav",
+  "txt",
+  "xml",
+  "webmanifest",
+  "pdf",
+])
+
 function isAssetRequest(pathname: string): boolean {
-  const lastSegment = pathname.split("/").pop() ?? ""
-  return /\.[^/]+$/.test(lastSegment)
+  // Decode first: client routes can carry percent-encoded slashes (`%2F`) inside a
+  // single path segment (e.g. an object id), so the raw pathname's "last segment"
+  // is unreliable. Falling back to the SPA shell for these is the whole point.
+  let decoded = pathname
+  try {
+    decoded = decodeURIComponent(pathname)
+  } catch {
+    // Keep the raw pathname when it isn't valid percent-encoding.
+  }
+  const lastSegment = decoded.split(/[\\/]+/).pop() ?? ""
+  const dot = lastSegment.lastIndexOf(".")
+  // No extension, a leading-dot file, or a trailing dot → not an asset request.
+  if (dot <= 0 || dot === lastSegment.length - 1) return false
+  return ASSET_EXTENSIONS.has(lastSegment.slice(dot + 1).toLowerCase())
 }
 
 function resolveStaticPath(appRoot: string, pathname: string): string | null {

@@ -93,6 +93,32 @@ describe("createCustomApp.start", () => {
     }
   })
 
+  test("falls back to the SPA shell for deep routes with encoded slashes and dots", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const server = await app.start({
+      host: "127.0.0.1",
+      port,
+      apiBaseUrl: "http://127.0.0.1:3000",
+    })
+
+    try {
+      // Regression: an object id with percent-encoded slashes (`%2F`) and a dotted
+      // segment (the IP `10.75.35.6`) lives inside a single path segment. On a hard
+      // refresh this must serve the SPA shell, not 404 as a "missing asset".
+      const deepRoute = "/point/point%3Asetty%3Asetty%2Fsetty%2F10.75.35.6-708112%2Fdevice%2F708112"
+      const response = await fetch(`http://127.0.0.1:${port}${deepRoute}`)
+      expect(response.status).toBe(200)
+      expect(await response.text()).toContain('<div id="root"></div>')
+
+      // A missing asset with a real extension still 404s.
+      const missingCss = await fetch(`http://127.0.0.1:${port}/assets/app.css`)
+      expect(missingCss.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("injects disabled auth state for public local apps", async () => {
     const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot, audience: "app", authEnabled: false })
