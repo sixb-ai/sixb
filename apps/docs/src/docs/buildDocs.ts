@@ -8,15 +8,16 @@ const outputPath = join(import.meta.dir, "..", "generated", "docs.ts")
 const docs = await Promise.all(
   docsConfig.map(async (doc) => {
     const markdown = await Bun.file(doc.sourcePath).text()
+    const rendered = await renderHighlightedMarkdown(markdown, { doc, docs: docsConfig })
 
     return {
       title: doc.title,
+      section: doc.section,
       routePath: doc.routePath,
       markdownPath: doc.markdownPath,
-      html: await renderHighlightedMarkdown(markdown, {
-        doc,
-        docs: docsConfig,
-      }),
+      summary: rendered.summary,
+      headings: rendered.headings,
+      html: rendered.html,
     }
   })
 )
@@ -24,6 +25,6 @@ const docs = await Promise.all(
 await mkdir(dirname(outputPath), { recursive: true })
 await writeFile(
   outputPath,
-  `export const docs = ${JSON.stringify(docs, null, 2)} as const\n`,
+  `import type { DocEntry } from "../docs/types"\n\nexport const docs: readonly DocEntry[] = ${JSON.stringify(docs, null, 2)}\n`,
   "utf-8"
 )
