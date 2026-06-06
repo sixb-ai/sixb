@@ -170,6 +170,44 @@ describe("SqliteWorkflowRunStorage", () => {
     expect(failed?.error).toBe("No invoice candidate")
   })
 
+  test("lists the latest run for multiple workflow ids", async () => {
+    await storage.start({
+      id: "run-reconcile-a",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_1" },
+      startedAt: new Date("2026-05-08T11:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-reconcile-z",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_2" },
+      startedAt: new Date("2026-05-08T11:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-review",
+      projectId: "my-app",
+      workflowId: "review-transaction",
+      input: { transactionId: "txn_3" },
+      startedAt: new Date("2026-05-08T10:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-other-project",
+      projectId: "other-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_4" },
+      startedAt: new Date("2026-05-08T12:00:00.000Z"),
+    })
+
+    const latest = await storage.listLatestByWorkflowIds({
+      projectId: "my-app",
+      workflowIds: ["review-transaction", "missing", "reconcile-transaction"],
+    })
+
+    expect(latest.runs.map((run) => run.id)).toEqual(["run-review", "run-reconcile-z"])
+  })
+
   test("starts and finishes node runs with JSON input and output", async () => {
     await storage.start({
       id: "wf-run-1",

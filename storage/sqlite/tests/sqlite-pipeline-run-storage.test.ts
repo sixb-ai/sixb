@@ -120,6 +120,40 @@ describe("SqlitePipelineRunStorage", () => {
     })
   })
 
+  test("lists the latest run for multiple pipeline ids", async () => {
+    await storage.start({
+      id: "run-customers-a",
+      projectId: "my-app",
+      pipelineId: "customers",
+      startedAt: new Date("2026-05-08T11:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-customers-z",
+      projectId: "my-app",
+      pipelineId: "customers",
+      startedAt: new Date("2026-05-08T11:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-orders",
+      projectId: "my-app",
+      pipelineId: "orders",
+      startedAt: new Date("2026-05-08T10:00:00.000Z"),
+    })
+    await storage.start({
+      id: "run-other-project",
+      projectId: "other-app",
+      pipelineId: "customers",
+      startedAt: new Date("2026-05-08T12:00:00.000Z"),
+    })
+
+    const latest = await storage.listLatestByPipelineIds({
+      projectId: "my-app",
+      pipelineIds: ["orders", "missing", "customers", "customers"],
+    })
+
+    expect(latest.runs.map((run) => run.id)).toEqual(["run-orders", "run-customers-z"])
+  })
+
   test("starts and finishes step runs with pinned inputs", async () => {
     await storage.start({
       id: "piperun_1",

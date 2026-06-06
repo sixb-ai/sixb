@@ -31,29 +31,47 @@ function serializeSyncRun(run: SyncRunRecord) {
   }
 }
 
+type SerializedSyncRun = ReturnType<typeof serializeSyncRun>
+
 async function getLatestSyncRun(
   sixb: Sixb<readonly OntologySource[]>,
   syncId: string
-): Promise<ReturnType<typeof serializeSyncRun> | null> {
+): Promise<SerializedSyncRun | null> {
   if (!sixb.storage.syncRuns) {
     return null
   }
 
-  const result = await sixb.storage.syncRuns.list({
+  const storage = sixb.storage.syncRuns
+  const result = await storage.listLatestBySyncIds({
     projectId: sixb.id,
-    syncId,
-    limit: 1,
-    order: "desc",
+    syncIds: [syncId],
   })
 
   const [latest] = result.runs
   return latest ? serializeSyncRun(latest) : null
 }
 
-async function serializeSync(
+async function getLatestSyncRuns(
   sixb: Sixb<readonly OntologySource[]>,
-  sync: SyncDefinition
-): Promise<ReturnType<typeof SyncSchema.parse>> {
+  syncIds: readonly string[]
+): Promise<Map<string, SerializedSyncRun>> {
+  const storage = sixb.storage.syncRuns
+  if (!storage || syncIds.length === 0) {
+    return new Map()
+  }
+
+  const result = await storage.listLatestBySyncIds({
+    projectId: sixb.id,
+    syncIds,
+  })
+
+  return new Map(result.runs.map((run) => [run.syncId, serializeSyncRun(run)]))
+}
+
+function serializeSync(
+  sync: SyncDefinition,
+  latestRun: SerializedSyncRun | null
+): ReturnType<typeof SyncSchema.parse> {
   return SyncSchema.parse({
     id: sync.id,
     mode: sync.config.mode,
@@ -66,7 +84,7 @@ async function serializeSync(
       dataset: sync.target.dataset,
     },
     triggers: sync.triggers,
-    latestRun: await getLatestSyncRun(sixb, sync.id),
+    latestRun,
   })
 }
 
@@ -75,7 +93,13 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     .get(
       "/api/syncs",
       async () => {
-        return await Promise.all(sixb.getSyncDefinitions().map((sync) => serializeSync(sixb, sync)))
+        const syncs = sixb.getSyncDefinitions()
+        const latestRuns = await getLatestSyncRuns(
+          sixb,
+          syncs.map((sync) => sync.id)
+        )
+
+        return syncs.map((sync) => serializeSync(sync, latestRuns.get(sync.id) ?? null))
       },
       {
         response: { 200: SyncSchema.array() },
@@ -95,7 +119,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           return { error: "Sync not found" }
         }
 
-        return await serializeSync(sixb, sync)
+        return serializeSync(sync, await getLatestSyncRun(sixb, sync.id))
       },
       {
         params: SyncParamsSchema,

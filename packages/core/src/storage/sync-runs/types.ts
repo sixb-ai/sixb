@@ -73,9 +73,19 @@ export interface ListSyncRunsResult {
   readonly total: number
 }
 
+export interface ListLatestSyncRunsInput {
+  readonly projectId: string
+  readonly syncIds: readonly string[]
+}
+
+export interface ListLatestSyncRunsResult {
+  readonly runs: readonly SyncRunRecord[]
+}
+
 export interface SyncRunStorage {
   start(input: StartSyncRunInput): Promise<SyncRunRecord>
   finish(input: FinishSyncRunInput): Promise<SyncRunRecord>
   getById(params: { projectId: string; id: string }): Promise<SyncRunRecord | null>
   list(input: ListSyncRunsInput): Promise<ListSyncRunsResult>
+  listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult>
 }

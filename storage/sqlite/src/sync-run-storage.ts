@@ -4,6 +4,8 @@ import { dirname } from "node:path"
 import type {
   FinishSyncRunInput,
   JsonValue,
+  ListLatestSyncRunsInput,
+  ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
@@ -12,6 +14,7 @@ import type {
   SyncRunStorage,
 } from "@sixb/core"
 import { SyncRunError } from "@sixb/core"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteSyncRunStorageOptions {
@@ -214,6 +217,21 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       runs,
       hasMore: offset + runs.length < totalRow.count,
       total: totalRow.count,
+    }
+  }
+
+  async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
+    const rows = queryLatestRunsByOwnerId<DatabaseRow>({
+      db: this.db,
+      tableName: "sync_runs",
+      ownerColumn: "sync_id",
+      ownerIds: input.syncIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.sync_id,
+    })
+
+    return {
+      runs: rows.map(rowToSyncRunRecord),
     }
   }
 

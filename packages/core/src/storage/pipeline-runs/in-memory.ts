@@ -2,6 +2,7 @@ import {
   cloneRecord,
   compareStartedAt,
   hasEmptyStatuses,
+  latestStartedAtByOwnerId,
   matchesRunListDateFilters,
   paginate,
   storageKey,
@@ -11,6 +12,8 @@ import { PipelineRunError } from "./errors"
 import type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
+  ListLatestPipelineRunsInput,
+  ListLatestPipelineRunsResult,
   ListPipelineRunsInput,
   ListPipelineRunsResult,
   ListPipelineStepRunsInput,
@@ -183,6 +186,20 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
       runs: page.map(cloneRecord),
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByPipelineIds(
+    input: ListLatestPipelineRunsInput
+  ): Promise<ListLatestPipelineRunsResult> {
+    const runs = latestStartedAtByOwnerId(
+      [...this.runs.values()].filter((record) => record.projectId === input.projectId),
+      input.pipelineIds,
+      (record) => record.pipelineId
+    )
+
+    return {
+      runs: runs.map(cloneRecord),
     }
   }
 

@@ -4,6 +4,8 @@ import { dirname } from "node:path"
 import type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
+  ListLatestWorkflowRunsInput,
+  ListLatestWorkflowRunsResult,
   ListWorkflowNodeRunsInput,
   ListWorkflowNodeRunsResult,
   ListWorkflowRunsInput,
@@ -22,6 +24,7 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core"
 import { WorkflowRunError } from "@sixb/core"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   appendRunListFilters,
@@ -332,6 +335,23 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
       runs: rows.map(rowToWorkflowRunRecord),
       hasMore,
       total,
+    }
+  }
+
+  async listLatestByWorkflowIds(
+    input: ListLatestWorkflowRunsInput
+  ): Promise<ListLatestWorkflowRunsResult> {
+    const rows = queryLatestRunsByOwnerId<WorkflowRunDatabaseRow>({
+      db: this.db,
+      tableName: "workflow_runs",
+      ownerColumn: "workflow_id",
+      ownerIds: input.workflowIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.workflow_id,
+    })
+
+    return {
+      runs: rows.map(rowToWorkflowRunRecord),
     }
   }
 

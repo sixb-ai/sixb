@@ -765,6 +765,9 @@ describe("runSyncJob", () => {
       list(input) {
         return delegate.list(input)
       },
+      listLatestBySyncIds(input) {
+        return delegate.listLatestBySyncIds(input)
+      },
     }
 
     const lakeStorage = new InMemoryLakeStorage()

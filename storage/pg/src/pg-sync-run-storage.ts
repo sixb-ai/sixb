@@ -1,6 +1,8 @@
 import type {
   FinishSyncRunInput,
   JsonValue,
+  ListLatestSyncRunsInput,
+  ListLatestSyncRunsResult,
   ListSyncRunsInput,
   ListSyncRunsResult,
   StartSyncRunInput,
@@ -10,6 +12,7 @@ import type {
 } from "@sixb/core"
 import { SyncRunError } from "@sixb/core"
 import type { SQL } from "bun"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 
 export class PgSyncRunStorage implements SyncRunStorage {
   constructor(private readonly sql: SQL) {}
@@ -185,6 +188,22 @@ export class PgSyncRunStorage implements SyncRunStorage {
       runs,
       hasMore: offset + runs.length < total,
       total,
+    }
+  }
+
+  async listLatestBySyncIds(input: ListLatestSyncRunsInput): Promise<ListLatestSyncRunsResult> {
+    const rows = await queryLatestRunsByOwnerId<DatabaseRow>({
+      sql: this.sql,
+      tableName: "sync_runs",
+      ownerColumn: "sync_id",
+      ownerIds: input.syncIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.sync_id,
+      selectList: "*, checkpoint IS NOT NULL AS checkpoint_present",
+    })
+
+    return {
+      runs: rows.map(rowToSyncRunRecord),
     }
   }
 }
