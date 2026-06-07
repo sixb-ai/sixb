@@ -13,6 +13,7 @@ export {
   validatePropertyDefinitions,
   validatePropertyValue,
 } from "./properties"
+export { validateQueryMetadata } from "./query"
 export { isRecord, resolveValueTypeRef, validateSchemaValue } from "./schema"
 
 export {

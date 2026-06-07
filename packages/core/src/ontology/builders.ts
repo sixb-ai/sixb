@@ -37,6 +37,7 @@ import type {
   Ontology,
   Property,
   PropertyMode,
+  PropertyQueryMetadata,
   Schema,
   ValueType,
   ValueTypeRefSchema,
@@ -207,6 +208,7 @@ export function defineObjectType(input: DefineObjectTypeInput): ObjectTypeWithTo
     implements: input.implements,
     properties,
     links,
+    search: input.search,
   }
 
   return {
@@ -315,6 +317,7 @@ type PropertyOptions = {
   primary?: true
   mode?: PropertyMode
   semanticType?: QuantitativeTypeId
+  query?: PropertyQueryMetadata
 }
 
 type PropertyResult<
@@ -330,7 +333,8 @@ type PropertyResult<
   FieldFromOptions<TOptions, "nullable", boolean> &
   FieldFromOptions<TOptions, "primary", true> &
   FieldFromOptions<TOptions, "mode", PropertyMode> &
-  FieldFromOptions<TOptions, "semanticType", QuantitativeTypeId>
+  FieldFromOptions<TOptions, "semanticType", QuantitativeTypeId> &
+  FieldFromOptions<TOptions, "query", PropertyQueryMetadata>
 
 /**
  * Shorthand for creating a {@link Property}.

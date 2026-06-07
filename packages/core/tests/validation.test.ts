@@ -7,6 +7,7 @@ import {
   OntologyRegistry,
   OntologyValidationError,
   prop,
+  stringEnum,
 } from "../src"
 import type { Property, ValueType } from "../src/ontology"
 import {
@@ -413,6 +414,208 @@ describe("ontology startup validation", () => {
 
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
     expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow("cannot use fileRef")
+  })
+
+  test("accepts valid query and search metadata", () => {
+    const objectType = defineObjectType({
+      id: "Customer",
+      name: "Customer",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", {
+          required: true,
+          query: { searchable: true, text: true, exact: true, sortable: true, weight: 5 },
+        }),
+        prop("email", "string", {
+          query: { searchable: true, text: true, exact: true },
+        }),
+        prop("status", stringEnum(["active", "paused"]), {
+          query: { searchable: true, filterable: true, exact: true, facet: true },
+        }),
+        prop(
+          "tags",
+          { type: "array", items: "string" },
+          {
+            query: { searchable: true, filterable: true },
+          }
+        ),
+        prop(
+          "metadata",
+          { type: "map", keySchema: "string", valueSchema: "string" },
+          {
+            query: { searchable: true, filterable: true },
+          }
+        ),
+        prop(
+          "embedding",
+          { type: "array", items: "double" },
+          {
+            query: { searchable: true, vector: true },
+          }
+        ),
+      ],
+      search: {
+        title: "name",
+        defaultText: ["name", "email"],
+        exact: ["id", "email"],
+        vector: { property: "embedding", source: ["name", "email"] },
+      },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).not.toThrow()
+  })
+
+  test("allows primary id in exact search profile without explicit exact metadata", () => {
+    const objectType = defineObjectType({
+      id: "PrimaryExactProfile",
+      name: "Primary Exact Profile",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { searchable: true, text: true } }),
+      ],
+      search: {
+        title: "name",
+        defaultText: ["name"],
+        exact: ["id"],
+      },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).not.toThrow()
+  })
+
+  test("rejects query features that do not opt in with searchable", () => {
+    const objectType = defineObjectType({
+      id: "BadQuery",
+      name: "Bad Query",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { text: true } }),
+      ],
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      "must set query.searchable: true"
+    )
+  })
+
+  test("rejects text search on non-string-like properties", () => {
+    const objectType = defineObjectType({
+      id: "BadText",
+      name: "Bad Text",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "double", { query: { searchable: true, text: true } }),
+      ],
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      "schema is not string-like"
+    )
+  })
+
+  test("rejects search profile fields without matching property query flags", () => {
+    const objectType = defineObjectType({
+      id: "BadSearchProfile",
+      name: "Bad Search Profile",
+      properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+      search: { title: "name", defaultText: ["name"] },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      "must set query.searchable: true and query.text: true"
+    )
+  })
+
+  test("rejects telemetry properties in search profiles", () => {
+    const objectType = defineObjectType({
+      id: "BadTelemetrySearch",
+      name: "Bad Telemetry Search",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("currentStatus", "string", {
+          mode: "telemetry",
+          query: { searchable: true, text: true },
+        }),
+      ],
+      search: { title: "currentStatus", defaultText: ["currentStatus"] },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      "can only reference static properties"
+    )
+  })
+
+  test("rejects vector search properties that are not numeric arrays", () => {
+    const objectType = defineObjectType({
+      id: "BadVector",
+      name: "Bad Vector",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { searchable: true, text: true } }),
+        prop("embedding", "string", { query: { searchable: true, vector: true } }),
+      ],
+      search: {
+        title: "name",
+        defaultText: ["name"],
+        vector: { property: "embedding", source: ["name"] },
+      },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
+      "schema is not a numeric array"
+    )
+  })
+
+  test("rejects vector search profiles with empty or non-text source fields", () => {
+    const emptySource = defineObjectType({
+      id: "EmptyVectorSource",
+      name: "Empty Vector Source",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { searchable: true, text: true } }),
+        prop(
+          "embedding",
+          { type: "array", items: "double" },
+          { query: { searchable: true, vector: true } }
+        ),
+      ],
+      search: {
+        defaultText: ["name"],
+        vector: { property: "embedding", source: [] },
+      },
+    })
+    const nonTextSource = defineObjectType({
+      id: "NonTextVectorSource",
+      name: "Non Text Vector Source",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { searchable: true, exact: true } }),
+        prop(
+          "embedding",
+          { type: "array", items: "double" },
+          { query: { searchable: true, vector: true } }
+        ),
+      ],
+      search: {
+        vector: { property: "embedding", source: ["name"] },
+      },
+    })
+
+    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(OntologyValidationError)
+    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(
+      "search.vector.source must include at least one source property"
+    )
+    expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
+      OntologyValidationError
+    )
+    expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
+      "must set query.searchable: true and query.text: true"
+    )
   })
 })
 

@@ -10,7 +10,11 @@ import { OntologyValidationError } from "./errors"
 import type { ObjectTypeWithPropertyTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type { ObjectType, Schema, ValueType } from "./types"
-import { validatePrimaryProperties, validatePropertyDefinitions } from "./validation"
+import {
+  validatePrimaryProperties,
+  validatePropertyDefinitions,
+  validateQueryMetadata,
+} from "./validation"
 
 // ── Input types ──────────────────────────────────────────────
 
@@ -174,6 +178,7 @@ export class OntologyRegistry {
     this.validateAndBuildExtendsRegistry()
     this.resolveInheritedProperties()
     validatePropertyDefinitions(this.objectTypesById, this.valueTypesById)
+    validateQueryMetadata(this.objectTypesById, this.valueTypesById)
     this.primaryByTypeId = validatePrimaryProperties(this.objectTypesById)
   }
 

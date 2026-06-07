@@ -172,6 +172,53 @@ export interface ValueType {
 }
 
 /**
+ * Query/indexing metadata for an object or link property.
+ *
+ * `searchable` is the opt-in gate. More specific flags describe which query
+ * surfaces may use the property once a storage provider supports them.
+ */
+export interface PropertyQueryMetadata {
+  /** Enables the property for query indexing. Required when any specific flag is set. */
+  searchable?: boolean
+  /** Enables property predicates such as equality/range filters. */
+  filterable?: boolean
+  /** Enables deterministic ordering by this property. */
+  sortable?: boolean
+  /** Enables keyword search over this property. String-like schemas only. */
+  text?: boolean
+  /** Enables exact-match search over this property. */
+  exact?: boolean
+  /** Enables faceting/grouping in search results. */
+  facet?: boolean
+  /** Enables vector search when the property stores numeric embedding arrays. */
+  vector?: boolean
+  /** Relative text-search weight. Only meaningful with `text: true`. */
+  weight?: number
+}
+
+/**
+ * Object-level search profile.
+ *
+ * Search profiles decide which fields a global or type-scoped search uses.
+ * Primary ids remain exact-matchable even if omitted here.
+ */
+export interface ObjectTypeSearchMetadata {
+  /** Display/title property used in search results. */
+  title?: string
+  /** Default keyword-search fields for this object type. */
+  defaultText?: readonly string[]
+  /** Exact-match fields such as external ids, slugs, or emails. */
+  exact?: readonly string[]
+  /** Vector-search configuration for semantic retrieval. */
+  vector?: {
+    /** Property that stores the embedding vector. */
+    property: string
+    /** Source text properties used to produce the embedding. */
+    source: readonly string[]
+  }
+}
+
+/**
  * Attribute on an `ObjectType` (or on a relationship via `ObjectLink.properties`).
  * - `serialNumber` (string)
  * - `manufacturer` (string)
@@ -228,6 +275,8 @@ export interface Property {
    * @example `semanticType: "Pressure"` — allows `bar`, `pascal`, `millibar`, etc.
    */
   semanticType?: QuantitativeTypeId
+  /** Query/indexing metadata for this property. */
+  query?: PropertyQueryMetadata
 }
 
 /**
@@ -338,6 +387,8 @@ export interface ObjectType {
 
   properties: Property[]
   links: ObjectLink[]
+  /** Search profile for this object type. */
+  search?: ObjectTypeSearchMetadata
 }
 
 /**
