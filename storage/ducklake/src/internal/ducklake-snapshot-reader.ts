@@ -12,6 +12,7 @@ import { getBigIntLike, getBoolean, getDate, getOptionalString, getString } from
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
+import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
 import { encodeDatasetTableName } from "./names"
 import { duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
@@ -29,12 +30,6 @@ interface DatasetSnapshotRow {
   readonly mode: DatasetVersionMode
   readonly parentSnapshotId?: string
   readonly metadata?: SixbCommitMetadata
-}
-
-interface DatasetTableRef {
-  readonly datasetId: string
-  readonly tableName: string
-  readonly tableId: bigint
 }
 
 interface DatasetSnapshotCandidateRow {
@@ -113,7 +108,7 @@ export class DuckLakeSnapshotReader {
     this.connections.assertOpen()
 
     return this.connections.withAttachedRuntime(async (runtime) => {
-      const tableRef = await this.getDatasetTableRef(runtime, datasetId)
+      const tableRef = await resolveDatasetTableRef(this.options, runtime, datasetId)
       if (!tableRef) {
         return []
       }
@@ -126,7 +121,7 @@ export class DuckLakeSnapshotReader {
     this.connections.assertOpen()
 
     return this.connections.withAttachedRuntime(async (runtime) => {
-      const tableRef = await this.getDatasetTableRef(runtime, datasetId)
+      const tableRef = await resolveDatasetTableRef(this.options, runtime, datasetId)
       if (!tableRef) {
         return null
       }
@@ -140,7 +135,7 @@ export class DuckLakeSnapshotReader {
     this.connections.assertOpen()
 
     return this.connections.withAttachedRuntime(async (runtime) => {
-      const tableRef = await this.getDatasetTableRef(runtime, datasetId)
+      const tableRef = await resolveDatasetTableRef(this.options, runtime, datasetId)
       if (!tableRef) {
         return null
       }
@@ -419,7 +414,7 @@ export class DuckLakeSnapshotReader {
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DatasetVersion | null> {
-    const tableRef = await this.getDatasetTableRef(runtime, dataset.id)
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
     return tableRef ? this.getLatestVersionForTableRef(runtime, tableRef) : null
   }
 
@@ -435,7 +430,7 @@ export class DuckLakeSnapshotReader {
     runtime: DuckDbQueryRuntime,
     dataset: DatasetDefinition
   ): Promise<DuckLakeVersionSummary | null> {
-    const tableRef = await this.getDatasetTableRef(runtime, dataset.id)
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
     if (!tableRef) {
       return null
     }
@@ -459,11 +454,11 @@ export class DuckLakeSnapshotReader {
   ): Promise<DatasetVersion | null> {
     assertDuckLakeSnapshotId(snapshotId)
 
-    const tableRef = await this.getDatasetTableRef(runtime, dataset.id)
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
     return tableRef ? this.getVersionForTableRef(runtime, tableRef, snapshotId) : null
   }
 
-  private async getVersionForTableRef(
+  async getVersionForTableRef(
     runtime: DuckDbQueryRuntime,
     tableRef: DatasetTableRef,
     snapshotId: string
@@ -481,7 +476,7 @@ export class DuckLakeSnapshotReader {
   ): Promise<DatasetVersionRef | null> {
     assertDuckLakeSnapshotId(snapshotId)
 
-    const tableRef = await this.getDatasetTableRef(runtime, dataset.id)
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
     if (!tableRef) {
       return null
     }
@@ -497,7 +492,7 @@ export class DuckLakeSnapshotReader {
     dataset: DatasetDefinition,
     limit?: number
   ): Promise<readonly DatasetVersion[]> {
-    const tableRef = await this.getDatasetTableRef(runtime, dataset.id)
+    const tableRef = await resolveDatasetTableRef(this.options, runtime, dataset.id)
     return tableRef ? this.listVersionsForTableRef(runtime, tableRef, limit) : []
   }
 
@@ -516,7 +511,7 @@ export class DuckLakeSnapshotReader {
     return versions
   }
 
-  private async getLatestVersionForTableRef(
+  async getLatestVersionForTableRef(
     runtime: DuckDbQueryRuntime,
     tableRef: DatasetTableRef
   ): Promise<DatasetVersion | null> {
@@ -730,29 +725,6 @@ export class DuckLakeSnapshotReader {
         ...(metadata !== undefined ? { metadata } : {}),
       }
     })
-  }
-
-  private async getDatasetTableRef(
-    runtime: DuckDbQueryRuntime,
-    datasetId: string
-  ): Promise<DatasetTableRef | null> {
-    const tableName = encodeDatasetTableName(datasetId)
-    const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
-    const [row] = await runtime.query(`
-      SELECT table_id
-      FROM ${ducklakeTable}
-      WHERE table_name = ${quoteSqlString(tableName)}
-        AND end_snapshot IS NULL
-      LIMIT 1
-    `)
-
-    return row === undefined
-      ? null
-      : {
-          datasetId,
-          tableName,
-          tableId: getBigIntLike(row, "table_id"),
-        }
   }
 
   private candidateToSnapshotRow(

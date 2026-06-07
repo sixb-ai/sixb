@@ -51,12 +51,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       this.connections,
       this.datasets
     )
-    this.rows = new DuckLakeRowReader(
-      normalizedOptions,
-      this.connections,
-      this.datasets,
-      this.snapshotReader
-    )
+    this.rows = new DuckLakeRowReader(normalizedOptions, this.connections, this.snapshotReader)
     this.writes = new DuckLakeWriteCoordinator(
       normalizedOptions,
       this.connections,

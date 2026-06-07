@@ -1,17 +1,15 @@
 import type {
   DatasetColumnDefinition,
-  DatasetDefinition,
   DatasetRow,
   DatasetVersion,
   ReadDatasetRowsInput,
 } from "@sixb/core"
 import { LakeStorageError } from "@sixb/core"
 import type { DuckLakeStorageOptions } from "../types"
-import type { DuckDbRuntime } from "./duckdb-runtime"
+import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
-import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
+import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
 import type { DuckLakeSnapshotReader } from "./ducklake-snapshot-reader"
-import { encodeDatasetTableName } from "./names"
 import { normalizeReadValue } from "./schema"
 import { qualifiedTableName, quoteIdentifier } from "./sql"
 import { parseVersionId } from "./versions"
@@ -27,7 +25,6 @@ export class DuckLakeRowReader {
   constructor(
     private readonly options: DuckLakeStorageOptions,
     private readonly connections: DuckLakeConnectionManager,
-    private readonly datasets: DuckLakeDatasetCatalog,
     private readonly snapshots: DuckLakeSnapshotReader
   ) {}
 
@@ -38,62 +35,75 @@ export class DuckLakeRowReader {
     try {
       const runtime = lease.runtime
 
-      // Step 1: use the catalog definition, not caller-provided shape. That
-      // keeps projection validation and value normalization aligned with the
-      // physical DuckLake table.
-      const definition = await this.datasets.getDatasetOnRuntime(runtime, input.datasetId)
-      if (!definition) {
+      // Step 1: resolve the physical table from DuckLake metadata directly. Row
+      // previews must not go through broad catalog introspection.
+      const tableRef = await resolveDatasetTableRef(this.options, runtime, input.datasetId)
+      if (!tableRef) {
         throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
       }
 
-      const version = await this.resolveVersion(runtime, definition, input.versionId)
+      const version = await this.resolveVersion(runtime, tableRef, input.versionId)
       const snapshotId = parseVersionId(version.versionId)
-      const selectedColumns = this.resolveReadColumns(definition.id, version.schema, input.columns)
+      const selectedColumns = this.resolveReadColumns(
+        tableRef.datasetId,
+        version.schema,
+        input.columns
+      )
 
       // Step 2: query DuckLake at the exact snapshot id. Version ids are just
       // `ducklake:<snapshot_id>`, so reads can use native DuckLake time travel
       // directly after validation.
-      const tableName = encodeDatasetTableName(input.datasetId)
       const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
-      const tableSql = qualifiedTableName(this.options, tableName)
-      const limitSql = input.limit === undefined ? "" : ` LIMIT ${Math.max(0, input.limit)}`
-      const offsetSql = input.offset === undefined ? "" : ` OFFSET ${Math.max(0, input.offset)}`
-      const rows = runtime.streamRows(
-        `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
-      )
+      const tableSql = qualifiedTableName(this.options, tableRef.tableName)
+      const limitSql =
+        input.limit === undefined ? "" : ` LIMIT ${Math.max(0, Math.trunc(input.limit))}`
+      const offsetSql =
+        input.offset === undefined ? "" : ` OFFSET ${Math.max(0, Math.trunc(input.offset))}`
+      const sql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})${limitSql}${offsetSql}`
+
+      // HTTP previews are bounded, so materialize them eagerly and release the
+      // runtime queue as soon as DuckDB has returned the small page.
+      const rows = input.limit === undefined ? runtime.streamRows(sql) : await runtime.query(sql)
 
       // Step 3: DuckDB returns driver-native values. Normalize each projected
       // column through the schema that was active at the resolved version.
-      for await (const row of rows) {
-        const output: Record<string, unknown> = {}
-        for (const column of selectedColumns) {
-          output[column.name] = normalizeReadValue(row[column.name], column)
-        }
-        yield output
-      }
+      yield* this.normalizeRows(rows, selectedColumns)
     } finally {
       await lease.release()
     }
   }
 
+  private async *normalizeRows(
+    rows: Iterable<Record<string, unknown>> | AsyncIterable<Record<string, unknown>>,
+    selectedColumns: readonly DatasetColumnDefinition[]
+  ): AsyncIterable<DatasetRow> {
+    for await (const row of rows) {
+      const output: Record<string, unknown> = {}
+      for (const column of selectedColumns) {
+        output[column.name] = normalizeReadValue(row[column.name], column)
+      }
+      yield output
+    }
+  }
+
   private async resolveVersion(
-    runtime: DuckDbRuntime,
-    definition: DatasetDefinition,
+    runtime: DuckDbQueryRuntime,
+    tableRef: DatasetTableRef,
     versionId?: string
   ): Promise<DatasetVersion> {
     if (versionId !== undefined) {
       const snapshotId = parseVersionId(versionId)
-      const version = await this.snapshots.getVersionForSnapshot(runtime, definition, snapshotId)
+      const version = await this.snapshots.getVersionForTableRef(runtime, tableRef, snapshotId)
       if (!version) {
-        this.throwNoCommittedVersion(definition.id)
+        this.throwNoCommittedVersion(tableRef.datasetId)
       }
 
       return version
     }
 
-    const latestVersion = await this.snapshots.getLatestVersionForDefinition(runtime, definition)
+    const latestVersion = await this.snapshots.getLatestVersionForTableRef(runtime, tableRef)
     if (!latestVersion) {
-      this.throwNoCommittedVersion(definition.id)
+      this.throwNoCommittedVersion(tableRef.datasetId)
     }
 
     return latestVersion

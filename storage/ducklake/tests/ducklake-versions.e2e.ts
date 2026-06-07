@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
-import type { DuckDbQueryRuntime } from "../src/internal/duckdb-runtime"
+import type { DuckDbQueryRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
 import { quoteSqlString } from "../src/internal/sql"
@@ -12,7 +12,7 @@ import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from ".
 
 interface DuckLakeStorageInternals {
   readonly connections: {
-    attachedRuntime(): Promise<DuckDbQueryRuntime>
+    attachedRuntime(): Promise<DuckDbRuntime>
   }
 }
 
@@ -169,6 +169,56 @@ describe("DuckLakeStorage versions and time travel", () => {
       await expect(storage.getLatestVersion("missing.dataset")).resolves.toBeNull()
     } finally {
       runtime.query = originalQuery
+    }
+  })
+
+  test("reads limited rows without catalog introspection or streaming", async () => {
+    const snapshotWrite = await storage.beginWrite({
+      dataset: ordersDataset,
+      mode: "snapshot",
+    })
+    await snapshotWrite.writeRows([
+      { orderId: "ord_1", customerName: "Ada", orderCount: 1 },
+      { orderId: "ord_2", customerName: "Grace", orderCount: 2 },
+    ])
+    const version = await snapshotWrite.commit()
+
+    const runtime = await (
+      storage as unknown as DuckLakeStorageInternals
+    ).connections.attachedRuntime()
+    const originalQuery = runtime.query.bind(runtime)
+    const originalStreamRows = runtime.streamRows.bind(runtime)
+    runtime.query = (async (sql, values) => {
+      if (
+        /\bduckdb_tables\s*\(/i.test(sql) ||
+        /SELECT\s+count\(\*\)\s+AS\s+row_count/i.test(sql) ||
+        /DESCRIBE\s+SELECT\s+\*\s+FROM[\s\S]*\bAT\s*\(\s*VERSION\s*=>/i.test(sql)
+      ) {
+        throw new Error(`Unexpected expensive row read: ${sql}`)
+      }
+
+      return originalQuery(sql, values)
+    }) satisfies DuckDbQueryRuntime["query"]
+    runtime.streamRows = ((sql, values) => {
+      void values
+      throw new Error(`Unexpected streaming row preview: ${sql}`)
+    }) satisfies DuckDbRuntime["streamRows"]
+
+    try {
+      await expect(
+        collectRows(
+          storage.readRows({
+            datasetId: ordersDataset.id,
+            versionId: version.versionId,
+            limit: 1,
+          })
+        )
+      ).resolves.toEqual([
+        { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
+      ])
+    } finally {
+      runtime.query = originalQuery
+      runtime.streamRows = originalStreamRows
     }
   })
 

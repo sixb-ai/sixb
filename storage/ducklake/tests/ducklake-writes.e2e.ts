@@ -16,7 +16,7 @@ interface DuckLakeStorageInternals {
     }>
   }
   readonly snapshotReader: {
-    getLatestVersionForDefinition: DuckLakeSnapshotReader["getLatestVersionForDefinition"]
+    getLatestVersionForTableRef: DuckLakeSnapshotReader["getLatestVersionForTableRef"]
   }
 }
 
@@ -421,16 +421,16 @@ describe("DuckLakeStorage writes and latest reads", () => {
     await appendWrite.commit()
 
     const snapshotReader = (storage as unknown as DuckLakeStorageInternals).snapshotReader
-    const getLatestVersionForDefinition =
-      snapshotReader.getLatestVersionForDefinition.bind(snapshotReader)
-    snapshotReader.getLatestVersionForDefinition = async () => version1
+    const getLatestVersionForTableRef =
+      snapshotReader.getLatestVersionForTableRef.bind(snapshotReader)
+    snapshotReader.getLatestVersionForTableRef = async () => version1
 
     try {
       await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual(
         [{ orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null }]
       )
     } finally {
-      snapshotReader.getLatestVersionForDefinition = getLatestVersionForDefinition
+      snapshotReader.getLatestVersionForTableRef = getLatestVersionForTableRef
     }
   })
 
