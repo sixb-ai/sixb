@@ -109,16 +109,6 @@ export interface ObjectStorage {
     primaryId: string
   }): Promise<ObjectRow | null>
 
-  findFirst(params: {
-    projectId: string
-    objectTypeId: string
-    where?: readonly {
-      propertyId: string
-      op: "eq"
-      value: unknown
-    }[]
-  }): Promise<ObjectRow | null>
-
   listLinks(params: {
     projectId: string
     objectTypeId: string

@@ -49,11 +49,82 @@ async function contract(): Promise<void> {
     at: new Date(),
   })
 
-  const room = await sixb.objects(Room).findFirst({
-    where: (r) => r.p.externalId.eq("RM-101"),
-  })
+  const room = await sixb
+    .objects(Room)
+    .query()
+    .where((r) => r.p.externalId.eq("RM-101"))
+    .first()
 
   void room
+
+  const roomQuery = sixb
+    .objects(Room)
+    .query()
+    .where((r) => r.and(r.p.externalId.eq("RM-101"), r.p.name.contains("Conference")))
+    .search("conference", { fields: [Room.p.name, Room.p.externalId] })
+    .orderBy(Room.p.name, "asc")
+    .limit(10)
+
+  void roomQuery.ir
+
+  sixb
+    .objects(Room)
+    .query()
+    .where((r) => r.p.name.eq("Conference 101"))
+    .validate()
+
+  sixb.objects(Room).query().search("conference").explain()
+
+  sixb.objects(Room).query().limit(10).formatExplanation()
+
+  sixb
+    .objects(Room)
+    .query()
+    // @ts-expect-error search fields accept only property tokens from the current object type
+    .search("conference", { fields: [Thermostat.p.name] })
+
+  sixb.objects(Room).list({
+    // @ts-expect-error list is storage browsing; use query().where(...).list()
+    where: (r) => r.p.name.eq("Conference 101"),
+  })
+
+  await sixb
+    .objects(Room)
+    .query()
+    .where((r) =>
+      r.and(
+        r.p.externalId.eq("RM-101"),
+        r.or(r.p.name.contains("Conference"), r.p.name.in(["Conference 101"])),
+        r.not(r.p.externalId.neq("RM-404")),
+        r.p.currentTemperature.gt(20)
+      )
+    )
+    .first()
+
+  await sixb
+    .objects(Room)
+    .query()
+    // @ts-expect-error contains on string properties requires a string
+    .where((r) => r.p.name.contains(123))
+    .first()
+
+  await sixb
+    .objects(Room)
+    .query()
+    // @ts-expect-error contains is not valid for numeric properties
+    .where((r) => r.p.currentTemperature.contains(22))
+    .first()
+
+  const tstatQuery = sixb
+    .objects(Room)
+    .query()
+    .where((r) => r.and(r.p.externalId.eq("RM-101"), r.p.name.contains("Conference")))
+    .traverse(Room.l.hasThermostat)
+    .where((t) => t.p.externalId.eq("device-123"))
+
+  const tstatFromQuery = await tstatQuery.first()
+  const _thermostatObjectTypeId: "Thermostat" | undefined = tstatFromQuery?.objectTypeId
+  void _thermostatObjectTypeId
 
   const tstat = await sixb.objects(Thermostat).upsert({
     properties: {
