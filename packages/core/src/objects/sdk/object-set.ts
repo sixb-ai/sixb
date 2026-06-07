@@ -12,12 +12,7 @@ import type { OntologyRegistry, ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { Queues } from "../../queues"
-import type {
-  ObjectSet,
-  ObjectWhereBuilder,
-  ObjectWhereClause,
-  TwinObject,
-} from "../../runtime/types"
+import type { ObjectSet, ObjectSetListInput, TwinObject } from "../../runtime/types"
 import type { Storage } from "../../storage"
 import {
   requestActionAndWait as requestActionAndWaitLeaf,
@@ -29,10 +24,11 @@ import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../l
 import { upsertObject as upsertObjectLeaf } from "../object"
 import { appendTelemetryBatch as appendTelemetryBatchLeaf } from "../telemetry"
 import { createObjectByIdHandle } from "./object-handle"
-import { resolveWhere } from "./where"
+import { createObjectQueryBuilder } from "./query-builder"
 
 export function createObjectSet<
   TObjectType extends ObjectTypeWithPropertyTokens,
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 >(params: {
   objectType: TObjectType
@@ -44,7 +40,7 @@ export function createObjectSet<
   blobStorage: BlobStorage
   storage: Storage
   queues: Queues
-}): ObjectSet<TObjectType, TValueTypes> {
+}): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
   const {
     objectType,
     projectId,
@@ -97,45 +93,18 @@ export function createObjectSet<
       return row as unknown as TwinObject<TObjectType, TValueTypes>
     },
 
-    findFirst: async (input?: {
-      where?: (
-        builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-      ) =>
-        | ObjectWhereClause<TObjectType, TValueTypes>
-        | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-    }) => {
-      const where = resolveWhere<TObjectType, TValueTypes>(objectType, input?.where)
-
-      const row = await storage.objects.findFirst({
+    query: () =>
+      createObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>({
+        objectType,
+        ontology,
         projectId,
-        objectTypeId: objectType.id,
-        where,
-      })
-
-      return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
-    },
+        storage,
+        query: { kind: "start", objectTypeId: objectType.id },
+      }),
 
     byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
 
-    list: async (input?: {
-      where?: (
-        builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-      ) =>
-        | ObjectWhereClause<TObjectType, TValueTypes>
-        | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-      idPrefix?: string
-      idSuffix?: string
-      updatedAfter?: Date
-      updatedBefore?: Date
-      createdAfter?: Date
-      createdBefore?: Date
-      limit?: number
-      offset?: number
-      orderBy?: "createdAt" | "updatedAt" | "primaryId"
-      order?: "asc" | "desc"
-    }) => {
-      const where = resolveWhere<TObjectType, TValueTypes>(objectType, input?.where)
-
+    list: async (input?: ObjectSetListInput) => {
       const result = await storage.objects.list({
         projectId,
         objectTypeId: objectType.id,
@@ -151,34 +120,12 @@ export function createObjectSet<
         order: input?.order,
       })
 
-      const filteredRows =
-        where && where.length > 0
-          ? result.objects.filter((row) => {
-              return where.every((clause) => {
-                if (clause.op === "eq") {
-                  return row.properties[clause.propertyId] === clause.value
-                }
-                return false
-              })
-            })
-          : result.objects
-
-      const objects = filteredRows.map(
-        (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
-      )
-
-      if (where && where.length > 0) {
-        return {
-          objects,
-          hasMore: false,
-          total: filteredRows.length,
-        }
-      }
-
       return {
-        objects,
+        objects: result.objects.map(
+          (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
+        ),
         hasMore: result.hasMore,
-        total: result.total,
+        total: result.total ?? result.objects.length,
       }
     },
 
@@ -275,5 +222,5 @@ export function createObjectSet<
     },
   }
 
-  return objectSet as unknown as ObjectSet<TObjectType, TValueTypes>
+  return objectSet as unknown as ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>
 }

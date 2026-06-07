@@ -20,6 +20,18 @@ import type { DatasetDefinition } from "../datasets"
 import type { EventsRuntime } from "../events"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
+import type {
+  ObjectQuery,
+  ObjectQueryExplanation,
+  ObjectQueryPredicateComparison,
+  ObjectQueryPredicateContains,
+  ObjectQueryPredicateExists,
+  ObjectQueryPredicateGroup,
+  ObjectQueryPredicateIn,
+  ObjectQueryPredicateNot,
+  ObjectQuerySortDirection,
+  ValidatedObjectQuery,
+} from "../objects/query"
 import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type {
   InferObjectProperties,
@@ -141,19 +153,62 @@ type PropertyById<
   TPropertyId extends TObjectType["properties"][number]["id"],
 > = Extract<TObjectType["properties"][number], { id: TPropertyId }>
 
-/**
- * Minimal query clause shape used by `findFirst`.
- *
- * V1 keeps this intentionally tiny (`eq`) while preserving typed values.
- */
-type PropertyWhereClause<
+type PropertyWhereValue<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
   TValueTypes extends readonly ValueType[],
-> = {
+> = InferPropertyValue<PropertyById<TObjectType, TPropertyId>, TValueTypes>
+
+type PropertyWhereContainsValue<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+  TValueTypes extends readonly ValueType[],
+> =
+  NonNullable<PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>> extends string
+    ? string
+    : NonNullable<
+          PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+        > extends readonly (infer TItem)[]
+      ? TItem
+      : NonNullable<PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>> extends Record<
+            string,
+            unknown
+          >
+        ? string
+        : never
+
+type PropertyWhereComparisonClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+  TValueTypes extends readonly ValueType[],
+> = Omit<ObjectQueryPredicateComparison, "propertyId" | "value"> & {
   propertyId: TPropertyId
-  op: "eq"
-  value: InferPropertyValue<PropertyById<TObjectType, TPropertyId>, TValueTypes>
+  value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+}
+
+type PropertyWhereInClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+  TValueTypes extends readonly ValueType[],
+> = Omit<ObjectQueryPredicateIn, "propertyId" | "values"> & {
+  propertyId: TPropertyId
+  values: readonly PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>[]
+}
+
+type PropertyWhereExistsClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+> = Omit<ObjectQueryPredicateExists, "propertyId"> & {
+  propertyId: TPropertyId
+}
+
+type PropertyWhereContainsClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TPropertyId extends TObjectType["properties"][number]["id"],
+  TValueTypes extends readonly ValueType[],
+> = Omit<ObjectQueryPredicateContains, "propertyId" | "value"> & {
+  propertyId: TPropertyId
+  value: PropertyWhereContainsValue<TObjectType, TPropertyId, TValueTypes>
 }
 
 /** Predicate operators exposed on `where` builder properties. */
@@ -163,24 +218,58 @@ type PropertyPredicate<
   TValueTypes extends readonly ValueType[],
 > = {
   eq(
-    value: InferPropertyValue<PropertyById<TObjectType, TPropertyId>, TValueTypes>
-  ): PropertyWhereClause<TObjectType, TPropertyId, TValueTypes>
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "eq" }
+  neq(
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "neq" }
+  lt(
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "lt" }
+  lte(
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "lte" }
+  gt(
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "gt" }
+  gte(
+    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "gte" }
+  in(
+    values: readonly PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>[]
+  ): PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
+  exists(value?: boolean): PropertyWhereExistsClause<TObjectType, TPropertyId>
+  contains(
+    value: PropertyWhereContainsValue<TObjectType, TPropertyId, TValueTypes>
+  ): PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
 }
 
-/** Union of all valid where-clause shapes for the selected object type. */
-export type ObjectWhereClause<
+type PropertyWhereClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 > = {
-  [TPropertyId in TObjectType["properties"][number]["id"]]: PropertyWhereClause<
-    TObjectType,
-    TPropertyId,
-    TValueTypes
-  >
+  [TPropertyId in TObjectType["properties"][number]["id"]]:
+    | PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes>
+    | PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
+    | PropertyWhereExistsClause<TObjectType, TPropertyId>
+    | PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
 }[TObjectType["properties"][number]["id"]]
 
+/** Typed ObjectSet where predicate. Serialized shape matches object query IR predicates. */
+export type ObjectWhereClause<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TValueTypes extends readonly ValueType[],
+> =
+  | PropertyWhereClause<TObjectType, TValueTypes>
+  | (Omit<ObjectQueryPredicateGroup, "items"> & {
+      items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+    })
+  | (Omit<ObjectQueryPredicateNot, "item"> & {
+      item: ObjectWhereClause<TObjectType, TValueTypes>
+    })
+
 /**
- * Builder object passed to `findFirst({ where })`.
+ * Builder object passed to object query `where` callbacks.
  *
  * Example: `(r) => r.p.externalId.eq("RM-101")`
  */
@@ -195,12 +284,27 @@ export type ObjectWhereBuilder<
       TValueTypes
     >
   }
+  and(
+    ...items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+  ): ObjectWhereClause<TObjectType, TValueTypes>
+  or(
+    ...items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+  ): ObjectWhereClause<TObjectType, TValueTypes>
+  not(
+    item: ObjectWhereClause<TObjectType, TValueTypes>
+  ): ObjectWhereClause<TObjectType, TValueTypes>
 }
 
 export type TelemetryPropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
   TObjectType["p"][InferTelemetryPropertyIds<TObjectType>]
 
 type AnyPropertyToken = PropertyToken<string, string, Property>
+
+type ObjectSetPropertyId<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TObjectType["properties"][number]["id"]
+
+export type ObjectSetQueryPropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TObjectType["p"][ObjectSetPropertyId<TObjectType>]
 
 /**
  * Unit requirement is conditional:
@@ -240,6 +344,121 @@ export type ListResult<T> = {
   objects: T[]
   hasMore: boolean
   total: number
+}
+
+export type ObjectSetListInput = {
+  idPrefix?: string
+  idSuffix?: string
+  updatedAfter?: Date
+  updatedBefore?: Date
+  createdAfter?: Date
+  createdBefore?: Date
+  limit?: number
+  offset?: number
+  orderBy?: "createdAt" | "updatedAt" | "primaryId"
+  order?: "asc" | "desc"
+}
+
+type LinkTargetObjectTypeId<TLinkToken> =
+  TLinkToken extends LinkToken<string, string, infer TTargetObjectTypeId>
+    ? TTargetObjectTypeId extends readonly (infer TTargetId extends string)[]
+      ? TTargetId
+      : TTargetObjectTypeId extends string
+        ? TTargetObjectTypeId
+        : never
+    : never
+
+type ObjectTypeForId<
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
+  TObjectTypeId extends string,
+> = [Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>] extends [never]
+  ? ObjectTypeWithPropertyTokens
+  : Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>
+
+export interface ObjectQueryBuilder<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
+  TValueTypes extends readonly ValueType[],
+> {
+  /** Normalized provider-neutral query IR. */
+  readonly ir: ObjectQuery
+
+  /** Add a typed property predicate at the current object type. */
+  where(
+    where: (
+      builder: ObjectWhereBuilder<TObjectType, TValueTypes>
+    ) =>
+      | ObjectWhereClause<TObjectType, TValueTypes>
+      | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Search configured text fields at the current object type. */
+  search(
+    query: string,
+    options?: { fields?: readonly ObjectSetQueryPropertyToken<TObjectType>[] }
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Search a vector property at the current object type. */
+  vector(
+    property: ObjectSetQueryPropertyToken<TObjectType>,
+    vector: readonly number[],
+    options: { k: number }
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Follow an outgoing link and make the linked object type the current result type. */
+  traverse<TLinkToken extends LinkToken<TObjectType["id"], string, string>>(
+    link: TLinkToken,
+    options?: { direction?: "outgoing" }
+  ): ObjectQueryBuilder<
+    ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>,
+    TRegisteredObjectTypes,
+    TValueTypes
+  >
+
+  /** Follow an incoming link and make the link source object type the current result type. */
+  traverse<TLinkToken extends LinkToken<string, string, TObjectType["id"] | readonly string[]>>(
+    link: TLinkToken,
+    options: { direction: "incoming" }
+  ): ObjectQueryBuilder<
+    ObjectTypeForId<TRegisteredObjectTypes, TLinkToken["objectTypeId"]>,
+    TRegisteredObjectTypes,
+    TValueTypes
+  >
+
+  /** Add property ordering at the current object type. */
+  orderBy(
+    property: ObjectSetQueryPropertyToken<TObjectType>,
+    direction?: ObjectQuerySortDirection
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Add relevance ordering for providers that support ranked search. */
+  orderByRelevance(
+    direction?: ObjectQuerySortDirection
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Bound the result count. */
+  limit(limit: number): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Request one page of results. */
+  page(input: {
+    pageSize: number
+    pageToken?: string
+  }): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+
+  /** Validate this query against the registered ontology. */
+  validate(): ValidatedObjectQuery
+
+  /** Return a provider-neutral explanation tree for this query. */
+  explain(): ObjectQueryExplanation
+
+  /** Format `explain()` as a compact diagnostic string. */
+  formatExplanation(): string
+
+  /** Execute this query and return matching objects. */
+  list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+
+  /** Execute this query with an outer limit of one and return the first object. */
+  first(): Promise<TwinObject<TObjectType, TValueTypes> | null>
 }
 
 export interface ObjectByIdHandle<
@@ -503,6 +722,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
 export interface ObjectSet<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens = TObjectType,
 > {
   /** Get an object by id, or null if it doesn't exist. */
   get(id: string): Promise<TwinObject<TObjectType, TValueTypes> | null>
@@ -512,36 +732,14 @@ export interface ObjectSet<
     properties: InferObjectProperties<TObjectType, TValueTypes>
   }): Promise<TwinObject<TObjectType, TValueTypes>>
 
-  /** Find the first object matching a typed where clause. */
-  findFirst(input?: {
-    where?: (
-      builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-    ) =>
-      | ObjectWhereClause<TObjectType, TValueTypes>
-      | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-  }): Promise<TwinObject<TObjectType, TValueTypes> | null>
+  /** Build an executable provider-neutral object query rooted at this object type. */
+  query(): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
 
   /** Bind operations to a specific object id. */
   byId(id: string): ObjectByIdHandle<TObjectType, TValueTypes>
 
-  /** List objects of this type with filtering and pagination. */
-  list(input?: {
-    where?: (
-      builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-    ) =>
-      | ObjectWhereClause<TObjectType, TValueTypes>
-      | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-    idPrefix?: string
-    idSuffix?: string
-    updatedAfter?: Date
-    updatedBefore?: Date
-    createdAfter?: Date
-    createdBefore?: Date
-    limit?: number
-    offset?: number
-    orderBy?: "createdAt" | "updatedAt" | "primaryId"
-    order?: "asc" | "desc"
-  }): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  /** List stored objects of this type with storage-system filtering and pagination. */
+  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
 
   /** Append telemetry for multiple objects in a single batch. */
   appendTelemetryBatch(

@@ -437,10 +437,18 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   objects<TObjectType extends RegisteredObjectType<TOntologySources>>(
     objectType: TObjectType
-  ): ObjectSet<TObjectType, RegisteredValueTypes<TOntologySources>> {
+  ): ObjectSet<
+    TObjectType,
+    RegisteredValueTypes<TOntologySources>,
+    RegisteredObjectType<TOntologySources>
+  > {
     assertObjectTypeRegistered(this.ontology.getObjectTypesById(), objectType)
 
-    return createObjectSet<TObjectType, RegisteredValueTypes<TOntologySources>>({
+    return createObjectSet<
+      TObjectType,
+      RegisteredObjectType<TOntologySources>,
+      RegisteredValueTypes<TOntologySources>
+    >({
       objectType,
       projectId: this.projectId,
       ontology: this.ontology,
@@ -521,7 +529,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   /**
    * Global list for cross-type queries (e.g., dashboards, search).
-   * Use sixb.objects(Type).list() for type-safe property filtering.
+   * Use sixb.objects(Type).query().where(...).list() for type-safe property filtering.
    */
   async list(params: {
     objectTypeIds?: readonly string[]

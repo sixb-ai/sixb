@@ -451,35 +451,6 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return bucket.get(params.primaryId) ?? null
   }
 
-  async findFirst(params: {
-    projectId: string
-    objectTypeId: string
-    where?: readonly {
-      propertyId: string
-      op: "eq"
-      value: unknown
-    }[]
-  }): Promise<ObjectRow | null> {
-    const bucket = this.rows.get(objectRowKey(params.projectId, params.objectTypeId))
-    if (!bucket) return null
-
-    const rows = [...bucket.values()]
-    if (!params.where || params.where.length === 0) {
-      return rows[0] ?? null
-    }
-
-    const row = rows.find((candidate) => {
-      return params.where?.every((clause) => {
-        if (clause.op === "eq") {
-          return candidate.properties[clause.propertyId] === clause.value
-        }
-        return false
-      })
-    })
-
-    return row ?? null
-  }
-
   async listLinks(params: {
     projectId: string
     objectTypeId: string

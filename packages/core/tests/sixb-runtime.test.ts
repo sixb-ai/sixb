@@ -10,8 +10,11 @@ import {
   InMemoryQueues,
   link,
   ObjectNotFoundError,
+  type ObjectQuery,
   OntologyValidationError,
   prop,
+  type QueryObjectsInput,
+  type QueryObjectsResult,
   Sixb,
   valueTypeRef,
 } from "../src"
@@ -22,8 +25,14 @@ const Room = defineObjectType({
   name: "Room",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("externalId", "string", { required: true }),
-    prop("name", "string", { required: true }),
+    prop("externalId", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true },
+    }),
+    prop("name", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true },
+    }),
     prop("currentTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
   ],
   links: [link("hasThermostat", "Thermostat", { cardinality: "one" })],
@@ -45,6 +54,66 @@ const Document = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true }), prop("file", "fileRef")],
 })
 
+const SearchCustomer = defineObjectType({
+  id: "SearchCustomer",
+  name: "Search Customer",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", {
+      required: true,
+      query: {
+        searchable: true,
+        text: true,
+        filterable: true,
+        sortable: true,
+        weight: 3,
+      },
+    }),
+    prop("email", "string", {
+      query: { searchable: true, text: true, exact: true },
+    }),
+    prop("status", "string", {
+      query: { searchable: true, filterable: true, exact: true },
+    }),
+    prop(
+      "embedding",
+      { type: "array", items: "double" },
+      {
+        query: { searchable: true, vector: true },
+      }
+    ),
+  ],
+  search: {
+    defaultText: ["name", "email"],
+    vector: { property: "embedding", source: ["name", "email"] },
+  },
+})
+
+function findQueryNode(query: ObjectQuery, kind: ObjectQuery["kind"]): ObjectQuery | null {
+  if (query.kind === kind) return query
+  if ("input" in query) return findQueryNode(query.input, kind)
+  return null
+}
+
+function countObjectQueryCalls(deps: ReturnType<typeof createTestRuntimeDeps>): {
+  readonly calls: number
+} {
+  let calls = 0
+  const originalQueryObjects = deps.storage.objects.queryObjects.bind(deps.storage.objects)
+  deps.storage.objects.queryObjects = async (
+    input: QueryObjectsInput
+  ): Promise<QueryObjectsResult> => {
+    calls += 1
+    return originalQueryObjects(input)
+  }
+
+  return {
+    get calls() {
+      return calls
+    },
+  }
+}
+
 describe("Sixb runtime", () => {
   test("upserts an object using object-type tokens", async () => {
     const sixb = new Sixb({ ontology: [Room], ...createTestRuntimeDeps() })
@@ -62,9 +131,11 @@ describe("Sixb runtime", () => {
     expect(room.properties.externalId).toBe("RM-101")
     expect(room.properties.name).toBe("Conference 101")
 
-    const found = await sixb.objects(Room).findFirst({
-      where: (r) => r.p.externalId.eq("RM-101"),
-    })
+    const found = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.externalId.eq("RM-101"))
+      .first()
 
     expect(found?.primaryId).toBe("room:101")
 
@@ -86,6 +157,161 @@ describe("Sixb runtime", () => {
         },
       })
     ).rejects.toThrow("must be a string")
+  })
+
+  test("builds executable ObjectSet queries", () => {
+    const sixb = new Sixb({ ontology: [SearchCustomer], ...createTestRuntimeDeps() })
+    const customers = sixb.objects(SearchCustomer)
+
+    const query = customers
+      .query()
+      .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
+      .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
+      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
+      .orderByRelevance()
+      .orderBy(SearchCustomer.p.name, "asc")
+      .limit(10)
+    const textNode = findQueryNode(query.ir, "text")
+    const sortNode = findQueryNode(query.ir, "sort")
+
+    expect(query.ir.kind).toBe("limit")
+    expect(textNode?.kind).toBe("text")
+    if (textNode?.kind === "text") {
+      expect(textNode.fields).toEqual(["name", "email"])
+    }
+    expect(sortNode?.kind).toBe("sort")
+    if (sortNode?.kind === "sort") {
+      expect(sortNode.fields).toEqual([
+        { kind: "relevance", direction: undefined },
+        { kind: "property", propertyId: "name", direction: "asc" },
+      ])
+    }
+
+    const validated = customers
+      .query()
+      .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
+      .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
+      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
+      .orderByRelevance()
+      .orderBy(SearchCustomer.p.name, "asc")
+      .limit(10)
+      .validate()
+    expect(validated.result.objectTypeIds).toEqual(["SearchCustomer"])
+
+    const explanation = customers
+      .query()
+      .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
+      .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
+      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
+      .orderByRelevance()
+      .orderBy(SearchCustomer.p.name, "asc")
+      .limit(10)
+      .explain()
+    expect(explanation.valid).toBe(true)
+    expect(
+      customers
+        .query()
+        .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
+        .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
+        .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
+        .orderByRelevance()
+        .orderBy(SearchCustomer.p.name, "asc")
+        .limit(10)
+        .formatExplanation()
+    ).toContain("ObjectQuery valid")
+  })
+
+  test("executes ObjectSet queries through the query executor", async () => {
+    const deps = createTestRuntimeDeps()
+    const queryCounter = countObjectQueryCalls(deps)
+    const sixb = new Sixb({ ontology: [Room], ...deps })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:103", externalId: "RM-103", name: "Conference 103" },
+    })
+
+    const found = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.externalId.eq("RM-102"))
+      .first()
+    const listed = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.name.neq("Conference 103"))
+      .limit(10)
+      .list()
+
+    expect(found?.primaryId).toBe("room:102")
+    expect(
+      (listed.objects as readonly { primaryId: string }[]).map((room) => room.primaryId)
+    ).toEqual(["room:101", "room:102"])
+    expect(queryCounter.calls).toBe(2)
+  })
+
+  test("executes fluent traversal queries with post-traverse filters", async () => {
+    const sixb = new Sixb({ ontology: [Room, Thermostat], ...createTestRuntimeDeps() })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
+    })
+    const thermostat = await sixb.objects(Thermostat).upsert({
+      properties: { id: "tstat:101", externalId: "T-101", name: "Thermostat 101" },
+    })
+    await sixb.objects(Room).byId("room:101").link(Room.l.hasThermostat, thermostat)
+
+    const found = await sixb
+      .objects(Room)
+      .query()
+      .where((room) => room.p.externalId.eq("RM-101"))
+      .traverse(Room.l.hasThermostat)
+      .where((thermostat) => thermostat.p.id.eq("tstat:101"))
+      .first()
+
+    expect(found?.objectTypeId).toBe("Thermostat")
+    expect(found?.primaryId).toBe("tstat:101")
+  })
+
+  test("keeps ObjectSet list on the storage-list path", async () => {
+    const deps = createTestRuntimeDeps()
+    const queryCounter = countObjectQueryCalls(deps)
+    const sixb = new Sixb({ ontology: [Room], ...deps })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:102", externalId: "RM-102", name: "Conference 102" },
+    })
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:201", externalId: "RM-201", name: "Conference 201" },
+    })
+
+    const prefixRooms = await sixb.objects(Room).list({ idPrefix: "room:10" })
+
+    expect(
+      (prefixRooms.objects as readonly { primaryId: string }[]).map((room) => room.primaryId).sort()
+    ).toEqual(["room:101", "room:102"])
+    expect(queryCounter.calls).toBe(0)
+
+    const queriedRooms = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.name.neq("Conference 201"))
+      .limit(10)
+      .list()
+
+    expect(queriedRooms.objects).toHaveLength(2)
+    expect(queryCounter.calls).toBe(1)
   })
 
   test("exposes configured lakeStorage on the runtime", () => {
@@ -358,11 +584,28 @@ describe("Sixb runtime", () => {
     expect(prefixRooms.objects).toHaveLength(3)
 
     // Test type-safe where filter
-    const filteredRooms = await sixb.objects(Room).list({
-      where: (r) => r.p.externalId.eq("RM-101"),
-    })
+    const filteredRooms = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.externalId.eq("RM-101"))
+      .list()
     expect(filteredRooms.objects).toHaveLength(1)
     expect(filteredRooms.objects[0]?.properties.externalId).toBe("RM-101")
+
+    const groupedFilterRooms = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.and(r.p.externalId.eq("RM-101"), r.p.name.eq("Conference 101")))
+      .list()
+    expect(groupedFilterRooms.objects).toHaveLength(1)
+    expect(groupedFilterRooms.objects[0]?.properties.externalId).toBe("RM-101")
+
+    const nonEqualityRooms = await sixb
+      .objects(Room)
+      .query()
+      .where((r) => r.p.name.neq("Conference 103"))
+      .list()
+    expect(nonEqualityRooms.objects).toHaveLength(2)
 
     // Test global list
     const allObjects = await sixb.list({ limit: 10 })
