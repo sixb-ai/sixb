@@ -25,6 +25,16 @@ export interface CompiledPgObjectQuery {
   nextPageToken(rows: readonly PgObjectQueryPageRow[], rowCount: number): string | undefined
 }
 
+export interface CompiledPgScalarQuery {
+  sql: string
+  args: unknown[]
+}
+
+export interface CompiledPgFacetQuery {
+  sql: string
+  args: unknown[]
+}
+
 interface CompiledHasMoreProbe {
   sql: string
   args: unknown[]
@@ -36,6 +46,11 @@ interface CompileContext {
 }
 
 interface CompiledPredicate {
+  sql: string
+  args: unknown[]
+}
+
+interface CompiledAggregateSource {
   sql: string
   args: unknown[]
 }
@@ -92,6 +107,60 @@ export function compilePgObjectQuery(
         }
       : undefined,
   }
+}
+
+export function compilePgObjectCountQuery(
+  projectId: string,
+  query: ObjectQuery
+): CompiledPgScalarQuery {
+  const source = compileAggregateSource(projectId, query)
+  return numberCompiledQuery({
+    sql: `
+      SELECT COUNT(*)::bigint AS count
+      FROM (${source.sql}) AS input
+    `,
+    args: source.args,
+  })
+}
+
+export function compilePgObjectExistsQuery(
+  projectId: string,
+  query: ObjectQuery
+): CompiledPgScalarQuery {
+  const source = compileAggregateSource(projectId, query)
+  return numberCompiledQuery({
+    sql: `
+      SELECT 1
+      FROM (${source.sql}) AS input
+      LIMIT 1
+    `,
+    args: source.args,
+  })
+}
+
+export function compilePgObjectFacetQuery(
+  projectId: string,
+  query: ObjectQuery,
+  propertyId: string,
+  limit: number
+): CompiledPgFacetQuery {
+  const source = compileAggregateSource(projectId, query)
+  return numberCompiledQuery({
+    sql: `
+      SELECT facet.value_type, facet.value_text, COUNT(*)::bigint AS count
+      FROM (
+        SELECT
+          jsonb_typeof(input.properties -> (?::text)) AS value_type,
+          input.properties ->> (?::text) AS value_text
+        FROM (${source.sql}) AS input
+        WHERE jsonb_exists(input.properties, ?::text)
+      ) AS facet
+      GROUP BY facet.value_type, facet.value_text
+      ORDER BY count DESC, facet.value_text ASC
+      LIMIT ?
+    `,
+    args: [propertyId, propertyId, ...source.args, propertyId, limit],
+  })
 }
 
 function compileObjectQueryInternal(
@@ -202,17 +271,11 @@ function compileText(
   fields: readonly string[] | undefined,
   fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
 ): CompiledPgObjectQuery {
-  const predicate =
-    fields && fields.length > 0
-      ? compileTextPredicate(query, fields)
-      : compileScopedTextPredicate(query, fieldsByObjectType)
-
-  if (!predicate) {
-    throw new Error(
-      "[SixbPg] PostgreSQL object text search requires fields or resolved text defaults"
-    )
-  }
-  return compileWhere(projectId, inputQuery, predicate)
+  return compileWhere(
+    projectId,
+    inputQuery,
+    compileTextSearchPredicate(query, fields, fieldsByObjectType)
+  )
 }
 
 function compileSort(
@@ -468,6 +531,160 @@ function compileProject(
   }
 }
 
+function compileAggregateSource(projectId: string, query: ObjectQuery): CompiledAggregateSource {
+  switch (query.kind) {
+    case "start":
+      return compileAggregateStart(projectId, query)
+    case "filter":
+      return compileAggregateWhere(projectId, query.input, compilePredicate(query.predicate))
+    case "text": {
+      return compileAggregateWhere(
+        projectId,
+        query.input,
+        compileTextSearchPredicate(query.query, query.fields, query.fieldsByObjectType)
+      )
+    }
+    case "traverse":
+      return compileAggregateTraversal(projectId, query.input, query.linkId, query.direction)
+    case "set":
+      return compileAggregateSet(projectId, query.op, query.inputs)
+    case "sort":
+    case "project":
+      return compileAggregateSource(projectId, query.input)
+    case "limit":
+    case "page":
+      return compileRowQueryAggregateSource(projectId, query)
+    case "vector":
+      throw new Error(`[SixbPg] PostgreSQL object storage does not support query node 'vector'`)
+  }
+}
+
+function compileAggregateStart(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "start" }>
+): CompiledAggregateSource {
+  if (query.includeSubtypes === true) {
+    throw new Error("[SixbPg] PostgreSQL object storage does not support start.includeSubtypes")
+  }
+
+  return {
+    sql: `
+      SELECT project_id, object_type_id, primary_id, properties
+      FROM objects
+      WHERE project_id = ? AND object_type_id = ?
+    `,
+    args: [projectId, query.objectTypeId],
+  }
+}
+
+function compileAggregateWhere(
+  projectId: string,
+  inputQuery: ObjectQuery,
+  predicate: CompiledPredicate
+): CompiledAggregateSource {
+  const input = compileAggregateSource(projectId, inputQuery)
+  return {
+    sql: `
+      SELECT input.project_id, input.object_type_id, input.primary_id, input.properties
+      FROM (${input.sql}) AS input
+      WHERE ${predicate.sql}
+    `,
+    args: [...input.args, ...predicate.args],
+  }
+}
+
+function compileAggregateTraversal(
+  projectId: string,
+  inputQuery: ObjectQuery,
+  linkId: string,
+  direction: "outgoing" | "incoming"
+): CompiledAggregateSource {
+  const input = compileAggregateSource(projectId, inputQuery)
+  const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
+  const joinSql =
+    direction === "outgoing"
+      ? `
+        JOIN links AS edge
+          ON edge.project_id = input.project_id
+         AND edge.source_type_id = input.object_type_id
+         AND edge.source_id = input.primary_id
+         AND edge.link_id = ?
+        JOIN objects AS target_object
+          ON target_object.project_id = edge.project_id
+         AND target_object.object_type_id = edge.target_type_id
+         AND target_object.primary_id = edge.target_id
+      `
+      : `
+        JOIN links AS edge
+          ON edge.project_id = input.project_id
+         AND edge.target_type_id = input.object_type_id
+         AND edge.target_id = input.primary_id
+         AND edge.link_id = ?
+        JOIN objects AS source_object
+          ON source_object.project_id = edge.project_id
+         AND source_object.object_type_id = edge.source_type_id
+         AND source_object.primary_id = edge.source_id
+      `
+
+  return {
+    sql: `
+      SELECT DISTINCT
+        ${outputAlias}.project_id,
+        ${outputAlias}.object_type_id,
+        ${outputAlias}.primary_id,
+        ${outputAlias}.properties
+      FROM (${input.sql}) AS input
+      ${joinSql}
+    `,
+    args: [...input.args, linkId],
+  }
+}
+
+function compileAggregateSet(
+  projectId: string,
+  op: ObjectQuerySetOperation,
+  inputs: readonly ObjectQuery[]
+): CompiledAggregateSource {
+  if (inputs.length === 0) {
+    return {
+      sql: `
+        SELECT project_id, object_type_id, primary_id, properties
+        FROM objects
+        WHERE 1 = 0
+      `,
+      args: [],
+    }
+  }
+
+  const compiledInputs = inputs.map((input) => compileAggregateSource(projectId, input))
+  const identities = compileSetIdentities(op, compiledInputs)
+  return {
+    sql: `
+      SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
+      FROM (${identities.sql}) AS ids
+      JOIN objects AS selected
+        ON selected.project_id = ?
+       AND selected.object_type_id = ids.object_type_id
+       AND selected.primary_id = ids.primary_id
+    `,
+    args: [...identities.args, projectId],
+  }
+}
+
+function compileRowQueryAggregateSource(
+  projectId: string,
+  query: ObjectQuery
+): CompiledAggregateSource {
+  const rowQuery = compileObjectQueryInternal(projectId, query, exactContext)
+  return {
+    sql: `
+      SELECT input.project_id, input.object_type_id, input.primary_id, input.properties
+      FROM (${rowQuery.sql}) AS input
+    `,
+    args: rowQuery.args,
+  }
+}
+
 function needsLimitProbe(query: ObjectQuery): boolean {
   switch (query.kind) {
     case "limit":
@@ -492,7 +709,7 @@ function hasMoreProbeFor(compiled: CompiledPgObjectQuery): CompiledHasMoreProbe 
 
 function compileSetIdentities(
   op: ObjectQuerySetOperation,
-  inputs: readonly CompiledPgObjectQuery[]
+  inputs: readonly { sql: string; args: readonly unknown[] }[]
 ): CompiledPredicate {
   const operator = op === "union" ? "UNION" : op === "intersect" ? "INTERSECT" : "EXCEPT"
   const identitySqls = inputs.map(
@@ -582,6 +799,20 @@ function compileEqualityPredicate(
     return op === "eq" ? item : negatePredicate(item)
   }
 
+  if (typeof value === "string") {
+    if (op === "eq") {
+      return {
+        sql: `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} = ?::text)`,
+        args: [propertyId, propertyId, value],
+      }
+    }
+
+    return {
+      sql: `(${jsonTypeExpression()} IS NULL OR ${jsonTypeExpression()} = 'null' OR ${jsonTypeExpression()} <> 'string' OR ${jsonTextExpression()} <> ?::text)`,
+      args: [propertyId, propertyId, propertyId, propertyId, value],
+    }
+  }
+
   if (op === "eq") {
     return {
       sql: `${jsonValueExpression()} = ?::text::jsonb`,
@@ -599,6 +830,8 @@ function compileInPredicate(propertyId: string, values: readonly unknown[]): Com
   if (values.length === 0) return { sql: "0 = 1", args: [] }
 
   const nonNullValues = values.filter((value) => value !== null)
+  const stringValues = nonNullValues.filter((value): value is string => typeof value === "string")
+  const jsonbValues = nonNullValues.filter((value) => typeof value !== "string")
   const clauses: string[] = []
   const args: unknown[] = []
 
@@ -607,11 +840,20 @@ function compileInPredicate(propertyId: string, values: readonly unknown[]): Com
     args.push(propertyId)
   }
 
-  if (nonNullValues.length > 0) {
+  if (stringValues.length > 0) {
     clauses.push(
-      `${jsonValueExpression()} IN (${nonNullValues.map(() => "?::text::jsonb").join(", ")})`
+      `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} IN (${stringValues
+        .map(() => "?::text")
+        .join(", ")}))`
     )
-    args.push(propertyId, ...nonNullValues.map(jsonbValue))
+    args.push(propertyId, propertyId, ...stringValues)
+  }
+
+  if (jsonbValues.length > 0) {
+    clauses.push(
+      `${jsonValueExpression()} IN (${jsonbValues.map(() => "?::text::jsonb").join(", ")})`
+    )
+    args.push(propertyId, ...jsonbValues.map(jsonbValue))
   }
 
   return {
@@ -659,6 +901,25 @@ function compileTextPredicate(query: string, fields: readonly string[]): Compile
   const args = terms.flatMap((term) => fields.flatMap((field) => [term, field]))
 
   return { sql: `(${clauses.join(" AND ")})`, args }
+}
+
+function compileTextSearchPredicate(
+  query: string,
+  fields: readonly string[] | undefined,
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+): CompiledPredicate {
+  const predicate =
+    fields && fields.length > 0
+      ? compileTextPredicate(query, fields)
+      : compileScopedTextPredicate(query, fieldsByObjectType)
+
+  if (!predicate) {
+    throw new Error(
+      "[SixbPg] PostgreSQL object text search requires fields or resolved text defaults"
+    )
+  }
+
+  return predicate
 }
 
 function compileScopedTextPredicate(
@@ -946,6 +1207,13 @@ function sqlComparisonOperator(op: "lt" | "lte" | "gt" | "gte"): "<" | "<=" | ">
 function numberPlaceholders(sql: string): string {
   let index = 0
   return sql.replace(/\?/g, () => `$${++index}`)
+}
+
+function numberCompiledQuery<T extends { sql: string; args: unknown[] }>(compiled: T): T {
+  return {
+    ...compiled,
+    sql: numberPlaceholders(compiled.sql),
+  }
 }
 
 function objectProperties(value: unknown): Record<string, unknown> {
