@@ -164,8 +164,8 @@ if (canRenderApp) {
   const mainPath = join(generatedDir, "main.tsx")
   await writeFile(mainPath, mainContent, "utf-8")
 
-  // Generate index.html with a styled fallback shell so pages still look intentional
-  // when projects don't define `app/globals.css`.
+  // Generate index.html with only structural reset rules. Apps own visual
+  // styling through app/globals.css.
   const htmlContent = `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -174,12 +174,6 @@ if (canRenderApp) {
     <title>Sixb</title>
     ${runtimeConfigScript}
     <style>
-      :root {
-        font-family: "Space Grotesk", "Manrope", "Avenir Next", "Segoe UI", sans-serif;
-        color: #ebf1ff;
-        background-color: #05070c;
-        text-rendering: optimizeLegibility;
-      }
       * {
         box-sizing: border-box;
       }
@@ -191,13 +185,6 @@ if (canRenderApp) {
       }
       body {
         min-height: 100vh;
-        background:
-          radial-gradient(circle at 14% 18%, rgba(24, 79, 255, 0.24), transparent 42%),
-          radial-gradient(circle at 82% 7%, rgba(0, 209, 255, 0.2), transparent 38%),
-          linear-gradient(155deg, #060913 0%, #0b1222 48%, #090d16 100%);
-      }
-      a {
-        color: inherit;
       }
     </style>
   </head>

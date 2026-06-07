@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { generateAppEntry } from "../src/codegen"
 import { createCustomApp } from "../src/createCustomApp"
 
 async function getFreePort(): Promise<number> {
@@ -178,5 +179,21 @@ describe("createCustomApp.dev", () => {
     } finally {
       await server.stop()
     }
+  })
+
+  test("generates a structural shell without framework visual styles", async () => {
+    const { htmlPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const html = await readFile(htmlPath, "utf-8")
+
+    expect(html).toContain("box-sizing: border-box")
+    expect(html).toContain("margin: 0")
+    expect(html).toContain("min-height: 100vh")
+    expect(html).not.toContain("theme-color")
+    expect(html).not.toContain("font-family")
+    expect(html).not.toContain("background")
+    expect(html).not.toContain("color:")
+    expect(html).not.toContain("#05070c")
+    expect(html).not.toContain("#0b1222")
+    expect(html).not.toContain("radial-gradient")
   })
 })
