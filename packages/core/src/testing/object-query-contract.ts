@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test"
 import type { StoredLinkUpsertedEvent, StoredObjectUpsertedEvent } from "../events"
 import {
   collectObjectQueryValidationIssues,
+  countObjects,
   executeObjectQuery,
+  existsObjects,
+  facetObjects,
   normalizeObjectQuery,
   type ObjectQuery,
   ObjectQueryPlanningError,
@@ -59,7 +62,7 @@ const Room = defineObjectType({
       query: { searchable: true, filterable: true, sortable: true },
     }),
     prop("occupied", "boolean", {
-      query: { searchable: true, filterable: true, exact: true },
+      query: { searchable: true, filterable: true, exact: true, facet: true },
     }),
     prop("status", stringEnum(["active", "paused"]), {
       query: { searchable: true, filterable: true, exact: true, facet: true },
@@ -217,6 +220,9 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
         const capabilities = storage.queryCapabilities()
 
         expect(capabilities.queryObjects).toBe(true)
+        expect(capabilities.countObjects).toBe(true)
+        expect(capabilities.existsObjects).toBe(true)
+        expect(capabilities.facetObjects).toBe(true)
         for (const node of [
           "start",
           "filter",
@@ -447,6 +453,204 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
         expect(page1.hasMore).toBe(true)
         expect(page1.nextPageToken).toBeTruthy()
         expect(ids(page2)).toEqual(["room-alpha"])
+      })
+    })
+
+    test("omits totals when requested without losing hasMore", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+
+        const limited = await executeObjectQuery(
+          {
+            projectId,
+            includeTotal: false,
+            query: { kind: "limit", limit: 2, input: { kind: "start", objectTypeId: Room.id } },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const page = await executeObjectQuery(
+          {
+            projectId,
+            includeTotal: false,
+            query: { kind: "page", pageSize: 2, input: { kind: "start", objectTypeId: Room.id } },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const sortedLimited = await executeObjectQuery(
+          {
+            projectId,
+            includeTotal: false,
+            query: {
+              kind: "sort",
+              fields: [{ kind: "property", propertyId: "capacity", direction: "desc" }],
+              input: { kind: "limit", limit: 2, input: { kind: "start", objectTypeId: Room.id } },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(limited.plan.mode).toBe("pushdown")
+        expect(ids(limited)).toEqual(["room-alpha", "room-beta"])
+        expect(limited.total).toBeUndefined()
+        expect(limited.hasMore).toBe(true)
+        expect(ids(page)).toEqual(["room-alpha", "room-beta"])
+        expect(page.total).toBeUndefined()
+        expect(page.hasMore).toBe(true)
+        expect(page.nextPageToken).toBeTruthy()
+        expect(ids(sortedLimited)).toEqual(["room-beta", "room-alpha"])
+        expect(sortedLimited.total).toBeUndefined()
+        expect(sortedLimited.hasMore).toBe(true)
+      })
+    })
+
+    test("counts matching objects without returning rows", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+
+        const active = await countObjects(
+          {
+            projectId,
+            query: {
+              kind: "filter",
+              predicate: { op: "eq", propertyId: "status", value: "active" },
+              input: { kind: "start", objectTypeId: Room.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const limited = await countObjects(
+          {
+            projectId,
+            query: { kind: "limit", limit: 2, input: { kind: "start", objectTypeId: Room.id } },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(active.plan.mode).toBe("pushdown")
+        expect(active.count).toBe(2)
+        expect(limited.count).toBe(5)
+      })
+    })
+
+    test("checks existence without returning rows", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+
+        const active = await existsObjects(
+          {
+            projectId,
+            query: {
+              kind: "filter",
+              predicate: { op: "eq", propertyId: "status", value: "active" },
+              input: { kind: "start", objectTypeId: Room.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const missing = await existsObjects(
+          {
+            projectId,
+            query: {
+              kind: "filter",
+              predicate: { op: "eq", propertyId: "name", value: "No Such Room" },
+              input: { kind: "start", objectTypeId: Room.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const limited = await existsObjects(
+          {
+            projectId,
+            query: { kind: "limit", limit: 0, input: { kind: "start", objectTypeId: Room.id } },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(active.plan.mode).toBe("pushdown")
+        expect(active.exists).toBe(true)
+        expect(missing.exists).toBe(false)
+        expect(limited.exists).toBe(true)
+      })
+    })
+
+    test("plans aggregate operations without outer row-shaping requirements", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+        const query: ObjectQuery = {
+          kind: "sort",
+          fields: [{ kind: "relevance" }],
+          input: {
+            kind: "text",
+            query: "alpha",
+            input: { kind: "start", objectTypeId: Room.id },
+          },
+        }
+
+        const count = await countObjects(
+          { projectId, query },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const exists = await existsObjects(
+          { projectId, query },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(count.plan.mode).toBe("pushdown")
+        if (count.plan.mode !== "pushdown") return
+        expect(count.plan.query.kind).toBe("text")
+        expect(count.count).toBe(1)
+        expect(exists.plan.mode).toBe("pushdown")
+        if (exists.plan.mode !== "pushdown") return
+        expect(exists.plan.query.kind).toBe("text")
+        expect(exists.exists).toBe(true)
+      })
+    })
+
+    test("counts matching objects by facetable properties without returning rows", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+
+        const status = await facetObjects(
+          {
+            projectId,
+            query: { kind: "start", objectTypeId: Room.id },
+            facets: [
+              { propertyId: "status", limit: 10 },
+              { propertyId: "occupied", limit: 10 },
+            ],
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const limited = await facetObjects(
+          {
+            projectId,
+            query: { kind: "limit", limit: 0, input: { kind: "start", objectTypeId: Room.id } },
+            facets: [
+              { propertyId: "status", limit: 10 },
+              { propertyId: "occupied", limit: 10 },
+            ],
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(status.plan.mode).toBe("pushdown")
+        expect(status.facets).toEqual([
+          {
+            propertyId: "status",
+            buckets: [
+              { value: "paused", count: 3 },
+              { value: "active", count: 2 },
+            ],
+          },
+          {
+            propertyId: "occupied",
+            buckets: [
+              { value: false, count: 3 },
+              { value: true, count: 2 },
+            ],
+          },
+        ])
+        expect(limited.facets).toEqual(status.facets)
       })
     })
 

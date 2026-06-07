@@ -54,6 +54,12 @@ export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record
 export interface ObjectQueryCapabilities {
   /** True only when `queryObjects` is implemented and should be called. */
   queryObjects: boolean
+  /** True only when `countObjects` is implemented and should be called. */
+  countObjects?: boolean
+  /** True only when `existsObjects` is implemented and should be called. */
+  existsObjects?: boolean
+  /** True only when `facetObjects` is implemented and should be called. */
+  facetObjects?: boolean
   nodes?: ObjectQueryCapabilityMap<ObjectQuery["kind"]>
   predicateOps?: ObjectQueryCapabilityMap<ObjectQueryPredicate["op"]>
   sortKinds?: ObjectQueryCapabilityMap<ObjectQuerySortField["kind"]>
@@ -79,6 +85,7 @@ export interface ObjectQueryCapabilities {
 export interface QueryObjectsInput {
   projectId: string
   query: ObjectQuery
+  includeTotal?: boolean
 }
 
 export interface QueryObjectsResult {
@@ -88,10 +95,56 @@ export interface QueryObjectsResult {
   nextPageToken?: string
 }
 
+export interface CountObjectsInput {
+  projectId: string
+  query: ObjectQuery
+}
+
+export interface CountObjectsResult {
+  count: number
+}
+
+export interface ExistsObjectsInput {
+  projectId: string
+  query: ObjectQuery
+}
+
+export interface ExistsObjectsResult {
+  exists: boolean
+}
+
+export interface ObjectFacetRequest {
+  propertyId: string
+  limit: number
+}
+
+export interface ObjectFacetBucket {
+  value: unknown
+  count: number
+}
+
+export interface ObjectFacetResult {
+  propertyId: string
+  buckets: readonly ObjectFacetBucket[]
+}
+
+export interface FacetObjectsInput {
+  projectId: string
+  query: ObjectQuery
+  facets: readonly ObjectFacetRequest[]
+}
+
+export interface FacetObjectsResult {
+  facets: readonly ObjectFacetResult[]
+}
+
 export interface ObjectStorage {
   queryCapabilities(): ObjectQueryCapabilities
 
   queryObjects?(params: QueryObjectsInput): Promise<QueryObjectsResult>
+  countObjects?(params: CountObjectsInput): Promise<CountObjectsResult>
+  existsObjects?(params: ExistsObjectsInput): Promise<ExistsObjectsResult>
+  facetObjects?(params: FacetObjectsInput): Promise<FacetObjectsResult>
 
   applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow>
   applyObjectUpsertedBatch(

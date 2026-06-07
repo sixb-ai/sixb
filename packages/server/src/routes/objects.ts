@@ -1,5 +1,8 @@
 import {
+  countObjects,
   executeObjectQuery,
+  existsObjects,
+  facetObjects,
   type ObjectQuery,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -14,6 +17,9 @@ import { ErrorResponseSchema } from "../schemas/common"
 import {
   ObjectListResponseSchema,
   ObjectParamsSchema,
+  ObjectQueryCountRequestSchema,
+  ObjectQueryExistsRequestSchema,
+  ObjectQueryFacetsRequestSchema,
   ObjectQueryRequestSchema,
   ObjectsQuerySchema,
   TwinObjectSchema,
@@ -141,11 +147,15 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       "/api/objects/query",
       async ({ body, set }) => {
         try {
-          const parsed = ObjectQueryRequestSchema.parse(body) as { query: ObjectQuery }
+          const parsed = ObjectQueryRequestSchema.parse(body) as {
+            query: ObjectQuery
+            includeTotal?: boolean
+          }
           const result = await executeObjectQuery(
             {
               projectId: sixb.id,
               query: parsed.query,
+              includeTotal: parsed.includeTotal,
             },
             {
               ontology: sixb.ontology,
@@ -156,9 +166,9 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           return {
             objects: result.objects.map(serializeObject),
             hasMore: result.hasMore,
-            total: result.total,
             nextPageToken: result.nextPageToken,
             plan: serializePlan(result.plan),
+            ...(result.total === undefined ? {} : { total: result.total }),
           }
         } catch (error) {
           return handleObjectQueryError(error, set)
@@ -184,6 +194,215 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ObjectQueryResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryErrorResponse" },
+                },
+              },
+            },
+            500: {
+              description: "Response for status 500",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      }
+    )
+    .post(
+      "/api/objects/query/count",
+      async ({ body, set }) => {
+        try {
+          const parsed = ObjectQueryCountRequestSchema.parse(body) as {
+            query: ObjectQuery
+          }
+          const result = await countObjects(
+            {
+              projectId: sixb.id,
+              query: parsed.query,
+            },
+            {
+              ontology: sixb.ontology,
+              storage: sixb.storage.objects,
+            }
+          )
+
+          return {
+            count: result.count,
+            plan: serializePlan(result.plan),
+          }
+        } catch (error) {
+          return handleObjectQueryError(error, set)
+        }
+      },
+      {
+        detail: {
+          summary: "Count objects",
+          tags: ["Objects"],
+          operationId: "countObjects",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ObjectQueryCountRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Response for status 200",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryCountResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryErrorResponse" },
+                },
+              },
+            },
+            500: {
+              description: "Response for status 500",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      }
+    )
+    .post(
+      "/api/objects/query/exists",
+      async ({ body, set }) => {
+        try {
+          const parsed = ObjectQueryExistsRequestSchema.parse(body) as {
+            query: ObjectQuery
+          }
+          const result = await existsObjects(
+            {
+              projectId: sixb.id,
+              query: parsed.query,
+            },
+            {
+              ontology: sixb.ontology,
+              storage: sixb.storage.objects,
+            }
+          )
+
+          return {
+            exists: result.exists,
+            plan: serializePlan(result.plan),
+          }
+        } catch (error) {
+          return handleObjectQueryError(error, set)
+        }
+      },
+      {
+        detail: {
+          summary: "Check object existence",
+          tags: ["Objects"],
+          operationId: "existsObjects",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ObjectQueryExistsRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Response for status 200",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryExistsResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryErrorResponse" },
+                },
+              },
+            },
+            500: {
+              description: "Response for status 500",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      }
+    )
+    .post(
+      "/api/objects/query/facets",
+      async ({ body, set }) => {
+        try {
+          const parsed = ObjectQueryFacetsRequestSchema.parse(body) as {
+            query: ObjectQuery
+            facets: { propertyId: string; limit: number }[]
+          }
+          const result = await facetObjects(
+            {
+              projectId: sixb.id,
+              query: parsed.query,
+              facets: parsed.facets,
+            },
+            {
+              ontology: sixb.ontology,
+              storage: sixb.storage.objects,
+            }
+          )
+
+          return {
+            facets: result.facets,
+            plan: serializePlan(result.plan),
+          }
+        } catch (error) {
+          return handleObjectQueryError(error, set)
+        }
+      },
+      {
+        detail: {
+          summary: "Facet objects",
+          tags: ["Objects"],
+          operationId: "facetObjects",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ObjectQueryFacetsRequest" },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Response for status 200",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ObjectQueryFacetsResponse" },
                 },
               },
             },

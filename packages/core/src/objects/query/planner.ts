@@ -3,6 +3,11 @@ import type { ObjectQueryPlanningIssue } from "./errors"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 
 export type ObjectQueryPlanMode = "pushdown" | "fallback" | "rejected"
+export type ObjectQueryProviderOperation =
+  | "queryObjects"
+  | "countObjects"
+  | "existsObjects"
+  | "facetObjects"
 
 export interface ObjectQueryPlan {
   mode: ObjectQueryPlanMode
@@ -18,7 +23,11 @@ export interface ObjectQueryPlan {
 
 export interface ObjectQueryPlanningOptions {
   capabilities: ObjectQueryCapabilities
+  operation?: ObjectQueryProviderOperation
   hasQueryObjects?: boolean
+  hasCountObjects?: boolean
+  hasExistsObjects?: boolean
+  hasFacetObjects?: boolean
   allowFallback?: boolean
   maxFallbackRows?: number
   requiresExplicitFallbackBound?: boolean
@@ -48,10 +57,12 @@ export function planObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryPlanningOptions
 ): ObjectQueryPlan {
+  const operation = options.operation ?? "queryObjects"
   // Providers get first refusal. Fallback is considered only after the provider
   // declares that pushdown is unavailable or incomplete for this query.
   const providerIssues = collectProviderIssues(query, options.capabilities, {
-    hasQueryObjects: options.hasQueryObjects === true,
+    operation,
+    hasImplementation: hasProviderImplementation(operation, options),
   })
 
   if (providerIssues.length === 0) {
@@ -93,31 +104,74 @@ export function planObjectQuery(
 function collectProviderIssues(
   query: ObjectQuery,
   capabilities: ObjectQueryCapabilities,
-  options: { hasQueryObjects: boolean }
+  options: { operation: ObjectQueryProviderOperation; hasImplementation: boolean }
 ): ObjectQueryPlanningIssue[] {
   const issues: ObjectQueryPlanningIssue[] = []
 
   // Capability maps are allowlists: missing flags mean unsupported.
-  if (capabilities.queryObjects !== true) {
-    addIssue(
-      issues,
-      "$",
-      "query_objects_not_enabled",
-      "Object storage capabilities do not enable queryObjects pushdown"
-    )
-  }
-
-  if (!options.hasQueryObjects) {
-    addIssue(
-      issues,
-      "$",
-      "query_objects_not_implemented",
-      "Object storage does not implement queryObjects"
-    )
-  }
+  collectOperationProviderIssues(capabilities, options, issues)
 
   collectNodeProviderIssues(query, "$", capabilities, issues)
   return issues
+}
+
+function collectOperationProviderIssues(
+  capabilities: ObjectQueryCapabilities,
+  options: { operation: ObjectQueryProviderOperation; hasImplementation: boolean },
+  issues: ObjectQueryPlanningIssue[]
+): void {
+  const enabled =
+    options.operation === "queryObjects"
+      ? capabilities.queryObjects === true
+      : options.operation === "countObjects"
+        ? capabilities.countObjects === true
+        : options.operation === "existsObjects"
+          ? capabilities.existsObjects === true
+          : capabilities.facetObjects === true
+
+  if (!enabled) {
+    const code = `${operationIssuePrefix(options.operation)}_not_enabled`
+    addIssue(
+      issues,
+      "$",
+      code,
+      `Object storage capabilities do not enable ${options.operation} pushdown`
+    )
+  }
+
+  if (options.hasImplementation) return
+
+  const code = `${operationIssuePrefix(options.operation)}_not_implemented`
+  addIssue(issues, "$", code, `Object storage does not implement ${options.operation}`)
+}
+
+function hasProviderImplementation(
+  operation: ObjectQueryProviderOperation,
+  options: ObjectQueryPlanningOptions
+): boolean {
+  switch (operation) {
+    case "queryObjects":
+      return options.hasQueryObjects === true
+    case "countObjects":
+      return options.hasCountObjects === true
+    case "existsObjects":
+      return options.hasExistsObjects === true
+    case "facetObjects":
+      return options.hasFacetObjects === true
+  }
+}
+
+function operationIssuePrefix(operation: ObjectQueryProviderOperation): string {
+  switch (operation) {
+    case "queryObjects":
+      return "query_objects"
+    case "countObjects":
+      return "count_objects"
+    case "existsObjects":
+      return "exists_objects"
+    case "facetObjects":
+      return "facet_objects"
+  }
 }
 
 function collectNodeProviderIssues(

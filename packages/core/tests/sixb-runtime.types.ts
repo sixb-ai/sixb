@@ -6,7 +6,10 @@ const Room = defineObjectType({
   name: "Room",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("externalId", "string", { required: true }),
+    prop("externalId", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
     prop("name", "string", { required: true }),
     prop("currentTemperature", "double", {
       mode: "telemetry",
@@ -21,7 +24,10 @@ const Thermostat = defineObjectType({
   name: "Thermostat",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("externalId", "string", { required: true }),
+    prop("externalId", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
     prop("name", "string", { required: true }),
   ],
 })
@@ -76,6 +82,38 @@ async function contract(): Promise<void> {
   sixb.objects(Room).query().search("conference").explain()
 
   sixb.objects(Room).query().limit(10).formatExplanation()
+
+  const roomsWithTotal = await sixb.objects(Room).query().limit(10).list()
+  const _roomsTotal: number = roomsWithTotal.total
+  void _roomsTotal
+
+  const roomsWithoutTotal = await sixb.objects(Room).query().limit(10).list({ includeTotal: false })
+  const _roomsOmittedTotal: undefined = roomsWithoutTotal.total
+  void _roomsOmittedTotal
+  // @ts-expect-error includeTotal: false omits total from the result type
+  const _roomsMissingTotal: number = roomsWithoutTotal.total
+  void _roomsMissingTotal
+
+  const roomCount: number = await sixb.objects(Room).query().count()
+  void roomCount
+
+  const roomExists: boolean = await sixb.objects(Room).query().exists()
+  void roomExists
+
+  const roomFacets = await sixb
+    .objects(Room)
+    .query()
+    .facets([{ property: Room.p.externalId, limit: 10 }])
+  const _facetValue: unknown = roomFacets[0]?.buckets[0]?.value
+  const _facetCount: number | undefined = roomFacets[0]?.buckets[0]?.count
+  void _facetValue
+  void _facetCount
+
+  await sixb
+    .objects(Room)
+    .query()
+    // @ts-expect-error facets accept only property tokens from the current object type
+    .facets([{ property: Thermostat.p.externalId, limit: 10 }])
 
   sixb
     .objects(Room)

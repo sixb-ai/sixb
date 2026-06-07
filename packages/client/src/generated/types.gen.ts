@@ -43,6 +43,31 @@ export type ObjectQueryResponse = {
   plan: ObjectQueryPlanSummary
 }
 
+export type ObjectQueryCountResponse = {
+  count: number
+  plan: ObjectQueryPlanSummary
+}
+
+export type ObjectQueryExistsResponse = {
+  exists: boolean
+  plan: ObjectQueryPlanSummary
+}
+
+export type ObjectQueryFacetBucket = {
+  value: unknown
+  count: number
+}
+
+export type ObjectQueryFacetResult = {
+  propertyId: string
+  buckets: Array<ObjectQueryFacetBucket>
+}
+
+export type ObjectQueryFacetsResponse = {
+  facets: Array<ObjectQueryFacetResult>
+  plan: ObjectQueryPlanSummary
+}
+
 export type ObjectQueryErrorResponse = {
   error: string
   issues?: Array<ObjectQueryIssue>
@@ -50,6 +75,25 @@ export type ObjectQueryErrorResponse = {
 
 export type ObjectQueryRequest = {
   query: ObjectQuery
+  includeTotal?: boolean
+}
+
+export type ObjectQueryCountRequest = {
+  query: ObjectQuery
+}
+
+export type ObjectQueryExistsRequest = {
+  query: ObjectQuery
+}
+
+export type ObjectQueryFacetRequest = {
+  propertyId: string
+  limit: number
+}
+
+export type ObjectQueryFacetsRequest = {
+  query: ObjectQuery
+  facets: Array<ObjectQueryFacetRequest>
 }
 
 export type ObjectQuery =
@@ -2833,6 +2877,93 @@ export type QueryObjectsResponses = {
 }
 
 export type QueryObjectsResponse = QueryObjectsResponses[keyof QueryObjectsResponses]
+
+export type CountObjectsData = {
+  body: ObjectQueryCountRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query/count"
+}
+
+export type CountObjectsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type CountObjectsError = CountObjectsErrors[keyof CountObjectsErrors]
+
+export type CountObjectsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryCountResponse
+}
+
+export type CountObjectsResponse = CountObjectsResponses[keyof CountObjectsResponses]
+
+export type ExistsObjectsData = {
+  body: ObjectQueryExistsRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query/exists"
+}
+
+export type ExistsObjectsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type ExistsObjectsError = ExistsObjectsErrors[keyof ExistsObjectsErrors]
+
+export type ExistsObjectsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryExistsResponse
+}
+
+export type ExistsObjectsResponse = ExistsObjectsResponses[keyof ExistsObjectsResponses]
+
+export type FacetObjectsData = {
+  body: ObjectQueryFacetsRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query/facets"
+}
+
+export type FacetObjectsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type FacetObjectsError = FacetObjectsErrors[keyof FacetObjectsErrors]
+
+export type FacetObjectsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryFacetsResponse
+}
+
+export type FacetObjectsResponse = FacetObjectsResponses[keyof FacetObjectsResponses]
 
 export type GetObjectData = {
   body?: never

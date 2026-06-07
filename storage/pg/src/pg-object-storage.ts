@@ -1,6 +1,14 @@
 import type {
+  CountObjectsInput,
+  CountObjectsResult,
+  ExistsObjectsInput,
+  ExistsObjectsResult,
+  FacetObjectsInput,
+  FacetObjectsResult,
   LinkDirection,
+  ObjectFacetRequest,
   ObjectLinkRow,
+  ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
@@ -16,6 +24,9 @@ import { type CompiledPgObjectQuery, compilePgObjectQuery } from "./pg-object-qu
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
+  countObjects: true,
+  existsObjects: true,
+  facetObjects: true,
   nodes: {
     start: true,
     filter: true,
@@ -128,17 +139,51 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
-    const compiled = compilePgObjectQuery(params.projectId, params.query)
-    const total = await readTotal(this.sql, compiled)
+    const compiled = compilePgObjectQuery(params.projectId, params.query, {
+      includeTotal: params.includeTotal,
+    })
+    const total = params.includeTotal === false ? undefined : await readTotal(this.sql, compiled)
     const rawRows = (await this.sql.unsafe(compiled.sql, compiled.args)) as ObjectQueryDatabaseRow[]
     const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
-    const hasMore = compiled.hasMore(rawRows.length, total)
+    const hasMore =
+      total === undefined && compiled.hasMoreProbe
+        ? compiled.hasMoreProbe.hasMore(
+            (await this.sql.unsafe(compiled.hasMoreProbe.sql, compiled.hasMoreProbe.args)).length
+          )
+        : compiled.hasMore(rawRows.length, total)
 
     return {
       objects: rows.map((row) => rowToObject(row)),
       hasMore,
-      total,
       nextPageToken: compiled.nextPageToken(rows, rawRows.length),
+      ...(total === undefined ? {} : { total }),
+    }
+  }
+
+  async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    return {
+      count: await readTotal(
+        this.sql,
+        compilePgObjectQuery(params.projectId, stripOuterRowShape(params.query))
+      ),
+    }
+  }
+
+  async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    const compiled = compilePgObjectQuery(params.projectId, existsProbeQuery(params.query))
+    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as ObjectQueryDatabaseRow[]
+    return { exists: row !== undefined }
+  }
+
+  async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    const compiled = compilePgObjectQuery(params.projectId, stripOuterRowShape(params.query))
+    return {
+      facets: await Promise.all(
+        params.facets.map(async (facet) => ({
+          propertyId: facet.propertyId,
+          buckets: await readFacetBuckets(this.sql, compiled, facet),
+        }))
+      ),
     }
   }
 
@@ -678,6 +723,50 @@ async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<num
   return Number(row?.total ?? 0)
 }
 
+async function readFacetBuckets(
+  sql: SQL,
+  compiled: CompiledPgObjectQuery,
+  facet: ObjectFacetRequest
+): Promise<{ value: unknown; count: number }[]> {
+  const propertyParam = `$${compiled.args.length + 1}`
+  const limitParam = `$${compiled.args.length + 2}`
+  const rows = (await sql.unsafe(
+    `
+    SELECT facet.value, COUNT(*)::bigint AS count
+    FROM (
+      SELECT input.properties -> (${propertyParam}::text) AS value
+      FROM (${compiled.sql}) AS input
+      WHERE input.properties ? (${propertyParam}::text)
+    ) AS facet
+    GROUP BY facet.value
+    ORDER BY count DESC, facet.value::text ASC
+    LIMIT ${limitParam}
+  `,
+    [...compiled.args, facet.propertyId, facet.limit]
+  )) as FacetDatabaseRow[]
+
+  return rows.map((row) => ({
+    value: row.value,
+    count: Number(row.count),
+  }))
+}
+
+function existsProbeQuery(query: ObjectQuery): ObjectQuery {
+  return { kind: "limit", limit: 1, input: stripOuterRowShape(query) }
+}
+
+function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
+  switch (query.kind) {
+    case "limit":
+    case "page":
+    case "project":
+    case "sort":
+      return stripOuterRowShape(query.input)
+    default:
+      return query
+  }
+}
+
 function rowToObject(row: ObjectDatabaseRow): ObjectRow {
   return {
     projectId: row.project_id,
@@ -719,6 +808,11 @@ interface ObjectDatabaseRow {
 
 interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
   _cursor_properties?: unknown
+}
+
+interface FacetDatabaseRow {
+  value: unknown
+  count: string | number | bigint
 }
 
 interface LinkDatabaseRow {

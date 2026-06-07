@@ -1,9 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type CountObjectsInput,
+  type CountObjectsResult,
   collectObjectQueryValidationIssues,
+  countObjects,
   defineObjectType,
+  type ExistsObjectsInput,
+  type ExistsObjectsResult,
   executeObjectQuery,
+  existsObjects,
   explainObjectQuery,
+  type FacetObjectsInput,
+  type FacetObjectsResult,
+  facetObjects,
   formatObjectQueryExplanation,
   InMemoryObjectStorage,
   link,
@@ -12,6 +21,7 @@ import {
   type ObjectQueryCapabilities,
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
+  ObjectQueryValidationError,
   OntologyRegistry,
   planObjectQuery,
   prop,
@@ -159,10 +169,28 @@ function makeLinkUpsertedEvent(
 
 class CountingQueryStorage extends InMemoryObjectStorage {
   queryObjectCalls = 0
+  countObjectCalls = 0
+  existsObjectCalls = 0
+  facetObjectCalls = 0
 
   override async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
     this.queryObjectCalls += 1
     return super.queryObjects(params)
+  }
+
+  override async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    this.countObjectCalls += 1
+    return super.countObjects(params)
+  }
+
+  override async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    this.existsObjectCalls += 1
+    return super.existsObjects(params)
+  }
+
+  override async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    this.facetObjectCalls += 1
+    return super.facetObjects(params)
   }
 }
 
@@ -664,6 +692,121 @@ describe("object query planner and executor", () => {
     )
     expect(result.objects.map((row) => row.primaryId)).toEqual(["cust-3", "cust-1"])
     expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
+  })
+
+  test("counts through provider pushdown without materializing rows", async () => {
+    const storage = new CountingQueryStorage()
+    await seedCustomers(storage)
+
+    const result = await countObjects(
+      {
+        projectId: "p1",
+        query: {
+          kind: "limit",
+          limit: 1,
+          input: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: { kind: "start", objectTypeId: "Customer" },
+          },
+        },
+      },
+      { ontology, storage }
+    )
+
+    expect(result.plan.mode).toBe("pushdown")
+    expect(result.count).toBe(2)
+    expect(storage.countObjectCalls).toBe(1)
+    expect(storage.queryObjectCalls).toBe(0)
+  })
+
+  test("checks existence through provider pushdown without materializing rows or counts", async () => {
+    const storage = new CountingQueryStorage()
+    await seedCustomers(storage)
+
+    const result = await existsObjects(
+      {
+        projectId: "p1",
+        query: {
+          kind: "limit",
+          limit: 0,
+          input: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: { kind: "start", objectTypeId: "Customer" },
+          },
+        },
+      },
+      { ontology, storage }
+    )
+
+    expect(result.plan.mode).toBe("pushdown")
+    expect(result.exists).toBe(true)
+    expect(storage.existsObjectCalls).toBe(1)
+    expect(storage.countObjectCalls).toBe(0)
+    expect(storage.queryObjectCalls).toBe(0)
+  })
+
+  test("facets through provider pushdown without materializing rows or scalar counts", async () => {
+    const storage = new CountingQueryStorage()
+    await seedCustomers(storage)
+
+    const result = await facetObjects(
+      {
+        projectId: "p1",
+        query: {
+          kind: "limit",
+          limit: 0,
+          input: {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: { kind: "start", objectTypeId: "Customer" },
+          },
+        },
+        facets: [{ propertyId: "status", limit: 10 }],
+      },
+      { ontology, storage }
+    )
+
+    expect(result.plan.mode).toBe("pushdown")
+    expect(result.facets).toEqual([
+      { propertyId: "status", buckets: [{ value: "active", count: 2 }] },
+    ])
+    expect(storage.facetObjectCalls).toBe(1)
+    expect(storage.queryObjectCalls).toBe(0)
+    expect(storage.countObjectCalls).toBe(0)
+    expect(storage.existsObjectCalls).toBe(0)
+  })
+
+  test("rejects facet requests for properties not marked facetable", async () => {
+    const storage = new InMemoryObjectStorage()
+
+    await expect(
+      facetObjects(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+          facets: [{ propertyId: "email", limit: 10 }],
+        },
+        { ontology, storage }
+      )
+    ).rejects.toBeInstanceOf(ObjectQueryValidationError)
+
+    try {
+      await facetObjects(
+        {
+          projectId: "p1",
+          query: { kind: "start", objectTypeId: "Customer" },
+          facets: [{ propertyId: "email", limit: 10 }],
+        },
+        { ontology, storage }
+      )
+    } catch (error) {
+      expect(error).toBeInstanceOf(ObjectQueryValidationError)
+      if (error instanceof ObjectQueryValidationError) {
+        expect(error.issues.map((issue) => issue.code)).toContain("property_not_facetable")
+      }
+    }
   })
 
   test("falls back when provider capabilities are incomplete but fallback is safe", () => {

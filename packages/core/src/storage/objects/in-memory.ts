@@ -6,7 +6,15 @@ import type {
 } from "../../events"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
 import type {
+  CountObjectsInput,
+  CountObjectsResult,
+  ExistsObjectsInput,
+  ExistsObjectsResult,
+  FacetObjectsInput,
+  FacetObjectsResult,
   LinkDirection,
+  ObjectFacetRequest,
+  ObjectFacetResult,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectRow,
@@ -17,6 +25,9 @@ import type {
 
 const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
+  countObjects: true,
+  existsObjects: true,
+  facetObjects: true,
   nodes: {
     start: true,
     filter: true,
@@ -107,8 +118,31 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return {
       objects: result.entries.map((entry) => entry.row),
       hasMore: result.hasMore,
-      total: result.total,
       nextPageToken: result.nextPageToken,
+      ...(params.includeTotal === false ? {} : { total: result.total }),
+    }
+  }
+
+  async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    return {
+      count: this.evaluateObjectQuery(params.projectId, stripOuterRowShape(params.query)).total,
+    }
+  }
+
+  async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    return {
+      exists:
+        this.evaluateObjectQuery(params.projectId, stripOuterRowShape(params.query)).total > 0,
+    }
+  }
+
+  async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    const result = this.evaluateObjectQuery(params.projectId, stripOuterRowShape(params.query))
+    return {
+      facets: buildFacetResults(
+        result.entries.map((entry) => entry.row),
+        params.facets
+      ),
     }
   }
 
@@ -847,6 +881,64 @@ function projectRow(row: ObjectRow, properties: readonly string[]): ObjectRow {
     ...row,
     properties: projected,
   }
+}
+
+function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
+  switch (query.kind) {
+    case "limit":
+    case "page":
+    case "project":
+    case "sort":
+      return stripOuterRowShape(query.input)
+    default:
+      return query
+  }
+}
+
+function buildFacetResults(
+  rows: readonly ObjectRow[],
+  facets: readonly ObjectFacetRequest[]
+): ObjectFacetResult[] {
+  return facets.map((facet) => ({
+    propertyId: facet.propertyId,
+    buckets: buildFacetBuckets(rows, facet),
+  }))
+}
+
+function buildFacetBuckets(
+  rows: readonly ObjectRow[],
+  facet: ObjectFacetRequest
+): ObjectFacetResult["buckets"] {
+  const buckets = new Map<string, { value: unknown; count: number }>()
+
+  for (const row of rows) {
+    if (!Object.hasOwn(row.properties, facet.propertyId)) continue
+    const value = row.properties[facet.propertyId]
+    if (value === undefined) continue
+    const key = facetValueKey(value)
+    const existing = buckets.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      buckets.set(key, { value, count: 1 })
+    }
+  }
+
+  return [...buckets.values()]
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        facetValueSortKey(left.value).localeCompare(facetValueSortKey(right.value))
+    )
+    .slice(0, facet.limit)
+}
+
+function facetValueKey(value: unknown): string {
+  return JSON.stringify(value) ?? String(value)
+}
+
+function facetValueSortKey(value: unknown): string {
+  return JSON.stringify(value) ?? String(value)
 }
 
 function rowIdentityKey(row: ObjectRow): string {

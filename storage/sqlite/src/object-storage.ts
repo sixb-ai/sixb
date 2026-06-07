@@ -2,8 +2,16 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type {
+  CountObjectsInput,
+  CountObjectsResult,
+  ExistsObjectsInput,
+  ExistsObjectsResult,
+  FacetObjectsInput,
+  FacetObjectsResult,
   LinkDirection,
+  ObjectFacetRequest,
   ObjectLinkRow,
+  ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
@@ -24,6 +32,9 @@ export interface SqliteObjectStorageOptions {
 
 const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
+  countObjects: true,
+  existsObjects: true,
+  facetObjects: true,
   nodes: {
     start: true,
     filter: true,
@@ -95,17 +106,48 @@ export class SqliteObjectStorage implements ObjectStorage {
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
-    const compiled = compileObjectQuery(params.projectId, params.query)
-    const total = readTotal(this.db, compiled)
+    const compiled = compileObjectQuery(params.projectId, params.query, {
+      includeTotal: params.includeTotal,
+    })
+    const total = params.includeTotal === false ? undefined : readTotal(this.db, compiled)
     const rawRows = this.db.query(compiled.sql).all(...compiled.args) as DatabaseRow[]
     const rows = compiled.trimRows(rawRows) as readonly DatabaseRow[]
-    const hasMore = compiled.hasMore(rawRows.length, total)
+    const hasMore =
+      total === undefined && compiled.hasMoreProbe
+        ? compiled.hasMoreProbe.hasMore(
+            this.db.query(compiled.hasMoreProbe.sql).all(...compiled.hasMoreProbe.args).length
+          )
+        : compiled.hasMore(rawRows.length, total)
 
     return {
       objects: rows.map((row) => this.rowToObject(row)),
       hasMore,
-      total,
       nextPageToken: compiled.nextPageToken(rows, rawRows.length),
+      ...(total === undefined ? {} : { total }),
+    }
+  }
+
+  async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    return {
+      count: readTotal(
+        this.db,
+        compileObjectQuery(params.projectId, stripOuterRowShape(params.query))
+      ),
+    }
+  }
+
+  async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    const compiled = compileObjectQuery(params.projectId, existsProbeQuery(params.query))
+    return { exists: this.db.query(compiled.sql).get(...compiled.args) !== null }
+  }
+
+  async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    const compiled = compileObjectQuery(params.projectId, stripOuterRowShape(params.query))
+    return {
+      facets: params.facets.map((facet) => ({
+        propertyId: facet.propertyId,
+        buckets: readFacetBuckets(this.db, compiled, facet),
+      })),
     }
   }
 
@@ -717,6 +759,61 @@ function readTotal(db: Database, compiled: CompiledObjectQuery): number {
   return row.total
 }
 
+function readFacetBuckets(
+  db: Database,
+  compiled: CompiledObjectQuery,
+  facet: ObjectFacetRequest
+): { value: unknown; count: number }[] {
+  const path = sqliteJsonPath(facet.propertyId)
+  const rows = db
+    .query(
+      `
+      SELECT
+        json_type(input.properties, ?) AS value_type,
+        json_extract(input.properties, ?) AS value,
+        COUNT(*) AS count
+      FROM (${compiled.sql}) AS input
+      WHERE json_type(input.properties, ?) IS NOT NULL
+      GROUP BY value_type, value
+      ORDER BY count DESC, CAST(value AS TEXT) ASC
+      LIMIT ?
+    `
+    )
+    .all(path, path, ...compiled.args, path, facet.limit) as FacetDatabaseRow[]
+
+  return rows.map((row) => ({
+    value: sqliteFacetValue(row.value_type, row.value),
+    count: Number(row.count),
+  }))
+}
+
+function sqliteJsonPath(propertyId: string): string {
+  return `$."${propertyId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+}
+
+function sqliteFacetValue(valueType: string | null, value: unknown): unknown {
+  if (valueType === "true") return true
+  if (valueType === "false") return false
+  if (valueType === "null") return null
+  return value
+}
+
+function existsProbeQuery(query: ObjectQuery): ObjectQuery {
+  return { kind: "limit", limit: 1, input: stripOuterRowShape(query) }
+}
+
+function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
+  switch (query.kind) {
+    case "limit":
+    case "page":
+    case "project":
+    case "sort":
+      return stripOuterRowShape(query.input)
+    default:
+      return query
+  }
+}
+
 interface DatabaseRow {
   project_id: string
   object_type_id: string
@@ -726,6 +823,12 @@ interface DatabaseRow {
   updated_at: string
   version: number
   source_event_id: string | null
+}
+
+interface FacetDatabaseRow {
+  value_type: string | null
+  value: unknown
+  count: number
 }
 
 interface LinkDatabaseRow {

@@ -12,7 +12,10 @@ import { client } from "../client.gen"
 import {
   appendTelemetry,
   cancelWorkflowIntervention,
+  countObjects,
   createAuthInvitation,
+  existsObjects,
+  facetObjects,
   getAction,
   getAuthInvitationOptions,
   getAuthSession,
@@ -74,9 +77,18 @@ import type {
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionError,
   CancelWorkflowInterventionResponse,
+  CountObjectsData,
+  CountObjectsError,
+  CountObjectsResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
+  ExistsObjectsData,
+  ExistsObjectsError,
+  ExistsObjectsResponse,
+  FacetObjectsData,
+  FacetObjectsError,
+  FacetObjectsResponse,
   GetActionData,
   GetActionError,
   GetActionResponse,
@@ -1633,6 +1645,75 @@ export const queryObjectsMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await queryObjects({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Count objects
+ */
+export const countObjectsMutation = (
+  options?: Partial<Options<CountObjectsData>>
+): UseMutationOptions<CountObjectsResponse, CountObjectsError, Options<CountObjectsData>> => {
+  const mutationOptions: UseMutationOptions<
+    CountObjectsResponse,
+    CountObjectsError,
+    Options<CountObjectsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await countObjects({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Check object existence
+ */
+export const existsObjectsMutation = (
+  options?: Partial<Options<ExistsObjectsData>>
+): UseMutationOptions<ExistsObjectsResponse, ExistsObjectsError, Options<ExistsObjectsData>> => {
+  const mutationOptions: UseMutationOptions<
+    ExistsObjectsResponse,
+    ExistsObjectsError,
+    Options<ExistsObjectsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await existsObjects({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Facet objects
+ */
+export const facetObjectsMutation = (
+  options?: Partial<Options<FacetObjectsData>>
+): UseMutationOptions<FacetObjectsResponse, FacetObjectsError, Options<FacetObjectsData>> => {
+  const mutationOptions: UseMutationOptions<
+    FacetObjectsResponse,
+    FacetObjectsError,
+    Options<FacetObjectsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await facetObjects({
         ...options,
         ...fnOptions,
         throwOnError: true,

@@ -75,7 +75,7 @@ export const Project = defineObjectType({
 | `sortable` | `orderBy(...)` on the property. |
 | `text` | `.search(...)` over the property. The field must be static and string-like. |
 | `exact` | Exact-match search profiles such as `search.exact`; primary ids are exact-matchable by default. |
-| `facet` | Marks fields that UI/search surfaces may group by. Object query does not return facet buckets yet. |
+| `facet` | Enables `.facets(...)` bucket counts on exact-matchable fields. |
 | `vector` | Vector search on numeric-array embedding fields when the storage provider supports it. |
 | `weight` | Relative text-search weight for providers that support ranking. |
 
@@ -125,12 +125,69 @@ const project = await sixb
 type ObjectQueryListResult<T> = {
   objects: T[]
   hasMore: boolean
+  nextPageToken?: string
   total: number
 }
 ```
 
 Each object has `primaryId`, `objectTypeId`, `properties`, `createdAt`, and `updatedAt`.
 With the typed API, `properties` is inferred from the object type.
+
+Totals are included by default for backward compatibility. Infinite-scroll UIs can skip the count
+query and keep only page state:
+
+```ts
+const page = await sixb
+  .objects(Project)
+  .query()
+  .orderBy(Project.p.deadline, "asc")
+  .page({ pageSize: 50, pageToken })
+  .list({ includeTotal: false })
+
+console.log(page.objects, page.hasMore, page.nextPageToken)
+```
+
+Use `count()` when you only need the matching-set size:
+
+```ts
+const activeProjectCount = await sixb
+  .objects(Project)
+  .query()
+  .where((project) => project.p.status.eq("active"))
+  .count()
+```
+
+`count()` runs a count-only storage query for providers that support object-query pushdown.
+It does not fetch or hydrate object rows.
+
+Use `exists()` for cheap yes/no checks:
+
+```ts
+const hasLiveProjects = await sixb
+  .objects(Project)
+  .query()
+  .where((project) => project.p.status.eq("active"))
+  .exists()
+```
+
+`exists()` runs an existence probe that stops after the first matching object.
+
+Use `facets()` when you need counts grouped by category:
+
+```ts
+const facets = await sixb
+  .objects(Project)
+  .query()
+  .where((project) => project.p.status.in(["active", "paused"]))
+  .facets([{ property: Project.p.status, limit: 10 }])
+
+console.log(facets[0]?.buckets)
+// [{ value: "active", count: 12 }, { value: "paused", count: 3 }]
+```
+
+Facet properties must set `query.searchable: true` and `query.facet: true`. Bucket limits
+are required. Facets answer aggregate questions over the matching set, so outer row-shaping
+nodes such as `limit`, `page`, `sort`, and `project` do not restrict facet counts.
 
 
 ## Predicates
@@ -339,7 +396,7 @@ console.log(query.formatExplanation())
 Validation catches problems such as unknown properties, wrong value types, missing query
 metadata, invalid text fields, and unsupported link traversal shapes. Provider capability
 issues, such as unsupported relevance sorting or vector search, are reported when the query
-executes through `.list()`, `.first()`, or the HTTP route.
+executes through `.list()`, `.count()`, `.exists()`, `.facets()`, `.first()`, or the HTTP route.
 
 
 ## Raw Query JSON
@@ -388,6 +445,43 @@ fields below.
   "objects": [],
   "hasMore": false,
   "total": 0
+}
+```
+
+Call `POST /api/objects/query/count` with the same `query` body when you only need the
+matching count. It returns `{ "count": number }` plus the same diagnostic `plan` shape as
+the row-query route.
+
+Call `POST /api/objects/query/exists` for yes/no checks. It returns
+`{ "exists": boolean }` plus the same diagnostic `plan` shape.
+
+Call `POST /api/objects/query/facets` for grouped counts:
+
+```json
+{
+  "query": {
+    "kind": "start",
+    "objectTypeId": "Project"
+  },
+  "facets": [
+    { "propertyId": "status", "limit": 10 }
+  ]
+}
+```
+
+The response returns one facet result per requested property plus the same diagnostic `plan` shape:
+
+```json
+{
+  "facets": [
+    {
+      "propertyId": "status",
+      "buckets": [
+        { "value": "active", "count": 12 },
+        { "value": "paused", "count": 3 }
+      ]
+    }
+  ]
 }
 ```
 
