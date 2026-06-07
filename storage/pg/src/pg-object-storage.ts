@@ -4,16 +4,63 @@ import type {
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
   StoredLinkRemovedEvent,
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import type { SQL } from "bun"
+import { type CompiledPgObjectQuery, compilePgObjectQuery } from "./pg-object-query-compiler"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
-  queryObjects: false,
-  notes: ["PostgreSQL object query pushdown is added in a later stacked PR."],
+  queryObjects: true,
+  nodes: {
+    start: true,
+    filter: true,
+    text: true,
+    sort: true,
+    limit: true,
+    page: true,
+    traverse: true,
+    set: true,
+    project: true,
+  },
+  predicateOps: {
+    and: true,
+    or: true,
+    not: true,
+    eq: true,
+    neq: true,
+    lt: true,
+    lte: true,
+    gt: true,
+    gte: true,
+    in: true,
+    exists: true,
+    contains: true,
+  },
+  sortKinds: {
+    property: true,
+  },
+  traversalDirections: {
+    outgoing: true,
+    incoming: true,
+  },
+  setOps: {
+    union: true,
+    intersect: true,
+    subtract: true,
+  },
+  limits: {
+    totalCount: true,
+    stablePageTokens: true,
+  },
+  notes: [
+    "PostgreSQL object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project over JSONB properties and object links.",
+    "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
+  ],
 }
 
 /**
@@ -59,8 +106,8 @@ function valuesJoin(
 /**
  * PostgreSQL-based ObjectStorage implementation.
  *
- * Stores object projections and links with full query support.
- * Uses JSONB for properties with GIN indexes for efficient `findFirst()` queries.
+ * Stores object projections and links. V1 object-query IR pushdown covers the
+ * scalar JSONB-property and link-traversal subset declared by queryCapabilities().
  *
  * Requires `search_path` to be set to the Sixb schema on the connection.
  *
@@ -78,6 +125,21 @@ export class PgObjectStorage implements ObjectStorage {
 
   queryCapabilities(): ObjectQueryCapabilities {
     return PG_OBJECT_QUERY_CAPABILITIES
+  }
+
+  async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    const compiled = compilePgObjectQuery(params.projectId, params.query)
+    const total = await readTotal(this.sql, compiled)
+    const rawRows = (await this.sql.unsafe(compiled.sql, compiled.args)) as ObjectQueryDatabaseRow[]
+    const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
+    const hasMore = compiled.hasMore(rawRows.length, total)
+
+    return {
+      objects: rows.map((row) => rowToObject(row)),
+      hasMore,
+      total,
+      nextPageToken: compiled.nextPageToken(rows, rawRows.length),
+    }
   }
 
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
@@ -447,42 +509,6 @@ export class PgObjectStorage implements ObjectStorage {
     return row ? rowToObject(row) : null
   }
 
-  async findFirst(params: {
-    projectId: string
-    objectTypeId: string
-    where?: readonly { propertyId: string; op: "eq"; value: unknown }[]
-  }): Promise<ObjectRow | null> {
-    if (params.where && params.where.length > 0) {
-      // Build a JSONB containment check using @>
-      const conditions: Record<string, unknown> = {}
-      for (const clause of params.where) {
-        if (clause.op === "eq") {
-          conditions[clause.propertyId] = clause.value
-        }
-      }
-
-      // Pass the JS object directly — Bun SQL auto-serialises it as JSONB
-      const [row] = (await this.sql`
-        SELECT * FROM objects
-        WHERE project_id = ${params.projectId}
-          AND object_type_id = ${params.objectTypeId}
-          AND properties @> ${conditions}
-        LIMIT 1
-      `) as ObjectDatabaseRow[]
-
-      return row ? rowToObject(row) : null
-    }
-
-    const [row] = (await this.sql`
-      SELECT * FROM objects
-      WHERE project_id = ${params.projectId}
-        AND object_type_id = ${params.objectTypeId}
-      LIMIT 1
-    `) as ObjectDatabaseRow[]
-
-    return row ? rowToObject(row) : null
-  }
-
   async listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -645,6 +671,13 @@ export class PgObjectStorage implements ObjectStorage {
   }
 }
 
+async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<number> {
+  const [row] = (await sql.unsafe(compiled.totalSql, compiled.totalArgs)) as {
+    total: string | number | bigint
+  }[]
+  return Number(row?.total ?? 0)
+}
+
 function rowToObject(row: ObjectDatabaseRow): ObjectRow {
   return {
     projectId: row.project_id,
@@ -682,6 +715,10 @@ interface ObjectDatabaseRow {
   updated_at: Date | string
   version: number
   source_event_id: string | null
+}
+
+interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
+  _cursor_properties?: unknown
 }
 
 interface LinkDatabaseRow {

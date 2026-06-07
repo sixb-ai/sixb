@@ -7,12 +7,15 @@ import type {
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
   StoredLinkRemovedEvent,
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
+import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
 
 export interface SqliteObjectStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
@@ -20,14 +23,59 @@ export interface SqliteObjectStorageOptions {
 }
 
 const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
-  queryObjects: false,
-  notes: ["SQLite object query pushdown is added in a later stacked PR."],
+  queryObjects: true,
+  nodes: {
+    start: true,
+    filter: true,
+    text: true,
+    sort: true,
+    limit: true,
+    page: true,
+    traverse: true,
+    set: true,
+    project: true,
+  },
+  predicateOps: {
+    and: true,
+    or: true,
+    not: true,
+    eq: true,
+    neq: true,
+    lt: true,
+    lte: true,
+    gt: true,
+    gte: true,
+    in: true,
+    exists: true,
+    contains: true,
+  },
+  sortKinds: {
+    property: true,
+  },
+  traversalDirections: {
+    outgoing: true,
+    incoming: true,
+  },
+  setOps: {
+    union: true,
+    intersect: true,
+    subtract: true,
+  },
+  limits: {
+    totalCount: true,
+    stablePageTokens: true,
+  },
+  notes: [
+    "SQLite object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project over JSON properties and object links.",
+    "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
+  ],
 }
 
 /**
  * SQLite-based ObjectStorage implementation.
  *
- * Stores object projections and links with full query support.
+ * Stores object projections and links. V1 object-query IR pushdown covers the
+ * scalar JSON-property and link-traversal subset declared by queryCapabilities().
  */
 export class SqliteObjectStorage implements ObjectStorage {
   private readonly db: Database
@@ -44,6 +92,21 @@ export class SqliteObjectStorage implements ObjectStorage {
 
   queryCapabilities(): ObjectQueryCapabilities {
     return SQLITE_OBJECT_QUERY_CAPABILITIES
+  }
+
+  async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    const compiled = compileObjectQuery(params.projectId, params.query)
+    const total = readTotal(this.db, compiled)
+    const rawRows = this.db.query(compiled.sql).all(...compiled.args) as DatabaseRow[]
+    const rows = compiled.trimRows(rawRows) as readonly DatabaseRow[]
+    const hasMore = compiled.hasMore(rawRows.length, total)
+
+    return {
+      objects: rows.map((row) => this.rowToObject(row)),
+      hasMore,
+      total,
+      nextPageToken: compiled.nextPageToken(rows, rawRows.length),
+    }
   }
 
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
@@ -443,31 +506,6 @@ export class SqliteObjectStorage implements ObjectStorage {
     return row ? this.rowToObject(row) : null
   }
 
-  async findFirst(params: {
-    projectId: string
-    objectTypeId: string
-    where?: readonly { propertyId: string; op: "eq"; value: unknown }[]
-  }): Promise<ObjectRow | null> {
-    const rows = this.db
-      .query("SELECT * FROM objects WHERE project_id = ? AND object_type_id = ?")
-      .all(params.projectId, params.objectTypeId) as DatabaseRow[]
-
-    for (const row of rows) {
-      const properties = JSON.parse(row.properties)
-
-      if (params.where && params.where.length > 0) {
-        const matches = params.where.every(
-          (clause) => clause.op === "eq" && properties[clause.propertyId] === clause.value
-        )
-        if (!matches) continue
-      }
-
-      return this.rowToObject(row)
-    }
-
-    return null
-  }
-
   async listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -672,6 +710,11 @@ export class SqliteObjectStorage implements ObjectStorage {
   close(): void {
     this.db.close()
   }
+}
+
+function readTotal(db: Database, compiled: CompiledObjectQuery): number {
+  const row = db.query(compiled.totalSql).get(...compiled.totalArgs) as { total: number }
+  return row.total
 }
 
 interface DatabaseRow {
