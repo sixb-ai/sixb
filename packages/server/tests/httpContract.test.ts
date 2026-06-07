@@ -1136,6 +1136,77 @@ describe("SixbServer HTTP contract", () => {
         },
       })
 
+      const queryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "limit",
+            limit: 5,
+            input: { kind: "start", objectTypeId: "device" },
+          },
+        }),
+      })
+      expect(queryObjectsResponse.status).toBe(200)
+      const queryObjectsBody = (await queryObjectsResponse.json()) as {
+        objects: Array<{ primaryId: string; properties: Record<string, unknown> }>
+        plan: { mode: string; providerIssues: unknown[] }
+      }
+      expect(queryObjectsBody.plan.mode).toBe("pushdown")
+      expect(queryObjectsBody.plan.providerIssues).toEqual([])
+      expect(queryObjectsBody.objects).toEqual([
+        expect.objectContaining({
+          primaryId: "fan-1",
+          properties: expect.objectContaining({
+            label: "Fan 1",
+            rpm: 1200,
+          }),
+        }),
+      ])
+
+      const invalidQueryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "limit",
+            limit: 5,
+            input: { kind: "start", objectTypeId: "missing" },
+          },
+        }),
+      })
+      expect(invalidQueryObjectsResponse.status).toBe(400)
+      expect(await invalidQueryObjectsResponse.json()).toMatchObject({
+        issues: [
+          {
+            path: "$.input",
+            code: "unknown_object_type",
+          },
+        ],
+      })
+
+      const invalidPageTokenResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "page",
+            pageSize: 5,
+            pageToken: "not-a-token",
+            input: { kind: "start", objectTypeId: "device" },
+          },
+        }),
+      })
+      expect(invalidPageTokenResponse.status).toBe(400)
+      expect(await invalidPageTokenResponse.json()).toMatchObject({
+        issues: [
+          {
+            path: "$.pageToken",
+            code: "invalid_page_token",
+          },
+        ],
+      })
+
       const objectResponse = await fetch(`${baseUrl}/api/objects/device/fan-1`)
       expect(objectResponse.status).toBe(200)
       const objectBody = (await objectResponse.json()) as {

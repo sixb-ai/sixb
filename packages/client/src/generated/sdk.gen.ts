@@ -124,6 +124,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  QueryObjectsData,
+  QueryObjectsErrors,
+  QueryObjectsResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -656,6 +659,22 @@ export const listObjects = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<ListObjectsResponses, ListObjectsErrors, ThrowOnError>({
     url: "/api/objects",
     ...options,
+  })
+
+/**
+ * Query objects
+ */
+export const queryObjects = <ThrowOnError extends boolean = false>(
+  options: Options<QueryObjectsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<QueryObjectsResponses, QueryObjectsErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/objects/query",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

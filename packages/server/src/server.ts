@@ -23,6 +23,7 @@ import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWsRoutes } from "./routes/ws"
+import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 
 export interface SixbServerOptions {
   sixb: Sixb<readonly OntologySource[]>
@@ -165,6 +166,7 @@ export function createSixbApi(server: SixbServer) {
           securitySchemes: {
             [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
           },
+          schemas: ObjectQueryOpenApiSchemas,
         },
         tags: [
           { name: "Project", description: "Current project metadata" },

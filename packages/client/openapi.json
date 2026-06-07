@@ -14,7 +14,515 @@
         "description": "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session."
       }
     },
-    "schemas": {}
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ObjectQueryObject": {
+        "type": "object",
+        "required": ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
+        "additionalProperties": false,
+        "properties": {
+          "primaryId": {
+            "type": "string"
+          },
+          "objectTypeId": {
+            "type": "string"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "ObjectQueryIssue": {
+        "type": "object",
+        "required": ["path", "code", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ObjectQueryPlanSummary": {
+        "type": "object",
+        "required": ["mode", "providerIssues", "fallbackIssues", "issues"],
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["pushdown", "fallback", "rejected"]
+          },
+          "providerIssues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryIssue"
+            }
+          },
+          "fallbackIssues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryIssue"
+            }
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryIssue"
+            }
+          },
+          "fallback": {
+            "type": "object",
+            "required": ["maxRows", "requiresExplicitBound"],
+            "additionalProperties": false,
+            "properties": {
+              "maxRows": {
+                "type": "number"
+              },
+              "requiresExplicitBound": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      },
+      "ObjectQueryResponse": {
+        "type": "object",
+        "required": ["objects", "hasMore", "plan"],
+        "additionalProperties": false,
+        "properties": {
+          "objects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryObject"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "total": {
+            "type": "number"
+          },
+          "nextPageToken": {
+            "type": "string"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ObjectQueryPlanSummary"
+          }
+        }
+      },
+      "ObjectQueryErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryIssue"
+            }
+          }
+        }
+      },
+      "ObjectQueryRequest": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ObjectQuery"
+          }
+        }
+      },
+      "ObjectQuery": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["kind", "objectTypeId"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["start"]
+              },
+              "objectTypeId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "includeSubtypes": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "predicate"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["filter"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "predicate": {
+                "$ref": "#/components/schemas/ObjectQueryPredicate"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "query"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["text"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "query": {
+                "type": "string"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "vector", "propertyId", "k"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["vector"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "vector": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "k": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "linkId", "direction"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["traverse"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "linkId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "direction": {
+                "type": "string",
+                "enum": ["outgoing", "incoming"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "op", "inputs"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["set"]
+              },
+              "op": {
+                "type": "string",
+                "enum": ["union", "intersect", "subtract"]
+              },
+              "inputs": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ObjectQuery"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "fields"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["sort"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ObjectQuerySortField"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "limit"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["limit"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "limit": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "pageSize"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["page"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "pageSize": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "pageToken": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["project"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "properties": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      },
+      "ObjectQueryPredicate": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["op", "items"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["and", "or"]
+              },
+              "items": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ObjectQueryPredicate"
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["op", "item"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["not"]
+              },
+              "item": {
+                "$ref": "#/components/schemas/ObjectQueryPredicate"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["op", "propertyId", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["eq", "neq", "lt", "lte", "gt", "gte"]
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {}
+            }
+          },
+          {
+            "type": "object",
+            "required": ["op", "propertyId", "values"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["in"]
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "values": {
+                "type": "array",
+                "items": {}
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["op", "propertyId", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["exists"]
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["op", "propertyId", "value"],
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["contains"]
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {}
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "op"
+        }
+      },
+      "ObjectQuerySortField": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["kind", "propertyId"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["property"]
+              },
+              "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "direction": {
+                "type": "string",
+                "enum": ["asc", "desc"]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["relevance"]
+              },
+              "direction": {
+                "type": "string",
+                "enum": ["asc", "desc"]
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "kind"
+        }
+      }
+    }
   },
   "tags": [
     {
@@ -7797,6 +8305,60 @@
                   },
                   "required": ["error"],
                   "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/query": {
+      "post": {
+        "summary": "Query objects",
+        "tags": ["Objects"],
+        "operationId": "queryObjects",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
