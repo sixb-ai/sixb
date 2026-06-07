@@ -6,7 +6,6 @@ import type {
   FacetObjectsInput,
   FacetObjectsResult,
   LinkDirection,
-  ObjectFacetRequest,
   ObjectLinkRow,
   ObjectQuery,
   ObjectQueryCapabilities,
@@ -20,7 +19,13 @@ import type {
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import type { SQL } from "bun"
-import { type CompiledPgObjectQuery, compilePgObjectQuery } from "./pg-object-query-compiler"
+import {
+  type CompiledPgObjectQuery,
+  compilePgObjectCountQuery,
+  compilePgObjectExistsQuery,
+  compilePgObjectFacetQuery,
+  compilePgObjectQuery,
+} from "./pg-object-query-compiler"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -161,27 +166,33 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
-    return {
-      count: await readTotal(
-        this.sql,
-        compilePgObjectQuery(params.projectId, stripOuterRowShape(params.query))
-      ),
-    }
+    const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query))
+    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as {
+      count: string | number | bigint
+    }[]
+    return { count: Number(row?.count ?? 0) }
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
-    const compiled = compilePgObjectQuery(params.projectId, existsProbeQuery(params.query))
-    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as ObjectQueryDatabaseRow[]
+    const compiled = compilePgObjectExistsQuery(params.projectId, stripOuterRowShape(params.query))
+    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as unknown[]
     return { exists: row !== undefined }
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
-    const compiled = compilePgObjectQuery(params.projectId, stripOuterRowShape(params.query))
     return {
       facets: await Promise.all(
         params.facets.map(async (facet) => ({
           propertyId: facet.propertyId,
-          buckets: await readFacetBuckets(this.sql, compiled, facet),
+          buckets: await readFacetBuckets(
+            this.sql,
+            compilePgObjectFacetQuery(
+              params.projectId,
+              stripOuterRowShape(params.query),
+              facet.propertyId,
+              facet.limit
+            )
+          ),
         }))
       ),
     }
@@ -725,34 +736,32 @@ async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<num
 
 async function readFacetBuckets(
   sql: SQL,
-  compiled: CompiledPgObjectQuery,
-  facet: ObjectFacetRequest
+  compiled: { sql: string; args: readonly unknown[] }
 ): Promise<{ value: unknown; count: number }[]> {
-  const propertyParam = `$${compiled.args.length + 1}`
-  const limitParam = `$${compiled.args.length + 2}`
-  const rows = (await sql.unsafe(
-    `
-    SELECT facet.value, COUNT(*)::bigint AS count
-    FROM (
-      SELECT input.properties -> (${propertyParam}::text) AS value
-      FROM (${compiled.sql}) AS input
-      WHERE input.properties ? (${propertyParam}::text)
-    ) AS facet
-    GROUP BY facet.value
-    ORDER BY count DESC, facet.value::text ASC
-    LIMIT ${limitParam}
-  `,
-    [...compiled.args, facet.propertyId, facet.limit]
-  )) as FacetDatabaseRow[]
+  const rows = (await sql.unsafe(compiled.sql, [...compiled.args])) as FacetDatabaseRow[]
 
   return rows.map((row) => ({
-    value: row.value,
+    value: pgFacetValue(row.value_type, row.value_text),
     count: Number(row.count),
   }))
 }
 
-function existsProbeQuery(query: ObjectQuery): ObjectQuery {
-  return { kind: "limit", limit: 1, input: stripOuterRowShape(query) }
+function pgFacetValue(valueType: string | null, valueText: string | null): unknown {
+  switch (valueType) {
+    case "string":
+      return valueText ?? ""
+    case "number":
+      return valueText === null ? null : Number(valueText)
+    case "boolean":
+      return valueText === "true"
+    case "null":
+      return null
+    case "array":
+    case "object":
+      return valueText === null ? null : JSON.parse(valueText)
+    default:
+      return valueText
+  }
 }
 
 function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
@@ -811,7 +820,8 @@ interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
 }
 
 interface FacetDatabaseRow {
-  value: unknown
+  value_type: string | null
+  value_text: string | null
   count: string | number | bigint
 }
 
