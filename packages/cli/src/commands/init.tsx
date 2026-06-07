@@ -19,9 +19,7 @@ async function findTemplateDir(): Promise<string> {
     try {
       await access(candidate)
       return candidate
-    } catch {
-      continue
-    }
+    } catch {}
   }
 
   throw new Error("[SixbCLI] Could not find the create-sixb template files.")
