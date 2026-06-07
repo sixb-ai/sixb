@@ -3,16 +3,17 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "sixb": "./src/index.tsx",
-    "create-sixb": "./src/index.tsx"
+    "sixb": "./dist/index.js",
+    "create-sixb": "./dist/index.js"
   },
-  "main": "./src/index.tsx",
-  "types": "./src/index.tsx",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "bun build ./src/index.tsx --outdir ./dist --target bun",
+    "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts"
+    "test:e2e": "bun test ./tests/prod-roles.e2e.ts && bun test ./tests/worker-group.e2e.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@sixb/app": "workspace:*",
@@ -35,5 +36,30 @@
     "@types/bun": "latest",
     "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.tsx",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "sixbBuild": {
+    "assets": [
+      {
+        "from": "../../templates/basic",
+        "to": "./dist/templates/basic"
+      }
+    ]
   }
 }

@@ -44,6 +44,9 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Publish package smoke
+        run: bun run test:publish
+
       - name: Unit tests
         run: bun run test
 

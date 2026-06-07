@@ -93,7 +93,7 @@ const { data: history } = useQuery(
 ### Domain events
 
 ```typescript
-import { useSixbEvents } from "@sixb/client"
+import { useSixbEvents } from "@sixb/client/hooks"
 
 function LiveDashboard() {
   const { connected } = useSixbEvents({
@@ -121,6 +121,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, UI model types/adapters, `useSixbEvents` hook |
+| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
 | `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useSixbEvents` |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

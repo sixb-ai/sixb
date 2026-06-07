@@ -2,16 +2,22 @@
   "name": "@sixb/blob-s3",
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts"
+    "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@sixb/core": "workspace:*"
@@ -19,5 +25,14 @@
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
 }

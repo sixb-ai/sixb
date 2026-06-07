@@ -1,12 +1,25 @@
 #!/usr/bin/env bun
 
-import { basename } from "node:path"
+import { basename, join } from "node:path"
 import { ErrorView, HelpView, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 const executable = basename(process.argv[1] ?? "sixb")
 
-const VERSION = "sixb v0.2.0"
+const VERSION = `sixb v${await readPackageVersion()}`
+
+async function readPackageVersion(): Promise<string> {
+  const fallbackVersion = "0.1.0"
+
+  try {
+    const packageJson = (await Bun.file(join(import.meta.dir, "..", "package.json")).json()) as {
+      version?: unknown
+    }
+    return typeof packageJson.version === "string" ? packageJson.version : fallbackVersion
+  } catch {
+    return fallbackVersion
+  }
+}
 
 function getFlag(name: string): string | undefined {
   const direct = args.find((arg) => arg.startsWith(`--${name}=`))

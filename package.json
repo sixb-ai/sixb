@@ -28,6 +28,7 @@
     "docs:dev": "bun --filter @sixb/docs dev",
     "docs:build": "bun --filter @sixb/docs build",
     "docs:typecheck": "bun --filter @sixb/docs typecheck",
+    "test:publish": "bun scripts/pack-smoke.ts",
     "ui:dev": "bun --filter @sixb/ui dev",
     "ui:add": "bun --cwd packages/ui x shadcn@latest add"
   },

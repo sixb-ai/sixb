@@ -3,15 +3,21 @@
   "version": "0.1.0",
   "description": "SFTP connector for Sixb built on ssh2",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
+    "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@sixb/core": "workspace:*",
@@ -21,5 +27,14 @@
     "@types/bun": "latest",
     "@types/ssh2": "^1.15.5",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
 }
