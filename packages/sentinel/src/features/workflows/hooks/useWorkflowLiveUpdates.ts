@@ -1,10 +1,10 @@
-import { useSixbEvents } from "@sixb/client"
 import {
   getWorkflowQueryKey,
   getWorkflowRunQueryKey,
   listWorkflowRunsInfiniteQueryKey,
   listWorkflowRunsQueryKey,
   listWorkflowsQueryKey,
+  useSixbEvents,
 } from "@sixb/client/hooks"
 import { useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"

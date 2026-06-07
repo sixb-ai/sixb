@@ -3,18 +3,45 @@
   "version": "0.1.0",
   "description": "Type-safe SDK for Sixb API with TanStack Query hooks",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./browser": "./src/browser.ts",
-    "./events": "./src/events.ts",
-    "./hooks": "./src/hooks.ts",
-    "./models": "./src/models.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "bun": "./src/browser.ts",
+      "import": "./dist/browser.js",
+      "default": "./dist/browser.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "bun": "./src/events.ts",
+      "import": "./dist/events.js",
+      "default": "./dist/events.js"
+    },
+    "./hooks": {
+      "types": "./dist/hooks.d.ts",
+      "bun": "./src/hooks.ts",
+      "import": "./dist/hooks.js",
+      "default": "./dist/hooks.js"
+    },
+    "./models": {
+      "types": "./dist/models.d.ts",
+      "bun": "./src/models.ts",
+      "import": "./dist/models.js",
+      "default": "./dist/models.js"
+    }
   },
   "scripts": {
     "generate": "openapi-ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "bun ../../scripts/build-package.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@sixb/core": "workspace:*"
@@ -38,5 +65,14 @@
     "@types/react": "^19.0.0",
     "react": "^19.0.0",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
 }

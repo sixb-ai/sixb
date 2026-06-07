@@ -1,8 +1,31 @@
-import { cp, mkdir, readdir, stat, writeFile } from "node:fs/promises"
+import { access, cp, mkdir, readdir, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 import { InitView, renderStatic } from "../ui"
 
-const TEMPLATE_DIR = resolve(import.meta.dir, "../../../../templates/basic")
+let templateDirPromise: Promise<string> | null = null
+
+async function resolveTemplateDir(): Promise<string> {
+  templateDirPromise ??= findTemplateDir()
+  return await templateDirPromise
+}
+
+async function findTemplateDir(): Promise<string> {
+  const candidates = [
+    join(import.meta.dir, "templates", "basic"),
+    resolve(import.meta.dir, "../../../../templates/basic"),
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate)
+      return candidate
+    } catch {
+      continue
+    }
+  }
+
+  throw new Error("[SixbCLI] Could not find the create-sixb template files.")
+}
 
 async function collectFiles(dir: string): Promise<string[]> {
   const entries = await readdir(dir)
@@ -23,7 +46,7 @@ async function collectFiles(dir: string): Promise<string[]> {
 }
 
 async function writeTemplateProject(targetDir: string): Promise<string[]> {
-  await cp(TEMPLATE_DIR, targetDir, { recursive: true, force: false })
+  await cp(await resolveTemplateDir(), targetDir, { recursive: true, force: false })
 
   const projectName = basename(targetDir)
   const packageJsonPath = join(targetDir, "package.json")

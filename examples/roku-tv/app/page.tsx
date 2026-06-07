@@ -1,5 +1,4 @@
-import { useSixbEvents } from "@sixb/client"
-import { listObjectsOptions } from "@sixb/client/hooks"
+import { listObjectsOptions, useSixbEvents } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"

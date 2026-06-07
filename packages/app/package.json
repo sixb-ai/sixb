@@ -2,18 +2,33 @@
   "name": "@sixb/app",
   "version": "0.1.0",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
-    "build": "bun build ./src/index.ts --outdir ./dist --target bun",
-    "typecheck": "tsc --noEmit"
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run build"
   },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7.0"
-  }
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
 }

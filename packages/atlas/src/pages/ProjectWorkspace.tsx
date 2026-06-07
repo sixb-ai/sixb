@@ -1,4 +1,4 @@
-import { type ObjectSummary, useSixbEvents } from "@sixb/client"
+import type { ObjectSummary } from "@sixb/client"
 import {
   getProjectInfoOptions,
   listConnectorsOptions,
@@ -9,6 +9,7 @@ import {
   listRulesOptions,
   listSyncsOptions,
   objectCountOptions,
+  useSixbEvents,
 } from "@sixb/client/hooks"
 import { Button, Card, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"

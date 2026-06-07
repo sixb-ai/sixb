@@ -1,5 +1,4 @@
-import { useSixbEvents } from "@sixb/client"
-import { getObjectOptions, getObjectTypeOptions, requestActionMutation } from "@sixb/client/hooks"
+import { getObjectOptions, getObjectTypeOptions, requestActionMutation, useSixbEvents } from "@sixb/client/hooks"
 import { encodeObjectId } from "@sixb/client/models"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
