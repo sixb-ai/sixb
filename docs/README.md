@@ -7,7 +7,15 @@ shared runtime.
 
 ## Quickstart
 
-The fastest way to start is with `create-sixb`.
+- [Ontology](./concepts/ontology.md)
+- [Object Query](./concepts/object-query.md)
+- [Dataset](./concepts/datasets.md)
+- [Pipeline](./concepts/pipeline.md)
+- [Projection](./concepts/projection.md)
+- [Connector](./concepts/connector.md)
+- [Sync](./concepts/sync.md)
+- [Rules](./concepts/rules.md)
+- [Workflow](./concepts/workflows.md)
 
 ```bash
 bun create-sixb my-sixb-app
