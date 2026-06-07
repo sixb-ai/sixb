@@ -4,6 +4,13 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
+import type {
+  ObjectQuery,
+  ObjectQueryDirection,
+  ObjectQueryPredicate,
+  ObjectQuerySetOperation,
+  ObjectQuerySortField,
+} from "../../objects/query"
 
 /**
  * Latest-state projection storage for objects and links.
@@ -35,7 +42,57 @@ export interface ObjectLinkRow {
 
 export type LinkDirection = "outgoing" | "incoming" | "both"
 
+export type ObjectQueryCapabilityMap<T extends string> = Readonly<Partial<Record<T, boolean>>>
+
+/**
+ * Provider-declared object query support.
+ *
+ * Missing nested flags are treated as unsupported. The planner can use this
+ * as a pushdown boundary and decide separately whether bounded fallback is
+ * allowed for unsupported nodes.
+ */
+export interface ObjectQueryCapabilities {
+  /** True only when `queryObjects` is implemented and should be called. */
+  queryObjects: boolean
+  nodes?: ObjectQueryCapabilityMap<ObjectQuery["kind"]>
+  predicateOps?: ObjectQueryCapabilityMap<ObjectQueryPredicate["op"]>
+  sortKinds?: ObjectQueryCapabilityMap<ObjectQuerySortField["kind"]>
+  traversalDirections?: ObjectQueryCapabilityMap<ObjectQueryDirection>
+  setOps?: ObjectQueryCapabilityMap<ObjectQuerySetOperation>
+  features?: {
+    /**
+     * True only when the provider can expand `start.includeSubtypes` itself.
+     * Storage-only providers usually cannot, because subtype expansion requires
+     * the ontology registry and should fall back to the core executor.
+     */
+    includeSubtypes?: boolean
+  }
+  limits?: {
+    maxLimit?: number
+    maxPageSize?: number
+    totalCount?: boolean
+    stablePageTokens?: boolean
+  }
+  notes?: readonly string[]
+}
+
+export interface QueryObjectsInput {
+  projectId: string
+  query: ObjectQuery
+}
+
+export interface QueryObjectsResult {
+  objects: readonly ObjectRow[]
+  hasMore: boolean
+  total?: number
+  nextPageToken?: string
+}
+
 export interface ObjectStorage {
+  queryCapabilities(): ObjectQueryCapabilities
+
+  queryObjects?(params: QueryObjectsInput): Promise<QueryObjectsResult>
+
   applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow>
   applyObjectUpsertedBatch(
     events: readonly StoredObjectUpsertedEvent[]

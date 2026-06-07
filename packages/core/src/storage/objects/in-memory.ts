@@ -4,7 +4,63 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "../../events"
-import type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "./types"
+import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
+import type {
+  LinkDirection,
+  ObjectLinkRow,
+  ObjectQueryCapabilities,
+  ObjectRow,
+  ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
+} from "./types"
+
+const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
+  queryObjects: true,
+  nodes: {
+    start: true,
+    filter: true,
+    text: true,
+    vector: true,
+    traverse: true,
+    set: true,
+    sort: true,
+    limit: true,
+    page: true,
+    project: true,
+  },
+  predicateOps: {
+    and: true,
+    or: true,
+    not: true,
+    eq: true,
+    neq: true,
+    lt: true,
+    lte: true,
+    gt: true,
+    gte: true,
+    in: true,
+    exists: true,
+    contains: true,
+  },
+  sortKinds: {
+    property: true,
+    relevance: true,
+  },
+  traversalDirections: {
+    outgoing: true,
+    incoming: true,
+  },
+  setOps: {
+    union: true,
+    intersect: true,
+    subtract: true,
+  },
+  limits: {
+    totalCount: true,
+    stablePageTokens: true,
+  },
+}
 
 function objectRowKey(projectId: string, objectTypeId: string): string {
   return `${projectId}:${objectTypeId}`
@@ -22,10 +78,233 @@ function fullLinkRowKey(row: ObjectLinkRow): string {
   return `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`
 }
 
+type QueryEntry = {
+  row: ObjectRow
+  score: number
+  order: number
+}
+
+type QueryEvaluation = {
+  entries: QueryEntry[]
+  total: number
+  hasMore: boolean
+  nextPageToken?: string
+}
+
+const PAGE_TOKEN_PREFIX = "offset:"
+
 export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
   private readonly appliedEventIds = new Set<string>()
+
+  queryCapabilities(): ObjectQueryCapabilities {
+    return IN_MEMORY_OBJECT_QUERY_CAPABILITIES
+  }
+
+  async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    const result = this.evaluateObjectQuery(params.projectId, params.query)
+    return {
+      objects: result.entries.map((entry) => entry.row),
+      hasMore: result.hasMore,
+      total: result.total,
+      nextPageToken: result.nextPageToken,
+    }
+  }
+
+  private evaluateObjectQuery(projectId: string, query: ObjectQuery): QueryEvaluation {
+    switch (query.kind) {
+      case "start":
+        return this.evaluateStart(projectId, query.objectTypeId)
+      case "filter": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const entries = input.entries.filter((entry) =>
+          matchesPredicate(entry.row, query.predicate)
+        )
+        return completeEvaluation(entries)
+      }
+      case "text": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const scoredEntries = input.entries.flatMap((entry) => {
+          const score = textScore(entry.row, query.query, query.fields)
+          return score > 0 ? [{ ...entry, score: entry.score + score }] : []
+        })
+        return completeEvaluation(scoredEntries)
+      }
+      case "vector": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const scoredEntries = input.entries.flatMap((entry) => {
+          const score = vectorSimilarity(entry.row.properties[query.propertyId], query.vector)
+          return score === null ? [] : [{ ...entry, score: entry.score + score }]
+        })
+        scoredEntries.sort(compareEntriesByRelevance)
+        const limit = Math.max(0, query.k)
+        return {
+          entries: scoredEntries.slice(0, limit),
+          total: scoredEntries.length,
+          hasMore: limit < scoredEntries.length,
+        }
+      }
+      case "traverse": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const entries =
+          query.direction === "outgoing"
+            ? this.traverseOutgoing(projectId, input.entries, query.linkId)
+            : this.traverseIncoming(projectId, input.entries, query.linkId)
+        return completeEvaluation(entries)
+      }
+      case "set":
+        return this.evaluateSet(projectId, query.op, query.inputs)
+      case "sort": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        return {
+          ...input,
+          entries: sortEntries(input.entries, query.fields),
+        }
+      }
+      case "limit": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const limit = Math.max(0, query.limit)
+        return {
+          entries: input.entries.slice(0, limit),
+          total: input.entries.length,
+          hasMore: limit < input.entries.length,
+        }
+      }
+      case "page": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        const offset = decodePageOffset(query.pageToken)
+        const pageSize = Math.max(0, query.pageSize)
+        const nextOffset = offset + pageSize
+        const hasMore = pageSize > 0 && nextOffset < input.entries.length
+        return {
+          entries: input.entries.slice(offset, nextOffset),
+          total: input.entries.length,
+          hasMore,
+          nextPageToken: hasMore ? encodePageOffset(nextOffset) : undefined,
+        }
+      }
+      case "project": {
+        const input = this.evaluateObjectQuery(projectId, query.input)
+        if (!query.properties) return input
+        const properties = query.properties
+        return {
+          ...input,
+          entries: input.entries.map((entry) => ({
+            ...entry,
+            row: projectRow(entry.row, properties),
+          })),
+        }
+      }
+    }
+  }
+
+  private evaluateStart(projectId: string, objectTypeId: string): QueryEvaluation {
+    const bucket = this.rows.get(objectRowKey(projectId, objectTypeId))
+    const entries = [...(bucket?.values() ?? [])].map((row, index) => ({
+      row,
+      score: 0,
+      order: index,
+    }))
+    return completeEvaluation(entries)
+  }
+
+  private evaluateSet(
+    projectId: string,
+    op: "union" | "intersect" | "subtract",
+    inputs: readonly ObjectQuery[]
+  ): QueryEvaluation {
+    const evaluations = inputs.map((input) => this.evaluateObjectQuery(projectId, input))
+    const first = evaluations[0]
+    if (!first) return completeEvaluation([])
+
+    if (op === "union") {
+      const entriesByKey = new Map<string, QueryEntry>()
+      for (const evaluation of evaluations) {
+        for (const entry of evaluation.entries) {
+          upsertEntry(entriesByKey, entry)
+        }
+      }
+      return completeEvaluation([...entriesByKey.values()])
+    }
+
+    if (op === "intersect") {
+      const otherKeySets = evaluations
+        .slice(1)
+        .map((evaluation) => new Set(evaluation.entries.map((entry) => rowIdentityKey(entry.row))))
+      const entries = first.entries.filter((entry) => {
+        const key = rowIdentityKey(entry.row)
+        return otherKeySets.every((keys) => keys.has(key))
+      })
+      return completeEvaluation(entries)
+    }
+
+    const subtractKeys = new Set(
+      evaluations
+        .slice(1)
+        .flatMap((evaluation) => evaluation.entries.map((entry) => rowIdentityKey(entry.row)))
+    )
+    return completeEvaluation(
+      first.entries.filter((entry) => !subtractKeys.has(rowIdentityKey(entry.row)))
+    )
+  }
+
+  private traverseOutgoing(
+    projectId: string,
+    entries: readonly QueryEntry[],
+    linkId: string
+  ): QueryEntry[] {
+    const resultsByKey = new Map<string, QueryEntry>()
+
+    entries.forEach((entry, index) => {
+      const bucket = this.links.get(
+        sourceLinkBucketKey(projectId, entry.row.objectTypeId, entry.row.primaryId)
+      )
+      if (!bucket) return
+
+      for (const link of bucket.values()) {
+        if (link.linkId !== linkId) continue
+        const target = this.rows.get(objectRowKey(projectId, link.targetTypeId))?.get(link.targetId)
+        if (!target) continue
+        upsertEntry(resultsByKey, {
+          row: target,
+          score: entry.score,
+          order: entry.order + index / 1_000_000,
+        })
+      }
+    })
+
+    return [...resultsByKey.values()]
+  }
+
+  private traverseIncoming(
+    projectId: string,
+    entries: readonly QueryEntry[],
+    linkId: string
+  ): QueryEntry[] {
+    const inputEntriesByTarget = new Map(entries.map((entry) => [rowIdentityKey(entry.row), entry]))
+    const resultsByKey = new Map<string, QueryEntry>()
+
+    for (const bucket of this.links.values()) {
+      for (const link of bucket.values()) {
+        if (link.projectId !== projectId || link.linkId !== linkId) continue
+        const targetEntry = inputEntriesByTarget.get(
+          rowIdentityKeyParts(link.targetTypeId, link.targetId)
+        )
+        if (!targetEntry) continue
+
+        const source = this.rows.get(objectRowKey(projectId, link.sourceTypeId))?.get(link.sourceId)
+        if (!source) continue
+        upsertEntry(resultsByKey, {
+          row: source,
+          score: targetEntry.score,
+          order: targetEntry.order,
+        })
+      }
+    }
+
+    return [...resultsByKey.values()]
+  }
 
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
     const bucketId = objectRowKey(event.projectId, event.payload.objectTypeId)
@@ -366,4 +645,281 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
     return { objects, hasMore, total }
   }
+}
+
+function completeEvaluation(entries: QueryEntry[]): QueryEvaluation {
+  return {
+    entries,
+    total: entries.length,
+    hasMore: false,
+  }
+}
+
+function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): boolean {
+  switch (predicate.op) {
+    case "and":
+      return predicate.items.every((item) => matchesPredicate(row, item))
+    case "or":
+      return predicate.items.some((item) => matchesPredicate(row, item))
+    case "not":
+      return !matchesPredicate(row, predicate.item)
+    case "eq":
+      return valuesEqual(row.properties[predicate.propertyId], predicate.value)
+    case "neq":
+      return !valuesEqual(row.properties[predicate.propertyId], predicate.value)
+    case "lt":
+      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) < 0
+    case "lte":
+      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) <= 0
+    case "gt":
+      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) > 0
+    case "gte":
+      return comparePropertyValues(row.properties[predicate.propertyId], predicate.value) >= 0
+    case "in":
+      return predicate.values.some((value) =>
+        valuesEqual(row.properties[predicate.propertyId], value)
+      )
+    case "exists": {
+      const exists =
+        Object.hasOwn(row.properties, predicate.propertyId) &&
+        row.properties[predicate.propertyId] !== undefined
+      return predicate.value ? exists : !exists
+    }
+    case "contains":
+      return containsValue(row.properties[predicate.propertyId], predicate.value)
+  }
+}
+
+function containsValue(actual: unknown, expected: unknown): boolean {
+  if (typeof actual === "string" && typeof expected === "string") {
+    return actual.includes(expected)
+  }
+
+  if (Array.isArray(actual)) {
+    return actual.some((item) => valuesEqual(item, expected))
+  }
+
+  if (isPlainObject(actual) && typeof expected === "string") {
+    return Object.hasOwn(actual, expected)
+  }
+
+  return false
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  if (left instanceof Date || right instanceof Date) {
+    const leftTime = dateTime(left)
+    const rightTime = dateTime(right)
+    return leftTime !== null && rightTime !== null && leftTime === rightTime
+  }
+
+  return Object.is(left, right)
+}
+
+function comparePropertyValues(left: unknown, right: unknown): number {
+  if (left === undefined || right === undefined || left === null || right === null) {
+    return Number.NaN
+  }
+
+  if (typeof left === "number" && typeof right === "number") {
+    return left - right
+  }
+
+  if (typeof left === "string" && typeof right === "string") {
+    return left.localeCompare(right)
+  }
+
+  if (typeof left === "boolean" && typeof right === "boolean") {
+    return Number(left) - Number(right)
+  }
+
+  if (left instanceof Date || right instanceof Date) {
+    const leftTime = dateTime(left)
+    const rightTime = dateTime(right)
+    if (leftTime === null || rightTime === null) return Number.NaN
+    return leftTime - rightTime
+  }
+
+  return Number.NaN
+}
+
+function textScore(row: ObjectRow, query: string, fields: readonly string[] | undefined): number {
+  const terms = tokenize(query)
+  if (terms.length === 0) return 0
+
+  const values = fields
+    ? fields.flatMap((field) => collectTextValues(row.properties[field]))
+    : [row.primaryId, ...Object.values(row.properties).flatMap(collectTextValues)]
+  const haystack = values.join(" ").toLowerCase()
+  if (!terms.every((term) => haystack.includes(term))) return 0
+
+  const phrase = query.trim().toLowerCase()
+  const phraseBoost = phrase.length > 0 && haystack.includes(phrase) ? terms.length : 0
+  return terms.reduce((score, term) => score + countOccurrences(haystack, term), phraseBoost)
+}
+
+function tokenize(query: string): string[] {
+  return query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((term) => term.length > 0)
+}
+
+function collectTextValues(value: unknown): string[] {
+  if (typeof value === "string") return [value]
+  if (Array.isArray(value)) return value.flatMap(collectTextValues)
+  return []
+}
+
+function countOccurrences(value: string, needle: string): number {
+  if (!needle) return 0
+  let count = 0
+  let index = value.indexOf(needle)
+  while (index !== -1) {
+    count += 1
+    index = value.indexOf(needle, index + needle.length)
+  }
+  return count
+}
+
+function vectorSimilarity(actual: unknown, expected: readonly number[]): number | null {
+  if (!Array.isArray(actual) || actual.length !== expected.length || actual.length === 0) {
+    return null
+  }
+
+  let dot = 0
+  let actualNorm = 0
+  let expectedNorm = 0
+  for (let index = 0; index < expected.length; index += 1) {
+    const actualValue = actual[index]
+    const expectedValue = expected[index]
+    if (
+      typeof actualValue !== "number" ||
+      typeof expectedValue !== "number" ||
+      !Number.isFinite(actualValue) ||
+      !Number.isFinite(expectedValue)
+    ) {
+      return null
+    }
+
+    dot += actualValue * expectedValue
+    actualNorm += actualValue * actualValue
+    expectedNorm += expectedValue * expectedValue
+  }
+
+  if (actualNorm === 0 || expectedNorm === 0) return null
+  return dot / (Math.sqrt(actualNorm) * Math.sqrt(expectedNorm))
+}
+
+function sortEntries(
+  entries: readonly QueryEntry[],
+  fields: readonly ObjectQuerySortField[]
+): QueryEntry[] {
+  return [...entries].sort((left, right) => {
+    for (const field of fields) {
+      const comparison = compareSortField(left, right, field)
+      if (comparison !== 0) return comparison
+    }
+    return (
+      left.order - right.order || rowIdentityKey(left.row).localeCompare(rowIdentityKey(right.row))
+    )
+  })
+}
+
+function compareSortField(
+  left: QueryEntry,
+  right: QueryEntry,
+  field: ObjectQuerySortField
+): number {
+  if (field.kind === "relevance") {
+    const direction = field.direction ?? "desc"
+    const comparison = right.score - left.score
+    return direction === "desc" ? comparison : -comparison
+  }
+
+  const leftValue = left.row.properties[field.propertyId]
+  const rightValue = right.row.properties[field.propertyId]
+  const leftMissing = leftValue === undefined || leftValue === null
+  const rightMissing = rightValue === undefined || rightValue === null
+  if (leftMissing && rightMissing) return 0
+  if (leftMissing) return 1
+  if (rightMissing) return -1
+
+  const comparison = comparePropertyValues(leftValue, rightValue)
+  if (Number.isNaN(comparison)) return 0
+  return field.direction === "desc" ? -comparison : comparison
+}
+
+function compareEntriesByRelevance(left: QueryEntry, right: QueryEntry): number {
+  return (
+    right.score - left.score || rowIdentityKey(left.row).localeCompare(rowIdentityKey(right.row))
+  )
+}
+
+function projectRow(row: ObjectRow, properties: readonly string[]): ObjectRow {
+  const projected: Record<string, unknown> = {}
+  for (const propertyId of properties) {
+    if (Object.hasOwn(row.properties, propertyId)) {
+      projected[propertyId] = row.properties[propertyId]
+    }
+  }
+  return {
+    ...row,
+    properties: projected,
+  }
+}
+
+function rowIdentityKey(row: ObjectRow): string {
+  return rowIdentityKeyParts(row.objectTypeId, row.primaryId)
+}
+
+function rowIdentityKeyParts(objectTypeId: string, primaryId: string): string {
+  return `${objectTypeId}:${primaryId}`
+}
+
+function upsertEntry(entriesByKey: Map<string, QueryEntry>, entry: QueryEntry): void {
+  const key = rowIdentityKey(entry.row)
+  const existing = entriesByKey.get(key)
+  if (!existing) {
+    entriesByKey.set(key, entry)
+    return
+  }
+
+  if (entry.score > existing.score) {
+    entriesByKey.set(key, {
+      ...existing,
+      score: entry.score,
+    })
+  }
+}
+
+function encodePageOffset(offset: number): string {
+  return `${PAGE_TOKEN_PREFIX}${offset}`
+}
+
+function decodePageOffset(token: string | undefined): number {
+  if (!token) return 0
+  if (!token.startsWith(PAGE_TOKEN_PREFIX)) {
+    throw new Error("[Sixb] Invalid object query page token")
+  }
+
+  const offset = Number(token.slice(PAGE_TOKEN_PREFIX.length))
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error("[Sixb] Invalid object query page token")
+  }
+  return offset
+}
+
+function dateTime(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime()
+  if (typeof value === "string" || typeof value === "number") {
+    const time = new Date(value).getTime()
+    return Number.isNaN(time) ? null : time
+  }
+  return null
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

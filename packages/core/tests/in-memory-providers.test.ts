@@ -5,6 +5,7 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "../src/events"
+import type { ObjectStorage } from "../src/storage"
 import { InMemoryObjectStorage, InMemoryTimeseriesStorage } from "../src/storage"
 
 function makeObjectUpsertedEvent(
@@ -96,6 +97,259 @@ function makeLinkRemovedEvent(
 }
 
 describe("InMemoryObjectStorage", () => {
+  test("declares object query capabilities", () => {
+    const storage = new InMemoryObjectStorage()
+    const objectStorage: ObjectStorage = storage
+
+    const capabilities = storage.queryCapabilities()
+
+    expect(capabilities.queryObjects).toBe(true)
+    expect(capabilities.nodes?.filter).toBe(true)
+    expect(capabilities.predicateOps?.contains).toBe(true)
+    expect(capabilities.sortKinds?.relevance).toBe(true)
+    expect(capabilities.traversalDirections?.incoming).toBe(true)
+    expect(capabilities.setOps?.intersect).toBe(true)
+    expect(objectStorage.queryObjects).toBeDefined()
+  })
+
+  test("queryObjects executes predicates, sort, limit, and projection", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r1", {
+        name: "Alpha Room",
+        status: "paused",
+        floor: 1,
+        tags: ["office"],
+      })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r2", {
+        name: "Beta Lab",
+        status: "active",
+        floor: 2,
+        tags: ["lab"],
+      })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r3", {
+        name: "Alpha Lab",
+        status: "active",
+        floor: 3,
+        tags: ["lab", "critical"],
+      })
+    )
+
+    const result = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "project",
+        properties: ["name", "floor"],
+        input: {
+          kind: "limit",
+          limit: 2,
+          input: {
+            kind: "sort",
+            fields: [{ kind: "property", propertyId: "floor", direction: "desc" }],
+            input: {
+              kind: "filter",
+              predicate: {
+                op: "and",
+                items: [
+                  { op: "eq", propertyId: "status", value: "active" },
+                  { op: "gte", propertyId: "floor", value: 2 },
+                  { op: "contains", propertyId: "tags", value: "lab" },
+                  { op: "exists", propertyId: "missing", value: false },
+                  { op: "not", item: { op: "eq", propertyId: "name", value: "Hidden" } },
+                ],
+              },
+              input: { kind: "start", objectTypeId: "Room" },
+            },
+          },
+        },
+      },
+    })
+
+    expect(result.objects.map((row) => row.primaryId)).toEqual(["r3", "r2"])
+    expect(result.objects[0].properties).toEqual({ name: "Alpha Lab", floor: 3 })
+    expect(result.total).toBe(2)
+    expect(result.hasMore).toBe(false)
+  })
+
+  test("queryObjects executes page tokens", async () => {
+    const storage = new InMemoryObjectStorage()
+    for (const primaryId of ["r1", "r2", "r3"]) {
+      await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Room", primaryId, {}))
+    }
+
+    const page1 = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "page",
+        pageSize: 2,
+        input: {
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "id", direction: "asc" }],
+          input: { kind: "start", objectTypeId: "Room" },
+        },
+      },
+    })
+
+    const page2 = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "page",
+        pageSize: 2,
+        pageToken: page1.nextPageToken,
+        input: {
+          kind: "sort",
+          fields: [{ kind: "property", propertyId: "id", direction: "asc" }],
+          input: { kind: "start", objectTypeId: "Room" },
+        },
+      },
+    })
+
+    expect(page1.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+    expect(page1.total).toBe(3)
+    expect(page1.hasMore).toBe(true)
+    expect(page1.nextPageToken).toBe("offset:2")
+    expect(page2.objects.map((row) => row.primaryId)).toEqual(["r3"])
+    expect(page2.hasMore).toBe(false)
+  })
+
+  test("queryObjects executes text and vector search with relevance sort", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r1", {
+        name: "Alpha Alpha",
+        embedding: [1, 0],
+      })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r2", {
+        name: "Alpha Beta",
+        embedding: [0.8, 0.2],
+      })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r3", {
+        name: "Gamma",
+        embedding: [0, 1],
+      })
+    )
+
+    const text = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "sort",
+        fields: [{ kind: "relevance" }],
+        input: {
+          kind: "text",
+          query: "alpha",
+          fields: ["name"],
+          input: { kind: "start", objectTypeId: "Room" },
+        },
+      },
+    })
+
+    const vector = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "vector",
+        propertyId: "embedding",
+        vector: [1, 0],
+        k: 2,
+        input: { kind: "start", objectTypeId: "Room" },
+      },
+    })
+
+    expect(text.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+    expect(vector.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+    expect(vector.total).toBe(3)
+    expect(vector.hasMore).toBe(true)
+  })
+
+  test("queryObjects executes traversal and set operations", async () => {
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r1", { status: "active", tags: ["lab"] })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r2", { status: "active", tags: ["office"] })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Room", "r3", { status: "paused", tags: ["lab"] })
+    )
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d1", {}))
+    await storage.applyObjectUpserted(makeObjectUpsertedEvent("p1", "Device", "d2", {}))
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r1", "hasDevice", "Device", "d1")
+    )
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Room", "r2", "hasDevice", "Device", "d2")
+    )
+
+    const outgoing = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "traverse",
+        direction: "outgoing",
+        linkId: "hasDevice",
+        input: { kind: "start", objectTypeId: "Room" },
+      },
+    })
+
+    const incoming = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "traverse",
+        direction: "incoming",
+        linkId: "hasDevice",
+        input: { kind: "start", objectTypeId: "Device" },
+      },
+    })
+
+    const intersect = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "set",
+        op: "intersect",
+        inputs: [
+          {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "active" },
+            input: { kind: "start", objectTypeId: "Room" },
+          },
+          {
+            kind: "filter",
+            predicate: { op: "contains", propertyId: "tags", value: "lab" },
+            input: { kind: "start", objectTypeId: "Room" },
+          },
+        ],
+      },
+    })
+
+    const subtract = await storage.queryObjects({
+      projectId: "p1",
+      query: {
+        kind: "set",
+        op: "subtract",
+        inputs: [
+          { kind: "start", objectTypeId: "Room" },
+          {
+            kind: "filter",
+            predicate: { op: "eq", propertyId: "status", value: "paused" },
+            input: { kind: "start", objectTypeId: "Room" },
+          },
+        ],
+      },
+    })
+
+    expect(outgoing.objects.map((row) => row.primaryId)).toEqual(["d1", "d2"])
+    expect(incoming.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+    expect(intersect.objects.map((row) => row.primaryId)).toEqual(["r1"])
+    expect(subtract.objects.map((row) => row.primaryId)).toEqual(["r1", "r2"])
+  })
+
   test("applyObjectUpserted creates and updates objects", async () => {
     const storage = new InMemoryObjectStorage()
 
@@ -204,23 +458,6 @@ describe("InMemoryObjectStorage", () => {
 
     const all = await storage.list({ projectId: "p1" })
     expect(all.objects).toHaveLength(2)
-  })
-
-  test("findFirst with where clause", async () => {
-    const storage = new InMemoryObjectStorage()
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r1", { name: "A" }, "1")
-    )
-    await storage.applyObjectUpserted(
-      makeObjectUpsertedEvent("p1", "Room", "r2", { name: "B" }, "2")
-    )
-
-    const found = await storage.findFirst({
-      projectId: "p1",
-      objectTypeId: "Room",
-      where: [{ propertyId: "name", op: "eq", value: "B" }],
-    })
-    expect(found?.primaryId).toBe("r2")
   })
 
   test("applyTelemetryAppended projects value onto object", async () => {
