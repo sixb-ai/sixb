@@ -30,4 +30,5 @@ npm-debug.log*
 
 .local/
 .sixb/
+.tsbuild/
 apps/docs/src/generated/
