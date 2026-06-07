@@ -37,6 +37,13 @@ const primaryRequired = prop("externalId", "string", { primary: true, required: 
 type _primaryRequiredPrimary = Expect<Equal<typeof primaryRequired.primary, true>>
 type _primaryRequiredRequired = Expect<Equal<typeof primaryRequired.required, true>>
 
+const searchableName = prop("name", "string", {
+  query: { searchable: true, text: true, weight: 4 },
+})
+type _querySearchable = Expect<Equal<typeof searchableName.query.searchable, true>>
+type _queryText = Expect<Equal<typeof searchableName.query.text, true>>
+type _queryWeight = Expect<Equal<typeof searchableName.query.weight, 4>>
+
 const thermostat = defineObjectType({
   id: "thermostat",
   name: "Thermostat",
@@ -47,6 +54,11 @@ const thermostat = defineObjectType({
     prop("fanSpeed", integerEnum([1, 2, 3, 4])),
   ],
   links: [link("locatedIn", "room", { cardinality: "one" })],
+  search: {
+    title: "externalId",
+    defaultText: ["externalId"],
+    exact: ["id", "externalId"],
+  },
 })
 
 type _thermostatId = Expect<Equal<typeof thermostat.id, "thermostat">>
@@ -62,6 +74,11 @@ type _propertyTokenIds = Expect<
 type _modeTokenId = Expect<Equal<typeof thermostat.p.mode.id, "mode">>
 type _linkTokenId = Expect<Equal<typeof thermostat.l.locatedIn.id, "locatedIn">>
 type _linkTokenTarget = Expect<Equal<typeof thermostat.l.locatedIn.targetObjectTypeId, "room">>
+type _searchTitle = Expect<Equal<typeof thermostat.search.title, "externalId">>
+type _searchDefaultText = Expect<
+  Equal<(typeof thermostat.search.defaultText)[number], "externalId">
+>
+type _searchExact = Expect<Equal<(typeof thermostat.search.exact)[number], "id" | "externalId">>
 
 type ModeProperty = Extract<(typeof thermostat.properties)[number], { id: "mode" }>
 type _modeEnumUnion = Expect<

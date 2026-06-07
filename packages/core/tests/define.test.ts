@@ -42,9 +42,11 @@ describe("defineObjectType", () => {
       description: "A generic sensor",
       implements: ["measurable"],
       properties: [prop("id", "string", { required: true, primary: true })],
+      search: { title: "id", exact: ["id"] },
     })
     expect(ot.description).toBe("A generic sensor")
     expect(ot.implements).toEqual(["measurable"])
+    expect(ot.search).toEqual({ title: "id", exact: ["id"] })
   })
 })
 
@@ -134,11 +136,13 @@ describe("prop", () => {
       required: true,
       nullable: false,
       semanticType: "Temperature",
+      query: { searchable: true, filterable: true, sortable: true },
     })
     expect(p.required).toBe(true)
     expect(p.nullable).toBe(false)
     expect(p.semanticType).toBe("Temperature")
     expect(p.description).toBe("Current reading")
+    expect(p.query).toEqual({ searchable: true, filterable: true, sortable: true })
   })
 })
 
