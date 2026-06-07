@@ -62,7 +62,16 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError } from "./auth"
-export type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "./objects/types"
+export type {
+  LinkDirection,
+  ObjectLinkRow,
+  ObjectQueryCapabilities,
+  ObjectQueryCapabilityMap,
+  ObjectRow,
+  ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
+} from "./objects/types"
 export type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,

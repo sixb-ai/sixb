@@ -12,6 +12,12 @@ export {
   runLakeStorageContractSuite,
 } from "./lake-storage-contract"
 export {
+  type ObjectQueryProviderContractSuiteOptions,
+  objectQueryContractOntology,
+  runObjectQueryProviderContractSuite,
+  seedObjectQueryContractData,
+} from "./object-query-contract"
+export {
   type QueueContractSuiteOptions,
   runQueueContractSuite,
 } from "./queues-contract"

@@ -72,7 +72,16 @@ export {
   runMigrationSet,
   step,
 } from "./migrations"
-export type { LinkDirection, ObjectLinkRow, ObjectRow, ObjectStorage } from "./objects"
+export type {
+  LinkDirection,
+  ObjectLinkRow,
+  ObjectQueryCapabilities,
+  ObjectQueryCapabilityMap,
+  ObjectRow,
+  ObjectStorage,
+  QueryObjectsInput,
+  QueryObjectsResult,
+} from "./objects"
 export { InMemoryObjectStorage } from "./objects"
 export type {
   FinishPipelineRunInput,

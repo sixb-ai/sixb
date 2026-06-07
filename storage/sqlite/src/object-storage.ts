@@ -4,6 +4,7 @@ import { dirname } from "node:path"
 import type {
   LinkDirection,
   ObjectLinkRow,
+  ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
   StoredLinkRemovedEvent,
@@ -16,6 +17,11 @@ import { installFreshSqliteSchema } from "./migrations"
 export interface SqliteObjectStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+}
+
+const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
+  queryObjects: false,
+  notes: ["SQLite object query pushdown is added in a later stacked PR."],
 }
 
 /**
@@ -34,6 +40,10 @@ export class SqliteObjectStorage implements ObjectStorage {
     if (path === ":memory:") {
       installFreshSqliteSchema(this.db)
     }
+  }
+
+  queryCapabilities(): ObjectQueryCapabilities {
+    return SQLITE_OBJECT_QUERY_CAPABILITIES
   }
 
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {

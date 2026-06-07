@@ -1,6 +1,7 @@
 import type {
   LinkDirection,
   ObjectLinkRow,
+  ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
   StoredLinkRemovedEvent,
@@ -9,6 +10,11 @@ import type {
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
 import type { SQL } from "bun"
+
+const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
+  queryObjects: false,
+  notes: ["PostgreSQL object query pushdown is added in a later stacked PR."],
+}
 
 /**
  * Build a `SELECT ... JOIN (VALUES ...) AS t(...) ON ... WHERE ...` query
@@ -69,6 +75,10 @@ function valuesJoin(
  */
 export class PgObjectStorage implements ObjectStorage {
   constructor(private readonly sql: SQL) {}
+
+  queryCapabilities(): ObjectQueryCapabilities {
+    return PG_OBJECT_QUERY_CAPABILITIES
+  }
 
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
     const occurredAt = new Date(event.occurredAt)
