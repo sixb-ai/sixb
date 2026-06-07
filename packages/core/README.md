@@ -124,9 +124,11 @@ await sixb.objects(Room).byId("room:101").telemetry(Room.p.currentTemperature).a
 })
 
 // Query
-const found = await sixb.objects(Room).findFirst({
-  where: (r) => r.p.externalId.eq("RM-101"),
-})
+const found = await sixb
+  .objects(Room)
+  .query()
+  .where((r) => r.p.externalId.eq("RM-101"))
+  .first()
 ```
 
 ## Functions
@@ -417,8 +419,9 @@ src/
 |---|---|
 | `.upsert({ properties })` | Create or update an object (id derived from primary property) |
 | `.get(id)` | Get an object by id |
-| `.findFirst({ where })` | Find first matching object |
-| `.list({ where, limit, ... })` | List objects with filtering and pagination |
+| `.query().where(...).limit(...).list()` | Execute a typed object query |
+| `.query().where(...).first()` | Return the first object from a typed query |
+| `.list({ limit, offset, ... })` | List stored objects with storage-system filtering and pagination |
 | `.byId(id)` | Get a handle for link/telemetry/action operations |
 | `.appendTelemetryBatch(items)` | Batch append telemetry for multiple objects |
 | `.requestAction({ id, actionId, params })` | Request an action on an object |

@@ -7,11 +7,29 @@ export const Employee = defineObjectType({
   description: "A company employee.",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-    prop("email", "string", { required: true }),
-    prop("role", "string", { required: true }),
-    prop("seniority", stringEnum(["junior", "mid", "senior", "lead", "director"])),
-    prop("hireDate", "date"),
+    prop("name", "string", {
+      required: true,
+      query: { searchable: true, text: true, exact: true, sortable: true, weight: 5 },
+    }),
+    prop("email", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true },
+    }),
+    prop("role", "string", {
+      required: true,
+      query: { searchable: true, text: true, filterable: true, exact: true, sortable: true },
+    }),
+    prop("seniority", stringEnum(["junior", "mid", "senior", "lead", "director"]), {
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
+    prop("hireDate", "date", {
+      query: { searchable: true, filterable: true, sortable: true },
+    }),
   ],
+  search: {
+    title: "name",
+    defaultText: ["name", "role"],
+    exact: ["id", "email"],
+  },
   links: [link("department", Department, { cardinality: "one" })],
 })

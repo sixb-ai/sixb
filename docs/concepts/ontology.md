@@ -278,6 +278,46 @@ import { Organization } from "./ontology/organization"
 export const sixb = createSixb({
   ontology: [Customer, Organization],
 })
+
+// Create or update
+const customer = await customers.upsert({
+  properties: { id: "cust-001", name: "Acme Corp", tier: "business" },
+})
+
+// Read
+const found = await customers.get("cust-001")
+
+// Query with filters
+const results = await customers
+  .query()
+  .where((c) => c.p.tier.eq("enterprise"))
+  .limit(10)
+  .list()
+
+// Telemetry
+await customers.byId("cust-001").telemetry(Customer.p.monthlySpend).append({
+  value: 1250.00,
+  unit: "USD",
+  at: new Date(),
+})
+
+// Batch telemetry
+await customers.appendTelemetryBatch([
+  { id: "cust-001", properties: { monthlySpend: { value: 1250.00, unit: "USD" } } },
+  { id: "cust-002", properties: { monthlySpend: { value: 890.50, unit: "USD" } } },
+])
+
+// Links
+await customers.byId("cust-001").link(Customer.l.belongsTo, {
+  objectTypeId: "Organization",
+  primaryId: "org-1",
+})
+
+// Actions
+await customers.byId("cust-001").requestAction({
+  actionId: "issueCredit",
+  params: { amount: { value: 500.00, unit: "USD" } },
+})
 ```
 
 ## How to model your domain
