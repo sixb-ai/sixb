@@ -1,0 +1,92 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "auth/magic-link/tsconfig.build.json"
+    },
+    {
+      "path": "auth/oidc/tsconfig.build.json"
+    },
+    {
+      "path": "broker/nats/tsconfig.build.json"
+    },
+    {
+      "path": "broker/redis/tsconfig.build.json"
+    },
+    {
+      "path": "connectors/rest/tsconfig.build.json"
+    },
+    {
+      "path": "connectors/sftp/tsconfig.build.json"
+    },
+    {
+      "path": "connectors/sql/tsconfig.build.json"
+    },
+    {
+      "path": "packages/action-worker/tsconfig.build.json"
+    },
+    {
+      "path": "packages/app/tsconfig.build.json"
+    },
+    {
+      "path": "packages/atlas/tsconfig.build.json"
+    },
+    {
+      "path": "packages/cli/tsconfig.build.json"
+    },
+    {
+      "path": "packages/client/tsconfig.build.json"
+    },
+    {
+      "path": "packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "packages/orchestrator/tsconfig.build.json"
+    },
+    {
+      "path": "packages/pipeline-worker/tsconfig.build.json"
+    },
+    {
+      "path": "packages/projection-worker/tsconfig.build.json"
+    },
+    {
+      "path": "packages/rules-worker/tsconfig.build.json"
+    },
+    {
+      "path": "packages/sentinel/tsconfig.build.json"
+    },
+    {
+      "path": "packages/server/tsconfig.build.json"
+    },
+    {
+      "path": "packages/sync-worker/tsconfig.build.json"
+    },
+    {
+      "path": "packages/ui/tsconfig.build.json"
+    },
+    {
+      "path": "packages/workflow-worker/tsconfig.build.json"
+    },
+    {
+      "path": "queues/bullmq/tsconfig.build.json"
+    },
+    {
+      "path": "storage/blob-local/tsconfig.build.json"
+    },
+    {
+      "path": "storage/blob-s3/tsconfig.build.json"
+    },
+    {
+      "path": "storage/ducklake/tsconfig.build.json"
+    },
+    {
+      "path": "storage/lake-local/tsconfig.build.json"
+    },
+    {
+      "path": "storage/pg/tsconfig.build.json"
+    },
+    {
+      "path": "storage/sqlite/tsconfig.build.json"
+    }
+  ]
+}

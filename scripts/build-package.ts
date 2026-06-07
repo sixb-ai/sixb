@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises"
+import { cp, mkdir, readdir, writeFile } from "node:fs/promises"
 import { extname, join, relative, resolve } from "node:path"
 
 type PackageJson = {
@@ -25,16 +25,14 @@ type ExportTarget =
 type ExportsMap = Record<string, ExportTarget> | ExportTarget
 
 const packageRoot = process.cwd()
-const repoRoot = resolve(packageRoot, "../..")
 const srcRoot = join(packageRoot, "src")
 const distRoot = join(packageRoot, "dist")
 const packageJsonPath = join(packageRoot, "package.json")
-const buildConfigDir = join(packageRoot, ".sixb")
+const buildConfigDir = join(packageRoot, ".tsbuild")
 
 const packageJson = (await Bun.file(packageJsonPath).json()) as PackageJson
 const packageName = packageJson.name ?? relative(process.cwd(), packageRoot)
 
-await rm(distRoot, { recursive: true, force: true })
 await mkdir(distRoot, { recursive: true })
 await mkdir(buildConfigDir, { recursive: true })
 
@@ -61,7 +59,6 @@ if (entrypoints.length > 0) {
   }
 }
 
-await emitDeclarations()
 await copyAssets(packageJson.sixbBuild?.assets ?? [])
 
 async function writeBundleTsconfig(): Promise<string> {
@@ -148,47 +145,6 @@ async function expandSourcePattern(pattern: string): Promise<string[]> {
     .filter((entry) => entry.name.startsWith(filePrefix) && entry.name.endsWith(suffix))
     .map((entry) => join(directory, entry.name))
     .sort((a, b) => a.localeCompare(b))
-}
-
-async function emitDeclarations(): Promise<void> {
-  const buildConfigPath = join(buildConfigDir, "tsconfig.package.json")
-  const declarationOutDir = join(buildConfigDir, "types")
-  await mkdir(buildConfigDir, { recursive: true })
-  await rm(declarationOutDir, { recursive: true, force: true })
-  await writeFile(
-    buildConfigPath,
-    `${JSON.stringify(
-      {
-        extends: "../tsconfig.json",
-        compilerOptions: {
-          noEmit: false,
-          emitDeclarationOnly: true,
-          declaration: true,
-          declarationMap: true,
-          outDir: "./types",
-          rootDir: repoRoot,
-          tsBuildInfoFile: "./tsconfig.package.tsbuildinfo",
-        },
-        include: ["../src/**/*"],
-      },
-      null,
-      2
-    )}\n`
-  )
-
-  const proc = Bun.spawn([process.execPath, "x", "--bun", "tsc", "-p", buildConfigPath], {
-    cwd: packageRoot,
-    stdout: "inherit",
-    stderr: "inherit",
-  })
-
-  const exitCode = await proc.exited
-  if (exitCode !== 0) {
-    throw new Error(`[SixbBuild] Failed to emit declarations for ${packageName}`)
-  }
-
-  const emittedPackageTypes = join(declarationOutDir, relative(repoRoot, srcRoot))
-  await cp(emittedPackageTypes, distRoot, { recursive: true, force: true })
 }
 
 async function copyAssets(assets: NonNullable<PackageJson["sixbBuild"]>["assets"]): Promise<void> {
