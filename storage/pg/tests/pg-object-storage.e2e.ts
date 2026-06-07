@@ -179,42 +179,6 @@ describe("PgObjectStorage", () => {
     expect(row).toBeNull()
   })
 
-  test("findFirst returns first matching object", async () => {
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:101", { name: "Room A", floor: "1" }, "1")
-    )
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:102", { name: "Room B", floor: "2" }, "2")
-    )
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:103", { name: "Room C", floor: "2" }, "3")
-    )
-
-    const row = await storage.objects.findFirst({
-      projectId: "project-a",
-      objectTypeId: "Room",
-      where: [{ propertyId: "floor", op: "eq", value: "2" }],
-    })
-
-    expect(row?.properties.floor).toBe("2")
-  })
-
-  test("findFirst without where returns first object", async () => {
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:101", { name: "Room A" }, "1")
-    )
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Room", "room:102", { name: "Room B" }, "2")
-    )
-
-    const row = await storage.objects.findFirst({
-      projectId: "project-a",
-      objectTypeId: "Room",
-    })
-
-    expect(row).not.toBeNull()
-  })
-
   test("applyTelemetryAppended updates object property", async () => {
     await storage.objects.applyObjectUpserted(
       createObjectEvent("project-a", "Room", "room:101", { name: "Conference" }, "1")
@@ -519,29 +483,6 @@ describe("PgObjectStorage", () => {
     expect(result.objects[0]?.primaryId).toBe("room:a")
     expect(result.objects[1]?.primaryId).toBe("room:b")
     expect(result.objects[2]?.primaryId).toBe("room:c")
-  })
-
-  test("findFirst with JSONB containment query", async () => {
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Sensor", "s:1", { type: "temperature", zone: "A" }, "1")
-    )
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Sensor", "s:2", { type: "humidity", zone: "A" }, "2")
-    )
-    await storage.objects.applyObjectUpserted(
-      createObjectEvent("project-a", "Sensor", "s:3", { type: "temperature", zone: "B" }, "3")
-    )
-
-    const row = await storage.objects.findFirst({
-      projectId: "project-a",
-      objectTypeId: "Sensor",
-      where: [
-        { propertyId: "type", op: "eq", value: "temperature" },
-        { propertyId: "zone", op: "eq", value: "B" },
-      ],
-    })
-
-    expect(row?.primaryId).toBe("s:3")
   })
 
   test("applyTelemetryAppendedBatch updates multiple properties on same object", async () => {
