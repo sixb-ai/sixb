@@ -4,6 +4,152 @@ export type ClientOptions = {
   baseUrl: `${string}://${string}` | (string & {})
 }
 
+export type ErrorResponse = {
+  error: string
+}
+
+export type ObjectQueryObject = {
+  primaryId: string
+  objectTypeId: string
+  properties: {
+    [key: string]: unknown
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type ObjectQueryIssue = {
+  path: string
+  code: string
+  message: string
+}
+
+export type ObjectQueryPlanSummary = {
+  mode: "pushdown" | "fallback" | "rejected"
+  providerIssues: Array<ObjectQueryIssue>
+  fallbackIssues: Array<ObjectQueryIssue>
+  issues: Array<ObjectQueryIssue>
+  fallback?: {
+    maxRows: number
+    requiresExplicitBound: boolean
+  }
+}
+
+export type ObjectQueryResponse = {
+  objects: Array<ObjectQueryObject>
+  hasMore: boolean
+  total?: number
+  nextPageToken?: string
+  plan: ObjectQueryPlanSummary
+}
+
+export type ObjectQueryErrorResponse = {
+  error: string
+  issues?: Array<ObjectQueryIssue>
+}
+
+export type ObjectQueryRequest = {
+  query: ObjectQuery
+}
+
+export type ObjectQuery =
+  | {
+      kind: "start"
+      objectTypeId: string
+      includeSubtypes?: boolean
+    }
+  | {
+      kind: "filter"
+      input: ObjectQuery
+      predicate: ObjectQueryPredicate
+    }
+  | {
+      kind: "text"
+      input: ObjectQuery
+      query: string
+      fields?: Array<string>
+    }
+  | {
+      kind: "vector"
+      input: ObjectQuery
+      vector: Array<number>
+      propertyId: string
+      k: number
+    }
+  | {
+      kind: "traverse"
+      input: ObjectQuery
+      linkId: string
+      direction: "outgoing" | "incoming"
+    }
+  | {
+      kind: "set"
+      op: "union" | "intersect" | "subtract"
+      inputs: Array<ObjectQuery>
+    }
+  | {
+      kind: "sort"
+      input: ObjectQuery
+      fields: Array<ObjectQuerySortField>
+    }
+  | {
+      kind: "limit"
+      input: ObjectQuery
+      limit: number
+    }
+  | {
+      kind: "page"
+      input: ObjectQuery
+      pageSize: number
+      pageToken?: string
+    }
+  | {
+      kind: "project"
+      input: ObjectQuery
+      properties?: Array<string>
+    }
+
+export type ObjectQueryPredicate =
+  | {
+      op: "and" | "or"
+      items: Array<ObjectQueryPredicate>
+    }
+  | {
+      op: "not"
+      item: ObjectQueryPredicate
+    }
+  | {
+      op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte"
+      propertyId: string
+      value: unknown
+    }
+  | {
+      op: "in"
+      propertyId: string
+      values: Array<unknown>
+    }
+  | {
+      op: "exists"
+      propertyId: string
+      value: boolean
+    }
+  | {
+      op: "contains"
+      propertyId: string
+      value: unknown
+    }
+
+export type ObjectQuerySortField =
+  | {
+      kind: "property"
+      propertyId: string
+      direction?: "asc" | "desc"
+    }
+  | {
+      kind: "relevance"
+      direction?: "asc" | "desc"
+    }
+
 export type GetAuthSessionData = {
   body?: never
   path?: never
@@ -2658,6 +2804,35 @@ export type ListObjectsResponses = {
 }
 
 export type ListObjectsResponse = ListObjectsResponses[keyof ListObjectsResponses]
+
+export type QueryObjectsData = {
+  body: ObjectQueryRequest
+  path?: never
+  query?: never
+  url: "/api/objects/query"
+}
+
+export type QueryObjectsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ObjectQueryErrorResponse
+  /**
+   * Response for status 500
+   */
+  500: ErrorResponse
+}
+
+export type QueryObjectsError = QueryObjectsErrors[keyof QueryObjectsErrors]
+
+export type QueryObjectsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: ObjectQueryResponse
+}
+
+export type QueryObjectsResponse = QueryObjectsResponses[keyof QueryObjectsResponses]
 
 export type GetObjectData = {
   body?: never

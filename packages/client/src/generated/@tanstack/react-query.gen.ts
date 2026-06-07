@@ -55,6 +55,7 @@ import {
   listWorkflowRuns,
   listWorkflows,
   type Options,
+  queryObjects,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -188,6 +189,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  QueryObjectsData,
+  QueryObjectsError,
+  QueryObjectsResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -1615,6 +1619,29 @@ export const listObjectsInfiniteOptions = (options?: Options<ListObjectsData>) =
       queryKey: listObjectsInfiniteQueryKey(options),
     }
   )
+
+/**
+ * Query objects
+ */
+export const queryObjectsMutation = (
+  options?: Partial<Options<QueryObjectsData>>
+): UseMutationOptions<QueryObjectsResponse, QueryObjectsError, Options<QueryObjectsData>> => {
+  const mutationOptions: UseMutationOptions<
+    QueryObjectsResponse,
+    QueryObjectsError,
+    Options<QueryObjectsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await queryObjects({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const getObjectQueryKey = (options: Options<GetObjectData>) =>
   createQueryKey("getObject", options)
