@@ -104,12 +104,18 @@ describe("InMemoryObjectStorage", () => {
     const capabilities = storage.queryCapabilities()
 
     expect(capabilities.queryObjects).toBe(true)
+    expect(capabilities.countObjects).toBe(true)
+    expect(capabilities.existsObjects).toBe(true)
+    expect(capabilities.facetObjects).toBe(true)
     expect(capabilities.nodes?.filter).toBe(true)
     expect(capabilities.predicateOps?.contains).toBe(true)
     expect(capabilities.sortKinds?.relevance).toBe(true)
     expect(capabilities.traversalDirections?.incoming).toBe(true)
     expect(capabilities.setOps?.intersect).toBe(true)
     expect(objectStorage.queryObjects).toBeDefined()
+    expect(objectStorage.countObjects).toBeDefined()
+    expect(objectStorage.existsObjects).toBeDefined()
+    expect(objectStorage.facetObjects).toBeDefined()
   })
 
   test("queryObjects executes predicates, sort, limit, and projection", async () => {

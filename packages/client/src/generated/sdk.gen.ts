@@ -9,9 +9,18 @@ import type {
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionErrors,
   CancelWorkflowInterventionResponses,
+  CountObjectsData,
+  CountObjectsErrors,
+  CountObjectsResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
+  ExistsObjectsData,
+  ExistsObjectsErrors,
+  ExistsObjectsResponses,
+  FacetObjectsData,
+  FacetObjectsErrors,
+  FacetObjectsResponses,
   GetActionData,
   GetActionErrors,
   GetActionResponses,
@@ -670,6 +679,54 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<QueryObjectsResponses, QueryObjectsErrors, ThrowOnError>({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/query",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Count objects
+ */
+export const countObjects = <ThrowOnError extends boolean = false>(
+  options: Options<CountObjectsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<CountObjectsResponses, CountObjectsErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/objects/query/count",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Check object existence
+ */
+export const existsObjects = <ThrowOnError extends boolean = false>(
+  options: Options<ExistsObjectsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<ExistsObjectsResponses, ExistsObjectsErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/objects/query/exists",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Facet objects
+ */
+export const facetObjects = <ThrowOnError extends boolean = false>(
+  options: Options<FacetObjectsData, ThrowOnError>
+) =>
+  (options.client ?? client).post<FacetObjectsResponses, FacetObjectsErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/objects/query/facets",
     ...options,
     headers: {
       "Content-Type": "application/json",

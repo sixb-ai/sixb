@@ -5,11 +5,23 @@ export {
   ObjectQueryValidationError,
 } from "./errors"
 export type {
+  ExecuteObjectCountInput,
+  ExecuteObjectCountResult,
+  ExecuteObjectExistsInput,
+  ExecuteObjectExistsResult,
+  ExecuteObjectFacetsInput,
+  ExecuteObjectFacetsResult,
   ExecuteObjectQueryInput,
   ExecuteObjectQueryResult,
   QueryExecutorOptions,
 } from "./executor"
-export { executeObjectQuery, QueryExecutor } from "./executor"
+export {
+  countObjects,
+  executeObjectQuery,
+  existsObjects,
+  facetObjects,
+  QueryExecutor,
+} from "./executor"
 export type {
   ObjectQueryExplainNode,
   ObjectQueryExplainOptions,
@@ -46,6 +58,7 @@ export type {
   ObjectQueryPlan,
   ObjectQueryPlanMode,
   ObjectQueryPlanningOptions,
+  ObjectQueryProviderOperation,
 } from "./planner"
 export { planObjectQuery, QueryPlanner } from "./planner"
 export type {

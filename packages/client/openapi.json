@@ -131,6 +131,75 @@
           }
         }
       },
+      "ObjectQueryCountResponse": {
+        "type": "object",
+        "required": ["count", "plan"],
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "number"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ObjectQueryPlanSummary"
+          }
+        }
+      },
+      "ObjectQueryExistsResponse": {
+        "type": "object",
+        "required": ["exists", "plan"],
+        "additionalProperties": false,
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ObjectQueryPlanSummary"
+          }
+        }
+      },
+      "ObjectQueryFacetBucket": {
+        "type": "object",
+        "required": ["value", "count"],
+        "additionalProperties": false,
+        "properties": {
+          "value": {},
+          "count": {
+            "type": "number"
+          }
+        }
+      },
+      "ObjectQueryFacetResult": {
+        "type": "object",
+        "required": ["propertyId", "buckets"],
+        "additionalProperties": false,
+        "properties": {
+          "propertyId": {
+            "type": "string"
+          },
+          "buckets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryFacetBucket"
+            }
+          }
+        }
+      },
+      "ObjectQueryFacetsResponse": {
+        "type": "object",
+        "required": ["facets", "plan"],
+        "additionalProperties": false,
+        "properties": {
+          "facets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryFacetResult"
+            }
+          },
+          "plan": {
+            "$ref": "#/components/schemas/ObjectQueryPlanSummary"
+          }
+        }
+      },
       "ObjectQueryErrorResponse": {
         "type": "object",
         "required": ["error"],
@@ -154,6 +223,61 @@
         "properties": {
           "query": {
             "$ref": "#/components/schemas/ObjectQuery"
+          },
+          "includeTotal": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ObjectQueryCountRequest": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ObjectQuery"
+          }
+        }
+      },
+      "ObjectQueryExistsRequest": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ObjectQuery"
+          }
+        }
+      },
+      "ObjectQueryFacetRequest": {
+        "type": "object",
+        "required": ["propertyId", "limit"],
+        "additionalProperties": false,
+        "properties": {
+          "propertyId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ObjectQueryFacetsRequest": {
+        "type": "object",
+        "required": ["query", "facets"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "$ref": "#/components/schemas/ObjectQuery"
+          },
+          "facets": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryFacetRequest"
+            }
           }
         }
       },
@@ -8339,6 +8463,168 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ObjectQueryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/query/count": {
+      "post": {
+        "summary": "Count objects",
+        "tags": ["Objects"],
+        "operationId": "countObjects",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectQueryCountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryCountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/query/exists": {
+      "post": {
+        "summary": "Check object existence",
+        "tags": ["Objects"],
+        "operationId": "existsObjects",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectQueryExistsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryExistsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/objects/query/facets": {
+      "post": {
+        "summary": "Facet objects",
+        "tags": ["Objects"],
+        "operationId": "facetObjects",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObjectQueryFacetsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectQueryFacetsResponse"
                 }
               }
             }

@@ -21,9 +21,20 @@ export interface CompiledObjectQuery {
   totalSql: string
   totalArgs: SqliteValue[]
   order: CompiledOrder
-  hasMore(rowCount: number, total: number): boolean
+  hasMoreProbe?: CompiledHasMoreProbe
+  hasMore(rowCount: number, total?: number): boolean
   trimRows<T>(rows: readonly T[]): readonly T[]
   nextPageToken(rows: readonly SqliteObjectQueryPageRow[], rowCount: number): string | undefined
+}
+
+interface CompiledHasMoreProbe {
+  sql: string
+  args: SqliteValue[]
+  hasMore(rowCount: number): boolean
+}
+
+interface CompileContext {
+  probeLimit: boolean
 }
 
 interface CompiledPredicate {
@@ -62,17 +73,31 @@ interface EncodedCursorValue {
 }
 
 const PAGE_TOKEN_PREFIX = "keyset:"
+const exactContext: CompileContext = { probeLimit: false }
 
-export function compileObjectQuery(projectId: string, query: ObjectQuery): CompiledObjectQuery {
+export function compileObjectQuery(
+  projectId: string,
+  query: ObjectQuery,
+  options: { includeTotal?: boolean } = {}
+): CompiledObjectQuery {
+  const ctx: CompileContext = { probeLimit: options.includeTotal === false }
+  return compileObjectQueryInternal(projectId, query, ctx)
+}
+
+function compileObjectQueryInternal(
+  projectId: string,
+  query: ObjectQuery,
+  ctx: CompileContext
+): CompiledObjectQuery {
   switch (query.kind) {
     case "start":
       return compileStart(projectId, query)
     case "filter":
       return compileFilter(projectId, query.input, query.predicate)
     case "sort":
-      return compileSort(projectId, query.input, query.fields)
+      return compileSort(projectId, query.input, query.fields, ctx)
     case "limit":
-      return compileLimit(projectId, query.input, query.limit)
+      return compileLimit(projectId, query.input, query.limit, ctx)
     case "page":
       return compilePage(projectId, query.input, query.pageSize, query.pageToken)
     case "traverse":
@@ -80,7 +105,7 @@ export function compileObjectQuery(projectId: string, query: ObjectQuery): Compi
     case "set":
       return compileSet(projectId, query.op, query.inputs)
     case "project":
-      return compileProject(projectId, query.input, query.properties)
+      return compileProject(projectId, query.input, query.properties, ctx)
     case "text":
       return compileText(
         projectId,
@@ -137,7 +162,7 @@ function compileWhere(
   inputQuery: ObjectQuery,
   predicate: CompiledPredicate
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
   const sql = `
     SELECT *
     FROM (${input.sql}) AS input
@@ -182,9 +207,14 @@ function compileText(
 function compileSort(
   projectId: string,
   inputQuery: ObjectQuery,
-  fields: readonly ObjectQuerySortField[]
+  fields: readonly ObjectQuerySortField[],
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const probeInput =
+    ctx.probeLimit && needsLimitProbe(inputQuery)
+      ? compileObjectQueryInternal(projectId, inputQuery, ctx)
+      : undefined
   const order = compileOrder(sortOrderFields(fields))
 
   return {
@@ -206,6 +236,7 @@ function compileSort(
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
     order,
+    hasMoreProbe: probeInput ? hasMoreProbeFor(probeInput) : input.hasMoreProbe,
     hasMore: input.hasMore,
     trimRows: input.trimRows,
     nextPageToken: input.nextPageToken,
@@ -215,10 +246,12 @@ function compileSort(
 function compileLimit(
   projectId: string,
   inputQuery: ObjectQuery,
-  rawLimit: number
+  rawLimit: number,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
   const limit = Math.max(0, rawLimit)
+  const rowLimit = ctx.probeLimit ? limit + 1 : limit
 
   return {
     sql: `
@@ -227,15 +260,16 @@ function compileLimit(
       ORDER BY ${input.order.sql}
       LIMIT ?
     `,
-    args: [...input.args, ...input.order.args, limit],
+    args: [...input.args, ...input.order.args, rowLimit],
     totalSql: `
       SELECT COUNT(*) as total
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
     order: input.order,
-    hasMore: (_rowCount, total) => limit < total,
-    trimRows: identityRows,
+    hasMore: (rowCount, total) =>
+      total === undefined ? ctx.probeLimit && rowCount > limit : limit < total,
+    trimRows: ctx.probeLimit ? (rows) => rows.slice(0, limit) : identityRows,
     nextPageToken: () => undefined,
   }
 }
@@ -246,7 +280,7 @@ function compilePage(
   rawPageSize: number,
   pageToken: string | undefined
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
   const pageSize = Math.max(0, rawPageSize)
   const cursor = pageToken ? decodePageToken(pageToken, input.order.fields) : undefined
   const cursorPredicate = cursor
@@ -284,7 +318,7 @@ function compileTraversal(
   linkId: string,
   direction: "outgoing" | "incoming"
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
   const joinSql =
     direction === "outgoing"
@@ -356,7 +390,9 @@ function compileSet(
     }
   }
 
-  const compiledInputs = inputs.map((input) => compileObjectQuery(projectId, input))
+  const compiledInputs = inputs.map((input) =>
+    compileObjectQueryInternal(projectId, input, exactContext)
+  )
   const identities = compileSetIdentities(op, compiledInputs)
   const order = compileOrder(identityOrderFields())
   const selectedOrder = compileOrder(identityOrderFields(), "selected")
@@ -386,9 +422,10 @@ function compileSet(
 function compileProject(
   projectId: string,
   inputQuery: ObjectQuery,
-  properties: readonly string[] | undefined
+  properties: readonly string[] | undefined,
+  ctx: CompileContext
 ): CompiledObjectQuery {
-  const input = compileObjectQuery(projectId, inputQuery)
+  const input = compileObjectQueryInternal(projectId, inputQuery, ctx)
   if (!properties) return input
 
   const projection = compileProjectionExpression(properties)
@@ -414,10 +451,33 @@ function compileProject(
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
     order: outputOrder,
+    hasMoreProbe: input.hasMoreProbe,
     hasMore: input.hasMore,
     trimRows: input.trimRows,
     nextPageToken: input.nextPageToken,
   }
+}
+
+function needsLimitProbe(query: ObjectQuery): boolean {
+  switch (query.kind) {
+    case "limit":
+      return true
+    case "project":
+    case "sort":
+      return needsLimitProbe(query.input)
+    default:
+      return false
+  }
+}
+
+function hasMoreProbeFor(compiled: CompiledObjectQuery): CompiledHasMoreProbe {
+  return (
+    compiled.hasMoreProbe ?? {
+      sql: compiled.sql,
+      args: compiled.args,
+      hasMore: (rowCount) => compiled.hasMore(rowCount, undefined),
+    }
+  )
 }
 
 function compileSetIdentities(

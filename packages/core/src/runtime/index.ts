@@ -37,8 +37,13 @@ export { Sixb } from "./sixb"
 export type {
   BatchItemResult,
   ListResult,
+  ListResultWithoutTotal,
   ObjectByIdHandle,
   ObjectQueryBuilder,
+  ObjectQueryFacetBucket,
+  ObjectQueryFacetInput,
+  ObjectQueryFacetResult,
+  ObjectQueryListOptions,
   ObjectSet,
   ObjectSetListInput,
   ObjectSetQueryPropertyToken,

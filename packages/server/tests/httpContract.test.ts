@@ -70,7 +70,10 @@ const Device = defineObjectType({
   name: "Device",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("label", "string", { required: true }),
+    prop("label", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
     prop("rpm", "double", { mode: "telemetry" }),
     prop("online", "boolean", { mode: "telemetry" }),
   ],
@@ -1163,6 +1166,81 @@ describe("SixbServer HTTP contract", () => {
           }),
         }),
       ])
+
+      const queryObjectsWithoutTotalResponse = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          includeTotal: false,
+          query: {
+            kind: "limit",
+            limit: 5,
+            input: { kind: "start", objectTypeId: "device" },
+          },
+        }),
+      })
+      expect(queryObjectsWithoutTotalResponse.status).toBe(200)
+      const queryObjectsWithoutTotalBody =
+        (await queryObjectsWithoutTotalResponse.json()) as Record<string, unknown>
+      expect(Object.hasOwn(queryObjectsWithoutTotalBody, "total")).toBe(false)
+      expect(queryObjectsWithoutTotalBody.hasMore).toBe(false)
+
+      const countObjectsResponse = await fetch(`${baseUrl}/api/objects/query/count`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "limit",
+            limit: 0,
+            input: { kind: "start", objectTypeId: "device" },
+          },
+        }),
+      })
+      expect(countObjectsResponse.status).toBe(200)
+      expect(await countObjectsResponse.json()).toMatchObject({
+        count: 1,
+        plan: { mode: "pushdown", providerIssues: [] },
+      })
+
+      const existsObjectsResponse = await fetch(`${baseUrl}/api/objects/query/exists`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "limit",
+            limit: 0,
+            input: { kind: "start", objectTypeId: "device" },
+          },
+        }),
+      })
+      expect(existsObjectsResponse.status).toBe(200)
+      expect(await existsObjectsResponse.json()).toMatchObject({
+        exists: true,
+        plan: { mode: "pushdown", providerIssues: [] },
+      })
+
+      const facetObjectsResponse = await fetch(`${baseUrl}/api/objects/query/facets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "limit",
+            limit: 0,
+            input: { kind: "start", objectTypeId: "device" },
+          },
+          facets: [{ propertyId: "label", limit: 10 }],
+        }),
+      })
+      expect(facetObjectsResponse.status).toBe(200)
+      expect(await facetObjectsResponse.json()).toMatchObject({
+        facets: [
+          {
+            propertyId: "label",
+            buckets: [{ value: "Fan 1", count: 1 }],
+          },
+        ],
+        plan: { mode: "pushdown", providerIssues: [] },
+      })
 
       const invalidQueryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",

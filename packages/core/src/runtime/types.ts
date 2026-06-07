@@ -343,7 +343,34 @@ type TypedActionParams<TAction extends TypedActionReference> =
 export type ListResult<T> = {
   objects: T[]
   hasMore: boolean
+  nextPageToken?: string
   total: number
+}
+
+export type ListResultWithoutTotal<T> = {
+  objects: T[]
+  hasMore: boolean
+  nextPageToken?: string
+  total?: undefined
+}
+
+export type ObjectQueryListOptions = {
+  includeTotal?: boolean
+}
+
+export type ObjectQueryFacetInput<TObjectType extends ObjectTypeWithPropertyTokens> = {
+  property: ObjectSetQueryPropertyToken<TObjectType>
+  limit: number
+}
+
+export type ObjectQueryFacetBucket = {
+  value: unknown
+  count: number
+}
+
+export type ObjectQueryFacetResult = {
+  propertyId: string
+  buckets: ObjectQueryFacetBucket[]
 }
 
 export type ObjectSetListInput = {
@@ -456,6 +483,25 @@ export interface ObjectQueryBuilder<
 
   /** Execute this query and return matching objects. */
   list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  list(options: {
+    includeTotal: false
+  }): Promise<ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>>
+  list(options: { includeTotal?: true }): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  list(
+    options?: ObjectQueryListOptions
+  ): Promise<
+    | ListResult<TwinObject<TObjectType, TValueTypes>>
+    | ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>
+  >
+
+  /** Count the matching objects without returning rows. */
+  count(): Promise<number>
+
+  /** Check whether any object matches without returning rows. */
+  exists(): Promise<boolean>
+
+  /** Count matching objects by configured facetable properties. */
+  facets(input: readonly ObjectQueryFacetInput<TObjectType>[]): Promise<ObjectQueryFacetResult[]>
 
   /** Execute this query with an outer limit of one and return the first object. */
   first(): Promise<TwinObject<TObjectType, TValueTypes> | null>

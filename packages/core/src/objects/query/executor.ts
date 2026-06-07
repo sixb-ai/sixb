@@ -1,30 +1,77 @@
 import type { OntologyRegistry } from "../../ontology"
 import type {
+  CountObjectsResult,
+  ExistsObjectsResult,
+  FacetObjectsResult,
+  ObjectFacetRequest,
+  ObjectFacetResult,
   ObjectQueryCapabilities,
   ObjectRow,
   ObjectStorage,
   QueryObjectsResult,
 } from "../../storage"
-import { ObjectQueryExecutionError, ObjectQueryPlanningError } from "./errors"
+import {
+  ObjectQueryExecutionError,
+  ObjectQueryPlanningError,
+  ObjectQueryValidationError,
+} from "./errors"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
-import { validateObjectQuery } from "./validate"
+import { type ObjectQueryValidationIssue, validateObjectQuery } from "./validate"
 
 export interface QueryExecutorOptions
-  extends Omit<ObjectQueryPlanningOptions, "capabilities" | "hasQueryObjects"> {
+  extends Omit<
+    ObjectQueryPlanningOptions,
+    | "capabilities"
+    | "operation"
+    | "hasQueryObjects"
+    | "hasCountObjects"
+    | "hasExistsObjects"
+    | "hasFacetObjects"
+  > {
   ontology: OntologyRegistry
   storage: ObjectStorage
   maxLimit?: number
   maxPageSize?: number
+  maxFacetLimit?: number
 }
 
 export interface ExecuteObjectQueryInput {
   projectId: string
   query: ObjectQuery
+  includeTotal?: boolean
 }
 
 export interface ExecuteObjectQueryResult extends QueryObjectsResult {
+  plan: ObjectQueryPlan
+}
+
+export interface ExecuteObjectCountInput {
+  projectId: string
+  query: ObjectQuery
+}
+
+export interface ExecuteObjectCountResult extends CountObjectsResult {
+  plan: ObjectQueryPlan
+}
+
+export interface ExecuteObjectExistsInput {
+  projectId: string
+  query: ObjectQuery
+}
+
+export interface ExecuteObjectExistsResult extends ExistsObjectsResult {
+  plan: ObjectQueryPlan
+}
+
+export interface ExecuteObjectFacetsInput {
+  projectId: string
+  query: ObjectQuery
+  facets: readonly ObjectFacetRequest[]
+}
+
+export interface ExecuteObjectFacetsResult extends FacetObjectsResult {
   plan: ObjectQueryPlan
 }
 
@@ -41,6 +88,7 @@ type FallbackEvaluation = {
 }
 
 const DEFAULT_MAX_FALLBACK_ROWS = 1_000
+const DEFAULT_MAX_FACET_LIMIT = 1_000
 
 // Fallback page tokens are local to the core executor. Provider page tokens are
 // opaque and should only be interpreted by the provider that returned them.
@@ -51,6 +99,18 @@ export class QueryExecutor {
 
   async execute(input: ExecuteObjectQueryInput): Promise<ExecuteObjectQueryResult> {
     return executeObjectQuery(input, this.options)
+  }
+
+  async count(input: ExecuteObjectCountInput): Promise<ExecuteObjectCountResult> {
+    return countObjects(input, this.options)
+  }
+
+  async exists(input: ExecuteObjectExistsInput): Promise<ExecuteObjectExistsResult> {
+    return existsObjects(input, this.options)
+  }
+
+  async facets(input: ExecuteObjectFacetsInput): Promise<ExecuteObjectFacetsResult> {
+    return facetObjects(input, this.options)
   }
 }
 
@@ -67,8 +127,14 @@ export async function executeObjectQuery(
   })
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
+  const hasCountObjects = typeof options.storage.countObjects === "function"
+  const hasExistsObjects = typeof options.storage.existsObjects === "function"
+  const hasFacetObjects = typeof options.storage.facetObjects === "function"
   const plannedQuery = expandPushdownQuery(validated.query, options.ontology, capabilities, {
     hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
     allowFallback: options.allowFallback,
     maxFallbackRows: options.maxFallbackRows,
     requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
@@ -76,6 +142,9 @@ export async function executeObjectQuery(
   const plan = planObjectQuery(plannedQuery, {
     capabilities,
     hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
     allowFallback: options.allowFallback,
     maxFallbackRows: options.maxFallbackRows,
     requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
@@ -92,14 +161,202 @@ export async function executeObjectQuery(
     const result = await options.storage.queryObjects({
       projectId: input.projectId,
       query: plan.query,
+      includeTotal: input.includeTotal,
     })
     return { ...result, plan }
   }
 
   // The planner admits only the small fallback subset; unsupported cases below
   // remain as defensive guards against future planner drift.
-  const fallback = await executeFallbackQuery(input.projectId, validated.query, options)
+  const fallback = await executeFallbackQuery(input.projectId, validated.query, options, {
+    includeTotal: input.includeTotal,
+  })
   return { ...fallback, plan }
+}
+
+export async function countObjects(
+  input: ExecuteObjectCountInput,
+  options: QueryExecutorOptions
+): Promise<ExecuteObjectCountResult> {
+  const normalized = normalizeObjectQuery(input.query)
+  const validated = validateObjectQuery(normalized, {
+    ontology: options.ontology,
+    maxLimit: options.maxLimit,
+    maxPageSize: options.maxPageSize,
+    normalize: false,
+  })
+  const capabilities = options.storage.queryCapabilities()
+  const hasQueryObjects = typeof options.storage.queryObjects === "function"
+  const hasCountObjects = typeof options.storage.countObjects === "function"
+  const hasExistsObjects = typeof options.storage.existsObjects === "function"
+  const hasFacetObjects = typeof options.storage.facetObjects === "function"
+  const aggregateQuery = stripOuterRowShape(validated.query)
+  const plannedQuery = expandPushdownQuery(aggregateQuery, options.ontology, capabilities, {
+    operation: "countObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+  const plan = planObjectQuery(plannedQuery, {
+    capabilities,
+    operation: "countObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+
+  if (plan.mode === "rejected") {
+    throw new ObjectQueryPlanningError(plan.issues)
+  }
+
+  if (plan.mode === "pushdown") {
+    if (!options.storage.countObjects) {
+      throw new ObjectQueryPlanningError(plan.providerIssues)
+    }
+    const result = await options.storage.countObjects({
+      projectId: input.projectId,
+      query: plan.query,
+    })
+    return { ...result, plan }
+  }
+
+  const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
+  const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
+  return { count: evaluation.total, plan }
+}
+
+export async function existsObjects(
+  input: ExecuteObjectExistsInput,
+  options: QueryExecutorOptions
+): Promise<ExecuteObjectExistsResult> {
+  const normalized = normalizeObjectQuery(input.query)
+  const validated = validateObjectQuery(normalized, {
+    ontology: options.ontology,
+    maxLimit: options.maxLimit,
+    maxPageSize: options.maxPageSize,
+    normalize: false,
+  })
+  const capabilities = options.storage.queryCapabilities()
+  const hasQueryObjects = typeof options.storage.queryObjects === "function"
+  const hasCountObjects = typeof options.storage.countObjects === "function"
+  const hasExistsObjects = typeof options.storage.existsObjects === "function"
+  const hasFacetObjects = typeof options.storage.facetObjects === "function"
+  const aggregateQuery = stripOuterRowShape(validated.query)
+  const plannedQuery = expandPushdownQuery(aggregateQuery, options.ontology, capabilities, {
+    operation: "existsObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+  const plan = planObjectQuery(plannedQuery, {
+    capabilities,
+    operation: "existsObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+
+  if (plan.mode === "rejected") {
+    throw new ObjectQueryPlanningError(plan.issues)
+  }
+
+  if (plan.mode === "pushdown") {
+    if (!options.storage.existsObjects) {
+      throw new ObjectQueryPlanningError(plan.providerIssues)
+    }
+    const result = await options.storage.existsObjects({
+      projectId: input.projectId,
+      query: plan.query,
+    })
+    return { ...result, plan }
+  }
+
+  const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
+  const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
+  return { exists: evaluation.total > 0, plan }
+}
+
+export async function facetObjects(
+  input: ExecuteObjectFacetsInput,
+  options: QueryExecutorOptions
+): Promise<ExecuteObjectFacetsResult> {
+  const normalized = normalizeObjectQuery(input.query)
+  const validated = validateObjectQuery(normalized, {
+    ontology: options.ontology,
+    maxLimit: options.maxLimit,
+    maxPageSize: options.maxPageSize,
+    normalize: false,
+  })
+  const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
+  const aggregateQuery = stripOuterRowShape(validated.query)
+  const capabilities = options.storage.queryCapabilities()
+  const hasQueryObjects = typeof options.storage.queryObjects === "function"
+  const hasCountObjects = typeof options.storage.countObjects === "function"
+  const hasExistsObjects = typeof options.storage.existsObjects === "function"
+  const hasFacetObjects = typeof options.storage.facetObjects === "function"
+  const plannedQuery = expandPushdownQuery(aggregateQuery, options.ontology, capabilities, {
+    operation: "facetObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+  const plan = planObjectQuery(plannedQuery, {
+    capabilities,
+    operation: "facetObjects",
+    hasQueryObjects,
+    hasCountObjects,
+    hasExistsObjects,
+    hasFacetObjects,
+    allowFallback: options.allowFallback,
+    maxFallbackRows: options.maxFallbackRows,
+    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+  })
+
+  if (plan.mode === "rejected") {
+    throw new ObjectQueryPlanningError(plan.issues)
+  }
+
+  if (plan.mode === "pushdown") {
+    if (!options.storage.facetObjects) {
+      throw new ObjectQueryPlanningError(plan.providerIssues)
+    }
+    const result = await options.storage.facetObjects({
+      projectId: input.projectId,
+      query: plan.query,
+      facets,
+    })
+    return { ...result, plan }
+  }
+
+  const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
+  const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
+  return {
+    facets: buildFacetResults(
+      evaluation.entries.map((entry) => entry.row),
+      facets
+    ),
+    plan,
+  }
 }
 
 function expandPushdownQuery(
@@ -147,15 +404,16 @@ function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): 
 async function executeFallbackQuery(
   projectId: string,
   query: ObjectQuery,
-  options: QueryExecutorOptions
+  options: QueryExecutorOptions,
+  resultOptions: { includeTotal?: boolean }
 ): Promise<QueryObjectsResult> {
   const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
   const evaluation = await evaluateFallbackQuery(projectId, query, options, maxRows)
   return {
     objects: evaluation.entries.map((entry) => entry.row),
     hasMore: evaluation.hasMore,
-    total: evaluation.total,
     nextPageToken: evaluation.nextPageToken,
+    ...(resultOptions.includeTotal === false ? {} : { total: evaluation.total }),
   }
 }
 
@@ -365,6 +623,171 @@ function projectRow(row: ObjectRow, properties: readonly string[]): ObjectRow {
     }
   }
   return { ...row, properties: projected }
+}
+
+function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
+  switch (query.kind) {
+    case "limit":
+    case "page":
+    case "project":
+    case "sort":
+      return stripOuterRowShape(query.input)
+    default:
+      return query
+  }
+}
+
+function validateFacetRequests(
+  facets: readonly ObjectFacetRequest[],
+  objectTypeIds: readonly string[],
+  options: QueryExecutorOptions
+): ObjectFacetRequest[] {
+  const issues: ObjectQueryValidationIssue[] = []
+  const maxLimit = options.maxFacetLimit ?? DEFAULT_MAX_FACET_LIMIT
+
+  if (facets.length === 0) {
+    addFacetIssue(issues, "$.facets", "empty_facets", "At least one facet is required")
+  }
+
+  if (!Number.isInteger(maxLimit) || maxLimit <= 0) {
+    addFacetIssue(
+      issues,
+      "$.maxFacetLimit",
+      "invalid_facet_bound",
+      "maxFacetLimit must be positive"
+    )
+  }
+
+  const seenPropertyIds = new Set<string>()
+  const normalizedFacets: ObjectFacetRequest[] = []
+
+  facets.forEach((facet, index) => {
+    const path = `$.facets[${index}]`
+    const propertyId = typeof facet.propertyId === "string" ? facet.propertyId.trim() : ""
+
+    if (!propertyId) {
+      addFacetIssue(
+        issues,
+        `${path}.propertyId`,
+        "missing_facet_property",
+        "Facet propertyId is required"
+      )
+    } else if (seenPropertyIds.has(propertyId)) {
+      addFacetIssue(
+        issues,
+        `${path}.propertyId`,
+        "duplicate_facet",
+        `Facet property '${propertyId}' is requested more than once`
+      )
+    } else {
+      seenPropertyIds.add(propertyId)
+    }
+
+    if (!Number.isInteger(facet.limit) || facet.limit <= 0) {
+      addFacetIssue(
+        issues,
+        `${path}.limit`,
+        "invalid_facet_limit",
+        "Facet limit must be a positive integer"
+      )
+    } else if (facet.limit > maxLimit) {
+      addFacetIssue(
+        issues,
+        `${path}.limit`,
+        "facet_limit_too_large",
+        `Facet limit must be less than or equal to ${maxLimit}`
+      )
+    }
+
+    if (!propertyId) return
+
+    for (const objectTypeId of objectTypeIds) {
+      const objectType = options.ontology.getObjectTypeById(objectTypeId)
+      const property = objectType?.properties.find((candidate) => candidate.id === propertyId)
+
+      if (!objectType || !property) {
+        addFacetIssue(
+          issues,
+          `${path}.propertyId`,
+          "unknown_facet_property",
+          `Property '${propertyId}' is not defined on '${objectTypeId}'`
+        )
+        continue
+      }
+
+      if (property.query?.searchable !== true || property.query.facet !== true) {
+        addFacetIssue(
+          issues,
+          `${path}.propertyId`,
+          "property_not_facetable",
+          `Property '${propertyId}' on '${objectTypeId}' must set query.searchable: true and query.facet: true before it can be used as a facet`
+        )
+      }
+    }
+
+    normalizedFacets.push({ propertyId, limit: facet.limit })
+  })
+
+  if (issues.length > 0) {
+    throw new ObjectQueryValidationError(issues)
+  }
+
+  return normalizedFacets
+}
+
+function addFacetIssue(
+  issues: ObjectQueryValidationIssue[],
+  path: string,
+  code: string,
+  message: string
+): void {
+  issues.push({ path, code, message })
+}
+
+function buildFacetResults(
+  rows: readonly ObjectRow[],
+  facets: readonly ObjectFacetRequest[]
+): ObjectFacetResult[] {
+  return facets.map((facet) => ({
+    propertyId: facet.propertyId,
+    buckets: buildFacetBuckets(rows, facet),
+  }))
+}
+
+function buildFacetBuckets(
+  rows: readonly ObjectRow[],
+  facet: ObjectFacetRequest
+): ObjectFacetResult["buckets"] {
+  const buckets = new Map<string, { value: unknown; count: number }>()
+
+  for (const row of rows) {
+    if (!Object.hasOwn(row.properties, facet.propertyId)) continue
+    const value = row.properties[facet.propertyId]
+    if (value === undefined) continue
+    const key = facetValueKey(value)
+    const existing = buckets.get(key)
+    if (existing) {
+      existing.count += 1
+    } else {
+      buckets.set(key, { value, count: 1 })
+    }
+  }
+
+  return [...buckets.values()]
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        facetValueSortKey(left.value).localeCompare(facetValueSortKey(right.value))
+    )
+    .slice(0, facet.limit)
+}
+
+function facetValueKey(value: unknown): string {
+  return JSON.stringify(value) ?? String(value)
+}
+
+function facetValueSortKey(value: unknown): string {
+  return JSON.stringify(value) ?? String(value)
 }
 
 function valuesEqual(left: unknown, right: unknown): boolean {

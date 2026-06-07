@@ -185,6 +185,33 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
 export const ObjectQueryRequestSchema = z
   .object({
     query: ObjectQuerySchema,
+    includeTotal: z.boolean().optional(),
+  })
+  .strict()
+
+export const ObjectQueryCountRequestSchema = z
+  .object({
+    query: ObjectQuerySchema,
+  })
+  .strict()
+
+export const ObjectQueryExistsRequestSchema = z
+  .object({
+    query: ObjectQuerySchema,
+  })
+  .strict()
+
+export const ObjectQueryFacetRequestSchema = z
+  .object({
+    propertyId: z.string().min(1),
+    limit: z.number().int().positive(),
+  })
+  .strict()
+
+export const ObjectQueryFacetsRequestSchema = z
+  .object({
+    query: ObjectQuerySchema,
+    facets: z.array(ObjectQueryFacetRequestSchema).min(1),
   })
   .strict()
 
@@ -288,6 +315,57 @@ export const ObjectQueryOpenApiSchemas = {
       plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
     },
   },
+  ObjectQueryCountResponse: {
+    type: "object",
+    required: ["count", "plan"],
+    additionalProperties: false,
+    properties: {
+      count: { type: "number" },
+      plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
+    },
+  },
+  ObjectQueryExistsResponse: {
+    type: "object",
+    required: ["exists", "plan"],
+    additionalProperties: false,
+    properties: {
+      exists: { type: "boolean" },
+      plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
+    },
+  },
+  ObjectQueryFacetBucket: {
+    type: "object",
+    required: ["value", "count"],
+    additionalProperties: false,
+    properties: {
+      value: anyJsonValueSchema,
+      count: { type: "number" },
+    },
+  },
+  ObjectQueryFacetResult: {
+    type: "object",
+    required: ["propertyId", "buckets"],
+    additionalProperties: false,
+    properties: {
+      propertyId: { type: "string" },
+      buckets: {
+        type: "array",
+        items: { $ref: "#/components/schemas/ObjectQueryFacetBucket" },
+      },
+    },
+  },
+  ObjectQueryFacetsResponse: {
+    type: "object",
+    required: ["facets", "plan"],
+    additionalProperties: false,
+    properties: {
+      facets: {
+        type: "array",
+        items: { $ref: "#/components/schemas/ObjectQueryFacetResult" },
+      },
+      plan: { $ref: "#/components/schemas/ObjectQueryPlanSummary" },
+    },
+  },
   ObjectQueryErrorResponse: {
     type: "object",
     required: ["error"],
@@ -306,6 +384,45 @@ export const ObjectQueryOpenApiSchemas = {
     additionalProperties: false,
     properties: {
       query: objectQueryRef,
+      includeTotal: { type: "boolean" },
+    },
+  },
+  ObjectQueryCountRequest: {
+    type: "object",
+    required: ["query"],
+    additionalProperties: false,
+    properties: {
+      query: objectQueryRef,
+    },
+  },
+  ObjectQueryExistsRequest: {
+    type: "object",
+    required: ["query"],
+    additionalProperties: false,
+    properties: {
+      query: objectQueryRef,
+    },
+  },
+  ObjectQueryFacetRequest: {
+    type: "object",
+    required: ["propertyId", "limit"],
+    additionalProperties: false,
+    properties: {
+      propertyId: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1 },
+    },
+  },
+  ObjectQueryFacetsRequest: {
+    type: "object",
+    required: ["query", "facets"],
+    additionalProperties: false,
+    properties: {
+      query: objectQueryRef,
+      facets: {
+        type: "array",
+        minItems: 1,
+        items: { $ref: "#/components/schemas/ObjectQueryFacetRequest" },
+      },
     },
   },
   ObjectQuery: {

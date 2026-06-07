@@ -179,6 +179,9 @@ describe("SqliteObjectStorage", () => {
     const capabilities = storage.queryCapabilities()
 
     expect(capabilities.queryObjects).toBe(true)
+    expect(capabilities.countObjects).toBe(true)
+    expect(capabilities.existsObjects).toBe(true)
+    expect(capabilities.facetObjects).toBe(true)
     expect(capabilities.nodes?.start).toBe(true)
     expect(capabilities.nodes?.filter).toBe(true)
     expect(capabilities.nodes?.limit).toBe(true)

@@ -73,7 +73,16 @@ export {
   step,
 } from "./migrations"
 export type {
+  CountObjectsInput,
+  CountObjectsResult,
+  ExistsObjectsInput,
+  ExistsObjectsResult,
+  FacetObjectsInput,
+  FacetObjectsResult,
   LinkDirection,
+  ObjectFacetBucket,
+  ObjectFacetRequest,
+  ObjectFacetResult,
   ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectQueryCapabilityMap,

@@ -10,15 +10,22 @@ import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
   ListResult,
+  ListResultWithoutTotal,
   ObjectQueryBuilder,
+  ObjectQueryFacetInput,
+  ObjectQueryFacetResult,
+  ObjectQueryListOptions,
   ObjectWhereBuilder,
   ObjectWhereClause,
   TwinObject,
 } from "../../runtime/types"
 import type { Storage } from "../../storage"
 import {
+  countObjects,
   executeObjectQuery,
+  existsObjects,
   explainObjectQuery,
+  facetObjects,
   formatObjectQueryExplanation,
   normalizeObjectQuery,
   type ObjectQuery,
@@ -201,14 +208,69 @@ class ObjectQueryBuilderImpl<
     return formatObjectQueryExplanation(this.explain())
   }
 
-  async list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>> {
+  async list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  async list(options: {
+    includeTotal: false
+  }): Promise<ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>>
+  async list(options: {
+    includeTotal?: true
+  }): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  async list(
+    options?: ObjectQueryListOptions
+  ): Promise<
+    | ListResult<TwinObject<TObjectType, TValueTypes>>
+    | ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>
+  > {
     return executeTypedObjectQuery<TObjectType, TValueTypes>({
       projectId: this.params.projectId,
       query: this.ir,
       storage: this.params.storage,
       ontology: this.params.ontology,
       sdkHints: true,
+      includeTotal: options?.includeTotal,
     })
+  }
+
+  async count(): Promise<number> {
+    const result = await countObjects(
+      {
+        projectId: this.params.projectId,
+        query: this.ir,
+      },
+      { ontology: this.params.ontology, storage: this.params.storage.objects }
+    )
+    return result.count
+  }
+
+  async exists(): Promise<boolean> {
+    const result = await existsObjects(
+      {
+        projectId: this.params.projectId,
+        query: this.ir,
+      },
+      { ontology: this.params.ontology, storage: this.params.storage.objects }
+    )
+    return result.exists
+  }
+
+  async facets(
+    input: readonly ObjectQueryFacetInput<TObjectType>[]
+  ): Promise<ObjectQueryFacetResult[]> {
+    const result = await facetObjects(
+      {
+        projectId: this.params.projectId,
+        query: this.ir,
+        facets: input.map((facet) => ({
+          propertyId: facet.property.id,
+          limit: facet.limit,
+        })),
+      },
+      { ontology: this.params.ontology, storage: this.params.storage.objects }
+    )
+    return result.facets.map((facet) => ({
+      propertyId: facet.propertyId,
+      buckets: [...facet.buckets],
+    }))
   }
 
   async first(): Promise<TwinObject<TObjectType, TValueTypes> | null> {
@@ -278,12 +340,26 @@ async function executeTypedObjectQuery<
   projectId: string
   storage: Storage
   sdkHints?: boolean
+  includeTotal?: boolean
 }) {
   const result = await executeObjectQueryWithSdkHints(params)
 
+  const objects = result.objects.map(
+    (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
+  )
+
+  if (params.includeTotal === false) {
+    return {
+      objects,
+      hasMore: result.hasMore,
+      nextPageToken: result.nextPageToken,
+    }
+  }
+
   return {
-    objects: result.objects.map((row) => row as unknown as TwinObject<TObjectType, TValueTypes>),
+    objects,
     hasMore: result.hasMore,
+    nextPageToken: result.nextPageToken,
     total: result.total ?? result.objects.length,
   }
 }
@@ -294,12 +370,14 @@ async function executeObjectQueryWithSdkHints(params: {
   projectId: string
   storage: Storage
   sdkHints?: boolean
+  includeTotal?: boolean
 }) {
   try {
     return await executeObjectQuery(
       {
         projectId: params.projectId,
         query: params.query,
+        includeTotal: params.includeTotal,
       },
       { ontology: params.ontology, storage: params.storage.objects }
     )
