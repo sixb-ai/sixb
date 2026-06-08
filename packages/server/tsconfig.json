@@ -5,7 +5,9 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["bun"]
+    "types": ["bun"],
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

@@ -6,7 +6,9 @@
     "jsx": "react-jsx",
     "noUncheckedIndexedAccess": false,
     "verbatimModuleSyntax": false,
-    "types": ["bun"]
+    "types": ["bun"],
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*", "dev/**/*"]
 }

@@ -2,6 +2,8 @@
   "extends": "../../tsconfig.json",
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "compilerOptions": {
-    "types": ["bun"]
+    "types": ["bun"],
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   }
 }
