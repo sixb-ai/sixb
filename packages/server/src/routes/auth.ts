@@ -128,6 +128,8 @@ export function registerAuthRoutes(
             id: session.session.id,
             revokedAt: new Date(),
           })
+          // Drop the cached session immediately so it isn't honored for the cache TTL.
+          sixb.auth.invalidateSession(session.session.id)
         }
 
         const headers = new Headers({ "content-type": "application/json; charset=utf-8" })

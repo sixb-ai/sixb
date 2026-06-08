@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   type AuthStrategy,
   createCsrfCookieHeader,
@@ -576,6 +576,126 @@ describe("Sixb auth runtime", () => {
         cookieName: "sixb_csrf",
       })
     ).toBe(true)
+  })
+
+  test("caches resolved sessions and re-validates after invalidation", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({ ontology: [], ...deps, auth: authStrategy })
+    const credential = createSessionCredential("ses_cache")
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: sixb.id,
+      email: "ava@acme.com",
+    })
+    await deps.storage.auth.sessions.create({
+      id: credential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: credential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const spy = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
+    const request = () =>
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+      })
+
+    await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
+    await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
+    // Second resolution served from cache — storage hit only once.
+    expect(spy).toHaveBeenCalledTimes(1)
+
+    sixb.auth.invalidateSession(credential.sessionId)
+    await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
+    expect(spy).toHaveBeenCalledTimes(2)
+    spy.mockRestore()
+  })
+
+  test("session cache is bound to the token secret, not just the session id", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({ ontology: [], ...deps, auth: authStrategy })
+    const credential = createSessionCredential("ses_bind")
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: sixb.id,
+      email: "ava@acme.com",
+    })
+    await deps.storage.auth.sessions.create({
+      id: credential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: credential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    // Prime the cache with the valid cookie.
+    await sixb.auth.getSession(
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+      })
+    )
+
+    // A forged cookie reusing the session id but a different secret must not hit the cache.
+    const forged = formatSessionCookieValue(credential.sessionId, "wrong-secret")
+    await expect(
+      sixb.auth.getSession(
+        new Request("http://localhost/api/project", {
+          headers: { cookie: `sixb_session=${forged}` },
+        })
+      )
+    ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
+  })
+
+  test("cacheTtlMs: 0 disables session caching", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: { strategy: authStrategy, session: { cacheTtlMs: 0 } },
+    })
+    const credential = createSessionCredential("ses_nocache")
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: sixb.id,
+      email: "ava@acme.com",
+    })
+    await deps.storage.auth.sessions.create({
+      id: credential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: credential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const spy = spyOn(deps.storage.auth.sessions, "findValidByTokenHash")
+    const request = () =>
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `sixb_session=${credential.cookieValue}` },
+      })
+
+    await sixb.auth.getSession(request())
+    await sixb.auth.getSession(request())
+    expect(spy).toHaveBeenCalledTimes(2)
+    spy.mockRestore()
+  })
+
+  test("rejects invalid session cacheTtlMs", () => {
+    const deps = createTestRuntimeDeps()
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [] as const,
+          ...deps,
+          auth: { strategy: authStrategy, session: { cacheTtlMs: -1 } },
+        })
+    ).toThrow("cacheTtlMs must be a non-negative finite number")
   })
 
   test("serializes auth cookies with strict same-site defaults", () => {

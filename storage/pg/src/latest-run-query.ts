@@ -1,4 +1,4 @@
-import type { SQL } from "bun"
+import type { SQL, SqlParameter } from "./pg-client"
 
 type PgLatestRunTarget =
   | { readonly tableName: "pipeline_runs"; readonly ownerColumn: "pipeline_id" }
@@ -22,15 +22,15 @@ export async function queryLatestRunsByOwnerId<TRow>(
   }
 
   const placeholders = ownerIds.map((_, index) => `$${index + 2}`).join(", ")
-  const rows = (await input.sql.unsafe(
+  const rows = await input.sql.unsafe<TRow[]>(
     `
       SELECT DISTINCT ON (${input.ownerColumn}) ${input.selectList ?? "*"}
       FROM ${input.tableName}
       WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})
       ORDER BY ${input.ownerColumn}, started_at DESC, id DESC
     `,
-    [input.projectId, ...ownerIds]
-  )) as TRow[]
+    [input.projectId, ...ownerIds] as SqlParameter[]
+  )
 
   const latestByOwnerId = new Map(rows.map((row) => [input.ownerIdFor(row), row]))
 

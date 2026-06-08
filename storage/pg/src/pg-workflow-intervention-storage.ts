@@ -11,7 +11,7 @@ import type {
   WorkflowIOSnapshot,
 } from "@sixb/core"
 import { WorkflowInterventionError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 
 export class PgWorkflowInterventionStorage implements WorkflowInterventionStorage {
@@ -21,7 +21,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
 
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<WorkflowInterventionDatabaseRow[]>`
         INSERT INTO workflow_interventions (
           project_id,
           id,
@@ -54,7 +54,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
           ${input.expiresAt ?? null}
         )
         RETURNING *
-      `) as WorkflowInterventionDatabaseRow[]
+      `
 
       return rowToWorkflowInterventionRecord(row)
     } catch (error) {
@@ -72,7 +72,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     return this.sql.begin(async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`
         UPDATE workflow_interventions
         SET
           status = ${"submitted"},
@@ -81,7 +81,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
           response = ${serializeRecord(input.response)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowInterventionDatabaseRow[]
+      `
 
       return rowToWorkflowInterventionRecord(updated)
     })
@@ -91,7 +91,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     return this.sql.begin(async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`
         UPDATE workflow_interventions
         SET
           status = ${"cancelled"},
@@ -99,7 +99,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
           cancelled_by = ${serializeActor(input.cancelledBy)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowInterventionDatabaseRow[]
+      `
 
       return rowToWorkflowInterventionRecord(updated)
     })
@@ -109,14 +109,14 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     return this.sql.begin(async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`
         UPDATE workflow_interventions
         SET
           status = ${"expired"},
           expired_at = ${input.expiredAt ?? new Date()}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowInterventionDatabaseRow[]
+      `
 
       return rowToWorkflowInterventionRecord(updated)
     })
@@ -126,10 +126,10 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     projectId: string
     id: string
   }): Promise<WorkflowInterventionRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<WorkflowInterventionDatabaseRow[]>`
       SELECT * FROM workflow_interventions
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as WorkflowInterventionDatabaseRow[]
+    `
 
     return row ? rowToWorkflowInterventionRecord(row) : null
   }
@@ -144,7 +144,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.statuses) {
@@ -196,10 +196,10 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
     const offset = input.offset ?? 0
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM workflow_interventions ${where}`,
       params
-    )) as { count: string | number }[]
+    )
 
     const queryParams = [...params]
     let query = `
@@ -216,7 +216,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
       queryParams.push(offset)
     }
 
-    const rows = (await this.sql.unsafe(query, queryParams)) as WorkflowInterventionDatabaseRow[]
+    const rows = await this.sql.unsafe<WorkflowInterventionDatabaseRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
 
     return {
@@ -228,15 +228,15 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
 }
 
 async function requirePendingIntervention(
-  sql: SQL,
+  sql: SQLClient,
   projectId: string,
   id: string
 ): Promise<WorkflowInterventionDatabaseRow> {
-  const [row] = (await sql`
+  const [row] = await sql<WorkflowInterventionDatabaseRow[]>`
     SELECT * FROM workflow_interventions
     WHERE project_id = ${projectId} AND id = ${id}
     FOR UPDATE
-  `) as WorkflowInterventionDatabaseRow[]
+  `
 
   if (!row) {
     throw new WorkflowInterventionError(

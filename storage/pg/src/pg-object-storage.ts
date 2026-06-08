@@ -18,7 +18,7 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
   compilePgObjectCountQuery,
@@ -85,14 +85,14 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
  * support VALUES inside SELECT/JOIN, so we construct the query string
  * manually while keeping all user data in the parameter array.
  */
-function valuesJoin(
-  sql: SQL,
+function valuesJoin<Row = unknown>(
+  sql: SQLClient,
   select: string,
   columns: string[],
   tuples: unknown[][],
   where: string,
   whereParams: unknown[]
-) {
+): Promise<Row[]> {
   const alias = "t"
   const colWidth = columns.length
 
@@ -116,7 +116,7 @@ function valuesJoin(
   const query = `${select} JOIN (VALUES ${valuePlaceholders}) AS ${alias}(${columns.join(",")}) ON ${onClause} ${where}`
   const params = [...whereParams, ...tuples.flat()]
 
-  return sql.unsafe(query, params)
+  return sql.unsafe(query, params as SqlParameter[]) as unknown as Promise<Row[]>
 }
 
 /**
@@ -148,12 +148,20 @@ export class PgObjectStorage implements ObjectStorage {
       includeTotal: params.includeTotal,
     })
     const total = params.includeTotal === false ? undefined : await readTotal(this.sql, compiled)
-    const rawRows = (await this.sql.unsafe(compiled.sql, compiled.args)) as ObjectQueryDatabaseRow[]
+    const rawRows = await this.sql.unsafe<ObjectQueryDatabaseRow[]>(
+      compiled.sql,
+      compiled.args as SqlParameter[]
+    )
     const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
     const hasMore =
       total === undefined && compiled.hasMoreProbe
         ? compiled.hasMoreProbe.hasMore(
-            (await this.sql.unsafe(compiled.hasMoreProbe.sql, compiled.hasMoreProbe.args)).length
+            (
+              await this.sql.unsafe(
+                compiled.hasMoreProbe.sql,
+                compiled.hasMoreProbe.args as SqlParameter[]
+              )
+            ).length
           )
         : compiled.hasMore(rawRows.length, total)
 
@@ -167,15 +175,16 @@ export class PgObjectStorage implements ObjectStorage {
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
     const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query))
-    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as {
-      count: string | number | bigint
-    }[]
+    const [row] = await this.sql.unsafe<{ count: string | number | bigint }[]>(
+      compiled.sql,
+      compiled.args as SqlParameter[]
+    )
     return { count: Number(row?.count ?? 0) }
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
     const compiled = compilePgObjectExistsQuery(params.projectId, stripOuterRowShape(params.query))
-    const [row] = (await this.sql.unsafe(compiled.sql, compiled.args)) as unknown[]
+    const [row] = await this.sql.unsafe<unknown[]>(compiled.sql, compiled.args as SqlParameter[])
     return { exists: row !== undefined }
   }
 
@@ -208,28 +217,30 @@ export class PgObjectStorage implements ObjectStorage {
       `
 
       if (applied) {
-        const [existing] = (await tx`
+        const [existing] = await tx<ObjectDatabaseRow[]>`
           SELECT * FROM objects
           WHERE project_id = ${event.projectId}
             AND object_type_id = ${event.payload.objectTypeId}
             AND primary_id = ${event.payload.primaryId}
-        `) as ObjectDatabaseRow[]
+        `
         return existing ? rowToObject(existing) : null
       }
 
-      const [existing] = (await tx`
+      const [existing] = await tx<
+        { properties: Record<string, unknown>; created_at: Date; version: number }[]
+      >`
         SELECT properties, created_at, version FROM objects
         WHERE project_id = ${event.projectId}
           AND object_type_id = ${event.payload.objectTypeId}
           AND primary_id = ${event.payload.primaryId}
-      `) as { properties: Record<string, unknown>; created_at: Date; version: number }[]
+      `
 
       const existingProperties = existing ? existing.properties : {}
       const mergedProperties = { ...existingProperties, ...event.payload.properties }
       const createdAt = existing ? existing.created_at : occurredAt
       const version = (existing?.version ?? 0) + 1
 
-      const [upserted] = (await tx`
+      const [upserted] = await tx<ObjectDatabaseRow[]>`
         INSERT INTO objects (
           project_id, object_type_id, primary_id, properties, created_at, updated_at,
           version, source_event_id
@@ -245,7 +256,7 @@ export class PgObjectStorage implements ObjectStorage {
           version = objects.version + 1,
           source_event_id = EXCLUDED.source_event_id
         RETURNING *
-      `) as ObjectDatabaseRow[]
+      `
 
       await tx`
         INSERT INTO applied_events_objects (event_id)
@@ -265,7 +276,7 @@ export class PgObjectStorage implements ObjectStorage {
     if (events.length === 0) return []
     return this.sql.begin(async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
-      const claimedRows = await tx`
+      const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
         ${this.sql(events.map((e) => ({ event_id: e.id })))}
         ON CONFLICT DO NOTHING
@@ -278,14 +289,14 @@ export class PgObjectStorage implements ObjectStorage {
       const results: ObjectRow[] = []
 
       if (alreadyApplied.length > 0) {
-        const existingRows = (await valuesJoin(
+        const existingRows = await valuesJoin<ObjectDatabaseRow>(
           tx,
           "SELECT o.* FROM objects o",
           ["object_type_id", "primary_id"],
           alreadyApplied.map((e) => [e.payload.objectTypeId, e.payload.primaryId]),
           `WHERE o.project_id = $1`,
           [events[0].projectId]
-        )) as ObjectDatabaseRow[]
+        )
 
         for (const row of existingRows) results.push(rowToObject(row))
       }
@@ -297,7 +308,7 @@ export class PgObjectStorage implements ObjectStorage {
 
         const occurredAt = new Date(event.occurredAt)
 
-        const [upserted] = (await tx`
+        const [upserted] = await tx<ObjectDatabaseRow[]>`
           INSERT INTO objects (
             project_id, object_type_id, primary_id, properties, created_at, updated_at,
             version, source_event_id
@@ -313,7 +324,7 @@ export class PgObjectStorage implements ObjectStorage {
             version = objects.version + 1,
             source_event_id = EXCLUDED.source_event_id
           RETURNING *
-        `) as ObjectDatabaseRow[]
+        `
 
         results.push(rowToObject(upserted))
       }
@@ -330,12 +341,12 @@ export class PgObjectStorage implements ObjectStorage {
       `
       if (applied) return
 
-      const [existing] = (await tx`
+      const [existing] = await tx<{ properties: Record<string, unknown> }[]>`
         SELECT properties FROM objects
         WHERE project_id = ${event.projectId}
           AND object_type_id = ${event.payload.objectTypeId}
           AND primary_id = ${event.payload.objectId}
-      `) as { properties: Record<string, unknown> }[]
+      `
 
       if (!existing) return
 
@@ -368,10 +379,10 @@ export class PgObjectStorage implements ObjectStorage {
     await this.sql.begin(async (tx) => {
       // Batch idempotence check: single query instead of N individual SELECTs
       const allEventIds = events.map((e) => e.id)
-      const appliedRows = (await tx`
+      const appliedRows = await tx<{ event_id: string }[]>`
         SELECT event_id FROM applied_events_objects
         WHERE event_id IN ${this.sql(allEventIds)}
-      `) as { event_id: string }[]
+      `
       const appliedSet = new Set(appliedRows.map((r) => r.event_id))
 
       // Group non-applied events by unique object to minimize reads/writes
@@ -403,12 +414,12 @@ export class PgObjectStorage implements ObjectStorage {
       }
 
       for (const group of objectGroups.values()) {
-        const [existing] = (await tx`
+        const [existing] = await tx<{ properties: Record<string, unknown> }[]>`
           SELECT properties FROM objects
           WHERE project_id = ${group.projectId}
             AND object_type_id = ${group.objectTypeId}
             AND primary_id = ${group.objectId}
-        `) as { properties: Record<string, unknown> }[]
+        `
 
         if (!existing) continue
 
@@ -488,7 +499,7 @@ export class PgObjectStorage implements ObjectStorage {
     if (events.length === 0) return
     await this.sql.begin(async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
-      const claimedRows = await tx`
+      const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
         ${this.sql(events.map((e) => ({ event_id: e.id })))}
         ON CONFLICT DO NOTHING
@@ -555,12 +566,12 @@ export class PgObjectStorage implements ObjectStorage {
     objectTypeId: string
     primaryId: string
   }): Promise<ObjectRow | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<ObjectDatabaseRow[]>`
       SELECT * FROM objects
       WHERE project_id = ${params.projectId}
         AND object_type_id = ${params.objectTypeId}
         AND primary_id = ${params.primaryId}
-    `) as ObjectDatabaseRow[]
+    `
 
     return row ? rowToObject(row) : null
   }
@@ -585,7 +596,7 @@ export class PgObjectStorage implements ObjectStorage {
     const args = params.linkId
       ? [params.projectId, params.objectTypeId, params.objectId, params.linkId]
       : [params.projectId, params.objectTypeId, params.objectId]
-    const rows = (await this.sql.unsafe(query, args)) as LinkDatabaseRow[]
+    const rows = await this.sql.unsafe<LinkDatabaseRow[]>(query, args)
 
     return rows.map((row) => rowToLink(row))
   }
@@ -596,14 +607,14 @@ export class PgObjectStorage implements ObjectStorage {
   }): Promise<Map<string, ObjectRow>> {
     const result = new Map<string, ObjectRow>()
     if (params.items.length === 0) return result
-    const rows = (await valuesJoin(
+    const rows = await valuesJoin<ObjectDatabaseRow>(
       this.sql,
       "SELECT o.* FROM objects o",
       ["object_type_id", "primary_id"],
       params.items.map((i) => [i.objectTypeId, i.primaryId]),
       `WHERE o.project_id = $1`,
       [params.projectId]
-    )) as ObjectDatabaseRow[]
+    )
 
     for (const row of rows) {
       result.set(`${row.object_type_id}:${row.primary_id}`, rowToObject(row))
@@ -617,14 +628,14 @@ export class PgObjectStorage implements ObjectStorage {
   }): Promise<Map<string, ObjectLinkRow[]>> {
     const result = new Map<string, ObjectLinkRow[]>()
     if (params.items.length === 0) return result
-    const rows = (await valuesJoin(
+    const rows = await valuesJoin<LinkDatabaseRow>(
       this.sql,
       "SELECT l.* FROM links l",
       ["source_type_id", "source_id", "link_id"],
       params.items.map((i) => [i.objectTypeId, i.objectId, i.linkId]),
       `WHERE l.project_id = $1`,
       [params.projectId]
-    )) as LinkDatabaseRow[]
+    )
 
     for (const row of rows) {
       const key = `${row.source_type_id}:${row.source_id}:${row.link_id}`
@@ -699,11 +710,11 @@ export class PgObjectStorage implements ObjectStorage {
     `
 
     // Get total count
-    const [countResult] = (await this.sql`
+    const [countResult] = await this.sql<{ total: number }[]>`
       SELECT COUNT(*)::int AS total FROM objects
       WHERE project_id = ${params.projectId}
       ${filters}
-    `) as { total: number }[]
+    `
     const total = countResult.total
 
     if (limit === 0) return { objects: [], hasMore: queryOffset < total, total }
@@ -711,14 +722,14 @@ export class PgObjectStorage implements ObjectStorage {
     // Get paginated results (+1 for hasMore check)
     // Column and direction derived from a fixed mapping — safe to use as identifiers
     const fetchLimit = limit + 1
-    const rows = (await this.sql`
+    const rows = await this.sql<ObjectDatabaseRow[]>`
       SELECT * FROM objects
       WHERE project_id = ${params.projectId}
       ${filters}
       ORDER BY ${this.sql(orderColumn)} ${order === "asc" ? this.sql`ASC` : this.sql`DESC`}
       LIMIT ${fetchLimit}
       OFFSET ${queryOffset}
-    `) as ObjectDatabaseRow[]
+    `
 
     const hasMore = rows.length > limit
     const objects = rows.slice(0, limit).map((row) => rowToObject(row))
@@ -728,9 +739,11 @@ export class PgObjectStorage implements ObjectStorage {
 }
 
 async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<number> {
-  const [row] = (await sql.unsafe(compiled.totalSql, compiled.totalArgs)) as {
-    total: string | number | bigint
-  }[]
+  const [row] = await sql.unsafe<
+    {
+      total: string | number | bigint
+    }[]
+  >(compiled.totalSql, compiled.totalArgs as SqlParameter[])
   return Number(row?.total ?? 0)
 }
 
@@ -738,7 +751,9 @@ async function readFacetBuckets(
   sql: SQL,
   compiled: { sql: string; args: readonly unknown[] }
 ): Promise<{ value: unknown; count: number }[]> {
-  const rows = (await sql.unsafe(compiled.sql, [...compiled.args])) as FacetDatabaseRow[]
+  const rows = await sql.unsafe<FacetDatabaseRow[]>(compiled.sql, [
+    ...compiled.args,
+  ] as SqlParameter[])
 
   return rows.map((row) => ({
     value: pgFacetValue(row.value_type, row.value_text),

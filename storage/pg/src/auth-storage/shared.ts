@@ -11,7 +11,7 @@ import type {
   UserRecord,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQLClient } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
 import type {
   PgAuthGroupMembershipRow,
@@ -83,11 +83,11 @@ export function placeholders(startIndex: number, count: number): readonly string
 }
 
 export async function getUserRowById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthUserRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthUserRow[]>(
     `
       SELECT *
       FROM auth_users
@@ -96,13 +96,13 @@ export async function getUserRowById(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.id]
-  )) as PgAuthUserRow[]
+  )
 
   return row ?? null
 }
 
 export async function getUserById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<UserRecord | null> {
   const row = await getUserRowById(sql, params)
@@ -110,11 +110,11 @@ export async function getUserById(
 }
 
 export async function getUserRowByEmail(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly email: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthUserRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthUserRow[]>(
     `
       SELECT *
       FROM auth_users
@@ -123,13 +123,13 @@ export async function getUserRowByEmail(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, normalizeEmail(params.email)]
-  )) as PgAuthUserRow[]
+  )
 
   return row ?? null
 }
 
 export async function getUserByEmail(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly email: string }
 ): Promise<UserRecord | null> {
   const row = await getUserRowByEmail(sql, params)
@@ -137,7 +137,7 @@ export async function getUserByEmail(
 }
 
 export async function requireUserById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<UserRecord> {
   const user = await getUserById(sql, params)
@@ -151,7 +151,7 @@ export async function requireUserById(
 }
 
 export async function getIdentityRowBySubject(
-  sql: SQL,
+  sql: SQLClient,
   params: {
     readonly projectId: string
     readonly strategyId: string
@@ -159,7 +159,7 @@ export async function getIdentityRowBySubject(
   },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthUserIdentityRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthUserIdentityRow[]>(
     `
       SELECT *
       FROM auth_user_identities
@@ -169,17 +169,17 @@ export async function getIdentityRowBySubject(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.strategyId, params.subject]
-  )) as PgAuthUserIdentityRow[]
+  )
 
   return row ?? null
 }
 
 export async function getSessionRowById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthSessionRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthSessionRow[]>(
     `
       SELECT *
       FROM auth_sessions
@@ -188,13 +188,13 @@ export async function getSessionRowById(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.id]
-  )) as PgAuthSessionRow[]
+  )
 
   return row ?? null
 }
 
 export async function getSessionById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<ReturnType<typeof rowToSessionRecord> | null> {
   const row = await getSessionRowById(sql, params)
@@ -202,7 +202,7 @@ export async function getSessionById(
 }
 
 export async function requireSessionById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<ReturnType<typeof rowToSessionRecord>> {
   const session = await getSessionById(sql, params)
@@ -216,7 +216,7 @@ export async function requireSessionById(
 }
 
 export async function getInvitationGroupIds(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly invitationId: string }
 ): Promise<readonly string[]> {
   const rows = (await sql`
@@ -231,11 +231,11 @@ export async function getInvitationGroupIds(
 }
 
 export async function getInvitationById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<InvitationRecord | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthInvitationRow[]>(
     `
       SELECT *
       FROM auth_invitations
@@ -244,13 +244,13 @@ export async function getInvitationById(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.id]
-  )) as PgAuthInvitationRow[]
+  )
 
   return row ? invitationRowToRecord(sql, row) : null
 }
 
 export async function requireInvitationById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<InvitationRecord> {
@@ -265,11 +265,11 @@ export async function requireInvitationById(
 }
 
 export async function getActiveInvitationByEmail(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly email: string; readonly now: Date },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<InvitationRecord | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthInvitationRow[]>(
     `
       SELECT *
       FROM auth_invitations
@@ -282,13 +282,13 @@ export async function getActiveInvitationByEmail(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, normalizeEmail(params.email), params.now]
-  )) as PgAuthInvitationRow[]
+  )
 
   return row ? invitationRowToRecord(sql, row) : null
 }
 
 export async function replaceInvitationGroups(
-  sql: SQL,
+  sql: SQLClient,
   params: {
     readonly projectId: string
     readonly invitationId: string
@@ -319,11 +319,11 @@ export async function replaceInvitationGroups(
 }
 
 export async function getMagicLinkRowById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthMagicLinkRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthMagicLinkRow[]>(
     `
       SELECT *
       FROM auth_magic_links
@@ -332,13 +332,13 @@ export async function getMagicLinkRowById(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.id]
-  )) as PgAuthMagicLinkRow[]
+  )
 
   return row ?? null
 }
 
 export async function getMagicLinkById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<MagicLinkRecord | null> {
   const row = await getMagicLinkRowById(sql, params)
@@ -346,7 +346,7 @@ export async function getMagicLinkById(
 }
 
 export async function consumeMagicLink(
-  sql: SQL,
+  sql: SQLClient,
   params: {
     readonly projectId: string
     readonly id: string
@@ -382,11 +382,11 @@ export async function consumeMagicLink(
 }
 
 export async function getOidcAttemptRowById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string },
   options: { readonly forUpdate?: boolean } = {}
 ): Promise<PgAuthOidcAttemptRow | null> {
-  const [row] = (await sql.unsafe(
+  const [row] = await sql.unsafe<PgAuthOidcAttemptRow[]>(
     `
       SELECT *
       FROM auth_oidc_authorization_attempts
@@ -395,13 +395,13 @@ export async function getOidcAttemptRowById(
       ${options.forUpdate ? "FOR UPDATE" : ""}
     `,
     [params.projectId, params.id]
-  )) as PgAuthOidcAttemptRow[]
+  )
 
   return row ?? null
 }
 
 export async function getOidcAttemptById(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly id: string }
 ): Promise<OidcAuthorizationAttemptRecord | null> {
   const row = await getOidcAttemptRowById(sql, params)
@@ -409,7 +409,7 @@ export async function getOidcAttemptById(
 }
 
 export async function consumeOidcAttempt(
-  sql: SQL,
+  sql: SQLClient,
   params: {
     readonly projectId: string
     readonly id: string
@@ -445,7 +445,7 @@ export async function consumeOidcAttempt(
 }
 
 export async function validateCompleteSessionInput(
-  sql: SQL,
+  sql: SQLClient,
   projectId: string,
   session: CompleteAuthSessionInput
 ): Promise<void> {
@@ -456,7 +456,7 @@ export async function validateCompleteSessionInput(
 }
 
 export async function assertSessionIdAvailable(
-  sql: SQL,
+  sql: SQLClient,
   projectId: string,
   sessionId: string
 ): Promise<void> {
@@ -469,7 +469,7 @@ export async function assertSessionIdAvailable(
 }
 
 export async function createSession(
-  sql: SQL,
+  sql: SQLClient,
   input: CreateAuthSessionInput
 ): Promise<SessionRecord> {
   const id = assertNonEmpty(input.id, "Session id")
@@ -489,7 +489,7 @@ export async function createSession(
   })
 
   try {
-    const [row] = (await sql`
+    const [row] = await sql<PgAuthSessionRow[]>`
       INSERT INTO auth_sessions (
         project_id,
         id,
@@ -510,7 +510,7 @@ export async function createSession(
         ${input.expiresAt}
       )
       RETURNING *
-    `) as PgAuthSessionRow[]
+    `
 
     return rowToSessionRecord(row)
   } catch (error) {
@@ -523,7 +523,7 @@ export async function createSession(
 }
 
 export async function revokeActiveSessionsForUser(
-  sql: SQL,
+  sql: SQLClient,
   params: {
     readonly projectId: string
     readonly userId: string
@@ -533,7 +533,7 @@ export async function revokeActiveSessionsForUser(
 ): Promise<readonly SessionRecord[]> {
   const rows =
     params.audience === undefined
-      ? ((await sql`
+      ? await sql<PgAuthSessionRow[]>`
       SELECT *
       FROM auth_sessions
       WHERE project_id = ${params.projectId}
@@ -542,8 +542,8 @@ export async function revokeActiveSessionsForUser(
         AND expires_at > ${params.revokedAt}
       ORDER BY created_at ASC, id ASC
       FOR UPDATE
-    `) as PgAuthSessionRow[])
-      : ((await sql`
+    `
+      : await sql<PgAuthSessionRow[]>`
       SELECT *
       FROM auth_sessions
       WHERE project_id = ${params.projectId}
@@ -553,7 +553,7 @@ export async function revokeActiveSessionsForUser(
         AND expires_at > ${params.revokedAt}
       ORDER BY created_at ASC, id ASC
       FOR UPDATE
-    `) as PgAuthSessionRow[])
+    `
 
   if (params.audience === undefined) {
     await sql`
@@ -585,7 +585,7 @@ export async function revokeActiveSessionsForUser(
 }
 
 export async function upsertGroupMembership(
-  sql: SQL,
+  sql: SQLClient,
   input: UpsertAuthGroupMembershipInput
 ): Promise<GroupMembershipRecord> {
   const projectId = assertNonEmpty(input.projectId, "Project id")
@@ -622,41 +622,41 @@ export async function upsertGroupMembership(
 }
 
 export async function getGroupMembership(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly userId: string; readonly groupId: string }
 ): Promise<GroupMembershipRecord | null> {
-  const [row] = (await sql`
+  const [row] = await sql<PgAuthGroupMembershipRow[]>`
     SELECT *
     FROM auth_group_memberships
     WHERE project_id = ${params.projectId}
       AND user_id = ${params.userId}
       AND group_id = ${params.groupId}
-  `) as PgAuthGroupMembershipRow[]
+  `
 
   return row ? rowToGroupMembershipRecord(row) : null
 }
 
 export async function listMembershipsForUser(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly userId: string }
 ): Promise<readonly GroupMembershipRecord[]> {
-  const rows = (await sql`
+  const rows = await sql<PgAuthGroupMembershipRow[]>`
     SELECT *
     FROM auth_group_memberships
     WHERE project_id = ${params.projectId}
       AND user_id = ${params.userId}
     ORDER BY group_id ASC
-  `) as PgAuthGroupMembershipRow[]
+  `
 
   return rows.map(rowToGroupMembershipRecord)
 }
 
 export async function revokeActiveMagicLinksForEmail(
-  sql: SQL,
+  sql: SQLClient,
   params: { readonly projectId: string; readonly email: string; readonly revokedAt: Date }
 ): Promise<readonly MagicLinkRecord[]> {
   const email = normalizeEmail(params.email)
-  const rows = (await sql`
+  const rows = await sql<PgAuthMagicLinkRow[]>`
     SELECT *
     FROM auth_magic_links
     WHERE project_id = ${params.projectId}
@@ -666,7 +666,7 @@ export async function revokeActiveMagicLinksForEmail(
       AND expires_at > ${params.revokedAt}
     ORDER BY created_at ASC, id ASC
     FOR UPDATE
-  `) as PgAuthMagicLinkRow[]
+  `
 
   await sql`
     UPDATE auth_magic_links
@@ -761,7 +761,7 @@ export function mapUniqueConstraintError(
 }
 
 async function invitationRowToRecord(
-  sql: SQL,
+  sql: SQLClient,
   row: PgAuthInvitationRow
 ): Promise<InvitationRecord> {
   return rowToInvitationRecord(

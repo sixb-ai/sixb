@@ -10,14 +10,15 @@ import type {
   StartActionRunInput,
 } from "@sixb/core"
 import { ActionRunError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SqlParameter } from "./pg-client"
+import { isUniqueViolation } from "./storage-errors"
 
 export class PgActionRunStorage implements ActionRunStorage {
   constructor(private readonly sql: SQL) {}
 
   async start(input: StartActionRunInput): Promise<ActionRunRecord> {
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<DatabaseRow[]>`
         INSERT INTO action_runs (
           project_id,
           id,
@@ -42,7 +43,7 @@ export class PgActionRunStorage implements ActionRunStorage {
           ${serializeMetadata(input.metadata)}::text::jsonb
         )
         RETURNING *
-      `) as DatabaseRow[]
+      `
 
       return rowToActionRunRecord(row)
     } catch (error) {
@@ -58,10 +59,10 @@ export class PgActionRunStorage implements ActionRunStorage {
 
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
-      `) as DatabaseRow[]
+      `
 
       if (!existing) {
         throw new ActionRunError(
@@ -73,7 +74,7 @@ export class PgActionRunStorage implements ActionRunStorage {
 
       const [updated] =
         input.status === "succeeded"
-          ? ((await tx`
+          ? await tx<DatabaseRow[]>`
               UPDATE action_runs
               SET
                 status = ${input.status},
@@ -84,8 +85,8 @@ export class PgActionRunStorage implements ActionRunStorage {
                 metadata = ${serializeMetadata(metadata)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as DatabaseRow[])
-          : ((await tx`
+            `
+          : await tx<DatabaseRow[]>`
               UPDATE action_runs
               SET
                 status = ${input.status},
@@ -96,17 +97,17 @@ export class PgActionRunStorage implements ActionRunStorage {
                 metadata = ${serializeMetadata(metadata)}::text::jsonb
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as DatabaseRow[])
+            `
 
       return rowToActionRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<DatabaseRow[]>`
       SELECT * FROM action_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as DatabaseRow[]
+    `
 
     return row ? rowToActionRunRecord(row) : null
   }
@@ -121,7 +122,7 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.actionId) {
@@ -174,10 +175,10 @@ export class PgActionRunStorage implements ActionRunStorage {
     const order = input.order === "asc" ? "ASC" : "DESC"
     const offset = input.offset ?? 0
 
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM action_runs ${where}`,
       params
-    )) as { count: string | number }[]
+    )
 
     const queryParams = [...params]
     let query = `
@@ -194,7 +195,7 @@ export class PgActionRunStorage implements ActionRunStorage {
       queryParams.push(offset)
     }
 
-    const rows = (await this.sql.unsafe(query, queryParams)) as DatabaseRow[]
+    const rows = await this.sql.unsafe<DatabaseRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
     const runs = rows.map(rowToActionRunRecord)
 
@@ -267,10 +268,6 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
     objectTypeId: row.object_type_id,
     primaryId: row.primary_id,
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Error && /duplicate key value|unique/i.test(error.message)
 }
 
 interface DatabaseRow {

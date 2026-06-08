@@ -6,7 +6,7 @@ import type {
   ListAuthInvitationsResult,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SQLClient } from "../pg-client"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthInvitationRow } from "./rows"
 import { rowToInvitationRecord } from "./rows"
@@ -179,10 +179,10 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ readonly count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM auth_invitations ${where}`,
       [...params]
-    )) as { readonly count: string | number }[]
+    )
 
     const queryParams = [...params]
     const query = appendPagination(
@@ -196,7 +196,7 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
       nextIndex,
       input
     )
-    const rows = (await this.sql.unsafe(query, queryParams)) as PgAuthInvitationRow[]
+    const rows = await this.sql.unsafe<PgAuthInvitationRow[]>(query, queryParams)
     const invitations = await Promise.all(
       rows.map(async (row) =>
         rowToInvitationRecord(
@@ -260,7 +260,7 @@ export class PgAuthInvitationStore implements AuthInvitationStore {
   }
 
   private async validateCreator(
-    sql: SQL,
+    sql: SQLClient,
     projectId: string,
     input: CreateOrUpdateAuthInvitationInput
   ): Promise<void> {

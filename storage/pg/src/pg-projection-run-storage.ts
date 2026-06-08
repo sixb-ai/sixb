@@ -11,7 +11,8 @@ import type {
   UpdateProjectionRunInput,
 } from "@sixb/core"
 import { ProjectionRunError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import { isUniqueViolation } from "./storage-errors"
 
 type CounterKey = keyof ProjectionRunCounters
 
@@ -33,7 +34,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     assertNonEmpty(input.datasetVersionId, "datasetVersionId")
 
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<DatabaseRow[]>`
         INSERT INTO projection_runs (
           project_id,
           id,
@@ -62,7 +63,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           ${0}
         )
         RETURNING *
-      `) as DatabaseRow[]
+      `
 
       return rowToProjectionRunRecord(row)
     } catch (error) {
@@ -81,7 +82,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       const existing = await requireRunning(tx, input.projectId, input.id)
       const counters = mergeCounters(rowToCounters(existing), input)
 
-      const [updated] = (await tx`
+      const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           rows_processed = ${counters.rowsProcessed},
@@ -90,7 +91,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           links_upserted = ${counters.linksUpserted}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as DatabaseRow[]
+      `
 
       return rowToProjectionRunRecord(updated)
     })
@@ -101,7 +102,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       const existing = await requireRunning(tx, input.projectId, input.id)
       const counters = mergeCounters(rowToCounters(existing), input)
 
-      const [updated] = (await tx`
+      const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET
           status = ${input.status},
@@ -113,17 +114,17 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as DatabaseRow[]
+      `
 
       return rowToProjectionRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<ProjectionRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<DatabaseRow[]>`
       SELECT * FROM projection_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as DatabaseRow[]
+    `
 
     return row ? rowToProjectionRunRecord(row) : null
   }
@@ -140,7 +141,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.projectionId) {
@@ -185,10 +186,10 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     assertOptionalWindowValue(input.limit, "limit")
     assertOptionalWindowValue(offset, "offset")
 
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM projection_runs ${where}`,
       params
-    )) as { count: string | number }[]
+    )
 
     const queryParams = [...params]
     let query = `
@@ -205,7 +206,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       queryParams.push(offset)
     }
 
-    const rows = (await this.sql.unsafe(query, queryParams)) as DatabaseRow[]
+    const rows = await this.sql.unsafe<DatabaseRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
     const runs = rows.map(rowToProjectionRunRecord)
 
@@ -217,15 +218,15 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
   }
 }
 
-async function requireRunning(sql: SQL, projectId: string, id: string): Promise<DatabaseRow> {
+async function requireRunning(sql: SQLClient, projectId: string, id: string): Promise<DatabaseRow> {
   assertNonEmpty(projectId, "projectId")
   assertNonEmpty(id, "id")
 
-  const [row] = (await sql`
+  const [row] = await sql<DatabaseRow[]>`
     SELECT * FROM projection_runs
     WHERE project_id = ${projectId} AND id = ${id}
     FOR UPDATE
-  `) as DatabaseRow[]
+  `
 
   if (!row) {
     throw new ProjectionRunError(
@@ -307,10 +308,6 @@ function assertOptionalWindowValue(value: number | undefined, fieldName: string)
   if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
     throw new ProjectionRunError(`[SixbPg] Projection run list ${fieldName} must be >= 0.`)
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Error && /duplicate key value|unique/i.test(error.message)
 }
 
 interface DatabaseRow {

@@ -3,10 +3,10 @@
 /// <reference path="./sql.d.ts" />
 
 import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
-import { SQL } from "bun"
-import { createPostgresStorageMigrators, dropSchema, quoteIdent } from "./migrations"
+import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAuthStorage } from "./pg-auth-storage"
+import { createPgClient, type SQL } from "./pg-client"
 import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -38,6 +38,39 @@ export interface PostgresStorageOptions {
   /** Idle connection timeout in milliseconds. Defaults to 30000. */
   idleTimeoutMillis?: number
 
+  /**
+   * Server-side `statement_timeout` (ms) applied to every connection in the pool. A query
+   * exceeding it is cancelled by PostgreSQL, which frees its pooled connection instead of
+   * pinning it indefinitely. Without this, a single stalled query can starve a small pool
+   * until the process is restarted. Unset by default (no timeout). Set per role — keep it
+   * generous or unset for workers that run long migrations/bulk writes.
+   */
+  statementTimeoutMillis?: number
+  /**
+   * Server-side `idle_in_transaction_session_timeout` (ms) applied to every connection. A
+   * transaction left open and idle beyond it is aborted by PostgreSQL, releasing the
+   * connection. Unset by default (no timeout).
+   */
+  idleInTransactionSessionTimeoutMillis?: number
+
+  /**
+   * Grace period (ms) for {@link PostgresStorage.close}. On shutdown the pool stops
+   * accepting new queries and waits up to this long for in-flight queries to finish before
+   * destroying the connections, so a restart drains cleanly instead of severing live work.
+   * Defaults to 5000.
+   */
+  shutdownTimeoutMillis?: number
+
+  /** Seconds to wait when establishing a connection. Defaults to 10000. */
+  connectTimeoutMillis?: number
+  /**
+   * Whether to use server-side prepared statements (porsager's default, faster against a
+   * direct Postgres connection). Behind PgBouncer transaction mode they require PgBouncer
+   * >= 1.21 with `max_prepared_statements > 0`; set `false` for an older PgBouncer or when
+   * that setting is 0. Defaults to `true`.
+   */
+  prepare?: boolean
+
   /** PostgreSQL schema name for all Sixb tables. Defaults to 'sixb'. */
   schemaName?: string
 
@@ -48,8 +81,8 @@ export interface PostgresStorageOptions {
 /**
  * PostgreSQL storage provider for Sixb.
  *
- * Bundles Sixb storage adapters backed by a shared PostgreSQL connection pool using Bun's
- * native SQL client.
+ * Bundles Sixb storage adapters backed by a shared PostgreSQL connection pool (porsager
+ * `postgres`), which reliably reclaims connections under load.
  *
  * The storage exposes a core `StorageMigrator`. Sixb CLI startup and
  * `sixb db migrate` run it automatically through `migrateStorage(storage)`.
@@ -83,49 +116,45 @@ export class PostgresStorage implements MigrationCapableStorage {
 
   private readonly sql: SQL
   private readonly schemaName: string
+  private readonly shutdownTimeoutSeconds: number
 
   constructor(options: PostgresStorageOptions) {
     this.schemaName = options.schemaName ?? "sixb"
-
-    const quotedSchemaName = quoteIdent(this.schemaName)
-
-    // Build connection URL — either from connectionString or individual fields.
-    // search_path is set via PostgreSQL's standard `options` connection parameter,
-    // which applies at the wire-protocol level to every connection in the pool.
-    let url: URL
-    if (options.connectionString) {
-      url = new URL(options.connectionString)
-    } else {
-      const host = options.host ?? "localhost"
-      const port = options.port ?? 5432
-      const db = options.database ?? ""
-      url = new URL(`postgres://${host}:${port}/${db}`)
-      if (options.user) url.username = options.user
-      if (options.password) url.password = options.password
-    }
-
-    const existingOptions = url.searchParams.get("options") ?? ""
-    const searchPathOption = `-csearch_path=${quotedSchemaName}`
-    url.searchParams.set(
-      "options",
-      existingOptions ? `${existingOptions} ${searchPathOption}` : searchPathOption
+    this.shutdownTimeoutSeconds = Math.max(
+      1,
+      Math.round((options.shutdownTimeoutMillis ?? 5000) / 1000)
     )
 
-    const sqlOptions: Record<string, unknown> = {
-      url: url.toString(),
+    this.sql = createPgClient({
+      ...(options.connectionString !== undefined
+        ? { connectionString: options.connectionString }
+        : {}),
+      ...(options.host !== undefined ? { host: options.host } : {}),
+      ...(options.port !== undefined ? { port: options.port } : {}),
+      ...(options.database !== undefined ? { database: options.database } : {}),
+      ...(options.user !== undefined ? { user: options.user } : {}),
+      ...(options.password !== undefined ? { password: options.password } : {}),
       max: options.max ?? 10,
-      idleTimeout: options.idleTimeoutMillis ? Math.round(options.idleTimeoutMillis / 1000) : 30,
-    }
-
-    if (options.ssl) {
-      if (typeof options.ssl === "string") {
-        sqlOptions.ssl = options.ssl
-      } else {
-        sqlOptions.tls = true
-      }
-    }
-
-    this.sql = new SQL(sqlOptions)
+      schemaName: this.schemaName,
+      ...(options.idleTimeoutMillis !== undefined
+        ? { idleTimeoutMillis: options.idleTimeoutMillis }
+        : {}),
+      ...(resolveTimeoutMillis(options.statementTimeoutMillis, "statementTimeoutMillis") !==
+      undefined
+        ? { statementTimeoutMillis: options.statementTimeoutMillis }
+        : {}),
+      ...(resolveTimeoutMillis(
+        options.idleInTransactionSessionTimeoutMillis,
+        "idleInTransactionSessionTimeoutMillis"
+      ) !== undefined
+        ? { idleInTransactionSessionTimeoutMillis: options.idleInTransactionSessionTimeoutMillis }
+        : {}),
+      ...(resolveTimeoutMillis(options.connectTimeoutMillis, "connectTimeoutMillis") !== undefined
+        ? { connectTimeoutMillis: options.connectTimeoutMillis }
+        : {}),
+      ...(options.prepare !== undefined ? { prepare: options.prepare } : {}),
+      ...(options.ssl !== undefined ? { ssl: options.ssl } : {}),
+    })
 
     this.migrators = createPostgresStorageMigrators(this.sql, this.schemaName)
     this.objects = new PgObjectStorage(this.sql)
@@ -144,9 +173,12 @@ export class PostgresStorage implements MigrationCapableStorage {
 
   /**
    * Close the connection pool. Should be called on shutdown.
+   *
+   * Stops accepting new queries and waits up to `shutdownTimeoutMillis` for in-flight
+   * queries to finish before destroying connections.
    */
   async close(): Promise<void> {
-    await this.sql.close()
+    await this.sql.end({ timeout: this.shutdownTimeoutSeconds })
   }
 
   /**
@@ -156,6 +188,18 @@ export class PostgresStorage implements MigrationCapableStorage {
   async dropSchema(): Promise<void> {
     await dropSchema(this.sql, this.schemaName)
   }
+}
+
+function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`[Sixb] PostgresStorage ${label} must be a non-negative finite number.`)
+  }
+
+  return Math.trunc(value)
 }
 
 export type { PostgresMigrationContext } from "./migrations"

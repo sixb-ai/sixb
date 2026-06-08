@@ -16,8 +16,8 @@ import type {
   StartPipelineStepRunInput,
 } from "@sixb/core"
 import { PipelineRunError } from "@sixb/core"
-import type { SQL } from "bun"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
+import type { SQL, SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -26,7 +26,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
   async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<PipelineRunDatabaseRow[]>`
         INSERT INTO pipeline_runs (
           project_id,
           id,
@@ -41,7 +41,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
           ${input.startedAt ?? new Date()}
         )
         RETURNING *
-      `) as PipelineRunDatabaseRow[]
+      `
 
       return rowToPipelineRunRecord(row)
     } catch (error) {
@@ -57,10 +57,10 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
   async finish(input: FinishPipelineRunInput): Promise<PipelineRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<PipelineRunDatabaseRow[]>`
         SELECT * FROM pipeline_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
-      `) as PipelineRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new PipelineRunError(
@@ -76,7 +76,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       const [updated] =
         input.status === "succeeded"
-          ? ((await tx`
+          ? await tx<PipelineRunDatabaseRow[]>`
               UPDATE pipeline_runs
               SET
                 status = ${input.status},
@@ -87,8 +87,8 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 error_message = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as PipelineRunDatabaseRow[])
-          : ((await tx`
+            `
+          : await tx<PipelineRunDatabaseRow[]>`
               UPDATE pipeline_runs
               SET
                 status = ${input.status},
@@ -99,7 +99,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 error_message = ${input.error?.message ?? null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as PipelineRunDatabaseRow[])
+            `
 
       return rowToPipelineRunRecord(updated)
     })
@@ -107,10 +107,10 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
   async startStep(input: StartPipelineStepRunInput): Promise<PipelineStepRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [pipelineRun] = (await tx`
+      const [pipelineRun] = await tx<PipelineRunDatabaseRow[]>`
         SELECT * FROM pipeline_runs
         WHERE project_id = ${input.projectId} AND id = ${input.pipelineRunId}
-      `) as PipelineRunDatabaseRow[]
+      `
 
       if (!pipelineRun) {
         throw new PipelineRunError(
@@ -131,7 +131,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
       }
 
       try {
-        const [row] = (await tx`
+        const [row] = await tx<PipelineStepRunDatabaseRow[]>`
           INSERT INTO pipeline_step_runs (
             project_id,
             id,
@@ -156,7 +156,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
             ${JSON.stringify(input.inputs)}::text::jsonb
           )
           RETURNING *
-        `) as PipelineStepRunDatabaseRow[]
+        `
 
         return rowToPipelineStepRunRecord(row)
       } catch (error) {
@@ -175,10 +175,10 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     assertOptionalNonNegativeInteger(input.rowsWritten, "rowsWritten")
 
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<PipelineStepRunDatabaseRow[]>`
         SELECT * FROM pipeline_step_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
-      `) as PipelineStepRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new PipelineRunError(
@@ -200,7 +200,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
 
       const [updated] =
         input.status === "succeeded"
-          ? ((await tx`
+          ? await tx<PipelineStepRunDatabaseRow[]>`
               UPDATE pipeline_step_runs
               SET
                 status = ${input.status},
@@ -211,8 +211,8 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 error_message = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as PipelineStepRunDatabaseRow[])
-          : ((await tx`
+            `
+          : await tx<PipelineStepRunDatabaseRow[]>`
               UPDATE pipeline_step_runs
               SET
                 status = ${input.status},
@@ -223,17 +223,17 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
                 error_message = ${input.error?.message ?? null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as PipelineStepRunDatabaseRow[])
+            `
 
       return rowToPipelineStepRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<PipelineRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PipelineRunDatabaseRow[]>`
       SELECT * FROM pipeline_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as PipelineRunDatabaseRow[]
+    `
 
     return row ? rowToPipelineRunRecord(row) : null
   }
@@ -248,7 +248,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.pipelineId) {
@@ -304,7 +304,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.pipelineRunId) {

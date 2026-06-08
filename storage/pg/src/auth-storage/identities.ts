@@ -3,7 +3,7 @@ import type {
   UpsertAuthUserIdentityInput,
   UserIdentityRecord,
 } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import type { PgAuthUserIdentityRow } from "./rows"
 import { rowToIdentityRecord, serializeOptionalRecord } from "./rows"
 import { assertNonEmpty, dateOrNow, getIdentityRowBySubject, requireUserById } from "./shared"
@@ -30,7 +30,7 @@ export class PgAuthUserIdentityStore implements AuthUserIdentityStore {
 
     await requireUserById(this.sql, { projectId, id: userId })
 
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PgAuthUserIdentityRow[]>`
       INSERT INTO auth_user_identities (
         project_id,
         strategy_id,
@@ -54,7 +54,7 @@ export class PgAuthUserIdentityStore implements AuthUserIdentityStore {
         claims = excluded.claims,
         updated_at = excluded.updated_at
       RETURNING *
-    `) as PgAuthUserIdentityRow[]
+    `
 
     return rowToIdentityRecord(row)
   }
@@ -72,13 +72,13 @@ export class PgAuthUserIdentityStore implements AuthUserIdentityStore {
     readonly projectId: string
     readonly userId: string
   }): Promise<readonly UserIdentityRecord[]> {
-    const rows = (await this.sql`
+    const rows = await this.sql<PgAuthUserIdentityRow[]>`
       SELECT *
       FROM auth_user_identities
       WHERE project_id = ${params.projectId}
         AND user_id = ${params.userId}
       ORDER BY created_at ASC, strategy_id ASC, subject ASC
-    `) as PgAuthUserIdentityRow[]
+    `
 
     return rows.map(rowToIdentityRecord)
   }

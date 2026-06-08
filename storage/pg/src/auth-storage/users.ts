@@ -8,7 +8,7 @@ import type {
   UserRecord,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -49,7 +49,7 @@ export class PgAuthUserStore implements AuthUserStore {
     const updatedAt = input.updatedAt ? new Date(input.updatedAt) : createdAt
 
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<PgAuthUserRow[]>`
         INSERT INTO auth_users (
           project_id,
           id,
@@ -70,7 +70,7 @@ export class PgAuthUserStore implements AuthUserStore {
           ${updatedAt}
         )
         RETURNING *
-      `) as PgAuthUserRow[]
+      `
 
       return rowToUserRecord(row)
     } catch (error) {
@@ -112,7 +112,7 @@ export class PgAuthUserStore implements AuthUserStore {
     }
 
     const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PgAuthUserRow[]>`
       UPDATE auth_users
       SET display_name = ${input.displayName ?? null},
           avatar_url = ${input.avatarUrl ?? null},
@@ -120,7 +120,7 @@ export class PgAuthUserStore implements AuthUserStore {
       WHERE project_id = ${input.projectId}
         AND id = ${input.id}
       RETURNING *
-    `) as PgAuthUserRow[]
+    `
 
     return rowToUserRecord(row)
   }
@@ -139,14 +139,14 @@ export class PgAuthUserStore implements AuthUserStore {
     }
 
     const updatedAt = dateOrNow(input.updatedAt)
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PgAuthUserRow[]>`
       UPDATE auth_users
       SET status = ${input.status},
           updated_at = ${updatedAt}
       WHERE project_id = ${input.projectId}
         AND id = ${input.id}
       RETURNING *
-    `) as PgAuthUserRow[]
+    `
 
     return rowToUserRecord(row)
   }
@@ -167,10 +167,10 @@ export class PgAuthUserStore implements AuthUserStore {
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
     const order = input.order === "asc" ? "ASC" : "DESC"
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ readonly count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM auth_users ${where}`,
       [...params]
-    )) as { readonly count: string | number }[]
+    )
 
     const queryParams = [...params]
     const query = appendPagination(
@@ -184,7 +184,7 @@ export class PgAuthUserStore implements AuthUserStore {
       nextIndex,
       input
     )
-    const rows = (await this.sql.unsafe(query, queryParams)) as PgAuthUserRow[]
+    const rows = await this.sql.unsafe<PgAuthUserRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
 
     return {
