@@ -257,6 +257,123 @@ export type SignOutResponses = {
 
 export type SignOutResponse = SignOutResponses[keyof SignOutResponses]
 
+export type ListAuthSessionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/sessions"
+}
+
+export type ListAuthSessionsErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+}
+
+export type ListAuthSessionsError = ListAuthSessionsErrors[keyof ListAuthSessionsErrors]
+
+export type ListAuthSessionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    sessions: Array<{
+      id: string
+      audience: string
+      current: boolean
+      createdAt: string
+      expiresAt: string
+      lastSeenAt?: string
+      userAgent?: string
+      ipAddress?: string
+    }>
+  }
+}
+
+export type ListAuthSessionsResponse = ListAuthSessionsResponses[keyof ListAuthSessionsResponses]
+
+export type RevokeAuthSessionData = {
+  body?: never
+  path: {
+    sessionId: string
+  }
+  query?: never
+  url: "/api/auth/sessions/{sessionId}/revoke"
+}
+
+export type RevokeAuthSessionErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type RevokeAuthSessionError = RevokeAuthSessionErrors[keyof RevokeAuthSessionErrors]
+
+export type RevokeAuthSessionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type RevokeAuthSessionResponse = RevokeAuthSessionResponses[keyof RevokeAuthSessionResponses]
+
+export type SignOutAllData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/sign-out-all"
+}
+
+export type SignOutAllErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type SignOutAllError = SignOutAllErrors[keyof SignOutAllErrors]
+
+export type SignOutAllResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+    revokedCount: number
+  }
+}
+
+export type SignOutAllResponse = SignOutAllResponses[keyof SignOutAllResponses]
+
 export type ListAuthInvitationsData = {
   body?: never
   path?: never

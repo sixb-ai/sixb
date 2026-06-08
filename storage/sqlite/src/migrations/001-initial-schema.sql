@@ -404,6 +404,8 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   expires_at TEXT NOT NULL,
   revoked_at TEXT,
   last_seen_at TEXT,
+  user_agent TEXT,
+  ip_address TEXT,
   PRIMARY KEY (project_id, id)
 );
 

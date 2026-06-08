@@ -36,6 +36,10 @@ export interface SessionRecord {
   readonly expiresAt: Date
   readonly revokedAt?: Date
   readonly lastSeenAt?: Date
+  // Best-effort client metadata captured at sign-in, for the active-sessions
+  // view. Display only — never used for authorization.
+  readonly userAgent?: string
+  readonly ipAddress?: string
 }
 
 export interface InvitationRecord {
@@ -148,6 +152,8 @@ export interface CreateAuthSessionInput {
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly userAgent?: string
+  readonly ipAddress?: string
 }
 
 export interface CompleteAuthSessionInput {
@@ -156,6 +162,8 @@ export interface CompleteAuthSessionInput {
   readonly tokenHash: string
   readonly createdAt: Date
   readonly expiresAt: Date
+  readonly userAgent?: string
+  readonly ipAddress?: string
 }
 
 export interface CreateOrUpdateAuthInvitationInput {
@@ -303,6 +311,13 @@ export interface AuthSessionStore {
     readonly audience: AuthSessionAudience
     readonly now: Date
   }): Promise<SessionRecord | null>
+  // All active sessions for a user across every audience, most-recently-active
+  // first. Backs the active-sessions view.
+  listActiveByUserId(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly now: Date
+  }): Promise<readonly SessionRecord[]>
   findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string

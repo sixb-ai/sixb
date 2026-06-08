@@ -27,6 +27,7 @@ import {
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
+import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 import {
   getObjectSortPreference,
@@ -430,6 +431,7 @@ export function ProjectWorkspace() {
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
             <Route path="settings" element={<Navigate to="/settings/invitations" replace />} />
             <Route path="settings/invitations" element={<SettingsInvitationsPage />} />
+            <Route path="settings/sessions" element={<SettingsSessionsPage />} />
             <Route
               path="ontology"
               element={

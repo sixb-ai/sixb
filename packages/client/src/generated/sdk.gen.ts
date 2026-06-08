@@ -83,6 +83,9 @@ import type {
   ListAuthInvitationsData,
   ListAuthInvitationsErrors,
   ListAuthInvitationsResponses,
+  ListAuthSessionsData,
+  ListAuthSessionsErrors,
+  ListAuthSessionsResponses,
   ListConnectorsData,
   ListConnectorsResponses,
   ListDatasetRowsData,
@@ -154,6 +157,12 @@ import type {
   RevokeAuthInvitationData,
   RevokeAuthInvitationErrors,
   RevokeAuthInvitationResponses,
+  RevokeAuthSessionData,
+  RevokeAuthSessionErrors,
+  RevokeAuthSessionResponses,
+  SignOutAllData,
+  SignOutAllErrors,
+  SignOutAllResponses,
   SignOutData,
   SignOutErrors,
   SignOutResponses,
@@ -205,6 +214,45 @@ export const signOut = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).post<SignOutResponses, SignOutErrors, ThrowOnError>({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/sign-out",
+    ...options,
+  })
+
+/**
+ * List active sessions for the current user
+ */
+export const listAuthSessions = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAuthSessionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListAuthSessionsResponses, ListAuthSessionsErrors, ThrowOnError>({
+    url: "/api/auth/sessions",
+    ...options,
+  })
+
+/**
+ * Revoke one of the current user's sessions
+ */
+export const revokeAuthSession = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeAuthSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RevokeAuthSessionResponses,
+    RevokeAuthSessionErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/sessions/{sessionId}/revoke",
+    ...options,
+  })
+
+/**
+ * Sign out the current user everywhere (all devices and apps)
+ */
+export const signOutAll = <ThrowOnError extends boolean = false>(
+  options?: Options<SignOutAllData, ThrowOnError>
+) =>
+  (options?.client ?? client).post<SignOutAllResponses, SignOutAllErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/sign-out-all",
     ...options,
   })
 

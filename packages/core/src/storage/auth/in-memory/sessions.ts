@@ -43,6 +43,25 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     return cloneOptionalRecord(sessions[0] ?? null)
   }
 
+  async listActiveByUserId(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly now: Date
+  }): Promise<readonly SessionRecord[]> {
+    return [...this.state.sessions.values()]
+      .filter((session) => session.projectId === params.projectId)
+      .filter((session) => session.userId === params.userId)
+      .filter((session) => isActiveSession(session, params.now))
+      .sort((a, b) => {
+        const activity =
+          (b.lastSeenAt ?? b.createdAt).getTime() - (a.lastSeenAt ?? a.createdAt).getTime()
+        if (activity !== 0) return activity
+        const created = b.createdAt.getTime() - a.createdAt.getTime()
+        return created !== 0 ? created : b.id.localeCompare(a.id)
+      })
+      .map(cloneRecord)
+  }
+
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string

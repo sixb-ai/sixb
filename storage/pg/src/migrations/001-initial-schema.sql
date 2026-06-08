@@ -408,6 +408,8 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
   expires_at TIMESTAMPTZ NOT NULL,
   revoked_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ,
+  user_agent TEXT,
+  ip_address TEXT,
   PRIMARY KEY (project_id, id),
   FOREIGN KEY (project_id, user_id)
     REFERENCES auth_users (project_id, id)

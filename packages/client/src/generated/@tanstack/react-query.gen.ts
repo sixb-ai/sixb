@@ -38,6 +38,7 @@ import {
   getWorkflowRun,
   listActions,
   listAuthInvitations,
+  listAuthSessions,
   listConnectors,
   listDatasetRows,
   listDatasets,
@@ -65,7 +66,9 @@ import {
   requestSyncRun,
   requestWorkflowRun,
   revokeAuthInvitation,
+  revokeAuthSession,
   signOut,
+  signOutAll,
   submitWorkflowIntervention,
   upsertObject,
   upsertObjectLink,
@@ -151,6 +154,9 @@ import type {
   ListAuthInvitationsData,
   ListAuthInvitationsError,
   ListAuthInvitationsResponse,
+  ListAuthSessionsData,
+  ListAuthSessionsError,
+  ListAuthSessionsResponse,
   ListConnectorsData,
   ListConnectorsResponse,
   ListDatasetRowsData,
@@ -222,6 +228,12 @@ import type {
   RevokeAuthInvitationData,
   RevokeAuthInvitationError,
   RevokeAuthInvitationResponse,
+  RevokeAuthSessionData,
+  RevokeAuthSessionError,
+  RevokeAuthSessionResponse,
+  SignOutAllData,
+  SignOutAllError,
+  SignOutAllResponse,
   SignOutData,
   SignOutError,
   SignOutResponse,
@@ -309,6 +321,81 @@ export const signOutMutation = (
   const mutationOptions: UseMutationOptions<SignOutResponse, SignOutError, Options<SignOutData>> = {
     mutationFn: async (fnOptions) => {
       const { data } = await signOut({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAuthSessionsQueryKey = (options?: Options<ListAuthSessionsData>) =>
+  createQueryKey("listAuthSessions", options)
+
+/**
+ * List active sessions for the current user
+ */
+export const listAuthSessionsOptions = (options?: Options<ListAuthSessionsData>) =>
+  queryOptions<
+    ListAuthSessionsResponse,
+    ListAuthSessionsError,
+    ListAuthSessionsResponse,
+    ReturnType<typeof listAuthSessionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAuthSessions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAuthSessionsQueryKey(options),
+  })
+
+/**
+ * Revoke one of the current user's sessions
+ */
+export const revokeAuthSessionMutation = (
+  options?: Partial<Options<RevokeAuthSessionData>>
+): UseMutationOptions<
+  RevokeAuthSessionResponse,
+  RevokeAuthSessionError,
+  Options<RevokeAuthSessionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RevokeAuthSessionResponse,
+    RevokeAuthSessionError,
+    Options<RevokeAuthSessionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await revokeAuthSession({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Sign out the current user everywhere (all devices and apps)
+ */
+export const signOutAllMutation = (
+  options?: Partial<Options<SignOutAllData>>
+): UseMutationOptions<SignOutAllResponse, SignOutAllError, Options<SignOutAllData>> => {
+  const mutationOptions: UseMutationOptions<
+    SignOutAllResponse,
+    SignOutAllError,
+    Options<SignOutAllData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await signOutAll({
         ...options,
         ...fnOptions,
         throwOnError: true,

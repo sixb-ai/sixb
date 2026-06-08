@@ -16,13 +16,9 @@ export class PgAuthSessionStore implements AuthSessionStore {
   constructor(private readonly sql: SQL) {}
 
   async create(input: CreateAuthSessionInput): Promise<SessionRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      await lockAdvisoryKeys(tx, [
-        authLockKey("sessions", input.projectId, input.userId),
-        authLockKey("sessions", input.projectId, input.userId, input.audience),
-      ])
-      return createSession(tx, input)
-    })
+    // Session ids are random UUIDs and the table has a primary-key guard, so
+    // concurrent inserts cannot collide; no advisory lock is needed here.
+    return runPgTransaction(this.sql, (tx) => createSession(tx, input))
   }
 
   async getById(params: {
@@ -51,6 +47,24 @@ export class PgAuthSessionStore implements AuthSessionStore {
     `
 
     return row ? rowToSessionRecord(row) : null
+  }
+
+  async listActiveByUserId(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly now: Date
+  }): Promise<readonly SessionRecord[]> {
+    const rows = (await this.sql`
+      SELECT *
+      FROM auth_sessions
+      WHERE project_id = ${params.projectId}
+        AND user_id = ${params.userId}
+        AND revoked_at IS NULL
+        AND expires_at > ${params.now}
+      ORDER BY COALESCE(last_seen_at, created_at) DESC, created_at DESC, id DESC
+    `) as PgAuthSessionRow[]
+
+    return rows.map(rowToSessionRecord)
   }
 
   async findValidByTokenHash(params: {

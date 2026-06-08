@@ -432,12 +432,6 @@ export function createSession(
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   assertSessionIdAvailable(db, projectId, id)
-  revokeActiveSessionsForUser(db, {
-    projectId,
-    userId,
-    audience,
-    revokedAt: input.createdAt,
-  })
 
   db.query(
     `
@@ -449,8 +443,10 @@ export function createSession(
       audience,
       token_hash,
       created_at,
-      expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      expires_at,
+      user_agent,
+      ip_address
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   ).run(
     projectId,
@@ -460,7 +456,9 @@ export function createSession(
     audience,
     tokenHash,
     toIso(input.createdAt),
-    toIso(input.expiresAt)
+    toIso(input.expiresAt),
+    input.userAgent ?? null,
+    input.ipAddress ?? null
   )
 
   const session = getSessionById(db, { projectId, id })

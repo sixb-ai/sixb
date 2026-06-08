@@ -33,8 +33,12 @@ import {
   GetAuthInvitationOptionsResponseSchema,
   ListAuthInvitationsQuerySchema,
   ListAuthInvitationsResponseSchema,
+  ListAuthSessionsResponseSchema,
   RevokeAuthInvitationParamsSchema,
   RevokeAuthInvitationResponseSchema,
+  RevokeAuthSessionParamsSchema,
+  RevokeAuthSessionResponseSchema,
+  SignOutAllResponseSchema,
 } from "../schemas/auth"
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
@@ -150,6 +154,150 @@ export function registerAuthRoutes(
           summary: "Sign out current auth session",
           tags: ["Auth"],
           operationId: "signOut",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/sessions",
+      async ({ request }) => {
+        const authOptions = resolveAuthOptions(options, request)
+        const session = await sixb.auth.getSession(request, authOptions)
+        if (!session.authenticated) {
+          return jsonResponse({ error: "Authentication required" }, 401)
+        }
+
+        const sessions = await requireAuthStorage(sixb).sessions.listActiveByUserId({
+          projectId: sixb.id,
+          userId: session.user.id,
+          now: new Date(),
+        })
+
+        return jsonResponse(
+          {
+            sessions: sessions.map((entry) => ({
+              id: entry.id,
+              audience: entry.audience,
+              current: entry.id === session.session.id,
+              createdAt: toIsoString(entry.createdAt),
+              expiresAt: toIsoString(entry.expiresAt),
+              lastSeenAt: entry.lastSeenAt ? toIsoString(entry.lastSeenAt) : undefined,
+              userAgent: entry.userAgent,
+              ipAddress: entry.ipAddress,
+            })),
+          },
+          200
+        )
+      },
+      {
+        response: {
+          200: ListAuthSessionsResponseSchema,
+          401: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "List active sessions for the current user",
+          tags: ["Auth"],
+          operationId: "listAuthSessions",
+        },
+      }
+    )
+    .post(
+      "/api/auth/sessions/:sessionId/revoke",
+      async ({ request, params }) => {
+        const authOptions = resolveAuthOptions(options, request)
+        const session = await sixb.auth.getSession(request, authOptions)
+        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        if (!session.authenticated) {
+          return jsonResponse({ error: "Authentication required" }, 401)
+        }
+        if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
+          return jsonResponse({ error: "CSRF verification failed" }, 403)
+        }
+
+        const { sessionId } = RevokeAuthSessionParamsSchema.parse(params)
+        const storage = requireAuthStorage(sixb)
+        const target = await storage.sessions.getById({ projectId: sixb.id, id: sessionId })
+        // Only the caller's own sessions are revocable. A missing or foreign
+        // session id returns the same 404 so it cannot probe other accounts.
+        if (!target || target.userId !== session.user.id) {
+          return jsonResponse({ error: "Session not found" }, 404)
+        }
+
+        await storage.sessions.revoke({ projectId: sixb.id, id: sessionId, revokedAt: new Date() })
+        sixb.auth.invalidateSession(sessionId)
+
+        const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
+        // Revoking the session backing this request also clears its cookies.
+        if (sessionId === session.session.id) {
+          headers.append(
+            "set-cookie",
+            clearSessionCookieHeader({ request, options: cookieOptions })
+          )
+          headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
+        }
+
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers })
+      },
+      {
+        params: RevokeAuthSessionParamsSchema,
+        response: {
+          200: RevokeAuthSessionResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Revoke one of the current user's sessions",
+          tags: ["Auth"],
+          operationId: "revokeAuthSession",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/auth/sign-out-all",
+      async ({ request }) => {
+        const authOptions = resolveAuthOptions(options, request)
+        const session = await sixb.auth.getSession(request, authOptions)
+        const cookieOptions = sixb.auth.getCookieOptions(authOptions)
+        if (!session.authenticated) {
+          return jsonResponse({ error: "Authentication required" }, 401)
+        }
+        if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
+          return jsonResponse({ error: "CSRF verification failed" }, 403)
+        }
+
+        // Global sign-out: revoke every active session for the user across all
+        // audiences. Other audiences' cookies remain client-side but their
+        // sessions are revoked, so the next request re-authenticates.
+        const revoked = await requireAuthStorage(sixb).sessions.revokeActiveForUser({
+          projectId: sixb.id,
+          userId: session.user.id,
+          revokedAt: new Date(),
+        })
+        for (const revokedSession of revoked) {
+          sixb.auth.invalidateSession(revokedSession.id)
+        }
+
+        const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
+        headers.append("set-cookie", clearSessionCookieHeader({ request, options: cookieOptions }))
+        headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
+
+        return new Response(JSON.stringify({ success: true, revokedCount: revoked.length }), {
+          status: 200,
+          headers,
+        })
+      },
+      {
+        response: {
+          200: SignOutAllResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Sign out the current user everywhere (all devices and apps)",
+          tags: ["Auth"],
+          operationId: "signOutAll",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
@@ -421,6 +569,7 @@ export function registerAuthRoutes(
         const strategy = sixb.auth.getStrategy()
         const now = new Date()
         const sessionCredential = createSessionCredential()
+        const device = resolveSessionDevice(request)
 
         if (isMagicLinkAuthStrategy(strategy)) {
           const authOptions = resolveAuthOptions(options, request)
@@ -444,6 +593,7 @@ export function registerAuthRoutes(
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
+                ...device,
               },
             })
 
@@ -473,6 +623,7 @@ export function registerAuthRoutes(
                 tokenHash: sessionCredential.tokenHash,
                 createdAt: now,
                 expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
+                ...device,
               },
             })
 
@@ -493,6 +644,22 @@ export function registerAuthRoutes(
       },
       { detail: { hide: true } }
     )
+}
+
+// Best-effort client metadata for the active-sessions view. `x-forwarded-for`
+// only reflects the real client behind a trusted proxy; both values are display
+// only and never used for authorization.
+function resolveSessionDevice(request: Request): {
+  readonly userAgent?: string
+  readonly ipAddress?: string
+} {
+  return {
+    userAgent: request.headers.get("user-agent")?.trim() || undefined,
+    ipAddress:
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip")?.trim() ||
+      undefined,
+  }
 }
 
 function sessionCallbackCompletionResponse(input: {

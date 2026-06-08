@@ -44,6 +44,8 @@ export interface SqliteAuthSessionRow {
   readonly expires_at: string
   readonly revoked_at: string | null
   readonly last_seen_at: string | null
+  readonly user_agent: string | null
+  readonly ip_address: string | null
 }
 
 export interface SqliteAuthInvitationRow {
@@ -134,6 +136,8 @@ export function rowToSessionRecord(row: SqliteAuthSessionRow): SessionRecord {
     expiresAt: new Date(row.expires_at),
     revokedAt: row.revoked_at ? new Date(row.revoked_at) : undefined,
     lastSeenAt: row.last_seen_at ? new Date(row.last_seen_at) : undefined,
+    userAgent: row.user_agent ?? undefined,
+    ipAddress: row.ip_address ?? undefined,
   }
 }
 

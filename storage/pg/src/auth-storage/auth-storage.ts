@@ -694,6 +694,8 @@ export class PgAuthStorage implements AuthStorage {
       tokenHash: input.session.tokenHash,
       createdAt: input.session.createdAt,
       expiresAt: input.session.expiresAt,
+      userAgent: input.session.userAgent,
+      ipAddress: input.session.ipAddress,
     })
   }
 

@@ -56,6 +56,10 @@ export {
   resolveAuthConfig,
 } from "./validation"
 
+// Throttle `lastSeenAt` writes: only refresh when the previous value is older
+// than this, so an active session does not incur a write on every request.
+const SESSION_TOUCH_INTERVAL_MS = 60_000
+
 export interface AuthRuntimeOptions {
   readonly projectId: string
   readonly storage: Storage
@@ -169,12 +173,13 @@ export class AuthRuntime {
     }
 
     const storage = this.requireAuthStorage()
+    const now = new Date(nowMs)
     const session = await storage.sessions.findValidByTokenHash({
       projectId: this.projectId,
       id: parts.sessionId,
       audience,
       tokenHash,
-      now: new Date(nowMs),
+      now,
     })
 
     if (!session) {
@@ -198,6 +203,8 @@ export class AuthRuntime {
       projectId: this.projectId,
       userId: user.id,
     })
+
+    await this.touchSessionLastSeen(storage, session, now)
 
     const result: AuthenticatedAuthSession = {
       authenticated: true,
@@ -225,6 +232,24 @@ export class AuthRuntime {
    */
   invalidateSession(sessionId: string): void {
     this.sessionCache?.invalidate(sessionId)
+  }
+
+  // Best-effort refresh of `lastSeenAt` for the active-sessions view. Throttled,
+  // and never allowed to fail an otherwise-valid request.
+  private async touchSessionLastSeen(
+    storage: AuthStorage,
+    session: { readonly id: string; readonly lastSeenAt?: Date },
+    now: Date
+  ): Promise<void> {
+    const lastSeen = session.lastSeenAt?.getTime() ?? 0
+    if (now.getTime() - lastSeen < SESSION_TOUCH_INTERVAL_MS) {
+      return
+    }
+    try {
+      await storage.sessions.touch({ projectId: this.projectId, id: session.id, lastSeenAt: now })
+    } catch {
+      // Touch is non-critical; ignore failures so auth still succeeds.
+    }
   }
 
   async requirePrincipal(
