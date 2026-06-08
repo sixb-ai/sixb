@@ -181,12 +181,12 @@ export class DuckLakeDatasetCatalog {
   async getDatasetSchemaAtSnapshot(
     runtime: DuckDbQueryRuntime,
     datasetId: string,
+    tableName: string,
     tableId: bigint,
     snapshotId: string
   ): Promise<DatasetSchema> {
     assertDuckLakeSnapshotId(snapshotId)
 
-    const tableName = encodeDatasetTableName(datasetId)
     const columns = await this.readDatasetColumnsAtSnapshot(runtime, tableName, tableId, snapshotId)
     if (columns.length === 0) {
       throw new LakeStorageError(
