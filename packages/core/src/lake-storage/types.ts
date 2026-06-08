@@ -1,5 +1,4 @@
 import type { DatasetDefinition, DatasetSchema } from "../datasets"
-import type { FunctionDefinition } from "../functions/types"
 
 export type DatasetWriteMode = "snapshot" | "append"
 export type DatasetVersionMode = DatasetWriteMode | "schema"
@@ -80,14 +79,6 @@ export interface LakeWriteSession {
 
 export interface LakeStorage {
   readonly standard?: LakeStandardDescriptor
-
-  /**
-   * Optional provider-owned scheduled functions, such as storage maintenance.
-   *
-   * createSixb() registers these after user/discovered functions; user
-   * functions with the same id take precedence.
-   */
-  getScheduledFunctions?(): readonly FunctionDefinition[]
 
   /**
    * Read-only preflight for hosts that want to fail before serving traffic.
