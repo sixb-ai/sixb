@@ -1,7 +1,9 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "types": ["bun", "node"]
+    "types": ["bun", "node"],
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
   "include": ["ontology/**/*.ts", "security/**/*.ts", "sixb.config.ts"]
 }

@@ -39,6 +39,14 @@ jobs:
       - name: Verify generated client is committed
         run: git diff --exit-code
 
+      - name: Cache typecheck (incremental)
+        uses: actions/cache@v4
+        with:
+          path: "**/.tsbuild/tsconfig.tsbuildinfo"
+          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuildinfo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+
       - name: Typecheck
         run: bun run typecheck
 
