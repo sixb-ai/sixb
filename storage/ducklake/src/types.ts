@@ -136,15 +136,6 @@ export interface DuckLakeMaintenanceReport {
   readonly orphanedFiles: number
 }
 
-export interface DuckLakeMaintenanceScheduleOptions {
-  /** Cron expression using existing FunctionRuntime semantics. Default: "0 3 * * *". */
-  readonly cron?: string
-  /** How long to retain snapshots before they can expire. Default: "7 days". */
-  readonly expireOlderThan?: string
-  /** How long to retain scheduled-for-deletion files. Default: expireOlderThan. */
-  readonly deleteOlderThan?: string
-}
-
 /**
  * Public provider configuration for `new DuckLakeStorage(...)`.
  *
@@ -165,5 +156,4 @@ export interface DuckLakeStorageOptions {
   readonly setupSql?: readonly string[]
   readonly createIfNotExists?: boolean
   readonly readOnly?: boolean
-  readonly maintenance?: DuckLakeMaintenanceScheduleOptions | false
 }

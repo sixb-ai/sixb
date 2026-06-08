@@ -68,27 +68,18 @@ catalog connections cleanly.
 ### Maintenance
 
 DuckLake keeps historical snapshots and deleted files until maintenance runs.
-`DuckLakeStorage` ships a default Sixb function named `ducklake-maintenance`
-when the provider is created through `createSixb()`. It runs daily at
-`0 3 * * *` using the existing function runtime semantics and keeps seven days
-of snapshots/files by default.
+Maintenance is operator-driven: run it on demand from the CLI or call
+`runMaintenance()` directly. It expires snapshots, reclaims deleted file blocks,
+and removes orphaned files, keeping seven days of snapshots/files by default.
 
-```ts
-const lakeStorage = new DuckLakeStorage({
-  catalog,
-  dataPath,
-  maintenance: {
-    cron: "0 4 * * *",
-    expireOlderThan: "14 days",
-    deleteOlderThan: "14 days",
-  },
-})
+Run it from the CLI (preview with `--dry-run`):
+
+```bash
+sixb lake cleanup --dry-run
+sixb lake cleanup --expire-older-than "14 days" --delete-older-than "14 days"
 ```
 
-Set `maintenance: false` to disable the provider function, or define a project
-function with id `ducklake-maintenance` to replace it.
-
-You can also run maintenance directly:
+Or run it directly against the provider:
 
 ```ts
 const report = await lakeStorage.runMaintenance({
@@ -97,9 +88,9 @@ const report = await lakeStorage.runMaintenance({
 })
 ```
 
-DuckLake retention options persist in the catalog. Scheduled maintenance
-re-applies the configured retention each run; after any one-off aggressive
-cleanup, run maintenance again with the normal retention window.
+DuckLake retention options persist in the catalog. Each run re-applies the
+retention window you pass; after any one-off aggressive cleanup, run maintenance
+again with the normal retention window.
 
 ### Read and Write Concurrency
 

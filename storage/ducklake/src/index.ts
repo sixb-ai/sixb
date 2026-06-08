@@ -6,7 +6,6 @@ export type {
   DuckLakeCatalogOptions,
   DuckLakeMaintenanceOptions,
   DuckLakeMaintenanceReport,
-  DuckLakeMaintenanceScheduleOptions,
   DuckLakePostgresPoolOptions,
   DuckLakeStorageOptions,
   GcsSecretOptions,

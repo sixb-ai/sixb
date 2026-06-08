@@ -110,11 +110,6 @@ export async function createSixb(
 
   // Explicit definitions come first so local setup can override ordering while
   // duplicate ids are still rejected by the Sixb constructor.
-  const providerFunctions = functionsWithProviderDefaults(
-    functions,
-    options.lakeStorage.getScheduledFunctions?.() ?? []
-  )
-
   return new Sixb<readonly OntologySource[]>({
     id: options.id,
     ontology: allSources,
@@ -126,7 +121,7 @@ export async function createSixb(
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],
-    functions: providerFunctions,
+    functions,
     schedules: [...(options.schedules ?? []), ...schedules],
     syncs: [...(options.syncs ?? []), ...syncs],
     pipelines: [...(options.pipelines ?? []), ...pipelines],
@@ -137,30 +132,4 @@ export async function createSixb(
     invitePolicies: [...(options.invitePolicies ?? []), ...invitePolicies],
     auth: options.auth,
   })
-}
-
-function functionsWithProviderDefaults(
-  userFunctions: readonly FunctionDefinition[],
-  providerFunctions: readonly FunctionDefinition[]
-): readonly FunctionDefinition[] {
-  if (providerFunctions.length === 0) {
-    return userFunctions
-  }
-
-  const userFunctionIds = new Set(userFunctions.map((fn) => fn.id))
-  const acceptedProviderFunctions: FunctionDefinition[] = []
-
-  for (const fn of providerFunctions) {
-    if (userFunctionIds.has(fn.id)) {
-      console.warn(
-        `[Sixb] Skipping provider scheduled function '${fn.id}' because ` +
-          "a user-defined function with that id is registered."
-      )
-      continue
-    }
-
-    acceptedProviderFunctions.push(fn)
-  }
-
-  return [...userFunctions, ...acceptedProviderFunctions]
 }
