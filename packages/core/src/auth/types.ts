@@ -227,6 +227,13 @@ export interface RevokeInvitationResult {
 
 export interface AuthSessionOptions {
   readonly ttlMs?: number
+  /**
+   * How long (ms) a resolved session is cached in-process before it is re-validated
+   * against storage. Collapses the per-request auth reads (session + user + memberships)
+   * during request bursts so they cannot starve the storage pool. Set to 0 to disable.
+   * Defaults to {@link DEFAULT_AUTH_SESSION_CACHE_TTL_MS}.
+   */
+  readonly cacheTtlMs?: number
 }
 
 export interface AuthCookieOptions {

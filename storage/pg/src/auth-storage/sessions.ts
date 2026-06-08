@@ -1,6 +1,6 @@
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthSessionRow } from "./rows"
 import { rowToSessionRecord } from "./rows"
@@ -38,7 +38,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
     readonly audience: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PgAuthSessionRow[]>`
       SELECT *
       FROM auth_sessions
       WHERE project_id = ${params.projectId}
@@ -48,7 +48,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
         AND expires_at > ${params.now}
       ORDER BY created_at DESC, id DESC
       LIMIT 1
-    `) as PgAuthSessionRow[]
+    `
 
     return row ? rowToSessionRecord(row) : null
   }
@@ -90,13 +90,13 @@ export class PgAuthSessionStore implements AuthSessionStore {
         )
       }
 
-      const [row] = (await tx`
+      const [row] = await tx<PgAuthSessionRow[]>`
         UPDATE auth_sessions
         SET revoked_at = ${params.revokedAt}
         WHERE project_id = ${params.projectId}
           AND id = ${params.id}
         RETURNING *
-      `) as PgAuthSessionRow[]
+      `
 
       return rowToSessionRecord(row)
     })
@@ -126,13 +126,13 @@ export class PgAuthSessionStore implements AuthSessionStore {
     return runPgTransaction(this.sql, async (tx) => {
       await requireSessionById(tx, params)
 
-      const [row] = (await tx`
+      const [row] = await tx<PgAuthSessionRow[]>`
         UPDATE auth_sessions
         SET last_seen_at = ${params.lastSeenAt}
         WHERE project_id = ${params.projectId}
           AND id = ${params.id}
         RETURNING *
-      `) as PgAuthSessionRow[]
+      `
 
       return rowToSessionRecord(row)
     })

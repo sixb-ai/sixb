@@ -21,8 +21,8 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core"
 import { WorkflowRunError } from "@sixb/core"
-import type { SQL } from "bun"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
+import type { SQL, SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -37,7 +37,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     const queuedAt = input.queuedAt ?? new Date()
 
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<WorkflowRunDatabaseRow[]>`
         INSERT INTO workflow_runs (
           project_id,
           id,
@@ -58,7 +58,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
         )
         RETURNING *
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       return rowToWorkflowRunRecord(row)
     } catch (error) {
@@ -75,11 +75,11 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
     return this.sql.begin(async (tx) => {
       const startedAt = input.startedAt ?? new Date()
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       if (existing) {
         if (existing.status !== "queued") {
@@ -94,7 +94,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           )
         }
 
-        const [updated] = (await tx`
+        const [updated] = await tx<WorkflowRunDatabaseRow[]>`
           UPDATE workflow_runs
           SET
             status = ${"running"},
@@ -104,13 +104,13 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             error = ${null}
           WHERE project_id = ${input.projectId} AND id = ${input.id}
           RETURNING *
-        `) as WorkflowRunDatabaseRow[]
+        `
 
         return rowToWorkflowRunRecord(updated)
       }
 
       try {
-        const [row] = (await tx`
+        const [row] = await tx<WorkflowRunDatabaseRow[]>`
           INSERT INTO workflow_runs (
             project_id,
             id,
@@ -127,7 +127,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             ${startedAt}
           )
           RETURNING *
-        `) as WorkflowRunDatabaseRow[]
+        `
 
         return rowToWorkflowRunRecord(row)
       } catch (error) {
@@ -144,11 +144,11 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WorkflowRunError(
@@ -164,7 +164,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
       const [updated] =
         input.status === "succeeded"
-          ? ((await tx`
+          ? await tx<WorkflowRunDatabaseRow[]>`
               UPDATE workflow_runs
               SET
                 status = ${input.status},
@@ -172,8 +172,8 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
                 error = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as WorkflowRunDatabaseRow[])
-          : ((await tx`
+            `
+          : await tx<WorkflowRunDatabaseRow[]>`
               UPDATE workflow_runs
               SET
                 status = ${input.status},
@@ -181,7 +181,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
                 error = ${input.error ?? null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as WorkflowRunDatabaseRow[])
+            `
 
       return rowToWorkflowRunRecord(updated)
     })
@@ -189,11 +189,11 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
   async wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WorkflowRunError(
@@ -207,7 +207,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
         )
       }
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
         UPDATE workflow_runs
         SET
           status = ${"waiting"},
@@ -215,7 +215,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           error = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       return rowToWorkflowRunRecord(updated)
     })
@@ -223,11 +223,11 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 
   async resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WorkflowRunError(
@@ -241,7 +241,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
         )
       }
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowRunDatabaseRow[]>`
         UPDATE workflow_runs
         SET
           status = ${"running"},
@@ -249,17 +249,17 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           error = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       return rowToWorkflowRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<WorkflowRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<WorkflowRunDatabaseRow[]>`
       SELECT * FROM workflow_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as WorkflowRunDatabaseRow[]
+    `
 
     return row ? rowToWorkflowRunRecord(row) : null
   }
@@ -274,7 +274,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.workflowId) {
@@ -328,11 +328,11 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
 
     return this.sql.begin(async (tx) => {
-      const [workflowRun] = (await tx`
+      const [workflowRun] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.workflowRunId}
         FOR UPDATE
-      `) as WorkflowRunDatabaseRow[]
+      `
 
       if (!workflowRun) {
         throw new WorkflowRunError(
@@ -353,7 +353,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
       }
 
       try {
-        const [row] = (await tx`
+        const [row] = await tx<WorkflowNodeRunDatabaseRow[]>`
           INSERT INTO workflow_node_runs (
             project_id,
             id,
@@ -380,7 +380,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
             ${input.startedAt ?? new Date()}
           )
           RETURNING *
-        `) as WorkflowNodeRunDatabaseRow[]
+        `
 
         return rowToWorkflowNodeRunRecord(row)
       } catch (error) {
@@ -397,11 +397,11 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
   async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowNodeRunDatabaseRow[]>`
         SELECT * FROM workflow_node_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowNodeRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WorkflowRunError(
@@ -417,7 +417,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
       const [updated] =
         input.status === "succeeded"
-          ? ((await tx`
+          ? await tx<WorkflowNodeRunDatabaseRow[]>`
               UPDATE workflow_node_runs
               SET
                 status = ${input.status},
@@ -426,8 +426,8 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
                 error = ${null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as WorkflowNodeRunDatabaseRow[])
-          : ((await tx`
+            `
+          : await tx<WorkflowNodeRunDatabaseRow[]>`
               UPDATE workflow_node_runs
               SET
                 status = ${input.status},
@@ -436,7 +436,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
                 error = ${input.error ?? null}
               WHERE project_id = ${input.projectId} AND id = ${input.id}
               RETURNING *
-            `) as WorkflowNodeRunDatabaseRow[])
+            `
 
       return rowToWorkflowNodeRunRecord(updated)
     })
@@ -444,11 +444,11 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
 
   async wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WorkflowNodeRunDatabaseRow[]>`
         SELECT * FROM workflow_node_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WorkflowNodeRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WorkflowRunError(
@@ -462,7 +462,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
         )
       }
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WorkflowNodeRunDatabaseRow[]>`
         UPDATE workflow_node_runs
         SET
           status = ${"waiting"},
@@ -471,17 +471,17 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
           error = ${null}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WorkflowNodeRunDatabaseRow[]
+      `
 
       return rowToWorkflowNodeRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<WorkflowNodeRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<WorkflowNodeRunDatabaseRow[]>`
       SELECT * FROM workflow_node_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as WorkflowNodeRunDatabaseRow[]
+    `
 
     return row ? rowToWorkflowNodeRunRecord(row) : null
   }
@@ -496,7 +496,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.workflowRunId) {

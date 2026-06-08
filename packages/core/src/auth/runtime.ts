@@ -14,6 +14,7 @@ import {
   resolveAuthCookieOptionsForAudience,
 } from "./cookies"
 import { AuthRuntimeError } from "./errors"
+import { SessionCache } from "./session-cache"
 import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
 import type {
   AuthenticatedAuthSession,
@@ -49,6 +50,7 @@ import {
 
 export {
   DEFAULT_AUTH_INVITATION_TTL_MS,
+  DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
   DEFAULT_AUTH_SESSION_TTL_MS,
   MAX_AUTH_INVITATION_TTL_MS,
   resolveAuthConfig,
@@ -66,12 +68,15 @@ export class AuthRuntime {
   private readonly storage: Storage
   private readonly security: SecurityRegistry
   private readonly config: ResolvedAuthConfig
+  private readonly sessionCache: SessionCache | null
 
   constructor(options: AuthRuntimeOptions) {
     this.projectId = options.projectId
     this.storage = options.storage
     this.security = options.security
     this.config = resolveAuthConfig(options.config)
+    this.sessionCache =
+      this.config.session.cacheTtlMs > 0 ? new SessionCache(this.config.session.cacheTtlMs) : null
 
     if (this.isEnabled() && !this.storage.auth) {
       throw new AuthRuntimeError(
@@ -150,13 +155,26 @@ export class AuthRuntime {
       return { authenticated: false, reason: "invalid_cookie" }
     }
 
+    const tokenHash = hashSessionSecret(parts.sessionSecret)
+    const nowMs = Date.now()
+
+    const cached = this.sessionCache?.get({
+      sessionId: parts.sessionId,
+      tokenHash,
+      audience,
+      nowMs,
+    })
+    if (cached) {
+      return cached
+    }
+
     const storage = this.requireAuthStorage()
     const session = await storage.sessions.findValidByTokenHash({
       projectId: this.projectId,
       id: parts.sessionId,
       audience,
-      tokenHash: hashSessionSecret(parts.sessionSecret),
-      now: new Date(),
+      tokenHash,
+      now: new Date(nowMs),
     })
 
     if (!session) {
@@ -181,13 +199,32 @@ export class AuthRuntime {
       userId: user.id,
     })
 
-    return {
+    const result: AuthenticatedAuthSession = {
       authenticated: true,
       principal: { type: "user", id: user.id },
       user,
       session,
       groupIds: memberships.map((membership) => membership.groupId),
     }
+
+    this.sessionCache?.set({
+      sessionId: parts.sessionId,
+      tokenHash,
+      audience,
+      session: result,
+      nowMs,
+      sessionExpiresAtMs: session.expiresAt.getTime(),
+    })
+
+    return result
+  }
+
+  /**
+   * Evict a session from the in-process cache. Call this when a session is revoked
+   * (e.g. sign-out) so the cached result is dropped before its TTL would expire.
+   */
+  invalidateSession(sessionId: string): void {
+    this.sessionCache?.invalidate(sessionId)
   }
 
   async requirePrincipal(

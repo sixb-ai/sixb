@@ -11,7 +11,7 @@ import type {
   UserRecord,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SQLClient } from "../pg-client"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import { PgAuthGroupMembershipStore } from "./group-memberships"
 import { PgAuthUserIdentityStore } from "./identities"
@@ -499,14 +499,14 @@ export class PgAuthStorage implements AuthStorage {
         )
       }
 
-      const [updated] = (await tx`
+      const [updated] = await tx<PgAuthUserRow[]>`
         UPDATE auth_users
         SET status = 'suspended',
             updated_at = ${input.suspendedAt}
         WHERE project_id = ${input.projectId}
           AND id = ${input.userId}
         RETURNING *
-      `) as PgAuthUserRow[]
+      `
 
       await revokeActiveSessionsForUser(tx, {
         projectId: input.projectId,
@@ -553,7 +553,7 @@ export class PgAuthStorage implements AuthStorage {
   }
 
   private async insertUser(
-    sql: SQL,
+    sql: SQLClient,
     input: {
       readonly id: string
       readonly projectId: string
@@ -564,7 +564,7 @@ export class PgAuthStorage implements AuthStorage {
     }
   ): Promise<UserRecord> {
     try {
-      const [row] = (await sql`
+      const [row] = await sql<PgAuthUserRow[]>`
         INSERT INTO auth_users (
           project_id,
           id,
@@ -585,7 +585,7 @@ export class PgAuthStorage implements AuthStorage {
           ${input.createdAt}
         )
         RETURNING *
-      `) as PgAuthUserRow[]
+      `
 
       return rowToUserRecord(row)
     } catch (error) {
@@ -598,7 +598,7 @@ export class PgAuthStorage implements AuthStorage {
   }
 
   private async acceptInvitationAndApplyGroups(
-    sql: SQL,
+    sql: SQLClient,
     input: {
       readonly activeInvitation: InvitationRecord | null
       readonly completedAt: Date
@@ -645,7 +645,7 @@ export class PgAuthStorage implements AuthStorage {
   }
 
   private async applyManualGroups(
-    sql: SQL,
+    sql: SQLClient,
     input: {
       readonly completedAt: Date
       readonly existing: readonly GroupMembershipRecord[]
@@ -672,7 +672,7 @@ export class PgAuthStorage implements AuthStorage {
   }
 
   private async createSignInSession(
-    sql: SQL,
+    sql: SQLClient,
     input: {
       readonly projectId: string
       readonly strategyId: string
@@ -701,7 +701,7 @@ export class PgAuthStorage implements AuthStorage {
     input: CompleteOidcSignInInput,
     completedAt: Date,
     projectId: string,
-    sql: SQL
+    sql: SQLClient
   ): Promise<void> {
     await consumeOidcAttempt(sql, {
       projectId,
@@ -712,7 +712,7 @@ export class PgAuthStorage implements AuthStorage {
   }
 
   private async upsertIdentity(
-    sql: SQL,
+    sql: SQLClient,
     input: {
       readonly projectId: string
       readonly strategyId: string
@@ -723,7 +723,7 @@ export class PgAuthStorage implements AuthStorage {
       readonly updatedAt: Date
     }
   ): Promise<UserIdentityRecord> {
-    const [row] = (await sql`
+    const [row] = await sql<PgAuthUserIdentityRow[]>`
       INSERT INTO auth_user_identities (
         project_id,
         strategy_id,
@@ -747,13 +747,13 @@ export class PgAuthStorage implements AuthStorage {
         claims = excluded.claims,
         updated_at = excluded.updated_at
       RETURNING *
-    `) as PgAuthUserIdentityRow[]
+    `
 
     return rowToIdentityRecord(row)
   }
 }
 
-async function hasActiveUsers(sql: SQL, projectId: string): Promise<boolean> {
+async function hasActiveUsers(sql: SQLClient, projectId: string): Promise<boolean> {
   const rows = (await sql`
     SELECT 1 AS active
     FROM auth_users

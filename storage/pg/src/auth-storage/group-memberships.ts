@@ -3,7 +3,7 @@ import type {
   GroupMembershipRecord,
   UpsertAuthGroupMembershipInput,
 } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import type { PgAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"
 import { listMembershipsForUser, upsertGroupMembership } from "./shared"
@@ -26,13 +26,13 @@ export class PgAuthGroupMembershipStore implements AuthGroupMembershipStore {
     readonly projectId: string
     readonly groupId: string
   }): Promise<readonly GroupMembershipRecord[]> {
-    const rows = (await this.sql`
+    const rows = await this.sql<PgAuthGroupMembershipRow[]>`
       SELECT *
       FROM auth_group_memberships
       WHERE project_id = ${params.projectId}
         AND group_id = ${params.groupId}
       ORDER BY user_id ASC
-    `) as PgAuthGroupMembershipRow[]
+    `
 
     return rows.map(rowToGroupMembershipRecord)
   }

@@ -19,7 +19,8 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:*"
+    "@sixb/core": "workspace:*",
+    "postgres": "^3.4.5"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -1,6 +1,6 @@
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@sixb/core"
 import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
 import type { PgAuthMagicLinkRow } from "./rows"
 import { rowToMagicLinkRecord } from "./rows"
@@ -42,7 +42,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
       })
 
       try {
-        const [row] = (await tx`
+        const [row] = await tx<PgAuthMagicLinkRow[]>`
           INSERT INTO auth_magic_links (
             project_id,
             id,
@@ -65,7 +65,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
             ${input.expiresAt}
           )
           RETURNING *
-        `) as PgAuthMagicLinkRow[]
+        `
 
         return rowToMagicLinkRecord(row)
       } catch (error) {
@@ -90,7 +90,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
     readonly email: string
     readonly now: Date
   }): Promise<MagicLinkRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<PgAuthMagicLinkRow[]>`
       SELECT *
       FROM auth_magic_links
       WHERE project_id = ${params.projectId}
@@ -100,7 +100,7 @@ export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
         AND expires_at > ${params.now}
       ORDER BY created_at DESC, id DESC
       LIMIT 1
-    `) as PgAuthMagicLinkRow[]
+    `
 
     return row ? rowToMagicLinkRecord(row) : null
   }

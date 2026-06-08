@@ -30,6 +30,7 @@ export type { AuthRuntimeOptions } from "./runtime"
 export {
   AuthRuntime,
   DEFAULT_AUTH_INVITATION_TTL_MS,
+  DEFAULT_AUTH_SESSION_CACHE_TTL_MS,
   DEFAULT_AUTH_SESSION_TTL_MS,
   MAX_AUTH_INVITATION_TTL_MS,
   resolveAuthConfig,

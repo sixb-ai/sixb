@@ -13,6 +13,11 @@ import type {
 export const DEFAULT_AUTH_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const DEFAULT_AUTH_INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000
 export const MAX_AUTH_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
+/**
+ * Default in-process session cache window. Short enough that a revoked session lingers
+ * only briefly, long enough to collapse a burst of requests to a single auth resolution.
+ */
+export const DEFAULT_AUTH_SESSION_CACHE_TTL_MS = 5_000
 
 export { resolveAuthSessionAudience } from "./audience"
 
@@ -125,7 +130,15 @@ function resolveAuthSessionOptions(
     )
   }
 
-  return { ttlMs }
+  const cacheTtlMs = options?.cacheTtlMs ?? DEFAULT_AUTH_SESSION_CACHE_TTL_MS
+  if (!Number.isFinite(cacheTtlMs) || cacheTtlMs < 0) {
+    throw new AuthRuntimeError(
+      "invalid_auth_config",
+      "[Sixb] Auth session cacheTtlMs must be a non-negative finite number."
+    )
+  }
+
+  return { ttlMs, cacheTtlMs }
 }
 
 export function isMagicLinkAuthStrategy(

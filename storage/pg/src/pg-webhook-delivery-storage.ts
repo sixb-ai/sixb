@@ -5,7 +5,7 @@ import type {
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "./pg-client"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   constructor(private readonly sql: SQL) {}
@@ -15,7 +15,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   ): Promise<WebhookDeliveryClaimRecord> {
     return this.sql.begin(async (tx) => {
       // Atomic first claim: only one transaction can insert this scoped delivery key.
-      const [inserted] = (await tx`
+      const [inserted] = await tx<WebhookDeliveryRow[]>`
         INSERT INTO webhook_deliveries (
           project_id,
           connector_id,
@@ -33,20 +33,20 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
         )
         ON CONFLICT (project_id, connector_id, webhook_id, idempotency_key) DO NOTHING
         RETURNING *
-      `) as WebhookDeliveryRow[]
+      `
 
       if (inserted) {
         return toWebhookDeliveryClaimRecord(inserted, "claimed")
       }
 
-      const [existing] = (await tx`
+      const [existing] = await tx<WebhookDeliveryRow[]>`
         SELECT * FROM webhook_deliveries
         WHERE project_id = ${input.projectId}
           AND connector_id = ${input.connectorId}
           AND webhook_id = ${input.webhookId}
           AND idempotency_key = ${input.idempotencyKey}
         FOR UPDATE
-      `) as WebhookDeliveryRow[]
+      `
 
       if (existing?.status === "completed") {
         return toWebhookDeliveryClaimRecord(existing, "duplicate")
@@ -61,7 +61,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
       }
 
       // Failed deliveries are intentionally claimable so provider retries can run again.
-      const [updated] = (await tx`
+      const [updated] = await tx<WebhookDeliveryRow[]>`
         UPDATE webhook_deliveries
         SET status = ${"in_progress"},
             received_at = ${input.receivedAt},
@@ -73,7 +73,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
           AND webhook_id = ${input.webhookId}
           AND idempotency_key = ${input.idempotencyKey}
         RETURNING *
-      `) as WebhookDeliveryRow[]
+      `
 
       if (!updated) {
         throw new Error(
@@ -88,7 +88,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   async complete(
     input: WebhookDeliveryKey & { completedAt: string }
   ): Promise<WebhookDeliveryRecord> {
-    const [updated] = (await this.sql`
+    const [updated] = await this.sql<WebhookDeliveryRow[]>`
       UPDATE webhook_deliveries
       SET status = ${"completed"},
           completed_at = ${input.completedAt},
@@ -99,7 +99,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
         AND webhook_id = ${input.webhookId}
         AND idempotency_key = ${input.idempotencyKey}
       RETURNING *
-    `) as WebhookDeliveryRow[]
+    `
 
     if (!updated) {
       throw new Error(
@@ -113,7 +113,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
   async fail(
     input: WebhookDeliveryKey & { failedAt: string; error: string }
   ): Promise<WebhookDeliveryRecord> {
-    const [updated] = (await this.sql`
+    const [updated] = await this.sql<WebhookDeliveryRow[]>`
       UPDATE webhook_deliveries
       SET status = ${"failed"},
           failed_at = ${input.failedAt},
@@ -123,7 +123,7 @@ export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
         AND webhook_id = ${input.webhookId}
         AND idempotency_key = ${input.idempotencyKey}
       RETURNING *
-    `) as WebhookDeliveryRow[]
+    `
 
     if (!updated) {
       throw new Error(

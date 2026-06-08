@@ -8,8 +8,8 @@ import type {
   StorageMigrator,
 } from "@sixb/core"
 import { defineMigrations, planMigrationSet, runMigrationSet, step } from "@sixb/core"
-import type { SQL } from "bun"
 import initialSchemaSql from "./migrations/001-initial-schema.sql" with { type: "text" }
+import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
   exec(sqlText: string): Promise<void>
@@ -98,8 +98,8 @@ function postgresMigrationSession(
   const schema = quoteIdent(schemaName)
   const migrationsTable = `${schema}.sixb_migrations`
   // Migration steps receive a stable context; route exec() through the active transaction.
-  let active: SQL | null = null
-  const connection = () => active ?? sql
+  let active: SQLClient | null = null
+  const connection = (): SQLClient => active ?? sql
 
   return {
     context: {
@@ -125,10 +125,10 @@ function postgresMigrationSession(
         `)
       },
       async readHistory(adapterId) {
-        const rows = (await sql.unsafe(
+        const rows = await sql.unsafe<PostgresMigrationRow[]>(
           `SELECT * FROM ${migrationsTable} WHERE adapter_id = $1 ORDER BY version`,
           [adapterId]
-        )) as PostgresMigrationRow[]
+        )
         return rows.map(rowToMigrationRecord)
       },
       async markStarted(adapterId, migration, at) {
@@ -158,17 +158,23 @@ function postgresMigrationSession(
         )
       },
       async transaction(run) {
-        return sql.begin(async (tx) => {
-          const previous = active
-          active = tx
-
-          try {
-            await tx.unsafe(`SET LOCAL search_path TO ${schema}`)
-            return await run()
-          } finally {
-            active = previous
-          }
-        })
+        // `sql` is the reserved connection holding the migration advisory lock. porsager's
+        // reserved connection has no `.begin`, so drive the transaction manually on it and
+        // route exec()/markStarted()/markApplied() through the same connection via `active`.
+        const previous = active
+        active = sql
+        await sql.unsafe("BEGIN")
+        try {
+          await sql.unsafe(`SET LOCAL search_path TO ${schema}`)
+          const result = await run()
+          await sql.unsafe("COMMIT")
+          return result
+        } catch (error) {
+          await sql.unsafe("ROLLBACK")
+          throw error
+        } finally {
+          active = previous
+        }
       },
     },
   }

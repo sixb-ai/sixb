@@ -4,7 +4,7 @@ import type {
   OidcAuthorizationAttemptRecord,
 } from "@sixb/core"
 import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "../pg-client"
 import { runPgTransaction } from "../transactions"
 import type { PgAuthOidcAttemptRow } from "./rows"
 import { rowToOidcAuthorizationAttemptRecord } from "./rows"
@@ -38,7 +38,7 @@ export class PgAuthOidcAuthorizationAttemptStore implements AuthOidcAuthorizatio
     }
 
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<PgAuthOidcAttemptRow[]>`
         INSERT INTO auth_oidc_authorization_attempts (
           project_id,
           id,
@@ -63,7 +63,7 @@ export class PgAuthOidcAuthorizationAttemptStore implements AuthOidcAuthorizatio
           ${input.expiresAt}
         )
         RETURNING *
-      `) as PgAuthOidcAttemptRow[]
+      `
 
       return rowToOidcAuthorizationAttemptRecord(row)
     } catch (error) {

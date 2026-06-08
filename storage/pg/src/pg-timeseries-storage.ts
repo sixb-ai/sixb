@@ -1,5 +1,5 @@
 import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL } from "./pg-client"
 
 /**
  * PostgreSQL-based TimeseriesStorage implementation.
@@ -50,10 +50,10 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     await this.sql.begin(async (tx) => {
       // Batch idempotence check: single query instead of N individual SELECTs
       const allEventIds = events.map((e) => e.id)
-      const appliedRows = (await tx`
+      const appliedRows = await tx<{ event_id: string }[]>`
         SELECT event_id FROM applied_events_timeseries
         WHERE event_id IN ${this.sql(allEventIds)}
-      `) as { event_id: string }[]
+      `
       const appliedSet = new Set(appliedRows.map((r) => r.event_id))
 
       for (const event of events) {
@@ -100,7 +100,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     const toFilter = params.to ? this.sql`AND at <= ${params.to}` : this.sql``
     const limitFilter = params.limit !== undefined ? this.sql`LIMIT ${params.limit}` : this.sql``
 
-    const rows = (await this.sql`
+    const rows = await this.sql<TimeseriesDatabaseRow[]>`
       SELECT * FROM timeseries
       WHERE project_id = ${params.projectId}
         AND object_type_id = ${params.objectTypeId}
@@ -110,7 +110,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
         ${toFilter}
       ORDER BY at ${order === "asc" ? this.sql`ASC` : this.sql`DESC`}
       ${limitFilter}
-    `) as TimeseriesDatabaseRow[]
+    `
 
     return rows.map((row) => rowToPoint(row))
   }
@@ -121,7 +121,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     objectId: string
     propertyId: string
   }): Promise<TimeseriesPoint | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<TimeseriesDatabaseRow[]>`
       SELECT * FROM timeseries
       WHERE project_id = ${params.projectId}
         AND object_type_id = ${params.objectTypeId}
@@ -129,7 +129,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
         AND property_id = ${params.propertyId}
       ORDER BY at DESC, source_event_id DESC
       LIMIT 1
-    `) as TimeseriesDatabaseRow[]
+    `
 
     return row ? rowToPoint(row) : null
   }

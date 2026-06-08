@@ -7,7 +7,7 @@ import type {
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SqlParameter } from "./pg-client"
 
 export class PgRulesStorage implements RulesStorage {
   constructor(private readonly sql: SQL) {}
@@ -17,7 +17,7 @@ export class PgRulesStorage implements RulesStorage {
     ruleId: string
     subject: RuleEventSubject
   }): Promise<RuleStateRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<RuleStateRow[]>`
       SELECT
         project_id,
         rule_id,
@@ -31,14 +31,14 @@ export class PgRulesStorage implements RulesStorage {
         AND subject_kind = ${params.subject.kind}
         AND object_type_id = ${params.subject.objectTypeId}
         AND primary_id = ${params.subject.primaryId}
-    `) as RuleStateRow[]
+    `
 
     return row ? rowToRuleStateRecord(row) : null
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.ruleId) {
@@ -60,10 +60,10 @@ export class PgRulesStorage implements RulesStorage {
     const order = input.order === "asc" ? "ASC" : "DESC"
     const offset = input.offset ?? 0
 
-    const [totalRow] = (await this.sql.unsafe(
+    const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM rule_states ${where}`,
       params
-    )) as { count: string | number }[]
+    )
 
     const queryParams = [...params]
     let query = `
@@ -87,7 +87,7 @@ export class PgRulesStorage implements RulesStorage {
       queryParams.push(offset)
     }
 
-    const rows = (await this.sql.unsafe(query, queryParams)) as RuleStateRow[]
+    const rows = await this.sql.unsafe<RuleStateRow[]>(query, queryParams)
     const total = Number(totalRow?.count ?? 0)
     const states = rows.map(rowToRuleStateRecord)
 

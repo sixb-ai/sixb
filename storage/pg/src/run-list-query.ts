@@ -1,4 +1,4 @@
-import type { SQL } from "bun"
+import type { SQL, SqlParameter } from "./pg-client"
 
 type PgRunListTable =
   | "pipeline_runs"
@@ -60,12 +60,12 @@ export async function queryRunList<TRow>(input: {
   const order = input.order === "asc" ? "ASC" : "DESC"
   const offset = input.offset ?? 0
 
-  const [totalRow] = (await input.sql.unsafe(
+  const [totalRow] = await input.sql.unsafe<{ count: string | number }[]>(
     `SELECT COUNT(*)::bigint AS count FROM ${input.tableName} ${where}`,
-    [...input.params]
-  )) as { count: string | number }[]
+    [...input.params] as SqlParameter[]
+  )
 
-  const queryParams = [...input.params]
+  const queryParams = [...input.params] as SqlParameter[]
   let query = `
     SELECT * FROM ${input.tableName}
     ${where}
@@ -81,7 +81,7 @@ export async function queryRunList<TRow>(input: {
     queryParams.push(offset)
   }
 
-  const rows = (await input.sql.unsafe(query, queryParams)) as TRow[]
+  const rows = await input.sql.unsafe<TRow[]>(query, queryParams)
   const total = Number(totalRow?.count ?? 0)
 
   return {

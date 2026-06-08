@@ -7,7 +7,7 @@ import type {
   WebhookRunStorage,
 } from "@sixb/core"
 import { WebhookRunError } from "@sixb/core"
-import type { SQL } from "bun"
+import type { SQL, SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -16,7 +16,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
 
   async start(input: StartWebhookRunInput): Promise<WebhookRunRecord> {
     try {
-      const [row] = (await this.sql`
+      const [row] = await this.sql<WebhookRunDatabaseRow[]>`
         INSERT INTO webhook_runs (
           project_id,
           id,
@@ -37,7 +37,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
           ${input.startedAt ?? new Date()}
         )
         RETURNING *
-      `) as WebhookRunDatabaseRow[]
+      `
 
       return rowToWebhookRunRecord(row)
     } catch (error) {
@@ -53,11 +53,11 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
 
   async finish(input: FinishWebhookRunInput): Promise<WebhookRunRecord> {
     return this.sql.begin(async (tx) => {
-      const [existing] = (await tx`
+      const [existing] = await tx<WebhookRunDatabaseRow[]>`
         SELECT * FROM webhook_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
-      `) as WebhookRunDatabaseRow[]
+      `
 
       if (!existing) {
         throw new WebhookRunError(
@@ -71,7 +71,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
         )
       }
 
-      const [updated] = (await tx`
+      const [updated] = await tx<WebhookRunDatabaseRow[]>`
         UPDATE webhook_runs
         SET
           status = ${input.status},
@@ -83,17 +83,17 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
           error = ${input.status === "succeeded" ? null : (input.error ?? null)}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
-      `) as WebhookRunDatabaseRow[]
+      `
 
       return rowToWebhookRunRecord(updated)
     })
   }
 
   async getById(params: { projectId: string; id: string }): Promise<WebhookRunRecord | null> {
-    const [row] = (await this.sql`
+    const [row] = await this.sql<WebhookRunDatabaseRow[]>`
       SELECT * FROM webhook_runs
       WHERE project_id = ${params.projectId} AND id = ${params.id}
-    `) as WebhookRunDatabaseRow[]
+    `
 
     return row ? rowToWebhookRunRecord(row) : null
   }
@@ -108,7 +108,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
     }
 
     const whereClauses = ["project_id = $1"]
-    const params: unknown[] = [input.projectId]
+    const params: SqlParameter[] = [input.projectId]
     let index = 2
 
     if (input.connectorId) {
