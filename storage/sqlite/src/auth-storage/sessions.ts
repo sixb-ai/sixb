@@ -57,6 +57,28 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
     return row ? rowToSessionRecord(row) : null
   }
 
+  async listActiveByUserId(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly now: Date
+  }): Promise<readonly SessionRecord[]> {
+    const rows = this.db
+      .query(
+        `
+        SELECT *
+        FROM auth_sessions
+        WHERE project_id = ?
+          AND user_id = ?
+          AND revoked_at IS NULL
+          AND expires_at > ?
+        ORDER BY COALESCE(last_seen_at, created_at) DESC, created_at DESC, id DESC
+      `
+      )
+      .all(params.projectId, params.userId, toIso(params.now)) as SqliteAuthSessionRow[]
+
+    return rows.map(rowToSessionRecord)
+  }
+
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string

@@ -100,3 +100,31 @@ export const AuthSessionResponseSchema = z.union([
 export const AuthSignOutResponseSchema = z.object({
   success: z.boolean(),
 })
+
+export const AuthSessionSummarySchema = z.object({
+  id: z.string(),
+  audience: z.string(),
+  current: z.boolean(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  lastSeenAt: z.string().optional(),
+  userAgent: z.string().optional(),
+  ipAddress: z.string().optional(),
+})
+
+export const ListAuthSessionsResponseSchema = z.object({
+  sessions: z.array(AuthSessionSummarySchema),
+})
+
+export const RevokeAuthSessionParamsSchema = z.object({
+  sessionId: z.string().min(1),
+})
+
+export const RevokeAuthSessionResponseSchema = z.object({
+  success: z.boolean(),
+})
+
+export const SignOutAllResponseSchema = z.object({
+  success: z.boolean(),
+  revokedCount: z.number(),
+})

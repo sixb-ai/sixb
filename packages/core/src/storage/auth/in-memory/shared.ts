@@ -257,7 +257,6 @@ export function createSessionRecord(
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   assertSessionIdAvailable(state, projectId, id)
-  revokeActiveSessionsForUser(state, projectId, userId, input.createdAt, audience)
 
   const session: SessionRecord = {
     id,
@@ -268,6 +267,8 @@ export function createSessionRecord(
     tokenHash,
     createdAt: cloneDate(input.createdAt),
     expiresAt: cloneDate(input.expiresAt),
+    userAgent: input.userAgent,
+    ipAddress: input.ipAddress,
   }
 
   state.sessions.set(sessionKey(projectId, id), cloneRecord(session))

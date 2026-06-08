@@ -481,12 +481,6 @@ export async function createSession(
 
   await requireUserById(sql, { projectId, id: userId })
   await assertSessionIdAvailable(sql, projectId, id)
-  await revokeActiveSessionsForUser(sql, {
-    projectId,
-    userId,
-    audience,
-    revokedAt: input.createdAt,
-  })
 
   try {
     const [row] = await sql<PgAuthSessionRow[]>`
@@ -498,7 +492,9 @@ export async function createSession(
         audience,
         token_hash,
         created_at,
-        expires_at
+        expires_at,
+        user_agent,
+        ip_address
       ) VALUES (
         ${projectId},
         ${id},
@@ -507,7 +503,9 @@ export async function createSession(
         ${audience},
         ${tokenHash},
         ${input.createdAt},
-        ${input.expiresAt}
+        ${input.expiresAt},
+        ${input.userAgent ?? null},
+        ${input.ipAddress ?? null}
       )
       RETURNING *
     `

@@ -113,6 +113,38 @@ function cookieValue(setCookie: string | null, name: string): string {
   return match[1]
 }
 
+async function signInAtlas(
+  app: ReturnType<typeof createSixbApi>,
+  messages: readonly { readonly text: string }[],
+  email: string
+): Promise<{
+  readonly sessionCookie: string
+  readonly csrfCookie: string
+  readonly sessionId: string
+}> {
+  await postSignIn(app, { email })
+  const link = linkFromLatestMessage(messages)
+  const callback = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+  const setCookie = callback.headers.get("set-cookie")
+  const sessionCookie = cookieValue(setCookie, "sixb_session")
+  const csrfCookie = cookieValue(setCookie, "sixb_csrf")
+  const sessionResponse = await app.fetch(
+    new Request("http://api.localhost/api/auth/session", {
+      headers: { cookie: `sixb_session=${sessionCookie}` },
+    })
+  )
+  const body = (await sessionResponse.json()) as { readonly session: { readonly id: string } }
+  return { sessionCookie, csrfCookie, sessionId: body.session.id }
+}
+
+async function founderUserId(storage: InMemoryStorage): Promise<string> {
+  const user = await storage.auth.users.getByEmail({ projectId, email: "founder@acme.com" })
+  if (!user) {
+    throw new Error("Expected founder user to exist")
+  }
+  return user.id
+}
+
 describe("magic-link auth routes", () => {
   test("renders the magic-link sign-in form for the magic-link strategy", async () => {
     const { app } = createRuntime()
@@ -347,5 +379,202 @@ describe("magic-link auth routes", () => {
     ).resolves.toMatchObject({
       revokedAt: expect.any(Date),
     })
+  })
+})
+
+describe("session management auth routes", () => {
+  test("lists the caller's active sessions across audiences and flags the current one", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie, sessionId } = await signInAtlas(app, messages, "founder@acme.com")
+
+    await storage.auth.sessions.create({
+      id: "ses_app_extra",
+      projectId,
+      userId: await founderUserId(storage),
+      strategyId: "magic-link",
+      audience: "app",
+      tokenHash: "hash-app-extra",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-12-01T00:00:00.000Z"),
+      userAgent: "Mozilla/5.0 (iPhone)",
+      ipAddress: "203.0.113.7",
+    })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/sessions", {
+        headers: { cookie: `sixb_session=${sessionCookie}` },
+      })
+    )
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      readonly sessions: ReadonlyArray<{
+        readonly id: string
+        readonly audience: string
+        readonly current: boolean
+        readonly userAgent?: string
+        readonly ipAddress?: string
+      }>
+    }
+    const current = body.sessions.find((entry) => entry.id === sessionId)
+    const other = body.sessions.find((entry) => entry.id === "ses_app_extra")
+    expect(current?.current).toBe(true)
+    expect(other?.current).toBe(false)
+    expect(other?.audience).toBe("app")
+    expect(other?.userAgent).toBe("Mozilla/5.0 (iPhone)")
+    expect(other?.ipAddress).toBe("203.0.113.7")
+  })
+
+  test("listing sessions requires authentication", async () => {
+    const { app } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const response = await app.fetch(new Request("http://api.localhost/api/auth/sessions"))
+    expect(response.status).toBe(401)
+  })
+
+  test("revokes one of the caller's other sessions and leaves the current one active", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie, csrfCookie, sessionId } = await signInAtlas(
+      app,
+      messages,
+      "founder@acme.com"
+    )
+
+    await storage.auth.sessions.create({
+      id: "ses_phone",
+      projectId,
+      userId: await founderUserId(storage),
+      strategyId: "magic-link",
+      audience: "atlas",
+      tokenHash: "hash-phone",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-12-01T00:00:00.000Z"),
+    })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/sessions/ses_phone/revoke", {
+        method: "POST",
+        headers: {
+          cookie: `sixb_session=${sessionCookie}; sixb_csrf=${csrfCookie}`,
+          "x-sixb-csrf": csrfCookie,
+        },
+      })
+    )
+    expect(response.status).toBe(200)
+    // Revoking a non-current session does not clear the caller's cookies.
+    expect(response.headers.get("set-cookie")).toBeNull()
+
+    const revoked = await storage.auth.sessions.getById({ projectId, id: "ses_phone" })
+    expect(revoked?.revokedAt).toBeInstanceOf(Date)
+
+    const stillValid = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: { cookie: `sixb_session=${sessionCookie}` },
+      })
+    )
+    expect(await stillValid.json()).toMatchObject({
+      authenticated: true,
+      session: { id: sessionId },
+    })
+  })
+
+  test("cannot revoke a session that belongs to another user", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie, csrfCookie } = await signInAtlas(app, messages, "founder@acme.com")
+
+    await storage.auth.users.create({ id: "usr_intruder", projectId, email: "mallory@acme.com" })
+    await storage.auth.sessions.create({
+      id: "ses_victim",
+      projectId,
+      userId: "usr_intruder",
+      strategyId: "magic-link",
+      audience: "atlas",
+      tokenHash: "hash-victim",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-12-01T00:00:00.000Z"),
+    })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/sessions/ses_victim/revoke", {
+        method: "POST",
+        headers: {
+          cookie: `sixb_session=${sessionCookie}; sixb_csrf=${csrfCookie}`,
+          "x-sixb-csrf": csrfCookie,
+        },
+      })
+    )
+    expect(response.status).toBe(404)
+
+    const victim = await storage.auth.sessions.getById({ projectId, id: "ses_victim" })
+    expect(victim?.revokedAt).toBeUndefined()
+  })
+
+  test("revoking a session requires a CSRF token", async () => {
+    const { app, messages } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie, sessionId } = await signInAtlas(app, messages, "founder@acme.com")
+
+    const response = await app.fetch(
+      new Request(`http://api.localhost/api/auth/sessions/${sessionId}/revoke`, {
+        method: "POST",
+        headers: { cookie: `sixb_session=${sessionCookie}` },
+      })
+    )
+    expect(response.status).toBe(403)
+  })
+
+  test("sign-out-all revokes every session across audiences and clears cookies", async () => {
+    const { app, messages, storage } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie, csrfCookie, sessionId } = await signInAtlas(
+      app,
+      messages,
+      "founder@acme.com"
+    )
+
+    await storage.auth.sessions.create({
+      id: "ses_app_extra",
+      projectId,
+      userId: await founderUserId(storage),
+      strategyId: "magic-link",
+      audience: "app",
+      tokenHash: "hash-app-extra",
+      createdAt: new Date("2026-06-01T00:00:00.000Z"),
+      expiresAt: new Date("2026-12-01T00:00:00.000Z"),
+    })
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/sign-out-all", {
+        method: "POST",
+        headers: {
+          cookie: `sixb_session=${sessionCookie}; sixb_csrf=${csrfCookie}`,
+          "x-sixb-csrf": csrfCookie,
+        },
+      })
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ success: true, revokedCount: 2 })
+    expect(response.headers.get("set-cookie")).toContain("sixb_session=")
+
+    const current = await storage.auth.sessions.getById({ projectId, id: sessionId })
+    const appExtra = await storage.auth.sessions.getById({ projectId, id: "ses_app_extra" })
+    expect(current?.revokedAt).toBeInstanceOf(Date)
+    expect(appExtra?.revokedAt).toBeInstanceOf(Date)
+
+    const afterResponse = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: { cookie: `sixb_session=${sessionCookie}` },
+      })
+    )
+    expect(await afterResponse.json()).toMatchObject({ authenticated: false })
+  })
+
+  test("sign-out-all requires a CSRF token", async () => {
+    const { app, messages } = createRuntime({ bootstrapUsers: ["founder@acme.com"] })
+    const { sessionCookie } = await signInAtlas(app, messages, "founder@acme.com")
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/sign-out-all", {
+        method: "POST",
+        headers: { cookie: `sixb_session=${sessionCookie}` },
+      })
+    )
+    expect(response.status).toBe(403)
   })
 })

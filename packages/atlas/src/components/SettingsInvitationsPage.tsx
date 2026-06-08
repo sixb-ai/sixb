@@ -24,6 +24,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
+import { SettingsTabs } from "./SettingsTabs"
 
 type Invitation = ListAuthInvitationsResponse["invitations"][number]
 type InvitationGroupOption = GetAuthInvitationOptionsResponse["groups"][number]
@@ -271,6 +272,7 @@ export function SettingsInvitationsPage() {
 
   return (
     <div className="space-y-4">
+      <SettingsTabs />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

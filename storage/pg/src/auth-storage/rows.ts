@@ -46,6 +46,8 @@ export interface PgAuthSessionRow {
   readonly expires_at: PgDate
   readonly revoked_at: PgDate | null
   readonly last_seen_at: PgDate | null
+  readonly user_agent: string | null
+  readonly ip_address: string | null
 }
 
 export interface PgAuthInvitationRow {
@@ -137,6 +139,8 @@ export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
     expiresAt: toDate(row.expires_at),
     revokedAt: row.revoked_at ? toDate(row.revoked_at) : undefined,
     lastSeenAt: row.last_seen_at ? toDate(row.last_seen_at) : undefined,
+    userAgent: row.user_agent ?? undefined,
+    ipAddress: row.ip_address ?? undefined,
   }
 }
 

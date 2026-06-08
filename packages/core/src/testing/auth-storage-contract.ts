@@ -144,7 +144,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("creates one active session per user per audience and never extends expiry on touch", async () => {
+    test("keeps multiple concurrent sessions per user and never extends expiry on touch", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)
 
@@ -169,15 +169,28 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           expiresAt: at("2026-05-21T10:05:00.000Z"),
         })
 
+        // Creating a second session in the same audience no longer revokes the
+        // first: both stay active and authenticate independently.
         expect(first.revokedAt).toBeUndefined()
-        await expect(storage.sessions.getById({ projectId, id: "ses_1" })).resolves.toMatchObject({
-          revokedAt: at("2026-05-14T10:05:00.000Z"),
-        })
+        expect(second.revokedAt).toBeUndefined()
+        const storedFirst = await storage.sessions.getById({ projectId, id: "ses_1" })
+        expect(storedFirst?.revokedAt).toBeUndefined()
+
         await expect(
-          storage.sessions.getActiveByUserId({
+          storage.sessions.findValidByTokenHash({
             projectId,
-            userId: "usr_1",
+            id: "ses_1",
             audience: "atlas",
+            tokenHash: "hash-1",
+            now: at("2026-05-14T10:06:00.000Z"),
+          })
+        ).resolves.toMatchObject({ id: "ses_1" })
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_2",
+            audience: "atlas",
+            tokenHash: "hash-2",
             now: at("2026-05-14T10:06:00.000Z"),
           })
         ).resolves.toMatchObject({ id: "ses_2" })
@@ -191,6 +204,16 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           })
         ).resolves.toBeNull()
 
+        // getActiveByUserId returns the most recently created active session.
+        await expect(
+          storage.sessions.getActiveByUserId({
+            projectId,
+            userId: "usr_1",
+            audience: "atlas",
+            now: at("2026-05-14T10:06:00.000Z"),
+          })
+        ).resolves.toMatchObject({ id: "ses_2" })
+
         const touched = await storage.sessions.touch({
           projectId,
           id: second.id,
@@ -199,6 +222,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         expect(touched.lastSeenAt?.toISOString()).toBe("2026-05-15T10:00:00.000Z")
         expect(touched.expiresAt.toISOString()).toBe("2026-05-21T10:05:00.000Z")
 
+        // A session in a different audience coexists and is cookie-scoped.
         const appSession = await storage.sessions.create({
           id: "ses_app",
           projectId,
@@ -210,8 +234,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           expiresAt: at("2026-05-21T10:06:00.000Z"),
         })
         expect(appSession.revokedAt).toBeUndefined()
-        const currentAdminSession = await storage.sessions.getById({ projectId, id: "ses_2" })
-        expect(currentAdminSession?.revokedAt).toBeUndefined()
         await expect(
           storage.sessions.findValidByTokenHash({
             projectId,
@@ -221,6 +243,160 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             now: at("2026-05-14T10:07:00.000Z"),
           })
         ).resolves.toBeNull()
+
+        // Revoking a single session leaves the user's other sessions active.
+        await storage.sessions.revoke({
+          projectId,
+          id: "ses_1",
+          revokedAt: at("2026-05-14T10:08:00.000Z"),
+        })
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_1",
+            audience: "atlas",
+            tokenHash: "hash-1",
+            now: at("2026-05-14T10:09:00.000Z"),
+          })
+        ).resolves.toBeNull()
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_2",
+            audience: "atlas",
+            tokenHash: "hash-2",
+            now: at("2026-05-14T10:09:00.000Z"),
+          })
+        ).resolves.toMatchObject({ id: "ses_2" })
+
+        // "Sign out everywhere": revokeActiveForUser clears every remaining
+        // active session for the user, across audiences.
+        const revoked = await storage.sessions.revokeActiveForUser({
+          projectId,
+          userId: "usr_1",
+          revokedAt: at("2026-05-14T10:10:00.000Z"),
+        })
+        expect(revoked.map((entry) => entry.id).sort()).toEqual(["ses_2", "ses_app"])
+        await expect(
+          storage.sessions.getActiveByUserId({
+            projectId,
+            userId: "usr_1",
+            audience: "atlas",
+            now: at("2026-05-14T10:11:00.000Z"),
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("persists best-effort device metadata on a session", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        const withDevice = await storage.sessions.create({
+          id: "ses_device",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-device",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+          userAgent: "Mozilla/5.0 (iPhone)",
+          ipAddress: "203.0.113.7",
+        })
+        expect(withDevice.userAgent).toBe("Mozilla/5.0 (iPhone)")
+        expect(withDevice.ipAddress).toBe("203.0.113.7")
+        await expect(
+          storage.sessions.getById({ projectId, id: "ses_device" })
+        ).resolves.toMatchObject({
+          userAgent: "Mozilla/5.0 (iPhone)",
+          ipAddress: "203.0.113.7",
+        })
+
+        // Device metadata is optional; omitting it round-trips as undefined.
+        const withoutDevice = await storage.sessions.create({
+          id: "ses_plain",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-plain",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+          expiresAt: at("2026-05-21T10:01:00.000Z"),
+        })
+        expect(withoutDevice.userAgent).toBeUndefined()
+        expect(withoutDevice.ipAddress).toBeUndefined()
+      })
+    })
+
+    test("lists a user's active sessions across audiences, newest activity first", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        await storage.sessions.create({
+          id: "ses_a",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-a",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+        await storage.sessions.create({
+          id: "ses_b",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "app",
+          tokenHash: "hash-b",
+          createdAt: at("2026-05-14T10:05:00.000Z"),
+          expiresAt: at("2026-05-21T10:05:00.000Z"),
+        })
+
+        // Revoked sessions are excluded.
+        await storage.sessions.create({
+          id: "ses_revoked",
+          projectId,
+          userId: "usr_1",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-revoked",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+          expiresAt: at("2026-05-21T10:01:00.000Z"),
+        })
+        await storage.sessions.revoke({
+          projectId,
+          id: "ses_revoked",
+          revokedAt: at("2026-05-14T10:02:00.000Z"),
+        })
+
+        // Another user's session must not leak in.
+        await createUser(storage, { id: "usr_2", email: "bo@acme.com" })
+        await storage.sessions.create({
+          id: "ses_other",
+          projectId,
+          userId: "usr_2",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-other",
+          createdAt: at("2026-05-14T10:03:00.000Z"),
+          expiresAt: at("2026-05-21T10:03:00.000Z"),
+        })
+
+        // ses_a is older than ses_b but has more recent activity, so it sorts first.
+        await storage.sessions.touch({
+          projectId,
+          id: "ses_a",
+          lastSeenAt: at("2026-05-15T10:00:00.000Z"),
+        })
+
+        const active = await storage.sessions.listActiveByUserId({
+          projectId,
+          userId: "usr_1",
+          now: at("2026-05-15T11:00:00.000Z"),
+        })
+        expect(active.map((session) => session.id)).toEqual(["ses_a", "ses_b"])
       })
     })
 
@@ -457,11 +633,10 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           strategyId: "magic-link",
           tokenHash: "session-hash",
         })
-        await expect(storage.sessions.getById({ projectId, id: "ses_old" })).resolves.toMatchObject(
-          {
-            revokedAt: at("2026-05-14T10:10:00.000Z"),
-          }
-        )
+        // Signing in again keeps the user's existing session active; concurrent
+        // sessions are allowed.
+        const oldSession = await storage.sessions.getById({ projectId, id: "ses_old" })
+        expect(oldSession?.revokedAt).toBeUndefined()
         await expectAuthError(
           storage.completeMagicLinkSignIn({
             projectId,
