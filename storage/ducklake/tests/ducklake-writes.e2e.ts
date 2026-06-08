@@ -563,7 +563,11 @@ describe("DuckLakeStorage writes and latest reads", () => {
 
     expect(appendVersion.versionId).not.toBe(seedVersion.versionId)
     expect(appendVersion.mode).toBe("append")
-    expect(appendVersion.rowCount).toBe(2)
+    // Unguarded appends omit row counts from commit metadata (DuckLake may retry
+    // and underreport previousRowCount + sourceRowCount), and version reads are a
+    // metadata-only path that never counts historical table contents. The
+    // committed duplicate rows below are the real proof that append does not dedupe.
+    expect(appendVersion.rowCount).toBeUndefined()
     await expect(collectRows(storage.readRows({ datasetId: ordersDataset.id }))).resolves.toEqual([
       { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
       { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
