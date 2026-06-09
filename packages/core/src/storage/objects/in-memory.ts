@@ -126,7 +126,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       case "text": {
         const input = this.evaluateObjectQuery(projectId, query.input)
         const scoredEntries = input.entries.flatMap((entry) => {
-          const score = textScore(entry.row, query.query, query.fields)
+          const score = textScore(entry.row, query.query, query.fields, query.fieldsByObjectType)
           return score > 0 ? [{ ...entry, score: entry.score + score }] : []
         })
         return completeEvaluation(scoredEntries)
@@ -743,13 +743,21 @@ function comparePropertyValues(left: unknown, right: unknown): number {
   return Number.NaN
 }
 
-function textScore(row: ObjectRow, query: string, fields: readonly string[] | undefined): number {
+function textScore(
+  row: ObjectRow,
+  query: string,
+  fields: readonly string[] | undefined,
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+): number {
   const terms = tokenize(query)
   if (terms.length === 0) return 0
 
+  const scopedFields = fields ?? fieldsByObjectType?.[row.objectTypeId]
   const values = fields
     ? fields.flatMap((field) => collectTextValues(row.properties[field]))
-    : [row.primaryId, ...Object.values(row.properties).flatMap(collectTextValues)]
+    : scopedFields
+      ? scopedFields.flatMap((field) => collectTextValues(row.properties[field]))
+      : [row.primaryId, ...Object.values(row.properties).flatMap(collectTextValues)]
   const haystack = values.join(" ").toLowerCase()
   if (!terms.every((term) => haystack.includes(term))) return 0
 

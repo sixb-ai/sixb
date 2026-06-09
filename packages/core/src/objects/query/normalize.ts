@@ -15,6 +15,9 @@ export function normalizeObjectQuery(query: ObjectQuery): ObjectQuery {
         ...query,
         input: normalizeObjectQuery(query.input),
         fields: query.fields ? uniqueStrings(query.fields) : undefined,
+        fieldsByObjectType: query.fieldsByObjectType
+          ? uniqueStringRecord(query.fieldsByObjectType)
+          : undefined,
       }
     case "vector":
       return { ...query, input: normalizeObjectQuery(query.input), vector: [...query.vector] }
@@ -134,4 +137,12 @@ function normalizeLimit(input: ObjectQuery, limit: number): ObjectQuery {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+function uniqueStringRecord(
+  record: Readonly<Record<string, readonly string[]>>
+): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(record).map(([objectTypeId, fields]) => [objectTypeId, uniqueStrings(fields)])
+  )
 }

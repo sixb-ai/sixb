@@ -572,7 +572,10 @@ describe("object query validation", () => {
     expect(defaultText.result.objectTypeIds).toEqual(["SearchProfileCustomer"])
     expect(defaultText.query.kind).toBe("text")
     if (defaultText.query.kind === "text") {
-      expect(defaultText.query.fields).toEqual(["name", "notes"])
+      expect(defaultText.query.fields).toBeUndefined()
+      expect(defaultText.query.fieldsByObjectType).toEqual({
+        SearchProfileCustomer: ["name", "notes"],
+      })
     }
     expect(explicitText.result.objectTypeIds).toEqual(["TextNoDefault"])
     expect(missingDefaultIssues.map((issue) => issue.code)).toContain("missing_text_fields")
@@ -689,6 +692,47 @@ describe("object query planner and executor", () => {
     )
   })
 
+  test("falls back when provider limit capabilities are exceeded", () => {
+    const capabilities: ObjectQueryCapabilities = {
+      queryObjects: true,
+      nodes: {
+        start: true,
+        limit: true,
+        page: true,
+      },
+      limits: {
+        maxLimit: 1,
+        maxPageSize: 1,
+      },
+    }
+
+    const limitPlan = planObjectQuery(
+      {
+        kind: "limit",
+        limit: 2,
+        input: { kind: "start", objectTypeId: "Customer" },
+      },
+      { capabilities, hasQueryObjects: true, maxFallbackRows: 10 }
+    )
+    const pagePlan = planObjectQuery(
+      {
+        kind: "page",
+        pageSize: 2,
+        input: { kind: "start", objectTypeId: "Customer" },
+      },
+      { capabilities, hasQueryObjects: true, maxFallbackRows: 10 }
+    )
+
+    expect(limitPlan.mode).toBe("fallback")
+    expect(limitPlan.providerIssues.map((issue) => issue.code)).toContain(
+      "provider_limit_too_large"
+    )
+    expect(pagePlan.mode).toBe("fallback")
+    expect(pagePlan.providerIssues.map((issue) => issue.code)).toContain(
+      "provider_page_size_too_large"
+    )
+  })
+
   test("pushes includeSubtypes starts down as concrete unions when the provider can run them", async () => {
     const BaseAsset = defineObjectType({
       id: "BaseAsset",
@@ -730,6 +774,58 @@ describe("object query planner and executor", () => {
     expect(new Set(result.objects.map((row) => row.primaryId))).toEqual(
       new Set(["asset-1", "laptop-1"])
     )
+  })
+
+  test("scopes default text fields by object type when querying subtypes", async () => {
+    const DefaultTextBase = defineObjectType({
+      id: "DefaultTextBase",
+      name: "Default Text Base",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("name", "string", { query: { searchable: true, text: true } }),
+        prop("alias", "string"),
+      ],
+      search: { defaultText: ["name"] },
+    })
+    const DefaultTextChild = defineObjectType({
+      id: "DefaultTextChild",
+      name: "Default Text Child",
+      extends: DefaultTextBase,
+      properties: [prop("alias", "string", { query: { searchable: true, text: true } })],
+      search: { defaultText: ["alias"] },
+    })
+    const subtypeOntology = new OntologyRegistry({
+      sources: [DefaultTextBase, DefaultTextChild],
+    })
+    const storage = new InMemoryObjectStorage()
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "DefaultTextBase", "base-1", {
+        id: "base-1",
+        name: "ordinary",
+        alias: "secret",
+      })
+    )
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "DefaultTextChild", "child-1", {
+        id: "child-1",
+        name: "ordinary",
+        alias: "secret",
+      })
+    )
+
+    const result = await executeObjectQuery(
+      {
+        projectId: "p1",
+        query: {
+          kind: "text",
+          query: "secret",
+          input: { kind: "start", objectTypeId: "DefaultTextBase", includeSubtypes: true },
+        },
+      },
+      { ontology: subtypeOntology, storage, maxFallbackRows: 10 }
+    )
+
+    expect(result.objects.map((row) => row.primaryId)).toEqual(["child-1"])
   })
 
   test("keeps includeSubtypes fallback for providers without query pushdown", async () => {

@@ -100,8 +100,27 @@ const LaptopAsset = defineObjectType({
   properties: [],
 })
 
+const DefaultTextBase = defineObjectType({
+  id: "ContractDefaultTextBase",
+  name: "Contract Default Text Base",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", { query: { searchable: true, text: true } }),
+    prop("alias", "string"),
+  ],
+  search: { defaultText: ["name"] },
+})
+
+const DefaultTextChild = defineObjectType({
+  id: "ContractDefaultTextChild",
+  name: "Contract Default Text Child",
+  extends: DefaultTextBase,
+  properties: [prop("alias", "string", { query: { searchable: true, text: true } })],
+  search: { defaultText: ["alias"] },
+})
+
 export const objectQueryContractOntology = new OntologyRegistry({
-  sources: [Room, Device, Asset, LaptopAsset],
+  sources: [Room, Device, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild],
 })
 
 /**
@@ -162,7 +181,10 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
       )
       expect(validated.query.kind).toBe("text")
       if (validated.query.kind === "text") {
-        expect(validated.query.fields).toEqual(["name", "description"])
+        expect(validated.query.fields).toBeUndefined()
+        expect(validated.query.fieldsByObjectType).toEqual({
+          [Room.id]: ["name", "description"],
+        })
       }
     })
 
@@ -557,6 +579,43 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
 
         expect(result.plan.mode).toBe("pushdown")
         expect(ids(result)).toEqual(["room-alpha"])
+      })
+    })
+
+    test("scopes search profile defaults by object type for subtype text queries", async () => {
+      await withStorage(async (storage) => {
+        await storage.applyObjectUpserted(
+          objectEvent("101", DefaultTextBase.id, "default-base", {
+            id: "default-base",
+            name: "ordinary",
+            alias: "secret",
+          })
+        )
+        await storage.applyObjectUpserted(
+          objectEvent("102", DefaultTextChild.id, "default-child", {
+            id: "default-child",
+            name: "ordinary",
+            alias: "secret",
+          })
+        )
+
+        const result = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "text",
+              query: "secret",
+              input: {
+                kind: "start",
+                objectTypeId: DefaultTextBase.id,
+                includeSubtypes: true,
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        expect(ids(result)).toEqual(["default-child"])
       })
     })
 
