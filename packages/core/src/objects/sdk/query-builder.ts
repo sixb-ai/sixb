@@ -23,6 +23,7 @@ import {
   normalizeObjectQuery,
   type ObjectQuery,
   type ObjectQueryDirection,
+  ObjectQueryPlanningError,
   type ObjectQuerySortDirection,
   validateObjectQuery,
 } from "../query"
@@ -206,6 +207,7 @@ class ObjectQueryBuilderImpl<
       query: this.ir,
       storage: this.params.storage,
       ontology: this.params.ontology,
+      sdkHints: true,
     })
   }
 
@@ -270,18 +272,57 @@ function resolveSingleTargetObjectTypeId(link: LinkToken): string {
 async function executeTypedObjectQuery<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
->(params: { query: ObjectQuery; ontology: OntologyRegistry; projectId: string; storage: Storage }) {
-  const result = await executeObjectQuery(
-    {
-      projectId: params.projectId,
-      query: params.query,
-    },
-    { ontology: params.ontology, storage: params.storage.objects }
-  )
+>(params: {
+  query: ObjectQuery
+  ontology: OntologyRegistry
+  projectId: string
+  storage: Storage
+  sdkHints?: boolean
+}) {
+  const result = await executeObjectQueryWithSdkHints(params)
 
   return {
     objects: result.objects.map((row) => row as unknown as TwinObject<TObjectType, TValueTypes>),
     hasMore: result.hasMore,
     total: result.total ?? result.objects.length,
   }
+}
+
+async function executeObjectQueryWithSdkHints(params: {
+  query: ObjectQuery
+  ontology: OntologyRegistry
+  projectId: string
+  storage: Storage
+  sdkHints?: boolean
+}) {
+  try {
+    return await executeObjectQuery(
+      {
+        projectId: params.projectId,
+        query: params.query,
+      },
+      { ontology: params.ontology, storage: params.storage.objects }
+    )
+  } catch (error) {
+    if (params.sdkHints && error instanceof ObjectQueryPlanningError) {
+      throw addSdkPlanningHints(error)
+    }
+    throw error
+  }
+}
+
+function addSdkPlanningHints(error: ObjectQueryPlanningError): ObjectQueryPlanningError {
+  if (!error.issues.some((issue) => issue.code === "fallback_requires_bound")) return error
+
+  return new ObjectQueryPlanningError(
+    error.issues.map((issue) =>
+      issue.code === "fallback_requires_bound"
+        ? {
+            ...issue,
+            message:
+              "Object query fallback requires an explicit result bound. Add .limit(n) or .page({ pageSize: n }) before .list().",
+          }
+        : issue
+    )
+  )
 }
