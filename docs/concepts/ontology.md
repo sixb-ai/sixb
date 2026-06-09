@@ -278,6 +278,14 @@ import { Organization } from "./ontology/organization"
 export const sixb = createSixb({
   ontology: [Customer, Organization],
 })
+```
+
+## Typed API
+
+Once registered, access objects through the typed API:
+
+```ts
+const customers = sixb.objects(Customer)
 
 // Create or update
 const customer = await customers.upsert({
