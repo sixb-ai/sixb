@@ -48,13 +48,7 @@ export async function runLakeCleanup(options: LakeCleanupOptions = {}) {
       expireOlderThan,
       deleteOlderThan,
     })
-    await renderStatic(
-      <LakeCleanupView
-        projectId={sixb.id}
-        report={report}
-        retentionWarning={!report.dryRun && !isDefaultRetention(report)}
-      />
-    )
+    await renderStatic(<LakeCleanupView projectId={sixb.id} report={report} />)
   } finally {
     await stopSixbProviders(sixb)
   }
@@ -65,11 +59,5 @@ function isLakeMaintenanceProvider(value: unknown): value is LakeMaintenanceProv
     typeof value === "object" &&
     value !== null &&
     typeof (value as { runMaintenance?: unknown }).runMaintenance === "function"
-  )
-}
-
-function isDefaultRetention(report: LakeMaintenanceReport): boolean {
-  return (
-    report.expireOlderThan === DEFAULT_RETENTION && report.deleteOlderThan === DEFAULT_RETENTION
   )
 }

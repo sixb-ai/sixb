@@ -115,7 +115,7 @@ describe("sixb lake cleanup", () => {
     })
   })
 
-  test("passes cleanup retention flags through and warns on aggressive retention", async () => {
+  test("passes cleanup retention flags through", async () => {
     const result = await runLakeCommand("cleanup", {
       args: ["--expire-older-than", "1 hour", "--delete-older-than", "30 minutes"],
     })
@@ -124,8 +124,7 @@ describe("sixb lake cleanup", () => {
     expect(result.stdout).toContain("Lake cleanup complete")
     expect(result.stdout).toContain("1 hour")
     expect(result.stdout).toContain("30 minutes")
-    expect(result.stdout).toContain("DuckLake retention options persist")
-    expect(result.stdout).toContain("7 days")
+    expect(result.stdout).not.toContain("DuckLake retention options persist")
     expect(result.logEntries).toContainEqual({
       type: "lake:maintenance",
       dryRun: false,

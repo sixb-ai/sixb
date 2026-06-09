@@ -647,17 +647,12 @@ export interface LakeCleanupReport {
   readonly orphanedFiles: number
 }
 
-const RESTORE_RETENTION_COMMAND =
-  'sixb lake cleanup --expire-older-than "7 days" --delete-older-than "7 days"'
-
 export function LakeCleanupView({
   projectId,
   report,
-  retentionWarning,
 }: {
   projectId: string
   report: LakeCleanupReport
-  retentionWarning: boolean
 }) {
   return (
     <Box flexDirection="column">
@@ -676,15 +671,6 @@ export function LakeCleanupView({
           { label: "Orphaned files", value: String(report.orphanedFiles) },
         ]}
       />
-      {retentionWarning ? (
-        <>
-          <Spacer />
-          <Text color="yellow">
-            DuckLake retention options persist. Restore normal retention with{" "}
-            {RESTORE_RETENTION_COMMAND}.
-          </Text>
-        </>
-      ) : null}
     </Box>
   )
 }

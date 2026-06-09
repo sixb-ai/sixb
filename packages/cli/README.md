@@ -129,8 +129,7 @@ provider's `createDataset` before committing, so drift still fails clearly even 
 
 Use `sixb lake cleanup` for operator-run lake maintenance on providers that expose
 `runMaintenance`. It defaults to a seven-day snapshot expiration and file deletion window. Start
-with `--dry-run`; after a short-retention DuckLake cleanup, run the seven-day command again because
-DuckLake retention options persist.
+with `--dry-run` to preview how many snapshots and files DuckLake reports as eligible.
 
 ### Production topologies
 

@@ -6,7 +6,7 @@ import type {
 } from "../types"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
-import { duckLakeAlias, quoteIdentifier, quoteSqlString } from "./sql"
+import { duckLakeAlias, quoteSqlString } from "./sql"
 
 const DEFAULT_RETENTION = "7 days"
 
@@ -38,17 +38,17 @@ export class DuckLakeMaintenance {
     }
 
     return this.connections.withExclusiveAttached(async (runtime) => {
-      const counts = await collectDryRunCounts(runtime, this.options, {
-        expireOlderThan,
-        deleteOlderThan,
-      })
-
-      if (!dryRun) {
-        await setMaintenanceOptions(runtime, this.options, {
+      const counts = await runMaintenanceProcedures(
+        runtime,
+        this.options,
+        {
           expireOlderThan,
           deleteOlderThan,
-        })
-        await runtime.run("CHECKPOINT")
+        },
+        dryRun
+      )
+
+      if (!dryRun) {
         this.connections.markLocalCatalogChanged()
       }
 
@@ -62,20 +62,36 @@ export class DuckLakeMaintenance {
   }
 }
 
-async function collectDryRunCounts(
+async function runMaintenanceProcedures(
   runtime: DuckDbQueryRuntime,
   options: DuckLakeStorageOptions,
-  retention: Pick<DuckLakeMaintenanceReport, "expireOlderThan" | "deleteOlderThan">
+  retention: Pick<DuckLakeMaintenanceReport, "expireOlderThan" | "deleteOlderThan">,
+  dryRun: boolean
 ): Promise<MaintenanceCounts> {
   const aliasSql = quoteSqlString(duckLakeAlias(options))
   const snapshots = await runtime.query(
-    maintenanceDryRunSql("ducklake_expire_snapshots", aliasSql, retention.expireOlderThan)
+    maintenanceProcedureSql(
+      "ducklake_expire_snapshots",
+      aliasSql,
+      retention.expireOlderThan,
+      dryRun
+    )
   )
   const oldFiles = await runtime.query(
-    maintenanceDryRunSql("ducklake_cleanup_old_files", aliasSql, retention.deleteOlderThan)
+    maintenanceProcedureSql(
+      "ducklake_cleanup_old_files",
+      aliasSql,
+      retention.deleteOlderThan,
+      dryRun
+    )
   )
   const orphanedFiles = await runtime.query(
-    maintenanceDryRunSql("ducklake_delete_orphaned_files", aliasSql, retention.deleteOlderThan)
+    maintenanceProcedureSql(
+      "ducklake_delete_orphaned_files",
+      aliasSql,
+      retention.deleteOlderThan,
+      dryRun
+    )
   )
 
   return {
@@ -85,25 +101,16 @@ async function collectDryRunCounts(
   }
 }
 
-function maintenanceDryRunSql(procedure: string, aliasSql: string, olderThan: string): string {
+function maintenanceProcedureSql(
+  procedure: string,
+  aliasSql: string,
+  olderThan: string,
+  dryRun: boolean
+): string {
   const olderThanSql = quoteSqlString(olderThan)
+  const dryRunSql = dryRun ? "dry_run => true, " : ""
   return (
-    `CALL ${procedure}(${aliasSql}, dry_run => true, ` +
+    `CALL ${procedure}(${aliasSql}, ${dryRunSql}` +
     `older_than => now() - INTERVAL ${olderThanSql})`
-  )
-}
-
-async function setMaintenanceOptions(
-  runtime: DuckDbQueryRuntime,
-  options: DuckLakeStorageOptions,
-  retention: Pick<DuckLakeMaintenanceReport, "expireOlderThan" | "deleteOlderThan">
-): Promise<void> {
-  const lake = quoteIdentifier(duckLakeAlias(options))
-
-  await runtime.run(
-    `CALL ${lake}.set_option('expire_older_than', ${quoteSqlString(retention.expireOlderThan)})`
-  )
-  await runtime.run(
-    `CALL ${lake}.set_option('delete_older_than', ${quoteSqlString(retention.deleteOlderThan)})`
   )
 }
