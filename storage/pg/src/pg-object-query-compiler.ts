@@ -89,7 +89,13 @@ function compileObjectQueryInternal(projectId: string, query: ObjectQuery): Comp
     case "project":
       return compileProject(projectId, query.input, query.properties)
     case "text":
-      return compileText(projectId, query.input, query.query, query.fields)
+      return compileText(
+        projectId,
+        query.input,
+        query.query,
+        query.fields,
+        query.fieldsByObjectType
+      )
     case "vector":
       throw new Error(`[SixbPg] PostgreSQL object storage does not support query node 'vector'`)
   }
@@ -165,12 +171,20 @@ function compileText(
   projectId: string,
   inputQuery: ObjectQuery,
   query: string,
-  fields: readonly string[] | undefined
+  fields: readonly string[] | undefined,
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
 ): CompiledPgObjectQuery {
-  if (!fields || fields.length === 0) {
-    throw new Error("[SixbPg] PostgreSQL object text search requires explicit fields")
+  const predicate =
+    fields && fields.length > 0
+      ? compileTextPredicate(query, fields)
+      : compileScopedTextPredicate(query, fieldsByObjectType)
+
+  if (!predicate) {
+    throw new Error(
+      "[SixbPg] PostgreSQL object text search requires fields or resolved text defaults"
+    )
   }
-  return compileWhere(projectId, inputQuery, compileTextPredicate(query, fields))
+  return compileWhere(projectId, inputQuery, predicate)
 }
 
 function compileSort(
@@ -582,6 +596,29 @@ function compileTextPredicate(query: string, fields: readonly string[]): Compile
   const args = terms.flatMap((term) => fields.flatMap((field) => [term, field]))
 
   return { sql: `(${clauses.join(" AND ")})`, args }
+}
+
+function compileScopedTextPredicate(
+  query: string,
+  fieldsByObjectType: Readonly<Record<string, readonly string[]>> | undefined
+): CompiledPredicate | null {
+  const scopedPredicates: CompiledPredicate[] = []
+
+  for (const [objectTypeId, fields] of Object.entries(fieldsByObjectType ?? {})) {
+    if (fields.length === 0) continue
+    const predicate = compileTextPredicate(query, fields)
+    scopedPredicates.push({
+      sql: `(object_type_id = ? AND ${predicate.sql})`,
+      args: [objectTypeId, ...predicate.args],
+    })
+  }
+
+  if (scopedPredicates.length === 0) return null
+
+  return {
+    sql: `(${scopedPredicates.map((predicate) => predicate.sql).join(" OR ")})`,
+    args: scopedPredicates.flatMap((predicate) => predicate.args),
+  }
 }
 
 function compileOrder(
