@@ -38,6 +38,13 @@ export interface ObjectQueryText {
   input: ObjectQuery
   query: string
   fields?: readonly string[]
+  /**
+   * Resolved search-profile defaults, keyed by object type id.
+   *
+   * Providers receive this from core validation when `fields` is omitted so
+   * multi-type text queries do not leak one type's defaults onto another.
+   */
+  fieldsByObjectType?: Readonly<Record<string, readonly string[]>>
 }
 
 export interface ObjectQueryVector {

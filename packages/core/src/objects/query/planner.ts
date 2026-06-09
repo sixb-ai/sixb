@@ -152,9 +152,15 @@ function collectNodeProviderIssues(
       return
     case "text":
     case "vector":
-    case "limit":
-    case "page":
     case "project":
+      collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
+      return
+    case "limit":
+      collectProviderMaxLimitIssues(query.limit, path, capabilities, issues)
+      collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
+      return
+    case "page":
+      collectProviderMaxPageSizeIssues(query.pageSize, path, capabilities, issues)
       collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
       return
     case "traverse":
@@ -233,6 +239,59 @@ function collectSortProviderIssues(
     "sort_kind_not_supported",
     `Provider does not support sort kind '${field.kind}'`
   )
+}
+
+function collectProviderMaxLimitIssues(
+  limit: number,
+  path: string,
+  capabilities: ObjectQueryCapabilities,
+  issues: ObjectQueryPlanningIssue[]
+): void {
+  const maxLimit = capabilities.limits?.maxLimit
+  if (maxLimit === undefined) return
+
+  if (!Number.isInteger(maxLimit) || maxLimit < 0) {
+    addIssue(
+      issues,
+      path,
+      "invalid_provider_limit_capability",
+      "Provider limit capability maxLimit must be a non-negative integer"
+    )
+    return
+  }
+
+  if (limit > maxLimit) {
+    addIssue(issues, path, "provider_limit_too_large", `Provider supports limit up to ${maxLimit}`)
+  }
+}
+
+function collectProviderMaxPageSizeIssues(
+  pageSize: number,
+  path: string,
+  capabilities: ObjectQueryCapabilities,
+  issues: ObjectQueryPlanningIssue[]
+): void {
+  const maxPageSize = capabilities.limits?.maxPageSize
+  if (maxPageSize === undefined) return
+
+  if (!Number.isInteger(maxPageSize) || maxPageSize <= 0) {
+    addIssue(
+      issues,
+      path,
+      "invalid_provider_page_size_capability",
+      "Provider limit capability maxPageSize must be a positive integer"
+    )
+    return
+  }
+
+  if (pageSize > maxPageSize) {
+    addIssue(
+      issues,
+      path,
+      "provider_page_size_too_large",
+      `Provider supports pageSize up to ${maxPageSize}`
+    )
+  }
 }
 
 function collectFallbackIssues(

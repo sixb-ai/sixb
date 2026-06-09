@@ -115,7 +115,11 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
         path,
         kind: query.kind,
         summary: `text "${query.query}"`,
-        details: { query: query.query, fields: query.fields },
+        details: {
+          query: query.query,
+          fields: query.fields,
+          fieldsByObjectType: query.fieldsByObjectType,
+        },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
     case "vector":

@@ -40,6 +40,10 @@ interface QueryValidationResult {
   query: ObjectQuery
 }
 
+interface TextFieldResolution {
+  fieldsByObjectType?: Record<string, string[]>
+}
+
 const DEFAULT_MAX_LIMIT = 1_000
 const DEFAULT_MAX_PAGE_SIZE = 1_000
 
@@ -103,13 +107,14 @@ function validateQueryNode(
     }
     case "text": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      validateTextQuery(query.query, query.fields, input.result, path, ctx)
+      const textFields = validateTextQuery(query.query, query.fields, input.result, path, ctx)
       return {
         result: input.result,
         query: {
           ...query,
           input: input.query,
-          fields: query.fields ?? resolveDefaultTextFields(input.result, ctx),
+          fields: query.fields,
+          fieldsByObjectType: query.fields ? undefined : textFields.fieldsByObjectType,
         },
       }
     }
@@ -375,10 +380,12 @@ function validateTextQuery(
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
-): void {
+): TextFieldResolution {
   if (query.trim().length === 0) {
     addIssue(ctx, path, "empty_text_query", "Text query must not be empty")
   }
+
+  const fieldsByObjectType: Record<string, string[]> | undefined = fields ? undefined : {}
 
   for (const objectType of getObjectTypesForResult(shape, ctx)) {
     const fieldIds = fields ?? objectType.search?.defaultText
@@ -391,6 +398,8 @@ function validateTextQuery(
       )
       continue
     }
+
+    if (fieldsByObjectType) fieldsByObjectType[objectType.id] = uniqueStrings(fieldIds)
 
     for (const fieldId of fieldIds) {
       const property = getProperty(objectType, fieldId)
@@ -417,6 +426,8 @@ function validateTextQuery(
       }
     }
   }
+
+  return fieldsByObjectType ? { fieldsByObjectType } : {}
 }
 
 function validateVectorQuery(
@@ -612,16 +623,6 @@ function validateSet(
     result: first,
     query: { kind: "set", op, inputs: results.map((result) => result.query) },
   }
-}
-
-function resolveDefaultTextFields(
-  shape: ObjectQueryResultShape,
-  ctx: QueryValidationContext
-): string[] | undefined {
-  const fields = getObjectTypesForResult(shape, ctx).flatMap(
-    (objectType) => objectType.search?.defaultText ?? []
-  )
-  return fields.length === 0 ? undefined : uniqueStrings(fields)
 }
 
 function validateSortFields(
