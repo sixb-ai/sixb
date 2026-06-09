@@ -11,6 +11,8 @@ import {
   link,
   ObjectNotFoundError,
   type ObjectQuery,
+  ObjectQueryPlanningError,
+  type ObjectStorage,
   OntologyValidationError,
   prop,
   type QueryObjectsInput,
@@ -112,6 +114,15 @@ function countObjectQueryCalls(deps: ReturnType<typeof createTestRuntimeDeps>): 
       return calls
     },
   }
+}
+
+function disableObjectQueryPushdown(deps: ReturnType<typeof createTestRuntimeDeps>): void {
+  const objectStorage = deps.storage.objects as ObjectStorage
+  objectStorage.queryCapabilities = () => ({
+    queryObjects: false,
+    notes: ["Object query pushdown disabled for this test."],
+  })
+  objectStorage.queryObjects = undefined
 }
 
 describe("Sixb runtime", () => {
@@ -312,6 +323,31 @@ describe("Sixb runtime", () => {
 
     expect(queriedRooms.objects).toHaveLength(2)
     expect(queryCounter.calls).toBe(1)
+  })
+
+  test("explains how to bound fallback ObjectSet queries before list", async () => {
+    const deps = createTestRuntimeDeps()
+    disableObjectQueryPushdown(deps)
+    const sixb = new Sixb({ ontology: [Room], ...deps })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+
+    try {
+      await sixb
+        .objects(Room)
+        .query()
+        .where((r) => r.p.externalId.eq("RM-101"))
+        .list()
+      throw new Error("Expected unbounded fallback query to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(ObjectQueryPlanningError)
+      if (error instanceof ObjectQueryPlanningError) {
+        expect(error.issues.map((issue) => issue.code)).toContain("fallback_requires_bound")
+        expect(error.message).toContain("Add .limit(n) or .page({ pageSize: n }) before .list().")
+      }
+    }
   })
 
   test("exposes configured lakeStorage on the runtime", () => {
