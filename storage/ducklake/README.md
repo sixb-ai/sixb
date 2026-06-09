@@ -70,7 +70,8 @@ catalog connections cleanly.
 DuckLake keeps historical snapshots and deleted files until maintenance runs.
 Maintenance is operator-driven: run it on demand from the CLI or call
 `runMaintenance()` directly. It expires snapshots, reclaims deleted file blocks,
-and removes orphaned files, keeping seven days of snapshots/files by default.
+and removes orphaned files through DuckLake's explicit maintenance functions,
+keeping seven days of snapshots/files by default.
 
 Run it from the CLI (preview with `--dry-run`):
 
@@ -87,10 +88,6 @@ const report = await lakeStorage.runMaintenance({
   expireOlderThan: "7 days",
 })
 ```
-
-DuckLake retention options persist in the catalog. Each run re-applies the
-retention window you pass; after any one-off aggressive cleanup, run maintenance
-again with the normal retention window.
 
 ### Read and Write Concurrency
 
