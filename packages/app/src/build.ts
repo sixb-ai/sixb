@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
 export interface BuildAppOptions {
@@ -20,6 +20,9 @@ export interface BuildAppResult {
  */
 export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult> {
   const outdir = options.outdir ?? join(process.cwd(), ".sixb", "dist", "app")
+  // The outdir is build-owned. Clear it so hashed chunks from previous builds
+  // don't accumulate (and get served) forever.
+  await rm(outdir, { recursive: true, force: true })
   await mkdir(outdir, { recursive: true })
 
   const result = await Bun.build({

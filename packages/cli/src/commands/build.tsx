@@ -40,17 +40,27 @@ export async function runBuild(options: BuildOptions = {}) {
   })
 
   if (await customApp.hasRoutes()) {
-    const appResult = await customApp.build({
-      outdir: resolve(outdir, "app"),
-    })
+    try {
+      const appResult = await customApp.build({
+        outdir: resolve(outdir, "app"),
+      })
 
-    if (!appResult.success) {
+      if (!appResult.success) {
+        await renderStatic(
+          <ErrorView
+            title="App build failed"
+            message="Failed to build the app"
+            details={appResult.logs ?? []}
+          />
+        )
+        process.exit(1)
+      }
+    } catch (error) {
+      // e.g. the app/globals.css Tailwind compile failed — surface the labeled
+      // message instead of an unhandled stack trace.
+      const message = error instanceof Error ? error.message : String(error)
       await renderStatic(
-        <ErrorView
-          title="App build failed"
-          message="Failed to build the app"
-          details={appResult.logs ?? []}
-        />
+        <ErrorView title="App build failed" message="Failed to build the app" details={[message]} />
       )
       process.exit(1)
     }
