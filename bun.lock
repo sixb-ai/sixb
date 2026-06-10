@@ -120,10 +120,13 @@
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
         "@sixb/sqlite": "workspace:*",
+        "@sixb/ui": "workspace:*",
+        "@tailwindcss/cli": "^4.2.2",
         "@tanstack/react-query": "^5.0.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "react-router-dom": "^7.13.0",
+        "tailwindcss": "^4.1.18",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -215,6 +218,7 @@
       "name": "@sixb/atlas",
       "version": "0.1.0",
       "dependencies": {
+        "@sixb/app": "workspace:*",
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/ui": "workspace:*",
@@ -344,6 +348,7 @@
       "name": "@sixb/sentinel",
       "version": "0.1.0",
       "dependencies": {
+        "@sixb/app": "workspace:*",
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/ui": "workspace:*",
