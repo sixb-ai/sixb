@@ -67,6 +67,48 @@ import { Button } from "@sixb/ui/components/ui/button"
 import { cn } from "@sixb/ui/lib/utils"
 ```
 
+## Theming
+
+Every color, font, radius, and shadow in this package resolves through CSS variables, and
+Tailwind utilities consume them via the `@theme inline` block in `globals.css`
+(`--color-primary: var(--primary)` makes `bg-primary` themeable, and so on). An app
+re-themes the entire component set by overriding the variables in its own stylesheet after
+the import — no Tailwind config, no component changes:
+
+```css
+@import "@sixb/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+
+:root {
+  --background: #f5f6f2;
+  --primary: #1f7a5a;
+  --primary-foreground: #ffffff;
+  --ring: #1f7a5a;
+}
+```
+
+Light values belong on `:root`; if the app supports dark mode, put the dark values on
+`.dark` (the package toggles that class via `ThemeProvider`). `examples/acme-corp` is a
+complete working override.
+
+The token contract:
+
+| Group | Tokens | Used for |
+| --- | --- | --- |
+| Page | `--background`, `--foreground` | body background and default text |
+| Surfaces | `--card`, `--popover` (+ `-foreground`) | cards, menus, dialogs, inputs |
+| Brand | `--primary`, `--secondary`, `--accent`, `--muted` (+ `-foreground`) | buttons, badges, hovers, secondary text |
+| Status | `--destructive` (+ `-foreground`), `--success`, `--warning`, `--info` | errors, confirmations, alerts |
+| Chrome | `--border`, `--input`, `--ring` | hairlines, field borders, focus rings |
+| Charts | `--chart-1` … `--chart-5` | data-viz series colors |
+| Sidebar | `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`, `--sidebar-accent`, `--sidebar-border`, `--sidebar-ring` (+ `-foreground` pairs) | the sidebar component family |
+| Type & shape | `--font-sans`, `--font-serif`, `--font-mono`, `--radius` | typography and corner rounding |
+| Elevation | `--shadow-2xs` … `--shadow-2xl` | shadows (hairline-only by default) |
+
+Pairs matter: anything that sets a background token should keep its `-foreground` partner
+readable (e.g. a dark `--primary` needs a light `--primary-foreground`). When only a few
+tokens are overridden, the rest keep the package defaults, so partial themes are fine.
+
 ## Design Notes
 
 The package is tuned for product surfaces, not marketing pages. Prefer dense, scannable

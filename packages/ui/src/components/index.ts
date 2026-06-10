@@ -144,6 +144,7 @@ export {
   TableRow,
 } from "./ui/table"
 export { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants } from "./ui/tabs"
+export { Textarea } from "./ui/textarea"
 export { Toggle, toggleVariants } from "./ui/toggle"
 export { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group"
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip"
