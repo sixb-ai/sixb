@@ -9,16 +9,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sixb/blob-local": "latest",
     "@sixb/cli": "latest",
     "@sixb/client": "latest",
-    "@sixb/blob-local": "latest",
     "@sixb/core": "latest",
     "@sixb/lake-local": "latest",
     "@sixb/sqlite": "latest",
+    "@sixb/ui": "latest",
+    "@tailwindcss/cli": "^4.2.2",
     "@tanstack/react-query": "^5.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.13.0"
+    "react-router-dom": "^7.13.0",
+    "tailwindcss": "^4.1.18"
   },
   "devDependencies": {
     "@types/bun": "latest",
