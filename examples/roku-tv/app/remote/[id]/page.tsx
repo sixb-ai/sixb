@@ -7,7 +7,7 @@ import {
 import { encodeObjectId } from "@sixb/client/models"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
-import { useParams } from "react-router-dom"
+import { Link, useParams } from "react-router-dom"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../../../lib/telemetryEvents"
 import { televisionObjectTypeId, televisionTwinProps } from "../../../lib/televisionTwin"
 
@@ -187,9 +187,9 @@ export default function RemoteControl() {
       <div className="twin-shell">
         <header className="panel-glass remote-header fade-slide">
           <div className="remote-header-row">
-            <a href="/" className="back-link">
+            <Link to="/" className="back-link">
               {"<- Back to twins"}
-            </a>
+            </Link>
             <div className="hero-chip">
               <span
                 className={`status-dot ${connected ? "status-online pulse-live" : "status-offline"}`}

@@ -1,3 +1,12 @@
+/*
+ * Tailwind v4 source — `sixb dev` and `sixb build` compile it automatically.
+ * Write Tailwind utility classes in any app page or component, drop in
+ * @sixb/ui components, and customize tokens below. The compiled CSS lands
+ * under .sixb/ and never needs to be committed.
+ */
+@import "@sixb/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+
 :root {
   color-scheme: dark;
   --bg: #0b0b0f;
@@ -11,6 +20,28 @@
   --accent-strong: #38bdf8;
   --danger: #f87171;
   --shadow: 0 30px 80px rgba(0, 0, 0, 0.35);
+
+  /* Map the starter palette onto @sixb/ui's design tokens so its components
+   * (Button, Card, ...) match this theme out of the box. */
+  --background: #0b0b0f;
+  --foreground: #f5f5f7;
+  --card: #13131a;
+  --card-foreground: #f5f5f7;
+  --popover: #13131a;
+  --popover-foreground: #f5f5f7;
+  --primary: #38bdf8;
+  --primary-foreground: #081018;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: #f5f5f7;
+  --muted: rgba(255, 255, 255, 0.06);
+  --muted-foreground: rgba(245, 245, 247, 0.68);
+  --accent: rgba(255, 255, 255, 0.08);
+  --accent-foreground: #f5f5f7;
+  --destructive: #f87171;
+  --destructive-foreground: #ffffff;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.12);
+  --ring: #38bdf8;
 }
 
 *,
