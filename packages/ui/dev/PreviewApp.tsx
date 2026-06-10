@@ -106,6 +106,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  Textarea,
   ThemeSwitcher,
   Tooltip,
   TooltipContent,
@@ -323,7 +324,7 @@ function Showcase() {
           </div>
         </Section>
 
-        <Section title="Forms" description="Input, label, select, checkbox, switch.">
+        <Section title="Forms" description="Input, textarea, label, select, checkbox, switch.">
           <Card>
             <CardContent className="space-y-5">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -346,6 +347,14 @@ function Showcase() {
                       </SelectGroup>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    rows={3}
+                    placeholder="Reviewer context, rollout caveats..."
+                  />
                 </div>
               </div>
 
