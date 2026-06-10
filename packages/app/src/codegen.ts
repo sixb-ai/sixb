@@ -4,7 +4,10 @@ import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
 /**
- * Generates `.sixb/generated/routes.ts` with lazy-loaded route imports.
+ * Generates `.sixb/generated/routes.ts` with static route imports. Pages are
+ * eager on purpose: project-specific apps bundle small, and a single bundle
+ * (one JS file, one render-blocking CSS file) means no Suspense gap or
+ * late-arriving styles when navigating — matching how Atlas/Sentinel route.
  */
 export async function generateRouteManifest(
   routes: PageRoute[],
@@ -13,16 +16,20 @@ export async function generateRouteManifest(
   await mkdir(generatedDir, { recursive: true })
 
   const imports = routes
-    .map((route) => {
+    .map((route, index) => {
       const rel = relativeTo(generatedDir, route.filePath)
-      return `  { path: ${JSON.stringify(route.path)}, component: lazy(() => import(${JSON.stringify(rel)})) },`
+      return `import Page${index} from ${JSON.stringify(rel)}`
     })
     .join("\n")
 
-  const content = `import { lazy } from "react"
+  const entries = routes
+    .map((route, index) => `  { path: ${JSON.stringify(route.path)}, component: Page${index} },`)
+    .join("\n")
+
+  const content = `${imports}
 
 export const routes = [
-${imports}
+${entries}
 ]
 `
 
@@ -44,6 +51,12 @@ export async function generateAppEntry(
     audience?: string
     authEnabled?: boolean
     appDir?: string
+    /**
+     * Stylesheet to import from the generated entry. `undefined` keeps the
+     * legacy behavior (import `app/globals.css` when it exists); `null` skips
+     * the import; a path imports that file (e.g. compiled Tailwind output).
+     */
+    stylesheetPath?: string | null
   } = {}
 ): Promise<{ htmlPath: string; mainPath: string }> {
   await mkdir(generatedDir, { recursive: true })
@@ -51,11 +64,17 @@ export async function generateAppEntry(
   const appDir = options.appDir ? resolve(projectRoot, options.appDir) : join(projectRoot, "app")
   const globalsCssPath = join(appDir, "globals.css")
   const layoutPath = join(appDir, "layout.tsx")
-  const globalsCssRel = relativeTo(generatedDir, globalsCssPath)
   const layoutRel = relativeTo(generatedDir, layoutPath)
-  const hasGlobalsCss = await fileExists(globalsCssPath)
   const hasLayout = await fileExists(layoutPath)
-  const globalsCssImport = hasGlobalsCss ? `import ${JSON.stringify(globalsCssRel)}\n` : ""
+  const stylesheetPath =
+    options.stylesheetPath !== undefined
+      ? options.stylesheetPath
+      : (await fileExists(globalsCssPath))
+        ? globalsCssPath
+        : null
+  const globalsCssImport = stylesheetPath
+    ? `import ${JSON.stringify(relativeTo(generatedDir, stylesheetPath))}\n`
+    : ""
   const layoutImport = hasLayout
     ? `import RootLayout, { metadata } from ${JSON.stringify(layoutRel)}\n`
     : ""
@@ -72,9 +91,9 @@ export async function generateAppEntry(
     : ""
 
   // Generate main.tsx
-  const mainContent = `import React, { Suspense } from "react"
+  const mainContent = `import React from "react"
 import { createRoot } from "react-dom/client"
-import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { BrowserRouter, Routes, Route, matchPath, useNavigate } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   configureSixbBrowserClient,
@@ -87,6 +106,7 @@ ${layoutImport}
 
 const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
 const browserClient = configureSixbBrowserClient(runtimeConfig)
+
 const authSession = runtimeConfig.auth.enabled
   ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
   : null
@@ -138,19 +158,73 @@ if (canRenderApp) {
   applyMetadata()
 }
 
+const RESERVED_PATH_PREFIXES = ["/api", "/auth", "/ws", "/docs"]
+
+function isReservedPath(pathname: string) {
+  return RESERVED_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(prefix + "/")
+  )
+}
+
+// Makes plain same-origin <a href="/..."> clicks navigate client-side, so app
+// authors get SPA navigation without remembering react-router's <Link>.
+// Deliberately conservative: anything unusual falls through to the browser.
+function InternalLinkInterceptor() {
+  const navigate = useNavigate()
+
+  React.useEffect(() => {
+    function onClick(event: MouseEvent) {
+      if (event.defaultPrevented) return
+      if (event.button !== 0) return
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+      const target = event.target
+      if (!(target instanceof Element)) return
+      const anchor = target.closest("a")
+      if (!(anchor instanceof HTMLAnchorElement)) return
+      if (anchor.target && anchor.target !== "_self") return
+      if (anchor.hasAttribute("download")) return
+      if (anchor.relList.contains("external")) return
+      if (!anchor.getAttribute("href")) return
+
+      const url = new URL(anchor.href, window.location.href)
+      if (url.origin !== window.location.origin) return
+      if (isReservedPath(url.pathname)) return
+      // Only intercept destinations the app actually routes; anything else may
+      // be a real server resource and keeps native navigation.
+      if (!routes.some((route) => matchPath(route.path, url.pathname))) return
+      // Same-document hash links keep native scroll behavior.
+      if (
+        url.hash &&
+        url.pathname === window.location.pathname &&
+        url.search === window.location.search
+      ) {
+        return
+      }
+
+      event.preventDefault()
+      navigate(url.pathname + url.search + url.hash)
+    }
+
+    document.addEventListener("click", onClick)
+    return () => document.removeEventListener("click", onClick)
+  }, [navigate])
+
+  return null
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <Suspense fallback={<div />}>
-          ${layoutWrapperStart}
-            <Routes>
-              {routes.map((route) => (
-                <Route key={route.path} path={route.path} element={<route.component />} />
-              ))}
-            </Routes>
-          ${layoutWrapperEnd}
-        </Suspense>
+        <InternalLinkInterceptor />
+        ${layoutWrapperStart}
+          <Routes>
+            {routes.map((route) => (
+              <Route key={route.path} path={route.path} element={<route.component />} />
+            ))}
+          </Routes>
+        ${layoutWrapperEnd}
       </BrowserRouter>
     </QueryClientProvider>
   )

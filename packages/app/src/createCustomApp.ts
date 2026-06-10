@@ -5,6 +5,8 @@ import { type BuildAppResult, buildApp } from "./build"
 import { generateAppEntry, generateRouteManifest } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, scanPages } from "./scanner"
+import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
+import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
 
 export interface CreateCustomAppOptions {
   rootDir: string
@@ -71,18 +73,49 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     return await scanPages(appDir)
   }
 
+  let tailwindCompiler: TailwindCssCompiler | null = null
+
+  // `app/globals.css` is source. When it uses Tailwind, compile it to
+  // `.sixb/generated/app.css` and bundle that; plain CSS bundles as-is. This
+  // runs in both dev and build, so `sixb build` alone always produces fresh CSS.
+  async function prepareStylesheet(): Promise<CustomAppStylesheet> {
+    const stylesheet = await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
+    if (stylesheet.kind !== "tailwind") {
+      return stylesheet
+    }
+
+    tailwindCompiler ??= createTailwindCssCompiler({
+      inputPath: stylesheet.sourcePath,
+      outputPath: stylesheet.outputPath,
+      // Scope Tailwind's automatic source detection to app/ so it never walks
+      // vendor/ or unrelated trees; resolve the CLI from the project's deps.
+      cwd: appDir,
+      resolveFrom: rootDir,
+      label: "[SixbCustomApp]",
+    })
+    await tailwindCompiler.compile()
+    return stylesheet
+  }
+
   async function prepareGeneratedApp(): Promise<{ htmlPath: string; routes: PageRoute[] }> {
     const routes = await scanRoutes()
     if (routes.length === 0) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
+    const stylesheet = await prepareStylesheet()
     await generateRouteManifest(routes, generatedDir)
     const { htmlPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
       authEnabled,
       appDir,
+      stylesheetPath:
+        stylesheet.kind === "none"
+          ? null
+          : stylesheet.kind === "static"
+            ? stylesheet.path
+            : stylesheet.outputPath,
     })
     return { htmlPath, routes }
   }
@@ -115,15 +148,26 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         },
       } as Parameters<typeof Bun.serve>[0])
 
-      const watcher = watch(appDir, { recursive: true }, async (_eventType, filename) => {
+      // .ts/.tsx edits can change Tailwind's scanned classes and .css edits
+      // change the stylesheet source, so both regenerate the entry and
+      // recompile CSS. Debounced so a burst of saves builds once.
+      let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+      const watcher = watch(appDir, { recursive: true }, (_eventType, filename) => {
         if (!filename) return
-        if (!filename.endsWith(".tsx") && !filename.endsWith(".ts")) return
+        if (!/\.(ts|tsx|css)$/.test(String(filename))) return
 
-        try {
-          await prepareGeneratedApp()
-        } catch {
-          // Ignore transient rebuild errors during dev; Bun will keep serving the last good build.
+        if (rebuildTimer) {
+          clearTimeout(rebuildTimer)
         }
+        rebuildTimer = setTimeout(() => {
+          rebuildTimer = null
+          prepareGeneratedApp().catch((error) => {
+            // Keep serving the last good build, but tell the user why styles
+            // or routes are stale instead of failing silently.
+            const message = error instanceof Error ? error.message : String(error)
+            console.error(`[SixbCustomApp] Rebuild failed: ${message}`)
+          })
+        }, 80)
       })
 
       const displayHost = host === "0.0.0.0" ? "localhost" : host
@@ -133,7 +177,12 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         port,
         url: `http://${displayHost}:${port}`,
         async stop() {
+          if (rebuildTimer) {
+            clearTimeout(rebuildTimer)
+            rebuildTimer = null
+          }
           watcher.close()
+          await tailwindCompiler?.stop()
           server.stop(true)
         },
       }
@@ -197,7 +246,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
-            return fileResponse(req, directFile)
+            return fileResponse(req, directFile, immutableAssetHeaders(url.pathname))
           }
 
           if (isAssetRequest(url.pathname)) {
@@ -400,8 +449,27 @@ function htmlResponse(request: Request, html: string): Response {
   })
 }
 
-function fileResponse(request: Request, file: Bun.BunFile): Response {
-  return new Response(request.method === "HEAD" ? null : file)
+// Bun.build emits content-hashed bundles named `chunk-<hash>.<ext>` (see buildApp).
+// Their contents can never change under the same URL, so they are safe to cache
+// forever — matching how Atlas/Sentinel serve their hashed assets. Files copied
+// from `public/` keep their names across deploys and stay uncached.
+const IMMUTABLE_ASSET_PATTERN = /^chunk-[a-z0-9]+\.(js|css|js\.map|css\.map)$/
+
+function immutableAssetHeaders(pathname: string): Record<string, string> {
+  const lastSegment = pathname.split("/").pop() ?? ""
+  if (!IMMUTABLE_ASSET_PATTERN.test(lastSegment)) {
+    return {}
+  }
+
+  return { "cache-control": "public, max-age=31536000, immutable" }
+}
+
+function fileResponse(
+  request: Request,
+  file: Bun.BunFile,
+  headers: Record<string, string> = {}
+): Response {
+  return new Response(request.method === "HEAD" ? null : file, { headers })
 }
 
 function filePathResponse(request: Request, path: string): Response {

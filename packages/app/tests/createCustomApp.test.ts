@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { generateAppEntry } from "../src/codegen"
+import { generateAppEntry, generateRouteManifest } from "../src/codegen"
 import { createCustomApp } from "../src/createCustomApp"
 
 async function getFreePort(): Promise<number> {
@@ -89,6 +89,40 @@ describe("createCustomApp.start", () => {
         method: "POST",
       })
       expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("serves hashed build chunks with immutable cache headers", async () => {
+    const outdir = join(tempRoot, ".sixb", "dist", "app")
+    await writeFile(join(outdir, "chunk-ab12cd34.js"), "console.log('chunk')\n")
+    await writeFile(join(outdir, "chunk-ab12cd34.css"), "body{}\n")
+
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
+    const server = await app.start({
+      host: "127.0.0.1",
+      port,
+      apiBaseUrl: "http://127.0.0.1:3000",
+    })
+
+    try {
+      const immutable = "public, max-age=31536000, immutable"
+      const chunkJs = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.js`)
+      expect(chunkJs.status).toBe(200)
+      expect(chunkJs.headers.get("cache-control")).toBe(immutable)
+
+      const chunkCss = await fetch(`http://127.0.0.1:${port}/chunk-ab12cd34.css`)
+      expect(chunkCss.headers.get("cache-control")).toBe(immutable)
+
+      // Non-hashed files (public/ copies) and the SPA shell stay uncached.
+      const mainJs = await fetch(`http://127.0.0.1:${port}/main.js`)
+      expect(mainJs.status).toBe(200)
+      expect(mainJs.headers.get("cache-control")).toBeNull()
+
+      const shell = await fetch(`http://127.0.0.1:${port}/`)
+      expect(shell.headers.get("cache-control")).toBe("no-store")
     } finally {
       await server.stop()
     }
@@ -181,6 +215,64 @@ describe("createCustomApp.dev", () => {
     }
   })
 
+  test("generates an eager entry with no lazy routes or Suspense gap", async () => {
+    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const main = await readFile(mainPath, "utf-8")
+
+    // Routes render synchronously after auth — no Suspense fallback frame.
+    expect(main).not.toContain("lazy(")
+    expect(main).not.toContain("Suspense")
+    expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
+  })
+
+  test("route manifest statically imports every page", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const manifestPath = await generateRouteManifest(
+      [
+        {
+          path: "/",
+          filePath: join(tempRoot, "app", "page.tsx"),
+          relativePath: "page.tsx",
+        },
+        {
+          path: "/devices/:id",
+          filePath: join(tempRoot, "app", "devices", "[id]", "page.tsx"),
+          relativePath: "devices/[id]/page.tsx",
+        },
+      ],
+      generatedDir
+    )
+    const manifest = await readFile(manifestPath, "utf-8")
+
+    expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
+    expect(manifest).toContain('import Page1 from "../../app/devices/[id]/page.tsx"')
+    expect(manifest).toContain('{ path: "/", component: Page0 },')
+    expect(manifest).toContain('{ path: "/devices/:id", component: Page1 },')
+    expect(manifest).not.toContain("lazy(")
+  })
+
+  test("generated entry intercepts internal anchors conservatively", async () => {
+    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const main = await readFile(mainPath, "utf-8")
+
+    expect(main).toContain("<InternalLinkInterceptor />")
+    // The guard list is the contract: anything unusual must fall through to
+    // native browser navigation.
+    for (const guard of [
+      "event.defaultPrevented",
+      "event.button !== 0",
+      "event.metaKey || event.ctrlKey || event.shiftKey || event.altKey",
+      'anchor.target && anchor.target !== "_self"',
+      'anchor.hasAttribute("download")',
+      'anchor.relList.contains("external")',
+      "url.origin !== window.location.origin",
+      "isReservedPath(url.pathname)",
+      "matchPath(route.path, url.pathname)",
+    ]) {
+      expect(main).toContain(guard)
+    }
+  })
+
   test("generates a structural shell without framework visual styles", async () => {
     const { htmlPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
     const html = await readFile(htmlPath, "utf-8")
@@ -192,6 +284,10 @@ describe("createCustomApp.dev", () => {
     expect(html).not.toContain("font-family")
     expect(html).not.toContain("background")
     expect(html).not.toContain("color:")
+    // No element-level link rules: an unlayered `a { color: inherit }` here
+    // once outranked Tailwind's layered text utilities and blanked the label
+    // of <Button asChild><Link/></Button> in every app.
+    expect(html).not.toMatch(/(^|[\s{}])a\s*\{/)
     expect(html).not.toContain("#05070c")
     expect(html).not.toContain("#0b1222")
     expect(html).not.toContain("radial-gradient")
