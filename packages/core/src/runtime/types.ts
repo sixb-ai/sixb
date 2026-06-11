@@ -115,10 +115,12 @@ export type RegisteredObjectType<TOntologySources extends readonly OntologySourc
 export type RegisteredValueTypes<TOntologySources extends readonly OntologySource[]> =
   readonly ValueTypeFromSource<TOntologySources[number]>[]
 
-export interface TwinObject<
-  TObjectType extends ObjectType,
-  TValueTypes extends readonly ValueType[],
-> {
+// A type alias, not an interface: relating two generic-interface
+// instantiations makes TypeScript measure the interface's variance by probing
+// it with marker types, and `InferObjectProperties<marker>` overflows its
+// recursion limits (TS2589) in consumers like `rows.map(...)`. The alias
+// relates structurally, which stays within limits.
+export type TwinObject<TObjectType extends ObjectType, TValueTypes extends readonly ValueType[]> = {
   primaryId: string
   objectTypeId: TObjectType["id"]
   properties: InferObjectProperties<TObjectType, TValueTypes>
@@ -247,13 +249,43 @@ type PropertyPredicate<
 type PropertyWhereClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
-> = {
-  [TPropertyId in TObjectType["properties"][number]["id"]]:
-    | PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes>
-    | PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
-    | PropertyWhereExistsClause<TObjectType, TPropertyId>
-    | PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
-}[TObjectType["properties"][number]["id"]]
+> =
+  HasKnownPropertyIds<TObjectType> extends false
+    ?
+        | ObjectQueryPredicateComparison
+        | ObjectQueryPredicateIn
+        | ObjectQueryPredicateExists
+        | ObjectQueryPredicateContains
+    : {
+        [TPropertyId in TObjectType["properties"][number]["id"]]:
+          | PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes>
+          | PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
+          | PropertyWhereExistsClause<TObjectType, TPropertyId>
+          | PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
+      }[TObjectType["properties"][number]["id"]]
+
+/**
+ * Predicate operators for an object type whose properties are not statically
+ * known, such as after traversing a link whose target type is unresolved.
+ * Mirrors `PropertyPredicate` with IR-level value types, and keeps the type
+ * shallow — instantiating the typed predicate map over the broad `Property`
+ * union overflows TypeScript's recursion limits.
+ */
+type UntypedPropertyPredicate = {
+  eq(value: unknown): ObjectQueryPredicateComparison & { op: "eq" }
+  neq(value: unknown): ObjectQueryPredicateComparison & { op: "neq" }
+  lt(value: unknown): ObjectQueryPredicateComparison & { op: "lt" }
+  lte(value: unknown): ObjectQueryPredicateComparison & { op: "lte" }
+  gt(value: unknown): ObjectQueryPredicateComparison & { op: "gt" }
+  gte(value: unknown): ObjectQueryPredicateComparison & { op: "gte" }
+  in(values: readonly unknown[]): ObjectQueryPredicateIn
+  exists(value?: boolean): ObjectQueryPredicateExists
+  contains(value: unknown): ObjectQueryPredicateContains
+}
+
+/** True when the object type's property ids are statically known literals. */
+type HasKnownPropertyIds<TObjectType extends ObjectTypeWithPropertyTokens> =
+  string extends TObjectType["properties"][number]["id"] ? false : true
 
 /** Typed ObjectSet where predicate. Serialized shape matches object query IR predicates. */
 export type ObjectWhereClause<
@@ -277,13 +309,15 @@ export type ObjectWhereBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 > = {
-  p: {
-    [TPropertyId in TObjectType["properties"][number]["id"]]: PropertyPredicate<
-      TObjectType,
-      TPropertyId,
-      TValueTypes
-    >
-  }
+  p: HasKnownPropertyIds<TObjectType> extends false
+    ? Record<string, UntypedPropertyPredicate>
+    : {
+        [TPropertyId in TObjectType["properties"][number]["id"]]: PropertyPredicate<
+          TObjectType,
+          TPropertyId,
+          TValueTypes
+        >
+      }
   and(
     ...items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
   ): ObjectWhereClause<TObjectType, TValueTypes>

@@ -53,25 +53,6 @@ type InferObjectFields<
   }
 >
 
-type ItemById<TItems extends readonly { id: string }[], TId extends string> = Extract<
-  TItems[number],
-  { id: TId }
->
-
-type RequiredItemIds<TItems extends readonly { id: string; required?: boolean }[]> = {
-  [K in TItems[number]["id"]]: ItemById<TItems, K>["required"] extends true ? K : never
-}[TItems[number]["id"]]
-
-type OptionalItemIds<TItems extends readonly { id: string; required?: boolean }[]> = Exclude<
-  TItems[number]["id"],
-  RequiredItemIds<TItems>
->
-
-type PropertyById<TProperties extends readonly Property[], TPropertyId extends string> = Extract<
-  TProperties[number],
-  { id: TPropertyId }
->
-
 /**
  * Convert ontology schema definitions into runtime value types.
  *
@@ -166,19 +147,29 @@ export type InferPropertyUnit<
 export type InferObjectProperties<
   TObjectType extends { properties: readonly Property[] },
   TValueTypes extends readonly ValueType[] = [],
-> = Simplify<
-  {
-    [K in RequiredItemIds<TObjectType["properties"]>]: InferPropertyValue<
-      PropertyById<TObjectType["properties"], K>,
-      TValueTypes
-    >
-  } & {
-    [K in OptionalItemIds<TObjectType["properties"]>]?: InferPropertyValue<
-      PropertyById<TObjectType["properties"], K>,
-      TValueTypes
-    >
-  }
->
+> =
+  // Object types whose property ids are not statically known (the broad
+  // `ObjectTypeWithPropertyTokens` base, e.g. as a generic constraint or
+  // after an unresolved link traversal) get an untyped property bag —
+  // instantiating the mapped type over the broad `Property` union overflows
+  // TypeScript's recursion limits.
+  string extends TObjectType["properties"][number]["id"]
+    ? Record<string, unknown>
+    : // Iterates over the property union directly (via `as TProp["id"]`
+      // remapping) so that `TProp` is already resolved — avoids repeated
+      // `Extract` lookups per key, which cause TS2589 when consumers relate
+      // these types in deep contexts such as `rows.map(...)` callbacks.
+      Simplify<
+        {
+          [TProp in TObjectType["properties"][number] as TProp extends { required: true }
+            ? TProp["id"]
+            : never]: InferPropertyValue<TProp, TValueTypes>
+        } & {
+          [TProp in TObjectType["properties"][number] as TProp extends { required: true }
+            ? never
+            : TProp["id"]]?: InferPropertyValue<TProp, TValueTypes>
+        }
+      >
 
 /** Useful for APIs that should only accept telemetry-mode properties. */
 export type InferTelemetryPropertyIds<TObjectType extends { properties: readonly Property[] }> =
