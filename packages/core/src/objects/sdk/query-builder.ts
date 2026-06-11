@@ -2,10 +2,11 @@
  * Fluent ObjectSet query builder.
  *
  * This is the TypeScript authoring layer for object queries. It builds the
- * provider-neutral object query IR and leaves validation, planning, fallback,
- * and execution to the shared query executor.
+ * provider-neutral object query IR and delegates execution to an
+ * `ObjectQueryExecutor` — the server runtime executor or the HTTP client
+ * executor — so the same builder serves both sides.
  */
-import type { OntologyRegistry, ValueType } from "../../ontology"
+import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
@@ -19,29 +20,15 @@ import type {
   ObjectWhereClause,
   TwinObject,
 } from "../../runtime/types"
-import type { Storage } from "../../storage"
-import {
-  countObjects,
-  executeObjectQuery,
-  existsObjects,
-  explainObjectQuery,
-  facetObjects,
-  formatObjectQueryExplanation,
-  normalizeObjectQuery,
-  type ObjectQuery,
-  type ObjectQueryDirection,
-  ObjectQueryPlanningError,
-  type ObjectQuerySortDirection,
-  validateObjectQuery,
-} from "../query"
+import { formatObjectQueryExplanation } from "../query/explain-format"
+import type { ObjectQuery, ObjectQueryDirection, ObjectQuerySortDirection } from "../query/ir"
+import { normalizeObjectQuery } from "../query/normalize"
+import type { ObjectQueryExecutor } from "./query-executor"
 import { resolveWhere } from "./where"
 
-type QueryBuilderParams<TObjectType extends ObjectTypeWithPropertyTokens> = {
-  objectType: TObjectType
-  projectId: string
-  ontology: OntologyRegistry
-  storage: Storage
+type QueryBuilderParams = {
   query: ObjectQuery
+  executor: ObjectQueryExecutor
 }
 
 export function createObjectQueryBuilder<
@@ -49,7 +36,7 @@ export function createObjectQueryBuilder<
   TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 >(
-  params: QueryBuilderParams<TObjectType>
+  params: QueryBuilderParams
 ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
   return new ObjectQueryBuilderImpl<TObjectType, TRegisteredObjectTypes, TValueTypes>(
     params
@@ -61,7 +48,7 @@ class ObjectQueryBuilderImpl<
   TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 > {
-  constructor(private readonly params: QueryBuilderParams<TObjectType>) {}
+  constructor(private readonly params: QueryBuilderParams) {}
 
   get ir(): ObjectQuery {
     return normalizeObjectQuery(this.params.query)
@@ -74,7 +61,7 @@ class ObjectQueryBuilderImpl<
       | ObjectWhereClause<TObjectType, TValueTypes>
       | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
-    const predicate = resolveWhere<TObjectType, TValueTypes>(this.params.objectType, whereFn)
+    const predicate = resolveWhere<TObjectType, TValueTypes>(whereFn)
     if (!predicate)
       return this as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
 
@@ -124,7 +111,9 @@ class ObjectQueryBuilderImpl<
     options: { direction?: ObjectQueryDirection } = {}
   ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens, TRegisteredObjectTypes, TValueTypes> {
     const direction = options.direction ?? "outgoing"
-    const nextObjectType = this.resolveTraverseObjectType(link, direction)
+    if (direction === "outgoing") {
+      requireSingleTargetObjectTypeId(link)
+    }
 
     return new ObjectQueryBuilderImpl<
       ObjectTypeWithPropertyTokens,
@@ -132,7 +121,6 @@ class ObjectQueryBuilderImpl<
       TValueTypes
     >({
       ...this.params,
-      objectType: nextObjectType,
       query: {
         kind: "traverse",
         input: this.ir,
@@ -191,17 +179,21 @@ class ObjectQueryBuilderImpl<
   }
 
   validate() {
-    return validateObjectQuery(this.ir, {
-      ontology: this.params.ontology,
-      normalize: false,
-    })
+    if (!this.params.executor.validate) {
+      throw new OntologyValidationError(
+        "[Sixb] validate() requires ontology access and is not supported by this query executor. Execute the query to get server-side validation."
+      )
+    }
+    return this.params.executor.validate(this.ir)
   }
 
   explain() {
-    return explainObjectQuery(this.ir, {
-      ontology: this.params.ontology,
-      normalize: false,
-    })
+    if (!this.params.executor.explain) {
+      throw new OntologyValidationError(
+        "[Sixb] explain() requires ontology access and is not supported by this query executor."
+      )
+    }
+    return this.params.executor.explain(this.ir)
   }
 
   formatExplanation(): string {
@@ -221,66 +213,53 @@ class ObjectQueryBuilderImpl<
     | ListResult<TwinObject<TObjectType, TValueTypes>>
     | ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>
   > {
-    return executeTypedObjectQuery<TObjectType, TValueTypes>({
-      projectId: this.params.projectId,
-      query: this.ir,
-      storage: this.params.storage,
-      ontology: this.params.ontology,
-      sdkHints: true,
+    const result = await this.params.executor.list(this.ir, {
       includeTotal: options?.includeTotal,
     })
+    const objects = result.objects.map(
+      (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
+    )
+
+    if (options?.includeTotal === false) {
+      return {
+        objects,
+        hasMore: result.hasMore,
+        nextPageToken: result.nextPageToken,
+      }
+    }
+
+    return {
+      objects,
+      hasMore: result.hasMore,
+      nextPageToken: result.nextPageToken,
+      total: result.total ?? result.objects.length,
+    }
   }
 
   async count(): Promise<number> {
-    const result = await countObjects(
-      {
-        projectId: this.params.projectId,
-        query: this.ir,
-      },
-      { ontology: this.params.ontology, storage: this.params.storage.objects }
-    )
-    return result.count
+    return this.params.executor.count(this.ir)
   }
 
   async exists(): Promise<boolean> {
-    const result = await existsObjects(
-      {
-        projectId: this.params.projectId,
-        query: this.ir,
-      },
-      { ontology: this.params.ontology, storage: this.params.storage.objects }
-    )
-    return result.exists
+    return this.params.executor.exists(this.ir)
   }
 
   async facets(
     input: readonly ObjectQueryFacetInput<TObjectType>[]
   ): Promise<ObjectQueryFacetResult[]> {
-    const result = await facetObjects(
-      {
-        projectId: this.params.projectId,
-        query: this.ir,
-        facets: input.map((facet) => ({
-          propertyId: facet.property.id,
-          limit: facet.limit,
-        })),
-      },
-      { ontology: this.params.ontology, storage: this.params.storage.objects }
+    return this.params.executor.facets(
+      this.ir,
+      input.map((facet) => ({
+        propertyId: facet.property.id,
+        limit: facet.limit,
+      }))
     )
-    return result.facets.map((facet) => ({
-      propertyId: facet.propertyId,
-      buckets: [...facet.buckets],
-    }))
   }
 
   async first(): Promise<TwinObject<TObjectType, TValueTypes> | null> {
-    const result = await executeTypedObjectQuery<TObjectType, TValueTypes>({
-      projectId: this.params.projectId,
-      query: { kind: "limit", input: this.ir, limit: 1 },
-      storage: this.params.storage,
-      ontology: this.params.ontology,
-    })
-    return result.objects[0] ?? null
+    const result = await this.params.executor.list({ kind: "limit", input: this.ir, limit: 1 })
+    const row = result.objects[0]
+    return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
   }
 
   private withQuery(
@@ -290,12 +269,6 @@ class ObjectQueryBuilderImpl<
       ...this.params,
       query,
     }) as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
-  }
-
-  private resolveTraverseObjectType(link: LinkToken, direction: ObjectQueryDirection) {
-    const objectTypeId =
-      direction === "incoming" ? link.objectTypeId : resolveSingleTargetObjectTypeId(link)
-    return this.params.ontology.resolveObjectType(objectTypeId)
   }
 }
 
@@ -321,86 +294,11 @@ function propertyTokenToId(token: PropertyToken): string {
   return token.id
 }
 
-function resolveSingleTargetObjectTypeId(link: LinkToken): string {
+function requireSingleTargetObjectTypeId(link: LinkToken): void {
   const target = link.targetObjectTypeId
   if (target === "*" || typeof target !== "string") {
     throw new OntologyValidationError(
       "[Sixb] Object query traverse requires a single concrete outgoing target type"
     )
   }
-  return target
-}
-
-async function executeTypedObjectQuery<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(params: {
-  query: ObjectQuery
-  ontology: OntologyRegistry
-  projectId: string
-  storage: Storage
-  sdkHints?: boolean
-  includeTotal?: boolean
-}) {
-  const result = await executeObjectQueryWithSdkHints(params)
-
-  const objects = result.objects.map(
-    (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
-  )
-
-  if (params.includeTotal === false) {
-    return {
-      objects,
-      hasMore: result.hasMore,
-      nextPageToken: result.nextPageToken,
-    }
-  }
-
-  return {
-    objects,
-    hasMore: result.hasMore,
-    nextPageToken: result.nextPageToken,
-    total: result.total ?? result.objects.length,
-  }
-}
-
-async function executeObjectQueryWithSdkHints(params: {
-  query: ObjectQuery
-  ontology: OntologyRegistry
-  projectId: string
-  storage: Storage
-  sdkHints?: boolean
-  includeTotal?: boolean
-}) {
-  try {
-    return await executeObjectQuery(
-      {
-        projectId: params.projectId,
-        query: params.query,
-        includeTotal: params.includeTotal,
-      },
-      { ontology: params.ontology, storage: params.storage.objects }
-    )
-  } catch (error) {
-    if (params.sdkHints && error instanceof ObjectQueryPlanningError) {
-      throw addSdkPlanningHints(error)
-    }
-    throw error
-  }
-}
-
-function addSdkPlanningHints(error: ObjectQueryPlanningError): ObjectQueryPlanningError {
-  if (!error.issues.some((issue) => issue.code === "fallback_requires_bound")) return error
-
-  return new ObjectQueryPlanningError(
-    error.issues.map((issue) =>
-      issue.code === "fallback_requires_bound"
-        ? {
-            ...issue,
-            message:
-              "Object query fallback requires an explicit result bound. Add .limit(n) or .page({ pageSize: n }) before .list().",
-          }
-        : issue
-    )
-  )
 }
