@@ -27,7 +27,8 @@ export type {
   ObjectQueryExplainOptions,
   ObjectQueryExplanation,
 } from "./explain"
-export { explainObjectQuery, formatObjectQueryExplanation } from "./explain"
+export { explainObjectQuery } from "./explain"
+export { formatObjectQueryExplanation } from "./explain-format"
 export type {
   ObjectQuery,
   ObjectQueryDirection,

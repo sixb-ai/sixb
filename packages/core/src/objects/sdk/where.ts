@@ -2,18 +2,17 @@
  * Where-clause builder for typed ObjectSet queries.
  *
  * Provides `createWhereBuilder` (predicate DSL) and `resolveWhere` (evaluator).
- * The builder emits object query IR predicates.
+ * The builder emits object query IR predicates. Property predicates are created
+ * on demand through a Proxy, so no runtime ontology access is required —
+ * property names are constrained at compile time and validated server-side.
  */
 import type { ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { ObjectWhereBuilder, ObjectWhereClause } from "../../runtime/types"
 import type { ObjectQueryPredicate } from "../query"
 
-export function createWhereBuilder<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(objectType: TObjectType): ObjectWhereBuilder<TObjectType, TValueTypes> {
-  const comparison = (propertyId: string, op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte") => {
+function createPropertyPredicate(propertyId: string) {
+  const comparison = (op: "eq" | "neq" | "lt" | "lte" | "gt" | "gte") => {
     return (value: unknown) => ({
       propertyId,
       op,
@@ -21,37 +20,45 @@ export function createWhereBuilder<
     })
   }
 
-  const entries = objectType.properties.map((property) => {
-    return [
-      property.id,
-      {
-        eq: comparison(property.id, "eq"),
-        neq: comparison(property.id, "neq"),
-        lt: comparison(property.id, "lt"),
-        lte: comparison(property.id, "lte"),
-        gt: comparison(property.id, "gt"),
-        gte: comparison(property.id, "gte"),
-        in: (values: readonly unknown[]) => ({
-          propertyId: property.id,
-          op: "in",
-          values,
-        }),
-        exists: (value = true) => ({
-          propertyId: property.id,
-          op: "exists",
-          value,
-        }),
-        contains: (value: unknown) => ({
-          propertyId: property.id,
-          op: "contains",
-          value,
-        }),
-      },
-    ]
-  })
+  return {
+    eq: comparison("eq"),
+    neq: comparison("neq"),
+    lt: comparison("lt"),
+    lte: comparison("lte"),
+    gt: comparison("gt"),
+    gte: comparison("gte"),
+    in: (values: readonly unknown[]) => ({
+      propertyId,
+      op: "in",
+      values,
+    }),
+    exists: (value = true) => ({
+      propertyId,
+      op: "exists",
+      value,
+    }),
+    contains: (value: unknown) => ({
+      propertyId,
+      op: "contains",
+      value,
+    }),
+  }
+}
+
+export function createWhereBuilder<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TValueTypes extends readonly ValueType[],
+>(): ObjectWhereBuilder<TObjectType, TValueTypes> {
+  const p = new Proxy(
+    {},
+    {
+      get: (_target, propertyId) =>
+        typeof propertyId === "string" ? createPropertyPredicate(propertyId) : undefined,
+    }
+  )
 
   return {
-    p: Object.fromEntries(entries),
+    p,
     and: (...items: readonly ObjectQueryPredicate[]) => ({ op: "and", items }),
     or: (...items: readonly ObjectQueryPredicate[]) => ({ op: "or", items }),
     not: (item: ObjectQueryPredicate) => ({ op: "not", item }),
@@ -62,7 +69,6 @@ export function resolveWhere<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 >(
-  objectType: TObjectType,
   whereFn?: (
     builder: ObjectWhereBuilder<TObjectType, TValueTypes>
   ) =>
@@ -70,7 +76,7 @@ export function resolveWhere<
     | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
 ): ObjectQueryPredicate | undefined {
   if (!whereFn) return undefined
-  const whereBuilder = createWhereBuilder<TObjectType, TValueTypes>(objectType)
+  const whereBuilder = createWhereBuilder<TObjectType, TValueTypes>()
   const whereInput = whereFn(whereBuilder)
   if (!whereInput) return undefined
   const predicates = (

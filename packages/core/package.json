@@ -11,6 +11,18 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./ontology": {
+      "types": "./dist/ontology/index.d.ts",
+      "bun": "./src/ontology/index.ts",
+      "import": "./dist/ontology/index.js",
+      "default": "./dist/ontology/index.js"
+    },
+    "./query": {
+      "types": "./dist/query.d.ts",
+      "bun": "./src/query.ts",
+      "import": "./dist/query.js",
+      "default": "./dist/query.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "bun": "./src/testing/index.ts",

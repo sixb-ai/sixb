@@ -70,25 +70,6 @@ export function explainObjectQuery(
   }
 }
 
-export function formatObjectQueryExplanation(explanation: ObjectQueryExplanation): string {
-  const lines: string[] = []
-  const status =
-    explanation.valid === undefined ? "not validated" : explanation.valid ? "valid" : "invalid"
-  const result = explanation.result ? ` result=${explanation.result.objectTypeIds.join(" | ")}` : ""
-
-  lines.push(`ObjectQuery ${status}${result}`)
-  appendNodeLines(explanation.tree, lines, 0)
-
-  if (explanation.issues.length > 0) {
-    lines.push("Issues:")
-    for (const issue of explanation.issues) {
-      lines.push(`- ${issue.path} [${issue.code}] ${issue.message}`)
-    }
-  }
-
-  return lines.join("\n")
-}
-
 function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainNode {
   switch (query.kind) {
     case "start":
@@ -180,13 +161,6 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
         details: { properties: query.properties },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
-  }
-}
-
-function appendNodeLines(node: ObjectQueryExplainNode, lines: string[], depth: number): void {
-  lines.push(`${"  ".repeat(depth)}- ${node.path} ${node.summary}`)
-  for (const child of node.children) {
-    appendNodeLines(child, lines, depth + 1)
   }
 }
 

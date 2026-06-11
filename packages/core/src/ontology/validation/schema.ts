@@ -1,4 +1,4 @@
-import { isFileRef } from "../../blob-storage"
+import { isFileRef } from "../../blob-storage/validation"
 import type { ObjectFieldSchema, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 

@@ -25,6 +25,7 @@ import { upsertObject as upsertObjectLeaf } from "../object"
 import { appendTelemetryBatch as appendTelemetryBatchLeaf } from "../telemetry"
 import { createObjectByIdHandle } from "./object-handle"
 import { createObjectQueryBuilder } from "./query-builder"
+import { createRuntimeQueryExecutor } from "./runtime-query-executor"
 
 export function createObjectSet<
   TObjectType extends ObjectTypeWithPropertyTokens,
@@ -58,6 +59,8 @@ export function createObjectSet<
     throw new OntologyValidationError(`Object type '${objectType.id}' has no primary property`)
   }
   const primaryPropertyId = primaryProp.id
+
+  const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage })
 
   const resolvedCtx: ResolvedObjectContext = {
     projectId,
@@ -95,11 +98,8 @@ export function createObjectSet<
 
     query: () =>
       createObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>({
-        objectType,
-        ontology,
-        projectId,
-        storage,
         query: { kind: "start", objectTypeId: objectType.id },
+        executor: queryExecutor,
       }),
 
     byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
