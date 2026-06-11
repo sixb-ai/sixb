@@ -1,4 +1,4 @@
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
 import { Employee } from "./employee"
 import { Project } from "./project"
 

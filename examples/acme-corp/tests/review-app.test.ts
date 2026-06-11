@@ -14,6 +14,10 @@ describe("Acme review app", () => {
     })
 
     const routes = await app.scanRoutes()
-    expect(routes.map((route) => route.path).sort()).toEqual(["/", "/review/:interventionId"])
+    expect(routes.map((route) => route.path).sort()).toEqual([
+      "/",
+      "/projects",
+      "/review/:interventionId",
+    ])
   })
 })
