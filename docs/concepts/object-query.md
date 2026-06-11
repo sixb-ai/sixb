@@ -349,6 +349,12 @@ Traversal is type-aware. After `traverse(Project.l.customer)`, subsequent `where
 use the target object's properties. Wildcard links cannot be traversed through the fluent
 API because the result object type cannot be inferred.
 
+Several object types can declare a link with the same id — for example `Project.customer`
+and `Invoice.customer`. The fluent API always pins incoming traversal to the link token's
+owner type, so `traverse(Project.l.customer, { direction: "incoming" })` returns only
+projects. Raw queries opt in with `sourceObjectTypeId` on the `traverse` node; omitting it
+keeps the union of every source type that declares the link.
+
 
 ## Sorting And Limits
 
@@ -606,7 +612,7 @@ Send that token back as `pageToken` to read the next page:
 | `filter` | Apply property predicates. |
 | `text` | Keyword search over `search.defaultText` or explicit `fields`. |
 | `vector` | Nearest-neighbor search on a numeric-array property when supported. |
-| `traverse` | Follow an outgoing or incoming ontology link. |
+| `traverse` | Follow an outgoing or incoming ontology link. Incoming traversal accepts `sourceObjectTypeId` to pin one source type. |
 | `set` | Combine compatible object sets with `union`, `intersect`, or `subtract`. |
 | `sort` | Order by properties or provider-supported relevance. |
 | `limit` | Bound the result count. |

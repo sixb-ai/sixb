@@ -115,8 +115,17 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
       return {
         path,
         kind: query.kind,
-        summary: `traverse ${query.direction} ${query.linkId}`,
-        details: { linkId: query.linkId, direction: query.direction },
+        summary:
+          query.sourceObjectTypeId === undefined
+            ? `traverse ${query.direction} ${query.linkId}`
+            : `traverse ${query.direction} ${query.sourceObjectTypeId}.${query.linkId}`,
+        details: {
+          linkId: query.linkId,
+          direction: query.direction,
+          ...(query.sourceObjectTypeId === undefined
+            ? {}
+            : { sourceObjectTypeId: query.sourceObjectTypeId }),
+        },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
     case "set":

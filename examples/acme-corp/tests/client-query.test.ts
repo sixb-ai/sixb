@@ -5,7 +5,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import { client } from "@sixb/client"
-import { objects, SixbQueryError } from "@sixb/client/query"
+import { createHttpQueryExecutor, objects, SixbQueryError } from "@sixb/client/query"
 import {
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -19,6 +19,7 @@ import { SixbServer } from "@sixb/server"
 import { SqliteObjectStorage, SqliteTimeseriesStorage } from "@sixb/sqlite"
 import { Customer } from "../ontology/customer"
 import { Employee } from "../ontology/employee"
+import { Invoice } from "../ontology/invoice"
 import { Project } from "../ontology/project"
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
@@ -52,7 +53,7 @@ function getFreePort(): Promise<number> {
 
 const sixb = createSixbInstance({
   id: "acme-client-query-e2e",
-  ontology: [Project, Customer, Employee] as const,
+  ontology: [Project, Customer, Employee, Invoice] as const,
   broker: new InMemoryBroker(),
   storage: {
     objects: new SqliteObjectStorage(),
@@ -111,6 +112,18 @@ beforeAll(async () => {
       targetId: "cust-001",
     })
   }
+
+  // Invoice shares the "customer" link id with Project, so incoming traversal
+  // is ambiguous unless the traverse node pins the source object type.
+  await sixb.objects(Invoice).upsert({
+    properties: { id: "inv-001", number: "INV-001", amount: 1_200, status: "sent" },
+  })
+  await sixb.objects(Invoice).upsertLink({
+    sourceId: "inv-001",
+    linkId: "customer",
+    targetTypeId: Customer.id,
+    targetId: "cust-001",
+  })
 
   const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
@@ -203,6 +216,32 @@ describe("client object queries against a live server", () => {
         { value: "completed", count: 1 },
       ])
     )
+  })
+
+  test("incoming traverse returns only the link token's source type", async () => {
+    const viaToken = await objects(Customer)
+      .query()
+      .where((customer) => customer.p.id.eq("cust-001"))
+      .traverse(Project.l.customer, { direction: "incoming" })
+      .list()
+    expect(primaryIds(viaToken.objects).sort()).toEqual(["proj-001", "proj-002"])
+
+    // Raw IR without sourceObjectTypeId keeps the union behavior.
+    const union = await createHttpQueryExecutor().list({
+      kind: "traverse",
+      linkId: "customer",
+      direction: "incoming",
+      input: {
+        kind: "filter",
+        predicate: { op: "eq", propertyId: "id", value: "cust-001" },
+        input: { kind: "start", objectTypeId: Customer.id },
+      },
+    })
+    expect([...union.objects].map((row) => row.primaryId).sort()).toEqual([
+      "inv-001",
+      "proj-001",
+      "proj-002",
+    ])
   })
 
   test("incoming traverse finds a customer's active projects", async () => {

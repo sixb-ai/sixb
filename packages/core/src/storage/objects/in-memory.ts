@@ -184,7 +184,12 @@ export class InMemoryObjectStorage implements ObjectStorage {
         const entries =
           query.direction === "outgoing"
             ? this.traverseOutgoing(projectId, input.entries, query.linkId)
-            : this.traverseIncoming(projectId, input.entries, query.linkId)
+            : this.traverseIncoming(
+                projectId,
+                input.entries,
+                query.linkId,
+                query.sourceObjectTypeId
+              )
         return completeEvaluation(entries)
       }
       case "set":
@@ -314,7 +319,8 @@ export class InMemoryObjectStorage implements ObjectStorage {
   private traverseIncoming(
     projectId: string,
     entries: readonly QueryEntry[],
-    linkId: string
+    linkId: string,
+    sourceObjectTypeId?: string
   ): QueryEntry[] {
     const inputEntriesByTarget = new Map(entries.map((entry) => [rowIdentityKey(entry.row), entry]))
     const resultsByKey = new Map<string, QueryEntry>()
@@ -322,6 +328,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
     for (const bucket of this.links.values()) {
       for (const link of bucket.values()) {
         if (link.projectId !== projectId || link.linkId !== linkId) continue
+        if (sourceObjectTypeId !== undefined && link.sourceTypeId !== sourceObjectTypeId) continue
         const targetEntry = inputEntriesByTarget.get(
           rowIdentityKeyParts(link.targetTypeId, link.targetId)
         )

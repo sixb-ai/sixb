@@ -214,6 +214,7 @@ describe("objects().query()", () => {
           kind: "traverse",
           linkId: "customer",
           direction: "incoming",
+          sourceObjectTypeId: "Project",
           input: {
             kind: "filter",
             predicate: { op: "eq", propertyId: "id", value: "cust-001" },

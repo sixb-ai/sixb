@@ -126,6 +126,10 @@ class ObjectQueryBuilderImpl<
         input: this.ir,
         linkId: link.id,
         direction,
+        // Several object types can declare a link with the same id. The token
+        // names exactly one source type, so incoming traversal pins it —
+        // matching the result type the fluent API advertises.
+        ...(direction === "incoming" ? { sourceObjectTypeId: link.objectTypeId } : {}),
       },
     }) as unknown as ObjectQueryBuilder<
       ObjectTypeWithPropertyTokens,
