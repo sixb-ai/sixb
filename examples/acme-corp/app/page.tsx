@@ -79,9 +79,17 @@ export default function ReviewQueuePage() {
             Pending reminder reviews
           </h1>
         </div>
-        <div className="flex min-h-14 min-w-19 flex-col items-center justify-center rounded-full border bg-accent font-bold text-accent-foreground max-md:self-start">
-          <span className="text-xl">{interventions.length}</span>
-          <small className="text-xs text-muted-foreground">open</small>
+        <div className="flex items-center gap-3 max-md:self-start">
+          <a
+            className="inline-flex min-h-10 items-center rounded-lg border bg-card px-4 text-sm font-bold text-foreground no-underline transition hover:border-primary hover:text-primary"
+            href="/projects"
+          >
+            Projects →
+          </a>
+          <div className="flex min-h-14 min-w-19 flex-col items-center justify-center rounded-full border bg-accent font-bold text-accent-foreground">
+            <span className="text-xl">{interventions.length}</span>
+            <small className="text-xs text-muted-foreground">open</small>
+          </div>
         </div>
       </header>
 

@@ -129,6 +129,7 @@
         "tailwindcss": "^4.1.18",
       },
       "devDependencies": {
+        "@sixb/server": "workspace:*",
         "@types/bun": "latest",
         "@types/node": "^22.15.30",
         "@types/react": "^19.0.0",
