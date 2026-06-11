@@ -48,6 +48,11 @@ if (entrypoints.length > 0) {
     format: "esm",
     packages: "external",
     sourcemap: "external",
+    // Share modules between entrypoints via chunks. Without splitting, each
+    // subpath entry bundles its own copy of shared modules, so stateful
+    // singletons (e.g. the generated SDK client) and error classes lose
+    // identity across entries for published `import`-condition consumers.
+    splitting: true,
     tsconfig: bundleTsconfigPath,
   })
 
