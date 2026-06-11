@@ -101,7 +101,13 @@ function compileObjectQueryInternal(
     case "page":
       return compilePage(projectId, query.input, query.pageSize, query.pageToken)
     case "traverse":
-      return compileTraversal(projectId, query.input, query.linkId, query.direction)
+      return compileTraversal(
+        projectId,
+        query.input,
+        query.linkId,
+        query.direction,
+        query.sourceObjectTypeId
+      )
     case "set":
       return compileSet(projectId, query.op, query.inputs)
     case "project":
@@ -316,7 +322,8 @@ function compileTraversal(
   projectId: string,
   inputQuery: ObjectQuery,
   linkId: string,
-  direction: "outgoing" | "incoming"
+  direction: "outgoing" | "incoming",
+  sourceObjectTypeId?: string
 ): CompiledObjectQuery {
   const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
   const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
@@ -338,7 +345,7 @@ function compileTraversal(
           ON edge.project_id = input.project_id
          AND edge.target_type_id = input.object_type_id
          AND edge.target_id = input.primary_id
-         AND edge.link_id = ?
+         AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
         JOIN objects AS source_object
           ON source_object.project_id = edge.project_id
          AND source_object.object_type_id = edge.source_type_id
@@ -352,7 +359,12 @@ function compileTraversal(
     ${joinSql}
     ORDER BY ${qualifiedOrder.sql}
   `
-  const args = [...input.args, linkId, ...qualifiedOrder.args]
+  const args = [
+    ...input.args,
+    linkId,
+    ...(sourceObjectTypeId === undefined ? [] : [sourceObjectTypeId]),
+    ...qualifiedOrder.args,
+  ]
 
   return {
     sql,

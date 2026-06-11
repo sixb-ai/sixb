@@ -60,6 +60,13 @@ export interface ObjectQueryTraverse {
   input: ObjectQuery
   linkId: string
   direction: ObjectQueryDirection
+  /**
+   * Constrains incoming traversal to one source object type. Without it,
+   * incoming traversal matches every object type that declares a link with
+   * this `linkId` targeting the input set. The fluent builder always sets it
+   * from the link token's owner type.
+   */
+  sourceObjectTypeId?: string
 }
 
 export interface ObjectQuerySet {

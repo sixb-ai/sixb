@@ -389,6 +389,10 @@
               "direction": {
                 "type": "string",
                 "enum": ["outgoing", "incoming"]
+              },
+              "sourceObjectTypeId": {
+                "type": "string",
+                "minLength": 1
               }
             }
           },

@@ -90,6 +90,13 @@ const Room = defineObjectType({
   },
 })
 
+const Zone = defineObjectType({
+  id: "ContractZone",
+  name: "Contract Zone",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link("hasDevice", Device)],
+})
+
 const Asset = defineObjectType({
   id: "ContractAsset",
   name: "Contract Asset",
@@ -123,7 +130,7 @@ const DefaultTextChild = defineObjectType({
 })
 
 export const objectQueryContractOntology = new OntologyRegistry({
-  sources: [Room, Device, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild],
+  sources: [Room, Device, Zone, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild],
 })
 
 /**
@@ -686,6 +693,32 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
           },
           { ontology: objectQueryContractOntology, storage }
         )
+        const incomingRooms = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "traverse",
+              direction: "incoming",
+              linkId: "hasDevice",
+              sourceObjectTypeId: Room.id,
+              input: { kind: "start", objectTypeId: Device.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        const incomingZones = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "traverse",
+              direction: "incoming",
+              linkId: "hasDevice",
+              sourceObjectTypeId: Zone.id,
+              input: { kind: "start", objectTypeId: Device.id },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
         const intersect = await executeObjectQuery(
           {
             projectId,
@@ -734,7 +767,10 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
         expect(outgoing.plan.mode).toBe("pushdown")
         expect(incoming.plan.mode).toBe("pushdown")
         expect(sortedIds(outgoing)).toEqual(["device-projector", "device-sensor"])
-        expect(sortedIds(incoming)).toEqual(["room-alpha", "room-beta"])
+        expect(sortedIds(incoming)).toEqual(["room-alpha", "room-beta", "zone-one"])
+        expect(incomingRooms.plan.mode).toBe("pushdown")
+        expect(sortedIds(incomingRooms)).toEqual(["room-alpha", "room-beta"])
+        expect(sortedIds(incomingZones)).toEqual(["zone-one"])
         expect(sortedIds(intersect)).toEqual(["room-alpha", "room-beta"])
         expect(ids(subtract)).toEqual(["room-beta"])
       })
@@ -1041,6 +1077,10 @@ export async function seedObjectQueryContractData(storage: ObjectStorage): Promi
   )
   await storage.applyLinkUpserted(
     linkEvent("011", Room.id, "room-beta", "hasDevice", Device.id, "device-sensor")
+  )
+  await storage.applyObjectUpserted(objectEvent("103", Zone.id, "zone-one", { id: "zone-one" }))
+  await storage.applyLinkUpserted(
+    linkEvent("012", Zone.id, "zone-one", "hasDevice", Device.id, "device-projector")
   )
 }
 

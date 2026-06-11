@@ -447,6 +447,65 @@ describe("object query validation", () => {
     expect(incoming.result.objectTypeIds).toEqual(["Customer"])
   })
 
+  test("constrains incoming traversal to a declared source object type", () => {
+    const Reseller = defineObjectType({
+      id: "Reseller",
+      name: "Reseller",
+      properties: [prop("id", "string", { required: true, primary: true })],
+      links: [link("orders", Order)],
+    })
+    const sharedLinkOntology = new OntologyRegistry({ sources: [Customer, Reseller, Order] })
+
+    const unconstrained = validateObjectQuery(
+      {
+        kind: "traverse",
+        direction: "incoming",
+        linkId: "orders",
+        input: { kind: "start", objectTypeId: "Order" },
+      },
+      { ontology: sharedLinkOntology }
+    )
+    expect([...unconstrained.result.objectTypeIds].sort()).toEqual(["Customer", "Reseller"])
+
+    const constrained = validateObjectQuery(
+      {
+        kind: "traverse",
+        direction: "incoming",
+        linkId: "orders",
+        sourceObjectTypeId: "Reseller",
+        input: { kind: "start", objectTypeId: "Order" },
+      },
+      { ontology: sharedLinkOntology }
+    )
+    expect(constrained.result.objectTypeIds).toEqual(["Reseller"])
+  })
+
+  test("rejects traverse source misuse", () => {
+    const unknownSource = collectObjectQueryValidationIssues(
+      {
+        kind: "traverse",
+        direction: "incoming",
+        linkId: "orders",
+        sourceObjectTypeId: "Nope",
+        input: { kind: "start", objectTypeId: "Order" },
+      },
+      { ontology }
+    )
+    expect(unknownSource.map((issue) => issue.code)).toContain("unknown_traverse_source")
+
+    const outgoingSource = collectObjectQueryValidationIssues(
+      {
+        kind: "traverse",
+        direction: "outgoing",
+        linkId: "orders",
+        sourceObjectTypeId: "Customer",
+        input: { kind: "start", objectTypeId: "Customer" },
+      },
+      { ontology }
+    )
+    expect(outgoingSource.map((issue) => issue.code)).toContain("traverse_source_not_applicable")
+  })
+
   test("accepts vector queries for declared vector search profiles", () => {
     const validated = validateObjectQuery(
       {
@@ -1165,6 +1224,52 @@ describe("object query planner and executor", () => {
     expect(union.plan.mode).toBe("pushdown")
     expect(union.objects.map((row) => row.primaryId)).toEqual(["cust-1", "cust-3", "cust-2"])
     expect(storage.queryObjectCalls).toBe(2)
+  })
+
+  test("filters incoming traversal by source object type during execution", async () => {
+    const Reseller = defineObjectType({
+      id: "Reseller",
+      name: "Reseller",
+      properties: [prop("id", "string", { required: true, primary: true })],
+      links: [link("orders", Order)],
+    })
+    const sharedLinkOntology = new OntologyRegistry({ sources: [Customer, Reseller, Order] })
+
+    const storage = new CountingQueryStorage()
+    await seedCustomerOrders(storage)
+    await storage.applyObjectUpserted(
+      makeObjectUpsertedEvent("p1", "Reseller", "reseller-1", { id: "reseller-1" })
+    )
+    await storage.applyLinkUpserted(
+      makeLinkUpsertedEvent("p1", "Reseller", "reseller-1", "orders", "Order", "order-1")
+    )
+
+    const orderOneSources: ObjectQuery = {
+      kind: "traverse",
+      direction: "incoming",
+      linkId: "orders",
+      input: {
+        kind: "filter",
+        predicate: { op: "eq", propertyId: "id", value: "order-1" },
+        input: { kind: "start", objectTypeId: "Order" },
+      },
+    }
+
+    const unconstrained = await executeObjectQuery(
+      { projectId: "p1", query: orderOneSources },
+      { ontology: sharedLinkOntology, storage }
+    )
+    expect(unconstrained.objects.map((row) => row.primaryId).sort()).toEqual([
+      "cust-1",
+      "reseller-1",
+    ])
+
+    const constrained = await executeObjectQuery(
+      { projectId: "p1", query: { ...orderOneSources, sourceObjectTypeId: "Reseller" } },
+      { ontology: sharedLinkOntology, storage }
+    )
+    expect(constrained.plan.mode).toBe("pushdown")
+    expect(constrained.objects.map((row) => row.primaryId)).toEqual(["reseller-1"])
   })
 
   test("rejects fallback for search, traversal, and set nodes", async () => {

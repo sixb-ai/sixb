@@ -3,6 +3,7 @@ import type { ObjectQuery } from "@sixb/core"
 import {
   compilePgObjectCountQuery,
   compilePgObjectFacetQuery,
+  compilePgObjectQuery,
 } from "../src/pg-object-query-compiler"
 
 const sitePointQuery: ObjectQuery = {
@@ -70,4 +71,31 @@ test("facet aggregate SQL projects scalar values without sorting object rows", (
     "objectType",
     100,
   ])
+})
+
+test("incoming traversal SQL filters by source object type when constrained", () => {
+  const incoming: ObjectQuery = {
+    kind: "traverse",
+    direction: "incoming",
+    linkId: "customer",
+    input: { kind: "start", objectTypeId: "Customer" },
+  }
+
+  const unconstrained = compilePgObjectQuery("project-a", incoming)
+  expect(unconstrained.sql).not.toContain("AND edge.source_type_id =")
+  expect(unconstrained.args).toEqual(["project-a", "Customer", "customer"])
+
+  const constrained = compilePgObjectQuery("project-a", {
+    ...incoming,
+    sourceObjectTypeId: "Project",
+  })
+  expect(constrained.sql).toContain("AND edge.source_type_id = $4")
+  expect(constrained.args).toEqual(["project-a", "Customer", "customer", "Project"])
+
+  const constrainedCount = compilePgObjectCountQuery("project-a", {
+    ...incoming,
+    sourceObjectTypeId: "Project",
+  })
+  expect(constrainedCount.sql).toContain("AND edge.source_type_id = $4")
+  expect(constrainedCount.args).toEqual(["project-a", "Customer", "customer", "Project"])
 })

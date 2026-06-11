@@ -126,7 +126,14 @@ function validateQueryNode(
     case "traverse": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       return {
-        result: validateTraverse(query.linkId, query.direction, input.result, path, ctx),
+        result: validateTraverse(
+          query.linkId,
+          query.direction,
+          query.sourceObjectTypeId,
+          input.result,
+          path,
+          ctx
+        ),
         query: { ...query, input: input.query },
       }
     }
@@ -489,6 +496,7 @@ function validateVectorQuery(
 function validateTraverse(
   linkId: string,
   direction: "outgoing" | "incoming",
+  sourceObjectTypeId: string | undefined,
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
@@ -498,9 +506,19 @@ function validateTraverse(
     return { objectTypeIds: [] }
   }
 
-  return direction === "outgoing"
-    ? validateOutgoingTraverse(linkId, shape, path, ctx)
-    : validateIncomingTraverse(linkId, shape, path, ctx)
+  if (direction === "outgoing") {
+    if (sourceObjectTypeId !== undefined) {
+      addIssue(
+        ctx,
+        path,
+        "traverse_source_not_applicable",
+        "traverse.sourceObjectTypeId only applies to incoming traversal"
+      )
+    }
+    return validateOutgoingTraverse(linkId, shape, path, ctx)
+  }
+
+  return validateIncomingTraverse(linkId, sourceObjectTypeId, shape, path, ctx)
 }
 
 function validateOutgoingTraverse(
@@ -556,13 +574,29 @@ function validateOutgoingTraverse(
 
 function validateIncomingTraverse(
   linkId: string,
+  sourceObjectTypeId: string | undefined,
   shape: ObjectQueryResultShape,
   path: string,
   ctx: QueryValidationContext
 ): ObjectQueryResultShape {
+  let candidateTypes = ctx.ontology.listObjectTypes()
+  if (sourceObjectTypeId !== undefined) {
+    const sourceType = ctx.ontology.getObjectTypeById(sourceObjectTypeId)
+    if (!sourceType) {
+      addIssue(
+        ctx,
+        path,
+        "unknown_traverse_source",
+        `Incoming traversal references unknown source object type '${sourceObjectTypeId}'`
+      )
+      return { objectTypeIds: [] }
+    }
+    candidateTypes = [sourceType]
+  }
+
   const sourceTypeIds: string[] = []
 
-  for (const sourceType of ctx.ontology.listObjectTypes()) {
+  for (const sourceType of candidateTypes) {
     const link = sourceType.links.find((candidate) => candidate.id === linkId)
     if (!link) continue
 

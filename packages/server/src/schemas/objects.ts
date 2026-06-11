@@ -141,6 +141,7 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
         input: ObjectQuerySchema,
         linkId: z.string().min(1),
         direction: z.enum(["outgoing", "incoming"]),
+        sourceObjectTypeId: z.string().min(1).optional(),
       })
       .strict(),
     z
@@ -479,6 +480,7 @@ export const ObjectQueryOpenApiSchemas = {
           input: objectQueryRef,
           linkId: { type: "string", minLength: 1 },
           direction: { type: "string", enum: ["outgoing", "incoming"] },
+          sourceObjectTypeId: { type: "string", minLength: 1 },
         },
       },
       {

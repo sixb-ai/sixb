@@ -125,6 +125,7 @@ export type ObjectQuery =
       input: ObjectQuery
       linkId: string
       direction: "outgoing" | "incoming"
+      sourceObjectTypeId?: string
     }
   | {
       kind: "set"
