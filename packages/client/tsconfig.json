@@ -5,5 +5,5 @@
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "tests/**/*"]
 }

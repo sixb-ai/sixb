@@ -20,6 +20,7 @@ import {
 
 export * from "./events"
 export * from "./generated/@tanstack/react-query.gen"
+export * from "./query-hooks"
 export {
   createSixbEventsWebSocketUrl,
   type UseSixbEventsOptions,
