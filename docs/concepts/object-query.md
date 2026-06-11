@@ -399,6 +399,85 @@ issues, such as unsupported relevance sorting or vector search, are reported whe
 executes through `.list()`, `.count()`, `.exists()`, `.facets()`, `.first()`, or the HTTP route.
 
 
+## Client Queries
+
+`@sixb/client/query` exposes the same fluent builder in the browser. `objects(Type)`
+builds the identical query IR and executes it through `POST /api/objects/query` (and the
+count, exists, and facets routes) using the generated SDK client, so authentication and
+CSRF handling come from your existing client configuration.
+
+```ts
+import { objects } from "@sixb/client/query"
+import { Project } from "../ontology/project"
+
+const { objects: rows } = await objects(Project)
+  .query()
+  .where((project) => project.p.status.eq("active"))
+  .orderBy(Project.p.deadline, "asc")
+  .limit(20)
+  .list()
+```
+
+Import your ontology types directly; no registration step is needed. Property names and
+predicate values are type-checked at compile time, and the server validates every query
+against the registered ontology. Validation and planning failures throw `SixbQueryError`
+with the structured `issues` array from the route. `validate()` and `explain()` require
+ontology access and are server-side only.
+
+Ontology files that browser code imports should define types via the browser-safe
+entrypoint `@sixb/core/ontology` (same `defineObjectType`, `prop`, `link`, and friends —
+without pulling server runtime modules into the bundle).
+
+React apps can use the TanStack Query hooks from `@sixb/client/hooks`. Hooks take a
+built query directly — any query from the docs, the server, or an event handler works
+unchanged. Hooks key the cache on the normalized query IR, so identical queries share
+cache entries and inline builders are safe to construct on every render:
+
+```tsx
+import { useObjectsInfinite, useObjectsQuery } from "@sixb/client/hooks"
+import { objects } from "@sixb/client/query"
+import { Project } from "../ontology/project"
+
+const { data, isLoading } = useObjectsQuery(
+  objects(Project)
+    .query()
+    .where((project) => project.p.status.eq("active"))
+    .orderBy(Project.p.deadline, "asc")
+    .limit(20)
+)
+
+const pages = useObjectsInfinite(objects(Project).query().search("dashboard"), {
+  pageSize: 50,
+})
+```
+
+Because queries are plain values, shared queries can live in a module and be refined at
+the call site:
+
+```tsx
+// queries/projects.ts
+export const openProjects = objects(Project)
+  .query()
+  .where((project) => project.p.status.in(["active", "paused"]))
+  .orderBy(Project.p.deadline, "asc")
+
+// component
+const { data } = useObjectsQuery(openProjects.limit(50))
+const { data: openCount } = useObjectsCount(openProjects)
+```
+
+`useObjectsCount`, `useObjectsExists`, and `useObjectsFacets` follow the same shape, and
+each hook accepts common TanStack options such as `enabled` and `staleTime`. For router
+loaders, prefetching, or full TanStack control, use the `objectQueryOptions`,
+`objectQueryCountOptions`, `objectQueryExistsOptions`, `objectQueryFacetsOptions`, and
+`objectQueryInfiniteOptions` factories with `useQuery` or `queryClient.prefetchQuery`.
+
+Hooks execute the query IR through the global SDK client; wrap a subtree in
+`SixbProvider` to override the transport for every hook beneath it. A per-query client
+passed to `objects(Type, { client })` applies to imperative calls such as `.list()`,
+not to hooks.
+
+
 ## Raw Query JSON
 
 Most app code should use the fluent API. Raw query JSON is useful when calling
