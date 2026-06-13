@@ -106,6 +106,7 @@ export function createTailwindCssCompiler(
   }
 
   function compile(): Promise<void> {
+    stopped = false
     const build = chain.then(() => runCompile())
     // The chain itself swallows failures so one bad build doesn't poison every
     // later compile; callers still observe their own build's error.

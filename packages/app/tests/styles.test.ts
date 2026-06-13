@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { createCustomApp } from "../src/createCustomApp"
 import { resolveCustomAppStylesheet, usesTailwind } from "../src/styles"
+import { createTailwindCssCompiler } from "../src/tailwind"
 
 // Links already-installed workspace packages into a fixture project's
 // node_modules, the way a real app would have them installed.
@@ -116,6 +117,52 @@ describe("resolveCustomAppStylesheet", () => {
       sourcePath: join(tempRoot, "app", "globals.css"),
       outputPath: join(tempRoot, ".sixb", "generated", "app.css"),
     })
+  })
+})
+
+describe("createTailwindCssCompiler", () => {
+  let tempRoot = ""
+
+  beforeEach(async () => {
+    tempRoot = await mkdtemp(join(tmpdir(), "sixb-tailwind-compiler-"))
+    await installFakeTailwindCli(tempRoot)
+  })
+
+  afterEach(async () => {
+    if (tempRoot) {
+      await rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("scheduled rebuilds work after a stopped compiler is compiled again", async () => {
+    const inputPath = join(tempRoot, "app.css")
+    const outputPath = join(tempRoot, "dist", "app.css")
+    await writeFile(inputPath, ".initial { color: red; }\n")
+
+    const compiler = createTailwindCssCompiler({
+      inputPath,
+      outputPath,
+      cwd: tempRoot,
+      resolveFrom: tempRoot,
+      debounceMs: 1,
+      label: "[SixbTest]",
+    })
+
+    try {
+      await compiler.compile()
+      expect(await readFile(outputPath, "utf-8")).toContain("initial")
+
+      await compiler.stop()
+      await writeFile(inputPath, ".after-restart { color: green; }\n")
+      await compiler.compile()
+      expect(await readFile(outputPath, "utf-8")).toContain("after-restart")
+
+      await writeFile(inputPath, ".scheduled { color: blue; }\n")
+      compiler.schedule()
+      await expectFileToContain(outputPath, "scheduled")
+    } finally {
+      await compiler.stop()
+    }
   })
 })
 
@@ -244,4 +291,38 @@ async function getFreePort(): Promise<number> {
     throw new Error("Could not resolve an open port")
   }
   return port
+}
+
+async function installFakeTailwindCli(projectRoot: string): Promise<void> {
+  const cliRoot = join(projectRoot, "node_modules", "@tailwindcss", "cli")
+  await mkdir(join(cliRoot, "dist"), { recursive: true })
+  await writeFile(
+    join(cliRoot, "package.json"),
+    `${JSON.stringify({ name: "@tailwindcss/cli", type: "module" })}\n`
+  )
+  await writeFile(
+    join(cliRoot, "dist", "index.mjs"),
+    [
+      'const input = process.argv[process.argv.indexOf("-i") + 1]',
+      'const output = process.argv[process.argv.indexOf("-o") + 1]',
+      "await Bun.write(output, await Bun.file(input).text())",
+      "",
+    ].join("\n")
+  )
+}
+
+async function expectFileToContain(path: string, expected: string): Promise<void> {
+  const deadline = Date.now() + 2_000
+  let content = ""
+
+  while (Date.now() < deadline) {
+    content = await readFile(path, "utf-8")
+    if (content.includes(expected)) {
+      expect(content).toContain(expected)
+      return
+    }
+    await Bun.sleep(20)
+  }
+
+  expect(content).toContain(expected)
 }
