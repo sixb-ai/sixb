@@ -1,7 +1,7 @@
 import { ActionRunError } from "./errors"
 import {
   actionRunCommitDiffsEqual,
-  actionRunParamsEqual,
+  actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
@@ -376,25 +376,4 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       total,
     }
   }
-}
-
-function actionRunPhaseRecordsEqual(left: unknown, right: unknown): boolean {
-  return actionRunParamsEqual(stripVolatilePhaseFields(left), stripVolatilePhaseFields(right))
-}
-
-function stripVolatilePhaseFields(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-  if (Array.isArray(value)) {
-    return value.map(stripVolatilePhaseFields)
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([key]) => key !== "completedAt")
-        .map(([key, entry]) => [key, stripVolatilePhaseFields(entry)])
-    )
-  }
-  return value
 }

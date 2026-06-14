@@ -4,8 +4,12 @@ import { dirname } from "node:path"
 import type {
   ActionRunCommitDiff,
   ActionRunCommitRecord,
+  ActionRunCommitSourceRow,
   ActionRunEffectsRecord,
   ActionRunFailure,
+  ActionRunLinkDiffSourceRow,
+  ActionRunObjectDiffPropertySourceRow,
+  ActionRunObjectDiffSourceRow,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
@@ -27,8 +31,10 @@ import type {
 import {
   ActionRunError,
   actionRunCommitDiffsEqual,
-  actionRunParamsEqual,
+  actionRunPhaseRecordsEqual,
+  buildActionRunCommitRecords,
   canRequeueActionRunAfterEnqueueFailure,
+  finishActionRunPhase,
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
@@ -429,7 +435,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         )
       }
 
-      const phase = finishPhase(input, existing.phase)
+      const phase = finishActionRunPhase(input, existing.phase)
 
       this.db
         .query(
@@ -734,16 +740,13 @@ export class SqliteActionRunStorage implements ActionRunStorage {
       )
       .all(...args) as LinkDiffRow[]
 
-    return buildCommitRecords(commitRows, objectRows, propertyRows, linkRows)
+    return buildActionRunCommitRecords(
+      commitRows.map(toCommitSourceRow),
+      objectRows.map(toObjectDiffSourceRow),
+      propertyRows.map(toObjectDiffPropertySourceRow),
+      linkRows.map(toLinkDiffSourceRow)
+    )
   }
-}
-
-function finishPhase(input: FinishActionRunInput, current: ActionRunPhase | null): ActionRunPhase {
-  if (input.status === "succeeded") {
-    return input.phase ?? current ?? "validation"
-  }
-
-  return input.phase ?? input.error?.phase ?? current ?? "validation"
 }
 
 function serializeJsonValue(value: JsonValue): string {
@@ -867,27 +870,6 @@ function toEffectsRecord(
   }
 }
 
-function actionRunPhaseRecordsEqual(left: unknown, right: unknown): boolean {
-  return actionRunParamsEqual(stripVolatilePhaseFields(left), stripVolatilePhaseFields(right))
-}
-
-function stripVolatilePhaseFields(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString()
-  }
-  if (Array.isArray(value)) {
-    return value.map(stripVolatilePhaseFields)
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .filter(([key]) => key !== "completedAt")
-        .map(([key, entry]) => [key, stripVolatilePhaseFields(entry)])
-    )
-  }
-  return value
-}
-
 function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord): ActionRunRecord {
   return {
     id: row.id,
@@ -909,70 +891,43 @@ function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord):
   }
 }
 
-function buildCommitRecords(
-  commitRows: readonly CommitRow[],
-  objectRows: readonly ObjectDiffRow[],
-  propertyRows: readonly ObjectDiffPropertyRow[],
-  linkRows: readonly LinkDiffRow[]
-): Map<string, ActionRunCommitRecord> {
-  const propertiesByObject = new Map<string, string[]>()
-  for (const propertyRow of propertyRows) {
-    const key = objectDiffKey(propertyRow)
-    const properties = propertiesByObject.get(key) ?? []
-    properties.push(propertyRow.property_id)
-    propertiesByObject.set(key, properties)
+function toCommitSourceRow(row: CommitRow): ActionRunCommitSourceRow {
+  return {
+    runId: row.run_id,
+    committedAt: row.committed_at,
   }
-
-  const objectsByRun = new Map<string, ActionRunCommitDiff["objects"][number][]>()
-  for (const objectRow of objectRows) {
-    const objects = objectsByRun.get(objectRow.run_id) ?? []
-    objects.push({
-      objectTypeId: objectRow.object_type_id,
-      primaryId: objectRow.primary_id,
-      operation: objectRow.operation,
-      changedProperties: propertiesByObject.get(objectDiffKey(objectRow)) ?? [],
-    })
-    objectsByRun.set(objectRow.run_id, objects)
-  }
-
-  const linksByRun = new Map<string, ActionRunCommitDiff["links"][number][]>()
-  for (const linkRow of linkRows) {
-    const links = linksByRun.get(linkRow.run_id) ?? []
-    links.push({
-      operation: linkRow.operation,
-      source: {
-        objectTypeId: linkRow.source_object_type_id,
-        primaryId: linkRow.source_primary_id,
-      },
-      linkId: linkRow.link_id,
-      target: {
-        objectTypeId: linkRow.target_object_type_id,
-        primaryId: linkRow.target_primary_id,
-      },
-    })
-    linksByRun.set(linkRow.run_id, links)
-  }
-
-  const commits = new Map<string, ActionRunCommitRecord>()
-  for (const commitRow of commitRows) {
-    commits.set(commitRow.run_id, {
-      committedAt: new Date(commitRow.committed_at),
-      diff: normalizeActionRunCommitDiff({
-        objects: objectsByRun.get(commitRow.run_id) ?? [],
-        links: linksByRun.get(commitRow.run_id) ?? [],
-      }),
-    })
-  }
-
-  return commits
 }
 
-function objectDiffKey(row: {
-  readonly run_id: string
-  readonly object_type_id: string
-  readonly primary_id: string
-}): string {
-  return `${row.run_id}:${row.object_type_id}:${row.primary_id}`
+function toObjectDiffSourceRow(row: ObjectDiffRow): ActionRunObjectDiffSourceRow {
+  return {
+    runId: row.run_id,
+    objectTypeId: row.object_type_id,
+    primaryId: row.primary_id,
+    operation: row.operation,
+  }
+}
+
+function toObjectDiffPropertySourceRow(
+  row: ObjectDiffPropertyRow
+): ActionRunObjectDiffPropertySourceRow {
+  return {
+    runId: row.run_id,
+    objectTypeId: row.object_type_id,
+    primaryId: row.primary_id,
+    propertyId: row.property_id,
+  }
+}
+
+function toLinkDiffSourceRow(row: LinkDiffRow): ActionRunLinkDiffSourceRow {
+  return {
+    runId: row.run_id,
+    operation: row.operation,
+    sourceObjectTypeId: row.source_object_type_id,
+    sourcePrimaryId: row.source_primary_id,
+    linkId: row.link_id,
+    targetObjectTypeId: row.target_object_type_id,
+    targetPrimaryId: row.target_primary_id,
+  }
 }
 
 function rowToActionSubject(row: DatabaseRow): ActionSubject {
@@ -1010,7 +965,7 @@ interface DatabaseRow {
   params: string
   idempotency_key: string
   security_context: string | null
-  writeback_status: ActionRunEffectsRecord["status"] | null
+  writeback_status: ActionRunWritebackRecord["status"] | null
   writeback_completed_at: string | null
   writeback_result: string | null
   writeback_error_name: string | null

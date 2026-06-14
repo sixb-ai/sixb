@@ -1,9 +1,19 @@
 export { ActionRunError } from "./errors"
+export type {
+  ActionRunCommitSourceRow,
+  ActionRunLinkDiffSourceRow,
+  ActionRunObjectDiffPropertySourceRow,
+  ActionRunObjectDiffSourceRow,
+  ActionRunPhaseRecord,
+} from "./idempotency"
 export {
   actionRunCommitDiffsEqual,
   actionRunParamsEqual,
+  actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
+  buildActionRunCommitRecords,
   canRequeueActionRunAfterEnqueueFailure,
+  finishActionRunPhase,
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "./idempotency"

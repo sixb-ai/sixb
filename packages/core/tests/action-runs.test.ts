@@ -398,4 +398,123 @@ describe("InMemoryActionRunStorage", () => {
       })
     ).rejects.toBeInstanceOf(ActionRunError)
   })
+
+  test("compares phase records without stripping user result fields", async () => {
+    const storage = new InMemoryActionRunStorage()
+
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "createInvoice",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+
+    const first = await storage.recordWriteback({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+      completedAt: new Date("2026-04-29T10:00:00.000Z"),
+      result: {
+        externalInvoiceId: "ext_1",
+        completedAt: "2026-04-29T10:00:00.000Z",
+      },
+    })
+
+    const duplicate = await storage.recordWriteback({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+      completedAt: new Date("2026-04-29T10:01:00.000Z"),
+      result: {
+        externalInvoiceId: "ext_1",
+        completedAt: "2026-04-29T10:00:00.000Z",
+      },
+    })
+    expect(duplicate.writeback?.completedAt.toISOString()).toBe(
+      first.writeback?.completedAt.toISOString()
+    )
+
+    await expect(
+      storage.recordWriteback({
+        id: "act_1",
+        projectId: "my-app",
+        status: "succeeded",
+        result: {
+          externalInvoiceId: "ext_1",
+          completedAt: "2026-04-29T10:02:00.000Z",
+        },
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+  })
+
+  test("rejects duplicate object and link commit diffs before storage constraints", async () => {
+    const storage = new InMemoryActionRunStorage()
+
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "markPaid",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+
+    await expect(
+      storage.recordCommit({
+        id: "act_1",
+        projectId: "my-app",
+        diff: {
+          objects: [
+            {
+              objectTypeId: "Invoice",
+              primaryId: "inv_1",
+              operation: "update",
+              changedProperties: ["status"],
+            },
+            {
+              objectTypeId: "Invoice",
+              primaryId: "inv_1",
+              operation: "delete",
+              changedProperties: [],
+            },
+          ],
+          links: [],
+        },
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+
+    await expect(
+      storage.recordCommit({
+        id: "act_1",
+        projectId: "my-app",
+        diff: {
+          objects: [],
+          links: [
+            {
+              operation: "create",
+              source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+              linkId: "customer",
+              target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            },
+            {
+              operation: "create",
+              source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+              linkId: "customer",
+              target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            },
+          ],
+        },
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+  })
 })
