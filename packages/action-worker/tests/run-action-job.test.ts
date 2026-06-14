@@ -304,6 +304,47 @@ describe("runActionJob", () => {
     expect(run?.phase).toBe("handler")
   })
 
+  test("marks redelivered running runs failed without invoking the handler again", async () => {
+    let invoked = 0
+    const count = defineAction("count")
+      .params({})
+      .run(() => {
+        invoked += 1
+      })
+
+    const sixb = createSixb([count])
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "count",
+      subject: { kind: "none" },
+      params: {},
+    })
+    await sixb.storage.actionRuns!.start({
+      projectId: sixb.id,
+      id: "act_1",
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "count",
+      },
+    })
+
+    expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error.name).toBe("ActionRunLeaseLostError")
+      expect(result.error.phase).toBe("handler")
+    }
+    expect(invoked).toBe(0)
+
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    expect(run?.status).toBe("failed")
+    expect(run?.phase).toBe("handler")
+    expect(run?.finishedAt).toBeInstanceOf(Date)
+  })
+
   test("rejects forged object subjects outside the action target hierarchy", async () => {
     let invoked = 0
     const setStatus = defineAction("setStatus")

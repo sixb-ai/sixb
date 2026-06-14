@@ -98,6 +98,40 @@ describe("InMemoryActionRunStorage", () => {
     ).rejects.toBeInstanceOf(ActionRunError)
   })
 
+  test("rejects finishing terminal runs", async () => {
+    const storage = new InMemoryActionRunStorage()
+
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "sendQuote",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+    await storage.finish({
+      id: "act_1",
+      projectId: "my-app",
+      status: "failed",
+      error: {
+        message: "handler failed",
+        phase: "handler",
+      },
+    })
+
+    await expect(
+      storage.finish({
+        id: "act_1",
+        projectId: "my-app",
+        status: "succeeded",
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+  })
+
   test("stores failed runs and lists with filters, ordering, and paging", async () => {
     const storage = new InMemoryActionRunStorage()
 

@@ -561,6 +561,9 @@ export type {
 export {
   ActionRunError,
   AuthStorageError,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
   defineMigrations,
   InMemoryActionRunStorage,
   InMemoryAuthStorage,
@@ -577,6 +580,7 @@ export {
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
   isMigrationCapableStorage,
+  isTerminalActionRun,
   migrateStorage,
   PipelineRunError,
   ProjectionRunError,

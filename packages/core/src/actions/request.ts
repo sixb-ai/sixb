@@ -11,6 +11,9 @@ import {
   type ActionRunParams,
   type ActionRunRecord,
   type ActionRunStorage,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  isTerminalActionRun,
 } from "../storage"
 import type {
   ActionDefinition,
@@ -65,6 +68,7 @@ export interface WaitForActionRunInput {
 }
 
 const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
+const DEFAULT_ACTION_WAIT_POLL_MS = 1_000
 
 function createActionRunId(runId: string | undefined): string {
   if (runId !== undefined) {
@@ -267,21 +271,25 @@ async function enqueueActionRunJob(
     throw error
   }
 
-  await runtime.events.append({
-    actor: params.securityContext ? toEventActor(params.securityContext) : undefined,
-    correlationId: params.securityContext?.correlationId,
-    events: [
-      {
-        type: "action.requested",
-        payload: {
-          actionId: params.actionId,
-          subject: params.subject,
-          params: params.params,
-          runId: params.runId,
+  try {
+    await runtime.events.append({
+      actor: params.securityContext ? toEventActor(params.securityContext) : undefined,
+      correlationId: params.securityContext?.correlationId,
+      events: [
+        {
+          type: "action.requested",
+          payload: {
+            actionId: params.actionId,
+            subject: params.subject,
+            params: params.params,
+            runId: params.runId,
+          },
         },
-      },
-    ],
-  })
+      ],
+    })
+  } catch (error) {
+    console.error("[Sixb] Failed to append action.requested observation event:", error)
+  }
 
   return {
     runId: params.runId,
@@ -328,6 +336,7 @@ export async function waitForActionRun(
     let pollTimer: ReturnType<typeof setTimeout> | undefined
     let unsubscribe: (() => void) | undefined
     let settled = false
+    let checking = false
 
     const cleanup = () => {
       if (settled) return
@@ -343,7 +352,20 @@ export async function waitForActionRun(
       reject(error)
     }
 
+    const schedulePoll = () => {
+      if (!settled && !pollTimer) {
+        pollTimer = setTimeout(() => {
+          pollTimer = undefined
+          void check()
+        }, DEFAULT_ACTION_WAIT_POLL_MS)
+      }
+    }
+
     const check = async () => {
+      if (settled || checking) {
+        return
+      }
+      checking = true
       try {
         const record = await actionRuns.getById({
           projectId: runtime.projectId,
@@ -354,11 +376,11 @@ export async function waitForActionRun(
           resolve(record)
           return
         }
-        if (!settled) {
-          pollTimer = setTimeout(check, 100)
-        }
+        schedulePoll()
       } catch (error) {
         rejectWith(error)
+      } finally {
+        checking = false
       }
     }
 
@@ -419,44 +441,14 @@ function assertExistingRunMatchesRequest(
 ): void {
   const matches =
     existing.actionId === request.actionId &&
-    subjectsEqual(existing.subject, request.subject) &&
-    jsonEqual(existing.params, request.params)
+    actionSubjectsEqual(existing.subject, request.subject) &&
+    actionRunParamsEqual(existing.params, request.params)
 
   if (!matches) {
     throw new ActionRunError(
       `[Sixb] Action run '${existing.id}' already exists with a different request payload.`
     )
   }
-}
-
-function subjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
-  if (left.kind !== right.kind) return false
-  if (left.kind === "none") return true
-  if (right.kind === "none") return false
-  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
-}
-
-function jsonEqual(left: unknown, right: unknown): boolean {
-  return stableJsonStringify(left) === stableJsonStringify(right)
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
-}
-
-function isTerminalActionRun(record: ActionRunRecord): boolean {
-  return (
-    record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
-  )
 }
 
 function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {

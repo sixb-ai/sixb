@@ -1,4 +1,10 @@
 export { ActionRunError } from "./errors"
+export {
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
+  isTerminalActionRun,
+} from "./idempotency"
 export { InMemoryActionRunStorage } from "./in-memory"
 export type {
   ActionRunFailure,

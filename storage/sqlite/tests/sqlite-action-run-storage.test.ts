@@ -154,6 +154,38 @@ describe("SqliteActionRunStorage", () => {
     ).rejects.toBeInstanceOf(ActionRunError)
   })
 
+  test("rejects finishing terminal runs", async () => {
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "sendQuote",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+    await storage.finish({
+      id: "act_1",
+      projectId: "my-app",
+      status: "failed",
+      error: {
+        message: "handler failed",
+        phase: "handler",
+      },
+    })
+
+    await expect(
+      storage.finish({
+        id: "act_1",
+        projectId: "my-app",
+        status: "succeeded",
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+  })
+
   test("requeues matching runs that failed during enqueue", async () => {
     await storage.queue({
       id: "act_1",

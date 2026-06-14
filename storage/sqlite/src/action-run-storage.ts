@@ -15,7 +15,11 @@ import type {
   SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
-import { ActionRunError } from "@sixb/core"
+import {
+  ActionRunError,
+  canRequeueActionRunAfterEnqueueFailure,
+  isTerminalActionRun,
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteActionRunStorageOptions {
@@ -105,7 +109,10 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
         .get(input.projectId, input.id) as DatabaseRow | null
 
-      if (!existing || !canRequeueAfterEnqueueFailure(rowToActionRunRecord(existing), input)) {
+      if (
+        !existing ||
+        !canRequeueActionRunAfterEnqueueFailure(rowToActionRunRecord(existing), input)
+      ) {
         throw new ActionRunError(
           `[SixbSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -202,6 +209,12 @@ export class SqliteActionRunStorage implements ActionRunStorage {
       if (!existing) {
         throw new ActionRunError(
           `[SixbSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (isTerminalActionRun({ status: existing.status })) {
+        throw new ActionRunError(
+          `[SixbSqlite] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
         )
       }
 
@@ -408,40 +421,6 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
 
 function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("UNIQUE constraint failed")
-}
-
-function canRequeueAfterEnqueueFailure(
-  existing: ActionRunRecord,
-  input: QueueActionRunInput
-): boolean {
-  return (
-    existing.status === "failed" &&
-    existing.phase === "enqueue" &&
-    existing.actionId === input.actionId &&
-    existing.idempotencyKey === input.idempotencyKey &&
-    subjectsEqual(existing.subject, input.subject) &&
-    stableJsonStringify(existing.params) === stableJsonStringify(input.params)
-  )
-}
-
-function subjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
-  if (left.kind !== right.kind) return false
-  if (left.kind === "none") return true
-  if (right.kind === "none") return false
-  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
 }
 
 interface DatabaseRow {

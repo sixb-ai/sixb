@@ -479,6 +479,64 @@ describe("requestAction", () => {
     }
   })
 
+  test("keeps a queued run when the action.requested observation event fails", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      id: "action-event-best-effort-test",
+      ontology: [Room],
+      actions: [createRoom],
+      ...runtimeDeps,
+    })
+    const originalAppend = sixb.events.append.bind(sixb.events)
+    const originalConsoleError = console.error
+
+    sixb.events.append = async (input) => {
+      if (input.events.some((event) => event.type === "action.requested")) {
+        throw new Error("event store unavailable")
+      }
+
+      return originalAppend(input)
+    }
+    console.error = () => {}
+
+    try {
+      const result = await sixb.actions.request({
+        actionId: "createRoom",
+        params: { id: "room:1", name: "Room 1" },
+        runId: "act_event_failure",
+      })
+
+      expect(result).toMatchObject({
+        runId: "act_event_failure",
+        created: true,
+      })
+
+      const run = await runtimeDeps.storage.actionRuns!.getById({
+        projectId: "action-event-best-effort-test",
+        id: "act_event_failure",
+      })
+      expect(run?.status).toBe("queued")
+
+      const jobs = await runtimeDeps.queues.actions.claim({
+        projectId: "action-event-best-effort-test",
+        workerId: "test-worker",
+        limit: 1,
+      })
+      expect(jobs[0]?.job.payload).toEqual({
+        actionId: "createRoom",
+        runId: "act_event_failure",
+      })
+
+      const events = await sixb.events.read({
+        types: ["action.requested"],
+      })
+      expect(events).toHaveLength(0)
+    } finally {
+      sixb.events.append = originalAppend
+      console.error = originalConsoleError
+    }
+  })
+
   test("reuses a matching run id and rejects conflicting payloads", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({

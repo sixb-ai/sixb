@@ -12,7 +12,11 @@ import type {
   SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
-import { ActionRunError } from "@sixb/core"
+import {
+  ActionRunError,
+  canRequeueActionRunAfterEnqueueFailure,
+  isTerminalActionRun,
+} from "@sixb/core"
 import type { SQL, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -77,9 +81,13 @@ export class PgActionRunStorage implements ActionRunStorage {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
       `
 
-      if (!existing || !canRequeueAfterEnqueueFailure(rowToActionRunRecord(existing), input)) {
+      if (
+        !existing ||
+        !canRequeueActionRunAfterEnqueueFailure(rowToActionRunRecord(existing), input)
+      ) {
         throw new ActionRunError(
           `[SixbPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
@@ -142,11 +150,18 @@ export class PgActionRunStorage implements ActionRunStorage {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
       `
 
       if (!existing) {
         throw new ActionRunError(
           `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (isTerminalActionRun({ status: existing.status })) {
+        throw new ActionRunError(
+          `[SixbPg] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
         )
       }
 
@@ -338,40 +353,6 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
     objectTypeId: row.object_type_id,
     primaryId: row.primary_id,
   }
-}
-
-function canRequeueAfterEnqueueFailure(
-  existing: ActionRunRecord,
-  input: QueueActionRunInput
-): boolean {
-  return (
-    existing.status === "failed" &&
-    existing.phase === "enqueue" &&
-    existing.actionId === input.actionId &&
-    existing.idempotencyKey === input.idempotencyKey &&
-    subjectsEqual(existing.subject, input.subject) &&
-    stableJsonStringify(existing.params) === stableJsonStringify(input.params)
-  )
-}
-
-function subjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
-  if (left.kind !== right.kind) return false
-  if (left.kind === "none") return true
-  if (right.kind === "none") return false
-  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
 }
 
 interface DatabaseRow {

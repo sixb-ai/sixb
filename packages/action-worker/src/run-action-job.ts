@@ -1,5 +1,5 @@
-import type { ActionRunRecord, ActionTargetObject } from "@sixb/core"
-import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
+import type { ActionRunFailure, ActionRunRecord, ActionTargetObject } from "@sixb/core"
+import { isObjectActionDefinition, isTerminalActionRun, ObjectNotFoundError } from "@sixb/core"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -32,12 +32,6 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
   )
 }
 
-function isTerminalRun(record: ActionRunRecord): boolean {
-  return (
-    record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
-  )
-}
-
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
@@ -56,7 +50,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       `[SixbActionWorker] Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
     )
   }
-  if (isTerminalRun(existingRun)) {
+  if (isTerminalActionRun(existingRun)) {
     return {
       id: job.id,
       actionId: job.actionId,
@@ -65,6 +59,9 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       skipped: true,
       record: existingRun,
     }
+  }
+  if (existingRun.status === "running") {
+    return failRedeliveredRunningRun(input, existingRun)
   }
   if (existingRun.status !== "queued") {
     throw new Error(
@@ -203,5 +200,60 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       error: failure,
       record: finishedRun,
     }
+  }
+}
+
+async function failRedeliveredRunningRun(
+  input: RunActionJobInput,
+  existingRun: ActionRunRecord
+): Promise<ActionRunResult> {
+  const { runtime, job } = input
+  const failure: ActionRunFailure = {
+    name: "ActionRunLeaseLostError",
+    message: `[SixbActionWorker] Action run '${job.id}' was redelivered while already running. The previous worker may have lost its queue lease or crashed.`,
+    phase: "handler",
+  }
+
+  const finishedRun = await runtime.actionRunsStorage
+    .finish({
+      projectId: runtime.id,
+      id: job.id,
+      status: "failed",
+      phase: "handler",
+      error: failure,
+    })
+    .catch(async (error) => {
+      const latest = await runtime.actionRunsStorage.getById({
+        projectId: runtime.id,
+        id: job.id,
+      })
+
+      if (latest && isTerminalActionRun(latest)) {
+        return latest
+      }
+
+      throw error
+    })
+
+  if (finishedRun.status !== "failed") {
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: finishedRun.subject,
+      status: finishedRun.status,
+      skipped: true,
+      record: finishedRun,
+    }
+  }
+
+  return {
+    id: job.id,
+    actionId: job.actionId,
+    subject: finishedRun.subject,
+    status: "failed",
+    startedAt: existingRun.startedAt ?? existingRun.queuedAt,
+    finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+    error: finishedRun.error ?? failure,
+    record: finishedRun,
   }
 }

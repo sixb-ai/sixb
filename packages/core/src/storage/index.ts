@@ -11,7 +11,14 @@ export type {
   QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
-export { ActionRunError, InMemoryActionRunStorage } from "./action-runs"
+export {
+  ActionRunError,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
+  InMemoryActionRunStorage,
+  isTerminalActionRun,
+} from "./action-runs"
 export type {
   AuthGroupMembershipStore,
   AuthInvitationStore,

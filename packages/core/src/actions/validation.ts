@@ -47,38 +47,6 @@ export function isObjectActionDefinition(value: ActionDefinition): value is Obje
   return value.binding.kind === "object"
 }
 
-export function validateActionParams(
-  runtime: Pick<ActionValidationRuntime, "ontology">,
-  action: ActionDefinition,
-  params: Record<string, unknown>,
-  pathPrefix: string
-): void {
-  const knownParamIds = new Set(Object.keys(action.params))
-
-  for (const paramId of Object.keys(params)) {
-    if (!knownParamIds.has(paramId)) {
-      throw new OntologyValidationError(`Unknown param '${paramId}' for action '${pathPrefix}'`)
-    }
-  }
-
-  for (const [paramId, paramDef] of Object.entries(action.params)) {
-    if (paramDef.required && params[paramId] === undefined) {
-      throw new OntologyValidationError(
-        `Missing required param '${paramId}' for action '${pathPrefix}'`
-      )
-    }
-
-    if (params[paramId] !== undefined) {
-      validateSchemaOrRefValue(
-        paramDef.schema,
-        params[paramId],
-        `${pathPrefix}.${paramId}`,
-        runtime.ontology.getValueTypesById()
-      )
-    }
-  }
-}
-
 export function normalizeActionParams(
   runtime: Pick<ActionValidationRuntime, "ontology">,
   paramsConfig: ActionParamsConfig,

@@ -23,10 +23,9 @@ export interface ActionWorkerSixb {
 }
 
 export interface ActionWorkerOptions {
-  readonly maxConcurrency?: number
+  readonly leaseMs?: number
+  readonly idlePollMs?: number
 }
-
-const DEFAULT_MAX_CONCURRENCY = 16
 
 export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   private readonly context: ActionWorkerContext | null
@@ -34,16 +33,13 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   private readonly idleWithoutDefinitions: boolean
 
   constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
-    const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY
-    if (maxConcurrency <= 0) {
-      throw new Error("[SixbActionWorker] maxConcurrency must be greater than 0.")
-    }
-
     super({
       projectId: sixb.id,
       queue: sixb.queues.actions,
       workerId: `action-worker-${sixb.id}`,
-      claimLimit: maxConcurrency,
+      claimLimit: 1,
+      leaseMs: options.leaseMs,
+      idlePollMs: options.idlePollMs,
     })
 
     const actions = sixb.getActionDefinitions()

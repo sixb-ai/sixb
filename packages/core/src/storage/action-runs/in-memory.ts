@@ -1,4 +1,9 @@
 import { ActionRunError } from "./errors"
+import {
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
+  isTerminalActionRun,
+} from "./idempotency"
 import type {
   ActionRunFailure,
   ActionRunParams,
@@ -52,7 +57,7 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     const key = actionRunKey(input.projectId, input.id)
     const existing = this.rows.get(key)
-    if (existing && !canRequeueAfterEnqueueFailure(existing, input)) {
+    if (existing && !canRequeueActionRunAfterEnqueueFailure(existing, input)) {
       throw new ActionRunError(
         `[Sixb] Action run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -128,6 +133,12 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       )
     }
 
+    if (isTerminalActionRun(existing)) {
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
+      )
+    }
+
     const phase =
       input.status === "succeeded"
         ? (input.phase ?? existing.phase)
@@ -169,7 +180,9 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.actionId ? record.actionId === input.actionId : true))
-      .filter((record) => (input.subject ? subjectsEqual(record.subject, input.subject) : true))
+      .filter((record) =>
+        input.subject ? actionSubjectsEqual(record.subject, input.subject) : true
+      )
       .filter((record) =>
         input.objectTypeId
           ? record.subject.kind === "object" && record.subject.objectTypeId === input.objectTypeId
@@ -198,50 +211,4 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       total,
     }
   }
-}
-
-function subjectsEqual(
-  left: QueueActionRunInput["subject"],
-  right: QueueActionRunInput["subject"]
-): boolean {
-  if (left.kind !== right.kind) {
-    return false
-  }
-
-  if (left.kind === "none") {
-    return true
-  }
-
-  if (right.kind === "none") {
-    return false
-  }
-
-  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
-}
-
-function canRequeueAfterEnqueueFailure(
-  existing: ActionRunRecord,
-  input: QueueActionRunInput
-): boolean {
-  return (
-    existing.status === "failed" &&
-    existing.phase === "enqueue" &&
-    existing.actionId === input.actionId &&
-    existing.idempotencyKey === input.idempotencyKey &&
-    subjectsEqual(existing.subject, input.subject) &&
-    stableJsonStringify(existing.params) === stableJsonStringify(input.params)
-  )
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
 }
