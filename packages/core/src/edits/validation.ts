@@ -316,7 +316,7 @@ function seedObjectStates(input: {
       objectTypeId: row.objectTypeId,
       primaryId: row.primaryId,
       objectType,
-      properties: row.properties as Record<string, JsonValue>,
+      properties: { ...row.properties } as Record<string, JsonValue>,
       exists: true,
       createdInBatch: false,
       deleted: false,
@@ -394,24 +394,19 @@ function applyObjectUpdate(
       propertyId,
       valueTypesById,
     })
-    if (!jsonValuesEqual(previous, value)) {
+    const normalized = normalizeObjectEditProperties({
+      objectType: state.objectType,
+      properties: { [propertyId]: value },
+      valueTypesById,
+      path: `${state.objectType.id}.set`,
+    })[propertyId]
+    if (!jsonValuesEqual(previous, normalized)) {
       diff.changedProperties.add(propertyId)
     }
-    state.properties[propertyId] = value
+    state.properties[propertyId] = normalized
   }
 
   assertRequiredProperties(state.objectType, state.properties)
-  for (const propertyId of Object.keys(operation.properties)) {
-    const property = state.objectType.properties.find((candidate) => candidate.id === propertyId)
-    if (!property) continue
-    const normalized = normalizeObjectEditProperties({
-      objectType: state.objectType,
-      properties: { [propertyId]: state.properties[propertyId] },
-      valueTypesById,
-      path: `${state.objectType.id}.set`,
-    })
-    state.properties[propertyId] = normalized[propertyId]
-  }
 }
 
 function applyObjectDelete(

@@ -15,7 +15,12 @@ export {
   validatePropertyValue,
 } from "./properties"
 export { validateQueryMetadata } from "./query"
-export { isRecord, resolveValueTypeRef, validateSchemaValue } from "./schema"
+export {
+  isRecord,
+  resolveValueTypeRef,
+  resolveValueTypeSchema,
+  validateSchemaValue,
+} from "./schema"
 
 export {
   assertTelemetryProperty,

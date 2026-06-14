@@ -1,6 +1,7 @@
 import { assertJsonValue, cloneJsonValue, type JsonValue } from "../../json"
 import type { ObjectFieldSchema, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
+import { resolveValueTypeSchema } from "./schema"
 
 export function normalizeSchemaValue(
   schema: Schema,
@@ -21,13 +22,12 @@ export function normalizeSchemaValue(
   }
 
   if (schema.type === "valueTypeRef") {
-    const valueType = valueTypesById.get(schema.valueTypeId)
-    if (!valueType) {
-      throw new OntologyValidationError(
-        `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
-      )
-    }
-    return normalizeSchemaValue(valueType.schema, value, path, valueTypesById)
+    return normalizeSchemaValue(
+      resolveValueTypeSchema(schema, valueTypesById, path),
+      value,
+      path,
+      valueTypesById
+    )
   }
 
   if (schema.type === "enum") {

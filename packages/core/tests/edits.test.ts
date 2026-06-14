@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   createEditBuilder,
   defineObjectType,
+  defineValueType,
   deriveEditCommitDiff,
   type EditBatch,
   InMemoryStorage,
@@ -9,6 +10,7 @@ import {
   OntologyRegistry,
   prop,
   validateEditBatch,
+  valueTypeRef,
 } from "../src"
 
 const Customer = defineObjectType({
@@ -47,6 +49,36 @@ const Payment = defineObjectType({
     prop("status", "string", { required: true }),
   ],
   links: [link("invoice", Invoice, { cardinality: "one" })],
+})
+
+const MoneyAmount = defineValueType({
+  id: "MoneyAmount",
+  name: "Money Amount",
+  schema: {
+    type: "object",
+    properties: {
+      value: { schema: "double", required: true },
+      currency: { schema: "string", required: true },
+    },
+  },
+})
+
+const InvoiceWithResolvedAmount = defineObjectType({
+  id: "InvoiceWithResolvedAmount",
+  name: "Invoice With Resolved Amount",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("total", valueTypeRef(MoneyAmount), { required: true }),
+  ],
+})
+
+const InvoiceWithRegisteredAmount = defineObjectType({
+  id: "InvoiceWithRegisteredAmount",
+  name: "Invoice With Registered Amount",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("total", valueTypeRef("MoneyAmount"), { required: true }),
+  ],
 })
 
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
@@ -193,6 +225,62 @@ describe("EditBatch core contract", () => {
           target: { objectTypeId: "Customer", primaryId: "cus_1" },
         },
       ],
+    })
+  })
+
+  test("deriving a diff does not mutate the in-memory object store", async () => {
+    const storage = await createSeededStorage()
+
+    await deriveEditCommitDiff({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: createEditBuilder({ runId: "act_readonly" }).set(Invoice, "inv_1", {
+        status: "paid",
+      }),
+    })
+
+    const row = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+
+    expect(row?.properties.status).toBe("draft")
+  })
+
+  test("normalizes builder edits with resolved and registered value type refs", async () => {
+    const resolvedEdit = createEditBuilder({ runId: "act_value_type_resolved" })
+    const resolvedInvoice = resolvedEdit.create(InvoiceWithResolvedAmount, {
+      total: { value: 120, currency: "EUR" },
+    })
+
+    expect(resolvedEdit.toEditBatch().operations[0]).toEqual({
+      kind: "object.create",
+      objectTypeId: "InvoiceWithResolvedAmount",
+      primaryId: resolvedInvoice.primaryId,
+      properties: {
+        id: resolvedInvoice.primaryId,
+        total: { value: 120, currency: "EUR" },
+      },
+    })
+
+    const registeredEdit = createEditBuilder<[typeof MoneyAmount]>({
+      runId: "act_value_type_registered",
+      valueTypesById: new Map([[MoneyAmount.id, MoneyAmount]]),
+    })
+    const registeredInvoice = registeredEdit.create(InvoiceWithRegisteredAmount, {
+      total: { value: 240, currency: "USD" },
+    })
+
+    expect(registeredEdit.toEditBatch().operations[0]).toEqual({
+      kind: "object.create",
+      objectTypeId: "InvoiceWithRegisteredAmount",
+      primaryId: registeredInvoice.primaryId,
+      properties: {
+        id: registeredInvoice.primaryId,
+        total: { value: 240, currency: "USD" },
+      },
     })
   })
 
