@@ -58,7 +58,7 @@ describe("PgActionRunStorage", () => {
         ],
         links: [
           {
-            operation: "create",
+            operation: "update",
             source: { objectTypeId: "Invoice", primaryId: "inv_1" },
             linkId: "customer",
             target: { objectTypeId: "Customer", primaryId: "cus_1" },
@@ -117,7 +117,7 @@ describe("PgActionRunStorage", () => {
       ],
       links: [
         {
-          operation: "create",
+          operation: "update",
           source: { objectTypeId: "Invoice", primaryId: "inv_1" },
           linkId: "customer",
           target: { objectTypeId: "Customer", primaryId: "cus_1" },

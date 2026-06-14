@@ -452,7 +452,7 @@ CREATE TABLE IF NOT EXISTS action_run_object_diff_properties (
 CREATE TABLE IF NOT EXISTS action_run_link_diffs (
   project_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
-  operation TEXT NOT NULL CHECK (operation IN ('create', 'delete')),
+  operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
   source_object_type_id TEXT NOT NULL,
   source_primary_id TEXT NOT NULL,
   link_id TEXT NOT NULL,

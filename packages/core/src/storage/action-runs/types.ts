@@ -1,5 +1,6 @@
 import type { ActionSubject } from "../../actions"
 import type { SecurityContext } from "../../auth"
+import type { EditCommitDiff, EditLinkDiff, EditObjectDiff, EditObjectRef } from "../../edits/types"
 import type { JsonValue } from "../../json"
 
 export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
@@ -32,29 +33,10 @@ export interface ActionRunWritebackRecord {
   readonly error?: ActionRunFailure
 }
 
-export interface ActionRunObjectEditDiff {
-  readonly objectTypeId: string
-  readonly primaryId: string
-  readonly operation: "create" | "update" | "delete"
-  readonly changedProperties: readonly string[]
-}
-
-export interface ActionRunObjectRef {
-  readonly objectTypeId: string
-  readonly primaryId: string
-}
-
-export interface ActionRunLinkEditDiff {
-  readonly operation: "create" | "delete"
-  readonly source: ActionRunObjectRef
-  readonly linkId: string
-  readonly target: ActionRunObjectRef
-}
-
-export interface ActionRunCommitDiff {
-  readonly objects: readonly ActionRunObjectEditDiff[]
-  readonly links: readonly ActionRunLinkEditDiff[]
-}
+export type ActionRunObjectEditDiff = EditObjectDiff
+export type ActionRunObjectRef = EditObjectRef
+export type ActionRunLinkEditDiff = EditLinkDiff
+export type ActionRunCommitDiff = EditCommitDiff
 
 export interface ActionRunCommitRecord {
   readonly committedAt: Date
