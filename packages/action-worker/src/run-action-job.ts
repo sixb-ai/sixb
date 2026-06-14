@@ -1,5 +1,6 @@
-import type { ActionRunRecord, ActionTargetObject } from "@sixb/core"
-import { ActionRunError, isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
+import type { ActionRunFailure, ActionRunRecord, ActionTargetObject } from "@sixb/core"
+import { isObjectActionDefinition, isTerminalActionRun, ObjectNotFoundError } from "@sixb/core"
+import { ActionWorkerError } from "./errors"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -27,76 +28,98 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
     return finishedAt
   }
 
-  throw new Error(
-    `[SixbActionWorker] Action run '${runId}' finished without a finishedAt timestamp.`
-  )
-}
-
-function isDuplicateStartError(error: unknown): boolean {
-  return error instanceof ActionRunError && /already exists/i.test(error.message)
+  throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
 }
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const action = runtime.getActionById(job.actionId)
-
-  if (!action) {
-    throw new Error(`[SixbActionWorker] Unknown action '${job.actionId}'.`)
-  }
 
   throwIfAborted(signal)
 
-  let startedRun: ActionRunRecord
+  const existingRun = await runtime.actionRunsStorage.getById({
+    projectId: runtime.id,
+    id: job.id,
+  })
+  if (!existingRun) {
+    throw new ActionWorkerError(`Action run '${job.id}' was not found.`)
+  }
+  if (existingRun.actionId !== job.actionId) {
+    throw new ActionWorkerError(
+      `Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
+    )
+  }
+  if (isTerminalActionRun(existingRun)) {
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: existingRun.subject,
+      status: existingRun.status,
+      skipped: true,
+      record: existingRun,
+    }
+  }
+  if (existingRun.status === "running") {
+    return failRedeliveredRunningRun(input, existingRun)
+  }
+  if (existingRun.status !== "queued") {
+    throw new ActionWorkerError(
+      `Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
+    )
+  }
+
+  const action = runtime.getActionById(job.actionId)
+  if (!action) {
+    const failure = toActionRunFailure(
+      new ActionWorkerError(`Unknown action '${job.actionId}'.`),
+      "handler"
+    )
+    const finishedRun = await runtime.actionRunsStorage.finish({
+      projectId: runtime.id,
+      id: job.id,
+      status: "failed",
+      error: failure,
+    })
+
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: finishedRun.subject,
+      status: "failed",
+      startedAt: finishedRun.startedAt ?? finishedRun.queuedAt,
+      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      error: failure,
+      record: finishedRun,
+    }
+  }
+
+  let startedRun: ActionRunRecord | null = null
   try {
     startedRun = await runtime.actionRunsStorage.start({
       projectId: runtime.id,
       id: job.id,
-      actionId: job.actionId,
-      subject: job.subject,
-      params: job.params,
     })
-  } catch (error) {
-    const existing = await runtime.actionRunsStorage.getById({
-      projectId: runtime.id,
-      id: job.id,
-    })
-    if (existing && isDuplicateStartError(error)) {
-      return {
-        id: job.id,
-        actionId: job.actionId,
-        subject: job.subject,
-        status: existing.status,
-        skipped: true,
-        record: existing,
-      }
-    }
-
-    throw error
-  }
-
-  try {
     throwIfAborted(signal)
 
     if (!isObjectActionDefinition(action)) {
-      if (job.subject.kind !== "none") {
-        throw new Error(`[SixbActionWorker] Action '${job.actionId}' does not accept a subject.`)
+      if (startedRun.subject.kind !== "none") {
+        throw new ActionWorkerError(`Action '${job.actionId}' does not accept a subject.`)
       }
 
       await action.handler({
-        params: job.params,
+        params: startedRun.params,
         sixb: runtime.sixb,
         signal,
       })
     } else {
-      if (job.subject.kind !== "object") {
-        throw new Error(`[SixbActionWorker] Action '${job.actionId}' requires an object subject.`)
+      if (startedRun.subject.kind !== "object") {
+        throw new ActionWorkerError(`Action '${job.actionId}' requires an object subject.`)
       }
 
-      const subjectObjectType = runtime.sixb.getObjectTypeById(job.subject.objectTypeId)
+      const subjectObjectType = runtime.sixb.getObjectTypeById(startedRun.subject.objectTypeId)
       if (!subjectObjectType) {
-        throw new Error(
-          `[SixbActionWorker] Unknown object type '${job.subject.objectTypeId}' for action '${job.actionId}'.`
+        throw new ActionWorkerError(
+          `Unknown object type '${startedRun.subject.objectTypeId}' for action '${job.actionId}'.`
         )
       }
 
@@ -104,27 +127,27 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
         .getActionsForType(subjectObjectType)
         .some((candidate) => candidate.id === action.id)
       if (!actionAppliesToSubject) {
-        throw new Error(
-          `[SixbActionWorker] Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
+        throw new ActionWorkerError(
+          `Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
         )
       }
 
       const targetRow = await runtime.storage.objects.getByPrimaryId({
         projectId: runtime.id,
         objectTypeId: subjectObjectType.id,
-        primaryId: job.subject.primaryId,
+        primaryId: startedRun.subject.primaryId,
       })
 
       if (!targetRow) {
         throw new ObjectNotFoundError(
-          job.subject.objectTypeId,
-          job.subject.primaryId,
+          startedRun.subject.objectTypeId,
+          startedRun.subject.primaryId,
           "Object not found for action run"
         )
       }
 
       await action.handler({
-        params: job.params,
+        params: startedRun.params,
         target: toActionTargetObject(targetRow, action.target.id),
         sixb: runtime.sixb,
         signal,
@@ -142,9 +165,9 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return {
       id: job.id,
       actionId: job.actionId,
-      subject: job.subject,
+      subject: startedRun.subject,
       status: "succeeded",
-      startedAt: startedRun.startedAt,
+      startedAt: startedRun.startedAt ?? startedRun.queuedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
       record: finishedRun,
     }
@@ -165,15 +188,74 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       throw error
     }
 
+    const startedAt = startedRun?.startedAt ?? finishedRun.startedAt ?? finishedRun.queuedAt
     return {
       id: job.id,
       actionId: job.actionId,
-      subject: job.subject,
+      subject: finishedRun.subject,
       status,
-      startedAt: startedRun.startedAt,
+      startedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
       error: failure,
       record: finishedRun,
     }
+  }
+}
+
+async function failRedeliveredRunningRun(
+  input: RunActionJobInput,
+  existingRun: ActionRunRecord
+): Promise<ActionRunResult> {
+  const { runtime, job } = input
+  const error = new ActionWorkerError(
+    `Action run '${job.id}' was redelivered while already running. The previous worker may have lost its queue lease or crashed.`
+  )
+  const failure: ActionRunFailure = {
+    name: "ActionRunLeaseLostError",
+    message: error.message,
+    phase: "handler",
+  }
+
+  const finishedRun = await runtime.actionRunsStorage
+    .finish({
+      projectId: runtime.id,
+      id: job.id,
+      status: "failed",
+      phase: "handler",
+      error: failure,
+    })
+    .catch(async (error) => {
+      const latest = await runtime.actionRunsStorage.getById({
+        projectId: runtime.id,
+        id: job.id,
+      })
+
+      if (latest && isTerminalActionRun(latest)) {
+        return latest
+      }
+
+      throw error
+    })
+
+  if (finishedRun.status !== "failed") {
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: finishedRun.subject,
+      status: finishedRun.status,
+      skipped: true,
+      record: finishedRun,
+    }
+  }
+
+  return {
+    id: job.id,
+    actionId: job.actionId,
+    subject: finishedRun.subject,
+    status: "failed",
+    startedAt: existingRun.startedAt ?? existingRun.queuedAt,
+    finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+    error: finishedRun.error ?? failure,
+    record: finishedRun,
   }
 }

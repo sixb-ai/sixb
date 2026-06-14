@@ -13,12 +13,15 @@ import type { WorkflowRunStorage } from "./workflow-runs"
 
 export type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
 export { ActionRunError } from "./action-runs"

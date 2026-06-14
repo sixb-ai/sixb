@@ -1,12 +1,17 @@
 import type { ActionSubject } from "../../actions"
+import type { SecurityContext } from "../../auth"
 import type { JsonValue } from "../../json"
 
-export type ActionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
+export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+
+export type ActionRunPhase = "request" | "enqueue" | "handler" | "cancelled"
+
+export type ActionRunParams = Readonly<Record<string, JsonValue>>
 
 export interface ActionRunFailure {
   readonly name?: string
   readonly message: string
-  readonly phase?: "handler" | "cancelled"
+  readonly phase?: ActionRunPhase
 }
 
 export interface ActionRunRecord {
@@ -15,21 +20,31 @@ export interface ActionRunRecord {
   readonly actionId: string
   readonly subject: ActionSubject
   readonly status: ActionRunStatus
-  readonly startedAt: Date
+  readonly phase?: ActionRunPhase
+  readonly queuedAt: Date
+  readonly startedAt?: Date
   readonly finishedAt?: Date
-  readonly params: Readonly<Record<string, unknown>>
+  readonly params: ActionRunParams
+  readonly idempotencyKey: string
+  readonly securityContext?: SecurityContext
   readonly error?: ActionRunFailure
-  readonly metadata?: Readonly<Record<string, JsonValue>>
+}
+
+export interface QueueActionRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly params: ActionRunParams
+  readonly idempotencyKey: string
+  readonly securityContext?: SecurityContext
+  readonly queuedAt?: Date
 }
 
 export interface StartActionRunInput {
   readonly id: string
   readonly projectId: string
-  readonly actionId: string
-  readonly subject: ActionSubject
-  readonly params: Readonly<Record<string, unknown>>
   readonly startedAt?: Date
-  readonly metadata?: Readonly<Record<string, JsonValue>>
 }
 
 export type FinishActionRunInput =
@@ -38,7 +53,7 @@ export type FinishActionRunInput =
       readonly projectId: string
       readonly status: "succeeded"
       readonly finishedAt?: Date
-      readonly metadata?: Readonly<Record<string, JsonValue>>
+      readonly phase?: ActionRunPhase
     }
   | {
       readonly id: string
@@ -46,7 +61,7 @@ export type FinishActionRunInput =
       readonly status: "failed" | "cancelled"
       readonly finishedAt?: Date
       readonly error?: ActionRunFailure
-      readonly metadata?: Readonly<Record<string, JsonValue>>
+      readonly phase?: ActionRunPhase
     }
 
 export interface ListActionRunsInput {
@@ -70,6 +85,7 @@ export interface ListActionRunsResult {
 }
 
 export interface ActionRunStorage {
+  queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>

@@ -1,12 +1,18 @@
-import type { JsonValue } from "../../json"
 import { ActionRunError } from "./errors"
+import {
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
+  isTerminalActionRun,
+} from "./idempotency"
 import type {
   ActionRunFailure,
+  ActionRunParams,
   ActionRunRecord,
   ActionRunStorage,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  QueueActionRunInput,
   StartActionRunInput,
 } from "./types"
 
@@ -18,20 +24,12 @@ function cloneActionRunRecord(record: ActionRunRecord): ActionRunRecord {
   return structuredClone(record)
 }
 
-function normalizeParams(
-  params: Readonly<Record<string, unknown>>
-): Readonly<Record<string, unknown>> {
+function normalizeParams(params: ActionRunParams): ActionRunParams {
   return structuredClone(params)
 }
 
-function normalizeSubject(subject: StartActionRunInput["subject"]): StartActionRunInput["subject"] {
+function normalizeSubject(subject: QueueActionRunInput["subject"]): QueueActionRunInput["subject"] {
   return structuredClone(subject)
-}
-
-function normalizeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  return metadata ? structuredClone(metadata) : undefined
 }
 
 function normalizeError(error: ActionRunFailure | undefined): ActionRunFailure | undefined {
@@ -39,7 +37,9 @@ function normalizeError(error: ActionRunFailure | undefined): ActionRunFailure |
 }
 
 function compareRuns(a: ActionRunRecord, b: ActionRunRecord, order: "asc" | "desc"): number {
-  const delta = a.startedAt.getTime() - b.startedAt.getTime()
+  const leftAt = a.startedAt ?? a.queuedAt
+  const rightAt = b.startedAt ?? b.queuedAt
+  const delta = leftAt.getTime() - rightAt.getTime()
   if (delta !== 0) {
     return order === "asc" ? delta : -delta
   }
@@ -54,9 +54,10 @@ function compareRuns(a: ActionRunRecord, b: ActionRunRecord, order: "asc" | "des
 export class InMemoryActionRunStorage implements ActionRunStorage {
   private readonly rows = new Map<string, ActionRunRecord>()
 
-  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
+  async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     const key = actionRunKey(input.projectId, input.id)
-    if (this.rows.has(key)) {
+    const existing = this.rows.get(key)
+    if (existing && !canRequeueActionRunAfterEnqueueFailure(existing, input)) {
       throw new ActionRunError(
         `[Sixb] Action run '${input.id}' already exists for project '${input.projectId}'.`
       )
@@ -67,14 +68,59 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       projectId: input.projectId,
       actionId: input.actionId,
       subject: normalizeSubject(input.subject),
-      status: "running",
-      startedAt: new Date(input.startedAt ?? new Date()),
+      status: "queued",
+      phase: "request",
+      queuedAt: new Date(input.queuedAt ?? new Date()),
       params: normalizeParams(input.params),
-      metadata: normalizeMetadata(input.metadata),
+      idempotencyKey: input.idempotencyKey,
+      securityContext: input.securityContext ? structuredClone(input.securityContext) : undefined,
+    }
+
+    if (existing) {
+      const next: ActionRunRecord = {
+        ...existing,
+        status: "queued",
+        phase: "request",
+        queuedAt: record.queuedAt,
+        startedAt: undefined,
+        finishedAt: undefined,
+        error: undefined,
+        securityContext: record.securityContext,
+      }
+      this.rows.set(key, structuredClone(next))
+      return cloneActionRunRecord(next)
     }
 
     this.rows.set(key, structuredClone(record))
     return cloneActionRunRecord(record)
+  }
+
+  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
+    const key = actionRunKey(input.projectId, input.id)
+    const existing = this.rows.get(key)
+
+    if (!existing) {
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    if (existing.status !== "queued") {
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' cannot start from status '${existing.status}'.`
+      )
+    }
+
+    const next: ActionRunRecord = {
+      ...existing,
+      status: "running",
+      phase: "handler",
+      startedAt: new Date(input.startedAt ?? new Date()),
+      error: undefined,
+    }
+
+    this.rows.set(key, structuredClone(next))
+    return cloneActionRunRecord(next)
   }
 
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
@@ -87,19 +133,22 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       )
     }
 
-    const metadata =
-      existing.metadata || input.metadata
-        ? {
-            ...(existing.metadata ?? {}),
-            ...(normalizeMetadata(input.metadata) ?? {}),
-          }
-        : undefined
+    if (isTerminalActionRun(existing)) {
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
+      )
+    }
+
+    const phase =
+      input.status === "succeeded"
+        ? (input.phase ?? existing.phase)
+        : (input.phase ?? input.error?.phase ?? existing.phase)
 
     const base: ActionRunRecord = {
       ...existing,
       status: input.status,
+      phase,
       finishedAt: new Date(input.finishedAt ?? new Date()),
-      metadata,
     }
 
     const next: ActionRunRecord =
@@ -131,7 +180,9 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.actionId ? record.actionId === input.actionId : true))
-      .filter((record) => (input.subject ? subjectsEqual(record.subject, input.subject) : true))
+      .filter((record) =>
+        input.subject ? actionSubjectsEqual(record.subject, input.subject) : true
+      )
       .filter((record) =>
         input.objectTypeId
           ? record.subject.kind === "object" && record.subject.objectTypeId === input.objectTypeId
@@ -143,8 +194,12 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
           : true
       )
       .filter((record) => (statuses ? statuses.has(record.status) : true))
-      .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))
-      .filter((record) => (input.startedBefore ? record.startedAt <= input.startedBefore : true))
+      .filter((record) =>
+        input.startedAfter ? (record.startedAt ?? record.queuedAt) >= input.startedAfter : true
+      )
+      .filter((record) =>
+        input.startedBefore ? (record.startedAt ?? record.queuedAt) <= input.startedBefore : true
+      )
       .sort((a, b) => compareRuns(a, b, order))
 
     const total = filtered.length
@@ -156,23 +211,4 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       total,
     }
   }
-}
-
-function subjectsEqual(
-  left: StartActionRunInput["subject"],
-  right: StartActionRunInput["subject"]
-): boolean {
-  if (left.kind !== right.kind) {
-    return false
-  }
-
-  if (left.kind === "none") {
-    return true
-  }
-
-  if (right.kind === "none") {
-    return false
-  }
-
-  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
 }

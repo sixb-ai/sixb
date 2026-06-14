@@ -23,8 +23,6 @@ export interface ActionWorkerContext {
 export interface ActionJob {
   readonly id: string
   readonly actionId: string
-  readonly subject: ActionSubject
-  readonly params: Readonly<Record<string, unknown>>
 }
 
 interface BaseActionRunResult {

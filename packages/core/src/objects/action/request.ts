@@ -7,9 +7,11 @@
 import {
   type RequestActionAndWaitOptions,
   type RequestActionOptions,
+  type RequestActionResult,
   requestAction as requestRuntimeAction,
   requestActionAndWait as requestRuntimeActionAndWait,
 } from "../../actions/request"
+import type { ActionRunRecord } from "../../storage"
 import type { ResolvedObjectContext } from "../context"
 
 export type { RequestActionAndWaitOptions, RequestActionOptions }
@@ -22,7 +24,7 @@ export async function requestAction(
     params?: Record<string, unknown>
     options?: RequestActionOptions
   }
-): Promise<{ runId: string }> {
+): Promise<RequestActionResult> {
   return requestRuntimeAction(ctx, {
     actionId: params.actionId,
     subject: {
@@ -33,6 +35,7 @@ export async function requestAction(
     params: params.params,
     runId: params.options?.runId,
     signal: params.options?.signal,
+    securityContext: params.options?.securityContext,
   })
 }
 
@@ -44,7 +47,7 @@ export async function requestActionAndWait(
     params?: Record<string, unknown>
     options?: RequestActionAndWaitOptions
   }
-): Promise<{ runId: string }> {
+): Promise<ActionRunRecord> {
   return requestRuntimeActionAndWait(ctx, {
     actionId: params.actionId,
     subject: {
@@ -56,6 +59,7 @@ export async function requestActionAndWait(
     runId: params.options?.runId,
     timeoutMs: params.options?.timeoutMs,
     signal: params.options?.signal,
+    securityContext: params.options?.securityContext,
     onRequested: params.options?.onRequested,
   })
 }

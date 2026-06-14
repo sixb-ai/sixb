@@ -1,3 +1,4 @@
+export { ActionWorkerError } from "./errors"
 export { runActionJob } from "./run-action-job"
 export type {
   ActionJob,

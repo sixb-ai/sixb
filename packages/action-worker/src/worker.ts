@@ -1,12 +1,16 @@
 import type {
   ActionDefinition,
+  ActionRunRequestedQueueJob,
+  ClaimedQueueJob,
   EventsRuntime,
   OntologySource,
+  Queues,
+  QueueWorkerFailureDecision,
   Sixb,
   Storage,
-  StoredActionRequestedEvent,
 } from "@sixb/core"
-import { Worker } from "@sixb/core"
+import { QueueWorker } from "@sixb/core"
+import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
@@ -14,24 +18,30 @@ export interface ActionWorkerSixb {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: Storage
+  readonly queues: Queues
   getActionDefinitions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
 }
 
 export interface ActionWorkerOptions {
-  readonly maxConcurrency?: number
+  readonly leaseMs?: number
+  readonly idlePollMs?: number
 }
 
-const DEFAULT_MAX_CONCURRENCY = 16
-
-export class ActionWorker extends Worker {
+export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   private readonly context: ActionWorkerContext | null
   private readonly sixb: ActionWorkerSixb
-  private readonly actionIds: ReadonlySet<string>
-  private readonly maxConcurrency: number
+  private readonly idleWithoutDefinitions: boolean
 
   constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
-    super()
+    super({
+      projectId: sixb.id,
+      queue: sixb.queues.actions,
+      workerId: `action-worker-${sixb.id}`,
+      claimLimit: 1,
+      leaseMs: options.leaseMs,
+      idlePollMs: options.idlePollMs,
+    })
 
     const actions = sixb.getActionDefinitions()
     if (actions.length === 0) {
@@ -40,92 +50,68 @@ export class ActionWorker extends Worker {
 
     this.context = actions.length > 0 ? buildActionContext(sixb) : null
     this.sixb = sixb
-    this.actionIds = new Set(actions.map((action) => action.id))
-    this.maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY
-
-    if (this.maxConcurrency <= 0) {
-      throw new Error("[SixbActionWorker] maxConcurrency must be greater than 0.")
-    }
+    this.idleWithoutDefinitions = actions.length === 0
   }
 
-  protected async run(signal: AbortSignal): Promise<void> {
-    const inFlight = new Set<Promise<void>>()
-    const pending: StoredActionRequestedEvent[] = []
-    const dispatch = (event: StoredActionRequestedEvent): void => {
-      const task = this.handleActionRequested(event, signal).finally(() => {
-        inFlight.delete(task)
-        const next = pending.shift()
-        if (next && !signal.aborted) dispatch(next)
-      })
-      inFlight.add(task)
+  protected override async run(signal: AbortSignal): Promise<void> {
+    if (!this.idleWithoutDefinitions) {
+      await super.run(signal)
+      return
     }
 
-    const unsubscribe = await this.sixb.events.subscribe(
-      {
-        types: ["action.requested"],
-      },
-      (events) => {
-        for (const event of events) {
-          if (event.type !== "action.requested") continue
-          if (!this.actionIds.has(event.payload.actionId)) continue
-          if (!this.context) continue
-          if (signal.aborted) continue
-
-          if (inFlight.size < this.maxConcurrency) {
-            dispatch(event)
-          } else {
-            pending.push(event)
-          }
-        }
+    await new Promise<void>((resolve) => {
+      if (signal.aborted) {
+        resolve()
+        return
       }
-    )
-
-    try {
-      await new Promise<void>((resolve) => {
-        if (signal.aborted) {
-          resolve()
-          return
-        }
-        signal.addEventListener("abort", () => resolve(), { once: true })
-      })
-    } finally {
-      unsubscribe()
-      pending.length = 0
-      await Promise.allSettled(inFlight)
-    }
+      signal.addEventListener("abort", () => resolve(), { once: true })
+    })
   }
 
-  private async handleActionRequested(
-    event: StoredActionRequestedEvent,
+  protected async execute(
+    claimed: ClaimedQueueJob<ActionRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
     const context = this.context
     if (!context) {
+      throw new ActionWorkerError("No action definitions are registered.")
+    }
+
+    const { job } = claimed
+    if (job.type !== "action.run.requested") {
+      throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
+    }
+
+    const actionJob: ActionJob = {
+      id: job.payload.runId,
+      actionId: job.payload.actionId,
+    }
+
+    const result = await runActionJob({
+      runtime: context,
+      job: actionJob,
+      signal,
+    })
+
+    if ("skipped" in result) {
       return
     }
 
-    const job: ActionJob = {
-      id: event.payload.runId,
-      actionId: event.payload.actionId,
-      subject: event.payload.subject,
-      params: event.payload.params,
-    }
+    await emitActionTerminalEvent(this.sixb, result)
+  }
 
-    try {
-      const result = await runActionJob({
-        runtime: context,
-        job,
-        signal,
-      })
+  protected override async onExecutionError(
+    _claimed: ClaimedQueueJob<ActionRunRequestedQueueJob>,
+    _error: unknown
+  ): Promise<QueueWorkerFailureDecision> {
+    return { kind: "fail" }
+  }
 
-      if ("skipped" in result) {
-        return
-      }
-
-      await emitActionTerminalEvent(this.sixb, result)
-    } catch (error) {
-      console.error("[SixbActionWorker] Failed to execute action run:", error)
-    }
+  protected override async onAbortError(
+    _claimed: ClaimedQueueJob<ActionRunRequestedQueueJob>,
+    _error: unknown
+  ): Promise<QueueWorkerFailureDecision> {
+    return { kind: "fail" }
   }
 }
 
@@ -177,7 +163,7 @@ async function emitActionTerminalEvent(
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   const actionRunsStorage = sixb.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new Error("[SixbActionWorker] Action workers require storage.actionRuns support.")
+    throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
 
   return {

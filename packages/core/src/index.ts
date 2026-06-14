@@ -82,6 +82,8 @@ export type {
   RequestActionAndWaitOptions,
   RequestActionInput,
   RequestActionOptions,
+  RequestActionResult,
+  WaitForActionRunInput,
 } from "./actions"
 export {
   ActionDefinitionError,
@@ -94,6 +96,7 @@ export {
   isObjectActionDefinition,
   requestAction,
   requestActionAndWait,
+  waitForActionRun,
 } from "./actions"
 export {
   ActionRunFailedError,
@@ -391,6 +394,8 @@ export {
 
 export type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
@@ -497,6 +502,7 @@ export type {
   ProjectionRunStorage,
   QueryObjectsInput,
   QueryObjectsResult,
+  QueueActionRunInput,
   QueueWorkflowRunInput,
   ResumeWorkflowRunInput,
   RuleStateRecord,
@@ -555,6 +561,9 @@ export type {
 export {
   ActionRunError,
   AuthStorageError,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  canRequeueActionRunAfterEnqueueFailure,
   defineMigrations,
   InMemoryActionRunStorage,
   InMemoryAuthStorage,
@@ -571,6 +580,7 @@ export {
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
   isMigrationCapableStorage,
+  isTerminalActionRun,
   migrateStorage,
   PipelineRunError,
   ProjectionRunError,
@@ -646,6 +656,7 @@ export {
 // ── Queues ─────────────────────────────────────────────────
 
 export type {
+  ActionRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,

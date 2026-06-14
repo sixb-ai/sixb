@@ -1,5 +1,5 @@
-import type { WorkflowActionNodeDefinition } from "@sixb/core"
-import { objectService, snapshotWorkflowActionInput } from "@sixb/core"
+import type { ActionRunFailure, WorkflowActionNodeDefinition } from "@sixb/core"
+import { ActionRunFailedError, objectService, snapshotWorkflowActionInput } from "@sixb/core"
 import { WorkflowWorkerError } from "../errors"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"
@@ -48,7 +48,7 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
     })
     const actionRunId = `${context.job.id}:action:${nodeIndex}`
 
-    await objectService.requestActionAndWait(
+    const run = await objectService.requestActionAndWait(
       context.runtime,
       mapperResult.target.objectTypeId,
       mapperResult.target.primaryId,
@@ -60,9 +60,28 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
         onRequested: () => context.markSideEffectBoundaryPassed(),
       }
     )
+    if (run.status !== "succeeded") {
+      throw new ActionRunFailedError({
+        runId: run.id,
+        actionId: run.actionId,
+        subject: run.subject,
+        error: run.error ?? actionRunStatusFailure(run.status, run.phase),
+        finishedAt: (run.finishedAt ?? new Date()).toISOString(),
+      })
+    }
 
     return {}
   },
+}
+
+function actionRunStatusFailure(
+  status: "queued" | "running" | "failed" | "cancelled",
+  phase: ActionRunFailure["phase"]
+): ActionRunFailure {
+  return {
+    message: `Action run finished with status '${status}'.`,
+    phase,
+  }
 }
 
 function normalizeActionMapperResult(input: {

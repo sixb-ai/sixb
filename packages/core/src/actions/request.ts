@@ -1,14 +1,20 @@
 import { randomUUID } from "node:crypto"
-import type { StoredActionCompletedEvent, StoredActionFailedEvent } from "../events"
-import {
-  ActionRunFailedError,
-  ActionRunTimeoutError,
-  ActionValidationError,
-} from "../objects/action/errors"
+import type { SecurityContext } from "../auth"
+import type { EventActor } from "../events"
+import { ActionRunTimeoutError, ActionValidationError } from "../objects/action/errors"
 import { requireObject } from "../objects/helpers"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
+import {
+  ActionRunError,
+  type ActionRunParams,
+  type ActionRunRecord,
+  type ActionRunStorage,
+  actionRunParamsEqual,
+  actionSubjectsEqual,
+  isTerminalActionRun,
+} from "../storage"
 import type {
   ActionDefinition,
   ActionSubject,
@@ -18,14 +24,22 @@ import type {
 import {
   isGlobalActionDefinition,
   isObjectActionDefinition,
+  normalizeActionParams,
   resolveObjectActionSubject,
-  validateActionParams,
   validateActionSubject,
 } from "./validation"
+
+export interface RequestActionResult {
+  readonly runId: string
+  readonly queuedAt: string
+  readonly jobId?: string
+  readonly created: boolean
+}
 
 export interface RequestActionOptions {
   readonly runId?: string
   readonly signal?: AbortSignal
+  readonly securityContext?: SecurityContext
 }
 
 export interface RequestActionAndWaitOptions extends RequestActionOptions {
@@ -39,6 +53,7 @@ export interface RequestActionInput {
   readonly params?: Record<string, unknown>
   readonly runId?: string
   readonly signal?: AbortSignal
+  readonly securityContext?: SecurityContext
 }
 
 export interface RequestActionAndWaitInput extends RequestActionInput {
@@ -46,7 +61,14 @@ export interface RequestActionAndWaitInput extends RequestActionInput {
   readonly onRequested?: (runId: string) => void | Promise<void>
 }
 
+export interface WaitForActionRunInput {
+  readonly runId: string
+  readonly timeoutMs?: number
+  readonly signal?: AbortSignal
+}
+
 const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
+const DEFAULT_ACTION_WAIT_POLL_MS = 1_000
 
 function createActionRunId(runId: string | undefined): string {
   if (runId !== undefined) {
@@ -104,20 +126,14 @@ async function loadActionTarget(params: {
   return toActionTargetObject(targetRow, action.target.id)
 }
 
-function isTerminalActionEvent(
-  event: StoredActionCompletedEvent | StoredActionFailedEvent,
-  runId: string
-): boolean {
-  return event.payload.runId === runId
-}
-
 export async function requestAction(
   runtime: SixbRuntimeContext,
   input: RequestActionInput
-): Promise<{ runId: string }> {
+): Promise<RequestActionResult> {
+  const actionRuns = requireActionRunStorage(runtime)
   const action = getActionDefinition(runtime, input.actionId)
   const actionId = action.id
-  const actionParams: Record<string, unknown> = input.params ?? {}
+  const rawParams: Record<string, unknown> = input.params ?? {}
   const subject: ActionSubject = input.subject ?? { kind: "none" }
   const signal = input.signal ?? new AbortController().signal
 
@@ -131,7 +147,7 @@ export async function requestAction(
     pathPrefix = `${objectType.id}.${action.id}`
   }
 
-  validateActionParams(runtime, action, actionParams, pathPrefix)
+  const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
   if (isGlobalActionDefinition(action)) {
     for (const validator of action.validators) {
@@ -153,113 +169,312 @@ export async function requestAction(
   }
 
   const runId = createActionRunId(input.runId)
+  const existing = await actionRuns.getById({ projectId: runtime.projectId, id: runId })
+  if (existing) {
+    assertExistingRunMatchesRequest(existing, {
+      actionId,
+      subject,
+      params: actionParams,
+    })
+    if (isRetryableEnqueueFailure(existing)) {
+      const queuedAt = new Date()
+      await actionRuns.queue({
+        projectId: runtime.projectId,
+        id: runId,
+        actionId,
+        subject,
+        params: actionParams,
+        idempotencyKey: existing.idempotencyKey,
+        securityContext: existing.securityContext,
+        queuedAt,
+      })
+      return enqueueActionRunJob(runtime, {
+        actionRuns,
+        actionId,
+        subject,
+        params: actionParams,
+        runId,
+        queuedAt,
+        created: false,
+        securityContext: input.securityContext,
+      })
+    }
+    return {
+      runId,
+      queuedAt: existing.queuedAt.toISOString(),
+      created: false,
+    }
+  }
 
-  await runtime.events.append({
-    events: [
-      {
-        type: "action.requested",
-        payload: {
-          actionId,
-          subject,
-          params: actionParams,
-          runId,
-        },
-      },
-    ],
+  const queuedAt = new Date()
+  const idempotencyKey = createActionRunIdempotencyKey(runtime.projectId, runId)
+
+  await actionRuns.queue({
+    projectId: runtime.projectId,
+    id: runId,
+    actionId,
+    subject,
+    params: actionParams,
+    idempotencyKey,
+    securityContext: input.securityContext,
+    queuedAt,
   })
 
-  return { runId }
+  return enqueueActionRunJob(runtime, {
+    actionRuns,
+    actionId,
+    subject,
+    params: actionParams,
+    runId,
+    queuedAt,
+    created: true,
+    securityContext: input.securityContext,
+  })
+}
+
+async function enqueueActionRunJob(
+  runtime: SixbRuntimeContext,
+  params: {
+    readonly actionRuns: ActionRunStorage
+    readonly actionId: string
+    readonly subject: ActionSubject
+    readonly params: ActionRunParams
+    readonly runId: string
+    readonly queuedAt: Date
+    readonly created: boolean
+    readonly securityContext?: SecurityContext
+  }
+): Promise<RequestActionResult> {
+  let jobId: string | undefined
+  try {
+    const [job] = await runtime.queues.actions.enqueue({
+      projectId: runtime.projectId,
+      jobs: [
+        {
+          type: "action.run.requested",
+          payload: {
+            actionId: params.actionId,
+            runId: params.runId,
+          },
+        },
+      ],
+    })
+    jobId = job?.id
+  } catch (error) {
+    await params.actionRuns.finish({
+      projectId: runtime.projectId,
+      id: params.runId,
+      status: "failed",
+      phase: "enqueue",
+      error: toActionRunFailure(error, "enqueue"),
+    })
+    throw error
+  }
+
+  try {
+    await runtime.events.append({
+      actor: params.securityContext ? toEventActor(params.securityContext) : undefined,
+      correlationId: params.securityContext?.correlationId,
+      events: [
+        {
+          type: "action.requested",
+          payload: {
+            actionId: params.actionId,
+            subject: params.subject,
+            params: params.params,
+            runId: params.runId,
+          },
+        },
+      ],
+    })
+  } catch (error) {
+    console.error("[Sixb] Failed to append action.requested observation event:", error)
+  }
+
+  return {
+    runId: params.runId,
+    queuedAt: params.queuedAt.toISOString(),
+    ...(jobId ? { jobId } : {}),
+    created: params.created,
+  }
 }
 
 export async function requestActionAndWait(
   runtime: SixbRuntimeContext,
   input: RequestActionAndWaitInput
-): Promise<{ runId: string }> {
+): Promise<ActionRunRecord> {
   const runId = createActionRunId(input.runId)
+
+  await requestAction(runtime, {
+    ...input,
+    runId,
+  })
+  await input.onRequested?.(runId)
+
+  return waitForActionRun(runtime, {
+    runId,
+    timeoutMs: input.timeoutMs,
+    signal: input.signal,
+  })
+}
+
+export async function waitForActionRun(
+  runtime: SixbRuntimeContext,
+  input: WaitForActionRunInput
+): Promise<ActionRunRecord> {
+  const actionRuns = requireActionRunStorage(runtime)
   const timeoutMs = input.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
   const signal = input.signal
+  const startedAt = Date.now()
 
   if (signal?.aborted) {
     throw signal.reason ?? new Error("aborted")
   }
 
-  let unsubscribe: (() => void) | undefined
-  let timer: ReturnType<typeof setTimeout> | undefined
-  let abortListener: (() => void) | undefined
-  let settled = false
+  return new Promise<ActionRunRecord>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let pollTimer: ReturnType<typeof setTimeout> | undefined
+    let unsubscribe: (() => void) | undefined
+    let settled = false
+    let checking = false
 
-  const cleanup = () => {
-    if (settled) {
-      return
+    const cleanup = () => {
+      if (settled) return
+      settled = true
+      clearTimer(timer)
+      clearTimer(pollTimer)
+      unsubscribe?.()
+      signal?.removeEventListener("abort", onAbort)
     }
-    settled = true
-    clearTimer(timer)
-    unsubscribe?.()
-    if (abortListener && signal) {
-      signal.removeEventListener("abort", abortListener)
-      abortListener = undefined
-    }
-  }
 
-  let resolveTerminal!: (value: { runId: string }) => void
-  let rejectTerminal!: (reason?: unknown) => void
-  const terminal = new Promise<{ runId: string }>((resolve, reject) => {
-    resolveTerminal = resolve
-    rejectTerminal = reject
-  })
-
-  unsubscribe = await runtime.events.subscribe(
-    {
-      types: ["action.completed", "action.failed"],
-    },
-    (events) => {
-      for (const event of events) {
-        if (event.type !== "action.completed" && event.type !== "action.failed") {
-          continue
-        }
-        if (!isTerminalActionEvent(event, runId)) {
-          continue
-        }
-
-        cleanup()
-        if (event.type === "action.completed") {
-          resolveTerminal({ runId: event.payload.runId })
-        } else {
-          rejectTerminal(new ActionRunFailedError(event.payload))
-        }
-      }
-    }
-  )
-
-  timer = setTimeout(() => {
-    cleanup()
-    rejectTerminal(new ActionRunTimeoutError({ runId, timeoutMs }))
-  }, timeoutMs)
-
-  if (signal) {
-    if (signal.aborted) {
+    const rejectWith = (error: unknown) => {
       cleanup()
-      rejectTerminal(signal.reason ?? new Error("aborted"))
-    } else {
-      abortListener = () => {
-        cleanup()
-        rejectTerminal(signal.reason ?? new Error("aborted"))
+      reject(error)
+    }
+
+    const schedulePoll = () => {
+      if (!settled && !pollTimer) {
+        pollTimer = setTimeout(() => {
+          pollTimer = undefined
+          void check()
+        }, DEFAULT_ACTION_WAIT_POLL_MS)
       }
-      signal.addEventListener("abort", abortListener, { once: true })
+    }
+
+    const check = async () => {
+      if (settled || checking) {
+        return
+      }
+      checking = true
+      try {
+        const record = await actionRuns.getById({
+          projectId: runtime.projectId,
+          id: input.runId,
+        })
+        if (record && isTerminalActionRun(record)) {
+          cleanup()
+          resolve(record)
+          return
+        }
+        schedulePoll()
+      } catch (error) {
+        rejectWith(error)
+      } finally {
+        checking = false
+      }
+    }
+
+    const onAbort = () => {
+      rejectWith(signal?.reason ?? new Error("aborted"))
+    }
+
+    timer = setTimeout(
+      () => {
+        rejectWith(new ActionRunTimeoutError({ runId: input.runId, timeoutMs }))
+      },
+      Math.max(0, timeoutMs - (Date.now() - startedAt))
+    )
+
+    if (signal) {
+      signal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    runtime.events
+      .subscribe({ types: ["action.completed", "action.failed"] }, (events) => {
+        if (
+          events.some(
+            (event) =>
+              (event.type === "action.completed" || event.type === "action.failed") &&
+              event.payload.runId === input.runId
+          )
+        ) {
+          void check()
+        }
+      })
+      .then((unsubscribeEvents) => {
+        unsubscribe = unsubscribeEvents
+        void check()
+      })
+      .catch(rejectWith)
+  })
+}
+
+function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage {
+  const actionRuns = runtime.storage.actionRuns
+  if (!actionRuns) {
+    throw new ActionRunError("[Sixb] Action run storage is not configured.")
+  }
+  return actionRuns
+}
+
+function createActionRunIdempotencyKey(projectId: string, runId: string): string {
+  return `action:${projectId}:${runId}`
+}
+
+function assertExistingRunMatchesRequest(
+  existing: ActionRunRecord,
+  request: {
+    readonly actionId: string
+    readonly subject: ActionSubject
+    readonly params: ActionRunParams
+  }
+): void {
+  const matches =
+    existing.actionId === request.actionId &&
+    actionSubjectsEqual(existing.subject, request.subject) &&
+    actionRunParamsEqual(existing.params, request.params)
+
+  if (!matches) {
+    throw new ActionRunError(
+      `[Sixb] Action run '${existing.id}' already exists with a different request payload.`
+    )
+  }
+}
+
+function isRetryableEnqueueFailure(record: ActionRunRecord): boolean {
+  return record.status === "failed" && record.phase === "enqueue"
+}
+
+function toActionRunFailure(
+  error: unknown,
+  phase: "enqueue"
+): { name?: string; message: string; phase: "enqueue" } {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      phase,
     }
   }
-  terminal.catch(() => {})
-
-  try {
-    await requestAction(runtime, {
-      ...input,
-      runId,
-    })
-    await input.onRequested?.(runId)
-  } catch (error) {
-    cleanup()
-    throw error
+  return {
+    message: String(error),
+    phase,
   }
+}
 
-  return terminal
+function toEventActor(securityContext: SecurityContext): EventActor {
+  if (securityContext.principal.type === "serviceAccount") {
+    return { type: "service", id: securityContext.principal.id }
+  }
+  return securityContext.principal
 }

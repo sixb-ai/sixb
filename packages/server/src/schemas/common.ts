@@ -7,4 +7,7 @@ export const SuccessResponseSchema = z.object({ success: z.boolean() })
 export const ActionRequestedResponseSchema = z.object({
   success: z.boolean(),
   runId: z.string(),
+  queuedAt: z.string(),
+  jobId: z.string().optional(),
+  created: z.boolean(),
 })

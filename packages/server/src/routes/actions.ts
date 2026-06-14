@@ -73,14 +73,14 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       async ({ params, body, set }) => {
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
-          const { runId } = await sixb.actions.request({
+          const result = await sixb.actions.request({
             actionId: params.actionId,
             subject: parsedBody.subject,
             params: parsedBody.params,
             runId: parsedBody.runId,
           })
 
-          return { success: true, runId }
+          return { success: true, ...result }
         } catch (error) {
           return handleRouteError(error, set)
         }

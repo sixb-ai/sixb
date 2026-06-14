@@ -33,6 +33,7 @@ import {
   type SixbOptions,
 } from "@sixb/core"
 import {
+  SqliteActionRunStorage,
   SqliteObjectStorage,
   SqlitePipelineRunStorage,
   SqliteRulesStorage,
@@ -297,6 +298,7 @@ describe("SixbServer HTTP contract", () => {
         workflowRuns: new SqliteWorkflowRunStorage(),
         workflowInterventions: new SqliteWorkflowInterventionStorage(),
         webhookRuns: new SqliteWebhookRunStorage(),
+        actionRuns: new SqliteActionRunStorage(),
         rules: new SqliteRulesStorage(),
       },
       lakeStorage,
@@ -1583,9 +1585,15 @@ describe("SixbServer HTTP contract", () => {
       const requestActionBody = (await requestActionResponse.json()) as {
         success: boolean
         runId: string
+        queuedAt: string
+        created: boolean
+        jobId?: string
       }
       expect(requestActionBody.success).toBe(true)
       expect(requestActionBody.runId.startsWith("act_")).toBe(true)
+      expect(new Date(requestActionBody.queuedAt).toISOString()).toBe(requestActionBody.queuedAt)
+      expect(requestActionBody.created).toBe(true)
+      expect(requestActionBody.jobId).toBeTruthy()
 
       const requestCreateMaintenanceRunResponse = await fetch(
         `${baseUrl}/api/actions/createMaintenanceRun`,
@@ -1602,6 +1610,9 @@ describe("SixbServer HTTP contract", () => {
       expect(await requestCreateMaintenanceRunResponse.json()).toEqual({
         success: true,
         runId: "act_contract_global",
+        queuedAt: expect.any(String),
+        jobId: expect.any(String),
+        created: true,
       })
 
       const missingSubjectResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {

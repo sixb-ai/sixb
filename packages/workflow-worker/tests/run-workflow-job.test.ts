@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionRunStorage,
   actionParam,
   defineAction,
   defineIntervention,
@@ -199,10 +200,19 @@ function createRuntime(sixb: {
 }
 
 async function completeRequestedActions(
-  sixb: { readonly id: string; readonly events: EventsRuntime },
+  sixb: {
+    readonly id: string
+    readonly events: EventsRuntime
+    readonly storage: { readonly actionRuns?: ActionRunStorage }
+  },
   status: "succeeded" | "failed",
   errorMessage = "action failed"
 ): Promise<() => void> {
+  const actionRuns = sixb.storage.actionRuns
+  if (!actionRuns) {
+    throw new Error("Expected action run storage in test runtime.")
+  }
+
   return sixb.events.subscribe(
     {
       types: ["action.requested"],
@@ -213,33 +223,66 @@ async function completeRequestedActions(
           continue
         }
 
-        void sixb.events.append({
-          events: [
+        void (async () => {
+          const run = await actionRuns.getById({
+            projectId: sixb.id,
+            id: event.payload.runId,
+          })
+          if (run?.status === "queued") {
+            await actionRuns.start({
+              projectId: sixb.id,
+              id: event.payload.runId,
+            })
+          }
+
+          await actionRuns.finish(
             status === "succeeded"
               ? {
-                  type: "action.completed",
-                  payload: {
-                    actionId: event.payload.actionId,
-                    runId: event.payload.runId,
-                    subject: event.payload.subject,
-                    finishedAt: "2026-05-08T10:00:00.000Z",
-                  },
+                  projectId: sixb.id,
+                  id: event.payload.runId,
+                  status: "succeeded",
+                  finishedAt: new Date("2026-05-08T10:00:00.000Z"),
                 }
               : {
-                  type: "action.failed",
-                  payload: {
-                    actionId: event.payload.actionId,
-                    runId: event.payload.runId,
-                    subject: event.payload.subject,
-                    error: {
-                      message: errorMessage,
-                      phase: "handler",
-                    },
-                    finishedAt: "2026-05-08T10:00:00.000Z",
+                  projectId: sixb.id,
+                  id: event.payload.runId,
+                  status: "failed",
+                  finishedAt: new Date("2026-05-08T10:00:00.000Z"),
+                  error: {
+                    message: errorMessage,
+                    phase: "handler",
                   },
-                },
-          ],
-        })
+                }
+          )
+
+          await sixb.events.append({
+            events: [
+              status === "succeeded"
+                ? {
+                    type: "action.completed",
+                    payload: {
+                      actionId: event.payload.actionId,
+                      runId: event.payload.runId,
+                      subject: event.payload.subject,
+                      finishedAt: "2026-05-08T10:00:00.000Z",
+                    },
+                  }
+                : {
+                    type: "action.failed",
+                    payload: {
+                      actionId: event.payload.actionId,
+                      runId: event.payload.runId,
+                      subject: event.payload.subject,
+                      error: {
+                        message: errorMessage,
+                        phase: "handler",
+                      },
+                      finishedAt: "2026-05-08T10:00:00.000Z",
+                    },
+                  },
+            ],
+          })
+        })()
       }
     }
   )

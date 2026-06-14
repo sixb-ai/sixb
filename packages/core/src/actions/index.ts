@@ -6,8 +6,10 @@ export type {
   RequestActionAndWaitOptions,
   RequestActionInput,
   RequestActionOptions,
+  RequestActionResult,
+  WaitForActionRunInput,
 } from "./request"
-export { requestAction, requestActionAndWait } from "./request"
+export { requestAction, requestActionAndWait, waitForActionRun } from "./request"
 export { ActionsRuntime } from "./runtime"
 export type {
   ActionBinding,
