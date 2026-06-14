@@ -6,12 +6,8 @@ export const markPaid = defineAction("markPaid", {
 })
   .target(Invoice)
   .params({})
-  .run(async ({ target, sixb }) => {
-    await sixb.objects(Invoice).upsert({
-      properties: {
-        ...target.properties,
-        id: target.primaryId,
-        status: "paid",
-      },
+  .edits(({ edit, target }) => {
+    edit.set(target, {
+      status: "paid",
     })
   })

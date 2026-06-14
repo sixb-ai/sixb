@@ -1,5 +1,4 @@
 import {
-  actionParam,
   defineAction,
   defineIntervention,
   defineObjectType,
@@ -9,6 +8,7 @@ import {
   type InferSchemaOrRef,
   interventionField,
   type ObjectRef,
+  param,
   prop,
   ref,
   stringEnum,
@@ -100,9 +100,9 @@ const persistReview = defineWorkflowStep("persist-review")
 const attachInvoice = defineAction("attach-invoice")
   .target(Transaction)
   .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
+    invoice: param(ref(Invoice)),
   })
-  .run(async () => {})
+  .writeback(async () => {})
 
 const approveInvoiceMatch = defineIntervention("approve-invoice-match")
   .input({

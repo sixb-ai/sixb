@@ -35,6 +35,10 @@ export const OBJECT_EVENT_DEFINITIONS = defineEventGroup<ObjectEvent>({
     topic: "objects",
     partitionKey: (payload) => `${payload.objectTypeId}:${payload.primaryId}`,
   },
+  "object.deleted": {
+    topic: "objects",
+    partitionKey: (payload) => `${payload.objectTypeId}:${payload.primaryId}`,
+  },
 })
 
 export const TELEMETRY_EVENT_DEFINITIONS = defineEventGroup<TelemetryEvent>({

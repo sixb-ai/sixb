@@ -19,7 +19,7 @@ export type {
 } from "./actions"
 export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
 export type { LinkEvent, LinkRemovedEvent, LinkUpsertedEvent } from "./links"
-export type { ObjectEvent, ObjectUpsertedEvent } from "./objects"
+export type { ObjectDeletedEvent, ObjectEvent, ObjectUpsertedEvent } from "./objects"
 export type {
   PipelineEvent,
   PipelineRunFinishedEvent,
@@ -78,6 +78,7 @@ export type NewDomainEvent = {
 }[DomainEvent["type"]]
 
 export type StoredObjectUpsertedEvent = Extract<StoredDomainEvent, { type: "object.upserted" }>
+export type StoredObjectDeletedEvent = Extract<StoredDomainEvent, { type: "object.deleted" }>
 export type StoredTelemetryAppendedEvent = Extract<
   StoredDomainEvent,
   { type: "telemetry.appended" }

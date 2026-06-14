@@ -633,6 +633,12 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   /** Lookup an object type by id. */
   getObjectTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null
 
+  /** Resolve an object type by id, or throw if it is unknown. */
+  resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens
+
+  /** Value types registered in the runtime ontology, keyed by id. */
+  getValueTypesById(): ReadonlyMap<string, ValueType>
+
   /** All registered function definitions. */
   getFunctionDefinitions(): readonly FunctionDefinition[]
 

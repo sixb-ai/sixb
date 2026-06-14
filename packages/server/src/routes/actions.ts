@@ -28,6 +28,12 @@ function serializeAction(
       description: config.description,
       semanticType: config.semanticType,
     })),
+    phases: {
+      validate: action.phases.validate.length > 0,
+      writeback: action.phases.writeback !== undefined,
+      edits: action.phases.edits !== undefined,
+      effects: action.phases.effects !== undefined,
+    },
   })
 }
 

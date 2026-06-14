@@ -26,7 +26,12 @@ import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
 import { createObjectSet, objectService } from "../objects"
-import { assertObjectTypeRegistered, type ObjectType, OntologyRegistry } from "../ontology"
+import {
+  assertObjectTypeRegistered,
+  type ObjectType,
+  OntologyRegistry,
+  type ValueType,
+} from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines/types"
 import { categorizeProjections } from "../projections/builders"
@@ -284,6 +289,14 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   getObjectTypeById(objectTypeId: string): ObjectTypeWithPropertyTokens | null {
     return this.ontology.getObjectTypeById(objectTypeId)
+  }
+
+  resolveObjectType(objectTypeId: string): ObjectTypeWithPropertyTokens {
+    return this.ontology.resolveObjectType(objectTypeId)
+  }
+
+  getValueTypesById(): ReadonlyMap<string, ValueType> {
+    return this.ontology.getValueTypesById()
   }
 
   getFunctionDefinitions(): readonly FunctionDefinition[] {

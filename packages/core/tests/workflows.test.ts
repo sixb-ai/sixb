@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  actionParam,
   defineAction,
   defineIntervention,
   defineObjectType,
@@ -11,6 +10,7 @@ import {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
+  param,
   prop,
   RuntimeError,
   ref,
@@ -90,9 +90,9 @@ const reviewInvoiceMatch = defineWorkflowStep("review-invoice-match")
 const attachInvoice = defineAction("attach-invoice")
   .target(Transaction)
   .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
+    invoice: param(ref(Invoice)),
   })
-  .run(async () => {})
+  .writeback(async () => {})
 
 const approveInvoiceMatch = defineIntervention("approve-invoice-match", {
   description: "Approve the proposed invoice match before attaching it.",

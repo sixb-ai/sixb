@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
 import {
-  actionParam,
   defineAction,
   defineObjectType,
   defineOntology,
@@ -14,6 +13,8 @@ import {
   ObjectQueryPlanningError,
   type ObjectStorage,
   OntologyValidationError,
+  optional,
+  param,
   prop,
   type QueryObjectsInput,
   type QueryObjectsResult,
@@ -878,8 +879,8 @@ describe("Sixb runtime", () => {
     })
     const reboot = defineAction("reboot")
       .target(ActionType)
-      .params({ force: actionParam("boolean") })
-      .run(async () => {})
+      .params({ force: optional(param("boolean")) })
+      .writeback(async () => {})
 
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({

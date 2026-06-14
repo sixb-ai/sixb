@@ -73,13 +73,13 @@ export const Room = defineObjectType({
     await writeProjectFile(
       projectRoot,
       "actions/setTemperature.ts",
-      `import { actionParam, defineAction } from "${coreModuleUrl}"
+      `import { defineAction, param } from "${coreModuleUrl}"
 import { Room } from "../ontology/room"
 
 export const setTemperature = defineAction("setTemperature")
   .target(Room)
-  .params({ target: actionParam("double", { required: true }) })
-  .run(async () => {})
+  .params({ target: param("double") })
+  .writeback(async () => {})
 `
     )
 
@@ -203,15 +203,15 @@ export const Invoice = defineObjectType({
     await writeProjectFile(
       projectRoot,
       "actions/attachInvoice.ts",
-      `import { actionParam, defineAction, ref } from "${coreModuleUrl}"
+      `import { defineAction, param, ref } from "${coreModuleUrl}"
 import { Invoice, Transaction } from "../ontology/transaction"
 
 export const attachInvoice = defineAction("attach-invoice")
   .target(Transaction)
   .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
+    invoice: param(ref(Invoice)),
   })
-  .run(async () => {})
+  .writeback(async () => {})
 `
     )
 

@@ -11,4 +11,14 @@ export interface ObjectUpsertedEvent extends EventEnvelope {
   }
 }
 
-export type ObjectEvent = ObjectUpsertedEvent
+export interface ObjectDeletedEvent extends EventEnvelope {
+  type: "object.deleted"
+  topic: "objects"
+  partitionKey: string
+  payload: {
+    objectTypeId: string
+    primaryId: string
+  }
+}
+
+export type ObjectEvent = ObjectUpsertedEvent | ObjectDeletedEvent

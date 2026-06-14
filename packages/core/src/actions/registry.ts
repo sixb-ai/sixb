@@ -31,6 +31,7 @@ export class ActionRegistry {
         )
       }
 
+      this.validatePhases(action)
       this.byId.set(action.id, action)
 
       if (!isObjectActionDefinition(action)) {
@@ -48,6 +49,24 @@ export class ActionRegistry {
       const bucket = this.byTargetId.get(action.target.id) ?? []
       bucket.push(action)
       this.byTargetId.set(action.target.id, bucket)
+    }
+  }
+
+  private validatePhases(action: ActionDefinition): void {
+    const hasWriteback = action.phases.writeback !== undefined
+    const hasEdits = action.phases.edits !== undefined
+    const hasEffects = action.phases.effects !== undefined
+
+    if (!hasWriteback && !hasEdits) {
+      throw new ActionDefinitionError(
+        `Action "${action.id}" must declare .writeback(...) or .edits(...).`
+      )
+    }
+
+    if (hasEffects && !hasEdits) {
+      throw new ActionDefinitionError(
+        `Action "${action.id}" cannot declare .effects(...) without .edits(...).`
+      )
     }
   }
 

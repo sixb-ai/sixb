@@ -1,21 +1,26 @@
 import {
-  actionParam,
+  type ActionDefinition,
   defineAction,
   defineObjectType,
   type InferActionParams,
   type InferSchemaOrRef,
   type ObjectRef,
   type ObjectRefSchema,
+  optional,
+  param,
   prop,
   ref,
   Sixb,
-  stringEnum,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
+
+function actionDefinition(action: unknown): ActionDefinition {
+  return action as ActionDefinition
+}
 
 const Room = defineObjectType({
   id: "Room",
@@ -31,39 +36,45 @@ const RoomRefSchema = ref(Room)
 type _roomRefSchema = Expect<Equal<typeof RoomRefSchema, ObjectRefSchema<"Room">>>
 type _roomRefValue = Expect<Equal<InferSchemaOrRef<typeof RoomRefSchema>, ObjectRef<"Room">>>
 
-const setTemperature = defineAction("setTemperature")
+const setTemperature = actionDefinition(
+  defineAction("setTemperature")
+    .on(Room)
+    .params({
+      target: param("double"),
+      mode: optional(param("string")),
+    })
+    .writeback(({ params, target }) => {
+      const targetValue: number = params.target
+      const mode: string | undefined = params.mode
+      const name: string = target.properties.name
+      const objectTypeId: string = target.objectTypeId
+
+      // @ts-expect-error "bogus" does not exist on params
+      const bogus = params.bogus
+
+      void targetValue
+      void mode
+      void name
+      void objectTypeId
+      void bogus
+    })
+)
+
+defineAction("validateTemperature")
   .on(Room)
   .params({
-    target: actionParam("double", { required: true }),
-    mode: actionParam(stringEnum(["heat", "cool", "auto"])),
+    target: param("double"),
   })
-  .validate(({ params, target }) => {
+  .validate(({ params }) => {
     const targetValue: number = params.target
-    const mode: "heat" | "cool" | "auto" | undefined = params.mode
-    const primaryId: string = target.primaryId
     void targetValue
-    void mode
-    void primaryId
   })
-  .run(async ({ params, target, sixb }) => {
-    const targetValue: number = params.target
-    const name: string = target.properties.name
-    const objectTypeId: string = target.objectTypeId
-    sixb.objects(Room)
-
-    // @ts-expect-error "bogus" does not exist on params
-    const bogus = params.bogus
-
-    void targetValue
-    void name
-    void objectTypeId
-    void bogus
-  })
+  .writeback(() => {})
 
 const reboot = defineAction("reboot")
   .target(Room)
   .params({})
-  .run(({ params }) => {
+  .writeback(({ params }) => {
     // @ts-expect-error empty params do not expose arbitrary keys
     const force = params.force
     void force
@@ -72,17 +83,17 @@ const reboot = defineAction("reboot")
 const setRequestTemperature = defineAction("setRequestTemperature")
   .on(Room)
   .params({
-    target: actionParam("double", { required: true }),
+    target: param("double"),
   })
-  .run(async () => {})
+  .writeback(async () => {})
 
 const assignRelatedRoom = defineAction("assignRelatedRoom")
   .on(Room)
   .params({
-    relatedRoom: actionParam(RoomRefSchema, { required: true }),
-    fallbackRoom: actionParam(ref(Room)),
+    relatedRoom: param(RoomRefSchema),
+    fallbackRoom: optional(param(ref(Room))),
   })
-  .run(({ params }) => {
+  .writeback(({ params }) => {
     const relatedRoom: ObjectRef<"Room"> = params.relatedRoom
     const relatedRoomType: "Room" = params.relatedRoom.objectTypeId
     const fallbackRoom: ObjectRef<"Room"> | undefined = params.fallbackRoom
@@ -98,8 +109,8 @@ const assignRelatedRoom = defineAction("assignRelatedRoom")
 
 const createRoom = defineAction("createRoom")
   .params({
-    id: actionParam("string", { required: true }),
-    name: actionParam("string", { required: true }),
+    id: param("string"),
+    name: param("string"),
   })
   .validate(({ params }) => {
     const id: string = params.id
@@ -110,12 +121,12 @@ const createRoom = defineAction("createRoom")
     void id
     void primaryId
   })
-  .run(({ params, sixb }) => {
+  .edits(({ params, edit }) => {
     const id: string = params.id
     const name: string = params.name
-    sixb.objects(Room)
+    edit.create(Room, { id, name, externalId: id })
 
-    // @ts-expect-error global action handlers do not expose target
+    // @ts-expect-error global action edits do not expose target
     const primaryId = target.primaryId
 
     void id
@@ -123,9 +134,65 @@ const createRoom = defineAction("createRoom")
     void primaryId
   })
 
+const createInvoice = defineAction("createInvoice")
+  .params({
+    amount: param("double"),
+    note: optional(param("string")),
+  })
+  .writeback(async ({ params }) => {
+    const amount: number = params.amount
+    const note: string | undefined = params.note
+    void amount
+    void note
+    return { externalId: "ext_1" }
+  })
+  .edits(({ edit, writeback }) => {
+    const externalId: string = writeback.externalId
+    const room = edit.object(Room, "room:1")
+    edit.set(room, { name: externalId })
+  })
+  .effects(({ commit, writeback }) => {
+    const externalId: string = writeback.externalId
+    const changedObjects = commit.diff.objects
+    void externalId
+    void changedObjects
+  })
+
+defineAction("writebackOnly")
+  .params({})
+  .writeback(async () => {})
+
+defineAction("editsOnly")
+  .params({})
+  .edits(({ edit }) => edit.create(Room, { id: "room:1", externalId: "R1", name: "Room 1" }))
+
+defineAction("badEditsContext")
+  .params({})
+  // @ts-expect-error edits do not expose the full runtime
+  .edits(({ sixb }) => {
+    void sixb
+  })
+
+defineAction("legacy")
+  .params({})
+  // @ts-expect-error .run(...) is not part of Actions V2 authoring
+  .run(async () => {})
+
+defineAction("effectsWithoutEdits")
+  .params({})
+  // @ts-expect-error effects require edits
+  .effects(async () => {})
+
 const sixb = new Sixb({
   ontology: [Room],
-  actions: [setTemperature, reboot, setRequestTemperature, assignRelatedRoom, createRoom],
+  actions: [
+    actionDefinition(setTemperature),
+    actionDefinition(reboot),
+    actionDefinition(setRequestTemperature),
+    actionDefinition(assignRelatedRoom),
+    actionDefinition(createRoom),
+    actionDefinition(createInvoice),
+  ],
   ...createTestRuntimeDeps(),
 })
 

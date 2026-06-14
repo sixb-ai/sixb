@@ -170,7 +170,7 @@ They live outside ontology definitions and are auto-discovered from `actions/`.
 const setTemperature = defineAction("setTemperature")
   .target(Room)
   .params({
-    value: actionParam("double", { required: true, semanticType: "Temperature" }),
+    value: param("double", { semanticType: "Temperature" }),
   })
   .validate(({ params }) => {
     if (params.value < 10) {
@@ -371,7 +371,7 @@ src/
   connectors/       -- defineConnector, connector types, connector runtime
   syncs/            -- defineSync and sync types
   sixb/            -- Sixb runtime, ObjectSet, ObjectByIdHandle, createSixb
-  actions/          -- defineAction, actionParam, ActionRegistry
+  actions/          -- defineAction, param, optional, ActionRegistry
   functions/        -- defineFunction, FunctionRuntime, cron matcher
 ```
 
@@ -396,7 +396,8 @@ src/
 | Export | Description |
 |---|---|
 | `defineAction(id)` | Define a first-class action contract and handler |
-| `actionParam(schema, options?)` | Define an action parameter inside `.params({...})` |
+| `param(schema, options?)` | Define a required action parameter inside `.params({...})` |
+| `optional(param(...))` | Mark an action parameter as optional |
 
 ### Runtime
 

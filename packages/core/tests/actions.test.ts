@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionDefinition,
   ActionDefinitionError,
   ActionRunError,
-  ActionValidationError,
-  actionParam,
   defineAction,
   defineObjectType,
-  ObjectNotFoundError,
   OntologyValidationError,
+  optional,
+  param,
   prop,
   ref,
   Sixb,
@@ -36,42 +36,52 @@ const setTemperature = defineAction("setTemperature", {
   description: "Set room temperature.",
 })
   .on(Room)
-  .params({ target: actionParam("double", { required: true }) })
+  .params({ target: param("double") })
   .validate(({ params }) => {
     if (params.target < 10) {
       return { error: "Target is too low" }
     }
   })
-  .run(async () => {})
+  .writeback(async () => {})
 
 const reboot = defineAction("reboot")
   .target(Room)
   .params({})
-  .run(async () => {})
+  .writeback(async () => {})
 
 const createRoom = defineAction("createRoom")
   .params({
-    id: actionParam("string", { required: true }),
-    name: actionParam("string", { required: true }),
+    id: param("string"),
+    name: param("string"),
   })
   .validate(({ params }) => {
     if (!params.id.startsWith("room:")) {
       return { error: "Room id must start with room:" }
     }
   })
-  .run(async () => {})
+  .edits(({ edit, params }) =>
+    edit.create(Room, {
+      id: params.id,
+      name: params.name,
+      externalId: params.id,
+    })
+  )
 
 const prepareSuite = defineAction("prepareSuite")
   .target(SuiteRoom)
-  .params({ note: actionParam("string") })
-  .run(async () => {})
+  .params({ note: optional(param("string")) })
+  .writeback(async () => {})
 
 const attachRelatedRoom = defineAction("attachRelatedRoom")
   .target(Room)
   .params({
-    relatedRoom: actionParam(ref(Room), { required: true }),
+    relatedRoom: param(ref(Room)),
   })
-  .run(async () => {})
+  .writeback(async () => {})
+
+function actionDefinition(action: unknown): ActionDefinition {
+  return action as ActionDefinition
+}
 
 describe("defineAction", () => {
   test("builds an inert typed action definition", () => {
@@ -81,8 +91,8 @@ describe("defineAction", () => {
     expect(setTemperature.target.id).toBe("Room")
     expect(setTemperature.params.target.schema).toBe("double")
     expect(setTemperature.params.target.required).toBe(true)
-    expect(setTemperature.validators).toHaveLength(1)
-    expect(typeof setTemperature.handler).toBe("function")
+    expect(setTemperature.phases.validate).toHaveLength(1)
+    expect(typeof setTemperature.phases.writeback).toBe("function")
     expect(setTemperature.description).toBe("Set room temperature.")
   })
 
@@ -91,7 +101,8 @@ describe("defineAction", () => {
     expect(createRoom.binding.kind).toBe("global")
     expect(createRoom.target).toBeUndefined()
     expect(createRoom.params.id.required).toBe(true)
-    expect(createRoom.validators).toHaveLength(1)
+    expect(createRoom.phases.validate).toHaveLength(1)
+    expect(typeof createRoom.phases.edits).toBe("function")
   })
 
   test("validates empty action ids", () => {
@@ -109,7 +120,12 @@ describe("ActionRegistry", () => {
     const sixb = new Sixb({
       id: "action-registry-test",
       ontology: [Room, SuiteRoom],
-      actions: [setTemperature, reboot, prepareSuite, createRoom],
+      actions: [
+        actionDefinition(setTemperature),
+        actionDefinition(reboot),
+        actionDefinition(prepareSuite),
+        actionDefinition(createRoom),
+      ],
       ...createTestRuntimeDeps(),
     })
 
@@ -136,19 +152,19 @@ describe("ActionRegistry", () => {
     const duplicate = defineAction("reboot")
       .target(Room)
       .params({})
-      .run(async () => {})
+      .writeback(async () => {})
 
     expect(() => {
       new Sixb({
         ontology: [Room],
-        actions: [reboot, duplicate],
+        actions: [actionDefinition(reboot), actionDefinition(duplicate)],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
     expect(() => {
       new Sixb({
         ontology: [Room],
-        actions: [reboot, duplicate],
+        actions: [actionDefinition(reboot), actionDefinition(duplicate)],
         ...createTestRuntimeDeps(),
       })
     }).toThrow('Duplicate action id "reboot"')
@@ -158,12 +174,12 @@ describe("ActionRegistry", () => {
     const suiteOverride = defineAction("setTemperature")
       .target(SuiteRoom)
       .params({})
-      .run(async () => {})
+      .writeback(async () => {})
 
     expect(() => {
       new Sixb({
         ontology: [Room, SuiteRoom],
-        actions: [setTemperature, suiteOverride],
+        actions: [actionDefinition(setTemperature), actionDefinition(suiteOverride)],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(
@@ -180,12 +196,12 @@ describe("ActionRegistry", () => {
     const unknownAction = defineAction("unknown")
       .target(Unknown)
       .params({})
-      .run(async () => {})
+      .writeback(async () => {})
 
     expect(() => {
       new Sixb({
         ontology: [Room],
-        actions: [unknownAction],
+        actions: [actionDefinition(unknownAction)],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
@@ -197,7 +213,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [setTemperature, reboot],
+      actions: [actionDefinition(setTemperature), actionDefinition(reboot)],
       ...createTestRuntimeDeps(),
     })
 
@@ -223,7 +239,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
-      actions: [setTemperature, prepareSuite],
+      actions: [actionDefinition(setTemperature), actionDefinition(prepareSuite)],
       ...createTestRuntimeDeps(),
     })
 
@@ -243,7 +259,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...createTestRuntimeDeps(),
     })
 
@@ -271,7 +287,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...createTestRuntimeDeps(),
     })
 
@@ -293,7 +309,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
-      actions: [attachRelatedRoom],
+      actions: [actionDefinition(attachRelatedRoom)],
       ...runtimeDeps,
     })
 
@@ -329,7 +345,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
-      actions: [attachRelatedRoom],
+      actions: [actionDefinition(attachRelatedRoom)],
       ...createTestRuntimeDeps(),
     })
 
@@ -348,7 +364,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
-      actions: [attachRelatedRoom],
+      actions: [actionDefinition(attachRelatedRoom)],
       ...createTestRuntimeDeps(),
     })
 
@@ -367,7 +383,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-ref-test",
       ontology: [Room],
-      actions: [attachRelatedRoom],
+      actions: [actionDefinition(attachRelatedRoom)],
       ...createTestRuntimeDeps(),
     })
 
@@ -382,43 +398,41 @@ describe("requestAction", () => {
     ).rejects.toThrow("Unknown field 'Room.attachRelatedRoom.relatedRoom.label'")
   })
 
-  test("rejects missing object", async () => {
+  test("queues object actions without loading the target object request-side", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [setTemperature],
-      ...createTestRuntimeDeps(),
+      actions: [actionDefinition(setTemperature)],
+      ...runtimeDeps,
     })
 
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:missing",
-        actionId: "setTemperature",
-        params: { target: 72 },
-      })
-    ).rejects.toBeInstanceOf(ObjectNotFoundError)
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:missing",
-        actionId: "setTemperature",
-        params: { target: 72 },
-      })
-    ).rejects.toThrow("Object not found")
+    const result = await sixb.objects(Room).requestAction({
+      id: "room:missing",
+      actionId: "setTemperature",
+      params: { target: 72 },
+    })
+
+    const run = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "action-test",
+      id: result.runId,
+    })
+    expect(run?.status).toBe("queued")
   })
 
-  test("emits action.requested event on success without invoking the handler", async () => {
+  test("emits action.requested event on success without invoking phases", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     let invoked = 0
     const counted = defineAction("counted")
       .target(Room)
       .params({})
-      .run(() => {
+      .writeback(() => {
         invoked += 1
       })
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [counted],
+      actions: [actionDefinition(counted)],
       ...runtimeDeps,
     })
 
@@ -484,7 +498,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-event-best-effort-test",
       ontology: [Room],
-      actions: [createRoom],
+      actions: [actionDefinition(createRoom)],
       ...runtimeDeps,
     })
     const originalAppend = sixb.events.append.bind(sixb.events)
@@ -542,7 +556,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-idempotency-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...runtimeDeps,
     })
 
@@ -596,7 +610,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-enqueue-retry-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...runtimeDeps,
     })
 
@@ -658,12 +672,12 @@ describe("requestAction", () => {
     })
   })
 
-  test("runs validators request-side and emits no event when validation fails", async () => {
+  test("queues custom validation for the worker phase", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...runtimeDeps,
     })
 
@@ -671,18 +685,17 @@ describe("requestAction", () => {
       properties: { id: "room:1", externalId: "R1", name: "Room 1" },
     })
 
-    await expect(
-      sixb.objects(Room).requestAction({
-        id: "room:1",
-        actionId: "setTemperature",
-        params: { target: 5 },
-      })
-    ).rejects.toBeInstanceOf(ActionValidationError)
+    const result = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      actionId: "setTemperature",
+      params: { target: 5 },
+    })
 
     const events = await sixb.events.read({
       types: ["action.requested"],
     })
-    expect(events).toHaveLength(0)
+    expect(result.created).toBe(true)
+    expect(events).toHaveLength(1)
   })
 
   test("allows inherited actions on subtypes", async () => {
@@ -690,7 +703,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "action-test",
       ontology: [Room, SuiteRoom],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...runtimeDeps,
     })
 
@@ -723,7 +736,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
-      actions: [createRoom],
+      actions: [actionDefinition(createRoom)],
       ...runtimeDeps,
     })
 
@@ -747,21 +760,21 @@ describe("requestAction", () => {
     }
   })
 
-  test("rejects invalid global action params before emitting an event", async () => {
+  test("rejects invalid global action param schemas before emitting an event", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
-      actions: [createRoom],
+      actions: [actionDefinition(createRoom)],
       ...runtimeDeps,
     })
 
     await expect(
       sixb.actions.request({
         actionId: "createRoom",
-        params: { id: "bad", name: "Room 1" },
+        params: { id: "room:1", name: 42 },
       })
-    ).rejects.toBeInstanceOf(ActionValidationError)
+    ).rejects.toBeInstanceOf(OntologyValidationError)
 
     const events = await sixb.events.read({
       types: ["action.requested"],
@@ -773,7 +786,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
-      actions: [setTemperature],
+      actions: [actionDefinition(setTemperature)],
       ...createTestRuntimeDeps(),
     })
 
@@ -789,7 +802,7 @@ describe("requestAction", () => {
     const sixb = new Sixb({
       id: "global-action-test",
       ontology: [Room],
-      actions: [createRoom],
+      actions: [actionDefinition(createRoom)],
       ...createTestRuntimeDeps(),
     })
 
