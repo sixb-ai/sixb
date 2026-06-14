@@ -15,7 +15,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
-import { ActionWorker } from "../src"
+import { ActionWorker, ActionWorkerError } from "../src"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({
@@ -94,6 +94,36 @@ describe("ActionWorker", () => {
 
     await worker.start()
     await worker.stop()
+  })
+
+  test("throws ActionWorkerError when action-run storage is missing", () => {
+    const noop = defineAction("noop")
+      .target(Device)
+      .params({})
+      .run(() => {})
+    const storage = new InMemoryStorage()
+
+    expect(
+      () =>
+        new ActionWorker({
+          id: "missing-action-runs",
+          events: new EventsRuntime({
+            projectId: "missing-action-runs",
+            broker: new InMemoryBroker(),
+          }),
+          storage: {
+            objects: storage.objects,
+            timeseries: storage.timeseries,
+          },
+          queues: new InMemoryQueues(),
+          getActionDefinitions() {
+            return [noop]
+          },
+          getActionById(actionId) {
+            return actionId === noop.id ? noop : null
+          },
+        })
+    ).toThrow(ActionWorkerError)
   })
 
   test("claims requested action runs and emits action.completed", async () => {

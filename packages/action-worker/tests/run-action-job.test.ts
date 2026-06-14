@@ -16,7 +16,7 @@ import {
   prop,
   Sixb,
 } from "@sixb/core"
-import { type ActionWorkerContext, runActionJob } from "../src"
+import { type ActionWorkerContext, ActionWorkerError, runActionJob } from "../src"
 
 const Device = defineObjectType({
   id: "Device",
@@ -107,6 +107,23 @@ async function queueActionRun(
 }
 
 describe("runActionJob", () => {
+  test("throws ActionWorkerError when the stored run is missing", async () => {
+    const count = defineAction("count")
+      .params({})
+      .run(() => {})
+    const sixb = createSixb([count])
+
+    await expect(
+      runActionJob({
+        runtime: createContext(sixb),
+        job: {
+          id: "act_missing",
+          actionId: "count",
+        },
+      })
+    ).rejects.toBeInstanceOf(ActionWorkerError)
+  })
+
   test("runs the handler, applies object writes, and stores a succeeded run", async () => {
     const setStatus = defineAction("setStatus")
       .target(Device)

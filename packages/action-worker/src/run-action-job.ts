@@ -1,5 +1,6 @@
 import type { ActionRunFailure, ActionRunRecord, ActionTargetObject } from "@sixb/core"
 import { isObjectActionDefinition, isTerminalActionRun, ObjectNotFoundError } from "@sixb/core"
+import { ActionWorkerError } from "./errors"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -27,9 +28,7 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
     return finishedAt
   }
 
-  throw new Error(
-    `[SixbActionWorker] Action run '${runId}' finished without a finishedAt timestamp.`
-  )
+  throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
 }
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
@@ -43,11 +42,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     id: job.id,
   })
   if (!existingRun) {
-    throw new Error(`[SixbActionWorker] Action run '${job.id}' was not found.`)
+    throw new ActionWorkerError(`Action run '${job.id}' was not found.`)
   }
   if (existingRun.actionId !== job.actionId) {
-    throw new Error(
-      `[SixbActionWorker] Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
+    throw new ActionWorkerError(
+      `Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
     )
   }
   if (isTerminalActionRun(existingRun)) {
@@ -64,15 +63,15 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return failRedeliveredRunningRun(input, existingRun)
   }
   if (existingRun.status !== "queued") {
-    throw new Error(
-      `[SixbActionWorker] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
+    throw new ActionWorkerError(
+      `Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
     )
   }
 
   const action = runtime.getActionById(job.actionId)
   if (!action) {
     const failure = toActionRunFailure(
-      new Error(`[SixbActionWorker] Unknown action '${job.actionId}'.`),
+      new ActionWorkerError(`Unknown action '${job.actionId}'.`),
       "handler"
     )
     const finishedRun = await runtime.actionRunsStorage.finish({
@@ -104,7 +103,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
 
     if (!isObjectActionDefinition(action)) {
       if (startedRun.subject.kind !== "none") {
-        throw new Error(`[SixbActionWorker] Action '${job.actionId}' does not accept a subject.`)
+        throw new ActionWorkerError(`Action '${job.actionId}' does not accept a subject.`)
       }
 
       await action.handler({
@@ -114,13 +113,13 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       })
     } else {
       if (startedRun.subject.kind !== "object") {
-        throw new Error(`[SixbActionWorker] Action '${job.actionId}' requires an object subject.`)
+        throw new ActionWorkerError(`Action '${job.actionId}' requires an object subject.`)
       }
 
       const subjectObjectType = runtime.sixb.getObjectTypeById(startedRun.subject.objectTypeId)
       if (!subjectObjectType) {
-        throw new Error(
-          `[SixbActionWorker] Unknown object type '${startedRun.subject.objectTypeId}' for action '${job.actionId}'.`
+        throw new ActionWorkerError(
+          `Unknown object type '${startedRun.subject.objectTypeId}' for action '${job.actionId}'.`
         )
       }
 
@@ -128,8 +127,8 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
         .getActionsForType(subjectObjectType)
         .some((candidate) => candidate.id === action.id)
       if (!actionAppliesToSubject) {
-        throw new Error(
-          `[SixbActionWorker] Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
+        throw new ActionWorkerError(
+          `Action '${job.actionId}' is not valid for object type '${subjectObjectType.id}'.`
         )
       }
 
@@ -208,9 +207,12 @@ async function failRedeliveredRunningRun(
   existingRun: ActionRunRecord
 ): Promise<ActionRunResult> {
   const { runtime, job } = input
+  const error = new ActionWorkerError(
+    `Action run '${job.id}' was redelivered while already running. The previous worker may have lost its queue lease or crashed.`
+  )
   const failure: ActionRunFailure = {
     name: "ActionRunLeaseLostError",
-    message: `[SixbActionWorker] Action run '${job.id}' was redelivered while already running. The previous worker may have lost its queue lease or crashed.`,
+    message: error.message,
     phase: "handler",
   }
 

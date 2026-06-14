@@ -10,6 +10,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import { QueueWorker } from "@sixb/core"
+import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
 import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
@@ -73,12 +74,12 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   ): Promise<void> {
     const context = this.context
     if (!context) {
-      throw new Error("[SixbActionWorker] No action definitions are registered.")
+      throw new ActionWorkerError("No action definitions are registered.")
     }
 
     const { job } = claimed
     if (job.type !== "action.run.requested") {
-      throw new Error(`[SixbActionWorker] Unsupported action job type '${job.type}'.`)
+      throw new ActionWorkerError(`Unsupported action job type '${job.type}'.`)
     }
 
     const actionJob: ActionJob = {
@@ -162,7 +163,7 @@ async function emitActionTerminalEvent(
 function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   const actionRunsStorage = sixb.storage.actionRuns
   if (!actionRunsStorage) {
-    throw new Error("[SixbActionWorker] Action workers require storage.actionRuns support.")
+    throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
 
   return {
