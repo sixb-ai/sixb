@@ -1,4 +1,5 @@
 import type { ActionSubject } from "../../actions"
+import type { ActionRunFailure } from "../../storage"
 import type { EventEnvelope } from "../envelope"
 
 export interface ActionRequestedEvent extends EventEnvelope {
@@ -33,11 +34,7 @@ export interface ActionFailedEvent extends EventEnvelope {
     actionId: string
     runId: string
     subject: ActionSubject
-    error: {
-      name?: string
-      message: string
-      phase?: "request" | "enqueue" | "handler" | "cancelled"
-    }
+    error: ActionRunFailure
     finishedAt: string
   }
 }

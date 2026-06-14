@@ -1,21 +1,35 @@
 export { ActionRunError } from "./errors"
 export {
+  actionRunCommitDiffsEqual,
   actionRunParamsEqual,
   actionSubjectsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
+  normalizeActionRunCommitDiff,
 } from "./idempotency"
 export { InMemoryActionRunStorage } from "./in-memory"
 export type {
+  ActionRunCommitDiff,
+  ActionRunCommitRecord,
+  ActionRunEffectsRecord,
   ActionRunFailure,
+  ActionRunLinkEditDiff,
+  ActionRunObjectEditDiff,
+  ActionRunObjectRef,
   ActionRunParams,
   ActionRunPhase,
+  ActionRunPhaseStatus,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
+  ActionRunWritebackRecord,
+  EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
+  RecordActionCommitInput,
+  RecordActionEffectsInput,
+  RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"

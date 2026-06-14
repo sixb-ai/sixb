@@ -1,5 +1,5 @@
 import type { ActionSubject } from "../../actions"
-import type { ActionRunRecord, QueueActionRunInput } from "./types"
+import type { ActionRunCommitDiff, ActionRunRecord, QueueActionRunInput } from "./types"
 
 export function actionSubjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
   if (left.kind !== right.kind) return false
@@ -10,6 +10,56 @@ export function actionSubjectsEqual(left: ActionSubject, right: ActionSubject): 
 
 export function actionRunParamsEqual(left: unknown, right: unknown): boolean {
   return stableJsonStringify(left) === stableJsonStringify(right)
+}
+
+export function actionRunCommitDiffsEqual(
+  left: ActionRunCommitDiff,
+  right: ActionRunCommitDiff
+): boolean {
+  return (
+    stableJsonStringify(normalizeActionRunCommitDiff(left)) ===
+    stableJsonStringify(normalizeActionRunCommitDiff(right))
+  )
+}
+
+export function normalizeActionRunCommitDiff(diff: ActionRunCommitDiff): ActionRunCommitDiff {
+  return {
+    objects: [...diff.objects]
+      .map((entry) => ({
+        objectTypeId: entry.objectTypeId,
+        primaryId: entry.primaryId,
+        operation: entry.operation,
+        changedProperties: [...new Set(entry.changedProperties)].sort(compareStrings),
+      }))
+      .sort(
+        (left, right) =>
+          compareStrings(left.objectTypeId, right.objectTypeId) ||
+          compareStrings(left.primaryId, right.primaryId) ||
+          compareStrings(left.operation, right.operation)
+      ),
+    links: [...diff.links]
+      .map((entry) => ({
+        operation: entry.operation,
+        source: {
+          objectTypeId: entry.source.objectTypeId,
+          primaryId: entry.source.primaryId,
+        },
+        linkId: entry.linkId,
+        target: {
+          objectTypeId: entry.target.objectTypeId,
+          primaryId: entry.target.primaryId,
+        },
+      }))
+      .sort(
+        (left, right) =>
+          compareStrings(left.source.objectTypeId, right.source.objectTypeId) ||
+          compareStrings(left.source.primaryId, right.source.primaryId) ||
+          compareStrings(left.linkId, right.linkId) ||
+          compareStrings(left.target.objectTypeId, right.target.objectTypeId) ||
+          compareStrings(left.target.primaryId, right.target.primaryId) ||
+          compareStrings(left.operation, right.operation)
+      ),
+  }
 }
 
 export function canRequeueActionRunAfterEnqueueFailure(

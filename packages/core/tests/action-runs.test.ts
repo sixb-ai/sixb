@@ -41,7 +41,7 @@ describe("InMemoryActionRunStorage", () => {
       actionId: "sendQuote",
       subject: { kind: "object", objectTypeId: "Opportunity", primaryId: "opp-123" },
       status: "succeeded",
-      phase: "handler",
+      phase: "validation",
       params: { amount: 50_000 },
       idempotencyKey: "action:my-app:act_1",
     })
@@ -92,7 +92,7 @@ describe("InMemoryActionRunStorage", () => {
         status: "failed",
         error: {
           message: "boom",
-          phase: "handler",
+          phase: "validation",
         },
       })
     ).rejects.toBeInstanceOf(ActionRunError)
@@ -119,7 +119,7 @@ describe("InMemoryActionRunStorage", () => {
       status: "failed",
       error: {
         message: "handler failed",
-        phase: "handler",
+        phase: "legacy_handler",
       },
     })
 
@@ -156,7 +156,7 @@ describe("InMemoryActionRunStorage", () => {
       error: {
         name: "FetchError",
         message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "handler",
+        phase: "legacy_handler",
       },
     })
 
@@ -209,7 +209,193 @@ describe("InMemoryActionRunStorage", () => {
     expect(failed?.error).toEqual({
       name: "FetchError",
       message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "handler",
+      phase: "legacy_handler",
     })
+  })
+
+  test("records V2 lifecycle records without failing committed actions on effects errors", async () => {
+    const storage = new InMemoryActionRunStorage()
+
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "createInvoice",
+      subject: { kind: "none" },
+      params: { amount: 42 },
+      idempotencyKey: "action:my-app:act_1",
+    })
+
+    const started = await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+    expect(started.phase).toBe("validation")
+
+    const writeback = await storage.recordWriteback({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+      result: { externalInvoiceId: "ext_1" },
+      completedAt: new Date("2026-04-29T10:00:01.000Z"),
+    })
+    expect(writeback.writeback).toMatchObject({
+      status: "succeeded",
+      result: { externalInvoiceId: "ext_1" },
+    })
+
+    await storage.enterPhase({
+      id: "act_1",
+      projectId: "my-app",
+      phase: "edits",
+    })
+
+    const committed = await storage.recordCommit({
+      id: "act_1",
+      projectId: "my-app",
+      committedAt: new Date("2026-04-29T10:00:02.000Z"),
+      diff: {
+        objects: [
+          {
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            operation: "update",
+            changedProperties: ["paidAt", "status", "status"],
+          },
+        ],
+        links: [
+          {
+            operation: "create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+        ],
+      },
+    })
+    expect(committed.commit?.diff).toEqual({
+      objects: [
+        {
+          objectTypeId: "Invoice",
+          primaryId: "inv_1",
+          operation: "update",
+          changedProperties: ["paidAt", "status"],
+        },
+      ],
+      links: [
+        {
+          operation: "create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+      ],
+    })
+
+    const effects = await storage.recordEffects({
+      id: "act_1",
+      projectId: "my-app",
+      status: "failed",
+      error: {
+        name: "SlackError",
+        message: "Slack timed out",
+        phase: "effects",
+      },
+    })
+    expect(effects.effects).toMatchObject({
+      status: "failed",
+      error: {
+        name: "SlackError",
+        message: "Slack timed out",
+        phase: "effects",
+      },
+    })
+
+    const finished = await storage.finish({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+    })
+
+    expect(finished).toMatchObject({
+      status: "succeeded",
+      phase: "effects",
+      error: undefined,
+      effects: {
+        status: "failed",
+      },
+    })
+  })
+
+  test("keeps phase records idempotent and rejects divergent commit diffs", async () => {
+    const storage = new InMemoryActionRunStorage()
+
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "markPaid",
+      subject: { kind: "none" },
+      params: {},
+      idempotencyKey: "action:my-app:act_1",
+    })
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+
+    const first = await storage.recordCommit({
+      id: "act_1",
+      projectId: "my-app",
+      committedAt: new Date("2026-04-29T10:00:00.000Z"),
+      diff: {
+        objects: [
+          {
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            operation: "update",
+            changedProperties: ["status"],
+          },
+        ],
+        links: [],
+      },
+    })
+
+    const duplicate = await storage.recordCommit({
+      id: "act_1",
+      projectId: "my-app",
+      committedAt: new Date("2026-04-29T10:00:05.000Z"),
+      diff: {
+        objects: [
+          {
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            operation: "update",
+            changedProperties: ["status"],
+          },
+        ],
+        links: [],
+      },
+    })
+
+    expect(duplicate.commit?.committedAt.toISOString()).toBe(
+      first.commit?.committedAt.toISOString()
+    )
+
+    await expect(
+      storage.recordCommit({
+        id: "act_1",
+        projectId: "my-app",
+        diff: {
+          objects: [
+            {
+              objectTypeId: "Invoice",
+              primaryId: "inv_1",
+              operation: "update",
+              changedProperties: ["paidAt"],
+            },
+          ],
+          links: [],
+        },
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
   })
 })

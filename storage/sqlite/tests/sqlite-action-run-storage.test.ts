@@ -40,7 +40,7 @@ describe("SqliteActionRunStorage", () => {
     })
 
     expect(finished.status).toBe("succeeded")
-    expect(finished.phase).toBe("handler")
+    expect(finished.phase).toBe("validation")
     expect(finished.params).toEqual({ amount: 50_000 })
     expect(finished.idempotencyKey).toBe("action:my-app:act_1")
     expect(finished.queuedAt.toISOString()).toBe("2026-04-29T10:14:00.000Z")
@@ -69,7 +69,7 @@ describe("SqliteActionRunStorage", () => {
       error: {
         name: "FetchError",
         message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "handler",
+        phase: "legacy_handler",
       },
     })
 
@@ -105,7 +105,7 @@ describe("SqliteActionRunStorage", () => {
     expect(failed?.error).toEqual({
       name: "FetchError",
       message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "handler",
+      phase: "legacy_handler",
     })
   })
 
@@ -173,7 +173,7 @@ describe("SqliteActionRunStorage", () => {
       status: "failed",
       error: {
         message: "handler failed",
-        phase: "handler",
+        phase: "legacy_handler",
       },
     })
 
@@ -236,5 +236,117 @@ describe("SqliteActionRunStorage", () => {
         idempotencyKey: "action:my-app:act_1",
       })
     ).rejects.toBeInstanceOf(ActionRunError)
+  })
+
+  test("persists V2 lifecycle records and recomposes relational commit diffs", async () => {
+    await storage.queue({
+      id: "act_1",
+      projectId: "my-app",
+      actionId: "createInvoice",
+      subject: { kind: "none" },
+      params: { amount: 42 },
+      idempotencyKey: "action:my-app:act_1",
+    })
+
+    await storage.start({
+      id: "act_1",
+      projectId: "my-app",
+    })
+
+    await storage.recordWriteback({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+      result: { externalInvoiceId: "ext_1" },
+      completedAt: new Date("2026-04-29T10:00:01.000Z"),
+    })
+
+    await storage.enterPhase({
+      id: "act_1",
+      projectId: "my-app",
+      phase: "edits",
+    })
+
+    await storage.recordCommit({
+      id: "act_1",
+      projectId: "my-app",
+      committedAt: new Date("2026-04-29T10:00:02.000Z"),
+      diff: {
+        objects: [
+          {
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            operation: "update",
+            changedProperties: ["status", "paidAt", "status"],
+          },
+        ],
+        links: [
+          {
+            operation: "create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+        ],
+      },
+    })
+
+    await storage.recordEffects({
+      id: "act_1",
+      projectId: "my-app",
+      status: "failed",
+      error: {
+        name: "SlackError",
+        message: "Slack timed out",
+        phase: "effects",
+      },
+    })
+
+    await storage.finish({
+      id: "act_1",
+      projectId: "my-app",
+      status: "succeeded",
+    })
+
+    const run = await storage.getById({
+      projectId: "my-app",
+      id: "act_1",
+    })
+
+    expect(run).toMatchObject({
+      status: "succeeded",
+      phase: "effects",
+      error: undefined,
+      writeback: {
+        status: "succeeded",
+        result: { externalInvoiceId: "ext_1" },
+      },
+      effects: {
+        status: "failed",
+        error: {
+          name: "SlackError",
+          message: "Slack timed out",
+          phase: "effects",
+        },
+      },
+    })
+    expect(run?.commit?.diff).toEqual({
+      objects: [
+        {
+          objectTypeId: "Invoice",
+          primaryId: "inv_1",
+          operation: "update",
+          changedProperties: ["paidAt", "status"],
+        },
+      ],
+      links: [
+        {
+          operation: "create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+      ],
+    })
   })
 })
