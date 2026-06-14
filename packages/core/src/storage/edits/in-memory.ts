@@ -38,7 +38,7 @@ export class InMemoryEditStorage implements EditStorage {
       )
     }
 
-    const committedAt = new Date(input.committedAt ?? new Date())
+    const committedAt = input.committedAt ?? new Date()
     const snapshot = this.objects.snapshot()
     const plan = await planEditBatch({
       projectId: input.projectId,

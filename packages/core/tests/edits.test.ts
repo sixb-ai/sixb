@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionRunStorage,
   defineObjectType,
   defineValueType,
   deriveEditCommitDiff,
   type EditBatch,
   type EditObjectRef,
+  InMemoryEditStorage,
   InMemoryStorage,
   link,
   type ObjectLink,
@@ -494,7 +496,9 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
       ontology,
       storage,
-      batch: createEditBuilder({ runId: "act_delete" }).delete(Invoice, "inv_1"),
+      batch: recordRuntimeEdits({ runId: "act_delete" }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").delete()
+      }),
     })
 
     expect(diff).toEqual({
@@ -525,22 +529,23 @@ describe("EditBatch core contract", () => {
 
   test("cancels create and link diffs when a created object is deleted", async () => {
     const storage = await createSeededStorage()
-    const edit = createEditBuilder({ runId: "act_create_delete" })
-    const invoice = edit.create(Invoice, {
-      id: "inv_created",
-      amount: 300,
-      status: "draft",
+    const batch = recordRuntimeEdits({ runId: "act_create_delete" }, ({ objects }) => {
+      const invoice = objects(Invoice).create({
+        id: "inv_created",
+        amount: 300,
+        status: "draft",
+      })
+      invoice.link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+        properties: { role: "billTo" },
+      })
+      invoice.delete()
     })
-    edit.link(invoice, Invoice.l.customer, edit.object(Customer, "cus_1"), {
-      properties: { role: "billTo" },
-    })
-    edit.delete(invoice)
 
     const diff = await deriveEditCommitDiff({
       projectId: "project-a",
       ontology,
       storage,
-      batch: edit,
+      batch,
     })
 
     expect(diff).toEqual({ objects: [], links: [] })
@@ -563,8 +568,8 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
     })
 
-    const batch = createEditBuilder({ runId: "run_commit_1" }).set(Invoice, "inv_1", {
-      status: "paid",
+    const batch = recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
     const result = await storage.edits.commit({
       projectId: "project-a",
@@ -601,6 +606,68 @@ describe("EditBatch core contract", () => {
     expect(invoice?.properties.status).toBe("paid")
     expect(invoice?.version).toBe(2)
     expect(run?.commit?.diff).toEqual(result.diff)
+  })
+
+  test("rolls back in-memory object changes when commit recording fails", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_rollback",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_rollback",
+    })
+    await storage.actionRuns.start({
+      id: "run_rollback",
+      projectId: "project-a",
+    })
+
+    const failingActionRuns: ActionRunStorage = {
+      queue: (input) => storage.actionRuns.queue(input),
+      start: (input) => storage.actionRuns.start(input),
+      enterPhase: (input) => storage.actionRuns.enterPhase(input),
+      recordWriteback: (input) => storage.actionRuns.recordWriteback(input),
+      recordCommit: async () => {
+        throw new Error("commit trail write failed")
+      },
+      recordEffects: (input) => storage.actionRuns.recordEffects(input),
+      finish: (input) => storage.actionRuns.finish(input),
+      getById: (input) => storage.actionRuns.getById(input),
+      list: (input) => storage.actionRuns.list(input),
+    }
+    const edits = new InMemoryEditStorage(storage.objects, failingActionRuns)
+    const batch = recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    await expect(
+      edits.commit({
+        projectId: "project-a",
+        runId: "run_rollback",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).rejects.toThrow("commit trail write failed")
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+    const run = await storage.actionRuns.getById({
+      projectId: "project-a",
+      id: "run_rollback",
+    })
+
+    expect(invoice?.properties.status).toBe("draft")
+    expect(invoice?.version).toBe(1)
+    expect(run?.commit).toBeUndefined()
   })
 })
 

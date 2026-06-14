@@ -35,6 +35,7 @@ import {
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import type { SQL, SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 
@@ -285,7 +286,7 @@ export class PgActionRunStorage implements ActionRunStorage {
         VALUES (${input.projectId}, ${input.id}, ${commit.committedAt})
       `
 
-      await this.insertCommitDiff(tx, input.projectId, input.id, commit.diff)
+      await insertActionRunCommitDiff(tx, input.projectId, input.id, commit.diff)
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE action_runs
@@ -515,73 +516,6 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     return existing
-  }
-
-  private async insertCommitDiff(
-    runner: SQLClient,
-    projectId: string,
-    runId: string,
-    diff: ActionRunCommitDiff
-  ): Promise<void> {
-    for (const objectDiff of diff.objects) {
-      await runner`
-        INSERT INTO action_run_object_diffs (
-          project_id,
-          run_id,
-          object_type_id,
-          primary_id,
-          operation
-        ) VALUES (
-          ${projectId},
-          ${runId},
-          ${objectDiff.objectTypeId},
-          ${objectDiff.primaryId},
-          ${objectDiff.operation}
-        )
-      `
-
-      for (const propertyId of objectDiff.changedProperties) {
-        await runner`
-          INSERT INTO action_run_object_diff_properties (
-            project_id,
-            run_id,
-            object_type_id,
-            primary_id,
-            property_id
-          ) VALUES (
-            ${projectId},
-            ${runId},
-            ${objectDiff.objectTypeId},
-            ${objectDiff.primaryId},
-            ${propertyId}
-          )
-        `
-      }
-    }
-
-    for (const linkDiff of diff.links) {
-      await runner`
-        INSERT INTO action_run_link_diffs (
-          project_id,
-          run_id,
-          operation,
-          source_object_type_id,
-          source_primary_id,
-          link_id,
-          target_object_type_id,
-          target_primary_id
-        ) VALUES (
-          ${projectId},
-          ${runId},
-          ${linkDiff.operation},
-          ${linkDiff.source.objectTypeId},
-          ${linkDiff.source.primaryId},
-          ${linkDiff.linkId},
-          ${linkDiff.target.objectTypeId},
-          ${linkDiff.target.primaryId}
-        )
-      `
-    }
   }
 
   private async deleteCommitRows(

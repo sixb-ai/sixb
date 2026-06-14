@@ -20,6 +20,7 @@ import {
   EditStorageError,
   planEditBatchFromLoadedState,
 } from "@sixb/core"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import type { SQL, SQLClient } from "./pg-client"
 
 export class PgEditStorage implements EditStorage {
@@ -45,7 +46,7 @@ export class PgEditStorage implements EditStorage {
         )
       }
 
-      const committedAt = new Date(input.committedAt ?? new Date())
+      const committedAt = input.committedAt ?? new Date()
       const plan = await this.plan(tx, input)
       await this.applyPlan(tx, input.projectId, plan, committedAt)
       await this.insertCommit(tx, input.projectId, input.runId, committedAt, plan.diff)
@@ -215,7 +216,7 @@ export class PgEditStorage implements EditStorage {
       INSERT INTO action_run_commits (project_id, run_id, committed_at)
       VALUES (${projectId}, ${runId}, ${committedAt})
     `
-    await insertCommitDiff(tx, projectId, runId, diff)
+    await insertActionRunCommitDiff(tx, projectId, runId, diff)
   }
 
   private async loadCommitRecord(
@@ -268,57 +269,6 @@ function assertCommitRunMatchesInput(row: ActionRunDatabaseRow, input: CommitEdi
     throw new EditStorageError(
       `[SixbPg] Action run '${input.runId}' cannot commit edits with a different idempotency key.`
     )
-  }
-}
-
-async function insertCommitDiff(
-  tx: SQLClient,
-  projectId: string,
-  runId: string,
-  diff: ActionRunCommitDiff
-): Promise<void> {
-  const objectRows = diff.objects.map((objectDiff) => ({
-    project_id: projectId,
-    run_id: runId,
-    object_type_id: objectDiff.objectTypeId,
-    primary_id: objectDiff.primaryId,
-    operation: objectDiff.operation,
-  }))
-  if (objectRows.length > 0) {
-    await tx`
-      INSERT INTO action_run_object_diffs ${tx(objectRows)}
-    `
-  }
-
-  const propertyRows = diff.objects.flatMap((objectDiff) =>
-    objectDiff.changedProperties.map((propertyId) => ({
-      project_id: projectId,
-      run_id: runId,
-      object_type_id: objectDiff.objectTypeId,
-      primary_id: objectDiff.primaryId,
-      property_id: propertyId,
-    }))
-  )
-  if (propertyRows.length > 0) {
-    await tx`
-      INSERT INTO action_run_object_diff_properties ${tx(propertyRows)}
-    `
-  }
-
-  const linkRows = diff.links.map((linkDiff) => ({
-    project_id: projectId,
-    run_id: runId,
-    operation: linkDiff.operation,
-    source_object_type_id: linkDiff.source.objectTypeId,
-    source_primary_id: linkDiff.source.primaryId,
-    link_id: linkDiff.linkId,
-    target_object_type_id: linkDiff.target.objectTypeId,
-    target_primary_id: linkDiff.target.primaryId,
-  }))
-  if (linkRows.length > 0) {
-    await tx`
-      INSERT INTO action_run_link_diffs ${tx(linkRows)}
-    `
   }
 }
 
@@ -407,7 +357,7 @@ async function createObjects(
   const creates = upserts.filter((upsert) => upsert.operation === "create")
   if (creates.length === 0) return
 
-  await tx`
+  const inserted = await tx<{ object_type_id: string; primary_id: string }[]>`
     WITH input AS (
       SELECT *
       FROM jsonb_to_recordset(${JSON.stringify(
@@ -436,7 +386,13 @@ async function createObjects(
       1,
       NULL
     FROM input
+    ON CONFLICT (project_id, object_type_id, primary_id) DO NOTHING
+    RETURNING object_type_id, primary_id
   `
+
+  if (inserted.length !== creates.length) {
+    throw new EditStorageError(`[SixbPg] Edit commit cannot create one or more existing objects.`)
+  }
 }
 
 async function updateObjects(
@@ -489,7 +445,15 @@ async function createLinks(
   const creates = upserts.filter((upsert) => upsert.operation === "create")
   if (creates.length === 0) return
 
-  await tx`
+  const inserted = await tx<
+    {
+      source_type_id: string
+      source_id: string
+      link_id: string
+      target_type_id: string
+      target_id: string
+    }[]
+  >`
     WITH input AS (
       SELECT *
       FROM jsonb_to_recordset(${JSON.stringify(
@@ -526,7 +490,15 @@ async function createLinks(
       ${committedAt},
       NULL
     FROM input
+    ON CONFLICT (
+      project_id, source_type_id, source_id, link_id, target_type_id, target_id
+    ) DO NOTHING
+    RETURNING source_type_id, source_id, link_id, target_type_id, target_id
   `
+
+  if (inserted.length !== creates.length) {
+    throw new EditStorageError(`[SixbPg] Edit commit cannot create one or more existing links.`)
+  }
 }
 
 async function updateLinks(

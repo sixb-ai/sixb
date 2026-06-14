@@ -23,6 +23,7 @@ import {
   EditStorageError,
   planEditBatchFromLoadedState,
 } from "@sixb/core"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteEditStorageOptions {
@@ -63,7 +64,7 @@ export class SqliteEditStorage implements EditStorage {
         )
       }
 
-      const committedAt = new Date(input.committedAt ?? new Date())
+      const committedAt = input.committedAt ?? new Date()
       const plan = this.plan(input)
       this.applyPlan(input.projectId, plan, committedAt)
       this.insertCommit(input.projectId, input.runId, committedAt, plan.diff)
@@ -291,7 +292,7 @@ export class SqliteEditStorage implements EditStorage {
     this.db
       .query("INSERT INTO action_run_commits (project_id, run_id, committed_at) VALUES (?, ?, ?)")
       .run(projectId, runId, committedAt.toISOString())
-    insertCommitDiff(this.db, projectId, runId, diff)
+    insertActionRunCommitDiff(this.db, projectId, runId, diff)
   }
 
   private loadCommitRecord(projectId: string, runId: string): ActionRunCommitRecord | undefined {
@@ -335,59 +336,6 @@ function assertCommitRunMatchesInput(row: ActionRunDatabaseRow, input: CommitEdi
   if (input.idempotencyKey !== undefined && row.idempotency_key !== input.idempotencyKey) {
     throw new EditStorageError(
       `[SixbSqlite] Action run '${input.runId}' cannot commit edits with a different idempotency key.`
-    )
-  }
-}
-
-function insertCommitDiff(
-  db: Database,
-  projectId: string,
-  runId: string,
-  diff: ActionRunCommitDiff
-): void {
-  for (const objectDiff of diff.objects) {
-    db.query(
-      `
-      INSERT INTO action_run_object_diffs (
-        project_id, run_id, object_type_id, primary_id, operation
-      ) VALUES (?, ?, ?, ?, ?)
-    `
-    ).run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, objectDiff.operation)
-
-    for (const propertyId of objectDiff.changedProperties) {
-      db.query(
-        `
-        INSERT INTO action_run_object_diff_properties (
-          project_id, run_id, object_type_id, primary_id, property_id
-        ) VALUES (?, ?, ?, ?, ?)
-      `
-      ).run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, propertyId)
-    }
-  }
-
-  for (const linkDiff of diff.links) {
-    db.query(
-      `
-      INSERT INTO action_run_link_diffs (
-        project_id,
-        run_id,
-        operation,
-        source_object_type_id,
-        source_primary_id,
-        link_id,
-        target_object_type_id,
-        target_primary_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `
-    ).run(
-      projectId,
-      runId,
-      linkDiff.operation,
-      linkDiff.source.objectTypeId,
-      linkDiff.source.primaryId,
-      linkDiff.linkId,
-      linkDiff.target.objectTypeId,
-      linkDiff.target.primaryId
     )
   }
 }

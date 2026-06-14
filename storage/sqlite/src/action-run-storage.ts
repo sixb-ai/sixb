@@ -38,6 +38,7 @@ import {
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import { installFreshSqliteSchema } from "./migrations"
 
 export interface SqliteActionRunStorageOptions {
@@ -348,7 +349,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         )
         .run(input.projectId, input.id, commit.committedAt.toISOString())
 
-      this.insertCommitDiff(input.projectId, input.id, commit.diff)
+      insertActionRunCommitDiff(this.db, input.projectId, input.id, commit.diff)
 
       this.db
         .query(
@@ -597,68 +598,6 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     }
 
     return existing
-  }
-
-  private insertCommitDiff(projectId: string, runId: string, diff: ActionRunCommitDiff): void {
-    for (const objectDiff of diff.objects) {
-      this.db
-        .query(
-          `
-          INSERT INTO action_run_object_diffs (
-            project_id,
-            run_id,
-            object_type_id,
-            primary_id,
-            operation
-          ) VALUES (?, ?, ?, ?, ?)
-        `
-        )
-        .run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, objectDiff.operation)
-
-      for (const propertyId of objectDiff.changedProperties) {
-        this.db
-          .query(
-            `
-            INSERT INTO action_run_object_diff_properties (
-              project_id,
-              run_id,
-              object_type_id,
-              primary_id,
-              property_id
-            ) VALUES (?, ?, ?, ?, ?)
-          `
-          )
-          .run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, propertyId)
-      }
-    }
-
-    for (const linkDiff of diff.links) {
-      this.db
-        .query(
-          `
-          INSERT INTO action_run_link_diffs (
-            project_id,
-            run_id,
-            operation,
-            source_object_type_id,
-            source_primary_id,
-            link_id,
-            target_object_type_id,
-            target_primary_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `
-        )
-        .run(
-          projectId,
-          runId,
-          linkDiff.operation,
-          linkDiff.source.objectTypeId,
-          linkDiff.source.primaryId,
-          linkDiff.linkId,
-          linkDiff.target.objectTypeId,
-          linkDiff.target.primaryId
-        )
-    }
   }
 
   private deleteCommitRows(projectId: string, runId: string): void {
