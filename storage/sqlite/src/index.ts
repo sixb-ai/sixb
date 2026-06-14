@@ -5,6 +5,7 @@
 import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAuthStorage } from "./auth-storage"
+import { SqliteEditStorage } from "./edit-storage"
 import { createSqliteStorageMigrators, sqliteStoragePath } from "./migrations"
 import { SqliteObjectStorage } from "./object-storage"
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
@@ -42,6 +43,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly objects: SqliteObjectStorage
   readonly auth: SqliteAuthStorage
   readonly actionRuns: SqliteActionRunStorage
+  readonly edits: SqliteEditStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
   readonly projectionRuns: SqliteProjectionRunStorage
@@ -64,6 +66,9 @@ export class SqliteStorage implements MigrationCapableStorage {
       path,
     })
     this.actionRuns = new SqliteActionRunStorage({
+      path,
+    })
+    this.edits = new SqliteEditStorage({
       path,
     })
     this.pipelineRuns = new SqlitePipelineRunStorage({
@@ -101,6 +106,8 @@ export type { SqliteActionRunStorageOptions } from "./action-run-storage"
 export { SqliteActionRunStorage } from "./action-run-storage"
 export type { SqliteAuthStorageOptions } from "./auth-storage"
 export { SqliteAuthStorage } from "./auth-storage"
+export type { SqliteEditStorageOptions } from "./edit-storage"
+export { SqliteEditStorage } from "./edit-storage"
 export {
   createSqliteMigrator,
   createSqliteStorageMigrators,

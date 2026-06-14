@@ -1,5 +1,6 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AuthStorage } from "./auth"
+import type { EditStorage } from "./edits"
 import type { ObjectStorage } from "./objects/types"
 import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
@@ -65,6 +66,8 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError } from "./auth"
+export type { CommitEditBatchInput, EditCommitResult, EditStorage } from "./edits"
+export { EditStorageError } from "./edits"
 export type {
   LinkDirection,
   ObjectLinkRow,
@@ -181,6 +184,7 @@ export { WorkflowRunError } from "./workflow-runs"
 export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
+  edits?: EditStorage
   auth?: AuthStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage

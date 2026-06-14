@@ -27,5 +27,20 @@ export type {
   RecordEditsOptions,
   TypedEditObjectRef,
 } from "./types"
-export type { ValidateEditBatchInput, ValidateEditBatchResult } from "./validation"
-export { deriveEditCommitDiff, validateEditBatch } from "./validation"
+export type {
+  EditBatchLoadRequests,
+  EditCommitPlan,
+  EditLinkDeletePlan,
+  EditLinkUpsertPlan,
+  EditObjectDeletePlan,
+  EditObjectUpsertPlan,
+  ValidateEditBatchInput,
+  ValidateEditBatchResult,
+} from "./validation"
+export {
+  collectEditBatchLoadRequests,
+  deriveEditCommitDiff,
+  planEditBatch,
+  planEditBatchFromLoadedState,
+  validateEditBatch,
+} from "./validation"

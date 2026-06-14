@@ -402,6 +402,7 @@ describe("SqlitePipelineRunStorage", () => {
       bundled.objects.close()
       bundled.auth.close()
       bundled.actionRuns.close()
+      bundled.edits.close()
       bundled.pipelineRuns.close()
       bundled.projectionRuns.close()
       bundled.workflowRuns.close()

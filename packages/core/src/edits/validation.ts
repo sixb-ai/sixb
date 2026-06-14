@@ -35,7 +35,7 @@ export interface ValidateEditBatchInput {
     "resolveObjectType" | "getPrimaryPropertyId" | "getValueTypesById" | "isValidLinkTarget"
   >
   readonly storage: {
-    readonly objects: Pick<ObjectStorage, "getByPrimaryIdBatch" | "listLinksBatch">
+    readonly objects: Pick<ObjectStorage, "getByPrimaryIdBatch" | "listLinks" | "listLinksBatch">
   }
   readonly batch: EditBatchInput
 }
@@ -43,6 +43,51 @@ export interface ValidateEditBatchInput {
 export interface ValidateEditBatchResult {
   readonly batch: EditBatch
   readonly diff: EditCommitDiff
+}
+
+export interface EditBatchLoadRequests {
+  readonly objects: readonly { objectTypeId: string; primaryId: string }[]
+  readonly sourceLinks: readonly { objectTypeId: string; objectId: string; linkId: string }[]
+  readonly incidentLinks: readonly { objectTypeId: string; objectId: string }[]
+}
+
+export interface EditObjectUpsertPlan {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly properties: Readonly<Record<string, JsonValue>>
+  readonly operation: "create" | "update"
+}
+
+export interface EditObjectDeletePlan {
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+export interface EditLinkUpsertPlan {
+  readonly source: EditObjectRef
+  readonly linkId: string
+  readonly target: EditObjectRef
+  readonly properties?: Readonly<Record<string, JsonValue>>
+  readonly operation: "create" | "update"
+}
+
+export interface EditLinkDeletePlan {
+  readonly source: EditObjectRef
+  readonly linkId: string
+  readonly target: EditObjectRef
+}
+
+export interface EditCommitPlan {
+  readonly batch: EditBatch
+  readonly diff: EditCommitDiff
+  readonly objects: {
+    readonly upserts: readonly EditObjectUpsertPlan[]
+    readonly deletes: readonly EditObjectDeletePlan[]
+  }
+  readonly links: {
+    readonly upserts: readonly EditLinkUpsertPlan[]
+    readonly deletes: readonly EditLinkDeletePlan[]
+  }
 }
 
 type NormalizedEditContext = Pick<ValidateEditBatchInput, "ontology">
@@ -76,28 +121,110 @@ type LinkDiffAccumulator = {
   target: EditObjectRef
 }
 
+type EditAnalysisInput = Omit<ValidateEditBatchInput, "batch" | "storage"> & {
+  readonly batch: EditBatch
+  readonly existingObjects: Map<string, ObjectRow>
+  readonly existingLinks: Map<string, ObjectLinkRow[]>
+}
+
 export async function validateEditBatch(
   input: ValidateEditBatchInput
 ): Promise<ValidateEditBatchResult> {
-  const initialBatch = normalizeEditBatch(input.batch)
-  const batch = normalizeEditBatchWithOntology(initialBatch, input)
-  const existingObjects = await loadExistingObjects(input, batch.operations)
-  const existingLinks = await loadExistingLinks(input, batch.operations)
-  const result = analyzeEditBatch({
-    ...input,
-    batch,
-    existingObjects,
-    existingLinks,
-  })
+  const result = await planEditBatch(input)
 
   return {
-    batch,
+    batch: result.batch,
     diff: result.diff,
   }
 }
 
 export async function deriveEditCommitDiff(input: ValidateEditBatchInput): Promise<EditCommitDiff> {
-  return (await validateEditBatch(input)).diff
+  return (await planEditBatch(input)).diff
+}
+
+export async function planEditBatch(input: ValidateEditBatchInput): Promise<EditCommitPlan> {
+  const batch = normalizeEditBatchWithOntology(normalizeEditBatch(input.batch), input)
+  const existingObjects = await loadExistingObjects(input, batch.operations)
+  const existingLinks = await loadExistingLinks(input, batch.operations)
+
+  return planEditBatchFromLoadedState({
+    ...input,
+    batch,
+    existingObjects,
+    existingLinks,
+  })
+}
+
+export function collectEditBatchLoadRequests(batchInput: EditBatchInput): EditBatchLoadRequests {
+  const batch = normalizeEditBatch(batchInput)
+  const objects = new Map<string, { objectTypeId: string; primaryId: string }>()
+  const sourceLinks = new Map<string, { objectTypeId: string; objectId: string; linkId: string }>()
+  const incidentLinks = new Map<string, { objectTypeId: string; objectId: string }>()
+
+  for (const operation of batch.operations) {
+    switch (operation.kind) {
+      case "object.create":
+      case "object.update":
+        objects.set(objectKey(operation.objectTypeId, operation.primaryId), {
+          objectTypeId: operation.objectTypeId,
+          primaryId: operation.primaryId,
+        })
+        break
+      case "object.delete":
+        objects.set(objectKey(operation.objectTypeId, operation.primaryId), {
+          objectTypeId: operation.objectTypeId,
+          primaryId: operation.primaryId,
+        })
+        incidentLinks.set(objectKey(operation.objectTypeId, operation.primaryId), {
+          objectTypeId: operation.objectTypeId,
+          objectId: operation.primaryId,
+        })
+        break
+      case "link.create":
+      case "link.delete":
+        objects.set(objectKey(operation.source.objectTypeId, operation.source.primaryId), {
+          objectTypeId: operation.source.objectTypeId,
+          primaryId: operation.source.primaryId,
+        })
+        objects.set(objectKey(operation.target.objectTypeId, operation.target.primaryId), {
+          objectTypeId: operation.target.objectTypeId,
+          primaryId: operation.target.primaryId,
+        })
+        sourceLinks.set(
+          sourceLinkKey(
+            operation.source.objectTypeId,
+            operation.source.primaryId,
+            operation.linkId
+          ),
+          {
+            objectTypeId: operation.source.objectTypeId,
+            objectId: operation.source.primaryId,
+            linkId: operation.linkId,
+          }
+        )
+        break
+    }
+  }
+
+  return {
+    objects: [...objects.values()],
+    sourceLinks: [...sourceLinks.values()],
+    incidentLinks: [...incidentLinks.values()],
+  }
+}
+
+export function planEditBatchFromLoadedState(
+  input: Omit<ValidateEditBatchInput, "storage"> & {
+    readonly existingObjects: Map<string, ObjectRow>
+    readonly existingLinks: Map<string, ObjectLinkRow[]>
+  }
+): EditCommitPlan {
+  const batch = normalizeEditBatchWithOntology(normalizeEditBatch(input.batch), input)
+
+  return analyzeEditBatch({
+    ...input,
+    batch,
+  })
 }
 
 function normalizeEditBatchWithOntology(batch: EditBatch, ctx: NormalizedEditContext): EditBatch {
@@ -201,35 +328,11 @@ async function loadExistingObjects(
   input: ValidateEditBatchInput,
   operations: readonly EditOperation[]
 ): Promise<Map<string, ObjectRow>> {
-  const items = new Map<string, { objectTypeId: string; primaryId: string }>()
-
-  for (const operation of operations) {
-    switch (operation.kind) {
-      case "object.create":
-      case "object.update":
-      case "object.delete":
-        items.set(objectKey(operation.objectTypeId, operation.primaryId), {
-          objectTypeId: operation.objectTypeId,
-          primaryId: operation.primaryId,
-        })
-        break
-      case "link.create":
-      case "link.delete":
-        items.set(objectKey(operation.source.objectTypeId, operation.source.primaryId), {
-          objectTypeId: operation.source.objectTypeId,
-          primaryId: operation.source.primaryId,
-        })
-        items.set(objectKey(operation.target.objectTypeId, operation.target.primaryId), {
-          objectTypeId: operation.target.objectTypeId,
-          primaryId: operation.target.primaryId,
-        })
-        break
-    }
-  }
+  const items = collectEditBatchLoadRequests({ version: 1, operations }).objects
 
   return input.storage.objects.getByPrimaryIdBatch({
     projectId: input.projectId,
-    items: [...items.values()],
+    items,
   })
 }
 
@@ -237,32 +340,28 @@ async function loadExistingLinks(
   input: ValidateEditBatchInput,
   operations: readonly EditOperation[]
 ): Promise<Map<string, ObjectLinkRow[]>> {
-  const items = new Map<string, { objectTypeId: string; objectId: string; linkId: string }>()
+  const requests = collectEditBatchLoadRequests({ version: 1, operations })
+  const result = await input.storage.objects.listLinksBatch({
+    projectId: input.projectId,
+    items: requests.sourceLinks,
+  })
 
-  for (const operation of operations) {
-    if (operation.kind !== "link.create" && operation.kind !== "link.delete") continue
-    items.set(
-      sourceLinkKey(operation.source.objectTypeId, operation.source.primaryId, operation.linkId),
-      {
-        objectTypeId: operation.source.objectTypeId,
-        objectId: operation.source.primaryId,
-        linkId: operation.linkId,
-      }
-    )
+  for (const incident of requests.incidentLinks) {
+    const rows = await input.storage.objects.listLinks({
+      projectId: input.projectId,
+      objectTypeId: incident.objectTypeId,
+      objectId: incident.objectId,
+      direction: "both",
+    })
+    if (rows.length > 0) {
+      result.set(`incident:${incident.objectTypeId}:${incident.objectId}`, [...rows])
+    }
   }
 
-  return input.storage.objects.listLinksBatch({
-    projectId: input.projectId,
-    items: [...items.values()],
-  })
+  return result
 }
 
-function analyzeEditBatch(
-  input: ValidateEditBatchInput & {
-    readonly existingObjects: Map<string, ObjectRow>
-    readonly existingLinks: Map<string, ObjectLinkRow[]>
-  }
-): { diff: EditCommitDiff } {
+function analyzeEditBatch(input: EditAnalysisInput): EditCommitPlan {
   const valueTypesById = input.ontology.getValueTypesById()
   const objectStates = seedObjectStates(input)
   const linkStates = seedLinkStates(input.existingLinks)
@@ -278,7 +377,7 @@ function analyzeEditBatch(
         applyObjectUpdate(input, operation, objectStates, objectDiffs, valueTypesById)
         break
       case "object.delete":
-        applyObjectDelete(input, operation, objectStates, objectDiffs)
+        applyObjectDelete(input, operation, objectStates, objectDiffs, linkStates, linkDiffs)
         break
       case "link.create":
         applyLinkCreate(input, operation, objectStates, linkStates, linkDiffs, valueTypesById)
@@ -289,19 +388,24 @@ function analyzeEditBatch(
     }
   }
 
+  const diff: EditCommitDiff = {
+    objects: [...objectDiffs.values()]
+      .filter((entry) => entry.operation !== "update" || entry.changedProperties.size > 0)
+      .map((entry) => ({
+        objectTypeId: entry.objectTypeId,
+        primaryId: entry.primaryId,
+        operation: entry.operation,
+        changedProperties: [...entry.changedProperties].sort(compareStrings),
+      }))
+      .sort(compareObjectDiffs),
+    links: [...linkDiffs.values()].sort(compareLinkDiffs),
+  }
+
   return {
-    diff: {
-      objects: [...objectDiffs.values()]
-        .filter((entry) => entry.operation !== "update" || entry.changedProperties.size > 0)
-        .map((entry) => ({
-          objectTypeId: entry.objectTypeId,
-          primaryId: entry.primaryId,
-          operation: entry.operation,
-          changedProperties: [...entry.changedProperties].sort(compareStrings),
-        }))
-        .sort(compareObjectDiffs),
-      links: [...linkDiffs.values()].sort(compareLinkDiffs),
-    },
+    batch: input.batch,
+    diff,
+    objects: buildObjectPlan(diff, objectStates),
+    links: buildLinkPlan(diff, linkStates),
   }
 }
 
@@ -342,7 +446,7 @@ function seedLinkStates(existingLinks: Map<string, ObjectLinkRow[]>): Map<string
 }
 
 function applyObjectCreate(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "ontology">,
   operation: Extract<EditOperation, { kind: "object.create" }>,
   states: Map<string, ObjectState>,
   diffs: Map<string, ObjectDiffAccumulator>
@@ -374,7 +478,7 @@ function applyObjectCreate(
 }
 
 function applyObjectUpdate(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "ontology">,
   operation: EditObjectUpdateOperation,
   states: Map<string, ObjectState>,
   diffs: Map<string, ObjectDiffAccumulator>,
@@ -410,10 +514,12 @@ function applyObjectUpdate(
 }
 
 function applyObjectDelete(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "ontology">,
   operation: EditObjectDeleteOperation,
   states: Map<string, ObjectState>,
-  diffs: Map<string, ObjectDiffAccumulator>
+  diffs: Map<string, ObjectDiffAccumulator>,
+  linkStates: Map<string, LinkState>,
+  linkDiffs: Map<string, LinkDiffAccumulator>
 ): void {
   const state = requireActiveObjectState(input, states, {
     objectTypeId: operation.objectTypeId,
@@ -422,6 +528,7 @@ function applyObjectDelete(
   const key = objectKey(operation.objectTypeId, operation.primaryId)
   state.exists = false
   state.deleted = true
+  deleteIncidentLinks(operation, linkStates, linkDiffs)
 
   if (state.createdInBatch) {
     diffs.delete(key)
@@ -437,7 +544,7 @@ function applyObjectDelete(
 }
 
 function applyLinkCreate(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "projectId" | "ontology">,
   operation: EditLinkCreateOperation,
   objectStates: Map<string, ObjectState>,
   linkStates: Map<string, LinkState>,
@@ -512,7 +619,7 @@ function applyLinkCreate(
 }
 
 function applyLinkDelete(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "ontology">,
   operation: EditLinkDeleteOperation,
   objectStates: Map<string, ObjectState>,
   linkStates: Map<string, LinkState>,
@@ -533,22 +640,47 @@ function applyLinkDelete(
     return
   }
 
+  deleteLinkState(existing, linkStates, diffs)
+}
+
+function deleteIncidentLinks(
+  ref: EditObjectRef,
+  linkStates: Map<string, LinkState>,
+  diffs: Map<string, LinkDiffAccumulator>
+): void {
+  for (const state of [...linkStates.values()]) {
+    const row = state.row
+    const isSource = row.sourceTypeId === ref.objectTypeId && row.sourceId === ref.primaryId
+    const isTarget = row.targetTypeId === ref.objectTypeId && row.targetId === ref.primaryId
+    if (!isSource && !isTarget) continue
+    deleteLinkState(state, linkStates, diffs)
+  }
+}
+
+function deleteLinkState(
+  state: LinkState,
+  linkStates: Map<string, LinkState>,
+  diffs: Map<string, LinkDiffAccumulator>
+): void {
+  const row = state.row
+  const key = linkKey(row.sourceTypeId, row.sourceId, row.linkId, row.targetTypeId, row.targetId)
+
   linkStates.delete(key)
-  if (existing.createdInBatch) {
+  if (state.createdInBatch) {
     diffs.delete(key)
     return
   }
 
   diffs.set(key, {
     operation: "delete",
-    source: operation.source,
-    linkId: operation.linkId,
-    target: operation.target,
+    source: { objectTypeId: row.sourceTypeId, primaryId: row.sourceId },
+    linkId: row.linkId,
+    target: { objectTypeId: row.targetTypeId, primaryId: row.targetId },
   })
 }
 
 function requireActiveObjectState(
-  input: ValidateEditBatchInput,
+  input: Pick<ValidateEditBatchInput, "ontology">,
   states: Map<string, ObjectState>,
   ref: EditObjectRef
 ): ObjectState {
@@ -725,4 +857,88 @@ function compareStrings(left: string, right: string): number {
   if (left < right) return -1
   if (left > right) return 1
   return 0
+}
+
+function buildObjectPlan(
+  diff: EditCommitDiff,
+  states: Map<string, ObjectState>
+): EditCommitPlan["objects"] {
+  const upserts: EditObjectUpsertPlan[] = []
+  const deletes: EditObjectDeletePlan[] = []
+
+  for (const entry of diff.objects) {
+    if (entry.operation === "delete") {
+      deletes.push({
+        objectTypeId: entry.objectTypeId,
+        primaryId: entry.primaryId,
+      })
+      continue
+    }
+
+    const state = states.get(objectKey(entry.objectTypeId, entry.primaryId))
+    if (!state || !state.exists || state.deleted) {
+      throw new EditBatchError(
+        `[Sixb] EditBatch could not build ${entry.operation} plan for missing object '${entry.objectTypeId}:${entry.primaryId}'.`
+      )
+    }
+    upserts.push({
+      objectTypeId: entry.objectTypeId,
+      primaryId: entry.primaryId,
+      properties: { ...state.properties },
+      operation: entry.operation,
+    })
+  }
+
+  return {
+    upserts,
+    deletes,
+  }
+}
+
+function buildLinkPlan(
+  diff: EditCommitDiff,
+  states: Map<string, LinkState>
+): EditCommitPlan["links"] {
+  const upserts: EditLinkUpsertPlan[] = []
+  const deletes: EditLinkDeletePlan[] = []
+
+  for (const entry of diff.links) {
+    if (entry.operation === "delete") {
+      deletes.push({
+        source: entry.source,
+        linkId: entry.linkId,
+        target: entry.target,
+      })
+      continue
+    }
+
+    const state = states.get(
+      linkKey(
+        entry.source.objectTypeId,
+        entry.source.primaryId,
+        entry.linkId,
+        entry.target.objectTypeId,
+        entry.target.primaryId
+      )
+    )
+    if (!state) {
+      throw new EditBatchError(
+        `[Sixb] EditBatch could not build ${entry.operation} plan for missing link '${entry.source.objectTypeId}:${entry.source.primaryId}:${entry.linkId}:${entry.target.objectTypeId}:${entry.target.primaryId}'.`
+      )
+    }
+    upserts.push({
+      source: entry.source,
+      linkId: entry.linkId,
+      target: entry.target,
+      ...(state.row.properties
+        ? { properties: { ...state.row.properties } as Record<string, JsonValue> }
+        : {}),
+      operation: entry.operation,
+    })
+  }
+
+  return {
+    upserts,
+    deletes,
+  }
 }

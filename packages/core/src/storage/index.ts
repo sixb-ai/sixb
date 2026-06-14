@@ -81,6 +81,8 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
+export type { CommitEditBatchInput, EditCommitResult, EditStorage } from "./edits"
+export { EditStorageError, InMemoryEditStorage } from "./edits"
 export { ObjectNotFoundError } from "./errors"
 export type {
   DefineMigrationsOptions,
@@ -246,6 +248,7 @@ export {
 
 import { InMemoryActionRunStorage } from "./action-runs"
 import { InMemoryAuthStorage } from "./auth"
+import { InMemoryEditStorage } from "./edits"
 import { InMemoryObjectStorage } from "./objects"
 import { InMemoryPipelineRunStorage } from "./pipeline-runs"
 import { InMemoryProjectionRunStorage } from "./projection-runs"
@@ -263,6 +266,7 @@ export class InMemoryStorage implements Storage {
   readonly timeseries = new InMemoryTimeseriesStorage()
   readonly auth = new InMemoryAuthStorage()
   readonly actionRuns = new InMemoryActionRunStorage()
+  readonly edits = new InMemoryEditStorage(this.objects, this.actionRuns)
   readonly syncRuns = new InMemorySyncRunStorage()
   readonly pipelineRuns = new InMemoryPipelineRunStorage()
   readonly projectionRuns = new InMemoryProjectionRunStorage()
