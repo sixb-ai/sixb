@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   ActionDefinitionError,
+  ActionRunError,
   ActionValidationError,
   actionParam,
   defineAction,
@@ -435,6 +436,35 @@ describe("requestAction", () => {
     })
     expect(invoked).toBe(0)
     expect(result.runId.startsWith("act_")).toBe(true)
+    expect(result.created).toBe(true)
+    expect(new Date(result.queuedAt).toISOString()).toBe(result.queuedAt)
+    const run = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "action-test",
+      id: result.runId,
+    })
+    expect(run).toMatchObject({
+      id: result.runId,
+      actionId: "counted",
+      status: "queued",
+      phase: "request",
+      subject: {
+        kind: "object",
+        objectTypeId: "Room",
+        primaryId: "room:1",
+      },
+      params: {},
+      idempotencyKey: `action:action-test:${result.runId}`,
+    })
+    const jobs = await runtimeDeps.queues.actions.claim({
+      projectId: "action-test",
+      workerId: "test-worker",
+      limit: 1,
+    })
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].job.payload).toEqual({
+      actionId: "counted",
+      runId: result.runId,
+    })
     expect(events.length).toBe(1)
     expect(events[0].type).toBe("action.requested")
     if (events[0].type === "action.requested") {
@@ -447,6 +477,127 @@ describe("requestAction", () => {
       expect(events[0].payload.params).toEqual({})
       expect(events[0].payload.runId).toBe(result.runId)
     }
+  })
+
+  test("reuses a matching run id and rejects conflicting payloads", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      id: "action-idempotency-test",
+      ontology: [Room],
+      actions: [setTemperature],
+      ...runtimeDeps,
+    })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+
+    const first = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      actionId: "setTemperature",
+      params: { target: 72 },
+      runId: "act_fixed",
+    })
+    const second = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      actionId: "setTemperature",
+      params: { target: 72 },
+      runId: "act_fixed",
+    })
+
+    expect(first.created).toBe(true)
+    expect(second).toEqual({
+      runId: "act_fixed",
+      queuedAt: first.queuedAt,
+      created: false,
+    })
+
+    await expect(
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        actionId: "setTemperature",
+        params: { target: 73 },
+        runId: "act_fixed",
+      })
+    ).rejects.toBeInstanceOf(ActionRunError)
+  })
+
+  test("retries enqueue failures for the same run id and payload", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const enqueue = runtimeDeps.queues.actions.enqueue.bind(runtimeDeps.queues.actions)
+    let shouldFailEnqueue = true
+    runtimeDeps.queues.actions.enqueue = async (input) => {
+      if (shouldFailEnqueue) {
+        shouldFailEnqueue = false
+        throw new Error("queue unavailable")
+      }
+
+      return enqueue(input)
+    }
+
+    const sixb = new Sixb({
+      id: "action-enqueue-retry-test",
+      ontology: [Room],
+      actions: [setTemperature],
+      ...runtimeDeps,
+    })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:1", externalId: "R1", name: "Room 1" },
+    })
+
+    await expect(
+      sixb.objects(Room).requestAction({
+        id: "room:1",
+        actionId: "setTemperature",
+        params: { target: 72 },
+        runId: "act_enqueue_retry",
+      })
+    ).rejects.toThrow("queue unavailable")
+
+    const failed = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "action-enqueue-retry-test",
+      id: "act_enqueue_retry",
+    })
+    expect(failed).toMatchObject({
+      status: "failed",
+      phase: "enqueue",
+      error: {
+        name: "Error",
+        message: "queue unavailable",
+        phase: "enqueue",
+      },
+    })
+
+    const retry = await sixb.objects(Room).requestAction({
+      id: "room:1",
+      actionId: "setTemperature",
+      params: { target: 72 },
+      runId: "act_enqueue_retry",
+    })
+
+    expect(retry.created).toBe(false)
+    expect(retry.jobId).toBeTruthy()
+    const queued = await runtimeDeps.storage.actionRuns!.getById({
+      projectId: "action-enqueue-retry-test",
+      id: "act_enqueue_retry",
+    })
+    expect(queued).toMatchObject({
+      status: "queued",
+      phase: "request",
+      error: undefined,
+      finishedAt: undefined,
+    })
+
+    const jobs = await runtimeDeps.queues.actions.claim({
+      projectId: "action-enqueue-retry-test",
+      workerId: "test-worker",
+      limit: 1,
+    })
+    expect(jobs[0]?.job.payload).toEqual({
+      actionId: "setTemperature",
+      runId: "act_enqueue_retry",
+    })
   })
 
   test("runs validators request-side and emits no event when validation fails", async () => {

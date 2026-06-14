@@ -3,7 +3,10 @@
  *
  * Resolves objectTypeId to a typed context and delegates to the leaf function.
  */
+
+import type { RequestActionResult } from "../../actions/request"
 import type { SixbRuntimeContext } from "../../runtime/types"
+import type { ActionRunRecord } from "../../storage"
 import {
   type RequestActionAndWaitOptions,
   type RequestActionOptions,
@@ -19,7 +22,7 @@ export async function requestAction(
   actionId: string,
   params?: Record<string, unknown>,
   options?: RequestActionOptions
-): Promise<{ runId: string }> {
+): Promise<RequestActionResult> {
   const ctx = resolveObjectContext(runtime, objectTypeId)
   return requestActionLeaf(ctx, { primaryId, actionId, params, options })
 }
@@ -31,7 +34,7 @@ export async function requestActionAndWait(
   actionId: string,
   params?: Record<string, unknown>,
   options?: RequestActionAndWaitOptions
-): Promise<{ runId: string }> {
+): Promise<ActionRunRecord> {
   const ctx = resolveObjectContext(runtime, objectTypeId)
   return requestActionAndWaitLeaf(ctx, { primaryId, actionId, params, options })
 }

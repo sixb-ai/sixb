@@ -199,7 +199,7 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
-      test("keeps syncRuns, pipelines, projections, and workflows lanes independent", async () => {
+      test("keeps syncRuns, pipelines, projections, workflows, and actions lanes independent", async () => {
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({
             projectId: "project-a",
@@ -237,6 +237,18 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               },
             ],
           })
+          await queues.actions.enqueue({
+            projectId: "project-a",
+            jobs: [
+              {
+                type: "action.run.requested",
+                payload: {
+                  actionId: "mark-paid",
+                  runId: "act_1",
+                },
+              },
+            ],
+          })
 
           const crossLane = await queues.pipelines.claim({
             projectId: "project-a",
@@ -253,6 +265,11 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             workerId: "workflow-worker-1",
             limit: 10,
           })
+          const actionLane = await queues.actions.claim({
+            projectId: "project-a",
+            workerId: "action-worker-1",
+            limit: 10,
+          })
           const sameLane = await queues.syncRuns.claim({
             projectId: "project-a",
             workerId: "sync-worker-1",
@@ -265,6 +282,8 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(projectionLane[0]?.job.payload.projectionId).toBe("room-projection")
           expect(workflowLane).toHaveLength(1)
           expect(workflowLane[0]?.job.payload.workflowId).toBe("reconcile-transaction")
+          expect(actionLane).toHaveLength(1)
+          expect(actionLane[0]?.job.payload.actionId).toBe("mark-paid")
           expect(sameLane).toHaveLength(1)
         })
       })

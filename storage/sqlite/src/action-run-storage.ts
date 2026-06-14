@@ -3,13 +3,16 @@ import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStorage,
   ActionSubject,
   FinishActionRunInput,
-  JsonValue,
   ListActionRunsInput,
   ListActionRunsResult,
+  QueueActionRunInput,
+  SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
 import { ActionRunError } from "@sixb/core"
@@ -33,8 +36,8 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     }
   }
 
-  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
-    const startedAt = input.startedAt ?? new Date()
+  async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
+    const queuedAt = input.queuedAt ?? new Date()
 
     try {
       this.db
@@ -48,10 +51,17 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             object_type_id,
             primary_id,
             status,
+            phase,
+            queued_at,
             started_at,
+            finished_at,
             params,
-            metadata
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            idempotency_key,
+            security_context,
+            error_name,
+            error_message,
+            error_phase
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL, NULL)
         `
         )
         .run(
@@ -61,16 +71,16 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           input.subject.kind,
           input.subject.kind === "object" ? input.subject.objectTypeId : null,
           input.subject.kind === "object" ? input.subject.primaryId : null,
-          "running",
-          startedAt.toISOString(),
+          "queued",
+          "request",
+          queuedAt.toISOString(),
           JSON.stringify(input.params),
-          serializeMetadata(input.metadata)
+          input.idempotencyKey,
+          serializeSecurityContext(input.securityContext)
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
-        throw new ActionRunError(
-          `[SixbSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
-        )
+        return this.requeueAfterEnqueueFailure(input, queuedAt)
       }
 
       throw error
@@ -86,6 +96,103 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     return record
   }
 
+  private async requeueAfterEnqueueFailure(
+    input: QueueActionRunInput,
+    queuedAt: Date
+  ): Promise<ActionRunRecord> {
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow | null
+
+      if (!existing || !canRequeueAfterEnqueueFailure(rowToActionRunRecord(existing), input)) {
+        throw new ActionRunError(
+          `[SixbSqlite] Action run '${input.id}' already exists for project '${input.projectId}'.`
+        )
+      }
+
+      this.db
+        .query(
+          `
+          UPDATE action_runs
+          SET
+            status = ?,
+            phase = ?,
+            queued_at = ?,
+            started_at = NULL,
+            finished_at = NULL,
+            security_context = ?,
+            error_name = NULL,
+            error_message = NULL,
+            error_phase = NULL
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          "queued",
+          "request",
+          queuedAt.toISOString(),
+          serializeSecurityContext(input.securityContext),
+          input.projectId,
+          input.id
+        )
+
+      const updated = this.db
+        .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow
+
+      return rowToActionRunRecord(updated)
+    })()
+  }
+
+  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
+    return this.db.transaction(() => {
+      const existing = this.db
+        .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow | null
+
+      if (!existing) {
+        throw new ActionRunError(
+          `[SixbSqlite] Action run '${input.id}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      if (existing.status !== "queued") {
+        throw new ActionRunError(
+          `[SixbSqlite] Action run '${input.id}' cannot start from status '${existing.status}'.`
+        )
+      }
+
+      this.db
+        .query(
+          `
+          UPDATE action_runs
+          SET
+            status = ?,
+            phase = ?,
+            started_at = ?,
+            error_name = NULL,
+            error_message = NULL,
+            error_phase = NULL
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          "running",
+          "handler",
+          (input.startedAt ?? new Date()).toISOString(),
+          input.projectId,
+          input.id
+        )
+
+      const updated = this.db
+        .query("SELECT * FROM action_runs WHERE project_id = ? AND id = ?")
+        .get(input.projectId, input.id) as DatabaseRow
+
+      return rowToActionRunRecord(updated)
+    })()
+  }
+
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
     return this.db.transaction(() => {
       const existing = this.db
@@ -98,7 +205,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         )
       }
 
-      const metadata = mergeMetadata(parseMetadata(existing.metadata), input.metadata)
+      const phase = finishPhase(input, existing.phase)
 
       this.db
         .query(
@@ -106,21 +213,21 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           UPDATE action_runs
           SET
             status = ?,
+            phase = ?,
             finished_at = ?,
             error_name = ?,
             error_message = ?,
-            error_phase = ?,
-            metadata = ?
+            error_phase = ?
           WHERE project_id = ? AND id = ?
         `
         )
         .run(
           input.status,
+          phase,
           (input.finishedAt ?? new Date()).toISOString(),
           input.status === "succeeded" ? null : (input.error?.name ?? null),
           input.status === "succeeded" ? null : (input.error?.message ?? null),
-          input.status === "succeeded" ? null : (input.error?.phase ?? null),
-          serializeMetadata(metadata),
+          input.status === "succeeded" ? null : (input.error?.phase ?? phase),
           input.projectId,
           input.id
         )
@@ -189,12 +296,12 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     }
 
     if (input.startedAfter) {
-      whereClauses.push("started_at >= ?")
+      whereClauses.push("COALESCE(started_at, queued_at) >= ?")
       args.push(input.startedAfter.toISOString())
     }
 
     if (input.startedBefore) {
-      whereClauses.push("started_at <= ?")
+      whereClauses.push("COALESCE(started_at, queued_at) <= ?")
       args.push(input.startedBefore.toISOString())
     }
 
@@ -210,7 +317,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     let query = `
       SELECT * FROM action_runs
       ${where}
-      ORDER BY started_at ${order}, id ${order}
+      ORDER BY COALESCE(started_at, queued_at) ${order}, id ${order}
     `
     const queryArgs = [...args]
 
@@ -237,28 +344,20 @@ export class SqliteActionRunStorage implements ActionRunStorage {
   }
 }
 
-function serializeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): string | null {
-  return metadata ? JSON.stringify(metadata) : null
-}
-
-function parseMetadata(value: string | null): Readonly<Record<string, JsonValue>> | undefined {
-  return value ? (JSON.parse(value) as Readonly<Record<string, JsonValue>>) : undefined
-}
-
-function mergeMetadata(
-  existing: Readonly<Record<string, JsonValue>> | undefined,
-  next: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  if (!existing && !next) {
-    return undefined
+function finishPhase(input: FinishActionRunInput, current: ActionRunPhase | null): ActionRunPhase {
+  if (input.status === "succeeded") {
+    return input.phase ?? current ?? "handler"
   }
 
-  return {
-    ...(existing ?? {}),
-    ...(next ?? {}),
-  }
+  return input.phase ?? input.error?.phase ?? current ?? "handler"
+}
+
+function serializeSecurityContext(securityContext: SecurityContext | undefined): string | null {
+  return securityContext ? JSON.stringify(securityContext) : null
+}
+
+function parseSecurityContext(value: string | null): SecurityContext | undefined {
+  return value ? (JSON.parse(value) as SecurityContext) : undefined
 }
 
 function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
@@ -280,11 +379,14 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
     actionId: row.action_id,
     subject: rowToActionSubject(row),
     status: row.status,
-    startedAt: new Date(row.started_at),
+    phase: row.phase ?? undefined,
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
-    params: JSON.parse(row.params) as Readonly<Record<string, unknown>>,
+    params: JSON.parse(row.params) as ActionRunParams,
+    idempotencyKey: row.idempotency_key,
+    securityContext: parseSecurityContext(row.security_context),
     error: toActionRunFailure(row),
-    metadata: parseMetadata(row.metadata),
   }
 }
 
@@ -308,6 +410,40 @@ function isUniqueConstraintError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("UNIQUE constraint failed")
 }
 
+function canRequeueAfterEnqueueFailure(
+  existing: ActionRunRecord,
+  input: QueueActionRunInput
+): boolean {
+  return (
+    existing.status === "failed" &&
+    existing.phase === "enqueue" &&
+    existing.actionId === input.actionId &&
+    existing.idempotencyKey === input.idempotencyKey &&
+    subjectsEqual(existing.subject, input.subject) &&
+    stableJsonStringify(existing.params) === stableJsonStringify(input.params)
+  )
+}
+
+function subjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
+  if (left.kind !== right.kind) return false
+  if (left.kind === "none") return true
+  if (right.kind === "none") return false
+  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonStringify).join(",")}]`
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
+    .join(",")}}`
+}
+
 interface DatabaseRow {
   project_id: string
   id: string
@@ -316,11 +452,14 @@ interface DatabaseRow {
   object_type_id: string | null
   primary_id: string | null
   status: ActionRunRecord["status"]
-  started_at: string
+  phase: ActionRunPhase | null
+  queued_at: string
+  started_at: string | null
   finished_at: string | null
   params: string
+  idempotency_key: string
+  security_context: string | null
   error_name: string | null
   error_message: string | null
   error_phase: ActionRunFailure["phase"] | null
-  metadata: string | null
 }

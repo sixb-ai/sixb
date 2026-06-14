@@ -36,7 +36,7 @@ export interface ActionFailedEvent extends EventEnvelope {
     error: {
       name?: string
       message: string
-      phase?: "handler" | "cancelled"
+      phase?: "request" | "enqueue" | "handler" | "cancelled"
     }
     finishedAt: string
   }

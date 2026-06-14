@@ -336,14 +336,19 @@ CREATE TABLE IF NOT EXISTS action_runs (
   subject_kind TEXT NOT NULL CHECK (subject_kind IN ('none', 'object')),
   object_type_id TEXT,
   primary_id TEXT,
-  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
-  started_at TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+  phase TEXT CHECK (phase IS NULL OR phase IN ('request', 'enqueue', 'handler', 'cancelled')),
+  queued_at TEXT NOT NULL,
+  started_at TEXT,
   finished_at TEXT,
   params TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  security_context TEXT,
   error_name TEXT,
   error_message TEXT,
-  error_phase TEXT CHECK (error_phase IS NULL OR error_phase IN ('handler', 'cancelled')),
-  metadata TEXT,
+  error_phase TEXT CHECK (
+    error_phase IS NULL OR error_phase IN ('request', 'enqueue', 'handler', 'cancelled')
+  ),
   CHECK (
     (subject_kind = 'none' AND object_type_id IS NULL AND primary_id IS NULL)
     OR (subject_kind = 'object' AND object_type_id IS NOT NULL AND primary_id IS NOT NULL)
@@ -352,13 +357,13 @@ CREATE TABLE IF NOT EXISTS action_runs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_action_runs_project_started
-  ON action_runs(project_id, started_at DESC);
+  ON action_runs(project_id, COALESCE(started_at, queued_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_project_action_started
-  ON action_runs(project_id, action_id, started_at DESC);
+  ON action_runs(project_id, action_id, COALESCE(started_at, queued_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_project_object_started
-  ON action_runs(project_id, object_type_id, primary_id, started_at DESC);
+  ON action_runs(project_id, object_type_id, primary_id, COALESCE(started_at, queued_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_project_status_started
-  ON action_runs(project_id, status, started_at DESC);
+  ON action_runs(project_id, status, COALESCE(started_at, queued_at) DESC);
 
 CREATE TABLE IF NOT EXISTS auth_users (
   project_id TEXT NOT NULL,

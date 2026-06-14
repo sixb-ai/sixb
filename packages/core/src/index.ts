@@ -82,6 +82,8 @@ export type {
   RequestActionAndWaitOptions,
   RequestActionInput,
   RequestActionOptions,
+  RequestActionResult,
+  WaitForActionRunInput,
 } from "./actions"
 export {
   ActionDefinitionError,
@@ -94,6 +96,7 @@ export {
   isObjectActionDefinition,
   requestAction,
   requestActionAndWait,
+  waitForActionRun,
 } from "./actions"
 export {
   ActionRunFailedError,
@@ -391,6 +394,8 @@ export {
 
 export type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
@@ -497,6 +502,7 @@ export type {
   ProjectionRunStorage,
   QueryObjectsInput,
   QueryObjectsResult,
+  QueueActionRunInput,
   QueueWorkflowRunInput,
   ResumeWorkflowRunInput,
   RuleStateRecord,
@@ -646,6 +652,7 @@ export {
 // ── Queues ─────────────────────────────────────────────────
 
 export type {
+  ActionRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,

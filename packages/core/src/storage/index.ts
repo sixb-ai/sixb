@@ -1,11 +1,14 @@
 export type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
+  QueueActionRunInput,
   StartActionRunInput,
 } from "./action-runs"
 export { ActionRunError, InMemoryActionRunStorage } from "./action-runs"

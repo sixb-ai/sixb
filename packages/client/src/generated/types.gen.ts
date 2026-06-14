@@ -3301,6 +3301,9 @@ export type RequestActionResponses = {
   200: {
     success: boolean
     runId: string
+    queuedAt: string
+    jobId?: string
+    created: boolean
   }
 }
 

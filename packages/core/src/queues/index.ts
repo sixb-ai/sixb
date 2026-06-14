@@ -1,6 +1,7 @@
 export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
+  ActionRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,

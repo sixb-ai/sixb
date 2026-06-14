@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
-  ActionRunFailedError,
+  type ActionRunRecord,
   actionParam,
   defineAction,
   defineObjectType,
@@ -39,13 +39,14 @@ interface DeviceObjectSet {
     id: string
     actionId: string
     params?: Record<string, unknown>
-  }): Promise<{ runId: string }>
+  }): Promise<ActionRunRecord>
 }
 
 interface TestSixb {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: InMemoryStorage
+  readonly queues: InMemoryQueues
   upsertObject(objectTypeId: string, properties: Record<string, unknown>): Promise<ObjectRow>
   getActionDefinitions(): readonly ActionDefinition[]
   getActionById(actionId: string): ActionDefinition | null
@@ -82,6 +83,7 @@ describe("ActionWorker", () => {
         objects: storage.objects,
         timeseries: storage.timeseries,
       },
+      queues: new InMemoryQueues(),
       getActionDefinitions() {
         return []
       },
@@ -94,7 +96,7 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("subscribes to action.requested and emits action.completed", async () => {
+  test("claims requested action runs and emits action.completed", async () => {
     const setStatus = defineAction("setStatus")
       .target(Device)
       .params({ status: actionParam("string", { required: true }) })
@@ -149,7 +151,7 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 
-  test("requestActionAndWait resolves on completion and rejects on failed runs", async () => {
+  test("requestActionAndWait resolves with the terminal action run", async () => {
     const setStatus = defineAction("setStatus")
       .target(Device)
       .params({ status: actionParam("string", { required: true }) })
@@ -183,14 +185,15 @@ describe("ActionWorker", () => {
       actionId: "setStatus",
       params: { status: "ready" },
     })
-    expect(succeeded.runId.startsWith("act_")).toBe(true)
+    expect(succeeded.id.startsWith("act_")).toBe(true)
+    expect(succeeded.status).toBe("succeeded")
 
-    await expect(
-      deviceObjects(sixb).requestActionAndWait({
-        id: "device-1",
-        actionId: "fail",
-      })
-    ).rejects.toBeInstanceOf(ActionRunFailedError)
+    const failed = await deviceObjects(sixb).requestActionAndWait({
+      id: "device-1",
+      actionId: "fail",
+    })
+    expect(failed.status).toBe("failed")
+    expect(failed.error?.message).toBe("handler failed")
 
     await worker.stop()
   })

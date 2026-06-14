@@ -11,6 +11,7 @@ import type {
   ActionRegistry,
   ActionsRuntime,
   InferActionParams,
+  RequestActionResult,
 } from "../actions"
 import type { AuthRuntime } from "../auth"
 import type { BlobStorage } from "../blob-storage"
@@ -52,7 +53,7 @@ import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityRegistry } from "../security"
-import type { ObjectLinkRow, ObjectRow, Storage } from "../storage"
+import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import type { WorkflowsRuntime } from "../workflows"
@@ -571,7 +572,7 @@ export interface ObjectByIdHandle<
     actionId: string
     params?: Record<string, unknown>
     runId?: string
-  }): Promise<{ runId: string }>
+  }): Promise<RequestActionResult>
 
   /**
    * Request an action on this object using a typed action reference.
@@ -581,7 +582,7 @@ export interface ObjectByIdHandle<
     action: TAction
     params: NoInfer<TypedActionParams<TAction>>
     runId?: string
-  }): Promise<{ runId: string }>
+  }): Promise<RequestActionResult>
 
   /** Request an action and wait for the terminal lifecycle event. */
   requestActionAndWait(input: {
@@ -589,7 +590,7 @@ export interface ObjectByIdHandle<
     params?: Record<string, unknown>
     timeoutMs?: number
     signal?: AbortSignal
-  }): Promise<{ runId: string }>
+  }): Promise<ActionRunRecord>
 
   /** Request a typed action and wait for the terminal lifecycle event. */
   requestActionAndWait<const TAction extends TypedActionReference>(input: {
@@ -597,7 +598,7 @@ export interface ObjectByIdHandle<
     params: NoInfer<TypedActionParams<TAction>>
     timeoutMs?: number
     signal?: AbortSignal
-  }): Promise<{ runId: string }>
+  }): Promise<ActionRunRecord>
 
   /** Append telemetry to a telemetry-mode property token. */
   telemetry<TToken extends TelemetryPropertyToken<TObjectType>>(
@@ -836,7 +837,7 @@ export interface ObjectSet<
     actionId: string
     params?: Record<string, unknown>
     runId?: string
-  }): Promise<{ runId: string }>
+  }): Promise<RequestActionResult>
 
   /**
    * Request an action on an object of this type using a typed action reference.
@@ -847,7 +848,7 @@ export interface ObjectSet<
     action: TAction
     params: NoInfer<TypedActionParams<TAction>>
     runId?: string
-  }): Promise<{ runId: string }>
+  }): Promise<RequestActionResult>
 
   /** Request an action on an object and wait for the terminal lifecycle event. */
   requestActionAndWait(input: {
@@ -856,7 +857,7 @@ export interface ObjectSet<
     params?: Record<string, unknown>
     timeoutMs?: number
     signal?: AbortSignal
-  }): Promise<{ runId: string }>
+  }): Promise<ActionRunRecord>
 
   /** Request a typed action and wait for the terminal lifecycle event. */
   requestActionAndWait<const TAction extends TypedActionReference>(input: {
@@ -865,7 +866,7 @@ export interface ObjectSet<
     params: NoInfer<TypedActionParams<TAction>>
     timeoutMs?: number
     signal?: AbortSignal
-  }): Promise<{ runId: string }>
+  }): Promise<ActionRunRecord>
 
   /** Create or update a link (string-based, for server/dynamic usage). */
   upsertLink(input: {

@@ -9501,9 +9501,18 @@
                     },
                     "runId": {
                       "type": "string"
+                    },
+                    "queuedAt": {
+                      "type": "string"
+                    },
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "created": {
+                      "type": "boolean"
                     }
                   },
-                  "required": ["success", "runId"],
+                  "required": ["success", "runId", "queuedAt", "created"],
                   "additionalProperties": false
                 }
               }

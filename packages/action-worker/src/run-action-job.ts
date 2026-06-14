@@ -1,5 +1,5 @@
 import type { ActionRunRecord, ActionTargetObject } from "@sixb/core"
-import { ActionRunError, isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
+import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
 import { throwIfAborted, toActionRunFailure } from "./normalize"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
@@ -32,71 +32,98 @@ function requireFinishedAt(runId: string, finishedAt: Date | undefined): Date {
   )
 }
 
-function isDuplicateStartError(error: unknown): boolean {
-  return error instanceof ActionRunError && /already exists/i.test(error.message)
+function isTerminalRun(record: ActionRunRecord): boolean {
+  return (
+    record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
+  )
 }
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
-  const action = runtime.getActionById(job.actionId)
-
-  if (!action) {
-    throw new Error(`[SixbActionWorker] Unknown action '${job.actionId}'.`)
-  }
 
   throwIfAborted(signal)
 
-  let startedRun: ActionRunRecord
+  const existingRun = await runtime.actionRunsStorage.getById({
+    projectId: runtime.id,
+    id: job.id,
+  })
+  if (!existingRun) {
+    throw new Error(`[SixbActionWorker] Action run '${job.id}' was not found.`)
+  }
+  if (existingRun.actionId !== job.actionId) {
+    throw new Error(
+      `[SixbActionWorker] Action job '${job.id}' references action '${job.actionId}' but the stored run references '${existingRun.actionId}'.`
+    )
+  }
+  if (isTerminalRun(existingRun)) {
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: existingRun.subject,
+      status: existingRun.status,
+      skipped: true,
+      record: existingRun,
+    }
+  }
+  if (existingRun.status !== "queued") {
+    throw new Error(
+      `[SixbActionWorker] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`
+    )
+  }
+
+  const action = runtime.getActionById(job.actionId)
+  if (!action) {
+    const failure = toActionRunFailure(
+      new Error(`[SixbActionWorker] Unknown action '${job.actionId}'.`),
+      "handler"
+    )
+    const finishedRun = await runtime.actionRunsStorage.finish({
+      projectId: runtime.id,
+      id: job.id,
+      status: "failed",
+      error: failure,
+    })
+
+    return {
+      id: job.id,
+      actionId: job.actionId,
+      subject: finishedRun.subject,
+      status: "failed",
+      startedAt: finishedRun.startedAt ?? finishedRun.queuedAt,
+      finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
+      error: failure,
+      record: finishedRun,
+    }
+  }
+
+  let startedRun: ActionRunRecord | null = null
   try {
     startedRun = await runtime.actionRunsStorage.start({
       projectId: runtime.id,
       id: job.id,
-      actionId: job.actionId,
-      subject: job.subject,
-      params: job.params,
     })
-  } catch (error) {
-    const existing = await runtime.actionRunsStorage.getById({
-      projectId: runtime.id,
-      id: job.id,
-    })
-    if (existing && isDuplicateStartError(error)) {
-      return {
-        id: job.id,
-        actionId: job.actionId,
-        subject: job.subject,
-        status: existing.status,
-        skipped: true,
-        record: existing,
-      }
-    }
-
-    throw error
-  }
-
-  try {
     throwIfAborted(signal)
 
     if (!isObjectActionDefinition(action)) {
-      if (job.subject.kind !== "none") {
+      if (startedRun.subject.kind !== "none") {
         throw new Error(`[SixbActionWorker] Action '${job.actionId}' does not accept a subject.`)
       }
 
       await action.handler({
-        params: job.params,
+        params: startedRun.params,
         sixb: runtime.sixb,
         signal,
       })
     } else {
-      if (job.subject.kind !== "object") {
+      if (startedRun.subject.kind !== "object") {
         throw new Error(`[SixbActionWorker] Action '${job.actionId}' requires an object subject.`)
       }
 
-      const subjectObjectType = runtime.sixb.getObjectTypeById(job.subject.objectTypeId)
+      const subjectObjectType = runtime.sixb.getObjectTypeById(startedRun.subject.objectTypeId)
       if (!subjectObjectType) {
         throw new Error(
-          `[SixbActionWorker] Unknown object type '${job.subject.objectTypeId}' for action '${job.actionId}'.`
+          `[SixbActionWorker] Unknown object type '${startedRun.subject.objectTypeId}' for action '${job.actionId}'.`
         )
       }
 
@@ -112,19 +139,19 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       const targetRow = await runtime.storage.objects.getByPrimaryId({
         projectId: runtime.id,
         objectTypeId: subjectObjectType.id,
-        primaryId: job.subject.primaryId,
+        primaryId: startedRun.subject.primaryId,
       })
 
       if (!targetRow) {
         throw new ObjectNotFoundError(
-          job.subject.objectTypeId,
-          job.subject.primaryId,
+          startedRun.subject.objectTypeId,
+          startedRun.subject.primaryId,
           "Object not found for action run"
         )
       }
 
       await action.handler({
-        params: job.params,
+        params: startedRun.params,
         target: toActionTargetObject(targetRow, action.target.id),
         sixb: runtime.sixb,
         signal,
@@ -142,9 +169,9 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return {
       id: job.id,
       actionId: job.actionId,
-      subject: job.subject,
+      subject: startedRun.subject,
       status: "succeeded",
-      startedAt: startedRun.startedAt,
+      startedAt: startedRun.startedAt ?? startedRun.queuedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
       record: finishedRun,
     }
@@ -165,12 +192,13 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
       throw error
     }
 
+    const startedAt = startedRun?.startedAt ?? finishedRun.startedAt ?? finishedRun.queuedAt
     return {
       id: job.id,
       actionId: job.actionId,
-      subject: job.subject,
+      subject: finishedRun.subject,
       status,
-      startedAt: startedRun.startedAt,
+      startedAt,
       finishedAt: requireFinishedAt(job.id, finishedRun.finishedAt),
       error: failure,
       record: finishedRun,

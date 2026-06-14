@@ -1,9 +1,10 @@
 import type {
+  ActionRunRequestedQueueJob,
   PipelineRunRequestedQueueJob,
   ProjectionRunRequestedQueueJob,
   Queues,
   SyncRunRequestedQueueJob,
-  WorkflowRunRequestedQueueJob,
+  WorkflowQueueJob,
 } from "@sixb/core"
 import type { KeepJobs } from "bullmq"
 import { type BullMqLaneShared, BullMqQueue } from "./bullmq-queue"
@@ -70,7 +71,8 @@ export class BullMqQueues implements Queues {
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob>
-  readonly workflows: BullMqQueue<WorkflowRunRequestedQueueJob>
+  readonly workflows: BullMqQueue<WorkflowQueueJob>
+  readonly actions: BullMqQueue<ActionRunRequestedQueueJob>
 
   private readonly connections: BullMqConnections
 
@@ -90,7 +92,8 @@ export class BullMqQueues implements Queues {
     this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob>(shared, "sync.runs")
     this.pipelines = new BullMqQueue<PipelineRunRequestedQueueJob>(shared, "pipeline.runs")
     this.projections = new BullMqQueue<ProjectionRunRequestedQueueJob>(shared, "projection.runs")
-    this.workflows = new BullMqQueue<WorkflowRunRequestedQueueJob>(shared, "workflow.runs")
+    this.workflows = new BullMqQueue<WorkflowQueueJob>(shared, "workflow.runs")
+    this.actions = new BullMqQueue<ActionRunRequestedQueueJob>(shared, "action.runs")
   }
 
   async close(): Promise<void> {
@@ -99,6 +102,7 @@ export class BullMqQueues implements Queues {
       this.pipelines.close(),
       this.projections.close(),
       this.workflows.close(),
+      this.actions.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

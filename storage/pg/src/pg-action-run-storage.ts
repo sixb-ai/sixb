@@ -1,12 +1,15 @@
 import type {
   ActionRunFailure,
+  ActionRunParams,
+  ActionRunPhase,
   ActionRunRecord,
   ActionRunStorage,
   ActionSubject,
   FinishActionRunInput,
-  JsonValue,
   ListActionRunsInput,
   ListActionRunsResult,
+  QueueActionRunInput,
+  SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
 import { ActionRunError } from "@sixb/core"
@@ -16,7 +19,7 @@ import { isUniqueViolation } from "./storage-errors"
 export class PgActionRunStorage implements ActionRunStorage {
   constructor(private readonly sql: SQL) {}
 
-  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
+  async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     try {
       const [row] = await this.sql<DatabaseRow[]>`
         INSERT INTO action_runs (
@@ -27,9 +30,16 @@ export class PgActionRunStorage implements ActionRunStorage {
           object_type_id,
           primary_id,
           status,
+          phase,
+          queued_at,
           started_at,
+          finished_at,
           params,
-          metadata
+          idempotency_key,
+          security_context,
+          error_name,
+          error_message,
+          error_phase
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -37,10 +47,17 @@ export class PgActionRunStorage implements ActionRunStorage {
           ${input.subject.kind},
           ${input.subject.kind === "object" ? input.subject.objectTypeId : null},
           ${input.subject.kind === "object" ? input.subject.primaryId : null},
-          ${"running"},
-          ${input.startedAt ?? new Date()},
+          ${"queued"},
+          ${"request"},
+          ${input.queuedAt ?? new Date()},
+          ${null},
+          ${null},
           ${JSON.stringify(input.params)}::text::jsonb,
-          ${serializeMetadata(input.metadata)}::text::jsonb
+          ${input.idempotencyKey},
+          ${serializeSecurityContext(input.securityContext)}::text::jsonb,
+          ${null},
+          ${null},
+          ${null}
         )
         RETURNING *
       `
@@ -48,13 +65,76 @@ export class PgActionRunStorage implements ActionRunStorage {
       return rowToActionRunRecord(row)
     } catch (error) {
       if (isUniqueViolation(error)) {
+        return this.requeueAfterEnqueueFailure(input)
+      }
+
+      throw error
+    }
+  }
+
+  private async requeueAfterEnqueueFailure(input: QueueActionRunInput): Promise<ActionRunRecord> {
+    return this.sql.begin(async (tx) => {
+      const [existing] = await tx<DatabaseRow[]>`
+        SELECT * FROM action_runs
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+      `
+
+      if (!existing || !canRequeueAfterEnqueueFailure(rowToActionRunRecord(existing), input)) {
         throw new ActionRunError(
           `[SixbPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
 
-      throw error
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE action_runs
+        SET
+          status = ${"queued"},
+          phase = ${"request"},
+          queued_at = ${input.queuedAt ?? new Date()},
+          started_at = ${null},
+          finished_at = ${null},
+          security_context = ${serializeSecurityContext(input.securityContext)}::text::jsonb,
+          error_name = ${null},
+          error_message = ${null},
+          error_phase = ${null}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+
+      return rowToActionRunRecord(updated)
+    })
+  }
+
+  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
+    const [updated] = await this.sql<DatabaseRow[]>`
+      UPDATE action_runs
+      SET
+        status = ${"running"},
+        phase = ${"handler"},
+        started_at = ${input.startedAt ?? new Date()},
+        error_name = ${null},
+        error_message = ${null},
+        error_phase = ${null}
+      WHERE project_id = ${input.projectId}
+        AND id = ${input.id}
+        AND status = ${"queued"}
+      RETURNING *
+    `
+
+    if (updated) {
+      return rowToActionRunRecord(updated)
     }
+
+    const existing = await this.getById({ projectId: input.projectId, id: input.id })
+    if (!existing) {
+      throw new ActionRunError(
+        `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
+      )
+    }
+
+    throw new ActionRunError(
+      `[SixbPg] Action run '${input.id}' cannot start from status '${existing.status}'.`
+    )
   }
 
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
@@ -70,34 +150,20 @@ export class PgActionRunStorage implements ActionRunStorage {
         )
       }
 
-      const metadata = mergeMetadata(existing.metadata, input.metadata)
+      const phase = finishPhase(input, existing.phase)
 
-      const [updated] =
-        input.status === "succeeded"
-          ? await tx<DatabaseRow[]>`
-              UPDATE action_runs
-              SET
-                status = ${input.status},
-                finished_at = ${input.finishedAt ?? new Date()},
-                error_name = ${null},
-                error_message = ${null},
-                error_phase = ${null},
-                metadata = ${serializeMetadata(metadata)}::text::jsonb
-              WHERE project_id = ${input.projectId} AND id = ${input.id}
-              RETURNING *
-            `
-          : await tx<DatabaseRow[]>`
-              UPDATE action_runs
-              SET
-                status = ${input.status},
-                finished_at = ${input.finishedAt ?? new Date()},
-                error_name = ${input.error?.name ?? null},
-                error_message = ${input.error?.message ?? null},
-                error_phase = ${input.error?.phase ?? null},
-                metadata = ${serializeMetadata(metadata)}::text::jsonb
-              WHERE project_id = ${input.projectId} AND id = ${input.id}
-              RETURNING *
-            `
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE action_runs
+        SET
+          status = ${input.status},
+          phase = ${phase},
+          finished_at = ${input.finishedAt ?? new Date()},
+          error_name = ${input.status === "succeeded" ? null : (input.error?.name ?? null)},
+          error_message = ${input.status === "succeeded" ? null : (input.error?.message ?? null)},
+          error_phase = ${input.status === "succeeded" ? null : (input.error?.phase ?? phase)}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
 
       return rowToActionRunRecord(updated)
     })
@@ -162,12 +228,12 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     if (input.startedAfter) {
-      whereClauses.push(`started_at >= $${index++}`)
+      whereClauses.push(`COALESCE(started_at, queued_at) >= $${index++}`)
       params.push(input.startedAfter)
     }
 
     if (input.startedBefore) {
-      whereClauses.push(`started_at <= $${index++}`)
+      whereClauses.push(`COALESCE(started_at, queued_at) <= $${index++}`)
       params.push(input.startedBefore)
     }
 
@@ -184,7 +250,7 @@ export class PgActionRunStorage implements ActionRunStorage {
     let query = `
       SELECT * FROM action_runs
       ${where}
-      ORDER BY started_at ${order}, id ${order}
+      ORDER BY COALESCE(started_at, queued_at) ${order}, id ${order}
     `
 
     if (input.limit !== undefined) {
@@ -207,24 +273,25 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 }
 
-function serializeMetadata(
-  metadata: Readonly<Record<string, JsonValue>> | undefined
-): string | null {
-  return metadata ? JSON.stringify(metadata) : null
+function finishPhase(input: FinishActionRunInput, current: ActionRunPhase | null): ActionRunPhase {
+  if (input.status === "succeeded") {
+    return input.phase ?? current ?? "handler"
+  }
+
+  return input.phase ?? input.error?.phase ?? current ?? "handler"
 }
 
-function mergeMetadata(
-  existing: Readonly<Record<string, JsonValue>> | null | undefined,
-  next: Readonly<Record<string, JsonValue>> | undefined
-): Readonly<Record<string, JsonValue>> | undefined {
-  if (!existing && !next) {
+function serializeSecurityContext(securityContext: SecurityContext | undefined): string | null {
+  return securityContext ? JSON.stringify(securityContext) : null
+}
+
+function normalizeSecurityContext(
+  value: SecurityContext | string | null
+): SecurityContext | undefined {
+  if (!value) {
     return undefined
   }
-
-  return {
-    ...(existing ?? {}),
-    ...(next ?? {}),
-  }
+  return typeof value === "string" ? (JSON.parse(value) as SecurityContext) : value
 }
 
 function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
@@ -246,11 +313,14 @@ function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
     actionId: row.action_id,
     subject: rowToActionSubject(row),
     status: row.status,
-    startedAt: new Date(row.started_at),
+    phase: row.phase ?? undefined,
+    queuedAt: new Date(row.queued_at),
+    startedAt: row.started_at ? new Date(row.started_at) : undefined,
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     params: row.params,
+    idempotencyKey: row.idempotency_key,
+    securityContext: normalizeSecurityContext(row.security_context),
     error: toActionRunFailure(row),
-    metadata: row.metadata ?? undefined,
   }
 }
 
@@ -270,6 +340,40 @@ function rowToActionSubject(row: DatabaseRow): ActionSubject {
   }
 }
 
+function canRequeueAfterEnqueueFailure(
+  existing: ActionRunRecord,
+  input: QueueActionRunInput
+): boolean {
+  return (
+    existing.status === "failed" &&
+    existing.phase === "enqueue" &&
+    existing.actionId === input.actionId &&
+    existing.idempotencyKey === input.idempotencyKey &&
+    subjectsEqual(existing.subject, input.subject) &&
+    stableJsonStringify(existing.params) === stableJsonStringify(input.params)
+  )
+}
+
+function subjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
+  if (left.kind !== right.kind) return false
+  if (left.kind === "none") return true
+  if (right.kind === "none") return false
+  return left.objectTypeId === right.objectTypeId && left.primaryId === right.primaryId
+}
+
+function stableJsonStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJsonStringify).join(",")}]`
+  }
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
+    .join(",")}}`
+}
+
 interface DatabaseRow {
   project_id: string
   id: string
@@ -278,11 +382,14 @@ interface DatabaseRow {
   object_type_id: string | null
   primary_id: string | null
   status: ActionRunRecord["status"]
-  started_at: Date | string
+  phase: ActionRunPhase | null
+  queued_at: Date | string
+  started_at: Date | string | null
   finished_at: Date | string | null
-  params: Readonly<Record<string, unknown>>
+  params: ActionRunParams
+  idempotency_key: string
+  security_context: SecurityContext | string | null
   error_name: string | null
   error_message: string | null
   error_phase: ActionRunFailure["phase"] | null
-  metadata: Readonly<Record<string, JsonValue>> | null
 }

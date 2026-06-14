@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
+  type ActionRunParams,
+  type ActionSubject,
   actionParam,
   defineAction,
   defineObjectType,
@@ -85,6 +87,25 @@ function createContext(sixb: TestSixb): ActionWorkerContext {
   }
 }
 
+async function queueActionRun(
+  sixb: TestSixb,
+  input: {
+    readonly id: string
+    readonly actionId: string
+    readonly subject: ActionSubject
+    readonly params: ActionRunParams
+  }
+): Promise<void> {
+  await sixb.storage.actionRuns!.queue({
+    projectId: sixb.id,
+    id: input.id,
+    actionId: input.actionId,
+    subject: input.subject,
+    params: input.params,
+    idempotencyKey: `action:${sixb.id}:${input.id}`,
+  })
+}
+
 describe("runActionJob", () => {
   test("runs the handler, applies object writes, and stores a succeeded run", async () => {
     const setStatus = defineAction("setStatus")
@@ -106,14 +127,18 @@ describe("runActionJob", () => {
       id: "device-1",
       name: "Device 1",
     })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "setStatus",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { status: "ready" },
+    })
 
     const result = await runActionJob({
       runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "setStatus",
-        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-        params: { status: "ready" },
       },
     })
 
@@ -146,14 +171,18 @@ describe("runActionJob", () => {
       id: "device-1",
       name: "Device 1",
     })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "failAfterWrite",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
 
     const result = await runActionJob({
       runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "failAfterWrite",
-        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-        params: {},
       },
     })
 
@@ -185,14 +214,18 @@ describe("runActionJob", () => {
       name: "Device 1",
     })
     const context = createContext(sixb)
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "count",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
 
     await runActionJob({
       runtime: context,
       job: {
         id: "act_1",
         actionId: "count",
-        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-        params: {},
       },
     })
 
@@ -201,8 +234,6 @@ describe("runActionJob", () => {
       job: {
         id: "act_1",
         actionId: "count",
-        subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
-        params: {},
       },
     })
 
@@ -225,13 +256,17 @@ describe("runActionJob", () => {
       })
 
     const sixb = createSixb([createDevice])
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "createDevice",
+      subject: { kind: "none" },
+      params: { id: "device-1" },
+    })
     const result = await runActionJob({
       runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "createDevice",
-        subject: { kind: "none" },
-        params: { id: "device-1" },
       },
     })
 
@@ -241,6 +276,32 @@ describe("runActionJob", () => {
 
     const created = await deviceObjects(sixb).get("device-1")
     expect(created?.properties.status).toBe("created")
+  })
+
+  test("marks queued runs failed when the action definition is missing", async () => {
+    const sixb = createSixb([])
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "missingAction",
+      subject: { kind: "none" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "missingAction",
+      },
+    })
+
+    expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
+    }
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    expect(run?.status).toBe("failed")
+    expect(run?.phase).toBe("handler")
   })
 
   test("rejects forged object subjects outside the action target hierarchy", async () => {
@@ -257,14 +318,18 @@ describe("runActionJob", () => {
       id: "sensor-1",
       name: "Sensor 1",
     })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "setStatus",
+      subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
+      params: {},
+    })
 
     const result = await runActionJob({
       runtime: createContext(sixb),
       job: {
         id: "act_1",
         actionId: "setStatus",
-        subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
-        params: {},
       },
     })
 

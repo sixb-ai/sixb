@@ -150,9 +150,19 @@ export interface WorkflowRunResumeRequestedQueueJob
 
 export type WorkflowQueueJob = WorkflowRunRequestedQueueJob | WorkflowRunResumeRequestedQueueJob
 
+export interface ActionRunRequestedQueueJob
+  extends QueueJob<
+    "action.run.requested",
+    {
+      readonly actionId: string
+      readonly runId: string
+    }
+  > {}
+
 export interface Queues {
   readonly syncRuns: Queue<SyncRunRequestedQueueJob>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob>
   readonly projections: Queue<ProjectionRunRequestedQueueJob>
   readonly workflows: Queue<WorkflowQueueJob>
+  readonly actions: Queue<ActionRunRequestedQueueJob>
 }
