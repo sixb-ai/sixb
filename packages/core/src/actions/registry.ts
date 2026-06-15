@@ -39,16 +39,17 @@ export class ActionRegistry {
         continue
       }
 
-      const target = this.ontology.getObjectTypeById(action.target.id)
+      const objectType = action.binding.objectType
+      const target = this.ontology.getObjectTypeById(objectType.id)
       if (!target) {
         throw new ActionDefinitionError(
-          `Action "${action.id}" targets unknown object type "${action.target.id}". Add the object type to ontology before registering the action.`
+          `Action "${action.id}" targets unknown object type "${objectType.id}". Add the object type to ontology before registering the action.`
         )
       }
 
-      const bucket = this.byTargetId.get(action.target.id) ?? []
+      const bucket = this.byTargetId.get(objectType.id) ?? []
       bucket.push(action)
-      this.byTargetId.set(action.target.id, bucket)
+      this.byTargetId.set(objectType.id, bucket)
     }
   }
 
@@ -107,25 +108,28 @@ export class ActionRegistry {
       return null
     }
 
-    if (action.target.id === previous.target.id) {
+    const actionObjectType = action.binding.objectType
+    const previousObjectType = previous.binding.objectType
+
+    if (actionObjectType.id === previousObjectType.id) {
       return null
     }
 
-    const actionChain = this.ontology.getAncestorChain(action.target)
-    if (actionChain.some((ancestor) => ancestor.id === previous.target.id)) {
+    const actionChain = this.ontology.getAncestorChain(actionObjectType)
+    if (actionChain.some((ancestor) => ancestor.id === previousObjectType.id)) {
       return {
-        objectTypeId: action.target.id,
-        firstTargetId: previous.target.id,
-        secondTargetId: action.target.id,
+        objectTypeId: actionObjectType.id,
+        firstTargetId: previousObjectType.id,
+        secondTargetId: actionObjectType.id,
       }
     }
 
-    const previousChain = this.ontology.getAncestorChain(previous.target)
-    if (previousChain.some((ancestor) => ancestor.id === action.target.id)) {
+    const previousChain = this.ontology.getAncestorChain(previousObjectType)
+    if (previousChain.some((ancestor) => ancestor.id === actionObjectType.id)) {
       return {
-        objectTypeId: previous.target.id,
-        firstTargetId: action.target.id,
-        secondTargetId: previous.target.id,
+        objectTypeId: previousObjectType.id,
+        firstTargetId: actionObjectType.id,
+        secondTargetId: previousObjectType.id,
       }
     }
 

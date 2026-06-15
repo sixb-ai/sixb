@@ -45,7 +45,7 @@ const setTemperature = defineAction("setTemperature", {
   .writeback(async () => {})
 
 const reboot = defineAction("reboot")
-  .target(Room)
+  .on(Room)
   .params({})
   .writeback(async () => {})
 
@@ -59,21 +59,21 @@ const createRoom = defineAction("createRoom")
       return { error: "Room id must start with room:" }
     }
   })
-  .edits(({ edit, params }) =>
-    edit.create(Room, {
+  .edits(({ objects, params }) => {
+    objects(Room).create({
       id: params.id,
       name: params.name,
       externalId: params.id,
     })
-  )
+  })
 
 const prepareSuite = defineAction("prepareSuite")
-  .target(SuiteRoom)
+  .on(SuiteRoom)
   .params({ note: optional(param("string")) })
   .writeback(async () => {})
 
 const attachRelatedRoom = defineAction("attachRelatedRoom")
-  .target(Room)
+  .on(Room)
   .params({
     relatedRoom: param(ref(Room)),
   })
@@ -88,7 +88,7 @@ describe("defineAction", () => {
     expect(setTemperature.kind).toBe("action")
     expect(setTemperature.binding.kind).toBe("object")
     expect(setTemperature.id).toBe("setTemperature")
-    expect(setTemperature.target.id).toBe("Room")
+    expect(setTemperature.binding.objectType.id).toBe("Room")
     expect(setTemperature.params.target.schema).toBe("double")
     expect(setTemperature.params.target.required).toBe(true)
     expect(setTemperature.phases.validate).toHaveLength(1)
@@ -99,7 +99,6 @@ describe("defineAction", () => {
   test("builds global action definitions without a target", () => {
     expect(createRoom.kind).toBe("action")
     expect(createRoom.binding.kind).toBe("global")
-    expect(createRoom.target).toBeUndefined()
     expect(createRoom.params.id.required).toBe(true)
     expect(createRoom.phases.validate).toHaveLength(1)
     expect(typeof createRoom.phases.edits).toBe("function")
@@ -150,7 +149,7 @@ describe("ActionRegistry", () => {
 
   test("rejects duplicate action ids", () => {
     const duplicate = defineAction("reboot")
-      .target(Room)
+      .on(Room)
       .params({})
       .writeback(async () => {})
 
@@ -172,7 +171,7 @@ describe("ActionRegistry", () => {
 
   test("rejects duplicate action ids in inheritance chains with a precise error", () => {
     const suiteOverride = defineAction("setTemperature")
-      .target(SuiteRoom)
+      .on(SuiteRoom)
       .params({})
       .writeback(async () => {})
 
@@ -194,7 +193,7 @@ describe("ActionRegistry", () => {
       properties: [prop("id", "string", { required: true, primary: true })],
     })
     const unknownAction = defineAction("unknown")
-      .target(Unknown)
+      .on(Unknown)
       .params({})
       .writeback(async () => {})
 
@@ -424,7 +423,7 @@ describe("requestAction", () => {
     const runtimeDeps = createTestRuntimeDeps()
     let invoked = 0
     const counted = defineAction("counted")
-      .target(Room)
+      .on(Room)
       .params({})
       .writeback(() => {
         invoked += 1

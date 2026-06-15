@@ -77,7 +77,7 @@ export const Room = defineObjectType({
 import { Room } from "../ontology/room"
 
 export const setTemperature = defineAction("setTemperature")
-  .target(Room)
+  .on(Room)
   .params({ target: param("double") })
   .writeback(async () => {})
 `
@@ -207,7 +207,7 @@ export const Invoice = defineObjectType({
 import { Invoice, Transaction } from "../ontology/transaction"
 
 export const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
+  .on(Transaction)
   .params({
     invoice: param(ref(Invoice)),
   })

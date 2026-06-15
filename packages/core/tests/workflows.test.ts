@@ -88,7 +88,7 @@ const reviewInvoiceMatch = defineWorkflowStep("review-invoice-match")
   .run(({ input }) => ({ invoice: input.invoice }))
 
 const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
+  .on(Transaction)
   .params({
     invoice: param(ref(Invoice)),
   })

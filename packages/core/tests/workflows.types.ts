@@ -98,7 +98,7 @@ const persistReview = defineWorkflowStep("persist-review")
   }))
 
 const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
+  .on(Transaction)
   .params({
     invoice: param(ref(Invoice)),
   })

@@ -1,10 +1,6 @@
-import type { ActionRunRecord, EditBatchInput, EditCommitResult, JsonValue } from "@sixb/core"
-import {
-  createEditBuilder,
-  isObjectActionDefinition,
-  normalizeEditBatch,
-  validateEditBatch,
-} from "@sixb/core"
+import type { ActionRunRecord, EditCommitResult, JsonValue } from "@sixb/core"
+import { isObjectActionDefinition, validateEditBatch } from "@sixb/core"
+import { recordEdits } from "@sixb/core/internal/edits"
 import { ActionWorkerError } from "../errors"
 import { emitLocalCommitEvents } from "./commit-events"
 import { type BasePhaseContext, createReadFacade, requireObjectSubject } from "./context"
@@ -52,26 +48,30 @@ export async function runEditsAndCommitPhase(
   })
   input.updateActiveRun(run)
 
-  const edit = createEditBuilder({
-    runId: run.id,
-    valueTypesById: input.runtime.sixb.getValueTypesById(),
-  })
-  const baseContext = {
-    ...input.baseContext,
-    edit,
-    read: createReadFacade(input.runtime.sixb),
-    writeback: input.writeback,
-  }
-  const rawBatch = isObjectActionDefinition(input.action)
-    ? await handler({
-        ...baseContext,
-        target: edit.object(
-          input.action.target,
-          requireObjectSubject(input.run.subject, input.action.id).primaryId
-        ),
-      })
-    : await handler(baseContext)
-  const batch = normalizeActionEditBatch(rawBatch as EditBatchInput | undefined, edit.toEditBatch())
+  const batch = await recordEdits(
+    {
+      runId: run.id,
+      valueTypesById: input.runtime.sixb.getValueTypesById(),
+    },
+    async ({ objects }) => {
+      const baseContext = {
+        ...input.baseContext,
+        objects,
+        read: createReadFacade(input.runtime.sixb),
+        writeback: input.writeback,
+      }
+
+      if (isObjectActionDefinition(input.action)) {
+        await handler({
+          ...baseContext,
+          subject: requireObjectSubject(input.run.subject, input.action.id),
+        })
+        return
+      }
+
+      await handler(baseContext)
+    }
+  )
 
   await validateEditBatch({
     projectId: input.runtime.id,
@@ -110,14 +110,4 @@ export async function runEditsAndCommitPhase(
   }
 
   return { run, result }
-}
-
-function normalizeActionEditBatch(
-  rawBatch: EditBatchInput | undefined,
-  implicitBatch: EditBatchInput
-): EditBatchInput {
-  if (rawBatch === undefined) {
-    return implicitBatch
-  }
-  return normalizeEditBatch(rawBatch)
 }

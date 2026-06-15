@@ -23,6 +23,12 @@
       "import": "./dist/query.js",
       "default": "./dist/query.js"
     },
+    "./internal/edits": {
+      "types": "./dist/edits/recorder.d.ts",
+      "bun": "./src/edits/recorder.ts",
+      "import": "./dist/edits/recorder.js",
+      "default": "./dist/edits/recorder.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "bun": "./src/testing/index.ts",

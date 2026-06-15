@@ -1,6 +1,5 @@
 export { EditBatchError } from "./errors"
 export { normalizeEditBatch, normalizeEditOperationInput } from "./normalize"
-export { recordEdits } from "./recorder"
 export type {
   EditBatch,
   EditBatchInput,
@@ -23,8 +22,6 @@ export type {
   EditUpdateProperties,
   NormalizedEditBatchResult,
   RecordEditsContext,
-  RecordEditsHandler,
-  RecordEditsOptions,
   TypedEditObjectRef,
 } from "./types"
 export type {

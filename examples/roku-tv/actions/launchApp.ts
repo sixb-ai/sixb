@@ -5,7 +5,7 @@ import { Television } from "../ontology/television"
 export const launchApp = defineAction("launchApp", {
   description: "Launch an app by provider-specific app id.",
 })
-  .target(Television)
+  .on(Television)
   .params({ appId: param("string") })
   .validate(({ params }) => {
     if (params.appId.length === 0) {

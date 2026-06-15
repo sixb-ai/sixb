@@ -6,12 +6,13 @@ import { PanasonicAcUnit } from "../ontology/acUnit"
 export const setMode = defineAction("setMode", {
   description: "Set operation mode (0=Auto, 1=Dry, 2=Cool, 3=Heat, 4=Fan).",
 })
-  .target(PanasonicAcUnit)
+  .on(PanasonicAcUnit)
   .params({ mode: param("integer") })
   .writeback(async ({ params, target, sixb }) => {
     const api = await getPanasonicApi(sixb)
     await api.setOperationMode(target.properties.guid, params.mode as OperationMode)
 
+    // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.
     await sixb
       .objects(PanasonicAcUnit)
       .appendTelemetryBatch([

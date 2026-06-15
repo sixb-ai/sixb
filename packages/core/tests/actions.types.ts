@@ -72,13 +72,32 @@ defineAction("validateTemperature")
   .writeback(() => {})
 
 const reboot = defineAction("reboot")
-  .target(Room)
+  .on(Room)
   .params({})
   .writeback(({ params }) => {
     // @ts-expect-error empty params do not expose arbitrary keys
     const force = params.force
     void force
   })
+
+const runtimeFacade = defineAction("runtimeFacade")
+  .on(Room)
+  .params({})
+  .writeback(({ sixb }) => {
+    sixb.objects(Room).appendTelemetryBatch([{ id: "room:1", properties: {}, at: new Date() }])
+
+    // @ts-expect-error writeback cannot perform local object writes
+    sixb.objects(Room).upsert({ properties: { id: "room:1" } })
+
+    // @ts-expect-error writeback cannot perform local object reads
+    sixb.objects(Room).get("room:1")
+  })
+
+defineAction("targetAlias")
+  // @ts-expect-error object-scoped actions use .on(ObjectType), not .target(ObjectType)
+  .target(Room)
+  .params({})
+  .writeback(() => {})
 
 const setRequestTemperature = defineAction("setRequestTemperature")
   .on(Room)
@@ -121,10 +140,10 @@ const createRoom = defineAction("createRoom")
     void id
     void primaryId
   })
-  .edits(({ params, edit }) => {
+  .edits(({ params, objects }) => {
     const id: string = params.id
     const name: string = params.name
-    edit.create(Room, { id, name, externalId: id })
+    objects(Room).create({ id, name, externalId: id })
 
     // @ts-expect-error global action edits do not expose target
     const primaryId = target.primaryId
@@ -146,10 +165,9 @@ const createInvoice = defineAction("createInvoice")
     void note
     return { externalId: "ext_1" }
   })
-  .edits(({ edit, writeback }) => {
+  .edits(({ objects, writeback }) => {
     const externalId: string = writeback.externalId
-    const room = edit.object(Room, "room:1")
-    edit.set(room, { name: externalId })
+    objects(Room).byId("room:1").update({ name: externalId })
   })
   .effects(({ commit, writeback }) => {
     const externalId: string = writeback.externalId
@@ -164,7 +182,17 @@ defineAction("writebackOnly")
 
 defineAction("editsOnly")
   .params({})
-  .edits(({ edit }) => edit.create(Room, { id: "room:1", externalId: "R1", name: "Room 1" }))
+  .edits(({ objects }) => {
+    objects(Room).create({ id: "room:1", externalId: "R1", name: "Room 1" })
+  })
+
+defineAction("badEditsReturn")
+  .params({})
+  // @ts-expect-error edits handlers must record through objects and cannot return an EditBatch
+  .edits(() => ({
+    version: 1,
+    operations: [],
+  }))
 
 defineAction("badEditsContext")
   .params({})
@@ -188,6 +216,7 @@ const sixb = new Sixb({
   actions: [
     actionDefinition(setTemperature),
     actionDefinition(reboot),
+    actionDefinition(runtimeFacade),
     actionDefinition(setRequestTemperature),
     actionDefinition(assignRelatedRoom),
     actionDefinition(createRoom),

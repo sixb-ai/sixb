@@ -158,7 +158,7 @@ const reviewDeviceHealthWorkflow = defineWorkflow("review-device-health-workflow
   .then(reviewDeviceHealth)
 
 const setSpeed = defineAction("setSpeed")
-  .target(Device)
+  .on(Device)
   .params({ speed: param("double") })
   .writeback(async () => {})
 

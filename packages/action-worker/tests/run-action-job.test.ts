@@ -126,11 +126,11 @@ describe("runActionJob", () => {
 
   test("commits edits and stores a succeeded run", async () => {
     const setStatus = defineAction("setStatus")
-      .target(Device)
+      .on(Device)
       .params({ status: param("string") })
-      .edits(({ edit, params, target, signal }) => {
+      .edits(({ objects, params, subject, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        edit.set(target, { status: params.status })
+        objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
 
     const sixb = createSixb([setStatus])
@@ -172,13 +172,13 @@ describe("runActionJob", () => {
 
   test("fails writeback before local commit", async () => {
     const failWriteback = defineAction("failWriteback")
-      .target(Device)
+      .on(Device)
       .params({})
       .writeback(() => {
         throw new Error("external API failed")
       })
-      .edits(({ edit, target }) => {
-        edit.set(target, { status: "should-not-commit" })
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: "should-not-commit" })
       })
 
     const sixb = createSixb([failWriteback])
@@ -221,7 +221,7 @@ describe("runActionJob", () => {
   test("skips duplicate terminal run ids without invoking phases twice", async () => {
     let invoked = 0
     const count = defineAction("count")
-      .target(Device)
+      .on(Device)
       .params({})
       .writeback(() => {
         invoked += 1
@@ -263,9 +263,9 @@ describe("runActionJob", () => {
   test("commits global action edits without loading a target", async () => {
     const createDevice = defineAction("createDevice")
       .params({ id: param("string") })
-      .edits(({ edit, params, signal }) => {
+      .edits(({ objects, params, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        edit.create(Device, {
+        objects(Device).create({
           id: params.id,
           name: "Created Device",
           status: "created",
@@ -366,14 +366,14 @@ describe("runActionJob", () => {
   test("resumes from a persisted successful writeback without replaying it", async () => {
     let writebackCalls = 0
     const setStatus = defineAction("setStatus")
-      .target(Device)
+      .on(Device)
       .params({})
       .writeback(() => {
         writebackCalls += 1
         return { status: "from-writeback" }
       })
-      .edits(({ edit, target, writeback }) => {
-        edit.set(target, { status: writeback.status })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
       })
 
     const sixb = createSixb([setStatus])
@@ -411,10 +411,10 @@ describe("runActionJob", () => {
 
   test("records effects errors without failing committed actions", async () => {
     const setStatus = defineAction("setStatus")
-      .target(Device)
+      .on(Device)
       .params({})
-      .edits(({ edit, target }) => {
-        edit.set(target, { status: "ready" })
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: "ready" })
       })
       .effects(() => {
         throw new Error("notification failed")
@@ -456,7 +456,7 @@ describe("runActionJob", () => {
   test("rejects forged object subjects outside the action target hierarchy", async () => {
     let invoked = 0
     const setStatus = defineAction("setStatus")
-      .target(Device)
+      .on(Device)
       .params({})
       .writeback(() => {
         invoked += 1

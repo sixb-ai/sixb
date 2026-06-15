@@ -5,7 +5,7 @@ import { PanasonicAcUnit } from "../ontology/acUnit"
 export const setPower = defineAction("setPower", {
   description: "Turn the AC unit on or off.",
 })
-  .target(PanasonicAcUnit)
+  .on(PanasonicAcUnit)
   .params({ on: param("boolean") })
   .writeback(async ({ params, target, sixb }) => {
     const api = await getPanasonicApi(sixb)
@@ -15,6 +15,7 @@ export const setPower = defineAction("setPower", {
       await api.powerOff(target.properties.guid)
     }
 
+    // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.
     await sixb
       .objects(PanasonicAcUnit)
       .appendTelemetryBatch([

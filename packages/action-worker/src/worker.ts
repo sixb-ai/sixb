@@ -3,16 +3,19 @@ import type {
   ActionRunRequestedQueueJob,
   ClaimedQueueJob,
   EventsRuntime,
-  OntologySource,
   Queues,
   QueueWorkerFailureDecision,
-  Sixb,
   Storage,
 } from "@sixb/core"
 import { QueueWorker } from "@sixb/core"
 import { ActionWorkerError } from "./errors"
 import { runActionJob } from "./run-action-job"
-import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
+import type {
+  ActionJob,
+  ActionRunResult,
+  ActionWorkerContext,
+  ActionWorkerSixbFacade,
+} from "./types"
 
 export interface ActionWorkerSixb {
   readonly id: string
@@ -165,15 +168,37 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   if (!actionRunsStorage) {
     throw new ActionWorkerError("Action workers require storage.actionRuns support.")
   }
+  assertActionWorkerSixbFacade(sixb)
 
   return {
     id: sixb.id,
     events: sixb.events,
     storage: sixb.storage,
     actionRunsStorage,
-    sixb: sixb as unknown as Sixb<readonly OntologySource[]>,
+    sixb,
     getActionById(actionId) {
       return sixb.getActionById(actionId)
     },
+  }
+}
+
+const requiredFacadeMethods = [
+  "connector",
+  "getActionsForType",
+  "getPrimaryPropertyId",
+  "getValueTypesById",
+  "isValidLinkTarget",
+  "objects",
+  "resolveObjectType",
+] as const satisfies readonly (keyof ActionWorkerSixbFacade)[]
+
+function assertActionWorkerSixbFacade(
+  sixb: ActionWorkerSixb
+): asserts sixb is ActionWorkerSixb & ActionWorkerSixbFacade {
+  const candidate = sixb as Partial<Record<(typeof requiredFacadeMethods)[number], unknown>>
+  for (const method of requiredFacadeMethods) {
+    if (typeof candidate[method] !== "function") {
+      throw new ActionWorkerError(`Action worker runtime is missing sixb.${method}(...).`)
+    }
   }
 }

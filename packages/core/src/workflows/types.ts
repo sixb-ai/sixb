@@ -285,12 +285,12 @@ export interface WorkflowActionDefinition<
 > {
   readonly kind: "action"
   readonly id: TId
-  readonly target: { readonly id: TTargetId }
+  readonly binding: { readonly kind: "object"; readonly objectType: { readonly id: TTargetId } }
   readonly params: TParams
 }
 
 export type WorkflowActionMapperResult<TAction extends WorkflowActionDefinition> = {
-  readonly target: ObjectRef<TAction["target"]["id"]>
+  readonly target: ObjectRef<TAction["binding"]["objectType"]["id"]>
   readonly params: InferActionParams<TAction["params"]>
 }
 

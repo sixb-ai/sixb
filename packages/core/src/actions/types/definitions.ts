@@ -2,6 +2,7 @@ import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
   ActionEditsHandler,
   ActionEffectsHandler,
+  ActionNoResultHandlerResult,
   ActionValidator,
   ActionWritebackHandler,
   ActionWritebackValue,
@@ -57,7 +58,6 @@ export interface GlobalActionDefinition<
   _TWriteback = unknown,
 > extends BaseActionDefinition<TId, TParams> {
   readonly binding: { readonly kind: "global" }
-  readonly target?: undefined
   readonly phases: GlobalActionPhaseDefinitions
 }
 
@@ -68,8 +68,6 @@ export interface ObjectActionDefinition<
   _TWriteback = unknown,
 > extends BaseActionDefinition<TId, TParams> {
   readonly binding: { readonly kind: "object"; readonly objectType: TObjectType }
-  /** Compatibility alias for the object-scoped action binding. Prefer `binding.objectType`. */
-  readonly target: TObjectType
   readonly phases: ObjectActionPhaseDefinitions
 }
 
@@ -87,8 +85,12 @@ export interface GlobalActionAfterWritebackBuilder<
   TParams extends ActionParamsConfig,
   TWriteback,
 > extends GlobalActionDefinition<TId, TParams, TWriteback> {
-  edits(
-    handler: GlobalActionEditsHandler<InferActionParams<TParams>, ActionWritebackValue<TWriteback>>
+  edits<const TResult extends ActionNoResultHandlerResult>(
+    handler: GlobalActionEditsHandler<
+      InferActionParams<TParams>,
+      ActionWritebackValue<TWriteback>,
+      TResult
+    >
   ): GlobalActionAfterEditsBuilder<TId, TParams, ActionWritebackValue<TWriteback>>
 }
 
@@ -98,11 +100,12 @@ export interface ObjectActionAfterWritebackBuilder<
   TParams extends ActionParamsConfig,
   TWriteback,
 > extends ObjectActionDefinition<TId, TObjectType, TParams, TWriteback> {
-  edits(
+  edits<const TResult extends ActionNoResultHandlerResult>(
     handler: ActionEditsHandler<
       TObjectType,
       InferActionParams<TParams>,
-      ActionWritebackValue<TWriteback>
+      ActionWritebackValue<TWriteback>,
+      TResult
     >
   ): ObjectActionAfterEditsBuilder<TId, TObjectType, TParams, ActionWritebackValue<TWriteback>>
 }
@@ -112,8 +115,8 @@ export interface GlobalActionAfterEditsBuilder<
   TParams extends ActionParamsConfig,
   TWriteback,
 > extends GlobalActionDefinition<TId, TParams, TWriteback> {
-  effects(
-    handler: GlobalActionEffectsHandler<InferActionParams<TParams>, TWriteback>
+  effects<const TResult extends ActionNoResultHandlerResult>(
+    handler: GlobalActionEffectsHandler<InferActionParams<TParams>, TWriteback, TResult>
   ): GlobalActionDefinition<TId, TParams, TWriteback>
 }
 
@@ -123,8 +126,8 @@ export interface ObjectActionAfterEditsBuilder<
   TParams extends ActionParamsConfig,
   TWriteback,
 > extends ObjectActionDefinition<TId, TObjectType, TParams, TWriteback> {
-  effects(
-    handler: ActionEffectsHandler<TObjectType, InferActionParams<TParams>, TWriteback>
+  effects<const TResult extends ActionNoResultHandlerResult>(
+    handler: ActionEffectsHandler<TObjectType, InferActionParams<TParams>, TWriteback, TResult>
   ): ObjectActionDefinition<TId, TObjectType, TParams, TWriteback>
 }
 
@@ -135,8 +138,8 @@ export interface GlobalActionPhaseBuilder<TId extends string, TParams extends Ac
   writeback<const TResult>(
     handler: GlobalActionWritebackHandler<InferActionParams<TParams>, TResult>
   ): GlobalActionAfterWritebackBuilder<TId, TParams, TResult>
-  edits(
-    handler: GlobalActionEditsHandler<InferActionParams<TParams>, undefined>
+  edits<const TResult extends ActionNoResultHandlerResult>(
+    handler: GlobalActionEditsHandler<InferActionParams<TParams>, undefined, TResult>
   ): GlobalActionAfterEditsBuilder<TId, TParams, undefined>
 }
 
@@ -151,8 +154,8 @@ export interface ObjectActionPhaseBuilder<
   writeback<const TResult>(
     handler: ActionWritebackHandler<TObjectType, InferActionParams<TParams>, TResult>
   ): ObjectActionAfterWritebackBuilder<TId, TObjectType, TParams, TResult>
-  edits(
-    handler: ActionEditsHandler<TObjectType, InferActionParams<TParams>, undefined>
+  edits<const TResult extends ActionNoResultHandlerResult>(
+    handler: ActionEditsHandler<TObjectType, InferActionParams<TParams>, undefined, TResult>
   ): ObjectActionAfterEditsBuilder<TId, TObjectType, TParams, undefined>
 }
 
@@ -173,9 +176,6 @@ export interface ObjectActionParamsBuilder<
 
 export interface ActionBuilder<TId extends string> extends GlobalActionParamsBuilder<TId> {
   on<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType
-  ): ObjectActionParamsBuilder<TId, TObjectType>
-  target<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ObjectActionParamsBuilder<TId, TObjectType>
 }

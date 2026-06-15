@@ -11,12 +11,25 @@ import type {
   Storage,
 } from "@sixb/core"
 
+export interface ActionWorkerSixbFacade
+  extends Pick<
+    Sixb<readonly OntologySource[]>,
+    | "connector"
+    | "appendTelemetry"
+    | "getActionsForType"
+    | "getPrimaryPropertyId"
+    | "getValueTypesById"
+    | "isValidLinkTarget"
+    | "objects"
+    | "resolveObjectType"
+  > {}
+
 export interface ActionWorkerContext {
   readonly id: string
   readonly events: EventsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: ActionWorkerSixbFacade
   getActionById(actionId: string): ActionDefinition | null
 }
 

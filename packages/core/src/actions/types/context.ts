@@ -1,7 +1,6 @@
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
-import type { EditBuilder, EditCommitDiff, EditObjectHandle } from "../../edits"
-import type { ObjectRef, ObjectType, ValueType } from "../../ontology"
-import type { InferObjectProperties, InferTelemetryBatchProperties } from "../../ontology/inference"
+import type { EditCommitDiff, RecordEditsContext } from "../../edits"
+import type { ObjectType, ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
   ListResult,
@@ -11,18 +10,9 @@ import type {
 } from "../../runtime/types"
 import type { ActionPrimitiveSchemaValues } from "./params"
 
-type ObjectTypeShape<TObjectType extends ObjectType> = {
-  readonly id: TObjectType["id"]
-  readonly name: TObjectType["name"]
-  readonly description?: TObjectType["description"]
-  readonly properties: TObjectType["properties"]
-  readonly links: TObjectType["links"]
-  readonly extends?: TObjectType["extends"]
-}
-
 export type ActionTargetObject<
   TObjectType extends ObjectType = ObjectType,
-  _TValueTypes extends readonly ValueType[] = [],
+  _TValueTypes extends readonly ValueType[] = readonly ValueType[],
 > = {
   readonly primaryId: string
   readonly objectTypeId: TObjectType["id"]
@@ -55,9 +45,13 @@ type InferActionSnapshotSchemaValue<TSchema> = TSchema extends keyof ActionPrimi
     ? TValue
     : unknown
 
-export type ActionSubject =
-  | { readonly kind: "none" }
-  | { readonly kind: "object"; readonly objectTypeId: string; readonly primaryId: string }
+export type ActionSubject = { readonly kind: "none" } | ActionObjectSubject
+
+export type ActionObjectSubject<TObjectType extends ObjectType = ObjectType> = {
+  readonly kind: "object"
+  readonly objectTypeId: TObjectType["id"]
+  readonly primaryId: string
+}
 
 export type ActionBinding<TObjectType extends ObjectType = ObjectType> =
   | { readonly kind: "global" }
@@ -87,33 +81,31 @@ export interface ActionReadObjectSet<
   byId(id: string): ActionReadObjectByIdHandle<TObjectType, TValueTypes>
 }
 
-export interface ActionReadFacade<TValueTypes extends readonly ValueType[] = []> {
+export interface ActionReadFacade<TValueTypes extends readonly ValueType[] = readonly ValueType[]> {
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): ActionReadObjectSet<TObjectType, TValueTypes, ObjectTypeWithPropertyTokens>
 }
 
-export interface ActionRuntimeObjectSet<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
+export interface ActionTelemetryObjectSet<
+  _TObjectType extends ObjectTypeWithPropertyTokens,
+  _TValueTypes extends readonly ValueType[],
 > {
-  get(id: string): Promise<TwinObject<ObjectTypeShape<TObjectType>, TValueTypes> | null>
-  upsert(input: {
-    properties: InferObjectProperties<ObjectTypeShape<TObjectType>, TValueTypes>
-  }): Promise<TwinObject<ObjectTypeShape<TObjectType>, TValueTypes>>
   appendTelemetryBatch(
     items: readonly {
       id: string
-      properties: InferTelemetryBatchProperties<ObjectTypeShape<TObjectType>, TValueTypes>
+      properties: Readonly<Record<string, unknown>>
       at?: Date
     }[]
   ): Promise<void>
 }
 
-export interface ActionRuntimeFacade<TValueTypes extends readonly ValueType[] = []> {
+export interface ActionRuntimeFacade<
+  TValueTypes extends readonly ValueType[] = readonly ValueType[],
+> {
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
-  ): ActionRuntimeObjectSet<TObjectType, TValueTypes>
+  ): ActionTelemetryObjectSet<TObjectType, TValueTypes>
   connector<TAdapter extends ConnectorAdapter>(
     definition: ConnectorDefinition<string, TAdapter>
   ): Promise<ConnectorClient<TAdapter>>
@@ -157,7 +149,7 @@ export interface ActionWritebackContext<
 
 export interface GlobalActionEditsContext<TParams extends Record<string, unknown>, TWriteback>
   extends BaseActionPhaseContext<TParams> {
-  readonly edit: EditBuilder
+  readonly objects: RecordEditsContext["objects"]
   readonly read: ActionReadFacade
   readonly writeback: TWriteback
 }
@@ -166,10 +158,10 @@ export interface ActionEditsContext<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TParams extends Record<string, unknown>,
   TWriteback,
-> extends BaseActionPhaseContext<TParams> {
-  readonly edit: EditBuilder
+> extends Omit<BaseActionPhaseContext<TParams>, "subject"> {
+  readonly subject: ActionObjectSubject<TObjectType>
+  readonly objects: RecordEditsContext["objects"]
   readonly read: ActionReadFacade
-  readonly target: EditObjectHandle<TObjectType>
   readonly writeback: TWriteback
 }
 
@@ -184,9 +176,9 @@ export interface ActionEffectsContext<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TParams extends Record<string, unknown>,
   TWriteback,
-> extends BaseActionPhaseContext<TParams> {
+> extends Omit<BaseActionPhaseContext<TParams>, "subject"> {
+  readonly subject: ActionObjectSubject<TObjectType>
   readonly sixb: ActionRuntimeFacade
   readonly commit: ActionPhaseCommit
-  readonly target: ObjectRef<ObjectTypeShape<TObjectType>["id"]>
   readonly writeback: TWriteback
 }

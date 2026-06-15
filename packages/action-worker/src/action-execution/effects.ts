@@ -1,7 +1,7 @@
 import type { ActionRunRecord, EditCommitResult, JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import { toActionRunFailure } from "../normalize"
-import { type BasePhaseContext, toActionRuntimeFacade, toEffectTarget } from "./context"
+import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./types"
 
 export async function runEffectsPhase(
@@ -29,8 +29,8 @@ export async function runEffectsPhase(
     if (isObjectActionDefinition(input.action)) {
       await input.action.phases.effects({
         ...input.baseContext,
+        subject: requireObjectSubject(input.run.subject, input.action.id),
         sixb: toActionRuntimeFacade(input.runtime),
-        target: toEffectTarget(input.run.subject, input.action.id),
         writeback: input.writeback,
         commit: input.commit,
       })

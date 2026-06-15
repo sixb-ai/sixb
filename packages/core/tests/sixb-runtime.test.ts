@@ -878,7 +878,7 @@ describe("Sixb runtime", () => {
       ],
     })
     const reboot = defineAction("reboot")
-      .target(ActionType)
+      .on(ActionType)
       .params({ force: optional(param("boolean")) })
       .writeback(async () => {})
 

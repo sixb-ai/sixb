@@ -40,9 +40,6 @@ function createActionBuilder(id: string, options?: ActionOptions) {
       assertNonEmpty(objectType.id, "target id")
       return createObjectActionParamsBuilder(id, objectType, options)
     },
-    target(objectType: ObjectTypeWithPropertyTokens) {
-      return builder.on(objectType)
-    },
   }
 
   return builder
@@ -206,7 +203,6 @@ function createObjectDefinition(input: {
     kind: "action",
     id: input.id,
     binding: { kind: "object", objectType: input.objectType },
-    target: input.objectType,
     params: input.params,
     phases: {
       validate: [...input.validators],

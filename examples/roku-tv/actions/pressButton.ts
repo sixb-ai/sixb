@@ -8,7 +8,7 @@ const validRokuKeys = new Set<string>(rokuKeys)
 export const pressButton = defineAction("pressButton", {
   description: "Press a remote control button on the television.",
 })
-  .target(Television)
+  .on(Television)
   .params({ button: param("string") })
   .validate(({ params }) => {
     if (!validRokuKeys.has(params.button)) {

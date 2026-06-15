@@ -1,4 +1,3 @@
-import type { EditBatchInput } from "../../edits"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
   ActionEditsContext,
@@ -12,26 +11,21 @@ import type {
 } from "./context"
 
 type MaybePromise<T> = T | Promise<T>
+type VoidResult = ReturnType<() => void>
+export type ActionNoResultHandlerResult = VoidResult | Promise<VoidResult>
 
 export type ActionValidationFailure = { readonly error: string }
 
-type ActionValidatorResult =
-  | void
-  | ActionValidationFailure
-  // biome-ignore lint/suspicious/noConfusingVoidType: Async validators intentionally allow implicit no-error returns.
-  | Promise<void | ActionValidationFailure>
-
-// biome-ignore lint/suspicious/noConfusingVoidType: Edits handlers intentionally allow implicit no-edit returns.
-type ActionEditsHandlerResult = MaybePromise<EditBatchInput | void>
-
 export type GlobalActionValidator<TParams extends Record<string, unknown>> = (
   ctx: GlobalActionValidationContext<TParams>
-) => ActionValidatorResult
+) => void | ActionValidationFailure | Promise<void> | Promise<ActionValidationFailure | undefined>
 
 export type ActionValidator<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TParams extends Record<string, unknown>,
-> = (ctx: ActionValidationContext<TObjectType, TParams>) => ActionValidatorResult
+> = (
+  ctx: ActionValidationContext<TObjectType, TParams>
+) => void | ActionValidationFailure | Promise<void> | Promise<ActionValidationFailure | undefined>
 
 export type GlobalActionWritebackHandler<TParams extends Record<string, unknown>, TResult> = (
   ctx: GlobalActionWritebackContext<TParams>
@@ -43,27 +37,32 @@ export type ActionWritebackHandler<
   TResult,
 > = (ctx: ActionWritebackContext<TObjectType, TParams>) => MaybePromise<TResult>
 
-export type GlobalActionEditsHandler<TParams extends Record<string, unknown>, TWriteback> = (
-  ctx: GlobalActionEditsContext<TParams, TWriteback>
-) => ActionEditsHandlerResult
+export type GlobalActionEditsHandler<
+  TParams extends Record<string, unknown>,
+  TWriteback,
+  TResult extends ActionNoResultHandlerResult = ActionNoResultHandlerResult,
+> = (ctx: GlobalActionEditsContext<TParams, TWriteback>) => TResult
 
 export type ActionEditsHandler<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TParams extends Record<string, unknown>,
   TWriteback,
-> = (ctx: ActionEditsContext<TObjectType, TParams, TWriteback>) => ActionEditsHandlerResult
+  TResult extends ActionNoResultHandlerResult = ActionNoResultHandlerResult,
+> = (ctx: ActionEditsContext<TObjectType, TParams, TWriteback>) => TResult
 
-export type GlobalActionEffectsHandler<TParams extends Record<string, unknown>, TWriteback> = (
-  ctx: GlobalActionEffectsContext<TParams, TWriteback>
-) => void | Promise<void>
+export type GlobalActionEffectsHandler<
+  TParams extends Record<string, unknown>,
+  TWriteback,
+  TResult extends ActionNoResultHandlerResult = ActionNoResultHandlerResult,
+> = (ctx: GlobalActionEffectsContext<TParams, TWriteback>) => TResult
 
 export type ActionEffectsHandler<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TParams extends Record<string, unknown>,
   TWriteback,
-> = (ctx: ActionEffectsContext<TObjectType, TParams, TWriteback>) => void | Promise<void>
+  TResult extends ActionNoResultHandlerResult = ActionNoResultHandlerResult,
+> = (ctx: ActionEffectsContext<TObjectType, TParams, TWriteback>) => TResult
 
-// biome-ignore lint/suspicious/noConfusingVoidType: Void writebacks normalize to a stored null result.
-export type ActionWritebackValue<TResult> = [Awaited<TResult>] extends [void]
+export type ActionWritebackValue<TResult> = [Awaited<TResult>] extends [VoidResult]
   ? null
   : Awaited<TResult>

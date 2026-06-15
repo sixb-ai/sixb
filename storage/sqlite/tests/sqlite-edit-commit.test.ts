@@ -12,10 +12,9 @@ import {
   OntologyRegistry,
   planEditBatch,
   prop,
-  type RecordEditsHandler,
-  recordEdits,
   type StoredObjectUpsertedEvent,
 } from "@sixb/core"
+import { type RecordEditsHandler, recordEdits } from "@sixb/core/internal/edits"
 import { SqliteStorage } from "../src"
 
 const Customer = defineObjectType({
@@ -52,7 +51,7 @@ const Payment = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
 const tempDirs: string[] = []
 
-function recordStorageEdits(runId: string, handler: RecordEditsHandler): EditBatch {
+async function recordStorageEdits(runId: string, handler: RecordEditsHandler): Promise<EditBatch> {
   return recordEdits({ runId }, handler)
 }
 
@@ -87,7 +86,7 @@ describe("SQLite edit commit", () => {
         projectId: "project-a",
       })
 
-      const batch = recordStorageEdits("run_mark_paid", ({ objects }) => {
+      const batch = await recordStorageEdits("run_mark_paid", ({ objects }) => {
         const invoice = objects(Invoice).byId("inv_1")
 
         invoice.update({ status: "paid" })
@@ -181,7 +180,7 @@ describe("SQLite edit commit", () => {
         projectId: "project-a",
       })
 
-      const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
+      const batch = await recordStorageEdits("run_delete_invoice", ({ objects }) => {
         objects(Invoice).byId("inv_1").delete()
       })
       const result = (

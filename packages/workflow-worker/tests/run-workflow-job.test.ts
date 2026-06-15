@@ -137,7 +137,6 @@ const attachInvoice: ActionDefinition = {
   kind: "action",
   id: "attach-invoice",
   binding: { kind: "object", objectType: Transaction },
-  target: Transaction,
   params: {
     invoice: param(ref(Invoice)),
   },

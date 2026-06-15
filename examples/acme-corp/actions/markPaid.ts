@@ -4,10 +4,10 @@ import { Invoice } from "../ontology/invoice"
 export const markPaid = defineAction("markPaid", {
   description: "Mark this invoice as paid.",
 })
-  .target(Invoice)
+  .on(Invoice)
   .params({})
-  .edits(({ edit, target }) => {
-    edit.set(target, {
+  .edits(({ objects, subject }) => {
+    objects(Invoice).byId(subject.primaryId).update({
       status: "paid",
     })
   })
