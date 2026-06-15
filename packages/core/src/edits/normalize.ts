@@ -3,12 +3,12 @@ import { EditBatchError } from "./errors"
 import type {
   EditBatch,
   EditBatchInput,
+  EditBatchProducer,
   EditLinkCreateOperation,
   EditObjectCreateOperation,
   EditObjectProperties,
   EditObjectUpdateOperation,
   EditOperation,
-  EditOperationHandleInput,
 } from "./types"
 
 export function normalizeEditBatch(input: EditBatchInput): EditBatch {
@@ -19,10 +19,6 @@ export function normalizeEditBatch(input: EditBatchInput): EditBatch {
     }
   }
 
-  if (isEditOperationHandle(input)) {
-    return normalizeEditBatch(input.toEditBatch())
-  }
-
   if (isEditBatch(input)) {
     return {
       version: 1,
@@ -30,7 +26,7 @@ export function normalizeEditBatch(input: EditBatchInput): EditBatch {
     }
   }
 
-  if (isEditBuilder(input)) {
+  if (isEditBatchProducer(input)) {
     return normalizeEditBatch(input.toEditBatch())
   }
 
@@ -40,13 +36,7 @@ export function normalizeEditBatch(input: EditBatchInput): EditBatch {
   }
 }
 
-export function normalizeEditOperationInput(
-  input: EditOperation | EditOperationHandleInput
-): EditOperation {
-  if (isEditOperationHandle(input)) {
-    return normalizeEditOperationInput(input.toEditOperation())
-  }
-
+export function normalizeEditOperationInput(input: EditOperation): EditOperation {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new EditBatchError("[Sixb] EditBatch operation must be an object.")
   }
@@ -144,18 +134,10 @@ function isEditBatch(input: unknown): input is EditBatch {
   )
 }
 
-function isEditBuilder(input: unknown): input is { toEditBatch(): EditBatch } {
+function isEditBatchProducer(input: unknown): input is EditBatchProducer {
   return (
     typeof input === "object" &&
     input !== null &&
     typeof (input as { toEditBatch?: unknown }).toEditBatch === "function"
-  )
-}
-
-function isEditOperationHandle(input: unknown): input is EditOperationHandleInput {
-  return (
-    typeof input === "object" &&
-    input !== null &&
-    typeof (input as { toEditOperation?: unknown }).toEditOperation === "function"
   )
 }

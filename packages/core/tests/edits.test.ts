@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import {
-  createEditBuilder,
   defineObjectType,
   defineValueType,
   deriveEditCommitDiff,
   type EditBatch,
+  type EditObjectRef,
   InMemoryStorage,
   link,
+  type ObjectLink,
+  type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   prop,
+  type RecordEditsOptions,
+  recordEdits,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -83,40 +87,68 @@ const InvoiceWithRegisteredAmount = defineObjectType({
 
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
 
+type RuntimeEditHandle = EditObjectRef & {
+  update(properties: Record<string, unknown>): void
+  delete(): void
+  link(
+    link: { objectTypeId: string; id: string; link: ObjectLink },
+    target: EditObjectRef,
+    options?: { properties?: Record<string, unknown> }
+  ): void
+  unlink(link: { objectTypeId: string; id: string; link: ObjectLink }, target: EditObjectRef): void
+}
+
+type RuntimeRecordObjects = (objectType: ObjectTypeWithPropertyTokens) => {
+  byId(primaryId: string): RuntimeEditHandle
+  create(properties: Record<string, unknown>): RuntimeEditHandle
+}
+
+function recordRuntimeEdits(
+  options: RecordEditsOptions,
+  handler: (ctx: { objects: RuntimeRecordObjects }) => void
+): EditBatch {
+  return (
+    recordEdits as (options: RecordEditsOptions, handler: (ctx: unknown) => void) => EditBatch
+  )(options, handler as (ctx: unknown) => void)
+}
+
 describe("EditBatch core contract", () => {
-  test("normalizes fluent and array edits into one serializable batch", async () => {
+  test("records object API mutations into one serializable batch", async () => {
     const storage = await createSeededStorage()
-    const edit = createEditBuilder({ runId: "act_1" })
-    const createdInvoice = edit.create(Invoice, {
-      amount: 250,
-      status: "draft",
-    })
-    const customer = edit.object(Customer, "cus_1")
+    let createdInvoiceId = ""
+    const batch = recordRuntimeEdits({ runId: "act_1" }, ({ objects }) => {
+      const createdInvoice = objects(Invoice).create({
+        amount: 250,
+        status: "draft",
+      })
+      const customer = objects(Customer).byId("cus_1")
+      createdInvoiceId = createdInvoice.primaryId
 
-    expect(JSON.parse(JSON.stringify(createdInvoice))).toEqual({
-      objectTypeId: "Invoice",
-      primaryId: createdInvoice.primaryId,
-    })
+      expect(JSON.parse(JSON.stringify(createdInvoice))).toEqual({
+        objectTypeId: "Invoice",
+        primaryId: createdInvoice.primaryId,
+      })
 
-    edit.set(createdInvoice, { status: "sent" })
-    edit.link(createdInvoice, Invoice.l.customer, customer, {
-      properties: { role: "billTo" },
+      createdInvoice.update({ status: "sent" })
+      createdInvoice.link(Invoice.l.customer, customer, {
+        properties: { role: "billTo" },
+      })
     })
 
     const result = await validateEditBatch({
       projectId: "project-a",
       ontology,
       storage,
-      batch: edit.toEditBatch(),
+      batch,
     })
 
     expect(result.batch.operations).toEqual([
       {
         kind: "object.create",
         objectTypeId: "Invoice",
-        primaryId: createdInvoice.primaryId,
+        primaryId: createdInvoiceId,
         properties: {
-          id: createdInvoice.primaryId,
+          id: createdInvoiceId,
           amount: 250,
           status: "draft",
         },
@@ -124,14 +156,14 @@ describe("EditBatch core contract", () => {
       {
         kind: "object.update",
         objectTypeId: "Invoice",
-        primaryId: createdInvoice.primaryId,
+        primaryId: createdInvoiceId,
         properties: {
           status: "sent",
         },
       },
       {
         kind: "link.create",
-        source: { objectTypeId: "Invoice", primaryId: createdInvoice.primaryId },
+        source: { objectTypeId: "Invoice", primaryId: createdInvoiceId },
         linkId: "customer",
         target: { objectTypeId: "Customer", primaryId: "cus_1" },
         properties: { role: "billTo" },
@@ -141,7 +173,7 @@ describe("EditBatch core contract", () => {
       objects: [
         {
           objectTypeId: "Invoice",
-          primaryId: createdInvoice.primaryId,
+          primaryId: createdInvoiceId,
           operation: "create",
           changedProperties: ["amount", "id", "status"],
         },
@@ -149,7 +181,7 @@ describe("EditBatch core contract", () => {
       links: [
         {
           operation: "create",
-          source: { objectTypeId: "Invoice", primaryId: createdInvoice.primaryId },
+          source: { objectTypeId: "Invoice", primaryId: createdInvoiceId },
           linkId: "customer",
           target: { objectTypeId: "Customer", primaryId: "cus_1" },
         },
@@ -235,8 +267,10 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
       ontology,
       storage,
-      batch: createEditBuilder({ runId: "act_readonly" }).set(Invoice, "inv_1", {
-        status: "paid",
+      batch: recordRuntimeEdits({ runId: "act_readonly" }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").update({
+          status: "paid",
+        })
       }),
     })
 
@@ -249,36 +283,48 @@ describe("EditBatch core contract", () => {
     expect(row?.properties.status).toBe("draft")
   })
 
-  test("normalizes builder edits with resolved and registered value type refs", async () => {
-    const resolvedEdit = createEditBuilder({ runId: "act_value_type_resolved" })
-    const resolvedInvoice = resolvedEdit.create(InvoiceWithResolvedAmount, {
-      total: { value: 120, currency: "EUR" },
-    })
+  test("normalizes recorded edits with resolved and registered value type refs", async () => {
+    let resolvedInvoiceId = ""
+    const resolvedBatch = recordRuntimeEdits(
+      { runId: "act_value_type_resolved" },
+      ({ objects }) => {
+        const resolvedInvoice = objects(InvoiceWithResolvedAmount).create({
+          total: { value: 120, currency: "EUR" },
+        })
+        resolvedInvoiceId = resolvedInvoice.primaryId
+      }
+    )
 
-    expect(resolvedEdit.toEditBatch().operations[0]).toEqual({
+    expect(resolvedBatch.operations[0]).toEqual({
       kind: "object.create",
       objectTypeId: "InvoiceWithResolvedAmount",
-      primaryId: resolvedInvoice.primaryId,
+      primaryId: resolvedInvoiceId,
       properties: {
-        id: resolvedInvoice.primaryId,
+        id: resolvedInvoiceId,
         total: { value: 120, currency: "EUR" },
       },
     })
 
-    const registeredEdit = createEditBuilder<[typeof MoneyAmount]>({
-      runId: "act_value_type_registered",
-      valueTypesById: new Map([[MoneyAmount.id, MoneyAmount]]),
-    })
-    const registeredInvoice = registeredEdit.create(InvoiceWithRegisteredAmount, {
-      total: { value: 240, currency: "USD" },
-    })
+    let registeredInvoiceId = ""
+    const registeredBatch = recordRuntimeEdits(
+      {
+        runId: "act_value_type_registered",
+        valueTypesById: new Map([[MoneyAmount.id, MoneyAmount]]),
+      },
+      ({ objects }) => {
+        const registeredInvoice = objects(InvoiceWithRegisteredAmount).create({
+          total: { value: 240, currency: "USD" },
+        })
+        registeredInvoiceId = registeredInvoice.primaryId
+      }
+    )
 
-    expect(registeredEdit.toEditBatch().operations[0]).toEqual({
+    expect(registeredBatch.operations[0]).toEqual({
       kind: "object.create",
       objectTypeId: "InvoiceWithRegisteredAmount",
-      primaryId: registeredInvoice.primaryId,
+      primaryId: registeredInvoiceId,
       properties: {
-        id: registeredInvoice.primaryId,
+        id: registeredInvoiceId,
         total: { value: 240, currency: "USD" },
       },
     })
@@ -286,14 +332,15 @@ describe("EditBatch core contract", () => {
 
   test("rejects invalid local mutations before commit", async () => {
     const storage = await createSeededStorage()
-    const edit = createEditBuilder({ runId: "act_3" })
 
     await expect(
       validateEditBatch({
         projectId: "project-a",
         ontology,
         storage,
-        batch: edit.set(Invoice, "missing", { status: "paid" }),
+        batch: recordRuntimeEdits({ runId: "act_3" }, ({ objects }) => {
+          objects(Invoice).byId("missing").update({ status: "paid" })
+        }),
       })
     ).rejects.toThrow("references missing object 'Invoice:missing'")
 
@@ -375,21 +422,18 @@ describe("EditBatch core contract", () => {
       },
     })
 
-    const edit = createEditBuilder({ runId: "act_4" })
-
     await expect(
       validateEditBatch({
         projectId: "project-a",
         ontology,
         storage,
-        batch: edit.link(
-          edit.ref(Invoice, "inv_1"),
-          Invoice.l.customer,
-          edit.object(Customer, "cus_2"),
-          {
-            properties: { role: "shipTo" },
-          }
-        ),
+        batch: recordRuntimeEdits({ runId: "act_4" }, ({ objects }) => {
+          objects(Invoice)
+            .byId("inv_1")
+            .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+              properties: { role: "shipTo" },
+            })
+        }),
       })
     ).rejects.toThrow("cardinality 'one'")
 
@@ -418,13 +462,14 @@ describe("EditBatch core contract", () => {
 
   test("supports object delete as contract-only diff", async () => {
     const storage = await createSeededStorage()
-    const edit = createEditBuilder({ runId: "act_6" })
 
     const diff = await deriveEditCommitDiff({
       projectId: "project-a",
       ontology,
       storage,
-      batch: edit.object(Payment, "pay_1").delete(),
+      batch: recordRuntimeEdits({ runId: "act_6" }, ({ objects }) => {
+        objects(Payment).byId("pay_1").delete()
+      }),
     })
 
     expect(diff).toEqual({

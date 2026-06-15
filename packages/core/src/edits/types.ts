@@ -1,21 +1,15 @@
 import type { JsonValue } from "../json"
 import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
-import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
+import type { LinkToken } from "../ontology/tokens"
 
 export type EditBatchVersion = 1
-
-declare const editObjectHandleBrand: unique symbol
 
 export interface EditObjectRef<TObjectTypeId extends string = string>
   extends ObjectRef<TObjectTypeId> {}
 
-export interface TypedEditObjectRef<
-  TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
-> extends EditObjectRef<TObjectType["id"]> {
-  readonly [editObjectHandleBrand]: TObjectType
-  readonly objectType: TObjectType
-}
+export interface TypedEditObjectRef<TObjectType extends ObjectType = ObjectType>
+  extends EditObjectRef<TObjectType["id"]> {}
 
 export type EditObjectProperties = Readonly<Record<string, JsonValue>>
 
@@ -104,7 +98,7 @@ type CreatablePropertyId<TProperty extends Property> =
 type StaticPropertyMap<
   TProperties extends readonly Property[],
   TValueTypes extends readonly ValueType[],
-  TMode extends "create" | "set",
+  TMode extends "create" | "update",
 > = string extends TProperties[number]["id"]
   ? Record<string, unknown>
   : Simplify<{
@@ -118,13 +112,16 @@ export type EditCreateProperties<
   TValueTypes extends readonly ValueType[] = [],
 > = StaticPropertyMap<TObjectType["properties"], TValueTypes, "create">
 
-export type EditSetProperties<
+export type EditUpdateProperties<
   TObjectType extends ObjectType,
   TValueTypes extends readonly ValueType[] = [],
-> = StaticPropertyMap<TObjectType["properties"], TValueTypes, "set">
+> = StaticPropertyMap<TObjectType["properties"], TValueTypes, "update">
 
-type LinkProperties<TLink extends { properties?: readonly Property[] }> =
-  TLink["properties"] extends readonly Property[] ? TLink["properties"] : []
+type LinkProperties<TLink extends { properties?: readonly Property[] }> = TLink extends {
+  properties: infer TProperties extends readonly Property[]
+}
+  ? TProperties
+  : []
 
 type LinkPropertyId<TProperty extends Property> =
   NonTelemetryProperty<TProperty> extends never ? never : TProperty["id"]
@@ -156,8 +153,8 @@ type RequiredLinkPropertyIds<TLink extends { properties?: readonly Property[] }>
     ? RequiredLinkPropertyId<TProperty>
     : never
 
-type HasKnownLinkProperties<TLink extends { properties?: readonly Property[] }> =
-  keyof EditLinkProperties<TLink, []> extends never ? false : true
+type HasLinkProperties<TLink extends { properties?: readonly Property[] }> =
+  LinkProperties<TLink> extends [] ? false : true
 
 type HasRequiredLinkProperties<TLink extends { properties?: readonly Property[] }> = [
   RequiredLinkPropertyIds<TLink>,
@@ -172,18 +169,6 @@ type ResolveTargetObjectTypeId<TTargetObjectTypeId> =
       ? TTargetObjectTypeId
       : never
 
-type EditPropertyTokenValue<
-  TPropertyToken extends PropertyToken<string, string, Property>,
-  TValueTypes extends readonly ValueType[],
-> = string extends TPropertyToken["id"]
-  ? unknown
-  : InferPropertyValue<TPropertyToken["property"], TValueTypes>
-
-type EditLinkSourceRef<TLinkToken extends LinkToken<string, string, string | readonly string[]>> =
-  string extends TLinkToken["id"]
-    ? EditObjectRef<string>
-    : EditObjectRef<TLinkToken["objectTypeId"] & string>
-
 type EditLinkTargetRef<TLinkToken extends LinkToken<string, string, string | readonly string[]>> =
   string extends TLinkToken["id"]
     ? EditObjectRef<string>
@@ -194,191 +179,75 @@ type EditLinkOptionsArg<
   TValueTypes extends readonly ValueType[],
 > = string extends TLinkToken["id"]
   ? [options?: { readonly properties?: Readonly<Record<string, unknown>> }]
-  : HasKnownLinkProperties<TLinkToken["link"]> extends false
+  : HasLinkProperties<TLinkToken["link"]> extends false
     ? [options?: { readonly properties?: never }]
     : HasRequiredLinkProperties<TLinkToken["link"]> extends true
       ? [
           options: {
-            readonly properties: NoInfer<EditLinkProperties<TLinkToken["link"], TValueTypes>>
+            readonly properties: EditLinkProperties<TLinkToken["link"], TValueTypes>
           },
         ]
       : [
           options?: {
-            readonly properties?: NoInfer<EditLinkProperties<TLinkToken["link"], TValueTypes>>
+            readonly properties?: EditLinkProperties<TLinkToken["link"], TValueTypes>
           },
         ]
 
-type RawEditRefProperties<TRef extends EditObjectRef> = TRef extends {
-  readonly objectType: ObjectTypeWithPropertyTokens
-}
-  ? never
-  : Readonly<Record<string, JsonValue>>
-
-export interface CreateEditBuilderOptions {
+export interface RecordEditsOptions {
   readonly runId: string
   readonly valueTypesById?: ReadonlyMap<string, ValueType>
 }
 
-export interface EditChain<TValueTypes extends readonly ValueType[] = []> {
-  set<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    object: TypedEditObjectRef<TObjectType>,
-    properties: NoInfer<EditSetProperties<TObjectType, TValueTypes>>
-  ): EditChain<TValueTypes>
-  set<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType,
-    primaryId: string,
-    properties: NoInfer<EditSetProperties<TObjectType, TValueTypes>>
-  ): EditChain<TValueTypes>
-  set<
-    const TObjectTypeId extends string,
-    const TPropertyToken extends PropertyToken<TObjectTypeId, string, Property>,
-  >(
-    ref: EditObjectRef<TObjectTypeId>,
-    property: TPropertyToken,
-    value: NoInfer<EditPropertyTokenValue<TPropertyToken, TValueTypes>>
-  ): EditChain<TValueTypes>
-  set<const TRef extends EditObjectRef>(
-    ref: TRef,
-    properties: RawEditRefProperties<TRef>
-  ): EditChain<TValueTypes>
-
-  delete<const TObjectType extends ObjectType>(
-    objectType: TObjectType,
-    primaryId: string
-  ): EditChain<TValueTypes>
-  delete<const TObjectTypeId extends string>(
-    ref: EditObjectRef<TObjectTypeId>
-  ): EditChain<TValueTypes>
-
-  link<const TLinkToken extends LinkToken<string, string, string | readonly string[]>>(
-    source: EditLinkSourceRef<TLinkToken>,
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>,
-    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
-  ): EditChain<TValueTypes>
-
-  unlink<const TLinkToken extends LinkToken<string, string, string | readonly string[]>>(
-    source: EditLinkSourceRef<TLinkToken>,
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>
-  ): EditChain<TValueTypes>
-
-  toEditBatch(): EditBatch
+export interface RecordEditsContext<TValueTypes extends readonly ValueType[] = []> {
+  objects<const TObjectType extends ObjectType>(
+    objectType: TObjectType
+  ): EditObjectSetRecorder<TObjectType, TValueTypes>
 }
 
-export interface EditBuilder<TValueTypes extends readonly ValueType[] = []>
-  extends Omit<EditChain<TValueTypes>, "set" | "delete" | "link" | "unlink"> {
-  object<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType,
-    primaryId: string
-  ): EditObjectHandle<TObjectType, TValueTypes>
+export type RecordEditsHandler<TValueTypes extends readonly ValueType[] = []> = {
+  bivarianceHack(ctx: RecordEditsContext<TValueTypes>): void
+}["bivarianceHack"]
 
-  ref<const TObjectType extends ObjectType>(
-    objectType: TObjectType,
-    primaryId: string
-  ): EditObjectRef<TObjectType["id"]>
-
-  create<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType,
-    properties: NoInfer<EditCreateProperties<TObjectType, TValueTypes>>
-  ): EditObjectCreateHandle<TObjectType, TValueTypes>
-
-  set<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    object: TypedEditObjectRef<TObjectType>,
-    properties: NoInfer<EditSetProperties<TObjectType, TValueTypes>>
-  ): EditOperationHandle<EditObjectUpdateOperation, TValueTypes>
-  set<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType,
-    primaryId: string,
-    properties: NoInfer<EditSetProperties<TObjectType, TValueTypes>>
-  ): EditOperationHandle<EditObjectUpdateOperation, TValueTypes>
-  set<
-    const TObjectTypeId extends string,
-    const TPropertyToken extends PropertyToken<TObjectTypeId, string, Property>,
-  >(
-    ref: EditObjectRef<TObjectTypeId>,
-    property: TPropertyToken,
-    value: NoInfer<EditPropertyTokenValue<TPropertyToken, TValueTypes>>
-  ): EditOperationHandle<EditObjectUpdateOperation, TValueTypes>
-  set<const TRef extends EditObjectRef>(
-    ref: TRef,
-    properties: RawEditRefProperties<TRef>
-  ): EditOperationHandle<EditObjectUpdateOperation, TValueTypes>
-
-  delete<const TObjectType extends ObjectType>(
-    objectType: TObjectType,
-    primaryId: string
-  ): EditOperationHandle<EditObjectDeleteOperation, TValueTypes>
-  delete<const TObjectTypeId extends string>(
-    ref: EditObjectRef<TObjectTypeId>
-  ): EditOperationHandle<EditObjectDeleteOperation, TValueTypes>
-
-  link<const TLinkToken extends LinkToken<string, string, string | readonly string[]>>(
-    source: EditLinkSourceRef<TLinkToken>,
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>,
-    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
-  ): EditOperationHandle<EditLinkCreateOperation, TValueTypes>
-
-  unlink<const TLinkToken extends LinkToken<string, string, string | readonly string[]>>(
-    source: EditLinkSourceRef<TLinkToken>,
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>
-  ): EditOperationHandle<EditLinkDeleteOperation, TValueTypes>
-}
-
-export interface EditOperationHandle<
-  TOperation extends EditOperation = EditOperation,
+export interface EditObjectSetRecorder<
+  TObjectType extends ObjectType,
   TValueTypes extends readonly ValueType[] = [],
-> extends EditChain<TValueTypes>,
-    EditOperationHandleInput<TOperation> {}
+> {
+  byId(primaryId: string): EditObjectHandle<TObjectType, TValueTypes>
 
-export interface EditOperationHandleInput<TOperation extends EditOperation = EditOperation> {
-  readonly operation: TOperation
-  toEditOperation(): TOperation
-  toEditBatch(): EditBatch
+  create(
+    properties: EditCreateProperties<TObjectType, TValueTypes>
+  ): EditObjectHandle<TObjectType, TValueTypes>
+}
+
+export interface EditObjectHandle<
+  TObjectType extends ObjectType = ObjectType,
+  TValueTypes extends readonly ValueType[] = [],
+> extends TypedEditObjectRef<TObjectType> {
+  update(properties: EditUpdateProperties<TObjectType, TValueTypes>): void
+
+  delete(): void
+
+  link<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
+    link: TLinkToken,
+    target: EditLinkTargetRef<TLinkToken>,
+    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
+  ): void
+
+  unlink<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
+    link: TLinkToken,
+    target: EditLinkTargetRef<TLinkToken>
+  ): void
 }
 
 export interface EditBatchProducer {
   toEditBatch(): EditBatch
 }
 
-export interface EditObjectHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[] = [],
-> extends TypedEditObjectRef<TObjectType> {
-  set(
-    properties: NoInfer<EditSetProperties<TObjectType, TValueTypes>>
-  ): EditOperationHandle<EditObjectUpdateOperation, TValueTypes>
-
-  delete(): EditOperationHandle<EditObjectDeleteOperation, TValueTypes>
-
-  link<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>,
-    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
-  ): EditOperationHandle<EditLinkCreateOperation, TValueTypes>
-
-  unlink<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
-    link: TLinkToken,
-    target: EditLinkTargetRef<TLinkToken>
-  ): EditOperationHandle<EditLinkDeleteOperation, TValueTypes>
-
-  toEditBatch(): EditBatch
-}
-
-export interface EditObjectCreateHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[] = [],
-> extends EditObjectHandle<TObjectType, TValueTypes>,
-    EditOperationHandleInput<EditObjectCreateOperation> {}
-
 export type EditBatchInput =
   | EditBatch
   | EditOperation
   | EditBatchProducer
-  | EditOperationHandleInput
-  | readonly (EditOperation | EditOperationHandleInput)[]
+  | readonly EditOperation[]
 
 export interface NormalizedEditBatchResult {
   readonly batch: EditBatch
