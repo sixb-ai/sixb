@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { createEditBuilder, defineObjectType, link, OntologyRegistry, prop } from "@sixb/core"
+import {
+  defineObjectType,
+  type EditBatch,
+  link,
+  OntologyRegistry,
+  prop,
+  type RecordEditsHandler,
+  recordEdits,
+} from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 
@@ -36,6 +44,10 @@ const Payment = defineObjectType({
 
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
 
+function recordStorageEdits(runId: string, handler: RecordEditsHandler): EditBatch {
+  return recordEdits({ runId }, handler)
+}
+
 describe("PgEditStorage", () => {
   let storage: PostgresStorage | undefined
 
@@ -67,10 +79,13 @@ describe("PgEditStorage", () => {
       projectId: "project-a",
     })
 
-    const edit = createEditBuilder({ runId: "run_mark_paid" })
-    edit.set(Invoice, "inv_1", { status: "paid" })
-    edit.link(edit.object(Invoice, "inv_1"), Invoice.l.customer, edit.object(Customer, "cus_1"), {
-      properties: { role: "payer" },
+    const batch = recordStorageEdits("run_mark_paid", ({ objects }) => {
+      const invoice = objects(Invoice).byId("inv_1")
+
+      invoice.update({ status: "paid" })
+      invoice.link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+        properties: { role: "payer" },
+      })
     })
 
     const result = await storage.edits.commit({
@@ -79,7 +94,7 @@ describe("PgEditStorage", () => {
       actionId: "markPaid",
       subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
       ontology,
-      batch: edit,
+      batch,
       committedAt: new Date("2026-06-02T00:00:00.000Z"),
     })
     const retry = await storage.edits.commit({
@@ -88,7 +103,7 @@ describe("PgEditStorage", () => {
       actionId: "markPaid",
       subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
       ontology,
-      batch: edit,
+      batch,
     })
 
     const invoice = await storage.objects.getByPrimaryId({
@@ -145,7 +160,9 @@ describe("PgEditStorage", () => {
       projectId: "project-a",
     })
 
-    const batch = createEditBuilder({ runId: "run_delete_invoice" }).delete(Invoice, "inv_1")
+    const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
+      objects(Invoice).byId("inv_1").delete()
+    })
     const result = await storage.edits.commit({
       projectId: "project-a",
       runId: "run_delete_invoice",
