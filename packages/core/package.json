@@ -23,11 +23,11 @@
       "import": "./dist/query.js",
       "default": "./dist/query.js"
     },
-    "./internal/edits": {
-      "types": "./dist/edits/recorder.d.ts",
-      "bun": "./src/edits/recorder.ts",
-      "import": "./dist/edits/recorder.js",
-      "default": "./dist/edits/recorder.js"
+    "./actions/worker": {
+      "types": "./dist/actions/worker.d.ts",
+      "bun": "./src/actions/worker.ts",
+      "import": "./dist/actions/worker.js",
+      "default": "./dist/actions/worker.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",

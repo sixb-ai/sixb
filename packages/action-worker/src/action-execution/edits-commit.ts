@@ -1,6 +1,6 @@
 import type { ActionRunRecord, EditCommitResult, JsonValue } from "@sixb/core"
 import { isObjectActionDefinition, validateEditBatch } from "@sixb/core"
-import { recordEdits } from "@sixb/core/internal/edits"
+import { recordEdits } from "@sixb/core/actions/worker"
 import { ActionWorkerError } from "../errors"
 import { emitLocalCommitEvents } from "./commit-events"
 import { type BasePhaseContext, createReadFacade, requireObjectSubject } from "./context"

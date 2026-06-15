@@ -1,11 +1,12 @@
 import type { ObjectType } from "../ontology"
 import type { OntologyRegistry } from "../ontology/registry"
-import { ActionDefinitionError } from "./errors"
+import {
+  ActionDefinitionError,
+  effectsWithoutEditsMessage,
+  missingActionMutationMessage,
+} from "./errors"
 import type { ActionDefinition, ObjectActionDefinition } from "./types"
-
-function isObjectActionDefinition(action: ActionDefinition): action is ObjectActionDefinition {
-  return action.binding.kind === "object"
-}
+import { isObjectActionDefinition } from "./validation"
 
 export class ActionRegistry {
   private readonly byId = new Map<string, ActionDefinition>()
@@ -59,15 +60,11 @@ export class ActionRegistry {
     const hasEffects = action.phases.effects !== undefined
 
     if (!hasWriteback && !hasEdits) {
-      throw new ActionDefinitionError(
-        `Action "${action.id}" must declare .writeback(...) or .edits(...).`
-      )
+      throw new ActionDefinitionError(missingActionMutationMessage(action.id))
     }
 
     if (hasEffects && !hasEdits) {
-      throw new ActionDefinitionError(
-        `Action "${action.id}" cannot declare .effects(...) without .edits(...).`
-      )
+      throw new ActionDefinitionError(effectsWithoutEditsMessage(action.id))
     }
   }
 

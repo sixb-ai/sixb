@@ -12,7 +12,7 @@ import {
   type Storage,
   type StoredObjectUpsertedEvent,
 } from "@sixb/core"
-import { type RecordEditsHandler, recordEdits } from "@sixb/core/internal/edits"
+import { type RecordEditsHandler, recordEdits } from "@sixb/core/actions/worker"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
 

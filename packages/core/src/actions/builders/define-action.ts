@@ -1,5 +1,5 @@
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import { ActionDefinitionError } from "../errors"
+import { ActionDefinitionError, effectsWithoutEditsMessage, legacyRunMessage } from "../errors"
 import type {
   ActionBuilder,
   ActionEditsHandler,
@@ -175,9 +175,7 @@ function createGlobalDefinition(input: {
       },
       effects(handler: GlobalActionEffectsHandler<Record<string, unknown>, unknown>) {
         if (!input.edits) {
-          throw new ActionDefinitionError(
-            `Action "${input.id}" cannot declare .effects(...) without .edits(...).`
-          )
+          throw new ActionDefinitionError(effectsWithoutEditsMessage(input.id))
         }
         return createGlobalDefinition({
           ...input,
@@ -231,9 +229,7 @@ function createObjectDefinition(input: {
         >
       ) {
         if (!input.edits) {
-          throw new ActionDefinitionError(
-            `Action "${input.id}" cannot declare .effects(...) without .edits(...).`
-          )
+          throw new ActionDefinitionError(effectsWithoutEditsMessage(input.id))
         }
         return createObjectDefinition({
           ...input,
@@ -246,9 +242,7 @@ function createObjectDefinition(input: {
 }
 
 function rejectLegacyRun(): never {
-  throw new ActionDefinitionError(
-    "Actions V2 no longer supports .run(...). Use .writeback(...), .edits(...), and .effects(...) instead."
-  )
+  throw new ActionDefinitionError(legacyRunMessage)
 }
 
 // Runtime builders are plain objects; public builder types carry phase-order inference.

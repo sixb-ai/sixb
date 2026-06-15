@@ -22,7 +22,7 @@ import {
   validateEditBatch,
   valueTypeRef,
 } from "../src"
-import { type RecordEditsOptions, recordEdits } from "../src/edits/recorder"
+import { type RecordEditsOptions, recordEdits } from "../src/actions/worker"
 
 const Customer = defineObjectType({
   id: "Customer",

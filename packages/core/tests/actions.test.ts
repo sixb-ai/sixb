@@ -112,6 +112,34 @@ describe("defineAction", () => {
       defineAction("")
     }).toThrow("Action id must not be empty")
   })
+
+  test("rejects legacy .run(...) at runtime", () => {
+    const builder = defineAction("legacy").params({}) as unknown as {
+      run(handler: () => void): unknown
+    }
+
+    expect(() => {
+      builder.run(() => {})
+    }).toThrow(ActionDefinitionError)
+    expect(() => {
+      builder.run(() => {})
+    }).toThrow("Actions V2 no longer supports .run(...)")
+  })
+
+  test("rejects .effects(...) without .edits(...) at runtime", () => {
+    const definition = defineAction("effectsWithoutEdits")
+      .params({})
+      .writeback(() => {}) as unknown as {
+      effects(handler: () => void): unknown
+    }
+
+    expect(() => {
+      definition.effects(() => {})
+    }).toThrow(ActionDefinitionError)
+    expect(() => {
+      definition.effects(() => {})
+    }).toThrow('Action "effectsWithoutEdits" cannot declare .effects(...) without .edits(...).')
+  })
 })
 
 describe("ActionRegistry", () => {
@@ -204,6 +232,60 @@ describe("ActionRegistry", () => {
         ...createTestRuntimeDeps(),
       })
     }).toThrow(ActionDefinitionError)
+  })
+
+  test("rejects action definitions without writeback or edits", () => {
+    const invalidAction = {
+      kind: "action",
+      id: "noMutation",
+      binding: { kind: "global" },
+      params: {},
+      phases: { validate: [] },
+    } as unknown as ActionDefinition
+
+    expect(() => {
+      new Sixb({
+        ontology: [Room],
+        actions: [invalidAction],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow(ActionDefinitionError)
+    expect(() => {
+      new Sixb({
+        ontology: [Room],
+        actions: [invalidAction],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow('Action "noMutation" must declare .writeback(...) or .edits(...).')
+  })
+
+  test("rejects action definitions with effects but no edits", () => {
+    const invalidAction = {
+      kind: "action",
+      id: "effectsOnly",
+      binding: { kind: "global" },
+      params: {},
+      phases: {
+        validate: [],
+        writeback: () => {},
+        effects: () => {},
+      },
+    } as unknown as ActionDefinition
+
+    expect(() => {
+      new Sixb({
+        ontology: [Room],
+        actions: [invalidAction],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow(ActionDefinitionError)
+    expect(() => {
+      new Sixb({
+        ontology: [Room],
+        actions: [invalidAction],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow('Action "effectsOnly" cannot declare .effects(...) without .edits(...).')
   })
 })
 

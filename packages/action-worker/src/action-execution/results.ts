@@ -1,4 +1,4 @@
-import type { ActionDefinition, ActionRunFailure, ActionRunRecord } from "@sixb/core"
+import type { ActionRunFailure, ActionRunRecord } from "@sixb/core"
 import { isTerminalActionRun } from "@sixb/core"
 import { ActionWorkerError } from "../errors"
 import type { ActionRunResult, RunActionJobInput } from "../types"
@@ -11,17 +11,8 @@ export function requireFinishedAt(runId: string, finishedAt: Date | undefined): 
   throw new ActionWorkerError(`Action run '${runId}' finished without a finishedAt timestamp.`)
 }
 
-export function canResumeRunningRun(run: ActionRunRecord, action: ActionDefinition): boolean {
-  if (run.writeback?.status === "succeeded") {
-    return true
-  }
-  if (run.commit) {
-    return true
-  }
-  if (!action.phases.writeback && !action.phases.edits && run.phase === "validation") {
-    return false
-  }
-  return false
+export function canResumeRunningRun(run: ActionRunRecord): boolean {
+  return run.writeback?.status === "succeeded" || run.commit !== undefined
 }
 
 export function failedResult(

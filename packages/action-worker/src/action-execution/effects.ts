@@ -14,6 +14,10 @@ export async function runEffectsPhase(
     readonly updateActiveRun: UpdateActiveRun
   }
 ): Promise<ActionRunRecord> {
+  if (!input.action.phases.effects) {
+    return input.run
+  }
+
   let run = await input.runtime.actionRunsStorage.enterPhase({
     projectId: input.runtime.id,
     id: input.run.id,
@@ -22,12 +26,9 @@ export async function runEffectsPhase(
   input.updateActiveRun(run)
 
   try {
-    if (!input.action.phases.effects) {
-      return run
-    }
-
     if (isObjectActionDefinition(input.action)) {
-      await input.action.phases.effects({
+      const effects = input.action.phases.effects
+      await effects({
         ...input.baseContext,
         subject: requireObjectSubject(input.run.subject, input.action.id),
         sixb: toActionRuntimeFacade(input.runtime),
@@ -35,7 +36,8 @@ export async function runEffectsPhase(
         commit: input.commit,
       })
     } else {
-      await input.action.phases.effects({
+      const effects = input.action.phases.effects
+      await effects({
         ...input.baseContext,
         sixb: toActionRuntimeFacade(input.runtime),
         writeback: input.writeback,

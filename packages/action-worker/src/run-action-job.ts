@@ -56,7 +56,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     return failedResult(job.id, job.actionId, finishedRun, failure)
   }
 
-  if (existingRun.status === "running" && !canResumeRunningRun(existingRun, action)) {
+  if (existingRun.status === "running" && !canResumeRunningRun(existingRun)) {
     return failRedeliveredRunningRun(input, existingRun)
   }
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
