@@ -337,17 +337,74 @@ CREATE TABLE IF NOT EXISTS action_runs (
   object_type_id TEXT,
   primary_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
-  phase TEXT CHECK (phase IS NULL OR phase IN ('request', 'enqueue', 'handler', 'cancelled')),
+  phase TEXT CHECK (
+    phase IS NULL OR phase IN (
+      'request',
+      'enqueue',
+      'validation',
+      'writeback',
+      'edits',
+      'commit',
+      'effects',
+      'legacy_handler',
+      'cancelled'
+    )
+  ),
   queued_at TEXT NOT NULL,
   started_at TEXT,
   finished_at TEXT,
   params TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   security_context TEXT,
+  writeback_status TEXT CHECK (writeback_status IS NULL OR writeback_status IN ('succeeded', 'failed')),
+  writeback_completed_at TEXT,
+  writeback_result TEXT,
+  writeback_error_name TEXT,
+  writeback_error_message TEXT,
+  writeback_error_phase TEXT CHECK (
+    writeback_error_phase IS NULL OR writeback_error_phase IN (
+      'request',
+      'enqueue',
+      'validation',
+      'writeback',
+      'edits',
+      'commit',
+      'effects',
+      'legacy_handler',
+      'cancelled'
+    )
+  ),
+  effects_status TEXT CHECK (effects_status IS NULL OR effects_status IN ('succeeded', 'failed')),
+  effects_completed_at TEXT,
+  effects_error_name TEXT,
+  effects_error_message TEXT,
+  effects_error_phase TEXT CHECK (
+    effects_error_phase IS NULL OR effects_error_phase IN (
+      'request',
+      'enqueue',
+      'validation',
+      'writeback',
+      'edits',
+      'commit',
+      'effects',
+      'legacy_handler',
+      'cancelled'
+    )
+  ),
   error_name TEXT,
   error_message TEXT,
   error_phase TEXT CHECK (
-    error_phase IS NULL OR error_phase IN ('request', 'enqueue', 'handler', 'cancelled')
+    error_phase IS NULL OR error_phase IN (
+      'request',
+      'enqueue',
+      'validation',
+      'writeback',
+      'edits',
+      'commit',
+      'effects',
+      'legacy_handler',
+      'cancelled'
+    )
   ),
   CHECK (
     (subject_kind = 'none' AND object_type_id IS NULL AND primary_id IS NULL)
@@ -364,6 +421,59 @@ CREATE INDEX IF NOT EXISTS idx_action_runs_project_object_started
   ON action_runs(project_id, object_type_id, primary_id, COALESCE(started_at, queued_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_action_runs_project_status_started
   ON action_runs(project_id, status, COALESCE(started_at, queued_at) DESC);
+
+CREATE TABLE IF NOT EXISTS action_run_commits (
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  committed_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, run_id)
+);
+
+CREATE TABLE IF NOT EXISTS action_run_object_diffs (
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  object_type_id TEXT NOT NULL,
+  primary_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
+  PRIMARY KEY (project_id, run_id, object_type_id, primary_id)
+);
+
+CREATE TABLE IF NOT EXISTS action_run_object_diff_properties (
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  object_type_id TEXT NOT NULL,
+  primary_id TEXT NOT NULL,
+  property_id TEXT NOT NULL,
+  PRIMARY KEY (project_id, run_id, object_type_id, primary_id, property_id)
+);
+
+CREATE TABLE IF NOT EXISTS action_run_link_diffs (
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation IN ('create', 'delete')),
+  source_object_type_id TEXT NOT NULL,
+  source_primary_id TEXT NOT NULL,
+  link_id TEXT NOT NULL,
+  target_object_type_id TEXT NOT NULL,
+  target_primary_id TEXT NOT NULL,
+  PRIMARY KEY (
+    project_id,
+    run_id,
+    operation,
+    source_object_type_id,
+    source_primary_id,
+    link_id,
+    target_object_type_id,
+    target_primary_id
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_run_object_diffs_object
+  ON action_run_object_diffs(project_id, object_type_id, primary_id);
+CREATE INDEX IF NOT EXISTS idx_action_run_link_diffs_source
+  ON action_run_link_diffs(project_id, source_object_type_id, source_primary_id, link_id);
+CREATE INDEX IF NOT EXISTS idx_action_run_link_diffs_target
+  ON action_run_link_diffs(project_id, target_object_type_id, target_primary_id);
 
 CREATE TABLE IF NOT EXISTS auth_users (
   project_id TEXT NOT NULL,

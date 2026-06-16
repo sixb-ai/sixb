@@ -162,6 +162,7 @@ describe("runActionJob", () => {
     expect(result.status).toBe("succeeded")
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
+    expect(run?.phase).toBe("legacy_handler")
     expect(run?.params).toEqual({ status: "ready" })
 
     const updated = await deviceObjects(sixb).get("device-1")
@@ -208,7 +209,7 @@ describe("runActionJob", () => {
       expect(result.error).toEqual({
         name: "Error",
         message: "external API failed",
-        phase: "handler",
+        phase: "legacy_handler",
       })
     }
 
@@ -315,10 +316,11 @@ describe("runActionJob", () => {
     expect(result.status).toBe("failed")
     if ("error" in result) {
       expect(result.error.message).toBe("[SixbActionWorker] Unknown action 'missingAction'.")
+      expect(result.error.phase).toBe("validation")
     }
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("failed")
-    expect(run?.phase).toBe("handler")
+    expect(run?.phase).toBe("validation")
   })
 
   test("marks redelivered running runs failed without invoking the handler again", async () => {
@@ -352,13 +354,13 @@ describe("runActionJob", () => {
     expect(result.status).toBe("failed")
     if ("error" in result) {
       expect(result.error.name).toBe("ActionRunLeaseLostError")
-      expect(result.error.phase).toBe("handler")
+      expect(result.error.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
 
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("failed")
-    expect(run?.phase).toBe("handler")
+    expect(run?.phase).toBe("validation")
     expect(run?.finishedAt).toBeInstanceOf(Date)
   })
 
@@ -396,6 +398,7 @@ describe("runActionJob", () => {
       expect(result.error.message).toBe(
         "[SixbActionWorker] Action 'setStatus' is not valid for object type 'Sensor'."
       )
+      expect(result.error.phase).toBe("validation")
     }
     expect(invoked).toBe(0)
   })

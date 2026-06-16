@@ -4,14 +4,67 @@ import type { JsonValue } from "../../json"
 
 export type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
-export type ActionRunPhase = "request" | "enqueue" | "handler" | "cancelled"
+export type ActionRunPhase =
+  | "request"
+  | "enqueue"
+  | "validation"
+  | "writeback"
+  | "edits"
+  | "commit"
+  | "effects"
+  | "legacy_handler"
+  | "cancelled"
 
 export type ActionRunParams = Readonly<Record<string, JsonValue>>
+
+export type ActionRunPhaseStatus = "succeeded" | "failed"
 
 export interface ActionRunFailure {
   readonly name?: string
   readonly message: string
   readonly phase?: ActionRunPhase
+}
+
+export interface ActionRunWritebackRecord {
+  readonly status: ActionRunPhaseStatus
+  readonly completedAt: Date
+  readonly result?: JsonValue
+  readonly error?: ActionRunFailure
+}
+
+export interface ActionRunObjectEditDiff {
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly operation: "create" | "update" | "delete"
+  readonly changedProperties: readonly string[]
+}
+
+export interface ActionRunObjectRef {
+  readonly objectTypeId: string
+  readonly primaryId: string
+}
+
+export interface ActionRunLinkEditDiff {
+  readonly operation: "create" | "delete"
+  readonly source: ActionRunObjectRef
+  readonly linkId: string
+  readonly target: ActionRunObjectRef
+}
+
+export interface ActionRunCommitDiff {
+  readonly objects: readonly ActionRunObjectEditDiff[]
+  readonly links: readonly ActionRunLinkEditDiff[]
+}
+
+export interface ActionRunCommitRecord {
+  readonly committedAt: Date
+  readonly diff: ActionRunCommitDiff
+}
+
+export interface ActionRunEffectsRecord {
+  readonly status: ActionRunPhaseStatus
+  readonly completedAt: Date
+  readonly error?: ActionRunFailure
 }
 
 export interface ActionRunRecord {
@@ -27,6 +80,9 @@ export interface ActionRunRecord {
   readonly params: ActionRunParams
   readonly idempotencyKey: string
   readonly securityContext?: SecurityContext
+  readonly writeback?: ActionRunWritebackRecord
+  readonly commit?: ActionRunCommitRecord
+  readonly effects?: ActionRunEffectsRecord
   readonly error?: ActionRunFailure
 }
 
@@ -45,7 +101,55 @@ export interface StartActionRunInput {
   readonly id: string
   readonly projectId: string
   readonly startedAt?: Date
+  readonly phase?: Extract<ActionRunPhase, "validation" | "legacy_handler">
 }
+
+export interface EnterActionRunPhaseInput {
+  readonly id: string
+  readonly projectId: string
+  readonly phase: Extract<
+    ActionRunPhase,
+    "validation" | "writeback" | "edits" | "commit" | "effects" | "legacy_handler"
+  >
+}
+
+export type RecordActionWritebackInput =
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "succeeded"
+      readonly completedAt?: Date
+      readonly result: JsonValue
+    }
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "failed"
+      readonly completedAt?: Date
+      readonly error: ActionRunFailure
+    }
+
+export interface RecordActionCommitInput {
+  readonly id: string
+  readonly projectId: string
+  readonly committedAt?: Date
+  readonly diff: ActionRunCommitDiff
+}
+
+export type RecordActionEffectsInput =
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "succeeded"
+      readonly completedAt?: Date
+    }
+  | {
+      readonly id: string
+      readonly projectId: string
+      readonly status: "failed"
+      readonly completedAt?: Date
+      readonly error: ActionRunFailure
+    }
 
 export type FinishActionRunInput =
   | {
@@ -87,6 +191,10 @@ export interface ListActionRunsResult {
 export interface ActionRunStorage {
   queue(input: QueueActionRunInput): Promise<ActionRunRecord>
   start(input: StartActionRunInput): Promise<ActionRunRecord>
+  enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord>
+  recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord>
+  recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord>
+  recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord>
   finish(input: FinishActionRunInput): Promise<ActionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null>
   list(input: ListActionRunsInput): Promise<ListActionRunsResult>

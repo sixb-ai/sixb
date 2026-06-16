@@ -1,18 +1,28 @@
 import { ActionRunError } from "./errors"
 import {
+  actionRunCommitDiffsEqual,
+  actionRunPhaseRecordsEqual,
   actionSubjectsEqual,
   canRequeueActionRunAfterEnqueueFailure,
   isTerminalActionRun,
+  normalizeActionRunCommitDiff,
 } from "./idempotency"
 import type {
+  ActionRunCommitRecord,
+  ActionRunEffectsRecord,
   ActionRunFailure,
   ActionRunParams,
   ActionRunRecord,
   ActionRunStorage,
+  ActionRunWritebackRecord,
+  EnterActionRunPhaseInput,
   FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
   QueueActionRunInput,
+  RecordActionCommitInput,
+  RecordActionEffectsInput,
+  RecordActionWritebackInput,
   StartActionRunInput,
 } from "./types"
 
@@ -34,6 +44,50 @@ function normalizeSubject(subject: QueueActionRunInput["subject"]): QueueActionR
 
 function normalizeError(error: ActionRunFailure | undefined): ActionRunFailure | undefined {
   return error ? structuredClone(error) : undefined
+}
+
+function normalizeWriteback(
+  input: RecordActionWritebackInput,
+  completedAt: Date
+): ActionRunWritebackRecord {
+  if (input.status === "succeeded") {
+    return {
+      status: "succeeded",
+      completedAt,
+      result: structuredClone(input.result),
+    }
+  }
+
+  return {
+    status: "failed",
+    completedAt,
+    error: normalizeError(input.error),
+  }
+}
+
+function normalizeCommit(input: RecordActionCommitInput, committedAt: Date): ActionRunCommitRecord {
+  return {
+    committedAt,
+    diff: normalizeActionRunCommitDiff(input.diff),
+  }
+}
+
+function normalizeEffects(
+  input: RecordActionEffectsInput,
+  completedAt: Date
+): ActionRunEffectsRecord {
+  if (input.status === "succeeded") {
+    return {
+      status: "succeeded",
+      completedAt,
+    }
+  }
+
+  return {
+    status: "failed",
+    completedAt,
+    error: normalizeError(input.error),
+  }
 }
 
 function compareRuns(a: ActionRunRecord, b: ActionRunRecord, order: "asc" | "desc"): number {
@@ -85,6 +139,9 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
         startedAt: undefined,
         finishedAt: undefined,
         error: undefined,
+        writeback: undefined,
+        commit: undefined,
+        effects: undefined,
         securityContext: record.securityContext,
       }
       this.rows.set(key, structuredClone(next))
@@ -114,9 +171,96 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     const next: ActionRunRecord = {
       ...existing,
       status: "running",
-      phase: "handler",
+      phase: input.phase ?? "validation",
       startedAt: new Date(input.startedAt ?? new Date()),
       error: undefined,
+    }
+
+    this.rows.set(key, structuredClone(next))
+    return cloneActionRunRecord(next)
+  }
+
+  async enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord> {
+    const key = actionRunKey(input.projectId, input.id)
+    const existing = this.requireRunningRun(key, input.projectId, input.id, "enter phase")
+    const next: ActionRunRecord = {
+      ...existing,
+      phase: input.phase,
+    }
+
+    this.rows.set(key, structuredClone(next))
+    return cloneActionRunRecord(next)
+  }
+
+  async recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord> {
+    const key = actionRunKey(input.projectId, input.id)
+    const existing = this.requireRunningRun(key, input.projectId, input.id, "record writeback")
+    const writeback = normalizeWriteback(input, new Date(input.completedAt ?? new Date()))
+
+    if (existing.writeback) {
+      if (actionRunPhaseRecordsEqual(existing.writeback, writeback)) {
+        return cloneActionRunRecord(existing)
+      }
+
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' already has a different writeback record.`
+      )
+    }
+
+    const next: ActionRunRecord = {
+      ...existing,
+      phase: "writeback",
+      writeback,
+    }
+
+    this.rows.set(key, structuredClone(next))
+    return cloneActionRunRecord(next)
+  }
+
+  async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
+    const key = actionRunKey(input.projectId, input.id)
+    const existing = this.requireRunningRun(key, input.projectId, input.id, "record commit")
+    const commit = normalizeCommit(input, new Date(input.committedAt ?? new Date()))
+
+    if (existing.commit) {
+      if (actionRunCommitDiffsEqual(existing.commit.diff, commit.diff)) {
+        return cloneActionRunRecord(existing)
+      }
+
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' already has a different commit diff.`
+      )
+    }
+
+    const next: ActionRunRecord = {
+      ...existing,
+      phase: "commit",
+      commit,
+    }
+
+    this.rows.set(key, structuredClone(next))
+    return cloneActionRunRecord(next)
+  }
+
+  async recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord> {
+    const key = actionRunKey(input.projectId, input.id)
+    const existing = this.requireRunningRun(key, input.projectId, input.id, "record effects")
+    const effects = normalizeEffects(input, new Date(input.completedAt ?? new Date()))
+
+    if (existing.effects) {
+      if (actionRunPhaseRecordsEqual(existing.effects, effects)) {
+        return cloneActionRunRecord(existing)
+      }
+
+      throw new ActionRunError(
+        `[Sixb] Action run '${input.id}' already has a different effects record.`
+      )
+    }
+
+    const next: ActionRunRecord = {
+      ...existing,
+      phase: "effects",
+      effects,
     }
 
     this.rows.set(key, structuredClone(next))
@@ -164,6 +308,27 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
 
     this.rows.set(key, structuredClone(next))
     return cloneActionRunRecord(next)
+  }
+
+  private requireRunningRun(
+    key: string,
+    projectId: string,
+    id: string,
+    operation: string
+  ): ActionRunRecord {
+    const existing = this.rows.get(key)
+
+    if (!existing) {
+      throw new ActionRunError(`[Sixb] Action run '${id}' not found for project '${projectId}'.`)
+    }
+
+    if (existing.status !== "running") {
+      throw new ActionRunError(
+        `[Sixb] Action run '${id}' cannot ${operation} from status '${existing.status}'.`
+      )
+    }
+
+    return existing
   }
 
   async getById(params: { projectId: string; id: string }): Promise<ActionRunRecord | null> {

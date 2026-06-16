@@ -250,7 +250,7 @@ async function completeRequestedActions(
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
                   error: {
                     message: errorMessage,
-                    phase: "handler",
+                    phase: "legacy_handler",
                   },
                 }
           )
@@ -275,7 +275,7 @@ async function completeRequestedActions(
                       subject: event.payload.subject,
                       error: {
                         message: errorMessage,
-                        phase: "handler",
+                        phase: "legacy_handler",
                       },
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },

@@ -72,7 +72,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   if (!action) {
     const failure = toActionRunFailure(
       new ActionWorkerError(`Unknown action '${job.actionId}'.`),
-      "handler"
+      "validation"
     )
     const finishedRun = await runtime.actionRunsStorage.finish({
       projectId: runtime.id,
@@ -94,11 +94,13 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   }
 
   let startedRun: ActionRunRecord | null = null
+  let activeRun: ActionRunRecord | null = null
   try {
     startedRun = await runtime.actionRunsStorage.start({
       projectId: runtime.id,
       id: job.id,
     })
+    activeRun = startedRun
     throwIfAborted(signal)
 
     if (!isObjectActionDefinition(action)) {
@@ -106,6 +108,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
         throw new ActionWorkerError(`Action '${job.actionId}' does not accept a subject.`)
       }
 
+      activeRun = await runtime.actionRunsStorage.enterPhase({
+        projectId: runtime.id,
+        id: job.id,
+        phase: "legacy_handler",
+      })
       await action.handler({
         params: startedRun.params,
         sixb: runtime.sixb,
@@ -146,6 +153,11 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
         )
       }
 
+      activeRun = await runtime.actionRunsStorage.enterPhase({
+        projectId: runtime.id,
+        id: job.id,
+        phase: "legacy_handler",
+      })
       await action.handler({
         params: startedRun.params,
         target: toActionTargetObject(targetRow, action.target.id),
@@ -173,7 +185,10 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
     }
   } catch (error) {
     const status = signal.aborted ? "cancelled" : "failed"
-    const failure = toActionRunFailure(error, status === "cancelled" ? "cancelled" : "handler")
+    const failure = toActionRunFailure(
+      error,
+      status === "cancelled" ? "cancelled" : (activeRun?.phase ?? "validation")
+    )
 
     const finishedRun = await runtime.actionRunsStorage
       .finish({
@@ -213,7 +228,7 @@ async function failRedeliveredRunningRun(
   const failure: ActionRunFailure = {
     name: "ActionRunLeaseLostError",
     message: error.message,
-    phase: "handler",
+    phase: existingRun.phase ?? "legacy_handler",
   }
 
   const finishedRun = await runtime.actionRunsStorage
@@ -221,7 +236,7 @@ async function failRedeliveredRunningRun(
       projectId: runtime.id,
       id: job.id,
       status: "failed",
-      phase: "handler",
+      phase: failure.phase,
       error: failure,
     })
     .catch(async (error) => {
