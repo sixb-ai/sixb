@@ -1,5 +1,5 @@
 import { isFileRef } from "../../blob-storage/validation"
-import type { ObjectFieldSchema, Schema, ValueType } from ".."
+import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
 import { OntologyValidationError } from "../errors"
 
 /** Recursive schema validator used by both object and link property validation. */
@@ -110,14 +110,12 @@ export function validateSchemaValue(
   }
 
   if (schema.type === "valueTypeRef") {
-    const valueType = valueTypesById.get(schema.valueTypeId)
-    if (!valueType) {
-      throw new OntologyValidationError(
-        `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
-      )
-    }
-
-    validateSchemaValue(valueType.schema, value, path, valueTypesById)
+    validateSchemaValue(
+      resolveValueTypeSchema(schema, valueTypesById, path),
+      value,
+      path,
+      valueTypesById
+    )
   }
 }
 
@@ -147,6 +145,20 @@ export function resolveValueTypeRef(schema: Schema): string | undefined {
   }
 
   return undefined
+}
+
+export function resolveValueTypeSchema(
+  schema: ValueTypeRefSchema,
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  path: string
+): Schema {
+  const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
+  if (!resolved) {
+    throw new OntologyValidationError(
+      `[Sixb] Unknown valueTypeRef '${schema.valueTypeId}' at ${path}`
+    )
+  }
+  return resolved
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

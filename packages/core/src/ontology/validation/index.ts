@@ -1,6 +1,7 @@
 export type { BatchValidationResult } from "./batch"
 export { validateLinkBatch, validateObjectBatch } from "./batch"
 export { assertLinkTargetType, assertTargetTypeCompatible, validateLinkProperties } from "./links"
+export { normalizeSchemaValue } from "./normalize"
 
 export {
   assertKnownProperties,
@@ -14,7 +15,12 @@ export {
   validatePropertyValue,
 } from "./properties"
 export { validateQueryMetadata } from "./query"
-export { isRecord, resolveValueTypeRef, validateSchemaValue } from "./schema"
+export {
+  isRecord,
+  resolveValueTypeRef,
+  resolveValueTypeSchema,
+  validateSchemaValue,
+} from "./schema"
 
 export {
   assertTelemetryProperty,

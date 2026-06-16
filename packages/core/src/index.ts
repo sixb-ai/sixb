@@ -50,6 +50,44 @@ export {
   valueTypeRef,
 } from "./ontology"
 
+// ── Edits ───────────────────────────────────────────────────
+
+export type {
+  EditBatch,
+  EditBatchInput,
+  EditBatchProducer,
+  EditBatchVersion,
+  EditCommitDiff,
+  EditCreateProperties,
+  EditLinkCreateOperation,
+  EditLinkDeleteOperation,
+  EditLinkDiff,
+  EditObjectCreateOperation,
+  EditObjectDeleteOperation,
+  EditObjectDiff,
+  EditObjectHandle,
+  EditObjectProperties,
+  EditObjectRef,
+  EditObjectSetRecorder,
+  EditObjectUpdateOperation,
+  EditOperation,
+  EditUpdateProperties,
+  RecordEditsContext,
+  RecordEditsHandler,
+  RecordEditsOptions,
+  TypedEditObjectRef,
+  ValidateEditBatchInput,
+  ValidateEditBatchResult,
+} from "./edits"
+export {
+  deriveEditCommitDiff,
+  EditBatchError,
+  normalizeEditBatch,
+  normalizeEditOperationInput,
+  recordEdits,
+  validateEditBatch,
+} from "./edits"
+
 // ── Actions ─────────────────────────────────────────────────
 
 export type {
