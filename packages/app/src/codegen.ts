@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
@@ -34,7 +34,7 @@ ${entries}
 `
 
   const outPath = join(generatedDir, "routes.ts")
-  await writeFile(outPath, content, "utf-8")
+  await writeFileIfChanged(outPath, content)
   return outPath
 }
 
@@ -236,7 +236,7 @@ if (canRenderApp) {
 `
 
   const mainPath = join(generatedDir, "main.tsx")
-  await writeFile(mainPath, mainContent, "utf-8")
+  await writeFileIfChanged(mainPath, mainContent)
 
   // Generate index.html with only structural reset rules. Apps own visual
   // styling through app/globals.css.
@@ -270,9 +270,31 @@ if (canRenderApp) {
 `
 
   const htmlPath = join(generatedDir, "index.html")
-  await writeFile(htmlPath, htmlContent, "utf-8")
+  await writeFileIfChanged(htmlPath, htmlContent)
 
   return { htmlPath, mainPath }
+}
+
+async function writeFileIfChanged(path: string, content: string): Promise<void> {
+  try {
+    if ((await readFile(path, "utf-8")) === content) {
+      return
+    }
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error
+    }
+  }
+
+  await writeFile(path, content, "utf-8")
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as Error & { readonly code?: unknown }).code === "ENOENT"
+  )
 }
 
 function relativeTo(from: string, to: string): string {

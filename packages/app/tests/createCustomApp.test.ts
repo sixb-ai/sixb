@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -23,6 +23,14 @@ async function getFreePort(): Promise<number> {
       })
     })
   })
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, ms))
+}
+
+async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
+  return await Promise.all(paths.map(async (path) => (await stat(path)).mtimeMs))
 }
 
 describe("createCustomApp.start", () => {
@@ -249,6 +257,28 @@ describe("createCustomApp.dev", () => {
     expect(manifest).toContain('{ path: "/", component: Page0 },')
     expect(manifest).toContain('{ path: "/devices/:id", component: Page1 },')
     expect(manifest).not.toContain("lazy(")
+  })
+
+  test("leaves generated entry files untouched when content is unchanged", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const routes = [
+      {
+        path: "/",
+        filePath: join(tempRoot, "app", "page.tsx"),
+        relativePath: "page.tsx",
+      },
+    ]
+
+    const manifestPath = await generateRouteManifest(routes, generatedDir)
+    const { htmlPath, mainPath } = await generateAppEntry(tempRoot, generatedDir)
+    const files = [manifestPath, mainPath, htmlPath]
+    const before = await mtimes(files)
+
+    await wait(25)
+    await generateRouteManifest(routes, generatedDir)
+    await generateAppEntry(tempRoot, generatedDir)
+
+    expect(await mtimes(files)).toEqual(before)
   })
 
   test("generated entry intercepts internal anchors conservatively", async () => {
