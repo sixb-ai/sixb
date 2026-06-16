@@ -143,10 +143,14 @@ export function SettingsInvitationsPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
 
-  const invitationOptionsQuery = useQuery(getAuthInvitationOptionsOptions())
+  const invitationOptionsQuery = useQuery({
+    ...getAuthInvitationOptionsOptions(),
+    retry: false,
+  })
   const invitationsQuery = useQuery({
     ...listAuthInvitationsOptions(invitationListOptions),
     enabled: invitationOptionsQuery.isSuccess,
+    retry: false,
   })
 
   const options = invitationOptionsQuery.data

@@ -7,7 +7,7 @@ import type { PageRoute } from "./scanner"
  * Generates `.sixb/generated/routes.ts` with static route imports. Pages are
  * eager on purpose: project-specific apps bundle small, and a single bundle
  * (one JS file, one render-blocking CSS file) means no Suspense gap or
- * late-arriving styles when navigating — matching how Atlas/Sentinel route.
+ * late-arriving styles when navigating — matching how Atlas routes.
  */
 export async function generateRouteManifest(
   routes: PageRoute[],

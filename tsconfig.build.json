@@ -53,9 +53,6 @@
       "path": "packages/rules-worker/tsconfig.build.json"
     },
     {
-      "path": "packages/sentinel/tsconfig.build.json"
-    },
-    {
       "path": "packages/server/tsconfig.build.json"
     },
     {

@@ -84,7 +84,10 @@ export function SettingsSessionsPage() {
   const [error, setError] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
 
-  const sessionsQuery = useQuery(listAuthSessionsOptions())
+  const sessionsQuery = useQuery({
+    ...listAuthSessionsOptions(),
+    retry: false,
+  })
   const sessions = sessionsQuery.data?.sessions ?? []
 
   const refreshSessions = () =>

@@ -2,7 +2,6 @@ import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { createCustomApp } from "@sixb/app"
 import { buildAtlasAssets } from "@sixb/atlas"
-import { buildSentinelAssets } from "@sixb/sentinel"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
 export interface BuildOptions {
@@ -68,7 +67,6 @@ export async function runBuild(options: BuildOptions = {}) {
 
   try {
     await buildAtlasAssets({ outdir: resolve(outdir, "atlas") })
-    await buildSentinelAssets({ outdir: resolve(outdir, "sentinel") })
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await renderStatic(

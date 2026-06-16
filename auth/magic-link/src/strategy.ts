@@ -31,10 +31,10 @@ export interface MagicLinkOptions {
   readonly magicLinkTtlMs?: number
   /**
    * Request rate limit, or `false` to disable. The limiter is keyed per email and
-   * shared across every audience served by one API process — a user signing into
-   * several browser roles (Atlas, Sentinel, the custom app) back-to-back draws from
-   * the same per-email bucket. Set `perMinute` to at least the number of browser
-   * roles a user signs into. Defaults to `{ perMinute: 5, perHour: 20 }`.
+   * shared across every audience served by one API process. A user signing into
+   * Atlas and a custom app back-to-back draws from the same per-email bucket. Set
+   * `perMinute` to at least the number of browser roles a user signs into.
+   * Defaults to `{ perMinute: 5, perHour: 20 }`.
    */
   readonly rateLimit?: false | Partial<MagicLinkRateLimitOptions>
   readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>

@@ -47,7 +47,6 @@ const flagsWithValues = new Set([
   "api-host",
   "api-public-origin",
   "atlas-public-origin",
-  "sentinel-public-origin",
   "app-public-origin",
   "outdir",
   "dir",
@@ -111,7 +110,6 @@ async function main(): Promise<void> {
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
-        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
       })
       break
@@ -149,7 +147,6 @@ async function main(): Promise<void> {
         apiHost: getFlag("api-host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
-        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
       })
       break
@@ -163,18 +160,6 @@ async function main(): Promise<void> {
         host: getFlag("host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         atlasPublicOrigin: getFlag("atlas-public-origin"),
-      })
-      break
-    }
-
-    case "sentinel": {
-      const { runSentinel } = await import("./commands/sentinel")
-      await runSentinel({
-        entry: getFlag("entry"),
-        port: getFlag("port"),
-        host: getFlag("host"),
-        apiPublicOrigin: getFlag("api-public-origin"),
-        sentinelPublicOrigin: getFlag("sentinel-public-origin"),
       })
       break
     }

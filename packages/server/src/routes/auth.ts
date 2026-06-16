@@ -834,7 +834,7 @@ function strategyNotImplementedResponse(message: string): Response {
   })
 }
 
-// Mirrors the Atlas/Sentinel design tokens (packages/ui/src/styles/globals.css) so the
+// Mirrors the Atlas design tokens (packages/ui/src/styles/globals.css) so the
 // server-rendered auth pages feel familiar. Self-contained: no external CSS, and dark mode
 // follows the system preference since these standalone pages have no client theme runtime.
 const AUTH_PAGE_STYLE = `<style>

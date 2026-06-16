@@ -129,7 +129,7 @@ describe("role startup connection budget", () => {
   test(
     "sixb api starts without migrating storage or touching lake storage",
     async () => {
-      const [atlasPort, apiPort, sentinelPort] = await getFreePorts(3)
+      const [atlasPort, apiPort] = await getFreePorts(2)
       const { ready, logEntries } = await startRole([
         "api",
         "--port",
@@ -144,8 +144,6 @@ describe("role startup connection budget", () => {
         `http://localhost:${apiPort}`,
         "--atlas-public-origin",
         `http://localhost:${atlasPort}`,
-        "--sentinel-public-origin",
-        `http://localhost:${sentinelPort}`,
       ])
 
       expect(ready).toBe(true)

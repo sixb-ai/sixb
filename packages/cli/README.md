@@ -12,10 +12,9 @@ bun add @sixb/cli
 
 | Command | Description |
 |---|---|
-| `sixb dev` | Start local API, Atlas UI, Sentinel UI, optional custom app, and workers |
+| `sixb dev` | Start local API, Atlas UI, optional custom app, and workers |
 | `sixb api` | Start the production API/docs/WebSocket server |
 | `sixb atlas` | Start the production Atlas UI server |
-| `sixb sentinel` | Start the production Sentinel UI server |
 | `sixb app` | Start the production custom app server |
 | `sixb scheduler` | Start the production scheduler event producer |
 | `sixb orchestrator` | Start the production event-to-queue dispatcher |
@@ -24,7 +23,7 @@ bun add @sixb/cli
 | `sixb worker <type>` | Start a production queue worker (one queue type per process) |
 | `sixb worker-group [types...]` | Co-host several queue workers in one process (constrained resources) |
 | `sixb check` | Validate project configuration and provider health |
-| `sixb build` | Bundle the project runtime, custom app, Atlas assets, and Sentinel assets |
+| `sixb build` | Bundle the project runtime, custom app, and Atlas assets |
 | `sixb db migrate` | Run adapter-owned database migrations for the configured storage |
 | `sixb lake check` | Check lake dataset definitions for drift against the lake catalog |
 | `sixb lake cleanup` | Run provider-supported lake maintenance cleanup |
@@ -46,7 +45,6 @@ Also available as `create-sixb <name>` (alias for `sixb create`).
 | `--api-host <host>` | `dev`, `api` | `--host` | API bind host |
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
 | `--atlas-public-origin <origin>` | `dev`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
-| `--sentinel-public-origin <origin>` | `dev`, `api`, `sentinel` | dev: `http://localhost:<port+3>` | Public Sentinel UI origin |
 | `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
 | `--outdir <path>` | `build` | `.sixb/dist` | Build output directory |
 | `--dry-run` | `lake cleanup` | false | Preview cleanup without changing storage |
@@ -65,7 +63,6 @@ sixb build
 # Recommended production process layout
 sixb api
 sixb atlas
-sixb sentinel
 sixb app
 sixb scheduler
 sixb orchestrator
@@ -170,10 +167,10 @@ http://localhost:3002 -> API, auth, docs, and runtime WebSockets
 Production serving commands require explicit public origins through flags or environment variables.
 The split UI commands require their own public origin and `SIXB_API_PUBLIC_ORIGIN`. `sixb api`
 requires `SIXB_API_PUBLIC_ORIGIN`, `SIXB_ATLAS_PUBLIC_ORIGIN`,
-`SIXB_SENTINEL_PUBLIC_ORIGIN`, and `SIXB_APP_PUBLIC_ORIGIN` when a built custom app is served.
+and `SIXB_APP_PUBLIC_ORIGIN` when a built custom app is served.
 
-`sixb atlas`, `sixb sentinel`, and `sixb app` serve only prebuilt assets. Run `sixb build`
-before starting them. They fail with a clear error instead of compiling assets at startup.
+`sixb atlas` and `sixb app` serve only prebuilt assets. Run `sixb build` before starting them.
+They fail with a clear error instead of compiling assets at startup.
 
 `sixb worker <type>` is intended for queue backends that can be shared across processes. Each
 worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue

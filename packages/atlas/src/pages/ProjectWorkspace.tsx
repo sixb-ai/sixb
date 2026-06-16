@@ -8,6 +8,7 @@ import {
   listPipelinesOptions,
   listRulesOptions,
   listSyncsOptions,
+  listWorkflowsOptions,
   objectCountOptions,
   useSixbEvents,
 } from "@sixb/client/hooks"
@@ -28,6 +29,7 @@ import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
+import { WorkflowLiveUpdatesBoundary } from "../features/workflows/components/WorkflowLiveUpdatesBoundary"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 import {
   getObjectSortPreference,
@@ -42,7 +44,10 @@ import { ObjectTypeDetail } from "./ObjectTypeDetail"
 import { OntologyExplorer } from "./OntologyExplorer"
 import { PipelineDetailPage, PipelinesPage } from "./PipelinesPage"
 import { RuleDetailPage, RulesPage } from "./RulesPage"
+import { RunDetailPage } from "./RunDetailPage"
 import { SyncDetailPage, SyncsPage } from "./SyncsPage"
+import { WorkflowDetailPage } from "./WorkflowDetailPage"
+import { WorkflowsPage } from "./WorkflowsPage"
 
 const emptyObjectList: ObjectSummary[] = []
 const OBJECT_PAGE_SIZE = 300
@@ -266,6 +271,11 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
+  const { data: workflows = [] } = useQuery({
+    ...listWorkflowsOptions(),
+    enabled: !!projectInfo,
+  })
+
   const { data: rules = [] } = useQuery({
     ...listRulesOptions(),
     enabled: !!projectInfo,
@@ -303,6 +313,7 @@ export function ProjectWorkspace() {
       connectorCount: connectors.length,
       syncCount: syncs.length,
       pipelineCount: pipelines.length,
+      workflowCount: workflows.length,
       ruleCount: rules.length,
       ontologyCount: objectTypes.length,
     })
@@ -313,6 +324,7 @@ export function ProjectWorkspace() {
     connectors.length,
     syncs.length,
     pipelines.length,
+    workflows.length,
     rules.length,
     objectTypes.length,
     setSidebarData,
@@ -386,6 +398,12 @@ export function ProjectWorkspace() {
   return (
     <Routes>
       <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
+      <Route element={<WorkflowLiveUpdatesBoundary />}>
+        <Route path="workflows" element={<WorkflowsPage />} />
+        <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
+        <Route path="runs" element={<RunsTabRedirect />} />
+        <Route path="runs/:runId" element={<RunDetailPage />} />
+      </Route>
       <Route
         path="*"
         element={constrained(
@@ -457,4 +475,12 @@ export function ProjectWorkspace() {
       />
     </Routes>
   )
+}
+
+function RunsTabRedirect() {
+  const [searchParams] = useSearchParams()
+  const params = new URLSearchParams(searchParams)
+  params.set("tab", "runs")
+
+  return <Navigate to={`/workflows?${params.toString()}`} replace />
 }

@@ -34,7 +34,6 @@
       "@sixb/projection-worker": ["./packages/projection-worker/src/index.ts"],
       "@sixb/queues-bullmq": ["./queues/bullmq/src/index.ts"],
       "@sixb/rules-worker": ["./packages/rules-worker/src/index.ts"],
-      "@sixb/sentinel": ["./packages/sentinel/src/index.ts"],
       "@sixb/server": ["./packages/server/src/index.ts"],
       "@sixb/sqlite": ["./storage/sqlite/src/index.ts"],
       "@sixb/sync-worker": ["./packages/sync-worker/src/index.ts"],

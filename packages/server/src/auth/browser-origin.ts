@@ -8,7 +8,7 @@ import {
 export interface SixbBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "atlas" | "sentinel" | "app"
+  readonly kind?: "atlas" | "app"
 }
 
 export interface SixbApiBrowserPolicy {
@@ -20,7 +20,7 @@ export interface SixbApiBrowserPolicy {
 export interface ResolvedSixbBrowserOrigin {
   readonly origin: string
   readonly audience: AuthSessionAudience
-  readonly kind?: "atlas" | "sentinel" | "app"
+  readonly kind?: "atlas" | "app"
 }
 
 export interface ResolvedSixbApiBrowserPolicy {

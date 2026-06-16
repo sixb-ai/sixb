@@ -48,7 +48,7 @@ export function WorkflowDetailPage() {
   })
 
   if (!workflowId) {
-    return <Navigate to="/" replace />
+    return <Navigate to="/workflows" replace />
   }
 
   if (workflowQuery.isLoading) {
@@ -89,7 +89,7 @@ export function WorkflowDetailPage() {
           <Stat count={inputFieldCount} singular="input field" plural="input fields" />
         </span>
       }
-      backTo="/"
+      backTo="/workflows"
       backLabel="Workflows"
       actions={<RequestWorkflowRunDialog workflow={workflow} />}
     >
@@ -127,7 +127,7 @@ export function WorkflowDetailPage() {
         </TabsContent>
 
         <TabsContent value="runs">
-          <WorkflowRunsTab workflowId={workflow.id} />
+          <WorkflowDetailRunsTab workflowId={workflow.id} />
         </TabsContent>
       </Tabs>
     </PageFrame>
@@ -294,7 +294,7 @@ function TriggerRow({ trigger }: { trigger: WorkflowTrigger }) {
   )
 }
 
-function WorkflowRunsTab({ workflowId }: { workflowId: string }) {
+function WorkflowDetailRunsTab({ workflowId }: { workflowId: string }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const statusParam = searchParams.get("status")
   const selectedStatus: WorkflowRunStatusFilter = isWorkflowRunStatus(statusParam)

@@ -115,5 +115,5 @@ In dev mode the Bun server serves them directly; in production they are copied i
 | `generateAppEntry(projectRoot, generatedDir, options)` | Write `index.html` and `main.tsx` entry points |
 | `buildApp(options)` | Bundle the generated entry point for production |
 | `resolveCustomAppStylesheet(input)` | Decide whether `app/globals.css` is plain CSS or Tailwind source |
-| `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas/Sentinel) |
+| `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
 | `resolveTailwindCliEntry(resolveFrom)` | Locate `@tailwindcss/cli` in a directory's dependency tree |

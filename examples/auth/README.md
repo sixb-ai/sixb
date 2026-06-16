@@ -38,7 +38,7 @@ whole flow, not just sign-in:
 - **Invite policy** — security admins can invite people into `team-members`
   (`security/invite-policies/default-invites.ts`).
 
-So: sign in as `admin@example.com`, then use the admin UI (Sentinel) to invite a
+So: sign in as `admin@example.com`, then use the admin UI in Atlas to invite a
 teammate. They receive their own sign-in link — printed to the terminal, or
 emailed if Resend is configured.
 

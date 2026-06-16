@@ -118,7 +118,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
         response: result.input,
         submittedBy: {
           principalType: "user",
-          principalId: "sentinel-ui",
+          principalId: "atlas-ui",
         },
       },
     })
@@ -165,7 +165,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
           <UserCheck className="h-4 w-4" />
           <AlertTitle>No pending intervention</AlertTitle>
           <AlertDescription>
-            This node is waiting, but Sentinel could not find a pending intervention record.
+            This node is waiting, but Atlas could not find a pending intervention record.
           </AlertDescription>
         </Alert>
       ) : !schemaReady ? (
