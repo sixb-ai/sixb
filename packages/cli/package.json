@@ -24,7 +24,6 @@
     "@sixb/pipeline-worker": "workspace:*",
     "@sixb/projection-worker": "workspace:*",
     "@sixb/rules-worker": "workspace:*",
-    "@sixb/sentinel": "workspace:*",
     "@sixb/server": "workspace:*",
     "@sixb/sync-worker": "workspace:*",
     "@sixb/workflow-worker": "workspace:*",

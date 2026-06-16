@@ -63,8 +63,8 @@ export function resolveRateLimitOptions(
     return false
   }
 
-  // Defaults accommodate a single user signing into multiple audiences (Atlas,
-  // Sentinel, app) in one burst. The limiter is keyed per email and shared across
+  // Defaults accommodate a single user signing into multiple audiences (Atlas and
+  // a custom app) in one burst. The limiter is keyed per email and shared across
   // audiences, so the per-minute default must cover the number of browser roles.
   const perMinute = options?.perMinute ?? 5
   const perHour = options?.perHour ?? 20

@@ -15,7 +15,6 @@ export interface ApiOptions {
   apiHost?: string
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
-  sentinelPublicOrigin?: string
   appPublicOrigin?: string
 }
 
@@ -44,7 +43,6 @@ export async function runApi(options: ApiOptions = {}) {
       apiPort: options.apiPort ?? options.port,
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
-      sentinelPublicOrigin: options.sentinelPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
       includeCustomApp: hasBuiltCustomApp,
     })

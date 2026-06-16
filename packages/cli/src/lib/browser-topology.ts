@@ -7,13 +7,10 @@ export interface BrowserTopologyOptions {
   readonly port?: string
   readonly appPort?: string
   readonly apiPort?: string
-  readonly sentinelPort?: string
   readonly apiPublicOrigin?: string
   readonly atlasPublicOrigin?: string
-  readonly sentinelPublicOrigin?: string
   readonly appPublicOrigin?: string
   readonly includeAtlas?: boolean
-  readonly includeSentinel?: boolean
   readonly includeCustomApp: boolean
 }
 
@@ -23,10 +20,8 @@ export interface BrowserTopology {
   readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
-  readonly sentinelPort: number
   readonly apiPublicOrigin: string
   readonly atlasPublicOrigin: string | null
-  readonly sentinelPublicOrigin: string | null
   readonly appPublicOrigin: string | null
   readonly allowedBrowserOrigins: readonly SixbBrowserOrigin[]
 }
@@ -40,13 +35,11 @@ interface BrowserPorts {
   readonly atlasPort: number
   readonly appPort: number
   readonly apiPort: number
-  readonly sentinelPort: number
 }
 
 interface BrowserPublicOrigins {
   readonly apiPublicOrigin: string
   readonly atlasPublicOrigin: string | null
-  readonly sentinelPublicOrigin: string | null
   readonly appPublicOrigin: string | null
 }
 
@@ -54,7 +47,6 @@ const DEFAULT_BROWSER_HOST = "0.0.0.0"
 const DEFAULT_ATLAS_PORT = 3000
 const DEFAULT_APP_PORT_OFFSET = 1
 const DEFAULT_API_PORT_OFFSET = 2
-const DEFAULT_SENTINEL_PORT_OFFSET = 3
 
 export function resolveBrowserTopology(options: BrowserTopologyOptions): BrowserTopology {
   const hosts = resolveBrowserHosts(options)
@@ -81,17 +73,11 @@ function resolveBrowserPorts(options: BrowserTopologyOptions): BrowserPorts {
   const atlasPort = parsePort(options.port, "port", DEFAULT_ATLAS_PORT)
   const appPort = parsePort(options.appPort, "app-port", atlasPort + DEFAULT_APP_PORT_OFFSET)
   const apiPort = parsePort(options.apiPort, "api-port", atlasPort + DEFAULT_API_PORT_OFFSET)
-  const sentinelPort = parsePort(
-    options.sentinelPort,
-    "sentinel-port",
-    atlasPort + DEFAULT_SENTINEL_PORT_OFFSET
-  )
 
   return {
     atlasPort,
     appPort,
     apiPort,
-    sentinelPort,
   }
 }
 
@@ -107,22 +93,12 @@ function resolveBrowserPublicOrigins(
     mode: options.mode,
   })
   const includeAtlas = options.includeAtlas ?? true
-  const includeSentinel = options.includeSentinel ?? true
   const atlasPublicOrigin = includeAtlas
     ? resolvePublicOrigin({
         value: options.atlasPublicOrigin,
         envName: "SIXB_ATLAS_PUBLIC_ORIGIN",
         label: "Atlas public origin",
         localDefault: `http://localhost:${ports.atlasPort}`,
-        mode: options.mode,
-      })
-    : null
-  const sentinelPublicOrigin = includeSentinel
-    ? resolvePublicOrigin({
-        value: options.sentinelPublicOrigin,
-        envName: "SIXB_SENTINEL_PUBLIC_ORIGIN",
-        label: "Sentinel public origin",
-        localDefault: `http://localhost:${ports.sentinelPort}`,
         mode: options.mode,
       })
     : null
@@ -139,7 +115,6 @@ function resolveBrowserPublicOrigins(
   return {
     apiPublicOrigin,
     atlasPublicOrigin,
-    sentinelPublicOrigin,
     appPublicOrigin,
   }
 }
@@ -149,14 +124,6 @@ function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly Si
 
   if (origins.atlasPublicOrigin) {
     allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" })
-  }
-
-  if (origins.sentinelPublicOrigin) {
-    allowedOrigins.push({
-      origin: origins.sentinelPublicOrigin,
-      audience: "sentinel",
-      kind: "sentinel",
-    })
   }
 
   if (origins.appPublicOrigin) {

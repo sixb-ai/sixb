@@ -42,6 +42,7 @@ export function AppLayout() {
       datasetCount={sidebarData?.datasetCount}
       syncCount={sidebarData?.syncCount}
       pipelineCount={sidebarData?.pipelineCount}
+      workflowCount={sidebarData?.workflowCount}
       ruleCount={sidebarData?.ruleCount}
       ontologyCount={sidebarData?.ontologyCount}
     />

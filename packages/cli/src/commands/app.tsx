@@ -46,7 +46,6 @@ export async function runApp(options: AppOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
       includeAtlas: false,
-      includeSentinel: false,
       includeCustomApp: true,
     })
     if (!topology.appPublicOrigin) {

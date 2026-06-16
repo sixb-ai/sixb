@@ -436,7 +436,7 @@ describe("magicLink", () => {
       email: "ava@acme.com",
     })
 
-    for (const audience of ["atlas", "sentinel", "app"]) {
+    for (const audience of ["atlas", "app"]) {
       await expect(
         requestMagicLink({
           storage,
@@ -448,7 +448,7 @@ describe("magicLink", () => {
       ).resolves.toEqual({ status: "sent" })
     }
 
-    expect(messages).toHaveLength(3)
+    expect(messages).toHaveLength(2)
   })
 
   test("revokes the created magic link if sending fails", async () => {

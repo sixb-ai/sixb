@@ -36,7 +36,7 @@ export function RunDetailPage() {
   })
 
   if (!runId) {
-    return <Navigate to="/runs" replace />
+    return <Navigate to="/workflows?tab=runs" replace />
   }
 
   if (runQuery.isLoading) {
@@ -54,7 +54,7 @@ export function RunDetailPage() {
     <PageFrame
       title={<RunDetailTitle run={run} />}
       description={<RunDetailMeta run={run} nodeCount={nodes.length} />}
-      backTo="/runs"
+      backTo="/workflows?tab=runs"
       backLabel="Run history"
       contentClassName="mx-auto max-w-5xl gap-3"
     >

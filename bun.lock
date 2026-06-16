@@ -244,8 +244,8 @@
       "name": "@sixb/cli",
       "version": "0.1.0",
       "bin": {
-        "sixb": "./src/index.tsx",
-        "create-sixb": "./src/index.tsx",
+        "sixb": "./dist/index.js",
+        "create-sixb": "./dist/index.js",
       },
       "dependencies": {
         "@sixb/action-worker": "workspace:*",
@@ -256,7 +256,6 @@
         "@sixb/pipeline-worker": "workspace:*",
         "@sixb/projection-worker": "workspace:*",
         "@sixb/rules-worker": "workspace:*",
-        "@sixb/sentinel": "workspace:*",
         "@sixb/server": "workspace:*",
         "@sixb/sync-worker": "workspace:*",
         "@sixb/workflow-worker": "workspace:*",
@@ -342,29 +341,6 @@
       },
       "devDependencies": {
         "@types/bun": "latest",
-        "typescript": "^5.7.0",
-      },
-    },
-    "packages/sentinel": {
-      "name": "@sixb/sentinel",
-      "version": "0.1.0",
-      "dependencies": {
-        "@sixb/app": "workspace:*",
-        "@sixb/client": "workspace:*",
-        "@sixb/core": "workspace:*",
-        "@sixb/ui": "workspace:*",
-        "@tailwindcss/cli": "^4.2.2",
-        "@tanstack/react-query": "^5.0.0",
-        "lucide-react": "^0.562.0",
-        "react": "^19.0.0",
-        "react-dom": "^19.0.0",
-        "react-router-dom": "^7.13.0",
-        "tailwindcss": "^4.1.18",
-      },
-      "devDependencies": {
-        "@types/bun": "latest",
-        "@types/react": "^19.0.0",
-        "@types/react-dom": "^19.0.0",
         "typescript": "^5.7.0",
       },
     },
@@ -883,8 +859,6 @@
     "@sixb/queues-bullmq": ["@sixb/queues-bullmq@workspace:queues/bullmq"],
 
     "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
-
-    "@sixb/sentinel": ["@sixb/sentinel@workspace:packages/sentinel"],
 
     "@sixb/server": ["@sixb/server@workspace:packages/server"],
 

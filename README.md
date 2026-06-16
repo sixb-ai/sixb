@@ -100,7 +100,6 @@ separate process so scaling and failure boundaries stay explicit:
 sixb build
 sixb api
 sixb atlas
-sixb sentinel
 sixb app
 sixb scheduler
 sixb orchestrator
@@ -114,8 +113,7 @@ sixb worker workflow
 ```
 
 The split commands are the production layout for Docker, Kubernetes, systemd, and other process
-managers. `sixb atlas`, `sixb sentinel`, and `sixb app` serve only assets prepared by
-`sixb build`.
+managers. `sixb atlas` and `sixb app` serve only assets prepared by `sixb build`.
 
 ## Where To Go Next
 

@@ -33,7 +33,6 @@ export async function runAtlas(options: AtlasOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
       includeAtlas: true,
-      includeSentinel: false,
       includeCustomApp: false,
     })
     if (!topology.atlasPublicOrigin) {

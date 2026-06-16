@@ -3,13 +3,13 @@ import { Card, CardContent } from "@sixb/ui/components"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { History } from "lucide-react"
 import { useEffect, useMemo, useRef } from "react"
-import { LoadingInline, PageFrame } from "../components/common"
-import { RunHistoryFilters } from "../features/workflows/components/runs/RunHistoryFilters"
-import { RunHistoryTable } from "../features/workflows/components/runs/RunHistoryTable"
-import { useRunHistorySearch } from "../features/workflows/hooks/useRunHistorySearch"
-import { RUN_HISTORY_PAGE_SIZE } from "../features/workflows/utils/workflows"
+import { LoadingInline } from "../../../../components/common"
+import { useRunHistorySearch } from "../../hooks/useRunHistorySearch"
+import { RUN_HISTORY_PAGE_SIZE } from "../../utils/workflows"
+import { RunHistoryFilters } from "./RunHistoryFilters"
+import { RunHistoryTable } from "./RunHistoryTable"
 
-export function RunsPage() {
+export function WorkflowRunHistoryTab() {
   const { selectedStatus, selectedWorkflowId, filtered, clearSearch, updateSearch } =
     useRunHistorySearch()
   const query = {
@@ -69,11 +69,7 @@ export function RunsPage() {
   }, [runsQuery.fetchNextPage, runsQuery.hasNextPage, runsQuery.isFetchingNextPage])
 
   return (
-    <PageFrame
-      eyebrow="Runs"
-      title="Workflow Runs"
-      description="Filter, inspect, and page through workflow execution history."
-    >
+    <section className="space-y-4">
       <RunHistoryFilters
         workflows={workflowsQuery.data ?? []}
         workflowId={selectedWorkflowId}
@@ -117,7 +113,7 @@ export function RunsPage() {
           )}
         </CardContent>
       </Card>
-    </PageFrame>
+    </section>
   )
 }
 

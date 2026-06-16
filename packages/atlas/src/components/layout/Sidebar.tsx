@@ -20,6 +20,7 @@ import {
   Box,
   Cable,
   Database,
+  GitBranch,
   Globe,
   LayoutGrid,
   ListChecks,
@@ -34,6 +35,7 @@ export type ViewMode =
   | "connectors"
   | "syncs"
   | "pipelines"
+  | "workflows"
   | "rules"
   | "ontology"
   | "settings"
@@ -49,6 +51,7 @@ const projectNavItems: NavItem[] = [
   { id: "datasets", label: "Datasets", Icon: Database },
   { id: "syncs", label: "Syncs", Icon: RefreshCw },
   { id: "pipelines", label: "Pipelines", Icon: Workflow },
+  { id: "workflows", label: "Workflows", Icon: GitBranch },
   { id: "ontology", label: "Ontology", Icon: LayoutGrid },
   { id: "home", label: "Objects", Icon: Box },
   { id: "rules", label: "Rules", Icon: ListChecks },
@@ -67,6 +70,7 @@ interface SidebarProps {
   connectorCount?: number
   syncCount?: number
   pipelineCount?: number
+  workflowCount?: number
   ruleCount?: number
   ontologyCount?: number
   objectCount?: number
@@ -80,6 +84,7 @@ export function Sidebar({
   connectorCount,
   syncCount,
   pipelineCount,
+  workflowCount,
   ruleCount,
   ontologyCount,
   objectCount,
@@ -90,6 +95,7 @@ export function Sidebar({
     if (id === "connectors") return connectorCount
     if (id === "syncs") return syncCount
     if (id === "pipelines") return pipelineCount
+    if (id === "workflows") return workflowCount
     if (id === "rules") return ruleCount
     if (id === "ontology") return ontologyCount
     return undefined

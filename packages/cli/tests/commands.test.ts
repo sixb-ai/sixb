@@ -2,11 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import {
-  builtAtlasOutdir,
-  builtSentinelOutdir,
-  resolveProductionPaths,
-} from "../src/lib/production"
+import { builtAtlasOutdir, resolveProductionPaths } from "../src/lib/production"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
@@ -45,7 +41,6 @@ describe("sixb command dispatch", () => {
     for (const command of [
       "api",
       "atlas",
-      "sentinel",
       "app",
       "scheduler",
       "orchestrator",
@@ -102,9 +97,6 @@ describe("production asset paths", () => {
     expect(paths.projectRoot).toBe(projectRoot)
     expect(paths.buildOutdir).toBe(join(projectRoot, ".sixb", "dist"))
     expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(projectRoot, ".sixb", "dist", "atlas"))
-    expect(builtSentinelOutdir(paths.buildOutdir)).toBe(
-      join(projectRoot, ".sixb", "dist", "sentinel")
-    )
   })
 
   test("resolves custom build assets next to the built entry", async () => {
@@ -112,13 +104,11 @@ describe("production asset paths", () => {
     tempDirs.push(tempDir)
     const outdir = join(tempDir, "dist")
     await mkdir(join(outdir, "atlas"), { recursive: true })
-    await mkdir(join(outdir, "sentinel"), { recursive: true })
 
     const paths = await resolveProductionPaths(join(outdir, "sixb.config.js"))
 
     expect(paths.projectRoot).toBe(outdir)
     expect(paths.buildOutdir).toBe(outdir)
     expect(builtAtlasOutdir(paths.buildOutdir)).toBe(join(outdir, "atlas"))
-    expect(builtSentinelOutdir(paths.buildOutdir)).toBe(join(outdir, "sentinel"))
   })
 })

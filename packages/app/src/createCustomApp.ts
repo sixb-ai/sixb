@@ -451,7 +451,7 @@ function htmlResponse(request: Request, html: string): Response {
 
 // Bun.build emits content-hashed bundles named `chunk-<hash>.<ext>` (see buildApp).
 // Their contents can never change under the same URL, so they are safe to cache
-// forever — matching how Atlas/Sentinel serve their hashed assets. Files copied
+// forever — matching how Atlas serves its hashed assets. Files copied
 // from `public/` keep their names across deploys and stay uncached.
 const IMMUTABLE_ASSET_PATTERN = /^chunk-[a-z0-9]+\.(js|css|js\.map|css\.map)$/
 

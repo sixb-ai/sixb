@@ -75,10 +75,6 @@ export function builtAtlasOutdir(buildOutdir: string): string {
   return resolve(buildOutdir, "atlas")
 }
 
-export function builtSentinelOutdir(buildOutdir: string): string {
-  return resolve(buildOutdir, "sentinel")
-}
-
 function isDefaultBuildEntry(entry: string): boolean {
   return entry.includes(`${sep}.sixb${sep}dist${sep}`)
 }
@@ -91,9 +87,6 @@ async function isCustomBuildOutdirEntry(entry: string, entryDir: string): Promis
   const hasBuiltAtlas = await stat(resolve(entryDir, "atlas"))
     .then((info) => info.isDirectory())
     .catch(() => false)
-  const hasBuiltSentinel = await stat(resolve(entryDir, "sentinel"))
-    .then((info) => info.isDirectory())
-    .catch(() => false)
 
-  return hasBuiltAtlas || hasBuiltSentinel
+  return hasBuiltAtlas
 }

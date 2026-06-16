@@ -60,8 +60,8 @@ export function resolveTailwindCliEntry(resolveFrom: string): string | null {
 }
 
 /**
- * Shared Tailwind v4 CSS build pipeline used by the built-in UIs (Atlas,
- * Sentinel) and custom apps. Owns CLI resolution, source-detection scoping,
+ * Shared Tailwind v4 CSS build pipeline used by the built-in UI (Atlas) and
+ * custom apps. Owns CLI resolution, source-detection scoping,
  * debounced/queued rebuilds, error formatting, and watch lifecycle cleanup.
  */
 export function createTailwindCssCompiler(

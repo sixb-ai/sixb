@@ -48,7 +48,13 @@ export function useRunHistorySearch() {
     page,
     offset: page * RUN_HISTORY_PAGE_SIZE,
     filtered: selectedStatus !== "all" || selectedWorkflowId !== "all",
-    clearSearch: () => setSearchParams(new URLSearchParams()),
+    clearSearch: () =>
+      setSearchParams((previous) => {
+        const params = new URLSearchParams()
+        const tab = previous.get("tab")
+        if (tab) params.set("tab", tab)
+        return params
+      }),
     updateSearch,
   }
 }
