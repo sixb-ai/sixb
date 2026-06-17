@@ -2802,7 +2802,26 @@ export type ListObjectTypesResponses = {
       primary?: boolean
       semanticType?: string
       schema?: unknown
+      query?: {
+        searchable?: boolean
+        filterable?: boolean
+        sortable?: boolean
+        text?: boolean
+        exact?: boolean
+        facet?: boolean
+        vector?: boolean
+        weight?: number
+      }
     }>
+    search?: {
+      title?: string
+      defaultText?: Array<string>
+      exact?: Array<string>
+      vector?: {
+        property: string
+        source: Array<string>
+      }
+    }
     links: Array<{
       id: string
       name: string
@@ -2819,6 +2838,16 @@ export type ListObjectTypesResponses = {
         primary?: boolean
         semanticType?: string
         schema?: unknown
+        query?: {
+          searchable?: boolean
+          filterable?: boolean
+          sortable?: boolean
+          text?: boolean
+          exact?: boolean
+          facet?: boolean
+          vector?: boolean
+          weight?: number
+        }
       }>
     }>
     actions: Array<{
@@ -2879,7 +2908,26 @@ export type GetObjectTypeResponses = {
       primary?: boolean
       semanticType?: string
       schema?: unknown
+      query?: {
+        searchable?: boolean
+        filterable?: boolean
+        sortable?: boolean
+        text?: boolean
+        exact?: boolean
+        facet?: boolean
+        vector?: boolean
+        weight?: number
+      }
     }>
+    search?: {
+      title?: string
+      defaultText?: Array<string>
+      exact?: Array<string>
+      vector?: {
+        property: string
+        source: Array<string>
+      }
+    }
     links: Array<{
       id: string
       name: string
@@ -2896,6 +2944,16 @@ export type GetObjectTypeResponses = {
         primary?: boolean
         semanticType?: string
         schema?: unknown
+        query?: {
+          searchable?: boolean
+          filterable?: boolean
+          sortable?: boolean
+          text?: boolean
+          exact?: boolean
+          facet?: boolean
+          vector?: boolean
+          weight?: number
+        }
       }>
     }>
     actions: Array<{

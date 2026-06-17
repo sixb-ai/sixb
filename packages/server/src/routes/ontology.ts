@@ -3,6 +3,42 @@ import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
+function serializeProperty(
+  property: ReturnType<
+    Sixb<readonly OntologySource[]>["listObjectTypes"]
+  >[number]["properties"][number]
+) {
+  return {
+    id: property.id,
+    name: property.name,
+    description: property.description,
+    mode: property.mode,
+    required: property.required,
+    nullable: property.nullable,
+    primary: property.primary,
+    semanticType: property.semanticType,
+    schema: property.schema,
+    query: property.query ? { ...property.query } : undefined,
+  }
+}
+
+function serializeSearch(
+  search: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number]["search"]
+) {
+  if (!search) return undefined
+  return {
+    title: search.title,
+    defaultText: search.defaultText ? [...search.defaultText] : undefined,
+    exact: search.exact ? [...search.exact] : undefined,
+    vector: search.vector
+      ? {
+          property: search.vector.property,
+          source: [...search.vector.source],
+        }
+      : undefined,
+  }
+}
+
 function serializeObjectType(
   sixb: Sixb<readonly OntologySource[]>,
   objectType: ReturnType<Sixb<readonly OntologySource[]>["listObjectTypes"]>[number]
@@ -12,15 +48,18 @@ function serializeObjectType(
     name: objectType.name,
     description: objectType.description,
     extends: objectType.extends,
-    implements: objectType.implements,
-    properties: objectType.properties,
+    implements: objectType.implements ? [...objectType.implements] : undefined,
+    properties: objectType.properties.map(serializeProperty),
+    search: serializeSearch(objectType.search),
     links: objectType.links.map((link) => ({
       id: link.id,
       name: link.name,
       description: link.description,
-      targetObjectTypeId: link.targetObjectTypeId,
+      targetObjectTypeId: Array.isArray(link.targetObjectTypeId)
+        ? [...link.targetObjectTypeId]
+        : link.targetObjectTypeId,
       cardinality: link.cardinality,
-      properties: link.properties,
+      properties: link.properties?.map(serializeProperty),
     })),
     actions: sixb.getActionsForType(objectType).map((action) => ({
       id: action.id,
