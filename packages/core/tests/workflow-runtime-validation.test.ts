@@ -343,7 +343,7 @@ describe("workflow runtime validation", () => {
       valueTypesById,
     })
     const actionInputSnapshot = snapshotWorkflowActionInput({
-      target: { objectTypeId: "Transaction", primaryId: "txn_123" },
+      subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
       params: {
         reviewedAt,
         invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
@@ -388,7 +388,7 @@ describe("workflow runtime validation", () => {
       reviewedAt: "2026-05-08T10:00:00.000Z",
     })
     expect(actionInputSnapshot).toEqual({
-      target: { objectTypeId: "Transaction", primaryId: "txn_123" },
+      subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
       params: {
         reviewedAt: "2026-05-08T10:00:00.000Z",
         invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
@@ -412,7 +412,7 @@ describe("workflow runtime validation", () => {
   test("rejects non-JSON workflow IO snapshots with path context", () => {
     expect(() =>
       snapshotWorkflowActionInput({
-        target: { objectTypeId: "Transaction", primaryId: "txn_123" },
+        subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
         params: {
           callback: () => undefined,
         },
@@ -421,7 +421,7 @@ describe("workflow runtime validation", () => {
 
     expect(() =>
       snapshotWorkflowActionInput({
-        target: { objectTypeId: "Transaction", primaryId: "txn_123" },
+        subject: { kind: "object", objectTypeId: "Transaction", primaryId: "txn_123" },
         params: {
           callback: () => undefined,
         },

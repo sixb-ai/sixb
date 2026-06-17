@@ -55,7 +55,9 @@ function NodeMeta({ node }: { node: WorkflowNode }) {
   if (node.type === "action") {
     return (
       <p className="mt-0.5 truncate text-xs text-muted-foreground">
-        Sends an action request to {node.targetObjectTypeId}.
+        {node.objectTypeId === undefined
+          ? "Sends a global action request."
+          : `Sends an action request to ${node.objectTypeId}.`}
       </p>
     )
   }
@@ -73,12 +75,14 @@ function NodeMeta({ node }: { node: WorkflowNode }) {
 
 function NodeSummary({ node }: { node: WorkflowNode }) {
   if (node.type === "action") {
+    const isGlobal = node.objectTypeId === undefined
+
     return (
       <span className="hidden shrink-0 items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex">
-        <span>targets</span>
+        <span>{isGlobal ? "scope" : "targets"}</span>
         <span className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 font-medium text-foreground">
           <Box className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-          {node.targetObjectTypeId}
+          {isGlobal ? "global" : node.objectTypeId}
         </span>
       </span>
     )

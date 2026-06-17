@@ -1854,7 +1854,7 @@ export type ListWorkflowsResponses = {
           type: "action"
           id: string
           key: string
-          targetObjectTypeId: string
+          objectTypeId?: string
           params: {
             [key: string]: unknown
           }
@@ -1939,7 +1939,7 @@ export type GetWorkflowResponses = {
           type: "action"
           id: string
           key: string
-          targetObjectTypeId: string
+          objectTypeId?: string
           params: {
             [key: string]: unknown
           }

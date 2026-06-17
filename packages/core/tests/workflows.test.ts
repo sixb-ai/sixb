@@ -247,7 +247,7 @@ describe("defineWorkflow", () => {
         confidence: 0.98,
       }))
       .then(attachInvoice, () => ({
-        target: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+        subject: { objectTypeId: "Transaction", primaryId: "transaction:1" },
         params: {
           invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
         },
@@ -270,6 +270,23 @@ describe("defineWorkflow", () => {
     expect(typeof workflow.nodes[2].mapper).toBe("function")
   })
 
+  test("stores direct action nodes without a mapper", () => {
+    const workflow = runtimeDefineWorkflow("direct-action")
+      .input({
+        subject: ref(Transaction),
+        invoice: ref(Invoice),
+      })
+      .then(attachInvoice)
+
+    expect(workflow.nodes).toHaveLength(1)
+    expect(workflow.nodes[0]).toMatchObject({
+      type: "action",
+      id: "attach-invoice",
+      key: "attachInvoice",
+    })
+    expect(workflow.nodes[0]).not.toHaveProperty("mapper")
+  })
+
   test("stores intervention nodes in linear order", () => {
     const workflow = runtimeDefineWorkflow("review-then-attach")
       .input({
@@ -278,7 +295,7 @@ describe("defineWorkflow", () => {
       .then(findBestInvoice)
       .then(approveInvoiceMatch)
       .then(attachInvoice, () => ({
-        target: { objectTypeId: "Transaction", primaryId: "transaction:1" },
+        subject: { objectTypeId: "Transaction", primaryId: "transaction:1" },
         params: {
           invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
         },
@@ -383,8 +400,7 @@ describe("defineWorkflow", () => {
     })
     const then = draft.then
 
-    expect(() => then(attachInvoice)).toThrow(WorkflowDefinitionError)
-    expect(() => then(attachInvoice)).toThrow('action node "attach-invoice" requires a mapper')
+    expect(() => then(attachInvoice, "alias")).toThrow(WorkflowDefinitionError)
     expect(() => then(findBestInvoice, "alias")).toThrow(WorkflowDefinitionError)
     expect(() => then(findBestInvoice, () => ({}), "alias")).toThrow(WorkflowDefinitionError)
     expect(() => then(approveInvoiceMatch, "alias")).toThrow(WorkflowDefinitionError)
@@ -421,7 +437,7 @@ describe("Sixb workflow registration", () => {
       .when(daily)
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
-        target: input.transaction,
+        subject: input.transaction,
         params: {
           invoice: steps.findBestInvoice.invoice,
         },
@@ -543,7 +559,7 @@ describe("Sixb workflow registration", () => {
       })
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
-        target: input.transaction,
+        subject: input.transaction,
         params: {
           invoice: steps.findBestInvoice.invoice,
         },

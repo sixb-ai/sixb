@@ -141,7 +141,7 @@ export const invoiceReminderWorkflow = defineWorkflow("invoice-reminder-workflow
   .then(composeInvoiceReminder)
   .then(reviewInvoiceReminder)
   .then(sendReminder, ({ steps }) => ({
-    target: steps.composeInvoiceReminder.invoice,
+    subject: steps.composeInvoiceReminder.invoice,
     params: {
       approved: steps.reviewInvoiceReminder.approved,
       message: steps.reviewInvoiceReminder.message,

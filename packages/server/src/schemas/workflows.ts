@@ -92,7 +92,7 @@ const WorkflowNodeSchema = z.union([
     type: z.literal("action"),
     id: z.string(),
     key: z.string(),
-    targetObjectTypeId: z.string(),
+    objectTypeId: z.string().optional(),
     params: z.record(z.unknown()),
   }),
   z.object({

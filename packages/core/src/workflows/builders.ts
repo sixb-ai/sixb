@@ -1,5 +1,5 @@
-import type { ObjectActionDefinition } from "../actions"
-import { isActionDefinition, isObjectActionDefinition } from "../actions"
+import type { ActionDefinition } from "../actions"
+import { isActionDefinition } from "../actions"
 import type { SchemaOrRef } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
@@ -121,53 +121,45 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
   let definition: WorkflowChainDefinition | null = null
 
   const appendNode = (
-    target: unknown,
+    nodeDefinition: unknown,
     mapper?: unknown,
     ...extraArgs: unknown[]
   ): WorkflowChainDefinition => {
     if (extraArgs.length > 0) {
-      throw invalidThenOverload(id)
+      throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
     }
 
-    if (isStepDefinition(target)) {
+    if (isStepDefinition(nodeDefinition)) {
       if (mapper !== undefined && typeof mapper !== "function") {
-        throw invalidThenOverload(id)
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
-      nodes.push(createStepNode(id, nodes, target, mapper))
+      nodes.push(createStepNode(id, nodes, nodeDefinition, mapper))
       definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
       return definition
     }
 
-    if (isInterventionDefinition(target)) {
+    if (isInterventionDefinition(nodeDefinition)) {
       if (mapper !== undefined && typeof mapper !== "function") {
-        throw invalidThenOverload(id)
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
-      nodes.push(createInterventionNode(id, nodes, target, mapper))
+      nodes.push(createInterventionNode(id, nodes, nodeDefinition, mapper))
       definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
       return definition
     }
 
-    if (isActionDefinition(target)) {
-      if (!isObjectActionDefinition(target)) {
-        throw new WorkflowDefinitionError(
-          `Workflow "${id}" action node "${target.id}" must be object-scoped in V1.`
-        )
+    if (isActionDefinition(nodeDefinition)) {
+      if (mapper !== undefined && typeof mapper !== "function") {
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
-      if (typeof mapper !== "function") {
-        throw new WorkflowDefinitionError(
-          `Workflow "${id}" action node "${target.id}" requires a mapper.`
-        )
-      }
-
-      nodes.push(createActionNode(id, nodes, target, mapper))
+      nodes.push(createActionNode(id, nodes, nodeDefinition, mapper))
       definition ??= createWorkflowDefinition(id, input, triggers, nodes, appendNode)
       return definition
     }
 
-    throw invalidThenOverload(id)
+    throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
   }
 
   const draft = {
@@ -193,7 +185,11 @@ function createWorkflowDefinition(
   input: Record<string, SchemaOrRef>,
   triggers: readonly WorkflowTriggerDefinition[],
   nodes: readonly WorkflowNodeDefinition[],
-  then: (target: unknown, mapper?: unknown, ...extraArgs: unknown[]) => WorkflowChainDefinition
+  then: (
+    nodeDefinition: unknown,
+    mapper?: unknown,
+    ...extraArgs: unknown[]
+  ) => WorkflowChainDefinition
 ): WorkflowChainDefinition {
   return {
     kind: "workflow",
@@ -263,7 +259,7 @@ function createInterventionDefinition(input: {
 function createActionNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
-  action: ObjectActionDefinition,
+  action: ActionDefinition,
   mapper: unknown
 ): WorkflowNodeDefinition {
   const key = deriveWorkflowNodeKey(action.id)
@@ -275,7 +271,7 @@ function createActionNode(
     id: action.id,
     key,
     action,
-    mapper,
+    ...(mapper !== undefined ? { mapper } : {}),
   }
 }
 
@@ -347,10 +343,4 @@ function uncapitalize(value: string): string {
 
 function capitalize(value: string): string {
   return value.length === 0 ? value : `${value[0].toUpperCase()}${value.slice(1)}`
-}
-
-function invalidThenOverload(workflowId: string): WorkflowDefinitionError {
-  return new WorkflowDefinitionError(
-    `Invalid workflow "${workflowId}" .then(...) overload. V1 supports then(step), then(step, mapper), then(intervention), then(intervention, mapper), and then(action, mapper).`
-  )
 }

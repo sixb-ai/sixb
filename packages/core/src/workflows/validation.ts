@@ -340,7 +340,7 @@ function validateActionNodeDefinition(
     )
   }
 
-  if (typeof node.mapper !== "function") {
+  if (node.mapper !== undefined && typeof node.mapper !== "function") {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" action node "${node.id}" mapper must be a function.`
     )

@@ -97,10 +97,59 @@ const persistReview = defineWorkflowStep("persist-review")
     invoice: input.invoice,
   }))
 
+const prepareCreateInvoice = defineWorkflowStep("prepare-create-invoice")
+  .input(workflowInput)
+  .output({
+    amount: "double",
+    transaction: ref(Transaction),
+    extraContext: "string",
+  })
+  .run(({ input }) => ({
+    amount: 250,
+    transaction: input.transaction,
+    extraContext: "available-to-later-steps",
+  }))
+
+const prepareAttachInvoice = defineWorkflowStep("prepare-attach-invoice")
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+  })
+  .output({
+    subject: ref(Transaction),
+    invoice: ref(Invoice),
+    extraContext: "string",
+  })
+  .run(({ input }) => ({
+    subject: input.transaction,
+    invoice: input.invoice,
+    extraContext: "available-to-later-steps",
+  }))
+
+const prepareWrongSubject = defineWorkflowStep("prepare-wrong-subject")
+  .input({
+    invoice: ref(Invoice),
+  })
+  .output({
+    subject: ref(Invoice),
+    invoice: ref(Invoice),
+  })
+  .run(({ input }) => ({
+    subject: input.invoice,
+    invoice: input.invoice,
+  }))
+
 const attachInvoice = defineAction("attach-invoice")
   .on(Transaction)
   .params({
     invoice: param(ref(Invoice)),
+  })
+  .writeback(async () => {})
+
+const createInvoice = defineAction("create-invoice")
+  .params({
+    amount: param("double"),
+    transaction: param(ref(Transaction)),
   })
   .writeback(async () => {})
 
@@ -181,14 +230,23 @@ const workflow = defineWorkflow("reconcile-transaction")
     }
   })
   .then(attachInvoice, ({ input, steps }) => ({
-    target: input.transaction,
+    subject: input.transaction,
     params: {
       invoice: steps.reviewInvoiceMatch.invoice,
+    },
+  }))
+  .then(createInvoice, ({ input }) => ({
+    params: {
+      amount: 250,
+      transaction: input.transaction,
     },
   }))
   .then(persistReview, ({ steps }) => {
     // @ts-expect-error action nodes do not expose business output in steps
     steps.attachInvoice
+
+    // @ts-expect-error global action nodes do not expose business output in steps
+    steps.createInvoice
 
     return {
       invoice: steps.reviewInvoiceMatch.invoice,
@@ -221,14 +279,46 @@ defineWorkflow("direct-step-dataflow")
   .then(findBestInvoice)
   .then(reviewInvoiceMatch)
 
+defineWorkflow("action-direct-dataflow")
+  .input(workflowInput)
+  .then(prepareCreateInvoice)
+  .then(createInvoice)
+  .then(prepareAttachInvoice, ({ input }) => ({
+    transaction: input.transaction,
+    invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" } as const,
+  }))
+  .then(attachInvoice)
+
 // @ts-expect-error workflow input has no invoice for this direct first step
 defineWorkflow("direct-step-mismatch").input(workflowInput).then(persistReview)
 
 // @ts-expect-error workflow input has no invoice/confidence for this direct first intervention
 defineWorkflow("direct-intervention-mismatch").input(workflowInput).then(approveInvoiceMatch)
 
-// @ts-expect-error action mapper is mandatory
-defineWorkflow("missing-action-mapper").input(workflowInput).then(attachInvoice)
+defineWorkflow("action-direct-dataflow-missing-global-param")
+  .input(workflowInput)
+  .then(findBestInvoice)
+  // @ts-expect-error direct global action dataflow requires current output to contain required params
+  .then(createInvoice)
+
+defineWorkflow("action-direct-dataflow-missing-object-subject")
+  .input(workflowInput)
+  .then(reviewInvoiceMatch, ({ input }) => ({
+    transaction: input.transaction,
+    invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" } as const,
+    confidence: 0.98,
+  }))
+  // @ts-expect-error direct object action dataflow requires a subject
+  .then(attachInvoice)
+
+defineWorkflow("action-direct-dataflow-wrong-object-subject")
+  .input(workflowInput)
+  .then(findBestInvoice)
+  .then(prepareWrongSubject, ({ steps }) => ({
+    invoice: steps.findBestInvoice.invoice,
+  }))
+  // @ts-expect-error direct object action subject must match the action binding type
+  .then(attachInvoice)
 
 // @ts-expect-error aliases are not supported in V1
 defineWorkflow("step-alias").input(workflowInput).then(findBestInvoice, "find")
@@ -241,9 +331,9 @@ defineWorkflow("step-mapper-alias")
 defineWorkflow("bad-action-target")
   .input(workflowInput)
   .then(findBestInvoice)
-  // @ts-expect-error action target must be a Transaction ref
+  // @ts-expect-error action subject must be a Transaction ref
   .then(attachInvoice, ({ steps }) => ({
-    target: steps.findBestInvoice.invoice,
+    subject: steps.findBestInvoice.invoice,
     params: {
       invoice: steps.findBestInvoice.invoice,
     },
@@ -254,9 +344,20 @@ defineWorkflow("bad-action-param")
   .then(findBestInvoice)
   // @ts-expect-error invoice param must be an Invoice ref
   .then(attachInvoice, ({ input }) => ({
-    target: input.transaction,
+    subject: input.transaction,
     params: {
       invoice: input.transaction,
+    },
+  }))
+
+defineWorkflow("bad-global-action-subject")
+  .input(workflowInput)
+  // @ts-expect-error global action mappers must not return subject
+  .then(createInvoice, ({ input }) => ({
+    subject: input.transaction,
+    params: {
+      amount: 250,
+      transaction: input.transaction,
     },
   }))
 
