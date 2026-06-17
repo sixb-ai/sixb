@@ -28,3 +28,7 @@ export function formatValue(value: unknown, depth = 0): string {
 
   return String(value)
 }
+
+export function formatCount(value: number): string {
+  return value.toLocaleString()
+}

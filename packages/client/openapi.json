@@ -8149,11 +8149,78 @@
                             "semanticType": {
                               "type": "string"
                             },
-                            "schema": {}
+                            "schema": {},
+                            "query": {
+                              "type": "object",
+                              "properties": {
+                                "searchable": {
+                                  "type": "boolean"
+                                },
+                                "filterable": {
+                                  "type": "boolean"
+                                },
+                                "sortable": {
+                                  "type": "boolean"
+                                },
+                                "text": {
+                                  "type": "boolean"
+                                },
+                                "exact": {
+                                  "type": "boolean"
+                                },
+                                "facet": {
+                                  "type": "boolean"
+                                },
+                                "vector": {
+                                  "type": "boolean"
+                                },
+                                "weight": {
+                                  "type": "number"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
                           },
                           "required": ["id", "name"],
                           "additionalProperties": false
                         }
+                      },
+                      "search": {
+                        "type": "object",
+                        "properties": {
+                          "title": {
+                            "type": "string"
+                          },
+                          "defaultText": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "exact": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "vector": {
+                            "type": "object",
+                            "properties": {
+                              "property": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": ["property", "source"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "links": {
                         "type": "array",
@@ -8216,7 +8283,37 @@
                                   "semanticType": {
                                     "type": "string"
                                   },
-                                  "schema": {}
+                                  "schema": {},
+                                  "query": {
+                                    "type": "object",
+                                    "properties": {
+                                      "searchable": {
+                                        "type": "boolean"
+                                      },
+                                      "filterable": {
+                                        "type": "boolean"
+                                      },
+                                      "sortable": {
+                                        "type": "boolean"
+                                      },
+                                      "text": {
+                                        "type": "boolean"
+                                      },
+                                      "exact": {
+                                        "type": "boolean"
+                                      },
+                                      "facet": {
+                                        "type": "boolean"
+                                      },
+                                      "vector": {
+                                        "type": "boolean"
+                                      },
+                                      "weight": {
+                                        "type": "number"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
                                 },
                                 "required": ["id", "name"],
                                 "additionalProperties": false
@@ -8355,11 +8452,78 @@
                           "semanticType": {
                             "type": "string"
                           },
-                          "schema": {}
+                          "schema": {},
+                          "query": {
+                            "type": "object",
+                            "properties": {
+                              "searchable": {
+                                "type": "boolean"
+                              },
+                              "filterable": {
+                                "type": "boolean"
+                              },
+                              "sortable": {
+                                "type": "boolean"
+                              },
+                              "text": {
+                                "type": "boolean"
+                              },
+                              "exact": {
+                                "type": "boolean"
+                              },
+                              "facet": {
+                                "type": "boolean"
+                              },
+                              "vector": {
+                                "type": "boolean"
+                              },
+                              "weight": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
                         },
                         "required": ["id", "name"],
                         "additionalProperties": false
                       }
+                    },
+                    "search": {
+                      "type": "object",
+                      "properties": {
+                        "title": {
+                          "type": "string"
+                        },
+                        "defaultText": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "exact": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "vector": {
+                          "type": "object",
+                          "properties": {
+                            "property": {
+                              "type": "string"
+                            },
+                            "source": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": ["property", "source"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "links": {
                       "type": "array",
@@ -8422,7 +8586,37 @@
                                 "semanticType": {
                                   "type": "string"
                                 },
-                                "schema": {}
+                                "schema": {},
+                                "query": {
+                                  "type": "object",
+                                  "properties": {
+                                    "searchable": {
+                                      "type": "boolean"
+                                    },
+                                    "filterable": {
+                                      "type": "boolean"
+                                    },
+                                    "sortable": {
+                                      "type": "boolean"
+                                    },
+                                    "text": {
+                                      "type": "boolean"
+                                    },
+                                    "exact": {
+                                      "type": "boolean"
+                                    },
+                                    "facet": {
+                                      "type": "boolean"
+                                    },
+                                    "vector": {
+                                      "type": "boolean"
+                                    },
+                                    "weight": {
+                                      "type": "number"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                }
                               },
                               "required": ["id", "name"],
                               "additionalProperties": false

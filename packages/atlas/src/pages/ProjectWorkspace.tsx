@@ -48,14 +48,6 @@ const emptyObjectList: ObjectSummary[] = []
 const OBJECT_PAGE_SIZE = 300
 const OBJECT_TYPE_PREVIEW_LIMIT = 12
 
-function parseObjectOffset(value: string | null): number {
-  if (!value) return 0
-
-  const parsed = Number.parseInt(value, 10)
-  if (!Number.isFinite(parsed) || parsed < 0) return 0
-  return parsed
-}
-
 export function ProjectWorkspace() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -68,29 +60,9 @@ export function ProjectWorkspace() {
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
   const [searchParams, setSearchParams] = useSearchParams()
   const classFilter = searchParams.get("class") || null
-  const objectOffset = parseObjectOffset(searchParams.get("offset"))
-
-  const setObjectOffset = useCallback(
-    (nextOffset: number, options?: { replace?: boolean }) => {
-      const offset = Math.max(0, Math.trunc(nextOffset))
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev)
-          if (offset > 0) {
-            params.set("offset", String(offset))
-          } else {
-            params.delete("offset")
-          }
-          return params
-        },
-        { replace: options?.replace ?? false }
-      )
-    },
-    [setSearchParams]
-  )
 
   const setClassFilter = useCallback(
-    (next: string | null, options?: { offset?: number; replace?: boolean }) => {
+    (next: string | null, options?: { replace?: boolean }) => {
       setSearchParams(
         (prev) => {
           const params = new URLSearchParams(prev)
@@ -99,12 +71,7 @@ export function ProjectWorkspace() {
           } else {
             params.delete("class")
           }
-          const offset = Math.max(0, Math.trunc(options?.offset ?? 0))
-          if (offset > 0) {
-            params.set("offset", String(offset))
-          } else {
-            params.delete("offset")
-          }
+          params.delete("offset")
           return params
         },
         { replace: options?.replace ?? true }
@@ -128,22 +95,6 @@ export function ProjectWorkspace() {
     setLatestUpdates({})
   }, [resolvedProjectName])
 
-  const objectsQuery = useQuery({
-    ...listObjectsPageOptions({
-      query: {
-        objectTypeId: classFilter ?? undefined,
-        limit: String(OBJECT_PAGE_SIZE),
-        offset: objectOffset > 0 ? String(objectOffset) : undefined,
-        orderBy: objectSortBy,
-        order: objectSortBy === "primaryId" ? "asc" : "desc",
-      },
-    }),
-    enabled: !!projectInfo && !!classFilter,
-  })
-  const objectsPage = objectsQuery.data
-  const objects = objectsPage?.objects ?? emptyObjectList
-  const { isLoading: objectsLoading } = objectsQuery
-
   const { data: objectTypes = [], isLoading: objectTypesLoading } = useQuery({
     ...listObjectTypesOptions(),
     enabled: !!projectInfo,
@@ -156,18 +107,10 @@ export function ProjectWorkspace() {
     }
   }, [classFilter, objectTypes, setClassFilter])
 
-  useEffect(() => {
-    const total = objectsPage?.total
-    if (typeof total !== "number" || objectOffset === 0) return
-    if (total === 0) {
-      setObjectOffset(0, { replace: true })
-      return
-    }
-    if (objectOffset < total) return
-
-    const lastOffset = Math.floor((total - 1) / OBJECT_PAGE_SIZE) * OBJECT_PAGE_SIZE
-    setObjectOffset(lastOffset, { replace: true })
-  }, [objectOffset, objectsPage?.total, setObjectOffset])
+  const selectedObjectType = useMemo(
+    () => objectTypes.find((objectType) => objectType.id === classFilter) ?? null,
+    [classFilter, objectTypes]
+  )
 
   const globalObjectCountQuery = useQuery({
     ...objectCountOptions(),
@@ -331,11 +274,11 @@ export function ProjectWorkspace() {
   const objectLookup = useMemo(
     () =>
       Object.fromEntries(
-        [...objects, ...objectTypePreviewSections.flatMap((section) => section.objects)].map(
-          (object) => [object.id, object]
-        )
+        objectTypePreviewSections
+          .flatMap((section) => section.objects)
+          .map((object) => [object.id, object])
       ),
-    [objects, objectTypePreviewSections]
+    [objectTypePreviewSections]
   )
 
   const toProjectPath = (suffix: string) => `/${suffix}`
@@ -343,7 +286,6 @@ export function ProjectWorkspace() {
   const handleObjectSortByChange = (sortBy: ObjectSortPreference) => {
     setObjectSortBy(sortBy)
     setObjectSortPreference(sortBy)
-    setObjectOffset(0, { replace: true })
   }
 
   if (projectLoading) {
@@ -395,25 +337,19 @@ export function ProjectWorkspace() {
               element={
                 <ObjectsWorkbench
                   projectName={resolvedProjectName}
-                  objects={objects}
-                  objectsTotal={objectsPage?.total ?? objects.length}
-                  objectsHasMore={objectsPage?.hasMore ?? false}
-                  objectOffset={objectOffset}
                   objectPageSize={OBJECT_PAGE_SIZE}
                   allObjectsTotal={allObjectsTotal}
                   objectTypeCounts={objectTypeCounts}
                   overviewSections={objectTypePreviewSections}
                   overviewLoading={overviewLoading}
-                  loading={objectsLoading}
+                  objectTypesLoading={objectTypesLoading}
                   sortBy={objectSortBy}
                   classFilter={classFilter}
+                  selectedObjectType={selectedObjectType}
                   selectedObjectId={selectedObjectIdForSidebar}
                   latestProjectUpdates={latestProjectUpdates}
                   onSortByChange={handleObjectSortByChange}
-                  onClassFilterChange={(objectTypeId, offset) =>
-                    setClassFilter(objectTypeId, { offset })
-                  }
-                  onObjectOffsetChange={setObjectOffset}
+                  onClassFilterChange={setClassFilter}
                   onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
                 />
               }

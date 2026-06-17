@@ -1,5 +1,4 @@
-import type { ObjectDetail, ObjectSummary } from "@sixb/client"
-import { getObjectOptions } from "@sixb/client/hooks"
+import type { ObjectSummary } from "@sixb/client"
 import {
   Button,
   Card,
@@ -22,12 +21,28 @@ import {
   TableRow,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { useQueries } from "@tanstack/react-query"
-import { Box, ChevronLeft, ChevronRight, Search } from "lucide-react"
-import { type ReactNode, useMemo, useState } from "react"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { Box, ChevronRight, Search } from "lucide-react"
+import { type ReactNode, useDeferredValue, useEffect, useMemo, useState } from "react"
 import { LetterAvatar, LoadingState } from "../components/common"
 import { ObjectIcon } from "../components/ObjectIcon"
+import { ObjectQueryBar, ObjectsQueryPagination } from "../components/objects/ObjectQueryBar"
+import { formatCount } from "../lib/formatValue"
 import { formatLocation, humanizeIdentifier } from "../lib/labels"
+import {
+  type AtlasObjectType,
+  buildObjectQuery,
+  executeAtlasObjectFacets,
+  executeAtlasObjectQuery,
+  getPropertyLabel,
+  isFacetProperty,
+  isFilterableProperty,
+  isSortableProperty,
+  type QueryFilter,
+  type QueryMatchMode,
+  type QueryProperty,
+  type QuerySort,
+} from "../lib/objects/objectQuery"
 import type { TelemetryUpdate } from "../lib/telemetryEvents"
 import { formatRelativeTime } from "../lib/time"
 import {
@@ -45,23 +60,19 @@ export interface ObjectTypePreviewSection {
 
 interface ObjectsWorkbenchProps {
   projectName: string
-  objects: ObjectSummary[]
-  objectsTotal: number
-  objectsHasMore: boolean
-  objectOffset: number
   objectPageSize: number
   allObjectsTotal: number
   objectTypeCounts: ReadonlyMap<string, number>
   overviewSections: ObjectTypePreviewSection[]
   overviewLoading: boolean
-  loading: boolean
+  objectTypesLoading?: boolean
   sortBy: ObjectSortPreference
   classFilter?: string | null
+  selectedObjectType?: AtlasObjectType | null
   selectedObjectId?: string | null
   latestProjectUpdates: TelemetryUpdate[]
   onSortByChange: (sortBy: ObjectSortPreference) => void
-  onClassFilterChange: (objectTypeId: string | null, offset?: number) => void
-  onObjectOffsetChange: (offset: number) => void
+  onClassFilterChange: (objectTypeId: string | null) => void
   onSelectObject: (id: string) => void
 }
 
@@ -80,10 +91,6 @@ function formatCompactValue(value: number | string | boolean): string {
   return value
 }
 
-function formatCount(value: number): string {
-  return value.toLocaleString()
-}
-
 function formatLoadedCount(loaded: number, total: number | undefined): string {
   if (typeof total === "number" && total !== loaded) {
     return `${formatCount(loaded)} of ${formatCount(total)}`
@@ -91,13 +98,8 @@ function formatLoadedCount(loaded: number, total: number | undefined): string {
   return formatCount(total ?? loaded)
 }
 
-function objectMatchesQuery(
-  candidate: ObjectSummary,
-  query: string,
-  details: ReadonlyMap<string, ObjectDetail>
-): boolean {
-  const detail = details.get(candidate.id)
-  const location = formatLocation(detail?.location).toLowerCase()
+function objectMatchesQuery(candidate: ObjectSummary, query: string): boolean {
+  const location = formatLocation(candidate.location).toLowerCase()
   const name = (candidate.name || "").toLowerCase()
   const className = humanizeIdentifier(candidate.class).toLowerCase()
   return (
@@ -111,52 +113,124 @@ function objectMatchesQuery(
 
 export function ObjectsWorkbench({
   projectName,
-  objects,
-  objectsTotal,
-  objectsHasMore,
-  objectOffset,
   objectPageSize,
   allObjectsTotal,
   objectTypeCounts,
   overviewSections,
   overviewLoading,
-  loading,
+  objectTypesLoading = false,
   sortBy,
   classFilter,
+  selectedObjectType,
   selectedObjectId,
   latestProjectUpdates,
   onSortByChange,
   onClassFilterChange,
-  onObjectOffsetChange,
   onSelectObject,
 }: ObjectsWorkbenchProps) {
   const [searchQuery, setSearchQuery] = useState("")
+  const deferredSearchQuery = useDeferredValue(searchQuery)
+  const [queryFilters, setQueryFilters] = useState<QueryFilter[]>([])
+  const [queryMatchMode, setQueryMatchMode] = useState<QueryMatchMode>("all")
+  const [querySort, setQuerySort] = useState<QuerySort | null>(null)
   const [viewStyle, setViewStyle] = useState<ViewStyle>(getObjectViewStyle)
   const selectedTypeMode = classFilter != null
 
-  const displayObjects = useMemo(
-    () => (selectedTypeMode ? objects : overviewSections.flatMap((section) => section.objects)),
-    [objects, overviewSections, selectedTypeMode]
-  )
+  useEffect(() => {
+    if (classFilter === undefined) return
+    setSearchQuery("")
+    setQueryFilters([])
+    setQueryMatchMode("all")
+    setQuerySort(null)
+  }, [classFilter])
 
-  const detailQueries = useQueries({
-    queries: displayObjects.map((object) => ({
-      ...getObjectOptions({
-        path: { projectName, objectId: object.id },
-      }),
-      enabled: !!projectName,
-      retry: false,
-    })),
+  const queryMode = selectedTypeMode && !!selectedObjectType
+  const queryProperties = useMemo(
+    () => (selectedObjectType?.properties ?? []) as QueryProperty[],
+    [selectedObjectType]
+  )
+  const queryPropertiesById = useMemo(
+    () => new Map(queryProperties.map((property) => [property.id, property])),
+    [queryProperties]
+  )
+  const filterableProperties = useMemo(
+    () => queryProperties.filter(isFilterableProperty),
+    [queryProperties]
+  )
+  const sortableProperties = useMemo(
+    () => queryProperties.filter(isSortableProperty),
+    [queryProperties]
+  )
+  const facetProperties = useMemo(() => queryProperties.filter(isFacetProperty), [queryProperties])
+  const textSearchEnabled = Boolean(selectedObjectType?.search?.defaultText?.length)
+
+  const objectQuery = useMemo(() => {
+    if (!queryMode || !classFilter) return null
+    return buildObjectQuery({
+      objectTypeId: classFilter,
+      text: deferredSearchQuery,
+      textSearchEnabled,
+      filters: queryFilters,
+      matchMode: queryMatchMode,
+      sort: querySort,
+    })
+  }, [
+    classFilter,
+    deferredSearchQuery,
+    queryFilters,
+    queryMatchMode,
+    queryMode,
+    querySort,
+    textSearchEnabled,
+  ])
+
+  const facetQuery = useMemo(() => {
+    if (!queryMode || !classFilter) return null
+    return buildObjectQuery({
+      objectTypeId: classFilter,
+      text: deferredSearchQuery,
+      textSearchEnabled,
+      filters: queryFilters,
+      matchMode: queryMatchMode,
+      sort: null,
+    })
+  }, [classFilter, deferredSearchQuery, queryFilters, queryMatchMode, queryMode, textSearchEnabled])
+
+  const queriedObjects = useInfiniteQuery({
+    queryKey: ["atlas", "objects", "query", objectQuery, objectPageSize],
+    enabled: queryMode && !!objectQuery && !!selectedObjectType,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      executeAtlasObjectQuery(
+        {
+          kind: "page",
+          input: objectQuery!,
+          pageSize: objectPageSize,
+          pageToken: pageParam,
+        },
+        selectedObjectType!
+      ),
+    getNextPageParam: (lastPage) => lastPage.nextPageToken,
+    retry: false,
   })
 
-  const detailById = useMemo(() => {
-    const detailMap = new Map<string, ObjectDetail>()
-    for (let i = 0; i < displayObjects.length; i += 1) {
-      const detail = detailQueries[i]?.data as ObjectDetail | undefined
-      if (detail) detailMap.set(displayObjects[i].id, detail)
-    }
-    return detailMap
-  }, [displayObjects, detailQueries])
+  const facetRequests = useMemo(
+    () => facetProperties.slice(0, 4).map((property) => ({ propertyId: property.id, limit: 8 })),
+    [facetProperties]
+  )
+
+  const facetsQuery = useQuery({
+    queryKey: ["atlas", "objects", "facets", facetQuery, facetRequests],
+    enabled: queryMode && !!facetQuery && facetRequests.length > 0,
+    queryFn: () => executeAtlasObjectFacets(facetQuery!, facetRequests),
+    retry: false,
+  })
+
+  const queryObjectsPage = useMemo(
+    () => queriedObjects.data?.pages.flatMap((page) => page.objects) ?? [],
+    [queriedObjects.data]
+  )
+  const queryTotal = queriedObjects.data?.pages[0]?.total ?? queryObjectsPage.length
 
   const updatesByObject = useMemo(() => {
     const grouped = new Map<string, TelemetryUpdate[]>()
@@ -181,10 +255,13 @@ export function ObjectsWorkbench({
   )
 
   const filteredObjects = useMemo(() => {
+    if (queryMode) return queryObjectsPage
+    if (selectedTypeMode) return []
     const query = searchQuery.trim().toLowerCase()
-    if (!query) return objects
-    return objects.filter((candidate) => objectMatchesQuery(candidate, query, detailById))
-  }, [objects, searchQuery, detailById])
+    const overviewObjects = overviewSections.flatMap((section) => section.objects)
+    if (!query) return overviewObjects
+    return overviewObjects.filter((candidate) => objectMatchesQuery(candidate, query))
+  }, [overviewSections, queryMode, queryObjectsPage, selectedTypeMode, searchQuery])
 
   const filteredOverviewSections = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -193,9 +270,7 @@ export function ObjectsWorkbench({
     return overviewSections
       .map((section) => ({
         ...section,
-        objects: section.objects.filter((candidate) =>
-          objectMatchesQuery(candidate, query, detailById)
-        ),
+        objects: section.objects.filter((candidate) => objectMatchesQuery(candidate, query)),
       }))
       .filter(
         (section) =>
@@ -203,7 +278,7 @@ export function ObjectsWorkbench({
           humanizeIdentifier(section.objectTypeId).toLowerCase().includes(query) ||
           section.objectTypeId.toLowerCase().includes(query)
       )
-  }, [overviewSections, searchQuery, detailById])
+  }, [overviewSections, searchQuery])
 
   const groups = useMemo(() => {
     const grouped = new Map<string, ObjectSummary[]>()
@@ -222,21 +297,29 @@ export function ObjectsWorkbench({
     onSelectObject(objectId)
   }
 
-  const searching = searchQuery.trim().length > 0
+  const searching = queryMode
+    ? searchQuery.trim().length > 0 || queryFilters.length > 0
+    : searchQuery.trim().length > 0
   const visibleObjectCount = selectedTypeMode
     ? filteredObjects.length
     : filteredOverviewSections.reduce((total, section) => total + section.objects.length, 0)
-  const headerCount = searching
-    ? visibleObjectCount
-    : selectedTypeMode
-      ? objectsTotal
-      : allObjectsTotal
-  const pageLoading = selectedTypeMode ? loading : overviewLoading
-  const showPagination =
-    selectedTypeMode && !loading && (objectsTotal > objectPageSize || objectOffset > 0)
+  const headerCount = queryMode
+    ? queryTotal
+    : searching
+      ? visibleObjectCount
+      : selectedTypeMode
+        ? 0
+        : allObjectsTotal
+  const pageLoading = queryMode
+    ? queriedObjects.isLoading
+    : selectedTypeMode && !selectedObjectType
+      ? objectTypesLoading
+      : overviewLoading
   const hasResults = selectedTypeMode
     ? filteredObjects.length > 0
     : filteredOverviewSections.some((section) => section.objects.length > 0)
+  const queryError = queriedObjects.error ?? facetsQuery.error
+  const querySortValue = querySort ? `${querySort.propertyId}:${querySort.direction}` : "default"
 
   return (
     <div className="mx-auto w-full max-w-5xl">
@@ -245,22 +328,58 @@ export function ObjectsWorkbench({
         count={headerCount}
         actions={
           <div className="flex items-center gap-2">
-            <Select
-              value={sortBy}
-              onValueChange={(value) => {
-                if (value === "primaryId" || value === "updatedAt") {
-                  onSortByChange(value)
-                }
-              }}
-            >
-              <SelectTrigger size="sm" className="h-8 w-28 text-xs" aria-label="Sort objects">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectItem value="primaryId">Primary ID</SelectItem>
-                <SelectItem value="updatedAt">Updated at</SelectItem>
-              </SelectContent>
-            </Select>
+            {queryMode ? (
+              <Select
+                value={querySortValue}
+                disabled={sortableProperties.length === 0}
+                onValueChange={(value) => {
+                  if (value === "default") {
+                    setQuerySort(null)
+                    return
+                  }
+
+                  const separator = value.lastIndexOf(":")
+                  const direction = value.slice(separator + 1)
+                  if (separator > 0 && (direction === "asc" || direction === "desc")) {
+                    setQuerySort({ propertyId: value.slice(0, separator), direction })
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="h-8 w-36 text-xs" aria-label="Sort objects">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="default">Default order</SelectItem>
+                  {sortableProperties.map((property) => (
+                    <SelectItem key={`${property.id}:asc`} value={`${property.id}:asc`}>
+                      {getPropertyLabel(property)} asc
+                    </SelectItem>
+                  ))}
+                  {sortableProperties.map((property) => (
+                    <SelectItem key={`${property.id}:desc`} value={`${property.id}:desc`}>
+                      {getPropertyLabel(property)} desc
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Select
+                value={sortBy}
+                onValueChange={(value) => {
+                  if (value === "primaryId" || value === "updatedAt") {
+                    onSortByChange(value)
+                  }
+                }}
+              >
+                <SelectTrigger size="sm" className="h-8 w-28 text-xs" aria-label="Sort objects">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectItem value="primaryId">Primary ID</SelectItem>
+                  <SelectItem value="updatedAt">Updated at</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             {selectedTypeMode ? (
               <CollectionViewToggle
                 value={viewStyle}
@@ -295,16 +414,41 @@ export function ObjectsWorkbench({
         </div>
       ) : null}
 
-      <div className="relative mt-3">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="text"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.target.value)}
-          placeholder="Search objects, location, or class..."
-          className="pl-9"
+      {queryMode && selectedObjectType ? (
+        <ObjectQueryBar
+          objectType={selectedObjectType}
+          searchQuery={searchQuery}
+          textSearchEnabled={textSearchEnabled}
+          filters={queryFilters}
+          matchMode={queryMatchMode}
+          filterableProperties={filterableProperties}
+          propertiesById={queryPropertiesById}
+          facetResults={facetsQuery.data ?? []}
+          facetsLoading={facetsQuery.isLoading}
+          queryError={queryError}
+          onSearchQueryChange={setSearchQuery}
+          onAddFilter={(filter) => setQueryFilters((current) => [...current, filter])}
+          onRemoveFilter={(filterId) =>
+            setQueryFilters((current) => current.filter((filter) => filter.id !== filterId))
+          }
+          onClear={() => {
+            setSearchQuery("")
+            setQueryFilters([])
+          }}
+          onMatchModeChange={setQueryMatchMode}
         />
-      </div>
+      ) : (
+        <div className="relative mt-3">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search objects, location, or class..."
+            className="pl-9"
+          />
+        </div>
+      )}
 
       <div className="mt-4 space-y-4">
         {pageLoading ? (
@@ -315,7 +459,11 @@ export function ObjectsWorkbench({
           <EmptyState
             icon={<Box className="size-12 stroke-1" />}
             title="No matching objects"
-            description="Try a broader search query."
+            description={
+              queryMode
+                ? "Try removing filters or broadening the search."
+                : "Try a broader search query."
+            }
           />
         ) : !selectedTypeMode ? (
           <div className="space-y-6">
@@ -349,7 +497,6 @@ export function ObjectsWorkbench({
         ) : viewStyle === "table" ? (
           <TableView
             objects={filteredObjects}
-            detailById={detailById}
             updatesByObject={updatesByObject}
             selectedObjectId={selectedObjectId ?? null}
             onSelectObject={handleSelectObject}
@@ -363,11 +510,13 @@ export function ObjectsWorkbench({
                 objects={items}
                 count={formatLoadedCount(
                   items.length,
-                  searching
-                    ? undefined
-                    : className === classFilter
-                      ? objectsTotal
-                      : objectTypeCounts.get(className)
+                  queryMode
+                    ? queryTotal
+                    : searching
+                      ? undefined
+                      : className === classFilter
+                        ? queryTotal
+                        : objectTypeCounts.get(className)
                 )}
                 selectedObjectId={selectedObjectId}
                 onSelectObject={handleSelectObject}
@@ -375,16 +524,13 @@ export function ObjectsWorkbench({
             ))}
           </div>
         )}
-        {showPagination ? (
-          <ObjectsPagination
-            offset={objectOffset}
-            pageSize={objectPageSize}
-            total={objectsTotal}
-            loadedCount={objects.length}
-            visibleCount={filteredObjects.length}
-            hasMore={objectsHasMore}
-            searching={searching}
-            onOffsetChange={onObjectOffsetChange}
+        {queryMode && hasResults ? (
+          <ObjectsQueryPagination
+            loadedCount={queryObjectsPage.length}
+            total={queryTotal}
+            hasMore={queriedObjects.hasNextPage}
+            loadingMore={queriedObjects.isFetchingNextPage}
+            onLoadMore={() => queriedObjects.fetchNextPage()}
           />
         ) : null}
       </div>
@@ -430,62 +576,6 @@ function ObjectCardSection({
         ))}
       </CollectionCardGrid>
     </section>
-  )
-}
-
-function ObjectsPagination({
-  offset,
-  pageSize,
-  total,
-  loadedCount,
-  visibleCount,
-  hasMore,
-  searching,
-  onOffsetChange,
-}: {
-  offset: number
-  pageSize: number
-  total: number
-  loadedCount: number
-  visibleCount: number
-  hasMore: boolean
-  searching: boolean
-  onOffsetChange: (offset: number) => void
-}) {
-  const rangeStart = loadedCount > 0 ? offset + 1 : 0
-  const rangeEnd = loadedCount > 0 ? offset + loadedCount : 0
-  const canGoBack = offset > 0
-  const canGoForward = hasMore
-
-  return (
-    <div className="flex flex-col gap-3 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-xs tabular-nums text-muted-foreground">
-        Showing {formatCount(rangeStart)}-{formatCount(rangeEnd)} of {formatCount(total)}
-        {searching ? ` · ${formatCount(visibleCount)} matching this page` : ""}
-      </p>
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!canGoBack}
-          onClick={() => onOffsetChange(Math.max(0, offset - pageSize))}
-        >
-          <ChevronLeft />
-          Previous
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!canGoForward}
-          onClick={() => onOffsetChange(offset + pageSize)}
-        >
-          Next
-          <ChevronRight />
-        </Button>
-      </div>
-    </div>
   )
 }
 
@@ -542,13 +632,11 @@ function ObjectCardItem({
 
 function TableView({
   objects,
-  detailById,
   updatesByObject,
   selectedObjectId,
   onSelectObject,
 }: {
   objects: ObjectSummary[]
-  detailById: Map<string, ObjectDetail>
   updatesByObject: Map<string, TelemetryUpdate[]>
   selectedObjectId: string | null
   onSelectObject: (id: string) => void
@@ -568,8 +656,7 @@ function TableView({
         <TableBody>
           {objects.map((object) => {
             const updates = updatesByObject.get(object.id) ?? []
-            const detail = detailById.get(object.id)
-            const location = formatLocation(detail?.location)
+            const location = formatLocation(object.location)
             const keySignal = updates[0]
             const isActive = selectedObjectId === object.id
 

@@ -12,6 +12,18 @@ export const PropertyDefinitionSchema = z.object({
   primary: z.boolean().optional(),
   semanticType: z.string().optional(),
   schema: z.unknown(),
+  query: z
+    .object({
+      searchable: z.boolean().optional(),
+      filterable: z.boolean().optional(),
+      sortable: z.boolean().optional(),
+      text: z.boolean().optional(),
+      exact: z.boolean().optional(),
+      facet: z.boolean().optional(),
+      vector: z.boolean().optional(),
+      weight: z.number().optional(),
+    })
+    .optional(),
 })
 
 export const LinkDefinitionSchema = z.object({
@@ -46,6 +58,19 @@ export const ObjectTypeSchema = z.object({
   extends: z.string().optional(),
   implements: z.array(z.string()).optional(),
   properties: z.array(PropertyDefinitionSchema),
+  search: z
+    .object({
+      title: z.string().optional(),
+      defaultText: z.array(z.string()).optional(),
+      exact: z.array(z.string()).optional(),
+      vector: z
+        .object({
+          property: z.string(),
+          source: z.array(z.string()),
+        })
+        .optional(),
+    })
+    .optional(),
   links: z.array(LinkDefinitionSchema),
   actions: z.array(ActionSchema),
 })
