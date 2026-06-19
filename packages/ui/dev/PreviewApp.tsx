@@ -19,7 +19,26 @@ import {
   User,
 } from "lucide-react"
 import { useState } from "react"
-
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  PolarAngleAxis,
+  PolarGrid,
+  Radar,
+  RadarChart,
+  RadialBar,
+  RadialBarChart,
+  XAxis,
+  YAxis,
+} from "recharts"
+import type { ChartConfig } from "../src/components"
 import {
   Alert,
   AlertDescription,
@@ -35,6 +54,11 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
   Checkbox,
   CollectionCardButton,
   CollectionCardGrid,
@@ -172,6 +196,26 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+function ChartPreviewCard({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children: React.ReactNode
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  )
+}
+
 const SPARKLINE_DATA = [3, 5, 4, 6, 5, 8, 7, 9, 8, 10].map((value, index) => ({
   value,
   timestamp: new Date(2026, 0, index + 1).toISOString(),
@@ -183,6 +227,96 @@ const SAMPLE_DATA = [
   { id: "ds-003", name: "erp.tasks", rows: 78_201, status: "failed", updated: "2h ago" },
   { id: "ds-004", name: "erp.projects", rows: 312, status: "synced", updated: "yesterday" },
 ]
+
+const CHART_SERIES_DATA = [
+  { month: "Jan", desktop: 186, mobile: 80 },
+  { month: "Feb", desktop: 305, mobile: 200 },
+  { month: "Mar", desktop: 237, mobile: 120 },
+  { month: "Apr", desktop: 73, mobile: 190 },
+  { month: "May", desktop: 209, mobile: 130 },
+  { month: "Jun", desktop: 214, mobile: 140 },
+]
+
+const USER_CHART_CONFIG = {
+  desktop: {
+    label: "Desktop",
+    color: "var(--chart-1)",
+  },
+  mobile: {
+    label: "Mobile",
+    color: "var(--chart-3)",
+  },
+} satisfies ChartConfig
+
+const DEVICE_CHART_DATA = [
+  { device: "desktop", visitors: 1260, fill: "var(--color-desktop)" },
+  { device: "mobile", visitors: 1040, fill: "var(--color-mobile)" },
+  { device: "tablet", visitors: 420, fill: "var(--color-tablet)" },
+  { device: "other", visitors: 180, fill: "var(--color-other)" },
+]
+
+const DEVICE_CHART_CONFIG = {
+  visitors: {
+    label: "Visitors",
+  },
+  desktop: {
+    label: "Desktop",
+    color: "var(--chart-1)",
+  },
+  mobile: {
+    label: "Mobile",
+    color: "var(--chart-3)",
+  },
+  tablet: {
+    label: "Tablet",
+    color: "var(--chart-4)",
+  },
+  other: {
+    label: "Other",
+    color: "var(--chart-2)",
+  },
+} satisfies ChartConfig
+
+const RADAR_CHART_DATA = [
+  { subject: "Schema", current: 92, target: 84 },
+  { subject: "Sync", current: 78, target: 90 },
+  { subject: "Actions", current: 86, target: 82 },
+  { subject: "Rules", current: 67, target: 76 },
+  { subject: "Search", current: 88, target: 74 },
+  { subject: "Auth", current: 72, target: 88 },
+]
+
+const RADAR_CHART_CONFIG = {
+  current: {
+    label: "Current",
+    color: "var(--chart-1)",
+  },
+  target: {
+    label: "Target",
+    color: "var(--chart-2)",
+  },
+} satisfies ChartConfig
+
+const RADIAL_CHART_DATA = [
+  { name: "complete", value: 74, fill: "var(--color-complete)" },
+  { name: "running", value: 48, fill: "var(--color-running)" },
+  { name: "queued", value: 31, fill: "var(--color-queued)" },
+]
+
+const RADIAL_CHART_CONFIG = {
+  complete: {
+    label: "Complete",
+    color: "var(--chart-3)",
+  },
+  running: {
+    label: "Running",
+    color: "var(--chart-1)",
+  },
+  queued: {
+    label: "Queued",
+    color: "var(--chart-4)",
+  },
+} satisfies ChartConfig
 
 const COMMAND_PREVIEW_IDLE_VALUE = "__sixb_command_preview_idle__"
 
@@ -321,6 +455,172 @@ function Showcase() {
                 </div>
               </CardContent>
             </Card>
+          </div>
+        </Section>
+
+        <Section
+          title="Charts"
+          description="Shadcn chart primitives backed by Recharts, using the shared chart color tokens."
+        >
+          <div className="grid gap-4 lg:grid-cols-2">
+            <ChartPreviewCard
+              title="Area Chart"
+              description="Opacity-differentiated stacked series."
+            >
+              <ChartContainer config={USER_CHART_CONFIG} className="h-[240px] w-full">
+                <AreaChart
+                  accessibilityLayer
+                  data={CHART_SERIES_DATA}
+                  margin={{ left: 12, right: 12 }}
+                >
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis hide />
+                  <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                  <ChartLegend content={<ChartLegendContent />} />
+                  <Area
+                    dataKey="mobile"
+                    type="monotone"
+                    fill="var(--color-mobile)"
+                    fillOpacity={0.22}
+                    stroke="var(--color-mobile)"
+                    stackId="a"
+                  />
+                  <Area
+                    dataKey="desktop"
+                    type="monotone"
+                    fill="var(--color-desktop)"
+                    fillOpacity={0.18}
+                    stroke="var(--color-desktop)"
+                    stackId="a"
+                  />
+                </AreaChart>
+              </ChartContainer>
+            </ChartPreviewCard>
+
+            <ChartPreviewCard title="Bar Chart" description="Grouped bars with tokenized fills.">
+              <ChartContainer config={USER_CHART_CONFIG} className="h-[240px] w-full">
+                <BarChart
+                  accessibilityLayer
+                  data={CHART_SERIES_DATA}
+                  margin={{ left: 12, right: 12 }}
+                >
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis hide />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <ChartLegend content={<ChartLegendContent />} />
+                  <Bar dataKey="desktop" fill="var(--color-desktop)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="mobile" fill="var(--color-mobile)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ChartContainer>
+            </ChartPreviewCard>
+
+            <ChartPreviewCard
+              title="Line Chart"
+              description="Solid and dashed series with line tooltip."
+            >
+              <ChartContainer config={USER_CHART_CONFIG} className="h-[240px] w-full">
+                <LineChart
+                  accessibilityLayer
+                  data={CHART_SERIES_DATA}
+                  margin={{ left: 12, right: 12 }}
+                >
+                  <CartesianGrid vertical={false} />
+                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
+                  <YAxis hide />
+                  <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                  <ChartLegend content={<ChartLegendContent />} />
+                  <Line
+                    dataKey="desktop"
+                    type="monotone"
+                    stroke="var(--color-desktop)"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                  <Line
+                    dataKey="mobile"
+                    type="monotone"
+                    stroke="var(--color-mobile)"
+                    strokeDasharray="4 4"
+                    strokeWidth={2}
+                    dot={false}
+                  />
+                </LineChart>
+              </ChartContainer>
+            </ChartPreviewCard>
+
+            <ChartPreviewCard
+              title="Pie Chart"
+              description="Segment colors are driven by the chart config."
+            >
+              <ChartContainer config={DEVICE_CHART_CONFIG} className="h-[240px] w-full">
+                <PieChart accessibilityLayer>
+                  <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent hideLabel nameKey="device" />}
+                  />
+                  <Pie
+                    data={DEVICE_CHART_DATA}
+                    dataKey="visitors"
+                    nameKey="device"
+                    innerRadius={54}
+                    outerRadius={88}
+                    strokeWidth={0}
+                  />
+                  <ChartLegend content={<ChartLegendContent nameKey="device" />} />
+                </PieChart>
+              </ChartContainer>
+            </ChartPreviewCard>
+
+            <ChartPreviewCard
+              title="Radar Chart"
+              description="Filled current area with a dashed target outline."
+            >
+              <ChartContainer config={RADAR_CHART_CONFIG} className="h-[260px] w-full">
+                <RadarChart accessibilityLayer data={RADAR_CHART_DATA}>
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <PolarGrid />
+                  <PolarAngleAxis dataKey="subject" tick={{ fontSize: 11 }} />
+                  <Radar
+                    dataKey="current"
+                    fill="var(--color-current)"
+                    fillOpacity={0.22}
+                    stroke="var(--color-current)"
+                    strokeWidth={2}
+                  />
+                  <Radar
+                    dataKey="target"
+                    fill="var(--color-target)"
+                    fillOpacity={0}
+                    stroke="var(--color-target)"
+                    strokeDasharray="4 4"
+                    strokeWidth={2}
+                  />
+                  <ChartLegend content={<ChartLegendContent />} />
+                </RadarChart>
+              </ChartContainer>
+            </ChartPreviewCard>
+
+            <ChartPreviewCard title="Radial Chart" description="Multi-ring status chart.">
+              <ChartContainer config={RADIAL_CHART_CONFIG} className="h-[260px] w-full">
+                <RadialBarChart
+                  accessibilityLayer
+                  data={RADIAL_CHART_DATA}
+                  innerRadius={36}
+                  outerRadius={108}
+                  startAngle={90}
+                  endAngle={-270}
+                >
+                  <ChartTooltip
+                    cursor={false}
+                    content={<ChartTooltipContent hideLabel nameKey="name" />}
+                  />
+                  <RadialBar dataKey="value" background cornerRadius={8} />
+                  <ChartLegend content={<ChartLegendContent nameKey="name" />} />
+                </RadialBarChart>
+              </ChartContainer>
+            </ChartPreviewCard>
           </div>
         </Section>
 

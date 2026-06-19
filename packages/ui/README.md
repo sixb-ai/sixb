@@ -14,7 +14,7 @@ visual language that works for dense operational tools.
   - light and dark CSS variables
   - Sixb typography, radius, border, scrollbar, and chart tokens
 - **shadcn/Radix primitives** in `src/components/ui`
-  - buttons, inputs, dialogs, dropdowns, tables, tabs, sidebar, tooltips, and more
+  - buttons, inputs, charts, dialogs, dropdowns, tables, tabs, sidebar, tooltips, and more
 - **Sixb components** in `src/components`
   - collection headers, card grids, empty states, theme switching, and small charts
 - **Hooks and utilities** in `src/hooks` and `src/lib`

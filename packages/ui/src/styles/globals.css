@@ -35,10 +35,10 @@
   --info: #0a0a0a;
 
   --chart-1: #101010;
-  --chart-2: #5f5f5f;
-  --chart-3: #16a34a;
-  --chart-4: #d97706;
-  --chart-5: #e64059;
+  --chart-2: #404040;
+  --chart-3: #737373;
+  --chart-4: #a3a3a3;
+  --chart-5: #d4d4d4;
 
   --sidebar: #ffffff;
   --sidebar-foreground: #5f5f5f;
@@ -98,10 +98,10 @@
   --info: #f4f4f4;
 
   --chart-1: #f4f4f4;
-  --chart-2: #8a8a8a;
-  --chart-3: #22c55e;
-  --chart-4: #f59e0b;
-  --chart-5: #ef4f6a;
+  --chart-2: #c4c4c4;
+  --chart-3: #8a8a8a;
+  --chart-4: #5f5f5f;
+  --chart-5: #404040;
 
   --sidebar: #141414;
   --sidebar-foreground: #8a8a8a;

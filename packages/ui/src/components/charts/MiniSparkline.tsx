@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useId, useMemo } from "react"
 import { cn } from "../../lib/utils"
 
 interface MiniSparklineProps {
@@ -14,10 +14,11 @@ export function MiniSparkline({
   data,
   width = 60,
   height = 24,
-  color = "#10b981",
+  color = "var(--chart-1)",
   showDot = true,
   className,
 }: MiniSparklineProps) {
+  const gradientId = `sparkline-gradient-${useId().replace(/:/g, "")}`
   const pathData = useMemo(() => {
     if (!data || data.length < 2) return null
 
@@ -68,7 +69,7 @@ export function MiniSparkline({
     >
       {/* Gradient fill under the line */}
       <defs>
-        <linearGradient id={`sparkline-gradient-${color}`} x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.3" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
@@ -77,7 +78,7 @@ export function MiniSparkline({
       {/* Area fill */}
       <path
         d={`${pathData.path} L ${width - 2} ${height - 2} L 2 ${height - 2} Z`}
-        fill={`url(#sparkline-gradient-${color})`}
+        fill={`url(#${gradientId})`}
         className="animate-in fade-in duration-500"
       />
 
