@@ -93,9 +93,16 @@ const report = await lakeStorage.runMaintenance({
 
 Reads, writes, SQL previews, and SQL transforms use the same DuckDB runtime and
 the same DuckLake PostgreSQL metadata pool. Work is serialized inside one
-`DuckLakeStorage` instance, so a large write can make later reads wait. A large
-streaming read can also make a later write wait until the stream is consumed or
-closed.
+`DuckLakeStorage` instance, so a queued DuckDB operation makes later operations
+wait. Only actual DuckDB work holds the runtime: batch appends, commits, SQL
+transforms, and metadata reads. A large streaming read can also make a later
+write wait until the stream is consumed or closed.
+
+A write does not hold the runtime while its source iterable is producing rows.
+`writeRows(...)` validates and stages rows in bounded in-memory batches, then
+takes a queue slot only to flush each batch into the staging table. Slow external
+reads (pagination, APIs, SFTP, retries) run outside the queue, so other reads and
+write batches can interleave between a write's batches.
 
 ```txt
 same provider instance:

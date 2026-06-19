@@ -21,6 +21,11 @@ export interface DuckLakeCommitWriteInput {
 
 type DuckLakeCommitWrite = (options: DuckLakeCommitWriteInput) => Promise<DatasetVersion>
 
+// Rows are staged in bounded in-memory batches so a slow source iterable never
+// holds the DuckDB runtime queue. Only the per-batch appender flush takes a
+// queue slot. 1000 keeps memory bounded while amortizing appender open/close.
+const WRITE_ROW_BATCH_SIZE = 1000
+
 interface CreateDuckLakeWriteSessionInput {
   readonly commitWrite: DuckLakeCommitWrite
   readonly runtime: DuckDbRuntime
@@ -66,17 +71,42 @@ class DuckLakeWriteSession implements LakeWriteSession {
   async writeRows(rows: Iterable<DatasetRow> | AsyncIterable<DatasetRow>): Promise<void> {
     this.assertOpen()
 
-    await this.runtime.withAppender(this.stagingTableName, async (appender) => {
-      for await (const row of rows) {
-        const validationError = getDatasetRowValidationError(row, this.input.dataset)
-        if (validationError) {
-          throw new LakeStorageError(`[SixbDuckLake] ${validationError}`)
-        }
+    // Drain and validate the source OUTSIDE the DuckDB queue so slow external
+    // reads (pagination, APIs, SFTP, retries) never hold a runtime slot. Only
+    // appendBatchToStagingTable below briefly enters the queue.
+    let batch: DatasetRow[] = []
+    for await (const row of rows) {
+      const validationError = getDatasetRowValidationError(row, this.input.dataset)
+      if (validationError) {
+        throw new LakeStorageError(`[SixbDuckLake] ${validationError}`)
+      }
 
+      // Snapshot the validated row. Callers may reuse and mutate one row object
+      // between yields, so the batch must not retain a live reference.
+      batch.push(structuredClone(row))
+
+      if (batch.length >= WRITE_ROW_BATCH_SIZE) {
+        await this.appendBatchToStagingTable(batch)
+        batch = []
+      }
+    }
+
+    if (batch.length > 0) {
+      await this.appendBatchToStagingTable(batch)
+    }
+  }
+
+  private async appendBatchToStagingTable(batch: readonly DatasetRow[]): Promise<void> {
+    // Synchronous callback: no awaits inside the queue slot. The appender
+    // buffers and flushes the whole batch into the staging temp table on close.
+    await this.runtime.withAppender(this.stagingTableName, (appender) => {
+      for (const row of batch) {
         appendDatasetRow(appender, this.input.dataset.schema, row)
-        this.rowsWritten += 1
       }
     })
+    // Count only rows actually appended -- commit asserts rowsWritten ===
+    // sourceRowCount in the write coordinator.
+    this.rowsWritten += batch.length
   }
 
   async commit(input?: CommitDatasetWriteInput): Promise<DatasetVersion> {
