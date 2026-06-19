@@ -313,6 +313,44 @@ describe("DuckLakeStorage writes and latest reads", () => {
     ])
   })
 
+  test("frees the DuckDB queue for reads while a slow source is mid-write", async () => {
+    let releaseSource: () => void = () => {}
+    const sourceGate = new Promise<void>((resolve) => {
+      releaseSource = resolve
+    })
+    let firstRowYielded: () => void = () => {}
+    const firstRow = new Promise<void>((resolve) => {
+      firstRowYielded = resolve
+    })
+
+    async function* slowOrders(): AsyncIterable<DatasetRow> {
+      yield { orderId: "ord_1", customerName: "Ada", orderCount: 1 }
+      firstRowYielded()
+      // Simulate an external wait (API/pagination/SFTP) mid-stream.
+      await sourceGate
+    }
+
+    const write = await storage.beginWrite({ dataset: ordersDataset, mode: "snapshot" })
+    const writePromise = write.writeRows(slowOrders())
+
+    await firstRow
+
+    // The source is now parked on sourceGate. If writeRows held the appender's
+    // queue slot across the external wait this read would deadlock and time
+    // out; with batched staging the queue is free between batches.
+    const datasets = await storage.listDatasets()
+    expect(datasets.map((dataset) => dataset.id)).toContain(ordersDataset.id)
+
+    releaseSource()
+    await writePromise
+    const version = await write.commit()
+
+    expect(version.rowCount).toBe(1)
+    expect(await collectRows(storage.readRows({ datasetId: ordersDataset.id }))).toEqual([
+      { orderId: "ord_1", customerName: "Ada", orderCount: "1", metadata: null },
+    ])
+  })
+
   test("evolves a dataset by appending a nullable column and writes new-format rows", async () => {
     const initialDataset = defineDataset("raw.erp.schema_evolution", {
       schema: [col("invoiceId", "string"), col("total", "int64")],
