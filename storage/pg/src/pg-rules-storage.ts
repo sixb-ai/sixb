@@ -7,10 +7,11 @@ import type {
   StoredRuleResolvedEvent,
   StoredRuleTriggeredEvent,
 } from "@sixb/core"
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SqlParameter } from "./pg-client"
+import type { PgStoreClient } from "./transactions"
 
 export class PgRulesStorage implements RulesStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async getActive(params: {
     projectId: string

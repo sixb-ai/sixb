@@ -1,6 +1,4 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import type { Database } from "bun:sqlite"
 import type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,
@@ -11,21 +9,28 @@ import type {
   StoredRuleTriggeredEvent,
 } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
+import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  type SqliteStoreConnection,
+} from "./transactions"
 
 export interface SqliteRulesStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+  /** Internal shared connection used by bundled SqliteStorage. */
+  connection?: SqliteStoreConnection
 }
 
 export class SqliteRulesStorage implements RulesStorage {
+  private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
   constructor(options: SqliteRulesStorageOptions = {}) {
-    const path = options.path ?? ":memory:"
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
+    this.connection = openSqliteStoreConnection(options)
+    this.db = this.connection.db
 
-    if (path === ":memory:") {
+    if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
   }
@@ -171,7 +176,7 @@ export class SqliteRulesStorage implements RulesStorage {
   }
 
   close(): void {
-    this.db.close()
+    closeSqliteStoreConnection(this.connection)
   }
 }
 

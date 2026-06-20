@@ -20,6 +20,17 @@ import type {
 export class InMemoryWebhookRunStorage implements WebhookRunStorage {
   private readonly runs = new Map<string, WebhookRunRecord>()
 
+  snapshot(): InMemoryWebhookRunStorageSnapshot {
+    return structuredClone(this.runs)
+  }
+
+  restore(snapshot: InMemoryWebhookRunStorageSnapshot): void {
+    this.runs.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.runs.set(key, record)
+    }
+  }
+
   async start(input: StartWebhookRunInput): Promise<WebhookRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
@@ -116,3 +127,5 @@ export class InMemoryWebhookRunStorage implements WebhookRunStorage {
     return record
   }
 }
+
+export type InMemoryWebhookRunStorageSnapshot = Map<string, WebhookRunRecord>

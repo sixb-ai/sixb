@@ -13,3 +13,7 @@ export class ObjectNotFoundError extends Error {
     super(`[Sixb] ${context}: ${objectTypeId}:${primaryId}`)
   }
 }
+
+export class StorageTransactionError extends Error {
+  readonly name = "StorageTransactionError"
+}

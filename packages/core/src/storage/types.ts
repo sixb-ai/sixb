@@ -68,6 +68,7 @@ export type {
 export { AuthStorageError } from "./auth"
 export type { CommitEditBatchInput, EditCommitResult, EditStorage } from "./edits"
 export { EditStorageError } from "./edits"
+export { StorageTransactionError } from "./errors"
 export type {
   LinkDirection,
   ObjectLinkRow,
@@ -181,6 +182,10 @@ export type {
 } from "./workflow-runs"
 export { WorkflowRunError } from "./workflow-runs"
 
+export interface StorageTransactionOptions {
+  readonly isolation?: "default" | "serializable"
+}
+
 export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
@@ -195,4 +200,9 @@ export interface Storage {
   webhookDeliveries?: WebhookDeliveryStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
+
+  transaction<T>(
+    run: (tx: Storage) => Promise<T> | T,
+    options?: StorageTransactionOptions
+  ): Promise<T>
 }

@@ -45,6 +45,17 @@ function compareRuns(a: SyncRunRecord, b: SyncRunRecord, order: "asc" | "desc"):
 export class InMemorySyncRunStorage implements SyncRunStorage {
   private readonly rows = new Map<string, SyncRunRecord>()
 
+  snapshot(): InMemorySyncRunStorageSnapshot {
+    return structuredClone(this.rows)
+  }
+
+  restore(snapshot: InMemorySyncRunStorageSnapshot): void {
+    this.rows.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.rows.set(key, record)
+    }
+  }
+
   async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
     const key = syncRunKey(input.projectId, input.id)
     if (this.rows.has(key)) {
@@ -154,3 +165,5 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     }
   }
 }
+
+export type InMemorySyncRunStorageSnapshot = Map<string, SyncRunRecord>

@@ -11,8 +11,13 @@ import type {
   UserRecord,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL, SQLClient } from "../pg-client"
-import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
+import type { SQLClient } from "../pg-client"
+import {
+  authLockKey,
+  lockAdvisoryKeys,
+  type PgStoreClient,
+  runPgTransaction,
+} from "../transactions"
 import { PgAuthGroupMembershipStore } from "./group-memberships"
 import { PgAuthUserIdentityStore } from "./identities"
 import { PgAuthInvitationStore } from "./invitations"
@@ -53,11 +58,11 @@ interface AuthTransactionError {
 }
 
 export interface PgAuthStorageOptions {
-  readonly sql: SQL
+  readonly sql: PgStoreClient
 }
 
 export class PgAuthStorage implements AuthStorage {
-  private readonly sql: SQL
+  private readonly sql: PgStoreClient
 
   readonly users: PgAuthUserStore
   readonly identities: PgAuthUserIdentityStore

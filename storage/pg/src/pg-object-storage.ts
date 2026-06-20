@@ -18,7 +18,7 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
   compilePgObjectCountQuery,
@@ -26,6 +26,7 @@ import {
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
 } from "./pg-object-query-compiler"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -137,7 +138,7 @@ function valuesJoin<Row = unknown>(
  *   the data was stored correctly.
  */
 export class PgObjectStorage implements ObjectStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   queryCapabilities(): ObjectQueryCapabilities {
     return PG_OBJECT_QUERY_CAPABILITIES
@@ -210,7 +211,7 @@ export class PgObjectStorage implements ObjectStorage {
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
     const occurredAt = new Date(event.occurredAt)
 
-    const row = await this.sql.begin(async (tx) => {
+    const row = await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -274,7 +275,7 @@ export class PgObjectStorage implements ObjectStorage {
     events: readonly StoredObjectUpsertedEvent[]
   ): Promise<readonly ObjectRow[]> {
     if (events.length === 0) return []
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
       const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
@@ -334,7 +335,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -376,7 +377,7 @@ export class PgObjectStorage implements ObjectStorage {
     events: readonly StoredTelemetryAppendedEvent[]
   ): Promise<void> {
     if (events.length === 0) return
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Batch idempotence check: single query instead of N individual SELECTs
       const allEventIds = events.map((e) => e.id)
       const appliedRows = await tx<{ event_id: string }[]>`
@@ -464,7 +465,7 @@ export class PgObjectStorage implements ObjectStorage {
       ? JSON.stringify(event.payload.properties)
       : null
 
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -497,7 +498,7 @@ export class PgObjectStorage implements ObjectStorage {
 
   async applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void> {
     if (events.length === 0) return
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
       const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
@@ -536,7 +537,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void> {
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -738,7 +739,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 }
 
-async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<number> {
+async function readTotal(sql: SQLClient, compiled: CompiledPgObjectQuery): Promise<number> {
   const [row] = await sql.unsafe<
     {
       total: string | number | bigint
@@ -748,7 +749,7 @@ async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<num
 }
 
 async function readFacetBuckets(
-  sql: SQL,
+  sql: SQLClient,
   compiled: { sql: string; args: readonly unknown[] }
 ): Promise<{ value: unknown; count: number }[]> {
   const rows = await sql.unsafe<FacetDatabaseRow[]>(compiled.sql, [

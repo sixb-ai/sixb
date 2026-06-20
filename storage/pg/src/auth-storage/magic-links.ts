@@ -1,7 +1,11 @@
 import type { AuthMagicLinkStore, CreateAuthMagicLinkInput, MagicLinkRecord } from "@sixb/core"
 import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
-import type { SQL } from "../pg-client"
-import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
+import {
+  authLockKey,
+  lockAdvisoryKeys,
+  type PgStoreClient,
+  runPgTransaction,
+} from "../transactions"
 import type { PgAuthMagicLinkRow } from "./rows"
 import { rowToMagicLinkRecord } from "./rows"
 import {
@@ -15,7 +19,7 @@ import {
 } from "./shared"
 
 export class PgAuthMagicLinkStore implements AuthMagicLinkStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateAuthMagicLinkInput): Promise<MagicLinkRecord> {
     return runPgTransaction(this.sql, async (tx) => {

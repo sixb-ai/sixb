@@ -3,13 +3,13 @@ import type {
   UpsertAuthUserIdentityInput,
   UserIdentityRecord,
 } from "@sixb/core"
-import type { SQL } from "../pg-client"
+import type { PgStoreClient } from "../transactions"
 import type { PgAuthUserIdentityRow } from "./rows"
 import { rowToIdentityRecord, serializeOptionalRecord } from "./rows"
 import { assertNonEmpty, dateOrNow, getIdentityRowBySubject, requireUserById } from "./shared"
 
 export class PgAuthUserIdentityStore implements AuthUserIdentityStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async upsert(input: UpsertAuthUserIdentityInput): Promise<UserIdentityRecord> {
     const projectId = assertNonEmpty(input.projectId, "Project id")

@@ -8,9 +8,7 @@ import {
   createSixb,
   defineConnector,
   defineWebhook,
-  InMemoryObjectStorage,
   InMemoryStorage,
-  InMemoryTimeseriesStorage,
   type OntologySource,
   Sixb,
   type SixbOptions,
@@ -156,12 +154,16 @@ describe("webhooks", () => {
       },
     })
 
-    expect(() =>
-      createRuntime([connector], {
-        objects: new InMemoryObjectStorage(),
-        timeseries: new InMemoryTimeseriesStorage(),
-      })
-    ).toThrow("[Sixb] Webhook idempotency requires storage.webhookDeliveries")
+    const storage = new InMemoryStorage()
+    const storageWithoutDeliveries: Storage = {
+      ...storage,
+      transaction: storage.transaction.bind(storage),
+      webhookDeliveries: undefined,
+    }
+
+    expect(() => createRuntime([connector], storageWithoutDeliveries)).toThrow(
+      "[Sixb] Webhook idempotency requires storage.webhookDeliveries"
+    )
   })
 
   test("discovers webhooks through discovered connectors", async () => {

@@ -21,13 +21,14 @@ import {
   planEditBatchFromLoadedState,
 } from "@sixb/core"
 import { insertActionRunCommitDiff } from "./action-run-commit-diff"
-import type { SQL, SQLClient } from "./pg-client"
+import type { SQLClient } from "./pg-client"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgEditStorage implements EditStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async commit(input: CommitEditBatchInput): Promise<EditCommitResult> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const run = await this.loadActionRun(tx, input.projectId, input.runId)
       assertCommitRunMatchesInput(run, input)
 

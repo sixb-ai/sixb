@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto"
 import type { SQL, SQLClient } from "./pg-client"
 
+export type PgStoreClient = SQL | SQLClient
+
 export async function runPgTransaction<T>(
-  sql: SQL,
+  sql: PgStoreClient,
   run: (tx: SQLClient) => Promise<T>
 ): Promise<T> {
+  if (!canStartPgTransaction(sql)) {
+    return run(sql)
+  }
+
   // porsager passes the callback a transaction-scoped client (a TransactionSql, which is an
   // ISql == SQLClient). The `as Promise<T>` only unwraps porsager's UnwrapPromiseArray return
   // type (our callbacks never return the pipelined-array form), not a structural cast.
@@ -25,4 +31,8 @@ export async function lockAdvisoryKeys(sql: SQLClient, keys: readonly string[]):
 function advisoryLockParts(key: string): readonly [number, number] {
   const hash = createHash("sha256").update(key).digest()
   return [hash.readInt32BE(0), hash.readInt32BE(4)]
+}
+
+function canStartPgTransaction(sql: PgStoreClient): sql is SQL {
+  return typeof (sql as { readonly begin?: unknown }).begin === "function"
 }

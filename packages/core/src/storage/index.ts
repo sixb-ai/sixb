@@ -83,7 +83,7 @@ export type {
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
 export type { CommitEditBatchInput, EditCommitResult, EditStorage } from "./edits"
 export { EditStorageError, InMemoryEditStorage } from "./edits"
-export { ObjectNotFoundError } from "./errors"
+export { ObjectNotFoundError, StorageTransactionError } from "./errors"
 export type {
   DefineMigrationsOptions,
   MigrationCapableStorage,
@@ -179,7 +179,12 @@ export type {
 export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
 export type { TimeseriesPoint, TimeseriesStorage } from "./timeseries"
 export { InMemoryTimeseriesStorage } from "./timeseries"
-export type { Storage } from "./types"
+export {
+  assertTransactionActive,
+  createTransactionStorageProxy,
+  throwNestedStorageTransaction,
+} from "./transaction"
+export type { Storage, StorageTransactionOptions } from "./types"
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,
@@ -246,6 +251,7 @@ export {
   WorkflowRunError,
 } from "./workflow-runs"
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "./action-runs"
 import { InMemoryAuthStorage } from "./auth"
 import { InMemoryEditStorage } from "./edits"
@@ -255,7 +261,8 @@ import { InMemoryProjectionRunStorage } from "./projection-runs"
 import { InMemoryRulesStorage } from "./rules"
 import { InMemorySyncRunStorage } from "./sync-runs"
 import { InMemoryTimeseriesStorage } from "./timeseries"
-import type { Storage } from "./types"
+import { createTransactionStorageProxy, throwNestedStorageTransaction } from "./transaction"
+import type { Storage, StorageTransactionOptions } from "./types"
 import { InMemoryWebhookDeliveryStorage } from "./webhook-deliveries"
 import { InMemoryWebhookRunStorage } from "./webhook-runs"
 import { InMemoryWorkflowInterventionStorage } from "./workflow-interventions"
@@ -275,4 +282,93 @@ export class InMemoryStorage implements Storage {
   readonly webhookDeliveries = new InMemoryWebhookDeliveryStorage()
   readonly webhookRuns = new InMemoryWebhookRunStorage()
   readonly rules = new InMemoryRulesStorage()
+
+  private readonly transactionScope = new AsyncLocalStorage<boolean>()
+  private transactionTail: Promise<void> = Promise.resolve()
+
+  async transaction<T>(
+    run: (tx: Storage) => Promise<T> | T,
+    _options: StorageTransactionOptions = {}
+  ): Promise<T> {
+    if (this.transactionScope.getStore()) {
+      throwNestedStorageTransaction()
+    }
+
+    return this.withTransactionLock(async () => {
+      const snapshot = this.snapshot()
+      let active = true
+      const tx = createTransactionStorageProxy(this, () => active)
+
+      try {
+        return await this.transactionScope.run(true, async () => run(tx))
+      } catch (error) {
+        this.restore(snapshot)
+        throw error
+      } finally {
+        active = false
+      }
+    })
+  }
+
+  private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.transactionTail
+    let release!: () => void
+    this.transactionTail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    await previous
+    try {
+      return await run()
+    } finally {
+      release()
+    }
+  }
+
+  private snapshot(): InMemoryStorageSnapshot {
+    return {
+      objects: this.objects.snapshot(),
+      timeseries: this.timeseries.snapshot(),
+      auth: this.auth.snapshot(),
+      actionRuns: this.actionRuns.snapshot(),
+      syncRuns: this.syncRuns.snapshot(),
+      pipelineRuns: this.pipelineRuns.snapshot(),
+      projectionRuns: this.projectionRuns.snapshot(),
+      workflowRuns: this.workflowRuns.snapshot(),
+      workflowInterventions: this.workflowInterventions.snapshot(),
+      webhookDeliveries: this.webhookDeliveries.snapshot(),
+      webhookRuns: this.webhookRuns.snapshot(),
+      rules: this.rules.snapshot(),
+    }
+  }
+
+  private restore(snapshot: InMemoryStorageSnapshot): void {
+    this.objects.restore(snapshot.objects)
+    this.timeseries.restore(snapshot.timeseries)
+    this.auth.restore(snapshot.auth)
+    this.actionRuns.restore(snapshot.actionRuns)
+    this.syncRuns.restore(snapshot.syncRuns)
+    this.pipelineRuns.restore(snapshot.pipelineRuns)
+    this.projectionRuns.restore(snapshot.projectionRuns)
+    this.workflowRuns.restore(snapshot.workflowRuns)
+    this.workflowInterventions.restore(snapshot.workflowInterventions)
+    this.webhookDeliveries.restore(snapshot.webhookDeliveries)
+    this.webhookRuns.restore(snapshot.webhookRuns)
+    this.rules.restore(snapshot.rules)
+  }
+}
+
+interface InMemoryStorageSnapshot {
+  readonly objects: ReturnType<InMemoryObjectStorage["snapshot"]>
+  readonly timeseries: ReturnType<InMemoryTimeseriesStorage["snapshot"]>
+  readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
+  readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
+  readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>
+  readonly pipelineRuns: ReturnType<InMemoryPipelineRunStorage["snapshot"]>
+  readonly projectionRuns: ReturnType<InMemoryProjectionRunStorage["snapshot"]>
+  readonly workflowRuns: ReturnType<InMemoryWorkflowRunStorage["snapshot"]>
+  readonly workflowInterventions: ReturnType<InMemoryWorkflowInterventionStorage["snapshot"]>
+  readonly webhookDeliveries: ReturnType<InMemoryWebhookDeliveryStorage["snapshot"]>
+  readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
+  readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
 }

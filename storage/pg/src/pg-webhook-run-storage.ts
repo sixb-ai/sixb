@@ -7,12 +7,13 @@ import type {
   WebhookRunStorage,
 } from "@sixb/core"
 import { WebhookRunError } from "@sixb/core"
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWebhookRunStorage implements WebhookRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async start(input: StartWebhookRunInput): Promise<WebhookRunRecord> {
     try {
@@ -52,7 +53,7 @@ export class PgWebhookRunStorage implements WebhookRunStorage {
   }
 
   async finish(input: FinishWebhookRunInput): Promise<WebhookRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WebhookRunDatabaseRow[]>`
         SELECT * FROM webhook_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}

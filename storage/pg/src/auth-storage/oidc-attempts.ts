@@ -4,8 +4,7 @@ import type {
   OidcAuthorizationAttemptRecord,
 } from "@sixb/core"
 import { AuthStorageError, resolveAuthSessionAudience } from "@sixb/core"
-import type { SQL } from "../pg-client"
-import { runPgTransaction } from "../transactions"
+import { type PgStoreClient, runPgTransaction } from "../transactions"
 import type { PgAuthOidcAttemptRow } from "./rows"
 import { rowToOidcAuthorizationAttemptRecord } from "./rows"
 import {
@@ -17,7 +16,7 @@ import {
 } from "./shared"
 
 export class PgAuthOidcAuthorizationAttemptStore implements AuthOidcAuthorizationAttemptStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async create(
     input: CreateOidcAuthorizationAttemptInput

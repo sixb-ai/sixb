@@ -2,17 +2,35 @@
 // source.
 /// <reference path="./sql.d.ts" />
 
-import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
+import { AsyncLocalStorage } from "node:async_hooks"
+import {
+  createTransactionStorageProxy,
+  type MigrationCapableStorage,
+  type Storage,
+  type StorageMigrator,
+  type StorageTransactionOptions,
+  throwNestedStorageTransaction,
+} from "@sixb/core"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteEditStorage } from "./edit-storage"
-import { createSqliteStorageMigrators, sqliteStoragePath } from "./migrations"
+import {
+  createSqliteStorageMigrators,
+  installFreshSqliteSchema,
+  sqliteStoragePath,
+} from "./migrations"
 import { SqliteObjectStorage } from "./object-storage"
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
+import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  runImmediateTransactionAsync,
+  type SqliteStoreConnection,
+} from "./transactions"
 import { SqliteWebhookDeliveryStorage } from "./webhook-delivery-storage"
 import { SqliteWebhookRunStorage } from "./webhook-run-storage"
 import { SqliteWorkflowInterventionStorage } from "./workflow-intervention-storage"
@@ -55,51 +73,123 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly rules: SqliteRulesStorage
   readonly migrators: readonly StorageMigrator[]
 
-  constructor(options: SqliteStorageOptions = {}) {
-    // The bundled stores share one file so one migrator owns the full SQLite schema.
-    const path = options.path ? sqliteStoragePath(options.path) : undefined
+  private readonly connection: SqliteStoreConnection
+  private readonly transactionScope = new AsyncLocalStorage<boolean>()
+  private transactionTail: Promise<void> = Promise.resolve()
 
-    this.objects = new SqliteObjectStorage({
-      path,
-    })
-    this.auth = new SqliteAuthStorage({
-      path,
-    })
-    this.actionRuns = new SqliteActionRunStorage({
-      path,
-    })
-    this.edits = new SqliteEditStorage({
-      path,
-    })
-    this.pipelineRuns = new SqlitePipelineRunStorage({
-      path,
-    })
-    this.timeseries = new SqliteTimeseriesStorage({
-      path,
-    })
-    this.syncRuns = new SqliteSyncRunStorage({
-      path,
-    })
-    this.projectionRuns = new SqliteProjectionRunStorage({
-      path,
-    })
-    this.workflowRuns = new SqliteWorkflowRunStorage({
-      path,
-    })
-    this.workflowInterventions = new SqliteWorkflowInterventionStorage({
-      path,
-    })
-    this.webhookDeliveries = new SqliteWebhookDeliveryStorage({
-      path,
-    })
-    this.webhookRuns = new SqliteWebhookRunStorage({
-      path,
-    })
-    this.rules = new SqliteRulesStorage({
-      path,
-    })
+  constructor(options: SqliteStorageOptions = {}) {
+    const path = options.path ? sqliteStoragePath(options.path) : undefined
+    this.connection = openSqliteStoreConnection({ path })
+
+    if (this.connection.installFreshSchema) {
+      installFreshSqliteSchema(this.connection.db)
+    }
+
+    const stores = createSqliteStores(this.connection)
+    this.objects = stores.objects
+    this.auth = stores.auth
+    this.actionRuns = stores.actionRuns
+    this.edits = stores.edits
+    this.pipelineRuns = stores.pipelineRuns
+    this.timeseries = stores.timeseries
+    this.syncRuns = stores.syncRuns
+    this.projectionRuns = stores.projectionRuns
+    this.workflowRuns = stores.workflowRuns
+    this.workflowInterventions = stores.workflowInterventions
+    this.webhookDeliveries = stores.webhookDeliveries
+    this.webhookRuns = stores.webhookRuns
+    this.rules = stores.rules
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
+
+  async transaction<T>(
+    run: (tx: Storage) => Promise<T> | T,
+    _options: StorageTransactionOptions = {}
+  ): Promise<T> {
+    if (this.transactionScope.getStore()) {
+      throwNestedStorageTransaction()
+    }
+
+    return this.withTransactionLock(async () => {
+      let active = true
+      const txStorage = this.createTransactionStorage()
+      const tx = createTransactionStorageProxy(txStorage, () => active)
+
+      try {
+        return await runImmediateTransactionAsync(this.connection.db, () =>
+          this.transactionScope.run(true, () => run(tx))
+        )
+      } finally {
+        active = false
+      }
+    })
+  }
+
+  close(): void {
+    closeSqliteStoreConnection(this.connection)
+  }
+
+  private createTransactionStorage(): Storage {
+    return {
+      ...createSqliteStores({
+        db: this.connection.db,
+        ownsConnection: false,
+        installFreshSchema: false,
+      }),
+      transaction: async <T>(): Promise<T> => {
+        throwNestedStorageTransaction()
+      },
+    }
+  }
+
+  private async withTransactionLock<T>(run: () => Promise<T>): Promise<T> {
+    const previous = this.transactionTail
+    let release!: () => void
+    this.transactionTail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    await previous
+    try {
+      return await run()
+    } finally {
+      release()
+    }
+  }
+}
+
+function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
+  return {
+    objects: new SqliteObjectStorage({ connection }),
+    auth: new SqliteAuthStorage({ connection }),
+    actionRuns: new SqliteActionRunStorage({ connection }),
+    edits: new SqliteEditStorage({ connection }),
+    pipelineRuns: new SqlitePipelineRunStorage({ connection }),
+    timeseries: new SqliteTimeseriesStorage({ connection }),
+    syncRuns: new SqliteSyncRunStorage({ connection }),
+    projectionRuns: new SqliteProjectionRunStorage({ connection }),
+    workflowRuns: new SqliteWorkflowRunStorage({ connection }),
+    workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
+    webhookDeliveries: new SqliteWebhookDeliveryStorage({ connection }),
+    webhookRuns: new SqliteWebhookRunStorage({ connection }),
+    rules: new SqliteRulesStorage({ connection }),
+  }
+}
+
+interface SqliteStoreSet {
+  readonly objects: SqliteObjectStorage
+  readonly auth: SqliteAuthStorage
+  readonly actionRuns: SqliteActionRunStorage
+  readonly edits: SqliteEditStorage
+  readonly pipelineRuns: SqlitePipelineRunStorage
+  readonly syncRuns: SqliteSyncRunStorage
+  readonly projectionRuns: SqliteProjectionRunStorage
+  readonly workflowRuns: SqliteWorkflowRunStorage
+  readonly workflowInterventions: SqliteWorkflowInterventionStorage
+  readonly timeseries: SqliteTimeseriesStorage
+  readonly webhookDeliveries: SqliteWebhookDeliveryStorage
+  readonly webhookRuns: SqliteWebhookRunStorage
+  readonly rules: SqliteRulesStorage
 }
 
 export type { SqliteActionRunStorageOptions } from "./action-run-storage"

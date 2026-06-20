@@ -36,11 +36,12 @@ import {
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
 import { insertActionRunCommitDiff } from "./action-run-commit-diff"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgActionRunStorage implements ActionRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     try {
@@ -118,7 +119,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   private async requeueAfterEnqueueFailure(input: QueueActionRunInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -200,7 +201,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       await this.requireRunningRun(tx, input.projectId, input.id, "transition phase")
 
       const [updated] = await tx<DatabaseRow[]>`
@@ -218,7 +219,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(
         tx,
         input.projectId,
@@ -263,7 +264,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record commit")
       const existingCommit = await this.loadCommitRecord(tx, input.projectId, input.id)
       const commit: ActionRunCommitRecord = {
@@ -300,7 +301,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record effects")
       const nextEffects = toEffectsRecord(input, new Date(input.completedAt ?? new Date()))
       const currentEffects = toActionRunEffectsRecord(existing)
@@ -339,7 +340,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}

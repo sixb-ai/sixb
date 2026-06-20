@@ -2,7 +2,15 @@
 // source.
 /// <reference path="./sql.d.ts" />
 
-import type { MigrationCapableStorage, StorageMigrator } from "@sixb/core"
+import { AsyncLocalStorage } from "node:async_hooks"
+import {
+  createTransactionStorageProxy,
+  type MigrationCapableStorage,
+  type Storage,
+  type StorageMigrator,
+  type StorageTransactionOptions,
+  throwNestedStorageTransaction,
+} from "@sixb/core"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAuthStorage } from "./pg-auth-storage"
@@ -18,6 +26,7 @@ import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
   /** Full connection string (e.g. DATABASE_URL). Takes precedence over individual fields. */
@@ -119,6 +128,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   private readonly sql: SQL
   private readonly schemaName: string
   private readonly shutdownTimeoutSeconds: number
+  private readonly transactionScope = new AsyncLocalStorage<boolean>()
 
   constructor(options: PostgresStorageOptions) {
     this.schemaName = options.schemaName ?? "sixb"
@@ -159,19 +169,45 @@ export class PostgresStorage implements MigrationCapableStorage {
     })
 
     this.migrators = createPostgresStorageMigrators(this.sql, this.schemaName)
-    this.objects = new PgObjectStorage(this.sql)
-    this.auth = new PgAuthStorage({ sql: this.sql })
-    this.actionRuns = new PgActionRunStorage(this.sql)
-    this.edits = new PgEditStorage(this.sql)
-    this.pipelineRuns = new PgPipelineRunStorage(this.sql)
-    this.workflowRuns = new PgWorkflowRunStorage(this.sql)
-    this.workflowInterventions = new PgWorkflowInterventionStorage(this.sql)
-    this.syncRuns = new PgSyncRunStorage(this.sql)
-    this.projectionRuns = new PgProjectionRunStorage(this.sql)
-    this.timeseries = new PgTimeseriesStorage(this.sql)
-    this.webhookDeliveries = new PgWebhookDeliveryStorage(this.sql)
-    this.webhookRuns = new PgWebhookRunStorage(this.sql)
-    this.rules = new PgRulesStorage(this.sql)
+    const stores = createPostgresStores(this.sql)
+    this.objects = stores.objects
+    this.auth = stores.auth
+    this.actionRuns = stores.actionRuns
+    this.edits = stores.edits
+    this.pipelineRuns = stores.pipelineRuns
+    this.workflowRuns = stores.workflowRuns
+    this.workflowInterventions = stores.workflowInterventions
+    this.syncRuns = stores.syncRuns
+    this.projectionRuns = stores.projectionRuns
+    this.timeseries = stores.timeseries
+    this.webhookDeliveries = stores.webhookDeliveries
+    this.webhookRuns = stores.webhookRuns
+    this.rules = stores.rules
+  }
+
+  async transaction<T>(
+    run: (tx: Storage) => Promise<T> | T,
+    options: StorageTransactionOptions = {}
+  ): Promise<T> {
+    if (this.transactionScope.getStore()) {
+      throwNestedStorageTransaction()
+    }
+
+    return runPgTransaction(this.sql, async (client) => {
+      if (options.isolation === "serializable") {
+        await client`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`
+      }
+
+      let active = true
+      const txStorage = this.createTransactionStorage(client)
+      const tx = createTransactionStorageProxy(txStorage, () => active)
+
+      try {
+        return await this.transactionScope.run(true, () => run(tx))
+      } finally {
+        active = false
+      }
+    })
   }
 
   /**
@@ -191,6 +227,49 @@ export class PostgresStorage implements MigrationCapableStorage {
   async dropSchema(): Promise<void> {
     await dropSchema(this.sql, this.schemaName)
   }
+
+  private createTransactionStorage(client: PgStoreClient): Storage {
+    return {
+      ...createPostgresStores(client),
+      transaction: async <T>(): Promise<T> => {
+        throwNestedStorageTransaction()
+      },
+    }
+  }
+}
+
+function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
+  return {
+    objects: new PgObjectStorage(sql),
+    auth: new PgAuthStorage({ sql }),
+    actionRuns: new PgActionRunStorage(sql),
+    edits: new PgEditStorage(sql),
+    pipelineRuns: new PgPipelineRunStorage(sql),
+    workflowRuns: new PgWorkflowRunStorage(sql),
+    workflowInterventions: new PgWorkflowInterventionStorage(sql),
+    syncRuns: new PgSyncRunStorage(sql),
+    projectionRuns: new PgProjectionRunStorage(sql),
+    timeseries: new PgTimeseriesStorage(sql),
+    webhookDeliveries: new PgWebhookDeliveryStorage(sql),
+    webhookRuns: new PgWebhookRunStorage(sql),
+    rules: new PgRulesStorage(sql),
+  }
+}
+
+interface PostgresStoreSet {
+  readonly objects: PgObjectStorage
+  readonly auth: PgAuthStorage
+  readonly actionRuns: PgActionRunStorage
+  readonly edits: PgEditStorage
+  readonly pipelineRuns: PgPipelineRunStorage
+  readonly workflowRuns: PgWorkflowRunStorage
+  readonly workflowInterventions: PgWorkflowInterventionStorage
+  readonly syncRuns: PgSyncRunStorage
+  readonly projectionRuns: PgProjectionRunStorage
+  readonly timeseries: PgTimeseriesStorage
+  readonly webhookDeliveries: PgWebhookDeliveryStorage
+  readonly webhookRuns: PgWebhookRunStorage
+  readonly rules: PgRulesStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

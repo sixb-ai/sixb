@@ -86,6 +86,17 @@ function applyCounters(
 export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
   private readonly rows = new Map<string, ProjectionRunRecord>()
 
+  snapshot(): InMemoryProjectionRunStorageSnapshot {
+    return structuredClone(this.rows)
+  }
+
+  restore(snapshot: InMemoryProjectionRunStorageSnapshot): void {
+    this.rows.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.rows.set(key, record)
+    }
+  }
+
   async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {
     assertNonEmpty(input.id, "id")
     assertNonEmpty(input.projectId, "projectId")
@@ -209,3 +220,5 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     return record
   }
 }
+
+export type InMemoryProjectionRunStorageSnapshot = Map<string, ProjectionRunRecord>

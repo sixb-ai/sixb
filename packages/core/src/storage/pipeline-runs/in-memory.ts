@@ -40,6 +40,25 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   private readonly runs = new Map<string, PipelineRunRecord>()
   private readonly steps = new Map<string, PipelineStepRunRecord>()
 
+  snapshot(): InMemoryPipelineRunStorageSnapshot {
+    return {
+      runs: structuredClone(this.runs),
+      steps: structuredClone(this.steps),
+    }
+  }
+
+  restore(snapshot: InMemoryPipelineRunStorageSnapshot): void {
+    this.runs.clear()
+    for (const [key, record] of structuredClone(snapshot.runs)) {
+      this.runs.set(key, record)
+    }
+
+    this.steps.clear()
+    for (const [key, record] of structuredClone(snapshot.steps)) {
+      this.steps.set(key, record)
+    }
+  }
+
   async start(input: StartPipelineRunInput): Promise<PipelineRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
@@ -278,4 +297,9 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
     return record
   }
+}
+
+export interface InMemoryPipelineRunStorageSnapshot {
+  readonly runs: Map<string, PipelineRunRecord>
+  readonly steps: Map<string, PipelineStepRunRecord>
 }

@@ -11,8 +11,9 @@ import type {
   UpdateProjectionRunInput,
 } from "@sixb/core"
 import { ProjectionRunError } from "@sixb/core"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 type CounterKey = keyof ProjectionRunCounters
 
@@ -24,7 +25,7 @@ const counterKeys: readonly CounterKey[] = [
 ]
 
 export class PgProjectionRunStorage implements ProjectionRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async start(input: StartProjectionRunInput): Promise<ProjectionRunRecord> {
     assertNonEmpty(input.id, "id")
@@ -78,7 +79,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
   }
 
   async update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await requireRunning(tx, input.projectId, input.id)
       const counters = mergeCounters(rowToCounters(existing), input)
 
@@ -98,7 +99,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
   }
 
   async finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await requireRunning(tx, input.projectId, input.id)
       const counters = mergeCounters(rowToCounters(existing), input)
 

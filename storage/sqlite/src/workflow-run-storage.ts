@@ -1,6 +1,4 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import type { Database } from "bun:sqlite"
 import type {
   FinishWorkflowNodeRunInput,
   FinishWorkflowRunInput,
@@ -33,23 +31,30 @@ import {
   type SqliteValue,
 } from "./run-list-query"
 import { isUniqueConstraintError } from "./storage-errors"
+import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  type SqliteStoreConnection,
+} from "./transactions"
 
 export interface SqliteWorkflowRunStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+  /** Internal shared connection used by bundled SqliteStorage. */
+  connection?: SqliteStoreConnection
 }
 
 export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: SqliteWorkflowNodeRunStorage
 
+  private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
   constructor(options: SqliteWorkflowRunStorageOptions = {}) {
-    const path = options.path ?? ":memory:"
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
+    this.connection = openSqliteStoreConnection(options)
+    this.db = this.connection.db
 
-    if (path === ":memory:") {
+    if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
 
@@ -356,7 +361,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   close(): void {
-    this.db.close()
+    closeSqliteStoreConnection(this.connection)
   }
 
   private requireWorkflowRun(projectId: string, id: string): WorkflowRunRecord {

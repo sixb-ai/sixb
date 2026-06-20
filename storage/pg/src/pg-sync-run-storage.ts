@@ -12,11 +12,12 @@ import type {
 } from "@sixb/core"
 import { SyncRunError } from "@sixb/core"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgSyncRunStorage implements SyncRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async start(input: StartSyncRunInput): Promise<SyncRunRecord> {
     try {
@@ -58,7 +59,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 
   async finish(input: FinishSyncRunInput): Promise<SyncRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}

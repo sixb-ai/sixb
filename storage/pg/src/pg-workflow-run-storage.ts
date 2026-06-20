@@ -22,14 +22,15 @@ import type {
 } from "@sixb/core"
 import { WorkflowRunError } from "@sixb/core"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWorkflowRunStorage implements WorkflowRunStorage {
   readonly nodes: PgWorkflowNodeRunStorage
 
-  constructor(private readonly sql: SQL) {
+  constructor(private readonly sql: PgStoreClient) {
     this.nodes = new PgWorkflowNodeRunStorage(sql)
   }
 
@@ -73,7 +74,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const startedAt = input.startedAt ?? new Date()
       const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
@@ -143,7 +144,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async finish(input: FinishWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -188,7 +189,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -222,7 +223,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -322,12 +323,12 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
 }
 
 export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async start(input: StartWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
 
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [workflowRun] = await tx<WorkflowRunDatabaseRow[]>`
         SELECT * FROM workflow_runs
         WHERE project_id = ${input.projectId} AND id = ${input.workflowRunId}
@@ -396,7 +397,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   }
 
   async finish(input: FinishWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WorkflowNodeRunDatabaseRow[]>`
         SELECT * FROM workflow_node_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -443,7 +444,7 @@ export class PgWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
   }
 
   async wait(input: WaitWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<WorkflowNodeRunDatabaseRow[]>`
         SELECT * FROM workflow_node_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}

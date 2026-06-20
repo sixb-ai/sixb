@@ -11,11 +11,12 @@ import type {
   WorkflowIOSnapshot,
 } from "@sixb/core"
 import { WorkflowInterventionError } from "@sixb/core"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWorkflowInterventionStorage implements WorkflowInterventionStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
@@ -69,7 +70,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
   }
 
   async submit(input: SubmitWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
       const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`
@@ -88,7 +89,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
   }
 
   async cancel(input: CancelWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
       const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`
@@ -106,7 +107,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
   }
 
   async expire(input: ExpireWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       await requirePendingIntervention(tx, input.projectId, input.id)
 
       const [updated] = await tx<WorkflowInterventionDatabaseRow[]>`

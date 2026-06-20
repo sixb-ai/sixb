@@ -5,15 +5,15 @@ import type {
   WebhookDeliveryRecord,
   WebhookDeliveryStorage,
 } from "@sixb/core"
-import type { SQL } from "./pg-client"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgWebhookDeliveryStorage implements WebhookDeliveryStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async claim(
     input: WebhookDeliveryKey & { receivedAt: string }
   ): Promise<WebhookDeliveryClaimRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       // Atomic first claim: only one transaction can insert this scoped delivery key.
       const [inserted] = await tx<WebhookDeliveryRow[]>`
         INSERT INTO webhook_deliveries (

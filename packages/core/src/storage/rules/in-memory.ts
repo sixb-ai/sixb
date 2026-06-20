@@ -53,6 +53,17 @@ function compareRuleStateRecords(
 export class InMemoryRulesStorage implements RulesStorage {
   private readonly active = new Map<string, RuleStateRecord>()
 
+  snapshot(): InMemoryRulesStorageSnapshot {
+    return structuredClone(this.active)
+  }
+
+  restore(snapshot: InMemoryRulesStorageSnapshot): void {
+    this.active.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.active.set(key, record)
+    }
+  }
+
   async getActive(params: {
     projectId: string
     ruleId: string
@@ -104,3 +115,5 @@ export class InMemoryRulesStorage implements RulesStorage {
     )
   }
 }
+
+export type InMemoryRulesStorageSnapshot = Map<string, RuleStateRecord>
