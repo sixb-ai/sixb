@@ -3,13 +3,13 @@ import type {
   GroupMembershipRecord,
   UpsertAuthGroupMembershipInput,
 } from "@sixb/core"
-import type { SQL } from "../pg-client"
+import type { PgStoreClient } from "../transactions"
 import type { PgAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"
 import { listMembershipsForUser, upsertGroupMembership } from "./shared"
 
 export class PgAuthGroupMembershipStore implements AuthGroupMembershipStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async upsert(input: UpsertAuthGroupMembershipInput): Promise<GroupMembershipRecord> {
     return upsertGroupMembership(this.sql, input)

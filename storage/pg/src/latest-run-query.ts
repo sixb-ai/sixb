@@ -1,4 +1,4 @@
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 
 type PgLatestRunTarget =
   | { readonly tableName: "pipeline_runs"; readonly ownerColumn: "pipeline_id" }
@@ -9,7 +9,7 @@ type PgLatestRunSelectList = "*" | "*, checkpoint IS NOT NULL AS checkpoint_pres
 
 export async function queryLatestRunsByOwnerId<TRow>(
   input: {
-    readonly sql: SQL
+    readonly sql: SQLClient
     readonly ownerIds: readonly string[]
     readonly projectId: string
     readonly ownerIdFor: (row: TRow) => string

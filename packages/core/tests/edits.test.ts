@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionRunStorage,
+  commitActionEditBatch,
   defineObjectType,
   defineValueType,
   deriveEditCommitDiff,
@@ -8,11 +10,14 @@ import {
   InMemoryStorage,
   link,
   type ObjectLink,
+  ObjectStorageError,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
+  planEditBatch,
   prop,
   type RecordEditsOptions,
   recordEdits,
+  type Storage,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -484,7 +489,654 @@ describe("EditBatch core contract", () => {
       links: [],
     })
   })
+
+  test("cascades object delete diffs to incoming and outgoing links", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+    await seedPaymentInvoiceLink(storage)
+
+    const diff = await deriveEditCommitDiff({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: recordRuntimeEdits({ runId: "act_delete" }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").delete()
+      }),
+    })
+
+    expect(diff).toEqual({
+      objects: [
+        {
+          objectTypeId: "Invoice",
+          primaryId: "inv_1",
+          operation: "delete",
+          changedProperties: [],
+        },
+      ],
+      links: [
+        {
+          operation: "delete",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+        {
+          operation: "delete",
+          source: { objectTypeId: "Payment", primaryId: "pay_1" },
+          linkId: "invoice",
+          target: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        },
+      ],
+    })
+  })
+
+  test("cancels create and link diffs when a created object is deleted", async () => {
+    const storage = await createSeededStorage()
+    const batch = recordRuntimeEdits({ runId: "act_create_delete" }, ({ objects }) => {
+      const invoice = objects(Invoice).create({
+        id: "inv_created",
+        amount: 300,
+        status: "draft",
+      })
+      invoice.link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+        properties: { role: "billTo" },
+      })
+      invoice.delete()
+    })
+
+    const diff = await deriveEditCommitDiff({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch,
+    })
+
+    expect(diff).toEqual({ objects: [], links: [] })
+  })
+
+  test("commits edits atomically in in-memory storage and reuses the commit on retry", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_commit_1",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_commit_1",
+    })
+    await storage.actionRuns.start({
+      id: "run_commit_1",
+      projectId: "project-a",
+    })
+
+    const batch = recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+    const result = await commitActionEditBatch({
+      storage,
+      projectId: "project-a",
+      runId: "run_commit_1",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+    const retry = await commitActionEditBatch({
+      storage,
+      projectId: "project-a",
+      runId: "run_commit_1",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch,
+      committedAt: new Date("2026-06-03T00:00:00.000Z"),
+    })
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+    const run = await storage.actionRuns.getById({
+      projectId: "project-a",
+      id: "run_commit_1",
+    })
+
+    expect(result.commit.created).toBe(true)
+    expect(retry.commit.created).toBe(false)
+    expect(retry.commit.diff).toEqual(result.commit.diff)
+    expect(invoice?.properties.status).toBe("paid")
+    expect(invoice?.version).toBe(2)
+    expect(run?.commit?.diff).toEqual(result.commit.diff)
+  })
+
+  test("rolls back in-memory object changes when commit recording fails", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_rollback",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_rollback",
+    })
+    await storage.actionRuns.start({
+      id: "run_rollback",
+      projectId: "project-a",
+    })
+
+    const failingStorage = withFailingRecordCommit(storage)
+    const batch = recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    await expect(
+      commitActionEditBatch({
+        storage: failingStorage,
+        projectId: "project-a",
+        runId: "run_rollback",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).rejects.toThrow("commit trail write failed")
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+    const run = await storage.actionRuns.getById({
+      projectId: "project-a",
+      id: "run_rollback",
+    })
+
+    expect(invoice?.properties.status).toBe("draft")
+    expect(invoice?.version).toBe(1)
+    expect(run?.commit).toBeUndefined()
+  })
+
+  test("rejects edit commits for a different action run identity", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_identity",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_identity",
+    })
+    await storage.actionRuns.start({
+      id: "run_identity",
+      projectId: "project-a",
+    })
+
+    const batch = recordRuntimeEdits({ runId: "run_identity" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "voidInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("belongs to action 'markPaid'")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_2" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different subject")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        idempotencyKey: "different",
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different idempotency key")
+  })
 })
+
+describe("EditBatch net diff (delete then re-create within one batch)", () => {
+  test("re-creating a deleted existing link nets to an update of the live row", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    const batch: EditBatch = {
+      version: 1,
+      operations: [
+        {
+          kind: "link.delete",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+        {
+          kind: "link.create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          properties: { role: "shipTo" },
+        },
+      ],
+    }
+
+    const plan = await planEditBatch({ projectId: "project-a", ontology, storage, batch })
+
+    // The row still physically exists, so the delete+create must collapse to a single update,
+    // never a `create` of a live row (which would fail at apply time).
+    expect(plan.diff.links).toEqual([
+      {
+        operation: "update",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+    ])
+    expect(plan.links.deletes).toEqual([])
+    expect(plan.links.upserts).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        properties: { role: "shipTo" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("re-creating a deleted link replaces (does not merge) the prior properties", async () => {
+    const storage = await createSeededStorage()
+    await storage.objects.applyLinkUpserted({
+      id: "evt_link_props",
+      schemaVersion: 1,
+      projectId: "project-a",
+      type: "link.upserted",
+      topic: "links",
+      partitionKey: "Invoice:inv_1:customer",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      cursor: "evt_link_props",
+      payload: {
+        sourceTypeId: "Invoice",
+        sourceId: "inv_1",
+        linkId: "customer",
+        targetTypeId: "Customer",
+        targetId: "cus_1",
+        properties: { role: "old" },
+      },
+    })
+
+    const batch: EditBatch = {
+      version: 1,
+      operations: [
+        {
+          kind: "link.delete",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+        {
+          kind: "link.create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          properties: { role: "new" },
+        },
+      ],
+    }
+
+    const plan = await planEditBatch({ projectId: "project-a", ontology, storage, batch })
+
+    expect(plan.links.upserts).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        properties: { role: "new" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("re-creating a deleted link with identical properties is a no-op", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.links).toEqual([])
+    expect(plan.links.upserts).toEqual([])
+    expect(plan.links.deletes).toEqual([])
+  })
+
+  test("swapping a cardinality-one target via delete then create is allowed", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1
+    await storage.objects.applyObjectUpserted({
+      id: "evt_customer_2",
+      schemaVersion: 1,
+      projectId: "project-a",
+      type: "object.upserted",
+      topic: "objects",
+      partitionKey: "Customer:cus_2",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      cursor: "evt_customer_2",
+      payload: {
+        objectTypeId: "Customer",
+        primaryId: "cus_2",
+        properties: { id: "cus_2", name: "Second Customer" },
+      },
+    })
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_2" },
+            properties: { role: "shipTo" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.links).toEqual([
+      {
+        operation: "delete",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+      {
+        operation: "create",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_2" },
+      },
+    ])
+    expect(plan.links.deletes).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+    ])
+  })
+
+  test("re-creating a deleted existing object nets to an update with the full new properties", async () => {
+    const storage = await createSeededStorage() // inv_1 = { amount: 120, status: "draft" }
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          { kind: "object.delete", objectTypeId: "Invoice", primaryId: "inv_1" },
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            properties: { id: "inv_1", amount: 999, status: "reissued" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.objects).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        operation: "update",
+        changedProperties: ["amount", "status"],
+      },
+    ])
+    expect(plan.objects.deletes).toEqual([])
+    expect(plan.objects.upserts).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        properties: { id: "inv_1", amount: 999, status: "reissued" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("commits a delete-then-create of an existing link as an in-place update", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    await storage.actionRuns.queue({
+      id: "run_relink",
+      projectId: "project-a",
+      actionId: "relink",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_relink",
+    })
+    await storage.actionRuns.start({ id: "run_relink", projectId: "project-a" })
+
+    const result = await commitActionEditBatch({
+      storage,
+      projectId: "project-a",
+      runId: "run_relink",
+      actionId: "relink",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "shipTo" },
+          },
+        ],
+      },
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    expect(result.commit.created).toBe(true)
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.properties).toEqual({ role: "shipTo" })
+  })
+})
+
+describe("EditCommitPlan apply conflicts (concurrent divergence from the plan)", () => {
+  test("rejects a create whose object already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    // The net-diff planner never emits a `create` for a live row, so build the plan while the row is
+    // absent; the first apply creates it and the second reproduces the concurrent-create hazard the
+    // serializable+retry machinery is meant to surface uniformly across providers.
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_dup",
+            properties: { id: "inv_dup", amount: 10, status: "draft" },
+          },
+        ],
+      },
+    })
+    expect(plan.objects.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing object 'Invoice:inv_dup'."
+    )
+  })
+
+  test("rejects a create whose link already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+    expect(plan.links.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
+    )
+  })
+})
+
+function withFailingRecordCommit(storage: InMemoryStorage): Storage {
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const actionRuns = requireActionRuns(tx.actionRuns)
+        const failingActionRuns: ActionRunStorage = {
+          queue: (input) => actionRuns.queue(input),
+          start: (input) => actionRuns.start(input),
+          enterPhase: (input) => actionRuns.enterPhase(input),
+          recordWriteback: (input) => actionRuns.recordWriteback(input),
+          recordCommit: async () => {
+            throw new Error("commit trail write failed")
+          },
+          recordEffects: (input) => actionRuns.recordEffects(input),
+          finish: (input) => actionRuns.finish(input),
+          getById: (input) => actionRuns.getById(input),
+          list: (input) => actionRuns.list(input),
+        }
+
+        return run({
+          ...tx,
+          actionRuns: failingActionRuns,
+          transaction: tx.transaction,
+        })
+      }, options),
+  }
+}
+
+function requireActionRuns(actionRuns: ActionRunStorage | undefined): ActionRunStorage {
+  if (!actionRuns) {
+    throw new Error("Missing action run storage")
+  }
+
+  return actionRuns
+}
 
 async function createSeededStorage(): Promise<InMemoryStorage> {
   const storage = new InMemoryStorage()
@@ -547,4 +1199,45 @@ async function createSeededStorage(): Promise<InMemoryStorage> {
   })
 
   return storage
+}
+
+async function seedInvoiceCustomerLink(storage: InMemoryStorage): Promise<void> {
+  await storage.objects.applyLinkUpserted({
+    id: "evt_invoice_customer",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "link.upserted",
+    topic: "links",
+    partitionKey: "Invoice:inv_1:customer",
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    cursor: "evt_invoice_customer",
+    payload: {
+      sourceTypeId: "Invoice",
+      sourceId: "inv_1",
+      linkId: "customer",
+      targetTypeId: "Customer",
+      targetId: "cus_1",
+      properties: { role: "billTo" },
+    },
+  })
+}
+
+async function seedPaymentInvoiceLink(storage: InMemoryStorage): Promise<void> {
+  await storage.objects.applyLinkUpserted({
+    id: "evt_payment_invoice",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "link.upserted",
+    topic: "links",
+    partitionKey: "Payment:pay_1:invoice",
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    cursor: "evt_payment_invoice",
+    payload: {
+      sourceTypeId: "Payment",
+      sourceId: "pay_1",
+      linkId: "invoice",
+      targetTypeId: "Invoice",
+      targetId: "inv_1",
+    },
+  })
 }

@@ -14,6 +14,25 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
   private readonly pointsByKey = new Map<string, TimeseriesPoint[]>()
   private readonly appliedEventIds = new Set<string>()
 
+  snapshot(): InMemoryTimeseriesStorageSnapshot {
+    return {
+      pointsByKey: structuredClone(this.pointsByKey),
+      appliedEventIds: new Set(this.appliedEventIds),
+    }
+  }
+
+  restore(snapshot: InMemoryTimeseriesStorageSnapshot): void {
+    this.pointsByKey.clear()
+    for (const [key, points] of structuredClone(snapshot.pointsByKey)) {
+      this.pointsByKey.set(key, points)
+    }
+
+    this.appliedEventIds.clear()
+    for (const eventId of snapshot.appliedEventIds) {
+      this.appliedEventIds.add(eventId)
+    }
+  }
+
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
     if (this.appliedEventIds.has(event.id)) {
       return
@@ -101,4 +120,9 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
     }
     return latest
   }
+}
+
+export interface InMemoryTimeseriesStorageSnapshot {
+  readonly pointsByKey: Map<string, TimeseriesPoint[]>
+  readonly appliedEventIds: Set<string>
 }

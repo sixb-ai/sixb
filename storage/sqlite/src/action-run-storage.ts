@@ -1,6 +1,4 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import type { Database } from "bun:sqlite"
 import type {
   ActionRunCommitDiff,
   ActionRunCommitRecord,
@@ -38,22 +36,30 @@ import {
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
 import { installFreshSqliteSchema } from "./migrations"
+import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  type SqliteStoreConnection,
+} from "./transactions"
 
 export interface SqliteActionRunStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+  /** Internal shared connection used by bundled SqliteStorage. */
+  connection?: SqliteStoreConnection
 }
 
 export class SqliteActionRunStorage implements ActionRunStorage {
+  private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
   constructor(options: SqliteActionRunStorageOptions = {}) {
-    const path = options.path ?? ":memory:"
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
+    this.connection = openSqliteStoreConnection(options)
+    this.db = this.connection.db
 
-    if (path === ":memory:") {
+    if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
   }
@@ -348,7 +354,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
         )
         .run(input.projectId, input.id, commit.committedAt.toISOString())
 
-      this.insertCommitDiff(input.projectId, input.id, commit.diff)
+      insertActionRunCommitDiff(this.db, input.projectId, input.id, commit.diff)
 
       this.db
         .query(
@@ -576,7 +582,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
   }
 
   close(): void {
-    this.db.close()
+    closeSqliteStoreConnection(this.connection)
   }
 
   private requireRunningRun(projectId: string, id: string, operation: string): DatabaseRow {
@@ -597,68 +603,6 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     }
 
     return existing
-  }
-
-  private insertCommitDiff(projectId: string, runId: string, diff: ActionRunCommitDiff): void {
-    for (const objectDiff of diff.objects) {
-      this.db
-        .query(
-          `
-          INSERT INTO action_run_object_diffs (
-            project_id,
-            run_id,
-            object_type_id,
-            primary_id,
-            operation
-          ) VALUES (?, ?, ?, ?, ?)
-        `
-        )
-        .run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, objectDiff.operation)
-
-      for (const propertyId of objectDiff.changedProperties) {
-        this.db
-          .query(
-            `
-            INSERT INTO action_run_object_diff_properties (
-              project_id,
-              run_id,
-              object_type_id,
-              primary_id,
-              property_id
-            ) VALUES (?, ?, ?, ?, ?)
-          `
-          )
-          .run(projectId, runId, objectDiff.objectTypeId, objectDiff.primaryId, propertyId)
-      }
-    }
-
-    for (const linkDiff of diff.links) {
-      this.db
-        .query(
-          `
-          INSERT INTO action_run_link_diffs (
-            project_id,
-            run_id,
-            operation,
-            source_object_type_id,
-            source_primary_id,
-            link_id,
-            target_object_type_id,
-            target_primary_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `
-        )
-        .run(
-          projectId,
-          runId,
-          linkDiff.operation,
-          linkDiff.source.objectTypeId,
-          linkDiff.source.primaryId,
-          linkDiff.linkId,
-          linkDiff.target.objectTypeId,
-          linkDiff.target.primaryId
-        )
-    }
   }
 
   private deleteCommitRows(projectId: string, runId: string): void {

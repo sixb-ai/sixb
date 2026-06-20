@@ -53,6 +53,28 @@ export class InMemoryAuthStorage implements AuthStorage {
   readonly magicLinks = new InMemoryAuthMagicLinkStore(this.state)
   readonly oidcAuthorizationAttempts = new InMemoryAuthOidcAuthorizationAttemptStore(this.state)
 
+  snapshot(): InMemoryAuthStorageSnapshot {
+    return {
+      users: structuredClone(this.state.users),
+      identities: structuredClone(this.state.identities),
+      sessions: structuredClone(this.state.sessions),
+      invitations: structuredClone(this.state.invitations),
+      groupMemberships: structuredClone(this.state.groupMemberships),
+      magicLinks: structuredClone(this.state.magicLinks),
+      oidcAuthorizationAttempts: structuredClone(this.state.oidcAuthorizationAttempts),
+    }
+  }
+
+  restore(snapshot: InMemoryAuthStorageSnapshot): void {
+    restoreMap(this.state.users, snapshot.users)
+    restoreMap(this.state.identities, snapshot.identities)
+    restoreMap(this.state.sessions, snapshot.sessions)
+    restoreMap(this.state.invitations, snapshot.invitations)
+    restoreMap(this.state.groupMemberships, snapshot.groupMemberships)
+    restoreMap(this.state.magicLinks, snapshot.magicLinks)
+    restoreMap(this.state.oidcAuthorizationAttempts, snapshot.oidcAuthorizationAttempts)
+  }
+
   async completeMagicLinkSignIn(
     input: CompleteMagicLinkSignInInput
   ): Promise<CompleteSignInResult> {
@@ -484,6 +506,15 @@ export class InMemoryAuthStorage implements AuthStorage {
       stateHash: input.stateHash,
       consumedAt: completedAt,
     })
+  }
+}
+
+export type InMemoryAuthStorageSnapshot = AuthStorageState
+
+function restoreMap<TKey, TValue>(target: Map<TKey, TValue>, snapshot: Map<TKey, TValue>): void {
+  target.clear()
+  for (const [key, value] of structuredClone(snapshot)) {
+    target.set(key, value)
   }
 }
 

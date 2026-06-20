@@ -16,7 +16,7 @@ import {
   type SixbOptions,
 } from "@sixb/core"
 import { SixbServer } from "@sixb/server"
-import { SqliteObjectStorage, SqliteTimeseriesStorage } from "@sixb/sqlite"
+import { SqliteStorage } from "@sixb/sqlite"
 import { Customer } from "../ontology/customer"
 import { Employee } from "../ontology/employee"
 import { Invoice } from "../ontology/invoice"
@@ -51,14 +51,13 @@ function getFreePort(): Promise<number> {
   })
 }
 
+const storage = new SqliteStorage()
+
 const sixb = createSixbInstance({
   id: "acme-client-query-e2e",
   ontology: [Project, Customer, Employee, Invoice] as const,
   broker: new InMemoryBroker(),
-  storage: {
-    objects: new SqliteObjectStorage(),
-    timeseries: new SqliteTimeseriesStorage(),
-  },
+  storage,
   lakeStorage: new InMemoryLakeStorage(),
   blobStorage: new InMemoryBlobStorage(),
   queues: new InMemoryQueues(),
@@ -145,6 +144,7 @@ beforeAll(async () => {
 afterAll(async () => {
   client.setConfig({ baseUrl: previousBaseUrl })
   await server?.stop()
+  storage.close()
 })
 
 describe("client object queries against a live server", () => {

@@ -1,7 +1,11 @@
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "../pg-client"
-import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
+import {
+  authLockKey,
+  lockAdvisoryKeys,
+  type PgStoreClient,
+  runPgTransaction,
+} from "../transactions"
 import type { PgAuthSessionRow } from "./rows"
 import { rowToSessionRecord } from "./rows"
 import {
@@ -13,7 +17,7 @@ import {
 } from "./shared"
 
 export class PgAuthSessionStore implements AuthSessionStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateAuthSessionInput): Promise<SessionRecord> {
     // Session ids are random UUIDs and the table has a primary-key guard, so

@@ -35,11 +35,13 @@ import {
   isTerminalActionRun,
   normalizeActionRunCommitDiff,
 } from "@sixb/core"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import { insertActionRunCommitDiff } from "./action-run-commit-diff"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgActionRunStorage implements ActionRunStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     try {
@@ -117,7 +119,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   private async requeueAfterEnqueueFailure(input: QueueActionRunInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -199,7 +201,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       await this.requireRunningRun(tx, input.projectId, input.id, "transition phase")
 
       const [updated] = await tx<DatabaseRow[]>`
@@ -217,7 +219,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(
         tx,
         input.projectId,
@@ -262,7 +264,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordCommit(input: RecordActionCommitInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record commit")
       const existingCommit = await this.loadCommitRecord(tx, input.projectId, input.id)
       const commit: ActionRunCommitRecord = {
@@ -285,7 +287,7 @@ export class PgActionRunStorage implements ActionRunStorage {
         VALUES (${input.projectId}, ${input.id}, ${commit.committedAt})
       `
 
-      await this.insertCommitDiff(tx, input.projectId, input.id, commit.diff)
+      await insertActionRunCommitDiff(tx, input.projectId, input.id, commit.diff)
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE action_runs
@@ -299,7 +301,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record effects")
       const nextEffects = toEffectsRecord(input, new Date(input.completedAt ?? new Date()))
       const currentEffects = toActionRunEffectsRecord(existing)
@@ -338,7 +340,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
@@ -515,73 +517,6 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     return existing
-  }
-
-  private async insertCommitDiff(
-    runner: SQLClient,
-    projectId: string,
-    runId: string,
-    diff: ActionRunCommitDiff
-  ): Promise<void> {
-    for (const objectDiff of diff.objects) {
-      await runner`
-        INSERT INTO action_run_object_diffs (
-          project_id,
-          run_id,
-          object_type_id,
-          primary_id,
-          operation
-        ) VALUES (
-          ${projectId},
-          ${runId},
-          ${objectDiff.objectTypeId},
-          ${objectDiff.primaryId},
-          ${objectDiff.operation}
-        )
-      `
-
-      for (const propertyId of objectDiff.changedProperties) {
-        await runner`
-          INSERT INTO action_run_object_diff_properties (
-            project_id,
-            run_id,
-            object_type_id,
-            primary_id,
-            property_id
-          ) VALUES (
-            ${projectId},
-            ${runId},
-            ${objectDiff.objectTypeId},
-            ${objectDiff.primaryId},
-            ${propertyId}
-          )
-        `
-      }
-    }
-
-    for (const linkDiff of diff.links) {
-      await runner`
-        INSERT INTO action_run_link_diffs (
-          project_id,
-          run_id,
-          operation,
-          source_object_type_id,
-          source_primary_id,
-          link_id,
-          target_object_type_id,
-          target_primary_id
-        ) VALUES (
-          ${projectId},
-          ${runId},
-          ${linkDiff.operation},
-          ${linkDiff.source.objectTypeId},
-          ${linkDiff.source.primaryId},
-          ${linkDiff.linkId},
-          ${linkDiff.target.objectTypeId},
-          ${linkDiff.target.primaryId}
-        )
-      `
-    }
   }
 
   private async deleteCommitRows(

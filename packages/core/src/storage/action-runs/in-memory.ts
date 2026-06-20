@@ -108,6 +108,17 @@ function compareRuns(a: ActionRunRecord, b: ActionRunRecord, order: "asc" | "des
 export class InMemoryActionRunStorage implements ActionRunStorage {
   private readonly rows = new Map<string, ActionRunRecord>()
 
+  snapshot(): InMemoryActionRunStorageSnapshot {
+    return structuredClone(this.rows)
+  }
+
+  restore(snapshot: InMemoryActionRunStorageSnapshot): void {
+    this.rows.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.rows.set(key, record)
+    }
+  }
+
   async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
     const key = actionRunKey(input.projectId, input.id)
     const existing = this.rows.get(key)
@@ -377,3 +388,5 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
     }
   }
 }
+
+export type InMemoryActionRunStorageSnapshot = Map<string, ActionRunRecord>

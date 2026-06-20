@@ -6,8 +6,13 @@ import type {
   ListAuthInvitationsResult,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL, SQLClient } from "../pg-client"
-import { authLockKey, lockAdvisoryKeys, runPgTransaction } from "../transactions"
+import type { SQLClient } from "../pg-client"
+import {
+  authLockKey,
+  lockAdvisoryKeys,
+  type PgStoreClient,
+  runPgTransaction,
+} from "../transactions"
 import type { PgAuthInvitationRow } from "./rows"
 import { rowToInvitationRecord } from "./rows"
 import {
@@ -31,7 +36,7 @@ import {
 } from "./shared"
 
 export class PgAuthInvitationStore implements AuthInvitationStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async createOrUpdateActive(input: CreateOrUpdateAuthInvitationInput): Promise<InvitationRecord> {
     return runPgTransaction(this.sql, async (tx) => {

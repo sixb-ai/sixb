@@ -1,6 +1,4 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import type { Database } from "bun:sqlite"
 import type {
   FinishProjectionRunInput,
   ListProjectionRunsInput,
@@ -16,6 +14,11 @@ import type {
 import { ProjectionRunError } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  type SqliteStoreConnection,
+} from "./transactions"
+import {
   assertOptionalProjectionRunCounter,
   assertProjectionRunFieldNonEmpty,
   assertProjectionRunListWindowValue,
@@ -24,6 +27,8 @@ import {
 export interface SqliteProjectionRunStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+  /** Internal shared connection used by bundled SqliteStorage. */
+  connection?: SqliteStoreConnection
 }
 
 type CounterKey = keyof ProjectionRunCounters
@@ -36,14 +41,14 @@ const counterKeys: readonly CounterKey[] = [
 ]
 
 export class SqliteProjectionRunStorage implements ProjectionRunStorage {
+  private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
   constructor(options: SqliteProjectionRunStorageOptions = {}) {
-    const path = options.path ?? ":memory:"
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
+    this.connection = openSqliteStoreConnection(options)
+    this.db = this.connection.db
 
-    if (path === ":memory:") {
+    if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
   }
@@ -267,7 +272,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
   }
 
   close(): void {
-    this.db.close()
+    closeSqliteStoreConnection(this.connection)
   }
 
   private requireRunning(projectId: string, id: string): DatabaseRow {

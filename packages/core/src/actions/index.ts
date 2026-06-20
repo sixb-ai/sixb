@@ -1,5 +1,11 @@
 export { actionParam, defineAction } from "./builders"
-export { ActionDefinitionError } from "./errors"
+export type {
+  ActionEditCommitResult,
+  CommitActionEditBatchInput,
+  CommitActionEditBatchResult,
+} from "./commit-edit-batch"
+export { commitActionEditBatch } from "./commit-edit-batch"
+export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export { ActionRegistry } from "./registry"
 export type {
   RequestActionAndWaitInput,

@@ -15,7 +15,6 @@ import {
   InMemoryObjectStorage,
   InMemoryRulesStorage,
   InMemoryStorage,
-  InMemoryTimeseriesStorage,
 } from "@sixb/core"
 import type { RulesWorkerSixb } from "../src"
 import { RulesWorker } from "../src"
@@ -240,18 +239,18 @@ function createStorage(
     readonly rules?: RulesStorage
   } = {}
 ): Storage {
-  return {
-    objects: options.objects ?? new InMemoryObjectStorage(),
-    timeseries: options.timeseries ?? new InMemoryTimeseriesStorage(),
-    rules: options.rules ?? new InMemoryRulesStorage(),
-  }
+  const storage = new InMemoryStorage()
+  return Object.assign(storage, {
+    objects: options.objects ?? storage.objects,
+    timeseries: options.timeseries ?? storage.timeseries,
+    rules: options.rules ?? storage.rules,
+  })
 }
 
 function createStorageWithoutRules(): Storage {
-  return {
-    objects: new InMemoryObjectStorage(),
-    timeseries: new InMemoryTimeseriesStorage(),
-  }
+  return Object.assign(new InMemoryStorage(), {
+    rules: undefined,
+  })
 }
 
 function objectUpsertedEvent(status: string, primaryId = "tx-1"): NewDomainEvent {

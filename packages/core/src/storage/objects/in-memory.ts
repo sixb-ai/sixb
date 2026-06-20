@@ -1,3 +1,4 @@
+import type { EditCommitPlan } from "../../edits"
 import type {
   StoredLinkRemovedEvent,
   StoredLinkUpsertedEvent,
@@ -5,6 +6,12 @@ import type {
   StoredTelemetryAppendedEvent,
 } from "../../events"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
+} from "../errors"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -104,10 +111,72 @@ type QueryEvaluation = {
 
 const PAGE_TOKEN_PREFIX = "offset:"
 
+export interface InMemoryObjectStorageSnapshot {
+  readonly rows: Map<string, Map<string, ObjectRow>>
+  readonly links: Map<string, Map<string, ObjectLinkRow>>
+  readonly appliedEventIds: Set<string>
+}
+
 export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
   private readonly appliedEventIds = new Set<string>()
+
+  snapshot(): InMemoryObjectStorageSnapshot {
+    return {
+      rows: cloneObjectBuckets(this.rows),
+      links: cloneLinkBuckets(this.links),
+      appliedEventIds: new Set(this.appliedEventIds),
+    }
+  }
+
+  restore(snapshot: InMemoryObjectStorageSnapshot): void {
+    this.rows.clear()
+    for (const [key, bucket] of cloneObjectBuckets(snapshot.rows)) {
+      this.rows.set(key, bucket)
+    }
+
+    this.links.clear()
+    for (const [key, bucket] of cloneLinkBuckets(snapshot.links)) {
+      this.links.set(key, bucket)
+    }
+
+    this.appliedEventIds.clear()
+    for (const eventId of snapshot.appliedEventIds) {
+      this.appliedEventIds.add(eventId)
+    }
+  }
+
+  async applyEditCommitPlan(input: {
+    projectId: string
+    plan: EditCommitPlan
+    committedAt: Date
+  }): Promise<void> {
+    const { projectId, plan, committedAt } = input
+
+    for (const linkDelete of plan.links.deletes) {
+      this.deleteLinkRow(
+        projectId,
+        linkDelete.source.objectTypeId,
+        linkDelete.source.primaryId,
+        linkDelete.linkId,
+        linkDelete.target.objectTypeId,
+        linkDelete.target.primaryId
+      )
+    }
+
+    for (const objectDelete of plan.objects.deletes) {
+      this.deleteObjectRow(projectId, objectDelete.objectTypeId, objectDelete.primaryId)
+    }
+
+    for (const objectUpsert of plan.objects.upserts) {
+      this.upsertObjectRowFromPlan(projectId, objectUpsert, committedAt)
+    }
+
+    for (const linkUpsert of plan.links.upserts) {
+      this.upsertLinkRowFromPlan(projectId, linkUpsert, committedAt)
+    }
+  }
 
   queryCapabilities(): ObjectQueryCapabilities {
     return IN_MEMORY_OBJECT_QUERY_CAPABILITIES
@@ -482,6 +551,13 @@ export class InMemoryObjectStorage implements ObjectStorage {
     this.appliedEventIds.add(event.id)
   }
 
+  /**
+   * Reads return the *live* stored row by reference (the SQL providers detach a copy via JSON
+   * round-trip). Callers must treat read results as immutable: mutating a returned row mutates the
+   * store in place — including after the transaction that read it has completed, which escapes the
+   * transaction guard. Internal call sites (e.g. the EditBatch planner) already copy before
+   * mutating; external callers must do the same.
+   */
   async getByPrimaryId(params: {
     projectId: string
     objectTypeId: string
@@ -657,6 +733,116 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
     return { objects, hasMore, total }
   }
+
+  private upsertObjectRowFromPlan(
+    projectId: string,
+    upsert: EditCommitPlan["objects"]["upserts"][number],
+    committedAt: Date
+  ): void {
+    const bucketId = objectRowKey(projectId, upsert.objectTypeId)
+    const bucket = this.rows.get(bucketId) ?? new Map<string, ObjectRow>()
+    this.rows.set(bucketId, bucket)
+
+    const existing = bucket.get(upsert.primaryId)
+    if (upsert.operation === "create" && existing) {
+      throw editCommitObjectCreateConflict(upsert)
+    }
+    if (upsert.operation === "update" && !existing) {
+      throw editCommitObjectUpdateMissing(upsert)
+    }
+
+    bucket.set(upsert.primaryId, {
+      projectId,
+      objectTypeId: upsert.objectTypeId,
+      primaryId: upsert.primaryId,
+      properties: structuredClone(upsert.properties) as Record<string, unknown>,
+      createdAt: existing?.createdAt ?? committedAt,
+      updatedAt: committedAt,
+      version: (existing?.version ?? 0) + 1,
+      sourceEventId: undefined,
+    })
+  }
+
+  private deleteObjectRow(projectId: string, objectTypeId: string, primaryId: string): void {
+    const bucket = this.rows.get(objectRowKey(projectId, objectTypeId))
+    bucket?.delete(primaryId)
+  }
+
+  private upsertLinkRowFromPlan(
+    projectId: string,
+    upsert: EditCommitPlan["links"]["upserts"][number],
+    committedAt: Date
+  ): void {
+    const bucketKey = sourceLinkBucketKey(
+      projectId,
+      upsert.source.objectTypeId,
+      upsert.source.primaryId
+    )
+    const bucket = this.links.get(bucketKey) ?? new Map<string, ObjectLinkRow>()
+    this.links.set(bucketKey, bucket)
+
+    const key = linkRowKey(upsert.linkId, upsert.target.objectTypeId, upsert.target.primaryId)
+    const existing = bucket.get(key)
+    if (upsert.operation === "create" && existing) {
+      throw editCommitLinkCreateConflict(upsert)
+    }
+    if (upsert.operation === "update" && !existing) {
+      throw editCommitLinkUpdateMissing(upsert)
+    }
+
+    bucket.set(key, {
+      projectId,
+      sourceTypeId: upsert.source.objectTypeId,
+      sourceId: upsert.source.primaryId,
+      linkId: upsert.linkId,
+      targetTypeId: upsert.target.objectTypeId,
+      targetId: upsert.target.primaryId,
+      // Keep the row shape uniform with the event path and the SQL providers: a propertyless link
+      // carries `properties: undefined`, never an omitted key.
+      properties: upsert.properties ? structuredClone(upsert.properties) : undefined,
+      createdAt: existing?.createdAt ?? committedAt,
+      updatedAt: committedAt,
+      sourceEventId: undefined,
+    })
+  }
+
+  private deleteLinkRow(
+    projectId: string,
+    sourceTypeId: string,
+    sourceId: string,
+    linkId: string,
+    targetTypeId: string,
+    targetId: string
+  ): void {
+    const bucket = this.links.get(sourceLinkBucketKey(projectId, sourceTypeId, sourceId))
+    bucket?.delete(linkRowKey(linkId, targetTypeId, targetId))
+  }
+}
+
+function cloneObjectBuckets(
+  rows: Map<string, Map<string, ObjectRow>>
+): Map<string, Map<string, ObjectRow>> {
+  const clone = new Map<string, Map<string, ObjectRow>>()
+  for (const [key, bucket] of rows) {
+    clone.set(
+      key,
+      new Map([...bucket.entries()].map(([primaryId, row]) => [primaryId, structuredClone(row)]))
+    )
+  }
+  return clone
+}
+
+function cloneLinkBuckets(
+  links: Map<string, Map<string, ObjectLinkRow>>
+): Map<string, Map<string, ObjectLinkRow>> {
+  const clone = new Map<string, Map<string, ObjectLinkRow>>()
+  for (const [key, bucket] of links) {
+    clone.set(
+      key,
+      new Map([...bucket.entries()].map(([linkId, row]) => [linkId, structuredClone(row)]))
+    )
+  }
+  return clone
 }
 
 function completeEvaluation(entries: QueryEntry[]): QueryEvaluation {

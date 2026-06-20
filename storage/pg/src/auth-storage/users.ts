@@ -8,7 +8,7 @@ import type {
   UserRecord,
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
-import type { SQL } from "../pg-client"
+import type { PgStoreClient } from "../transactions"
 import type { PgAuthUserRow } from "./rows"
 import { rowToUserRecord } from "./rows"
 import {
@@ -24,7 +24,7 @@ import {
 } from "./shared"
 
 export class PgAuthUserStore implements AuthUserStore {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateAuthUserInput): Promise<UserRecord> {
     const id = assertNonEmpty(input.id, "User id")

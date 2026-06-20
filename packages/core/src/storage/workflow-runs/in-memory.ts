@@ -48,6 +48,21 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
     })
   }
 
+  snapshot(): InMemoryWorkflowRunStorageSnapshot {
+    return {
+      runs: structuredClone(this.runs),
+      nodes: this.nodes.snapshot(),
+    }
+  }
+
+  restore(snapshot: InMemoryWorkflowRunStorageSnapshot): void {
+    this.runs.clear()
+    for (const [key, record] of structuredClone(snapshot.runs)) {
+      this.runs.set(key, record)
+    }
+    this.nodes.restore(snapshot.nodes)
+  }
+
   async queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord> {
     const key = storageKey(input.projectId, input.id)
     if (this.runs.has(key)) {
@@ -288,6 +303,17 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     }
   ) {}
 
+  snapshot(): InMemoryWorkflowNodeRunStorageSnapshot {
+    return structuredClone(this.nodes)
+  }
+
+  restore(snapshot: InMemoryWorkflowNodeRunStorageSnapshot): void {
+    this.nodes.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.nodes.set(key, record)
+    }
+  }
+
   async start(input: StartWorkflowNodeRunInput): Promise<WorkflowNodeRunRecord> {
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
 
@@ -444,3 +470,10 @@ export class InMemoryWorkflowNodeRunStorage implements WorkflowNodeRunStorage {
     return record
   }
 }
+
+export interface InMemoryWorkflowRunStorageSnapshot {
+  readonly runs: Map<string, WorkflowRunRecord>
+  readonly nodes: InMemoryWorkflowNodeRunStorageSnapshot
+}
+
+export type InMemoryWorkflowNodeRunStorageSnapshot = Map<string, WorkflowNodeRunRecord>

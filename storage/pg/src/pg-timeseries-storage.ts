@@ -1,5 +1,5 @@
 import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@sixb/core"
-import type { SQL } from "./pg-client"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 /**
  * PostgreSQL-based TimeseriesStorage implementation.
@@ -10,10 +10,10 @@ import type { SQL } from "./pg-client"
  * Requires `search_path` to be set to the Sixb schema on the connection.
  */
 export class PgTimeseriesStorage implements TimeseriesStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_timeseries WHERE event_id = ${event.id}
@@ -47,7 +47,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
     events: readonly StoredTelemetryAppendedEvent[]
   ): Promise<void> {
     if (events.length === 0) return
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Batch idempotence check: single query instead of N individual SELECTs
       const allEventIds = events.map((e) => e.id)
       const appliedRows = await tx<{ event_id: string }[]>`

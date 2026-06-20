@@ -14,6 +14,7 @@ import {
   type ObjectRow,
   prop,
   Sixb,
+  type Storage,
 } from "@sixb/core"
 import { ActionWorker, ActionWorkerError } from "../src"
 import { waitFor } from "./helpers"
@@ -75,14 +76,11 @@ function createSixb(actions: readonly ActionDefinition[]): TestSixb {
 
 describe("ActionWorker", () => {
   test("idles without action definitions or action-run storage", async () => {
-    const storage = new InMemoryStorage()
+    const storage = createStorageWithoutActionRuns()
     const worker = new ActionWorker({
       id: "idle-project",
       events: new EventsRuntime({ projectId: "idle-project", broker: new InMemoryBroker() }),
-      storage: {
-        objects: storage.objects,
-        timeseries: storage.timeseries,
-      },
+      storage,
       queues: new InMemoryQueues(),
       getActionDefinitions() {
         return []
@@ -101,7 +99,7 @@ describe("ActionWorker", () => {
       .target(Device)
       .params({})
       .run(() => {})
-    const storage = new InMemoryStorage()
+    const storage = createStorageWithoutActionRuns()
 
     expect(
       () =>
@@ -111,10 +109,7 @@ describe("ActionWorker", () => {
             projectId: "missing-action-runs",
             broker: new InMemoryBroker(),
           }),
-          storage: {
-            objects: storage.objects,
-            timeseries: storage.timeseries,
-          },
+          storage,
           queues: new InMemoryQueues(),
           getActionDefinitions() {
             return [noop]
@@ -228,3 +223,9 @@ describe("ActionWorker", () => {
     await worker.stop()
   })
 })
+
+function createStorageWithoutActionRuns(): Storage {
+  return Object.assign(new InMemoryStorage(), {
+    actionRuns: undefined,
+  })
+}

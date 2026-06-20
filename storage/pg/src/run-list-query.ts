@@ -1,4 +1,4 @@
-import type { SQL, SqlParameter } from "./pg-client"
+import type { SQLClient, SqlParameter } from "./pg-client"
 
 type PgRunListTable =
   | "pipeline_runs"
@@ -47,7 +47,7 @@ export function appendRunListFilters(
 }
 
 export async function queryRunList<TRow>(input: {
-  readonly sql: SQL
+  readonly sql: SQLClient
   readonly tableName: PgRunListTable
   readonly whereClauses: readonly string[]
   readonly params: readonly unknown[]

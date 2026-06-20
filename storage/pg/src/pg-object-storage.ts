@@ -1,6 +1,7 @@
 import type {
   CountObjectsInput,
   CountObjectsResult,
+  EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
   FacetObjectsInput,
@@ -18,7 +19,14 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import type { SQL, SQLClient, SqlParameter } from "./pg-client"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
+  ObjectStorageError,
+} from "@sixb/core"
+import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
   compilePgObjectCountQuery,
@@ -26,6 +34,7 @@ import {
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
 } from "./pg-object-query-compiler"
+import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   queryObjects: true,
@@ -137,7 +146,7 @@ function valuesJoin<Row = unknown>(
  *   the data was stored correctly.
  */
 export class PgObjectStorage implements ObjectStorage {
-  constructor(private readonly sql: SQL) {}
+  constructor(private readonly sql: PgStoreClient) {}
 
   queryCapabilities(): ObjectQueryCapabilities {
     return PG_OBJECT_QUERY_CAPABILITIES
@@ -210,7 +219,7 @@ export class PgObjectStorage implements ObjectStorage {
   async applyObjectUpserted(event: StoredObjectUpsertedEvent): Promise<ObjectRow> {
     const occurredAt = new Date(event.occurredAt)
 
-    const row = await this.sql.begin(async (tx) => {
+    const row = await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -274,7 +283,7 @@ export class PgObjectStorage implements ObjectStorage {
     events: readonly StoredObjectUpsertedEvent[]
   ): Promise<readonly ObjectRow[]> {
     if (events.length === 0) return []
-    return this.sql.begin(async (tx) => {
+    return runPgTransaction(this.sql, async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
       const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
@@ -334,7 +343,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -376,7 +385,7 @@ export class PgObjectStorage implements ObjectStorage {
     events: readonly StoredTelemetryAppendedEvent[]
   ): Promise<void> {
     if (events.length === 0) return
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Batch idempotence check: single query instead of N individual SELECTs
       const allEventIds = events.map((e) => e.id)
       const appliedRows = await tx<{ event_id: string }[]>`
@@ -464,7 +473,7 @@ export class PgObjectStorage implements ObjectStorage {
       ? JSON.stringify(event.payload.properties)
       : null
 
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -497,7 +506,7 @@ export class PgObjectStorage implements ObjectStorage {
 
   async applyLinkUpsertedBatch(events: readonly StoredLinkUpsertedEvent[]): Promise<void> {
     if (events.length === 0) return
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // 1. Bulk claim: single INSERT returns only the event_ids we now own.
       const claimedRows = await tx<{ event_id: string }[]>`
         INSERT INTO applied_events_objects
@@ -536,7 +545,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async applyLinkRemoved(event: StoredLinkRemovedEvent): Promise<void> {
-    await this.sql.begin(async (tx) => {
+    await runPgTransaction(this.sql, async (tx) => {
       // Idempotence check inside transaction to prevent race conditions
       const [applied] = await tx`
         SELECT 1 FROM applied_events_objects WHERE event_id = ${event.id}
@@ -646,6 +655,25 @@ export class PgObjectStorage implements ObjectStorage {
     return result
   }
 
+  async applyEditCommitPlan(input: {
+    projectId: string
+    plan: EditCommitPlan
+    committedAt: Date
+  }): Promise<void> {
+    // Ordering contract shared with the in-memory and SQLite providers: link deletes, then object
+    // deletes, then object upserts, then link upserts, so cascades and re-links resolve correctly.
+    // Within objects (and within links) Postgres applies all creates as one set-based statement and
+    // all updates as another, instead of walking the plan in order like the other providers. That
+    // regrouping is safe because the net-diff planner emits at most one operation per key, so a
+    // create and an update never touch the same row — there is no create-vs-update order to preserve.
+    await deleteLinks(this.sql, input.projectId, input.plan.links.deletes)
+    await deleteObjects(this.sql, input.projectId, input.plan.objects.deletes)
+    await createObjects(this.sql, input.projectId, input.plan.objects.upserts, input.committedAt)
+    await updateObjects(this.sql, input.projectId, input.plan.objects.upserts, input.committedAt)
+    await createLinks(this.sql, input.projectId, input.plan.links.upserts, input.committedAt)
+    await updateLinks(this.sql, input.projectId, input.plan.links.upserts, input.committedAt)
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]
@@ -738,7 +766,7 @@ export class PgObjectStorage implements ObjectStorage {
   }
 }
 
-async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<number> {
+async function readTotal(sql: SQLClient, compiled: CompiledPgObjectQuery): Promise<number> {
   const [row] = await sql.unsafe<
     {
       total: string | number | bigint
@@ -747,8 +775,359 @@ async function readTotal(sql: SQL, compiled: CompiledPgObjectQuery): Promise<num
   return Number(row?.total ?? 0)
 }
 
+async function deleteLinks(
+  sql: SQLClient,
+  projectId: string,
+  deletes: EditCommitPlan["links"]["deletes"]
+): Promise<void> {
+  if (deletes.length === 0) return
+
+  await sql`
+    WITH requested AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        deletes.map((linkDelete) => ({
+          source_object_type_id: linkDelete.source.objectTypeId,
+          source_primary_id: linkDelete.source.primaryId,
+          link_id: linkDelete.linkId,
+          target_object_type_id: linkDelete.target.objectTypeId,
+          target_primary_id: linkDelete.target.primaryId,
+        }))
+      )}::text::jsonb) AS requested(
+        source_object_type_id text,
+        source_primary_id text,
+        link_id text,
+        target_object_type_id text,
+        target_primary_id text
+      )
+    )
+    DELETE FROM links l
+    USING requested r
+    WHERE l.project_id = ${projectId}
+      AND l.source_type_id = r.source_object_type_id
+      AND l.source_id = r.source_primary_id
+      AND l.link_id = r.link_id
+      AND l.target_type_id = r.target_object_type_id
+      AND l.target_id = r.target_primary_id
+  `
+}
+
+async function deleteObjects(
+  sql: SQLClient,
+  projectId: string,
+  deletes: EditCommitPlan["objects"]["deletes"]
+): Promise<void> {
+  if (deletes.length === 0) return
+
+  await sql`
+    WITH requested AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        deletes.map((objectDelete) => ({
+          object_type_id: objectDelete.objectTypeId,
+          primary_id: objectDelete.primaryId,
+        }))
+      )}::text::jsonb) AS requested(object_type_id text, primary_id text)
+    )
+    DELETE FROM objects o
+    USING requested r
+    WHERE o.project_id = ${projectId}
+      AND o.object_type_id = r.object_type_id
+      AND o.primary_id = r.primary_id
+  `
+}
+
+// Postgres applies each kind of upsert as a single set-based statement, so the offending row is not
+// known up front. Both `INSERT … ON CONFLICT DO NOTHING` and `UPDATE … FROM` use `RETURNING`, so a
+// count mismatch is reconciled by diffing the affected rows against the requested ones, recovering
+// the same per-entity identity the in-memory and SQLite providers report. Identity columns are
+// keyed via JSON so no in-band delimiter can collide with a type or primary id.
+function editEntityKey(parts: readonly string[]): string {
+  return JSON.stringify(parts)
+}
+
+async function createObjects(
+  sql: SQLClient,
+  projectId: string,
+  upserts: EditCommitPlan["objects"]["upserts"],
+  committedAt: Date
+): Promise<void> {
+  const creates = upserts.filter((upsert) => upsert.operation === "create")
+  if (creates.length === 0) return
+
+  const inserted = await sql<{ object_type_id: string; primary_id: string }[]>`
+    WITH input AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        creates.map((objectCreate) => ({
+          object_type_id: objectCreate.objectTypeId,
+          primary_id: objectCreate.primaryId,
+          properties: objectCreate.properties,
+        }))
+      )}::text::jsonb) AS input(object_type_id text, primary_id text, properties jsonb)
+    )
+    INSERT INTO objects (
+      project_id, object_type_id, primary_id, properties, created_at, updated_at, version,
+      source_event_id
+    )
+    SELECT
+      ${projectId},
+      input.object_type_id,
+      input.primary_id,
+      input.properties,
+      ${committedAt},
+      ${committedAt},
+      1,
+      NULL
+    FROM input
+    ON CONFLICT (project_id, object_type_id, primary_id) DO NOTHING
+    RETURNING object_type_id, primary_id
+  `
+
+  if (inserted.length !== creates.length) {
+    const insertedKeys = new Set(
+      inserted.map((row) => editEntityKey([row.object_type_id, row.primary_id]))
+    )
+    const conflict = creates.find(
+      (create) => !insertedKeys.has(editEntityKey([create.objectTypeId, create.primaryId]))
+    )
+    if (conflict) {
+      throw editCommitObjectCreateConflict(conflict)
+    }
+    // Unreachable: ON CONFLICT DO NOTHING only ever inserts fewer rows, so a count mismatch always
+    // leaves at least one requested create unaccounted for above.
+    throw new ObjectStorageError(`[SixbPg] Edit commit cannot create one or more existing objects.`)
+  }
+}
+
+async function updateObjects(
+  sql: SQLClient,
+  projectId: string,
+  upserts: EditCommitPlan["objects"]["upserts"],
+  committedAt: Date
+): Promise<void> {
+  const updates = upserts.filter((upsert) => upsert.operation === "update")
+  if (updates.length === 0) return
+
+  const updated = await sql<{ object_type_id: string; primary_id: string }[]>`
+    WITH input AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        updates.map((objectUpdate) => ({
+          object_type_id: objectUpdate.objectTypeId,
+          primary_id: objectUpdate.primaryId,
+          properties: objectUpdate.properties,
+        }))
+      )}::text::jsonb) AS input(object_type_id text, primary_id text, properties jsonb)
+    )
+    UPDATE objects o
+    SET properties = input.properties,
+        updated_at = ${committedAt},
+        version = o.version + 1,
+        source_event_id = NULL
+    FROM input
+    WHERE o.project_id = ${projectId}
+      AND o.object_type_id = input.object_type_id
+      AND o.primary_id = input.primary_id
+    RETURNING o.object_type_id, o.primary_id
+  `
+
+  if (updated.length !== updates.length) {
+    const updatedKeys = new Set(
+      updated.map((row) => editEntityKey([row.object_type_id, row.primary_id]))
+    )
+    const missing = updates.find(
+      (update) => !updatedKeys.has(editEntityKey([update.objectTypeId, update.primaryId]))
+    )
+    if (missing) {
+      throw editCommitObjectUpdateMissing(missing)
+    }
+    // Unreachable: the join only updates matching rows, so a count mismatch always leaves at least
+    // one requested update unaccounted for above.
+    throw new ObjectStorageError(`[SixbPg] Edit commit cannot update one or more missing objects.`)
+  }
+}
+
+async function createLinks(
+  sql: SQLClient,
+  projectId: string,
+  upserts: EditCommitPlan["links"]["upserts"],
+  committedAt: Date
+): Promise<void> {
+  const creates = upserts.filter((upsert) => upsert.operation === "create")
+  if (creates.length === 0) return
+
+  const inserted = await sql<
+    {
+      source_type_id: string
+      source_id: string
+      link_id: string
+      target_type_id: string
+      target_id: string
+    }[]
+  >`
+    WITH input AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        creates.map((linkCreate) => ({
+          source_object_type_id: linkCreate.source.objectTypeId,
+          source_primary_id: linkCreate.source.primaryId,
+          link_id: linkCreate.linkId,
+          target_object_type_id: linkCreate.target.objectTypeId,
+          target_primary_id: linkCreate.target.primaryId,
+          properties: linkCreate.properties ?? null,
+        }))
+      )}::text::jsonb) AS input(
+        source_object_type_id text,
+        source_primary_id text,
+        link_id text,
+        target_object_type_id text,
+        target_primary_id text,
+        properties jsonb
+      )
+    )
+    INSERT INTO links (
+      project_id, source_type_id, source_id, link_id, target_type_id, target_id, properties,
+      created_at, updated_at, source_event_id
+    )
+    SELECT
+      ${projectId},
+      input.source_object_type_id,
+      input.source_primary_id,
+      input.link_id,
+      input.target_object_type_id,
+      input.target_primary_id,
+      input.properties,
+      ${committedAt},
+      ${committedAt},
+      NULL
+    FROM input
+    ON CONFLICT (
+      project_id, source_type_id, source_id, link_id, target_type_id, target_id
+    ) DO NOTHING
+    RETURNING source_type_id, source_id, link_id, target_type_id, target_id
+  `
+
+  if (inserted.length !== creates.length) {
+    const insertedKeys = new Set(
+      inserted.map((row) =>
+        editEntityKey([
+          row.source_type_id,
+          row.source_id,
+          row.link_id,
+          row.target_type_id,
+          row.target_id,
+        ])
+      )
+    )
+    const conflict = creates.find(
+      (create) =>
+        !insertedKeys.has(
+          editEntityKey([
+            create.source.objectTypeId,
+            create.source.primaryId,
+            create.linkId,
+            create.target.objectTypeId,
+            create.target.primaryId,
+          ])
+        )
+    )
+    if (conflict) {
+      throw editCommitLinkCreateConflict(conflict)
+    }
+    // Unreachable: ON CONFLICT DO NOTHING only ever inserts fewer rows, so a count mismatch always
+    // leaves at least one requested create unaccounted for above.
+    throw new ObjectStorageError(`[SixbPg] Edit commit cannot create one or more existing links.`)
+  }
+}
+
+async function updateLinks(
+  sql: SQLClient,
+  projectId: string,
+  upserts: EditCommitPlan["links"]["upserts"],
+  committedAt: Date
+): Promise<void> {
+  const updates = upserts.filter((upsert) => upsert.operation === "update")
+  if (updates.length === 0) return
+
+  const updated = await sql<
+    {
+      source_type_id: string
+      source_id: string
+      link_id: string
+      target_type_id: string
+      target_id: string
+    }[]
+  >`
+    WITH input AS (
+      SELECT *
+      FROM jsonb_to_recordset(${JSON.stringify(
+        updates.map((linkUpdate) => ({
+          source_object_type_id: linkUpdate.source.objectTypeId,
+          source_primary_id: linkUpdate.source.primaryId,
+          link_id: linkUpdate.linkId,
+          target_object_type_id: linkUpdate.target.objectTypeId,
+          target_primary_id: linkUpdate.target.primaryId,
+          properties: linkUpdate.properties ?? null,
+        }))
+      )}::text::jsonb) AS input(
+        source_object_type_id text,
+        source_primary_id text,
+        link_id text,
+        target_object_type_id text,
+        target_primary_id text,
+        properties jsonb
+      )
+    )
+    UPDATE links l
+    SET properties = input.properties,
+        updated_at = ${committedAt},
+        source_event_id = NULL
+    FROM input
+    WHERE l.project_id = ${projectId}
+      AND l.source_type_id = input.source_object_type_id
+      AND l.source_id = input.source_primary_id
+      AND l.link_id = input.link_id
+      AND l.target_type_id = input.target_object_type_id
+      AND l.target_id = input.target_primary_id
+    RETURNING l.source_type_id, l.source_id, l.link_id, l.target_type_id, l.target_id
+  `
+
+  if (updated.length !== updates.length) {
+    const updatedKeys = new Set(
+      updated.map((row) =>
+        editEntityKey([
+          row.source_type_id,
+          row.source_id,
+          row.link_id,
+          row.target_type_id,
+          row.target_id,
+        ])
+      )
+    )
+    const missing = updates.find(
+      (update) =>
+        !updatedKeys.has(
+          editEntityKey([
+            update.source.objectTypeId,
+            update.source.primaryId,
+            update.linkId,
+            update.target.objectTypeId,
+            update.target.primaryId,
+          ])
+        )
+    )
+    if (missing) {
+      throw editCommitLinkUpdateMissing(missing)
+    }
+    // Unreachable: the join only updates matching rows, so a count mismatch always leaves at least
+    // one requested update unaccounted for above.
+    throw new ObjectStorageError(`[SixbPg] Edit commit cannot update one or more missing links.`)
+  }
+}
+
 async function readFacetBuckets(
-  sql: SQL,
+  sql: SQLClient,
   compiled: { sql: string; args: readonly unknown[] }
 ): Promise<{ value: unknown; count: number }[]> {
   const rows = await sql.unsafe<FacetDatabaseRow[]>(compiled.sql, [

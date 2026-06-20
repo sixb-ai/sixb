@@ -1,6 +1,4 @@
-import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
-import { dirname } from "node:path"
+import type { Database } from "bun:sqlite"
 import type {
   AuthStorage,
   CompleteMagicLinkSignInInput,
@@ -15,7 +13,12 @@ import type {
 } from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
 import { installFreshSqliteSchema } from "../migrations"
-import { runImmediateTransaction } from "../transactions"
+import {
+  closeSqliteStoreConnection,
+  openSqliteStoreConnection,
+  runImmediateTransaction,
+  type SqliteStoreConnection,
+} from "../transactions"
 import { SqliteAuthGroupMembershipStore } from "./group-memberships"
 import { SqliteAuthUserIdentityStore } from "./identities"
 import { SqliteAuthInvitationStore } from "./invitations"
@@ -52,9 +55,12 @@ interface AuthTransactionError {
 export interface SqliteAuthStorageOptions {
   /** Path to SQLite database file. Defaults to ':memory:' for in-memory database. */
   path?: string
+  /** Internal shared connection used by bundled SqliteStorage. */
+  connection?: SqliteStoreConnection
 }
 
 export class SqliteAuthStorage implements AuthStorage {
+  private readonly connection: SqliteStoreConnection
   private readonly db: Database
 
   readonly users: SqliteAuthUserStore
@@ -66,11 +72,10 @@ export class SqliteAuthStorage implements AuthStorage {
   readonly oidcAuthorizationAttempts: SqliteAuthOidcAuthorizationAttemptStore
 
   constructor(options: SqliteAuthStorageOptions = {}) {
-    const path = options.path ?? ":memory:"
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true })
-    this.db = new Database(path)
+    this.connection = openSqliteStoreConnection(options)
+    this.db = this.connection.db
 
-    if (path === ":memory:") {
+    if (this.connection.installFreshSchema) {
       installFreshSqliteSchema(this.db)
     }
 
@@ -466,7 +471,7 @@ export class SqliteAuthStorage implements AuthStorage {
   }
 
   close(): void {
-    this.db.close()
+    closeSqliteStoreConnection(this.connection)
   }
 
   private assertMagicLinkUsable(

@@ -22,6 +22,17 @@ function assertNonNegativeInteger(value: number, fieldName: string): void {
 export class InMemoryWorkflowInterventionStorage implements WorkflowInterventionStorage {
   private readonly interventions = new Map<string, WorkflowInterventionRecord>()
 
+  snapshot(): InMemoryWorkflowInterventionStorageSnapshot {
+    return structuredClone(this.interventions)
+  }
+
+  restore(snapshot: InMemoryWorkflowInterventionStorageSnapshot): void {
+    this.interventions.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.interventions.set(key, record)
+    }
+  }
+
   async create(input: CreateWorkflowInterventionInput): Promise<WorkflowInterventionRecord> {
     assertNonNegativeInteger(input.nodeIndex, "nodeIndex")
 
@@ -158,6 +169,8 @@ export class InMemoryWorkflowInterventionStorage implements WorkflowIntervention
     return record
   }
 }
+
+export type InMemoryWorkflowInterventionStorageSnapshot = Map<string, WorkflowInterventionRecord>
 
 function compareRequestedAt(
   left: { readonly id: string; readonly requestedAt: Date },

@@ -12,6 +12,17 @@ function cloneDeliveryRecord(record: WebhookDeliveryRecord): WebhookDeliveryReco
 export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
   private readonly deliveries = new Map<string, WebhookDeliveryRecord>()
 
+  snapshot(): InMemoryWebhookDeliveryStorageSnapshot {
+    return structuredClone(this.deliveries)
+  }
+
+  restore(snapshot: InMemoryWebhookDeliveryStorageSnapshot): void {
+    this.deliveries.clear()
+    for (const [key, record] of structuredClone(snapshot)) {
+      this.deliveries.set(key, record)
+    }
+  }
+
   async claim(
     input: WebhookDeliveryKey & { receivedAt: string }
   ): Promise<WebhookDeliveryClaimRecord> {
@@ -89,6 +100,8 @@ export class InMemoryWebhookDeliveryStorage implements WebhookDeliveryStorage {
     return cloneDeliveryRecord(next)
   }
 }
+
+export type InMemoryWebhookDeliveryStorageSnapshot = Map<string, WebhookDeliveryRecord>
 
 function serializeKey(key: WebhookDeliveryKey): string {
   return JSON.stringify([key.projectId, key.connectorId, key.webhookId, key.idempotencyKey])
