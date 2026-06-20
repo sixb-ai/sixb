@@ -22,6 +22,7 @@ type RuntimeReadObjectSet = {
   list(input?: ObjectSetListInput): Promise<unknown>
   byId(id: string): {
     get(): Promise<unknown>
+    listLinks(link?: unknown): Promise<unknown>
   }
 }
 
@@ -157,6 +158,11 @@ function createReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTo
       return {
         get() {
           return handle.get() as ReturnType<ReturnType<TypedReadObjectSet["byId"]>["get"]>
+        },
+        listLinks(link) {
+          return handle.listLinks(link) as ReturnType<
+            ReturnType<TypedReadObjectSet["byId"]>["listLinks"]
+          >
         },
       }
     },

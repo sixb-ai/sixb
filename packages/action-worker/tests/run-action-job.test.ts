@@ -11,6 +11,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  link,
   type ObjectRow,
   param,
   prop,
@@ -26,6 +27,7 @@ const Device = defineObjectType({
     prop("name", "string", { required: true }),
     prop("status", "string"),
   ],
+  links: [link("sensor", "Sensor", { cardinality: "one" })],
 })
 
 const Sensor = defineObjectType({
@@ -293,6 +295,77 @@ describe("runActionJob", () => {
 
     const created = await deviceObjects(sixb).get("device-1")
     expect(created?.properties.status).toBe("created")
+  })
+
+  test("exposes object link reads inside action edits", async () => {
+    const detachSensor = defineAction("detachSensor")
+      .on(Device)
+      .params({})
+      .edits(async ({ objects, read, subject }) => {
+        const links = await read.objects(Device).byId(subject.primaryId).listLinks(Device.l.sensor)
+        expect(links).toHaveLength(1)
+        expect(links[0]).toMatchObject({
+          linkId: "sensor",
+          targetTypeId: "Sensor",
+          targetId: "sensor-1",
+        })
+
+        objects(Device).byId(subject.primaryId).unlink(Device.l.sensor, {
+          objectTypeId: Sensor.id,
+          primaryId: links[0].targetId,
+        })
+        objects(Device).byId(subject.primaryId).update({ status: "detached" })
+      })
+
+    const sixb = createSixb([detachSensor], [Device, Sensor])
+    await sixb.upsertObject("Device", {
+      id: "device-1",
+      name: "Device 1",
+    })
+    await sixb.upsertObject("Sensor", {
+      id: "sensor-1",
+      name: "Sensor 1",
+    })
+    await (
+      sixb as unknown as {
+        objects(objectType: typeof Device): {
+          byId(id: string): {
+            link(
+              linkToken: typeof Device.l.sensor,
+              target: { objectTypeId: "Sensor"; primaryId: string }
+            ): Promise<void>
+          }
+        }
+      }
+    )
+      .objects(Device)
+      .byId("device-1")
+      .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "detachSensor",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "detachSensor",
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    const updated = await deviceObjects(sixb).get("device-1")
+    expect(updated?.properties.status).toBe("detached")
+    const linksAfter = await sixb.storage.objects.listLinks({
+      projectId: sixb.id,
+      objectTypeId: "Device",
+      objectId: "device-1",
+      linkId: "sensor",
+    })
+    expect(linksAfter).toEqual([])
   })
 
   test("marks queued runs failed when the action definition is missing", async () => {

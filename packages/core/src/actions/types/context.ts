@@ -68,6 +68,14 @@ export interface ActionReadObjectByIdHandle<
   TValueTypes extends readonly ValueType[],
 > {
   get(): Promise<TwinObject<TObjectType, TValueTypes> | null>
+  listLinks(link?: { readonly id: string }): Promise<
+    readonly {
+      readonly linkId: string
+      readonly targetTypeId: string
+      readonly targetId: string
+      readonly properties?: Readonly<Record<string, unknown>>
+    }[]
+  >
 }
 
 export interface ActionReadObjectSet<
