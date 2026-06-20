@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite"
 import type {
   CountObjectsInput,
   CountObjectsResult,
+  EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
   FacetObjectsInput,
@@ -19,6 +20,12 @@ import type {
   StoredLinkUpsertedEvent,
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
+} from "@sixb/core"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
 } from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
@@ -539,6 +546,135 @@ export class SqliteObjectStorage implements ObjectStorage {
     this.db
       .query("INSERT OR IGNORE INTO applied_events_objects (event_id) VALUES (?)")
       .run(event.id)
+  }
+
+  async applyEditCommitPlan(input: {
+    projectId: string
+    plan: EditCommitPlan
+    committedAt: Date
+  }): Promise<void> {
+    const { projectId, plan, committedAt } = input
+
+    for (const linkDelete of plan.links.deletes) {
+      this.db
+        .query(
+          `
+          DELETE FROM links
+          WHERE project_id = ?
+            AND source_type_id = ?
+            AND source_id = ?
+            AND link_id = ?
+            AND target_type_id = ?
+            AND target_id = ?
+        `
+        )
+        .run(
+          projectId,
+          linkDelete.source.objectTypeId,
+          linkDelete.source.primaryId,
+          linkDelete.linkId,
+          linkDelete.target.objectTypeId,
+          linkDelete.target.primaryId
+        )
+    }
+
+    for (const objectDelete of plan.objects.deletes) {
+      this.db
+        .query("DELETE FROM objects WHERE project_id = ? AND object_type_id = ? AND primary_id = ?")
+        .run(projectId, objectDelete.objectTypeId, objectDelete.primaryId)
+    }
+
+    const insertObject = this.db.query(`
+      INSERT INTO objects (
+        project_id, object_type_id, primary_id, properties, created_at, updated_at, version,
+        source_event_id
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL)
+      ON CONFLICT(project_id, object_type_id, primary_id) DO NOTHING
+    `)
+    const updateObject = this.db.query(`
+      UPDATE objects
+      SET properties = ?, updated_at = ?, version = version + 1, source_event_id = NULL
+      WHERE project_id = ? AND object_type_id = ? AND primary_id = ?
+    `)
+    for (const objectUpsert of plan.objects.upserts) {
+      if (objectUpsert.operation === "create") {
+        const result = insertObject.run(
+          projectId,
+          objectUpsert.objectTypeId,
+          objectUpsert.primaryId,
+          JSON.stringify(objectUpsert.properties),
+          committedAt.toISOString(),
+          committedAt.toISOString()
+        )
+        if (result.changes !== 1) {
+          throw editCommitObjectCreateConflict(objectUpsert)
+        }
+        continue
+      }
+
+      const result = updateObject.run(
+        JSON.stringify(objectUpsert.properties),
+        committedAt.toISOString(),
+        projectId,
+        objectUpsert.objectTypeId,
+        objectUpsert.primaryId
+      )
+      if (result.changes !== 1) {
+        throw editCommitObjectUpdateMissing(objectUpsert)
+      }
+    }
+
+    const insertLink = this.db.query(`
+      INSERT INTO links (
+        project_id, source_type_id, source_id, link_id, target_type_id, target_id, properties,
+        created_at, updated_at, source_event_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(project_id, source_type_id, source_id, link_id, target_type_id, target_id) DO NOTHING
+    `)
+    const updateLink = this.db.query(`
+      UPDATE links
+      SET properties = ?, updated_at = ?, source_event_id = NULL
+      WHERE project_id = ?
+        AND source_type_id = ?
+        AND source_id = ?
+        AND link_id = ?
+        AND target_type_id = ?
+        AND target_id = ?
+    `)
+    for (const linkUpsert of plan.links.upserts) {
+      const properties = linkUpsert.properties ? JSON.stringify(linkUpsert.properties) : null
+      if (linkUpsert.operation === "create") {
+        const result = insertLink.run(
+          projectId,
+          linkUpsert.source.objectTypeId,
+          linkUpsert.source.primaryId,
+          linkUpsert.linkId,
+          linkUpsert.target.objectTypeId,
+          linkUpsert.target.primaryId,
+          properties,
+          committedAt.toISOString(),
+          committedAt.toISOString()
+        )
+        if (result.changes !== 1) {
+          throw editCommitLinkCreateConflict(linkUpsert)
+        }
+        continue
+      }
+
+      const result = updateLink.run(
+        properties,
+        committedAt.toISOString(),
+        projectId,
+        linkUpsert.source.objectTypeId,
+        linkUpsert.source.primaryId,
+        linkUpsert.linkId,
+        linkUpsert.target.objectTypeId,
+        linkUpsert.target.primaryId
+      )
+      if (result.changes !== 1) {
+        throw editCommitLinkUpdateMissing(linkUpsert)
+      }
+    }
   }
 
   async getByPrimaryId(params: {

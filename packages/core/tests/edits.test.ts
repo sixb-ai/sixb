@@ -1,21 +1,23 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionRunStorage,
+  commitActionEditBatch,
   defineObjectType,
   defineValueType,
   deriveEditCommitDiff,
   type EditBatch,
   type EditObjectRef,
-  InMemoryEditStorage,
   InMemoryStorage,
   link,
   type ObjectLink,
+  ObjectStorageError,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   planEditBatch,
   prop,
   type RecordEditsOptions,
   recordEdits,
+  type Storage,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -572,7 +574,8 @@ describe("EditBatch core contract", () => {
     const batch = recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
-    const result = await storage.edits.commit({
+    const result = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_commit_1",
       actionId: "markPaid",
@@ -581,7 +584,8 @@ describe("EditBatch core contract", () => {
       batch,
       committedAt: new Date("2026-06-02T00:00:00.000Z"),
     })
-    const retry = await storage.edits.commit({
+    const retry = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_commit_1",
       actionId: "markPaid",
@@ -601,12 +605,12 @@ describe("EditBatch core contract", () => {
       id: "run_commit_1",
     })
 
-    expect(result.created).toBe(true)
-    expect(retry.created).toBe(false)
-    expect(retry.diff).toEqual(result.diff)
+    expect(result.commit.created).toBe(true)
+    expect(retry.commit.created).toBe(false)
+    expect(retry.commit.diff).toEqual(result.commit.diff)
     expect(invoice?.properties.status).toBe("paid")
     expect(invoice?.version).toBe(2)
-    expect(run?.commit?.diff).toEqual(result.diff)
+    expect(run?.commit?.diff).toEqual(result.commit.diff)
   })
 
   test("rolls back in-memory object changes when commit recording fails", async () => {
@@ -626,26 +630,14 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
     })
 
-    const failingActionRuns: ActionRunStorage = {
-      queue: (input) => storage.actionRuns.queue(input),
-      start: (input) => storage.actionRuns.start(input),
-      enterPhase: (input) => storage.actionRuns.enterPhase(input),
-      recordWriteback: (input) => storage.actionRuns.recordWriteback(input),
-      recordCommit: async () => {
-        throw new Error("commit trail write failed")
-      },
-      recordEffects: (input) => storage.actionRuns.recordEffects(input),
-      finish: (input) => storage.actionRuns.finish(input),
-      getById: (input) => storage.actionRuns.getById(input),
-      list: (input) => storage.actionRuns.list(input),
-    }
-    const edits = new InMemoryEditStorage(storage.objects, failingActionRuns)
+    const failingStorage = withFailingRecordCommit(storage)
     const batch = recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
     await expect(
-      edits.commit({
+      commitActionEditBatch({
+        storage: failingStorage,
         projectId: "project-a",
         runId: "run_rollback",
         actionId: "markPaid",
@@ -669,6 +661,65 @@ describe("EditBatch core contract", () => {
     expect(invoice?.properties.status).toBe("draft")
     expect(invoice?.version).toBe(1)
     expect(run?.commit).toBeUndefined()
+  })
+
+  test("rejects edit commits for a different action run identity", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_identity",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_identity",
+    })
+    await storage.actionRuns.start({
+      id: "run_identity",
+      projectId: "project-a",
+    })
+
+    const batch = recordRuntimeEdits({ runId: "run_identity" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "voidInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("belongs to action 'markPaid'")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_2" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different subject")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        idempotencyKey: "different",
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different idempotency key")
   })
 })
 
@@ -926,7 +977,8 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
     })
     await storage.actionRuns.start({ id: "run_relink", projectId: "project-a" })
 
-    const result = await storage.edits.commit({
+    const result = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_relink",
       actionId: "relink",
@@ -953,7 +1005,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
       committedAt: new Date("2026-06-02T00:00:00.000Z"),
     })
 
-    expect(result.created).toBe(true)
+    expect(result.commit.created).toBe(true)
     const links = await storage.objects.listLinks({
       projectId: "project-a",
       objectTypeId: "Invoice",
@@ -964,6 +1016,127 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
     expect(links[0]?.properties).toEqual({ role: "shipTo" })
   })
 })
+
+describe("EditCommitPlan apply conflicts (concurrent divergence from the plan)", () => {
+  test("rejects a create whose object already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    // The net-diff planner never emits a `create` for a live row, so build the plan while the row is
+    // absent; the first apply creates it and the second reproduces the concurrent-create hazard the
+    // serializable+retry machinery is meant to surface uniformly across providers.
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_dup",
+            properties: { id: "inv_dup", amount: 10, status: "draft" },
+          },
+        ],
+      },
+    })
+    expect(plan.objects.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing object 'Invoice:inv_dup'."
+    )
+  })
+
+  test("rejects a create whose link already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+    expect(plan.links.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
+    )
+  })
+})
+
+function withFailingRecordCommit(storage: InMemoryStorage): Storage {
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const actionRuns = requireActionRuns(tx.actionRuns)
+        const failingActionRuns: ActionRunStorage = {
+          queue: (input) => actionRuns.queue(input),
+          start: (input) => actionRuns.start(input),
+          enterPhase: (input) => actionRuns.enterPhase(input),
+          recordWriteback: (input) => actionRuns.recordWriteback(input),
+          recordCommit: async () => {
+            throw new Error("commit trail write failed")
+          },
+          recordEffects: (input) => actionRuns.recordEffects(input),
+          finish: (input) => actionRuns.finish(input),
+          getById: (input) => actionRuns.getById(input),
+          list: (input) => actionRuns.list(input),
+        }
+
+        return run({
+          ...tx,
+          actionRuns: failingActionRuns,
+          transaction: tx.transaction,
+        })
+      }, options),
+  }
+}
+
+function requireActionRuns(actionRuns: ActionRunStorage | undefined): ActionRunStorage {
+  if (!actionRuns) {
+    throw new Error("Missing action run storage")
+  }
+
+  return actionRuns
+}
 
 async function createSeededStorage(): Promise<InMemoryStorage> {
   const storage = new InMemoryStorage()

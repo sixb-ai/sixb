@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  commitActionEditBatch,
   defineObjectType,
   type EditBatch,
   link,
+  ObjectStorageError,
   OntologyRegistry,
+  planEditBatch,
   prop,
   type RecordEditsHandler,
   recordEdits,
+  type StoredObjectUpsertedEvent,
 } from "@sixb/core"
 import type { PostgresStorage } from "../src"
 import { createTestStorage } from "./helpers"
@@ -48,7 +52,7 @@ function recordStorageEdits(runId: string, handler: RecordEditsHandler): EditBat
   return recordEdits({ runId }, handler)
 }
 
-describe("PgEditStorage", () => {
+describe("PostgreSQL edit commit", () => {
   let storage: PostgresStorage | undefined
 
   beforeEach(async () => {
@@ -88,23 +92,29 @@ describe("PgEditStorage", () => {
       })
     })
 
-    const result = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_mark_paid",
-      actionId: "markPaid",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-      committedAt: new Date("2026-06-02T00:00:00.000Z"),
-    })
-    const retry = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_mark_paid",
-      actionId: "markPaid",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-    })
+    const result = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_mark_paid",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).commit
+    const retry = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_mark_paid",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).commit
 
     const invoice = await storage.objects.getByPrimaryId({
       projectId: "project-a",
@@ -163,23 +173,29 @@ describe("PgEditStorage", () => {
     const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
       objects(Invoice).byId("inv_1").delete()
     })
-    const result = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_delete_invoice",
-      actionId: "deleteInvoice",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-      committedAt: new Date("2026-06-02T00:00:00.000Z"),
-    })
-    const retry = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_delete_invoice",
-      actionId: "deleteInvoice",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-    })
+    const result = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_delete_invoice",
+        actionId: "deleteInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).commit
+    const retry = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_delete_invoice",
+        actionId: "deleteInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).commit
 
     const invoice = await storage.objects.getByPrimaryId({
       projectId: "project-a",
@@ -227,7 +243,120 @@ describe("PgEditStorage", () => {
       ],
     })
   })
+
+  test("rejects a create whose object already exists with a typed, identified error", async () => {
+    if (!storage) throw new Error("[SixbPg] Test storage was not initialized.")
+    const objects = storage.objects
+
+    // The net-diff planner never emits a `create` for a live row, so build the plan while the row is
+    // absent; applying twice reproduces the concurrent-create hazard. Postgres must report the same
+    // typed, per-entity error as the other providers rather than a generic count-mismatch message.
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage: { objects },
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_dup",
+            properties: { id: "inv_dup", status: "draft" },
+          },
+        ],
+      },
+    })
+    expect(plan.objects.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing object 'Invoice:inv_dup'."
+    )
+  })
+
+  test("rejects a create whose link already exists with a typed, identified error", async () => {
+    if (!storage) throw new Error("[SixbPg] Test storage was not initialized.")
+    const objects = storage.objects
+
+    // Seed only the endpoints (no link) so the plan nets to a link `create`.
+    await objects.applyObjectUpserted(
+      objectEvent("Customer", "cus_1", { id: "cus_1", name: "Acme" })
+    )
+    await objects.applyObjectUpserted(
+      objectEvent("Invoice", "inv_1", { id: "inv_1", status: "draft" })
+    )
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage: { objects },
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+    expect(plan.links.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
+    )
+  })
 })
+
+function objectEvent(
+  objectTypeId: string,
+  primaryId: string,
+  properties: Record<string, unknown>
+): StoredObjectUpsertedEvent {
+  const id = `evt_${objectTypeId}_${primaryId}`
+  return {
+    id,
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: `${objectTypeId}:${primaryId}`,
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    cursor: id,
+    payload: { objectTypeId, primaryId, properties },
+  }
+}
 
 async function seedGraph(storage: PostgresStorage): Promise<void> {
   const occurredAt = "2026-06-01T00:00:00.000Z"

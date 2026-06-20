@@ -252,7 +252,6 @@ describe("SqliteStorage", () => {
     storage.objects.close()
     storage.auth.close()
     storage.actionRuns.close()
-    storage.edits.close()
     storage.pipelineRuns.close()
     storage.projectionRuns.close()
     storage.workflowRuns.close()
