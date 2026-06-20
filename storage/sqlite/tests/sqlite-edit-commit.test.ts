@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  commitActionEditBatch,
   defineObjectType,
   type EditBatch,
   link,
@@ -61,9 +62,9 @@ afterEach(async () => {
   }
 })
 
-describe("SqliteEditStorage", () => {
+describe("SQLite edit commit", () => {
   test("commits object and link updates with idempotent retry", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edits-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edit-commit-"))
     tempDirs.push(tempDir)
     const storage = new SqliteStorage({ path: tempDir })
     await migrateStorage(storage)
@@ -92,23 +93,29 @@ describe("SqliteEditStorage", () => {
         })
       })
 
-      const result = await storage.edits.commit({
-        projectId: "project-a",
-        runId: "run_mark_paid",
-        actionId: "markPaid",
-        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-        ontology,
-        batch,
-        committedAt: new Date("2026-06-02T00:00:00.000Z"),
-      })
-      const retry = await storage.edits.commit({
-        projectId: "project-a",
-        runId: "run_mark_paid",
-        actionId: "markPaid",
-        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-        ontology,
-        batch,
-      })
+      const result = (
+        await commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_mark_paid",
+          actionId: "markPaid",
+          subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+          ontology,
+          batch,
+          committedAt: new Date("2026-06-02T00:00:00.000Z"),
+        })
+      ).commit
+      const retry = (
+        await commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_mark_paid",
+          actionId: "markPaid",
+          subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+          ontology,
+          batch,
+        })
+      ).commit
 
       const invoice = await storage.objects.getByPrimaryId({
         projectId: "project-a",
@@ -151,7 +158,7 @@ describe("SqliteEditStorage", () => {
   })
 
   test("commits object delete with incident link diffs and idempotent retry", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edits-"))
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edit-commit-"))
     tempDirs.push(tempDir)
     const storage = new SqliteStorage({ path: tempDir })
     await migrateStorage(storage)
@@ -174,23 +181,29 @@ describe("SqliteEditStorage", () => {
       const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
         objects(Invoice).byId("inv_1").delete()
       })
-      const result = await storage.edits.commit({
-        projectId: "project-a",
-        runId: "run_delete_invoice",
-        actionId: "deleteInvoice",
-        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-        ontology,
-        batch,
-        committedAt: new Date("2026-06-02T00:00:00.000Z"),
-      })
-      const retry = await storage.edits.commit({
-        projectId: "project-a",
-        runId: "run_delete_invoice",
-        actionId: "deleteInvoice",
-        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-        ontology,
-        batch,
-      })
+      const result = (
+        await commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_delete_invoice",
+          actionId: "deleteInvoice",
+          subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+          ontology,
+          batch,
+          committedAt: new Date("2026-06-02T00:00:00.000Z"),
+        })
+      ).commit
+      const retry = (
+        await commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_delete_invoice",
+          actionId: "deleteInvoice",
+          subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+          ontology,
+          batch,
+        })
+      ).commit
 
       const invoice = await storage.objects.getByPrimaryId({
         projectId: "project-a",
@@ -331,7 +344,6 @@ function closeSqliteStorage(storage: SqliteStorage): void {
   storage.objects.close()
   storage.auth.close()
   storage.actionRuns.close()
-  storage.edits.close()
   storage.pipelineRuns.close()
   storage.projectionRuns.close()
   storage.workflowRuns.close()

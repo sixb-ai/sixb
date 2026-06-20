@@ -14,6 +14,10 @@ export class ObjectNotFoundError extends Error {
   }
 }
 
+export class ObjectStorageError extends Error {
+  readonly name = "ObjectStorageError"
+}
+
 export class StorageTransactionError extends Error {
   readonly name = "StorageTransactionError"
 }

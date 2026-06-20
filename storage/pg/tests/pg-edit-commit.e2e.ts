@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
+  commitActionEditBatch,
   defineObjectType,
   type EditBatch,
   link,
@@ -48,7 +49,7 @@ function recordStorageEdits(runId: string, handler: RecordEditsHandler): EditBat
   return recordEdits({ runId }, handler)
 }
 
-describe("PgEditStorage", () => {
+describe("PostgreSQL edit commit", () => {
   let storage: PostgresStorage | undefined
 
   beforeEach(async () => {
@@ -88,23 +89,29 @@ describe("PgEditStorage", () => {
       })
     })
 
-    const result = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_mark_paid",
-      actionId: "markPaid",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-      committedAt: new Date("2026-06-02T00:00:00.000Z"),
-    })
-    const retry = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_mark_paid",
-      actionId: "markPaid",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-    })
+    const result = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_mark_paid",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).commit
+    const retry = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_mark_paid",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).commit
 
     const invoice = await storage.objects.getByPrimaryId({
       projectId: "project-a",
@@ -163,23 +170,29 @@ describe("PgEditStorage", () => {
     const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
       objects(Invoice).byId("inv_1").delete()
     })
-    const result = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_delete_invoice",
-      actionId: "deleteInvoice",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-      committedAt: new Date("2026-06-02T00:00:00.000Z"),
-    })
-    const retry = await storage.edits.commit({
-      projectId: "project-a",
-      runId: "run_delete_invoice",
-      actionId: "deleteInvoice",
-      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
-      ontology,
-      batch,
-    })
+    const result = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_delete_invoice",
+        actionId: "deleteInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+    ).commit
+    const retry = (
+      await commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_delete_invoice",
+        actionId: "deleteInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).commit
 
     const invoice = await storage.objects.getByPrimaryId({
       projectId: "project-a",

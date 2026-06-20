@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
   type ActionRunStorage,
+  commitActionEditBatch,
   defineObjectType,
   defineValueType,
   deriveEditCommitDiff,
   type EditBatch,
   type EditObjectRef,
-  InMemoryEditStorage,
   InMemoryStorage,
   link,
   type ObjectLink,
@@ -16,6 +16,7 @@ import {
   prop,
   type RecordEditsOptions,
   recordEdits,
+  type Storage,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -572,7 +573,8 @@ describe("EditBatch core contract", () => {
     const batch = recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
-    const result = await storage.edits.commit({
+    const result = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_commit_1",
       actionId: "markPaid",
@@ -581,7 +583,8 @@ describe("EditBatch core contract", () => {
       batch,
       committedAt: new Date("2026-06-02T00:00:00.000Z"),
     })
-    const retry = await storage.edits.commit({
+    const retry = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_commit_1",
       actionId: "markPaid",
@@ -601,12 +604,12 @@ describe("EditBatch core contract", () => {
       id: "run_commit_1",
     })
 
-    expect(result.created).toBe(true)
-    expect(retry.created).toBe(false)
-    expect(retry.diff).toEqual(result.diff)
+    expect(result.commit.created).toBe(true)
+    expect(retry.commit.created).toBe(false)
+    expect(retry.commit.diff).toEqual(result.commit.diff)
     expect(invoice?.properties.status).toBe("paid")
     expect(invoice?.version).toBe(2)
-    expect(run?.commit?.diff).toEqual(result.diff)
+    expect(run?.commit?.diff).toEqual(result.commit.diff)
   })
 
   test("rolls back in-memory object changes when commit recording fails", async () => {
@@ -626,26 +629,14 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
     })
 
-    const failingActionRuns: ActionRunStorage = {
-      queue: (input) => storage.actionRuns.queue(input),
-      start: (input) => storage.actionRuns.start(input),
-      enterPhase: (input) => storage.actionRuns.enterPhase(input),
-      recordWriteback: (input) => storage.actionRuns.recordWriteback(input),
-      recordCommit: async () => {
-        throw new Error("commit trail write failed")
-      },
-      recordEffects: (input) => storage.actionRuns.recordEffects(input),
-      finish: (input) => storage.actionRuns.finish(input),
-      getById: (input) => storage.actionRuns.getById(input),
-      list: (input) => storage.actionRuns.list(input),
-    }
-    const edits = new InMemoryEditStorage(storage.objects, failingActionRuns)
+    const failingStorage = withFailingRecordCommit(storage)
     const batch = recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
     await expect(
-      edits.commit({
+      commitActionEditBatch({
+        storage: failingStorage,
         projectId: "project-a",
         runId: "run_rollback",
         actionId: "markPaid",
@@ -669,6 +660,65 @@ describe("EditBatch core contract", () => {
     expect(invoice?.properties.status).toBe("draft")
     expect(invoice?.version).toBe(1)
     expect(run?.commit).toBeUndefined()
+  })
+
+  test("rejects edit commits for a different action run identity", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_identity",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_identity",
+    })
+    await storage.actionRuns.start({
+      id: "run_identity",
+      projectId: "project-a",
+    })
+
+    const batch = recordRuntimeEdits({ runId: "run_identity" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "voidInvoice",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("belongs to action 'markPaid'")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_2" },
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different subject")
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_identity",
+        actionId: "markPaid",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        idempotencyKey: "different",
+        ontology,
+        batch,
+      })
+    ).rejects.toThrow("different idempotency key")
   })
 })
 
@@ -926,7 +976,8 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
     })
     await storage.actionRuns.start({ id: "run_relink", projectId: "project-a" })
 
-    const result = await storage.edits.commit({
+    const result = await commitActionEditBatch({
+      storage,
       projectId: "project-a",
       runId: "run_relink",
       actionId: "relink",
@@ -953,7 +1004,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
       committedAt: new Date("2026-06-02T00:00:00.000Z"),
     })
 
-    expect(result.created).toBe(true)
+    expect(result.commit.created).toBe(true)
     const links = await storage.objects.listLinks({
       projectId: "project-a",
       objectTypeId: "Invoice",
@@ -964,6 +1015,43 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
     expect(links[0]?.properties).toEqual({ role: "shipTo" })
   })
 })
+
+function withFailingRecordCommit(storage: InMemoryStorage): Storage {
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const actionRuns = requireActionRuns(tx.actionRuns)
+        const failingActionRuns: ActionRunStorage = {
+          queue: (input) => actionRuns.queue(input),
+          start: (input) => actionRuns.start(input),
+          enterPhase: (input) => actionRuns.enterPhase(input),
+          recordWriteback: (input) => actionRuns.recordWriteback(input),
+          recordCommit: async () => {
+            throw new Error("commit trail write failed")
+          },
+          recordEffects: (input) => actionRuns.recordEffects(input),
+          finish: (input) => actionRuns.finish(input),
+          getById: (input) => actionRuns.getById(input),
+          list: (input) => actionRuns.list(input),
+        }
+
+        return run({
+          ...tx,
+          actionRuns: failingActionRuns,
+          transaction: tx.transaction,
+        })
+      }, options),
+  }
+}
+
+function requireActionRuns(actionRuns: ActionRunStorage | undefined): ActionRunStorage {
+  if (!actionRuns) {
+    throw new Error("Missing action run storage")
+  }
+
+  return actionRuns
+}
 
 async function createSeededStorage(): Promise<InMemoryStorage> {
   const storage = new InMemoryStorage()

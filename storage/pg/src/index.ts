@@ -15,7 +15,6 @@ import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAuthStorage } from "./pg-auth-storage"
 import { createPgClient, type SQL } from "./pg-client"
-import { PgEditStorage } from "./pg-edit-storage"
 import { PgObjectStorage } from "./pg-object-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -113,7 +112,6 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly objects: PgObjectStorage
   readonly auth: PgAuthStorage
   readonly actionRuns: PgActionRunStorage
-  readonly edits: PgEditStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
   readonly workflowInterventions: PgWorkflowInterventionStorage
@@ -173,7 +171,6 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.objects = stores.objects
     this.auth = stores.auth
     this.actionRuns = stores.actionRuns
-    this.edits = stores.edits
     this.pipelineRuns = stores.pipelineRuns
     this.workflowRuns = stores.workflowRuns
     this.workflowInterventions = stores.workflowInterventions
@@ -243,7 +240,6 @@ function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
     objects: new PgObjectStorage(sql),
     auth: new PgAuthStorage({ sql }),
     actionRuns: new PgActionRunStorage(sql),
-    edits: new PgEditStorage(sql),
     pipelineRuns: new PgPipelineRunStorage(sql),
     workflowRuns: new PgWorkflowRunStorage(sql),
     workflowInterventions: new PgWorkflowInterventionStorage(sql),
@@ -260,7 +256,6 @@ interface PostgresStoreSet {
   readonly objects: PgObjectStorage
   readonly auth: PgAuthStorage
   readonly actionRuns: PgActionRunStorage
-  readonly edits: PgEditStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
   readonly workflowInterventions: PgWorkflowInterventionStorage
@@ -299,7 +294,6 @@ export {
 export { PgActionRunStorage } from "./pg-action-run-storage"
 export type { PgAuthStorageOptions } from "./pg-auth-storage"
 export { PgAuthStorage } from "./pg-auth-storage"
-export { PgEditStorage } from "./pg-edit-storage"
 export { PgObjectStorage } from "./pg-object-storage"
 export { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 export { PgProjectionRunStorage } from "./pg-projection-run-storage"

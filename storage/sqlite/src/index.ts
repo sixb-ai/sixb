@@ -13,7 +13,6 @@ import {
 } from "@sixb/core"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAuthStorage } from "./auth-storage"
-import { SqliteEditStorage } from "./edit-storage"
 import {
   createSqliteStorageMigrators,
   installFreshSqliteSchema,
@@ -61,7 +60,6 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly objects: SqliteObjectStorage
   readonly auth: SqliteAuthStorage
   readonly actionRuns: SqliteActionRunStorage
-  readonly edits: SqliteEditStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
   readonly projectionRuns: SqliteProjectionRunStorage
@@ -89,7 +87,6 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.objects = stores.objects
     this.auth = stores.auth
     this.actionRuns = stores.actionRuns
-    this.edits = stores.edits
     this.pipelineRuns = stores.pipelineRuns
     this.timeseries = stores.timeseries
     this.syncRuns = stores.syncRuns
@@ -163,7 +160,6 @@ function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
     objects: new SqliteObjectStorage({ connection }),
     auth: new SqliteAuthStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection }),
-    edits: new SqliteEditStorage({ connection }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
     syncRuns: new SqliteSyncRunStorage({ connection }),
@@ -180,7 +176,6 @@ interface SqliteStoreSet {
   readonly objects: SqliteObjectStorage
   readonly auth: SqliteAuthStorage
   readonly actionRuns: SqliteActionRunStorage
-  readonly edits: SqliteEditStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
   readonly projectionRuns: SqliteProjectionRunStorage
@@ -196,8 +191,6 @@ export type { SqliteActionRunStorageOptions } from "./action-run-storage"
 export { SqliteActionRunStorage } from "./action-run-storage"
 export type { SqliteAuthStorageOptions } from "./auth-storage"
 export { SqliteAuthStorage } from "./auth-storage"
-export type { SqliteEditStorageOptions } from "./edit-storage"
-export { SqliteEditStorage } from "./edit-storage"
 export {
   createSqliteMigrator,
   createSqliteStorageMigrators,

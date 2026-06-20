@@ -141,7 +141,13 @@ export class InMemoryObjectStorage implements ObjectStorage {
     }
   }
 
-  applyEditCommitPlan(projectId: string, plan: EditCommitPlan, committedAt: Date): void {
+  async applyEditCommitPlan(input: {
+    projectId: string
+    plan: EditCommitPlan
+    committedAt: Date
+  }): Promise<void> {
+    const { projectId, plan, committedAt } = input
+
     for (const linkDelete of plan.links.deletes) {
       this.deleteLinkRow(
         projectId,
