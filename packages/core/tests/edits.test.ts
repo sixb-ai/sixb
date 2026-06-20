@@ -10,6 +10,7 @@ import {
   InMemoryStorage,
   link,
   type ObjectLink,
+  ObjectStorageError,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
   planEditBatch,
@@ -1013,6 +1014,90 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
     })
     expect(links).toHaveLength(1)
     expect(links[0]?.properties).toEqual({ role: "shipTo" })
+  })
+})
+
+describe("EditCommitPlan apply conflicts (concurrent divergence from the plan)", () => {
+  test("rejects a create whose object already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    // The net-diff planner never emits a `create` for a live row, so build the plan while the row is
+    // absent; the first apply creates it and the second reproduces the concurrent-create hazard the
+    // serializable+retry machinery is meant to surface uniformly across providers.
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_dup",
+            properties: { id: "inv_dup", amount: 10, status: "draft" },
+          },
+        ],
+      },
+    })
+    expect(plan.objects.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing object 'Invoice:inv_dup'."
+    )
+  })
+
+  test("rejects a create whose link already exists with a typed, identified error", async () => {
+    const storage = await createSeededStorage()
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+    expect(plan.links.upserts[0]?.operation).toBe("create")
+
+    const applyAgain = () =>
+      storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-03T00:00:00.000Z"),
+      })
+
+    await storage.objects.applyEditCommitPlan({
+      projectId: "project-a",
+      plan,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+    await expect(applyAgain()).rejects.toThrow(
+      "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
+    )
   })
 })
 

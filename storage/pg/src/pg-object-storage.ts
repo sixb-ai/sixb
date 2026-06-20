@@ -19,7 +19,13 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import { ObjectStorageError } from "@sixb/core"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
+  ObjectStorageError,
+} from "@sixb/core"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import {
   type CompiledPgObjectQuery,
@@ -654,6 +660,12 @@ export class PgObjectStorage implements ObjectStorage {
     plan: EditCommitPlan
     committedAt: Date
   }): Promise<void> {
+    // Ordering contract shared with the in-memory and SQLite providers: link deletes, then object
+    // deletes, then object upserts, then link upserts, so cascades and re-links resolve correctly.
+    // Within objects (and within links) Postgres applies all creates as one set-based statement and
+    // all updates as another, instead of walking the plan in order like the other providers. That
+    // regrouping is safe because the net-diff planner emits at most one operation per key, so a
+    // create and an update never touch the same row — there is no create-vs-update order to preserve.
     await deleteLinks(this.sql, input.projectId, input.plan.links.deletes)
     await deleteObjects(this.sql, input.projectId, input.plan.objects.deletes)
     await createObjects(this.sql, input.projectId, input.plan.objects.upserts, input.committedAt)
@@ -825,6 +837,15 @@ async function deleteObjects(
   `
 }
 
+// Postgres applies each kind of upsert as a single set-based statement, so the offending row is not
+// known up front. Both `INSERT … ON CONFLICT DO NOTHING` and `UPDATE … FROM` use `RETURNING`, so a
+// count mismatch is reconciled by diffing the affected rows against the requested ones, recovering
+// the same per-entity identity the in-memory and SQLite providers report. Identity columns are
+// keyed via JSON so no in-band delimiter can collide with a type or primary id.
+function editEntityKey(parts: readonly string[]): string {
+  return JSON.stringify(parts)
+}
+
 async function createObjects(
   sql: SQLClient,
   projectId: string,
@@ -864,6 +885,17 @@ async function createObjects(
   `
 
   if (inserted.length !== creates.length) {
+    const insertedKeys = new Set(
+      inserted.map((row) => editEntityKey([row.object_type_id, row.primary_id]))
+    )
+    const conflict = creates.find(
+      (create) => !insertedKeys.has(editEntityKey([create.objectTypeId, create.primaryId]))
+    )
+    if (conflict) {
+      throw editCommitObjectCreateConflict(conflict)
+    }
+    // Unreachable: ON CONFLICT DO NOTHING only ever inserts fewer rows, so a count mismatch always
+    // leaves at least one requested create unaccounted for above.
     throw new ObjectStorageError(`[SixbPg] Edit commit cannot create one or more existing objects.`)
   }
 }
@@ -901,6 +933,17 @@ async function updateObjects(
   `
 
   if (updated.length !== updates.length) {
+    const updatedKeys = new Set(
+      updated.map((row) => editEntityKey([row.object_type_id, row.primary_id]))
+    )
+    const missing = updates.find(
+      (update) => !updatedKeys.has(editEntityKey([update.objectTypeId, update.primaryId]))
+    )
+    if (missing) {
+      throw editCommitObjectUpdateMissing(missing)
+    }
+    // Unreachable: the join only updates matching rows, so a count mismatch always leaves at least
+    // one requested update unaccounted for above.
     throw new ObjectStorageError(`[SixbPg] Edit commit cannot update one or more missing objects.`)
   }
 }
@@ -966,6 +1009,34 @@ async function createLinks(
   `
 
   if (inserted.length !== creates.length) {
+    const insertedKeys = new Set(
+      inserted.map((row) =>
+        editEntityKey([
+          row.source_type_id,
+          row.source_id,
+          row.link_id,
+          row.target_type_id,
+          row.target_id,
+        ])
+      )
+    )
+    const conflict = creates.find(
+      (create) =>
+        !insertedKeys.has(
+          editEntityKey([
+            create.source.objectTypeId,
+            create.source.primaryId,
+            create.linkId,
+            create.target.objectTypeId,
+            create.target.primaryId,
+          ])
+        )
+    )
+    if (conflict) {
+      throw editCommitLinkCreateConflict(conflict)
+    }
+    // Unreachable: ON CONFLICT DO NOTHING only ever inserts fewer rows, so a count mismatch always
+    // leaves at least one requested create unaccounted for above.
     throw new ObjectStorageError(`[SixbPg] Edit commit cannot create one or more existing links.`)
   }
 }
@@ -1023,6 +1094,34 @@ async function updateLinks(
   `
 
   if (updated.length !== updates.length) {
+    const updatedKeys = new Set(
+      updated.map((row) =>
+        editEntityKey([
+          row.source_type_id,
+          row.source_id,
+          row.link_id,
+          row.target_type_id,
+          row.target_id,
+        ])
+      )
+    )
+    const missing = updates.find(
+      (update) =>
+        !updatedKeys.has(
+          editEntityKey([
+            update.source.objectTypeId,
+            update.source.primaryId,
+            update.linkId,
+            update.target.objectTypeId,
+            update.target.primaryId,
+          ])
+        )
+    )
+    if (missing) {
+      throw editCommitLinkUpdateMissing(missing)
+    }
+    // Unreachable: the join only updates matching rows, so a count mismatch always leaves at least
+    // one requested update unaccounted for above.
     throw new ObjectStorageError(`[SixbPg] Edit commit cannot update one or more missing links.`)
   }
 }

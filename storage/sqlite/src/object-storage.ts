@@ -21,7 +21,12 @@ import type {
   StoredObjectUpsertedEvent,
   StoredTelemetryAppendedEvent,
 } from "@sixb/core"
-import { ObjectStorageError } from "@sixb/core"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import { type CompiledObjectQuery, compileObjectQuery } from "./object-query-compiler"
 import {
@@ -584,6 +589,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         project_id, object_type_id, primary_id, properties, created_at, updated_at, version,
         source_event_id
       ) VALUES (?, ?, ?, ?, ?, ?, 1, NULL)
+      ON CONFLICT(project_id, object_type_id, primary_id) DO NOTHING
     `)
     const updateObject = this.db.query(`
       UPDATE objects
@@ -592,7 +598,7 @@ export class SqliteObjectStorage implements ObjectStorage {
     `)
     for (const objectUpsert of plan.objects.upserts) {
       if (objectUpsert.operation === "create") {
-        insertObject.run(
+        const result = insertObject.run(
           projectId,
           objectUpsert.objectTypeId,
           objectUpsert.primaryId,
@@ -600,6 +606,9 @@ export class SqliteObjectStorage implements ObjectStorage {
           committedAt.toISOString(),
           committedAt.toISOString()
         )
+        if (result.changes !== 1) {
+          throw editCommitObjectCreateConflict(objectUpsert)
+        }
         continue
       }
 
@@ -611,9 +620,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         objectUpsert.primaryId
       )
       if (result.changes !== 1) {
-        throw new ObjectStorageError(
-          `[SixbSqlite] Edit commit cannot update missing object '${objectUpsert.objectTypeId}:${objectUpsert.primaryId}'.`
-        )
+        throw editCommitObjectUpdateMissing(objectUpsert)
       }
     }
 
@@ -622,6 +629,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         project_id, source_type_id, source_id, link_id, target_type_id, target_id, properties,
         created_at, updated_at, source_event_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(project_id, source_type_id, source_id, link_id, target_type_id, target_id) DO NOTHING
     `)
     const updateLink = this.db.query(`
       UPDATE links
@@ -636,7 +644,7 @@ export class SqliteObjectStorage implements ObjectStorage {
     for (const linkUpsert of plan.links.upserts) {
       const properties = linkUpsert.properties ? JSON.stringify(linkUpsert.properties) : null
       if (linkUpsert.operation === "create") {
-        insertLink.run(
+        const result = insertLink.run(
           projectId,
           linkUpsert.source.objectTypeId,
           linkUpsert.source.primaryId,
@@ -647,6 +655,9 @@ export class SqliteObjectStorage implements ObjectStorage {
           committedAt.toISOString(),
           committedAt.toISOString()
         )
+        if (result.changes !== 1) {
+          throw editCommitLinkCreateConflict(linkUpsert)
+        }
         continue
       }
 
@@ -661,9 +672,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         linkUpsert.target.primaryId
       )
       if (result.changes !== 1) {
-        throw new ObjectStorageError(
-          `[SixbSqlite] Edit commit cannot update missing link '${linkUpsert.source.objectTypeId}:${linkUpsert.source.primaryId}:${linkUpsert.linkId}:${linkUpsert.target.objectTypeId}:${linkUpsert.target.primaryId}'.`
-        )
+        throw editCommitLinkUpdateMissing(linkUpsert)
       }
     }
   }

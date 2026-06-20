@@ -6,6 +6,12 @@ import type {
   StoredTelemetryAppendedEvent,
 } from "../../events"
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "../../objects/query"
+import {
+  editCommitLinkCreateConflict,
+  editCommitLinkUpdateMissing,
+  editCommitObjectCreateConflict,
+  editCommitObjectUpdateMissing,
+} from "../errors"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -739,14 +745,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
     const existing = bucket.get(upsert.primaryId)
     if (upsert.operation === "create" && existing) {
-      throw new Error(
-        `[Sixb] Edit commit cannot create existing object '${upsert.objectTypeId}:${upsert.primaryId}'.`
-      )
+      throw editCommitObjectCreateConflict(upsert)
     }
     if (upsert.operation === "update" && !existing) {
-      throw new Error(
-        `[Sixb] Edit commit cannot update missing object '${upsert.objectTypeId}:${upsert.primaryId}'.`
-      )
+      throw editCommitObjectUpdateMissing(upsert)
     }
 
     bucket.set(upsert.primaryId, {
@@ -782,14 +784,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
     const key = linkRowKey(upsert.linkId, upsert.target.objectTypeId, upsert.target.primaryId)
     const existing = bucket.get(key)
     if (upsert.operation === "create" && existing) {
-      throw new Error(
-        `[Sixb] Edit commit cannot create existing link '${upsert.source.objectTypeId}:${upsert.source.primaryId}:${upsert.linkId}:${upsert.target.objectTypeId}:${upsert.target.primaryId}'.`
-      )
+      throw editCommitLinkCreateConflict(upsert)
     }
     if (upsert.operation === "update" && !existing) {
-      throw new Error(
-        `[Sixb] Edit commit cannot update missing link '${upsert.source.objectTypeId}:${upsert.source.primaryId}:${upsert.linkId}:${upsert.target.objectTypeId}:${upsert.target.primaryId}'.`
-      )
+      throw editCommitLinkUpdateMissing(upsert)
     }
 
     bucket.set(key, {
@@ -799,7 +797,9 @@ export class InMemoryObjectStorage implements ObjectStorage {
       linkId: upsert.linkId,
       targetTypeId: upsert.target.objectTypeId,
       targetId: upsert.target.primaryId,
-      ...(upsert.properties ? { properties: structuredClone(upsert.properties) } : {}),
+      // Keep the row shape uniform with the event path and the SQL providers: a propertyless link
+      // carries `properties: undefined`, never an omitted key.
+      properties: upsert.properties ? structuredClone(upsert.properties) : undefined,
       createdAt: existing?.createdAt ?? committedAt,
       updatedAt: committedAt,
       sourceEventId: undefined,

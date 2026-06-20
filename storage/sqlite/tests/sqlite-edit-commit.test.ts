@@ -8,10 +8,13 @@ import {
   type EditBatch,
   link,
   migrateStorage,
+  ObjectStorageError,
   OntologyRegistry,
+  planEditBatch,
   prop,
   type RecordEditsHandler,
   recordEdits,
+  type StoredObjectUpsertedEvent,
 } from "@sixb/core"
 import { SqliteStorage } from "../src"
 
@@ -255,6 +258,133 @@ describe("SQLite edit commit", () => {
     }
   })
 })
+
+describe("SQLite edit commit apply conflicts", () => {
+  test("rejects a create whose object already exists with a typed, identified error", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edit-conflict-"))
+    tempDirs.push(tempDir)
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+
+    try {
+      // The net-diff planner never emits a `create` for a live row, so build the plan while the row
+      // is absent; applying twice reproduces the concurrent-create hazard. Before this fix SQLite
+      // leaked a raw SQLITE_CONSTRAINT driver error here instead of a typed ObjectStorageError.
+      const plan = await planEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage: { objects: storage.objects },
+        batch: {
+          version: 1,
+          operations: [
+            {
+              kind: "object.create",
+              objectTypeId: "Invoice",
+              primaryId: "inv_dup",
+              properties: { id: "inv_dup", status: "draft" },
+            },
+          ],
+        },
+      })
+      expect(plan.objects.upserts[0]?.operation).toBe("create")
+
+      const applyAgain = () =>
+        storage.objects.applyEditCommitPlan({
+          projectId: "project-a",
+          plan,
+          committedAt: new Date("2026-06-03T00:00:00.000Z"),
+        })
+
+      await storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+
+      await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+      await expect(applyAgain()).rejects.toThrow(
+        "[Sixb] Edit commit cannot create existing object 'Invoice:inv_dup'."
+      )
+    } finally {
+      closeSqliteStorage(storage)
+    }
+  })
+
+  test("rejects a create whose link already exists with a typed, identified error", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edit-conflict-"))
+    tempDirs.push(tempDir)
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+
+    try {
+      // Seed only the endpoints (no link) so the plan nets to a link `create`.
+      await storage.objects.applyObjectUpserted(
+        objectEvent("Customer", "cus_1", { id: "cus_1", name: "Acme" })
+      )
+      await storage.objects.applyObjectUpserted(
+        objectEvent("Invoice", "inv_1", { id: "inv_1", status: "draft" })
+      )
+
+      const plan = await planEditBatch({
+        projectId: "project-a",
+        ontology,
+        storage: { objects: storage.objects },
+        batch: {
+          version: 1,
+          operations: [
+            {
+              kind: "link.create",
+              source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+              linkId: "customer",
+              target: { objectTypeId: "Customer", primaryId: "cus_1" },
+              properties: { role: "billTo" },
+            },
+          ],
+        },
+      })
+      expect(plan.links.upserts[0]?.operation).toBe("create")
+
+      const applyAgain = () =>
+        storage.objects.applyEditCommitPlan({
+          projectId: "project-a",
+          plan,
+          committedAt: new Date("2026-06-03T00:00:00.000Z"),
+        })
+
+      await storage.objects.applyEditCommitPlan({
+        projectId: "project-a",
+        plan,
+        committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      })
+
+      await expect(applyAgain()).rejects.toThrow(ObjectStorageError)
+      await expect(applyAgain()).rejects.toThrow(
+        "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
+      )
+    } finally {
+      closeSqliteStorage(storage)
+    }
+  })
+})
+
+function objectEvent(
+  objectTypeId: string,
+  primaryId: string,
+  properties: Record<string, unknown>
+): StoredObjectUpsertedEvent {
+  const id = `evt_${objectTypeId}_${primaryId}`
+  return {
+    id,
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: `${objectTypeId}:${primaryId}`,
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    cursor: id,
+    payload: { objectTypeId, primaryId, properties },
+  }
+}
 
 async function seedGraph(storage: SqliteStorage): Promise<void> {
   const occurredAt = "2026-06-01T00:00:00.000Z"
