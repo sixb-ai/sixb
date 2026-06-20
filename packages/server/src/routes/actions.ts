@@ -5,8 +5,9 @@ import {
   ActionCatalogItemSchema,
   ActionIdParamsSchema,
   RequestActionBodySchema,
+  RequestActionResponseSchema,
 } from "../schemas/actions"
-import { ActionRequestedResponseSchema, ErrorResponseSchema } from "../schemas/common"
+import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
 
 function serializeAction(
@@ -16,10 +17,7 @@ function serializeAction(
     id: action.id,
     name: action.id,
     description: action.description,
-    binding:
-      action.binding.kind === "global"
-        ? { kind: "global" }
-        : { kind: "object", objectTypeId: action.binding.objectType.id },
+    ...(action.binding.kind === "object" ? { objectTypeId: action.binding.objectType.id } : {}),
     params: Object.entries(action.params).map(([id, config]) => ({
       id,
       name: id,
@@ -34,7 +32,28 @@ function serializeAction(
       edits: action.phases.edits !== undefined,
       effects: action.phases.effects !== undefined,
     },
+    preview: getActionPreview(action),
   })
+}
+
+function getActionPreview(
+  action: ActionDefinition
+): ReturnType<typeof ActionCatalogItemSchema.parse>["preview"] {
+  if (!action.phases.edits) {
+    return {
+      supported: false,
+      reason: "no_edits",
+    }
+  }
+
+  if (action.phases.writeback) {
+    return {
+      supported: false,
+      reason: "writeback_required",
+    }
+  }
+
+  return { supported: true }
 }
 
 export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
@@ -86,7 +105,8 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             runId: parsedBody.runId,
           })
 
-          return { success: true, ...result }
+          set.status = 202
+          return RequestActionResponseSchema.parse(result)
         } catch (error) {
           return handleRouteError(error, set)
         }
@@ -95,7 +115,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         params: ActionIdParamsSchema,
         body: RequestActionBodySchema,
         response: {
-          200: ActionRequestedResponseSchema,
+          202: RequestActionResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },

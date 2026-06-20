@@ -1,5 +1,6 @@
 import type { ElysiaOpenAPIConfig } from "@elysiajs/openapi"
 import { z } from "zod"
+import { JsonValueSchema } from "./common"
 
 type OpenApiSchemas = NonNullable<
   NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]
@@ -27,19 +28,6 @@ export const ObjectsQuerySchema = z.object({
 export const UpsertObjectBodySchema = z.object({
   properties: z.record(z.unknown()),
 })
-
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
-
-const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.null(),
-    z.array(JsonValueSchema),
-    z.record(JsonValueSchema),
-  ])
-)
 
 export const ObjectQueryPredicateSchema: z.ZodType<unknown> = z.lazy(() =>
   z.union([

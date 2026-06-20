@@ -162,6 +162,22 @@ const setSpeed = defineAction("setSpeed")
   .params({ speed: param("double") })
   .writeback(async () => {})
 
+const renameDevice = defineAction("renameDevice")
+  .on(Device)
+  .params({ label: param("string") })
+  .edits(({ objects, params, subject }) => {
+    objects(Device).byId(subject.primaryId).update({ label: params.label })
+  })
+
+const syncDeviceLabel = defineAction("syncDeviceLabel")
+  .on(Device)
+  .params({ label: param("string") })
+  .writeback(async () => ({ externalId: "ext_123" }))
+  .edits(({ objects, params, subject }) => {
+    objects(Device).byId(subject.primaryId).update({ label: params.label })
+  })
+  .effects(async () => {})
+
 const createMaintenanceRun = defineAction("createMaintenanceRun")
   .params({ note: param("string") })
   .writeback(async () => {})
@@ -288,7 +304,7 @@ describe("SixbServer HTTP contract", () => {
     const sixb = createSixbInstance<readonly OntologySource[]>({
       id: "contract-project",
       ontology: [Space, Device],
-      actions: [setSpeed, createMaintenanceRun],
+      actions: [setSpeed, renameDevice, syncDeviceLabel, createMaintenanceRun],
       broker: new InMemoryBroker(),
       storage: {
         objects: new SqliteObjectStorage(),
@@ -480,6 +496,72 @@ describe("SixbServer HTTP contract", () => {
       finishedAt: new Date("2026-02-18T09:10:01.000Z"),
       requestBodyBytes: 18,
       responseStatus: 202,
+    })
+
+    await sixb.storage.actionRuns!.queue({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      actionId: "syncDeviceLabel",
+      subject: {
+        kind: "object",
+        objectTypeId: "device",
+        primaryId: "fan-1",
+      },
+      params: { label: "Fan 1 audited" },
+      idempotencyKey: "action:contract-project:act_audit_previous",
+      queuedAt: new Date("2026-02-18T09:12:00.000Z"),
+      securityContext: {
+        principal: { type: "user", id: "usr_contract" },
+        projectId: "contract-project",
+        correlationId: "corr_contract",
+      },
+    })
+    await sixb.storage.actionRuns!.start({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      startedAt: new Date("2026-02-18T09:12:01.000Z"),
+      phase: "validation",
+    })
+    await sixb.storage.actionRuns!.recordWriteback({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      status: "succeeded",
+      completedAt: new Date("2026-02-18T09:12:02.000Z"),
+      result: { externalId: "ext_123" },
+    })
+    await sixb.storage.actionRuns!.recordCommit({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      committedAt: new Date("2026-02-18T09:12:03.000Z"),
+      diff: {
+        objects: [
+          {
+            objectTypeId: "device",
+            primaryId: "fan-1",
+            operation: "update",
+            changedProperties: ["label"],
+          },
+        ],
+        links: [],
+      },
+    })
+    await sixb.storage.actionRuns!.recordEffects({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      status: "failed",
+      completedAt: new Date("2026-02-18T09:12:04.000Z"),
+      error: {
+        name: "NotificationError",
+        message: "Notification failed",
+        phase: "effects",
+      },
+    })
+    await sixb.storage.actionRuns!.finish({
+      id: "act_audit_previous",
+      projectId: "contract-project",
+      status: "succeeded",
+      finishedAt: new Date("2026-02-18T09:12:05.000Z"),
+      phase: "effects",
     })
 
     const port = await getFreePort()
@@ -1080,7 +1162,7 @@ describe("SixbServer HTTP contract", () => {
         {
           id: "setSpeed",
           name: "setSpeed",
-          binding: { kind: "object", objectTypeId: "device" },
+          objectTypeId: "device",
           params: [
             {
               id: "speed",
@@ -1095,11 +1177,59 @@ describe("SixbServer HTTP contract", () => {
             edits: false,
             effects: false,
           },
+          preview: {
+            supported: false,
+            reason: "no_edits",
+          },
+        },
+        {
+          id: "renameDevice",
+          name: "renameDevice",
+          objectTypeId: "device",
+          params: [
+            {
+              id: "label",
+              name: "label",
+              schema: "string",
+              required: true,
+            },
+          ],
+          phases: {
+            validate: false,
+            writeback: false,
+            edits: true,
+            effects: false,
+          },
+          preview: {
+            supported: true,
+          },
+        },
+        {
+          id: "syncDeviceLabel",
+          name: "syncDeviceLabel",
+          objectTypeId: "device",
+          params: [
+            {
+              id: "label",
+              name: "label",
+              schema: "string",
+              required: true,
+            },
+          ],
+          phases: {
+            validate: false,
+            writeback: true,
+            edits: true,
+            effects: true,
+          },
+          preview: {
+            supported: false,
+            reason: "writeback_required",
+          },
         },
         {
           id: "createMaintenanceRun",
           name: "createMaintenanceRun",
-          binding: { kind: "global" },
           params: [
             {
               id: "note",
@@ -1114,6 +1244,10 @@ describe("SixbServer HTTP contract", () => {
             edits: false,
             effects: false,
           },
+          preview: {
+            supported: false,
+            reason: "no_edits",
+          },
         },
       ])
 
@@ -1122,7 +1256,6 @@ describe("SixbServer HTTP contract", () => {
       expect(await actionResponse.json()).toEqual({
         id: "createMaintenanceRun",
         name: "createMaintenanceRun",
-        binding: { kind: "global" },
         params: [
           {
             id: "note",
@@ -1136,6 +1269,10 @@ describe("SixbServer HTTP contract", () => {
           writeback: true,
           edits: false,
           effects: false,
+        },
+        preview: {
+          supported: false,
+          reason: "no_edits",
         },
       })
 
@@ -1599,15 +1736,13 @@ describe("SixbServer HTTP contract", () => {
           params: { speed: 950 },
         }),
       })
-      expect(requestActionResponse.status).toBe(200)
+      expect(requestActionResponse.status).toBe(202)
       const requestActionBody = (await requestActionResponse.json()) as {
-        success: boolean
         runId: string
         queuedAt: string
         created: boolean
         jobId?: string
       }
-      expect(requestActionBody.success).toBe(true)
       expect(requestActionBody.runId.startsWith("act_")).toBe(true)
       expect(new Date(requestActionBody.queuedAt).toISOString()).toBe(requestActionBody.queuedAt)
       expect(requestActionBody.created).toBe(true)
@@ -1624,14 +1759,122 @@ describe("SixbServer HTTP contract", () => {
           }),
         }
       )
-      expect(requestCreateMaintenanceRunResponse.status).toBe(200)
+      expect(requestCreateMaintenanceRunResponse.status).toBe(202)
       expect(await requestCreateMaintenanceRunResponse.json()).toEqual({
-        success: true,
         runId: "act_contract_global",
         queuedAt: expect.any(String),
         jobId: expect.any(String),
         created: true,
       })
+
+      const actionRunsResponse = await fetch(`${baseUrl}/api/action-runs?status=queued`)
+      expect(actionRunsResponse.status).toBe(200)
+      const actionRunsBody = (await actionRunsResponse.json()) as {
+        runs: Array<{ id: string; status: string; actionId: string }>
+        hasMore: boolean
+        total: number
+      }
+      expect(actionRunsBody.total).toBe(2)
+      expect(actionRunsBody.hasMore).toBe(false)
+      expect(actionRunsBody.runs.map((run) => run.id).sort()).toEqual(
+        [requestActionBody.runId, "act_contract_global"].sort()
+      )
+
+      const objectActionRunsResponse = await fetch(
+        `${baseUrl}/api/action-runs?actionId=setSpeed&objectTypeId=device&primaryId=fan-2`
+      )
+      expect(objectActionRunsResponse.status).toBe(200)
+      expect(await objectActionRunsResponse.json()).toMatchObject({
+        runs: [
+          {
+            id: requestActionBody.runId,
+            projectId: "contract-project",
+            actionId: "setSpeed",
+            subject: {
+              kind: "object",
+              objectTypeId: "device",
+              primaryId: "fan-2",
+            },
+            status: "queued",
+            queuedAt: expect.any(String),
+          },
+        ],
+        hasMore: false,
+        total: 1,
+      })
+
+      const queuedActionRunResponse = await fetch(
+        `${baseUrl}/api/action-runs/${requestActionBody.runId}`
+      )
+      expect(queuedActionRunResponse.status).toBe(200)
+      expect(await queuedActionRunResponse.json()).toMatchObject({
+        id: requestActionBody.runId,
+        projectId: "contract-project",
+        actionId: "setSpeed",
+        subject: {
+          kind: "object",
+          objectTypeId: "device",
+          primaryId: "fan-2",
+        },
+        status: "queued",
+        params: { speed: 950 },
+      })
+
+      const completedActionRunResponse = await fetch(
+        `${baseUrl}/api/action-runs/act_audit_previous`
+      )
+      expect(completedActionRunResponse.status).toBe(200)
+      const completedActionRunBody = await completedActionRunResponse.json()
+      expect(completedActionRunBody).toEqual({
+        id: "act_audit_previous",
+        projectId: "contract-project",
+        actionId: "syncDeviceLabel",
+        subject: {
+          kind: "object",
+          objectTypeId: "device",
+          primaryId: "fan-1",
+        },
+        status: "succeeded",
+        phase: "effects",
+        queuedAt: "2026-02-18T09:12:00.000Z",
+        startedAt: "2026-02-18T09:12:01.000Z",
+        finishedAt: "2026-02-18T09:12:05.000Z",
+        params: { label: "Fan 1 audited" },
+        writeback: {
+          status: "succeeded",
+          completedAt: "2026-02-18T09:12:02.000Z",
+          result: { externalId: "ext_123" },
+        },
+        commit: {
+          committedAt: "2026-02-18T09:12:03.000Z",
+          diff: {
+            objects: [
+              {
+                objectTypeId: "device",
+                primaryId: "fan-1",
+                operation: "update",
+                changedProperties: ["label"],
+              },
+            ],
+            links: [],
+          },
+        },
+        effects: {
+          status: "failed",
+          completedAt: "2026-02-18T09:12:04.000Z",
+          error: {
+            name: "NotificationError",
+            message: "Notification failed",
+            phase: "effects",
+          },
+        },
+      })
+      expect(JSON.stringify(completedActionRunBody)).not.toContain("idempotencyKey")
+      expect(JSON.stringify(completedActionRunBody)).not.toContain("securityContext")
+
+      const missingActionRunResponse = await fetch(`${baseUrl}/api/action-runs/missing`)
+      expect(missingActionRunResponse.status).toBe(404)
+      expect(await missingActionRunResponse.json()).toEqual({ error: "Action run not found" })
 
       const missingSubjectResponse = await fetch(`${baseUrl}/api/actions/setSpeed`, {
         method: "POST",

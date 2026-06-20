@@ -56,14 +56,11 @@ import { defineAction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 export const approveInvoice = defineAction("approve")
-  .target(Invoice)
+  .on(Invoice)
   .params({})
-  .run(async ({ target, sixb }) => {
-    await sixb.objects(Invoice).upsert({
-      properties: {
-        id: target.primaryId,
-        status: "approved",
-      },
+  .edits(({ objects, subject }) => {
+    objects(Invoice).byId(subject.primaryId).update({
+      status: "approved",
     })
   })
 ```

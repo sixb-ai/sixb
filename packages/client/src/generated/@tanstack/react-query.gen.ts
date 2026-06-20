@@ -17,6 +17,7 @@ import {
   existsObjects,
   facetObjects,
   getAction,
+  getActionRun,
   getAuthInvitationOptions,
   getAuthSession,
   getConnector,
@@ -36,6 +37,7 @@ import {
   getWorkflow,
   getWorkflowIntervention,
   getWorkflowRun,
+  listActionRuns,
   listActions,
   listAuthInvitations,
   listAuthSessions,
@@ -95,6 +97,9 @@ import type {
   GetActionData,
   GetActionError,
   GetActionResponse,
+  GetActionRunData,
+  GetActionRunError,
+  GetActionRunResponse,
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsError,
   GetAuthInvitationOptionsResponse,
@@ -149,6 +154,9 @@ import type {
   GetWorkflowRunData,
   GetWorkflowRunError,
   GetWorkflowRunResponse,
+  ListActionRunsData,
+  ListActionRunsError,
+  ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
   ListAuthInvitationsData,
@@ -1931,6 +1939,99 @@ export const requestActionMutation = (
   }
   return mutationOptions
 }
+
+export const listActionRunsQueryKey = (options?: Options<ListActionRunsData>) =>
+  createQueryKey("listActionRuns", options)
+
+/**
+ * List action run history
+ */
+export const listActionRunsOptions = (options?: Options<ListActionRunsData>) =>
+  queryOptions<
+    ListActionRunsResponse,
+    ListActionRunsError,
+    ListActionRunsResponse,
+    ReturnType<typeof listActionRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listActionRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listActionRunsQueryKey(options),
+  })
+
+export const listActionRunsInfiniteQueryKey = (
+  options?: Options<ListActionRunsData>
+): QueryKey<Options<ListActionRunsData>> => createQueryKey("listActionRuns", options, true)
+
+/**
+ * List action run history
+ */
+export const listActionRunsInfiniteOptions = (options?: Options<ListActionRunsData>) =>
+  infiniteQueryOptions<
+    ListActionRunsResponse,
+    ListActionRunsError,
+    InfiniteData<ListActionRunsResponse>,
+    QueryKey<Options<ListActionRunsData>>,
+    string | Pick<QueryKey<Options<ListActionRunsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListActionRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listActionRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listActionRunsInfiniteQueryKey(options),
+    }
+  )
+
+export const getActionRunQueryKey = (options: Options<GetActionRunData>) =>
+  createQueryKey("getActionRun", options)
+
+/**
+ * Get action run detail
+ */
+export const getActionRunOptions = (options: Options<GetActionRunData>) =>
+  queryOptions<
+    GetActionRunResponse,
+    GetActionRunError,
+    GetActionRunResponse,
+    ReturnType<typeof getActionRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActionRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActionRunQueryKey(options),
+  })
 
 export const listObjectLinksQueryKey = (options: Options<ListObjectLinksData>) =>
   createQueryKey("listObjectLinks", options)
