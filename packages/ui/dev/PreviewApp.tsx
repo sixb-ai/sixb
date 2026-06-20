@@ -1,24 +1,37 @@
 import {
   Bell,
   Box,
-  Calendar,
+  Calendar as CalendarIcon,
   CheckCircle2,
+  ChevronRight,
   Cog,
+  CreditCard,
   Database,
+  FileText,
   Filter,
   Folder,
   GitBranch,
+  GripVertical,
   Home,
   Inbox,
+  KeyRound,
+  Layers,
   Loader2,
   LogOut,
+  Mail,
+  PanelTop,
   Plus,
   Search,
   Settings,
+  Sparkles,
+  SquareStack,
+  Terminal,
   Trash2,
+  Upload,
   User,
 } from "lucide-react"
 import { useState } from "react"
+import { useForm } from "react-hook-form"
 import {
   Area,
   AreaChart,
@@ -38,32 +51,67 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { toast } from "sonner"
 import type { ChartConfig } from "../src/components"
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
   Alert,
   AlertDescription,
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
   AlertTitle,
+  AspectRatio,
   Avatar,
   AvatarFallback,
   AvatarImage,
   Badge,
+  Breadcrumb,
+  BreadcrumbEllipsis,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
   Button,
+  ButtonGroup,
+  ButtonGroupSeparator,
+  ButtonGroupText,
+  Calendar,
   Card,
   CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
   ChartContainer,
   ChartLegend,
   ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   Checkbox,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   CollectionCardButton,
   CollectionCardGrid,
   CollectionHeader,
   CollectionViewToggle,
+  Combobox,
   Command,
   CommandEmpty,
   CommandGroup,
@@ -71,6 +119,16 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
+  ContextMenu,
+  ContextMenuCheckboxItem,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+  ContextMenuShortcut,
+  ContextMenuTrigger,
   Dialog,
   DialogClose,
   DialogContent,
@@ -79,17 +137,100 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DirectionProvider,
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
   EmptyState,
+  EmptyTitle,
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSeparator,
+  FieldSet,
+  FieldTitle,
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
   Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSeparator,
+  InputOTPSlot,
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+  Kbd,
+  KbdGroup,
   Label,
+  Menubar,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarSeparator,
+  MenubarShortcut,
+  MenubarTrigger,
   MiniSparkline,
+  NativeSelect,
+  NativeSelectOptGroup,
+  NativeSelectOption,
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+  Pagination,
+  PaginationContent,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Progress,
+  RadioGroup,
+  RadioGroupItem,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
   ScrollArea,
   Select,
   SelectContent,
@@ -119,6 +260,8 @@ import {
   SidebarProvider,
   SidebarTrigger,
   Skeleton,
+  Slider,
+  Spinner,
   Switch,
   Table,
   TableBody,
@@ -132,6 +275,10 @@ import {
   TabsTrigger,
   Textarea,
   ThemeSwitcher,
+  Toaster,
+  Toggle,
+  ToggleGroup,
+  ToggleGroupItem,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -322,10 +469,17 @@ const COMMAND_PREVIEW_IDLE_VALUE = "__sixb_command_preview_idle__"
 
 function Showcase() {
   const [search, setSearch] = useState("")
+  const [dataset, setDataset] = useState("erp.customers")
   const [collectionView, setCollectionView] = useState<"cards" | "table">("cards")
   const [progress, setProgress] = useState(64)
   const [airplane, setAirplane] = useState(false)
   const [agreed, setAgreed] = useState<boolean | "indeterminate">("indeterminate")
+  const [calendarDate, setCalendarDate] = useState<Date | undefined>(new Date(2026, 5, 19))
+  const form = useForm({
+    defaultValues: {
+      email: "ops@sixb.dev",
+    },
+  })
 
   return (
     <main className="min-h-dvh">
@@ -359,7 +513,7 @@ function Showcase() {
 
         <Section
           title="Color"
-          description="Neutral-first palette with one electric blue accent. Pure-white cards lift above a subtly tinted canvas."
+          description="Neutral-first palette with pure-white surfaces, black primary actions, and grey chart tokens."
         >
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <Swatch label="Background" variable="--background" description="Page canvas." />
@@ -403,6 +557,18 @@ function Showcase() {
               <Button variant="outline">
                 <Plus /> With icon
               </Button>
+            </div>
+          </Block>
+          <Block label="Toggle controls">
+            <div className="flex flex-wrap items-center gap-3">
+              <Toggle variant="outline" aria-label="Pin project">
+                <Sparkles /> Pin
+              </Toggle>
+              <ToggleGroup type="multiple" variant="outline" defaultValue={["schema"]}>
+                <ToggleGroupItem value="schema">Schema</ToggleGroupItem>
+                <ToggleGroupItem value="runs">Runs</ToggleGroupItem>
+                <ToggleGroupItem value="logs">Logs</ToggleGroupItem>
+              </ToggleGroup>
             </div>
           </Block>
         </Section>
@@ -678,6 +844,398 @@ function Showcase() {
           </Card>
         </Section>
 
+        <Section
+          title="Form Composition"
+          description="Field, form, and advanced input primitives for dense app workflows."
+        >
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Block label="Form + field">
+              <Form {...form}>
+                <form
+                  onSubmit={form.handleSubmit((values) => {
+                    toast.success(`Saved ${values.email}`)
+                  })}
+                  className="space-y-5"
+                >
+                  <FormField
+                    control={form.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Owner email</FormLabel>
+                        <FormControl>
+                          <InputGroup>
+                            <InputGroupAddon>
+                              <Mail />
+                            </InputGroupAddon>
+                            <InputGroupInput placeholder="ops@sixb.dev" {...field} />
+                          </InputGroup>
+                        </FormControl>
+                        <FormDescription>
+                          Used for run notifications and audit exports.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FieldSeparator className="my-3">Policy</FieldSeparator>
+
+                  <FieldSet className="gap-5">
+                    <FieldLegend variant="label">Write controls</FieldLegend>
+                    <FieldGroup>
+                      <Field orientation="horizontal">
+                        <Switch id="field-audit" defaultChecked />
+                        <FieldContent>
+                          <FieldLabel htmlFor="field-audit">Require audit log</FieldLabel>
+                          <FieldDescription>
+                            Record every mutation made by preview actions.
+                          </FieldDescription>
+                        </FieldContent>
+                      </Field>
+                      <Field>
+                        <FieldTitle>Conflict policy</FieldTitle>
+                        <FieldDescription>
+                          Choose how local writes behave when upstream data changes.
+                        </FieldDescription>
+                        <RadioGroup defaultValue="review" className="grid gap-2 sm:grid-cols-3">
+                          {["review", "queue", "block"].map((value) => (
+                            <div key={value} className="flex items-center gap-2">
+                              <RadioGroupItem id={`policy-${value}`} value={value} />
+                              <Label htmlFor={`policy-${value}`} className="capitalize">
+                                {value}
+                              </Label>
+                            </div>
+                          ))}
+                        </RadioGroup>
+                      </Field>
+                    </FieldGroup>
+                  </FieldSet>
+
+                  <Button size="sm" type="submit">
+                    Save owner
+                  </Button>
+                </form>
+              </Form>
+            </Block>
+
+            <Block label="Inputs">
+              <div className="grid gap-6">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <Search />
+                  </InputGroupAddon>
+                  <InputGroupInput placeholder="Find datasets" />
+                  <InputGroupAddon align="inline-end">
+                    <InputGroupButton>
+                      <Upload />
+                      Import
+                    </InputGroupButton>
+                  </InputGroupAddon>
+                </InputGroup>
+
+                <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(13rem,0.6fr)]">
+                  <div className="space-y-2">
+                    <Label>Dataset</Label>
+                    <Combobox
+                      value={dataset}
+                      onValueChange={setDataset}
+                      options={SAMPLE_DATA.map((row) => ({
+                        value: row.name,
+                        label: row.name,
+                        description: row.status,
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Native select</Label>
+                    <NativeSelect defaultValue="staging">
+                      <NativeSelectOptGroup label="Deploy targets">
+                        <NativeSelectOption value="local">Local</NativeSelectOption>
+                        <NativeSelectOption value="staging">Staging</NativeSelectOption>
+                        <NativeSelectOption value="production">Production</NativeSelectOption>
+                      </NativeSelectOptGroup>
+                    </NativeSelect>
+                  </div>
+                </div>
+
+                <div className="grid gap-5 md:grid-cols-[max-content_minmax(12rem,1fr)] md:items-start">
+                  <div className="space-y-2">
+                    <Label>One-time code</Label>
+                    <InputOTP maxLength={6} defaultValue="204800">
+                      <InputOTPGroup>
+                        <InputOTPSlot index={0} />
+                        <InputOTPSlot index={1} />
+                        <InputOTPSlot index={2} />
+                      </InputOTPGroup>
+                      <InputOTPSeparator />
+                      <InputOTPGroup>
+                        <InputOTPSlot index={3} />
+                        <InputOTPSlot index={4} />
+                        <InputOTPSlot index={5} />
+                      </InputOTPGroup>
+                    </InputOTP>
+                  </div>
+                  <div className="min-w-0 space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <Label>Batch size</Label>
+                      <span className="font-mono text-muted-foreground">64%</span>
+                    </div>
+                    <Slider defaultValue={[64]} max={100} step={1} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Quick actions</Label>
+                  <ButtonGroup>
+                    <Button variant="outline">Run</Button>
+                    <Button variant="outline">Queue</Button>
+                    <ButtonGroupSeparator />
+                    <ButtonGroupText>
+                      <KbdGroup>
+                        <Kbd>Cmd</Kbd>
+                        <Kbd>K</Kbd>
+                      </KbdGroup>
+                    </ButtonGroupText>
+                  </ButtonGroup>
+                </div>
+              </div>
+            </Block>
+
+            <Block label="Calendar">
+              <Calendar
+                mode="single"
+                selected={calendarDate}
+                onSelect={(date) => setCalendarDate(date)}
+                className="rounded-md border border-border"
+              />
+            </Block>
+          </div>
+        </Section>
+
+        <Section
+          title="Navigation & Disclosure"
+          description="Breadcrumb, navigation menu, accordion, collapsible, pagination, and direction primitives."
+        >
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Block label="Navigation menu">
+              <div className="space-y-5">
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem>
+                      <BreadcrumbLink href="#">Projects</BreadcrumbLink>
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator>
+                      <ChevronRight />
+                    </BreadcrumbSeparator>
+                    <BreadcrumbItem>
+                      <BreadcrumbEllipsis />
+                    </BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>acme-corp</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+
+                <NavigationMenu viewport={false}>
+                  <NavigationMenuList>
+                    <NavigationMenuItem>
+                      <NavigationMenuTrigger>Platform</NavigationMenuTrigger>
+                      <NavigationMenuContent>
+                        <div className="grid w-72 gap-1 p-1">
+                          <NavigationMenuLink href="#">
+                            <Layers />
+                            <span className="font-medium">Objects</span>
+                            <span className="text-muted-foreground">Typed runtime entities.</span>
+                          </NavigationMenuLink>
+                          <NavigationMenuLink href="#">
+                            <GitBranch />
+                            <span className="font-medium">Pipelines</span>
+                            <span className="text-muted-foreground">Sync and transform flows.</span>
+                          </NavigationMenuLink>
+                        </div>
+                      </NavigationMenuContent>
+                    </NavigationMenuItem>
+                    <NavigationMenuItem>
+                      <NavigationMenuLink href="#" className="h-9 justify-center px-4">
+                        Docs
+                      </NavigationMenuLink>
+                    </NavigationMenuItem>
+                  </NavigationMenuList>
+                </NavigationMenu>
+              </div>
+            </Block>
+
+            <Block label="Accordion + collapsible">
+              <div className="space-y-4">
+                <Accordion type="single" collapsible defaultValue="schema">
+                  <AccordionItem value="schema">
+                    <AccordionTrigger>Schema changes</AccordionTrigger>
+                    <AccordionContent>
+                      Three object types and two action handlers were regenerated.
+                    </AccordionContent>
+                  </AccordionItem>
+                  <AccordionItem value="sync">
+                    <AccordionTrigger>Sync status</AccordionTrigger>
+                    <AccordionContent>
+                      Last successful run finished 11 minutes ago.
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+
+                <Collapsible defaultOpen className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">Advanced filters</p>
+                      <p className="text-xs text-muted-foreground">Expanded by default.</p>
+                    </div>
+                    <CollapsibleTrigger asChild>
+                      <Button size="sm" variant="ghost">
+                        Toggle
+                      </Button>
+                    </CollapsibleTrigger>
+                  </div>
+                  <CollapsibleContent className="pt-3 text-sm text-muted-foreground">
+                    Owner, status, branch, and runtime filters.
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            </Block>
+
+            <Block label="Pagination">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious href="#" />
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationLink href="#" isActive>
+                      1
+                    </PaginationLink>
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationLink href="#">2</PaginationLink>
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationEllipsis />
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationNext href="#" />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </Block>
+
+            <Block label="Direction">
+              <DirectionProvider dir="rtl">
+                <div dir="rtl" className="rounded-md border border-border p-3">
+                  <Breadcrumb>
+                    <BreadcrumbList>
+                      <BreadcrumbItem>
+                        <BreadcrumbLink href="#">البيانات</BreadcrumbLink>
+                      </BreadcrumbItem>
+                      <BreadcrumbSeparator />
+                      <BreadcrumbItem>
+                        <BreadcrumbPage>المزامنة</BreadcrumbPage>
+                      </BreadcrumbItem>
+                    </BreadcrumbList>
+                  </Breadcrumb>
+                </div>
+              </DirectionProvider>
+            </Block>
+          </div>
+        </Section>
+
+        <Section
+          title="Media & Panels"
+          description="Aspect ratio, carousel, resizable panels, and item lists."
+        >
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Block label="Aspect ratio">
+              <AspectRatio
+                ratio={16 / 9}
+                className="overflow-hidden rounded-md border border-border"
+              >
+                <div className="flex h-full w-full flex-col justify-between bg-muted p-4">
+                  <PanelTop className="size-5 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm font-medium">Preview surface</p>
+                    <p className="text-xs text-muted-foreground">Stable 16:9 frame.</p>
+                  </div>
+                </div>
+              </AspectRatio>
+            </Block>
+
+            <Block label="Carousel">
+              <Carousel className="mx-10">
+                <CarouselContent>
+                  {["Objects", "Syncs", "Actions"].map((label, index) => (
+                    <CarouselItem key={label} className="basis-2/3">
+                      <div className="flex aspect-[4/3] flex-col justify-between rounded-md border border-border bg-muted p-4">
+                        <SquareStack className="size-5 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium">{label}</p>
+                          <p className="font-mono text-xs text-muted-foreground">0{index + 1}</p>
+                        </div>
+                      </div>
+                    </CarouselItem>
+                  ))}
+                </CarouselContent>
+                <CarouselPrevious />
+                <CarouselNext />
+              </Carousel>
+            </Block>
+
+            <Block label="Resizable">
+              <ResizablePanelGroup
+                orientation="horizontal"
+                className="min-h-44 rounded-md border border-border"
+              >
+                <ResizablePanel defaultSize={45} minSize={30}>
+                  <div className="flex h-full items-center justify-center gap-2 p-4 text-sm">
+                    <FileText className="size-4 text-muted-foreground" />
+                    Schema
+                  </div>
+                </ResizablePanel>
+                <ResizableHandle withHandle />
+                <ResizablePanel defaultSize={55} minSize={30}>
+                  <div className="flex h-full items-center justify-center gap-2 p-4 text-sm">
+                    <GripVertical className="size-4 text-muted-foreground" />
+                    Inspector
+                  </div>
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </Block>
+
+            <Block label="Items">
+              <ItemGroup>
+                {SAMPLE_DATA.slice(0, 3).map((row, index) => (
+                  <div key={row.id}>
+                    <Item variant={index === 0 ? "outline" : "default"}>
+                      <ItemMedia variant="icon">
+                        <Database />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>{row.name}</ItemTitle>
+                        <ItemDescription>
+                          {row.rows.toLocaleString()} rows updated {row.updated}
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
+                        <Badge variant={row.status === "failed" ? "destructive" : "secondary"}>
+                          {row.status}
+                        </Badge>
+                      </ItemActions>
+                    </Item>
+                    {index < 2 ? <ItemSeparator /> : null}
+                  </div>
+                ))}
+              </ItemGroup>
+            </Block>
+          </div>
+        </Section>
+
         <Section title="Search & Command">
           <div className="grid gap-4 lg:grid-cols-2">
             <Block label="Search">
@@ -701,7 +1259,7 @@ function Showcase() {
                   <CommandEmpty>No results found.</CommandEmpty>
                   <CommandGroup heading="Suggestions">
                     <CommandItem>
-                      <Calendar /> Calendar
+                      <CalendarIcon /> Calendar
                     </CommandItem>
                     <CommandItem>
                       <Search /> Search
@@ -856,75 +1414,192 @@ function Showcase() {
           </div>
         </Section>
 
-        <Section title="Dialog, Sheet, Dropdown & Tooltip">
+        <Section title="Overlays & Menus">
           <Block label="Floating UI">
             <TooltipProvider>
-              <div className="flex flex-wrap items-center gap-3">
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="outline">Open dialog</Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Delete dataset</DialogTitle>
-                      <DialogDescription>
-                        This permanently removes erp.customers and all its sync history.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <DialogFooter>
-                      <DialogClose asChild>
-                        <Button variant="outline">Cancel</Button>
-                      </DialogClose>
-                      <Button variant="destructive">
-                        <Trash2 /> Delete
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">Open dialog</Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Delete dataset</DialogTitle>
+                        <DialogDescription>
+                          This permanently removes erp.customers and all its sync history.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <DialogFooter>
+                        <DialogClose asChild>
+                          <Button variant="outline">Cancel</Button>
+                        </DialogClose>
+                        <Button variant="destructive">
+                          <Trash2 /> Delete
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="outline">
+                        <KeyRound /> Alert dialog
                       </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Rotate access keys?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Active syncs will pause until the new key is confirmed.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction>Rotate key</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
 
-                <Sheet>
-                  <SheetTrigger asChild>
-                    <Button variant="outline">
-                      <Filter /> Open sheet
-                    </Button>
-                  </SheetTrigger>
-                  <SheetContent>
-                    <SheetHeader>
-                      <SheetTitle>Filters</SheetTitle>
-                      <SheetDescription>Refine the dataset view.</SheetDescription>
-                    </SheetHeader>
-                    <div className="space-y-3 px-4 pb-4 text-sm text-muted-foreground">
-                      A sheet is a side-mounted panel for secondary controls.
-                    </div>
-                  </SheetContent>
-                </Sheet>
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <Button variant="outline">
+                        <Filter /> Open sheet
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent>
+                      <SheetHeader>
+                        <SheetTitle>Filters</SheetTitle>
+                        <SheetDescription>Refine the dataset view.</SheetDescription>
+                      </SheetHeader>
+                      <div className="space-y-3 px-4 pb-4 text-sm text-muted-foreground">
+                        A sheet is a side-mounted panel for secondary controls.
+                      </div>
+                    </SheetContent>
+                  </Sheet>
 
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline">
-                      <Cog /> Open menu
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuLabel>Project</DropdownMenuLabel>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem>Rename</DropdownMenuItem>
-                    <DropdownMenuItem>Duplicate</DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive">
-                      <Trash2 /> Delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  <Drawer>
+                    <DrawerTrigger asChild>
+                      <Button variant="outline">
+                        <CreditCard /> Drawer
+                      </Button>
+                    </DrawerTrigger>
+                    <DrawerContent>
+                      <DrawerHeader>
+                        <DrawerTitle>Billing checkpoint</DrawerTitle>
+                        <DrawerDescription>
+                          Bottom-mounted drawer for mobile-friendly confirmations.
+                        </DrawerDescription>
+                      </DrawerHeader>
+                      <DrawerFooter>
+                        <Button>Continue</Button>
+                        <DrawerClose asChild>
+                          <Button variant="outline">Cancel</Button>
+                        </DrawerClose>
+                      </DrawerFooter>
+                    </DrawerContent>
+                  </Drawer>
 
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <Bell />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>You have 3 new alerts</TooltipContent>
-                </Tooltip>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline">
+                        <Cog /> Open menu
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuLabel>Project</DropdownMenuLabel>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem>Rename</DropdownMenuItem>
+                      <DropdownMenuItem>Duplicate</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem variant="destructive">
+                        <Trash2 /> Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline">Open popover</Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72">
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium">Preview branch</p>
+                        <p className="text-sm text-muted-foreground">
+                          Popovers hold compact, contextual controls.
+                        </p>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+
+                  <HoverCard>
+                    <HoverCardTrigger asChild>
+                      <Button variant="outline">Hover owner</Button>
+                    </HoverCardTrigger>
+                    <HoverCardContent className="w-72">
+                      <div className="flex gap-3">
+                        <Avatar className="size-9">
+                          <AvatarFallback>AD</AvatarFallback>
+                        </Avatar>
+                        <div className="space-y-1">
+                          <p className="text-sm font-medium">Anthony</p>
+                          <p className="text-sm text-muted-foreground">
+                            Owns package review and release notes.
+                          </p>
+                        </div>
+                      </div>
+                    </HoverCardContent>
+                  </HoverCard>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button variant="outline" size="icon">
+                        <Bell />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>You have 3 new alerts</TooltipContent>
+                  </Tooltip>
+                </div>
+
+                <Menubar>
+                  <MenubarMenu>
+                    <MenubarTrigger>Project</MenubarTrigger>
+                    <MenubarContent>
+                      <MenubarItem>
+                        New sync <MenubarShortcut>Cmd+N</MenubarShortcut>
+                      </MenubarItem>
+                      <MenubarItem>Open logs</MenubarItem>
+                      <MenubarSeparator />
+                      <MenubarItem>Settings</MenubarItem>
+                    </MenubarContent>
+                  </MenubarMenu>
+                  <MenubarMenu>
+                    <MenubarTrigger>Run</MenubarTrigger>
+                    <MenubarContent>
+                      <MenubarItem>Start</MenubarItem>
+                      <MenubarItem>Pause</MenubarItem>
+                    </MenubarContent>
+                  </MenubarMenu>
+                </Menubar>
+
+                <ContextMenu>
+                  <ContextMenuTrigger className="flex h-24 items-center justify-center rounded-md border border-dashed border-border bg-muted text-sm text-muted-foreground">
+                    Right click preview canvas
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuLabel>Canvas</ContextMenuLabel>
+                    <ContextMenuItem>
+                      <Terminal /> Open inspector
+                      <ContextMenuShortcut>Cmd+I</ContextMenuShortcut>
+                    </ContextMenuItem>
+                    <ContextMenuCheckboxItem checked>Show grid</ContextMenuCheckboxItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuRadioGroup value="compact">
+                      <ContextMenuRadioItem value="compact">Compact</ContextMenuRadioItem>
+                      <ContextMenuRadioItem value="comfortable">Comfortable</ContextMenuRadioItem>
+                    </ContextMenuRadioGroup>
+                  </ContextMenuContent>
+                </ContextMenu>
               </div>
             </TooltipProvider>
           </Block>
@@ -1041,18 +1716,38 @@ function Showcase() {
         </Section>
 
         <Section title="Empty state">
-          <Block label="Default">
-            <EmptyState
-              icon={<Box className="size-12 stroke-1" />}
-              title="No datasets yet"
-              description="Connect a source to materialize datasets into your project."
-              action={
-                <Button size="sm">
-                  <Plus /> Connect source
-                </Button>
-              }
-            />
-          </Block>
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Block label="Sixb empty state">
+              <EmptyState
+                icon={<Box className="size-12 stroke-1" />}
+                title="No datasets yet"
+                description="Connect a source to materialize datasets into your project."
+                action={
+                  <Button size="sm">
+                    <Plus /> Connect source
+                  </Button>
+                }
+              />
+            </Block>
+            <Block label="Shadcn empty">
+              <Empty className="border border-border">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <Inbox />
+                  </EmptyMedia>
+                  <EmptyTitle>No review tasks</EmptyTitle>
+                  <EmptyDescription>
+                    Everything has been handled for the current preview branch.
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button size="sm" variant="outline" onClick={() => toast.info("No review tasks")}>
+                    Check again
+                  </Button>
+                </EmptyContent>
+              </Empty>
+            </Block>
+          </div>
         </Section>
 
         <Section title="ScrollArea, separator, loaders">
@@ -1076,7 +1771,10 @@ function Showcase() {
                   <span className="text-muted-foreground">Right</span>
                 </div>
                 <Separator />
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  <Spinner />
+                </div>
               </div>
             </Block>
           </div>
@@ -1096,6 +1794,7 @@ export function PreviewApp() {
   return (
     <ThemeProvider>
       <Showcase />
+      <Toaster />
     </ThemeProvider>
   )
 }
