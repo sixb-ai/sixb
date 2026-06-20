@@ -37,10 +37,21 @@ whole flow, not just sign-in:
   `security-admins`.
 - **Invite policy** — security admins can invite people into `team-members`
   (`security/invite-policies/default-invites.ts`).
+- **Roles** — `team-members` can view `Note` and apply `acknowledge-note`.
+  `security-admins` use wildcard grants: view all objects, apply all actions,
+  run all workflows, and view events
+  (`security/roles/atlas-access.ts`).
+- **Seed data** — startup writes one `Note`, one `AdminNote`, and one
+  `AccessRequest` (`seed.ts`).
 
 So: sign in as `admin@example.com`, then use the admin UI in Atlas to invite a
 teammate. They receive their own sign-in link — printed to the terminal, or
 emailed if Resend is configured.
+
+In Atlas, the teammate's object list should only include `Note` objects and the
+`acknowledge-note` action. Requests for `AdminNote`, `AccessRequest`, admin
+actions, workflows, and events are denied by the scoped SDK that backs the
+server routes.
 
 ## Use OIDC instead (Google Workspace)
 

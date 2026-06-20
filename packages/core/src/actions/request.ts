@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { SecurityContext } from "../auth"
+import { assertAuthorized } from "../authorization"
 import type { EventActor } from "../events"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
@@ -109,6 +110,12 @@ export async function requestAction(
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
+
+  assertAuthorized(runtime, { kind: "action.apply", actionId: action.id })
+  if (objectType) {
+    // Object actions also require visibility of the subject's object type.
+    assertAuthorized(runtime, { kind: "object.view", objectTypeId: objectType.id })
+  }
 
   const runId = createActionRunId(input.runId)
   const existing = await actionRuns.getById({ projectId: runtime.projectId, id: runId })

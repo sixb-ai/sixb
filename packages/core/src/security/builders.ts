@@ -1,9 +1,22 @@
 import { SecurityValidationError } from "./errors"
-import type { GroupDefinition, InvitePolicyDefinition } from "./types"
+import type {
+  GrantDefinition,
+  GroupDefinition,
+  InvitePolicyDefinition,
+  RoleDefinition,
+} from "./types"
+import { assertGrantDefinition } from "./validation"
 
 export interface DefineGroupOptions {
   readonly label?: string
   readonly description?: string
+}
+
+export interface DefineRoleOptions {
+  readonly label?: string
+  readonly description?: string
+  readonly grantedTo: readonly GroupDefinition[]
+  readonly grants: readonly GrantDefinition[]
 }
 
 export interface DefineInvitePolicyOptions {
@@ -71,6 +84,35 @@ export function defineGroup<const TId extends string>(
     id,
     ...(options.label !== undefined ? { label: options.label } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
+  }
+}
+
+export function defineRole<const TId extends string>(
+  id: TId,
+  options: DefineRoleOptions
+): RoleDefinition<TId> {
+  assertNonEmptyString(id, "Role id")
+  assertOptionalString(options.label, `Role '${id}' label`)
+  assertOptionalString(options.description, `Role '${id}' description`)
+  assertNonEmptyArray(options.grantedTo, `Role '${id}' grantedTo`)
+
+  const grantedToGroupIds = groupIdsFrom(options.grantedTo, `Role '${id}' grantedTo`)
+
+  for (const grant of options.grants) {
+    assertGrantDefinition(grant, `Role '${id}' grants`)
+  }
+
+  if (options.grants.length === 0) {
+    throw new SecurityValidationError(`Role '${id}' grants must not be empty.`)
+  }
+
+  return {
+    kind: "role",
+    id,
+    ...(options.label !== undefined ? { label: options.label } : {}),
+    ...(options.description !== undefined ? { description: options.description } : {}),
+    grantedToGroupIds,
+    grants: options.grants,
   }
 }
 

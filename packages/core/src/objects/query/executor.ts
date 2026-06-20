@@ -1,3 +1,4 @@
+import { type AuthorizationContext, assertAuthorized } from "../../authorization"
 import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
@@ -18,7 +19,11 @@ import {
 import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
-import { type ObjectQueryValidationIssue, validateObjectQuery } from "./validate"
+import {
+  type ObjectQueryValidationIssue,
+  type ValidatedObjectQuery,
+  validateObjectQuery,
+} from "./validate"
 
 export interface QueryExecutorOptions
   extends Omit<
@@ -35,6 +40,8 @@ export interface QueryExecutorOptions
   maxLimit?: number
   maxPageSize?: number
   maxFacetLimit?: number
+  /** When present, every object type the query touches must be viewable. */
+  authorization?: AuthorizationContext
 }
 
 export interface ExecuteObjectQueryInput {
@@ -125,6 +132,7 @@ export async function executeObjectQuery(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
+  assertQueryViewable(validated, options.authorization)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -185,6 +193,7 @@ export async function countObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
+  assertQueryViewable(validated, options.authorization)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -244,6 +253,7 @@ export async function existsObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
+  assertQueryViewable(validated, options.authorization)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -303,6 +313,7 @@ export async function facetObjects(
     maxPageSize: options.maxPageSize,
     normalize: false,
   })
+  assertQueryViewable(validated, options.authorization)
   const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
@@ -357,6 +368,18 @@ export async function facetObjects(
     ),
     plan,
   }
+}
+
+// Authorization happens at planning time: a scoped query must hold a view
+// grant for every object type it touches, before any storage call runs.
+function assertQueryViewable(
+  validated: ValidatedObjectQuery,
+  authorization: AuthorizationContext | undefined
+): void {
+  assertAuthorized(
+    { authorization },
+    { kind: "object.query", touchedObjectTypeIds: validated.touchedObjectTypeIds }
+  )
 }
 
 function expandPushdownQuery(

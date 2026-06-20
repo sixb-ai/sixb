@@ -150,7 +150,20 @@ export function createSixbApi(server: SixbServer) {
     })
   )
 
-  app.onBeforeHandle(({ request }) => guard.handle(request))
+  // Resolve the session once per request and attach the principal's scoped SDK.
+  // The beforeHandle enforces the auth decision before any route runs; `scoped`
+  // and `authz` stay null for public routes and disabled auth (privileged mode).
+  app
+    .derive(async ({ request }) => {
+      const auth = await guard.resolve(request)
+      if (auth.kind === "deny" || !auth.session?.authenticated) {
+        return { auth, authz: null, scoped: null }
+      }
+
+      const authz = sixb.auth.contextFromSession(auth.session)
+      return { auth, authz, scoped: sixb.as(authz) }
+    })
+    .onBeforeHandle(({ auth }) => (auth.kind === "deny" ? auth.response : undefined))
 
   app.use(
     openapi({

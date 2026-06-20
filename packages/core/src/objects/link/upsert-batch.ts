@@ -5,6 +5,7 @@
  * because each item can target a different objectType + linkDefinition.
  */
 
+import { assertPrivileged } from "../../authorization"
 import type { NewDomainEvent } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
@@ -16,6 +17,7 @@ export async function upsertLinkBatch(
   ctx: SixbRuntimeContext,
   items: readonly ResolvedLinkBatchItem[]
 ): Promise<readonly BatchItemResult<void>[]> {
+  assertPrivileged(ctx, "upsertLinkBatch")
   const { events: eventsRuntime, storage, projectId, ontology } = ctx
 
   if (items.length === 0) return []

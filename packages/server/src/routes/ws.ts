@@ -1,4 +1,4 @@
-import type { DomainEvent } from "@sixb/core"
+import { type AuthorizationContext, canViewEvent, type DomainEvent } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../schemas/events"
@@ -90,6 +90,8 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
       return
     }
 
+    const authz = wsAuthz(ws)
+
     const tick = async () => {
       if (state.polling) {
         return
@@ -105,8 +107,13 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
           types: state.types,
         })
 
+        // Each event payload may carry object data, so visibility is derived
+        // per-event from the principal's grants (see `canViewEvent`). The cursor
+        // advances over every event read, not just the ones sent.
         for (const event of events) {
-          safeSend(ws, { type: "event", event })
+          if (canViewEvent(authz, event)) {
+            safeSend(ws, { type: "event", event })
+          }
         }
 
         const last = events[events.length - 1]
@@ -130,6 +137,8 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
 
   return app.ws("/ws/events", {
     async open(ws) {
+      // Any authenticated principal may connect; events are filtered per-event
+      // by grants as they stream (see the poll loop in `startPolling`).
       const state = createDefaultState()
       state.afterCursor = await resolveLatestCursor(server)
       states.set(wsStateKey(ws), state)
@@ -183,4 +192,10 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
 function wsStateKey(ws: object): object {
   const raw = (ws as { raw?: unknown }).raw
   return raw && typeof raw === "object" ? raw : ws
+}
+
+/** Read the authorization context the auth derive attached to the upgrade request. */
+function wsAuthz(ws: object): AuthorizationContext | null {
+  const data = (ws as { data?: { authz?: AuthorizationContext | null } }).data
+  return data?.authz ?? null
 }

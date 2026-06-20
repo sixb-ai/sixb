@@ -15,6 +15,7 @@ import {
   isOidcAuthStrategy,
   type SixbAuthConfig,
 } from "../auth"
+import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { ConnectorRuntime } from "../connectors/runtime"
@@ -46,7 +47,12 @@ import type { RuleDefinition } from "../rules"
 import { validateRulesAtStartup } from "../rules"
 import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
-import type { GroupDefinition, InvitePolicyDefinition, SecurityRegistry } from "../security"
+import type {
+  GroupDefinition,
+  InvitePolicyDefinition,
+  RoleDefinition,
+  SecurityRegistry,
+} from "../security"
 import { createRuntimeSecurityRegistry } from "../security/runtime"
 import type { ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
@@ -55,6 +61,7 @@ import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webho
 import type { WorkflowDefinition } from "../workflows"
 import { validateWorkflowsAtStartup, WorkflowsRuntime } from "../workflows"
 import { RuntimeError } from "./errors"
+import { createScopedSixb, type ScopedSixb } from "./scoped"
 import type {
   BatchItemResult,
   ListResult,
@@ -86,6 +93,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
+  roles?: readonly RoleDefinition[]
   invitePolicies?: readonly InvitePolicyDefinition[]
   auth?: SixbAuthConfig
 }
@@ -135,9 +143,19 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.blobStorage = options.blobStorage
     this.queues = options.queues
     this.rules = options.rules ?? []
+    // Ontology and actions resolve first so every later registry (security,
+    // rules, workflows, projections) can validate its references against them.
+    this.ontology = new OntologyRegistry({ sources: this.ontologySources })
+    this.actionRegistry = new ActionRegistry(options.actions ?? [], this.ontology)
+    const registeredActionIds = new Set(this.actionRegistry.list().map((action) => action.id))
     this.security = createRuntimeSecurityRegistry({
       groups: options.groups ?? [],
+      roles: options.roles ?? [],
       invitePolicies: options.invitePolicies ?? [],
+      objectTypeIds: new Set(this.ontology.getObjectTypesById().keys()),
+      actionIds: registeredActionIds,
+      workflowIds: new Set((options.workflows ?? []).map((workflow) => workflow.id)),
+      getSubTypes: (objectTypeId) => this.ontology.getSubTypes(objectTypeId),
     })
     this.auth = new AuthRuntime({
       projectId: this.projectId,
@@ -226,9 +244,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       this.pipelinesById.set(pipeline.id, pipeline)
     }
 
-    this.ontology = new OntologyRegistry({ sources: this.ontologySources })
-    this.actionRegistry = new ActionRegistry(options.actions ?? [], this.ontology)
-
     // Rules validate against the resolved ontology so inherited properties and
     // links are available before checking predicate references.
     validateRulesAtStartup(this.rules, this.ontology)
@@ -239,7 +254,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     const workflows = validateWorkflowsAtStartup({
       workflows: options.workflows ?? [],
       registeredScheduleIds: new Set(this.schedulesById.keys()),
-      registeredActionIds: new Set(this.actionRegistry.list().map((action) => action.id)),
+      registeredActionIds,
     })
 
     const workflowIds = new Set<string>()
@@ -448,6 +463,20 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     await this.broker.close?.()
   }
 
+  /**
+   * Derive a principal-scoped SDK from this runtime.
+   *
+   * The scoped surface is default-deny: operations run only when covered by
+   * the context's grants. This raw runtime stays privileged for trusted
+   * system code (startup, syncs, projections, workers, webhooks, tests).
+   */
+  as(context: AuthorizationContext): ScopedSixb<TOntologySources> {
+    return createScopedSixb<TOntologySources>(
+      { ...this.runtimeContext, authorization: context },
+      { workflows: this.workflows }
+    )
+  }
+
   objects<TObjectType extends RegisteredObjectType<TOntologySources>>(
     objectType: TObjectType
   ): ObjectSet<
@@ -461,17 +490,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       TObjectType,
       RegisteredObjectType<TOntologySources>,
       RegisteredValueTypes<TOntologySources>
-    >({
-      objectType,
-      projectId: this.projectId,
-      ontology: this.ontology,
-      actionRegistry: this.actionRegistry,
-      events: this.events,
-      lakeStorage: this.lakeStorage,
-      blobStorage: this.blobStorage,
-      storage: this.storage,
-      queues: this.queues,
-    })
+    >({ ...this.runtimeContext, objectType })
   }
 
   async upsertObject(
@@ -557,30 +576,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     orderBy?: "createdAt" | "updatedAt" | "primaryId"
     order?: "asc" | "desc"
   }): Promise<ListResult<ObjectRow>> {
-    const expandedTypeIds = params.objectTypeIds
-      ? [...new Set(params.objectTypeIds.flatMap((id) => [id, ...this.ontology.getSubTypes(id)]))]
-      : undefined
-
-    const result = await this.storage.objects.list({
-      projectId: this.projectId,
-      objectTypeId: expandedTypeIds?.length === 1 ? expandedTypeIds[0] : expandedTypeIds,
-      primaryIdPrefix: params.idPrefix,
-      primaryIdSuffix: params.idSuffix,
-      updatedAfter: params.updatedAfter,
-      updatedBefore: params.updatedBefore,
-      createdAfter: params.createdAfter,
-      createdBefore: params.createdBefore,
-      limit: params.limit,
-      offset: params.offset,
-      orderBy: params.orderBy,
-      order: params.order,
-    })
-
-    return {
-      objects: [...result.objects],
-      hasMore: result.hasMore,
-      total: result.total,
-    }
+    return objectService.listObjects(this.runtimeContext, params)
   }
 
   getSubTypes(objectTypeId: string): string[] {

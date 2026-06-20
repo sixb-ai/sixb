@@ -2,6 +2,7 @@
  * Leaf operation: upsert a single object.
  */
 
+import { assertPrivileged } from "../../authorization"
 import {
   assertKnownProperties,
   assertRequiredProperties,
@@ -16,6 +17,7 @@ export async function upsertObject(
   primaryId: string,
   properties: Record<string, unknown>
 ): Promise<ObjectRow> {
+  assertPrivileged(ctx, "upsertObject")
   const { events, storage, projectId, objectType, ontology } = ctx
 
   assertKnownProperties(objectType, properties)

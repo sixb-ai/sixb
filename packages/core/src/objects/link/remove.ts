@@ -1,6 +1,7 @@
 /**
  * Leaf operation: remove a single link.
  */
+import { assertPrivileged } from "../../authorization"
 import { assertLinkTargetType } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
 import { ObjectError } from "../errors"
@@ -14,6 +15,7 @@ export async function removeLink(
     targetId: string
   }
 ): Promise<void> {
+  assertPrivileged(ctx, "removeLink")
   const { events, storage, objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId } = params
 

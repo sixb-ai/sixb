@@ -1,6 +1,7 @@
 /**
  * Leaf operation: upsert a single link.
  */
+import { assertPrivileged } from "../../authorization"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
@@ -17,6 +18,7 @@ export async function upsertLink(
     properties?: Record<string, unknown>
   }
 ): Promise<void> {
+  assertPrivileged(ctx, "upsertLink")
   const { events, storage, projectId, objectType, linkDefinition, ontology } = ctx
   const { sourceId, linkId, targetTypeId, targetId, properties } = params
 

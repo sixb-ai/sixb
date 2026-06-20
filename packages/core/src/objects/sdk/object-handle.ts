@@ -4,6 +4,7 @@
  * per-property telemetry appenders with compile-time unit and value type safety.
  */
 import type { ActionDefinition } from "../../actions"
+import { assertAuthorized, assertPrivileged } from "../../authorization"
 import type { ObjectLink, ObjectRef, ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
@@ -25,6 +26,7 @@ export function createObjectByIdHandle<
 >(ctx: ResolvedObjectContext, primaryId: string): ObjectByIdHandle<TObjectType, TValueTypes> {
   const objectHandle = {
     get: async () => {
+      assertAuthorized(ctx, { kind: "object.view", objectTypeId: ctx.objectType.id })
       const row = await ctx.storage.objects.getByPrimaryId({
         projectId: ctx.projectId,
         objectTypeId: ctx.objectType.id,
@@ -34,6 +36,8 @@ export function createObjectByIdHandle<
     },
 
     listLinks: async (linkToken?: LinkToken<string, string, string, ObjectLink>) => {
+      // Link rows reveal target types; no link grant semantics exist yet.
+      assertPrivileged(ctx, "listLinks")
       if (linkToken) {
         assertLinkTokenBelongsToObjectType(ctx.objectType, linkToken)
       }

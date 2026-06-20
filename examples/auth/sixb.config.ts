@@ -7,8 +7,9 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
 } from "@sixb/core"
-import { SqliteStorage } from "@sixb/sqlite"
+import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
 import { securityAdmins } from "./security/groups/security-admins"
+import { seedAuthExampleObjects } from "./seed"
 
 // Switch the auth strategy with SIXB_AUTH_MODE:
 //   magic-link (default) — zero setup; the sign-in link is printed to this terminal.
@@ -19,35 +20,45 @@ const fromEmail = process.env.SIXB_AUTH_EMAIL_FROM?.trim()
 
 const allowedDomains = listEnv("SIXB_AUTH_ALLOWED_DOMAINS", ["example.com"])
 const bootstrapUsers = listEnv("SIXB_AUTH_BOOTSTRAP_USERS", ["admin@example.com"])
+const storagePath = ".sixb"
 
-export const sixb = createSixb({
-  id: "auth-example",
-  broker: new InMemoryBroker(),
-  storage: new SqliteStorage({ path: ".sixb" }),
-  lakeStorage: new InMemoryLakeStorage(),
-  blobStorage: new InMemoryBlobStorage(),
-  queues: new InMemoryQueues(),
-  auth:
-    authMode === "oidc"
-      ? oidc({
-          id: "google-workspace",
-          issuer: "https://accounts.google.com",
-          clientId: requiredEnv("SIXB_GOOGLE_CLIENT_ID"),
-          clientSecret: requiredEnv("SIXB_GOOGLE_CLIENT_SECRET"),
-          allowedDomains,
-          bootstrapUsers,
-          bootstrapGroups: [securityAdmins],
-          from: fromEmail,
-          sendInvitation: sendAuthInvitation,
-        })
-      : magicLink({
-          allowedDomains,
-          bootstrapUsers,
-          bootstrapGroups: [securityAdmins],
-          from: fromEmail,
-          sendMagicLink: sendMagicLinkEmail,
-        }),
-})
+export const sixb = createAuthExampleSixb()
+
+async function createAuthExampleSixb() {
+  await migrateSqliteStorage(storagePath)
+
+  const runtime = await createSixb({
+    id: "auth-example",
+    broker: new InMemoryBroker(),
+    storage: new SqliteStorage({ path: storagePath }),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+    auth:
+      authMode === "oidc"
+        ? oidc({
+            id: "google-workspace",
+            issuer: "https://accounts.google.com",
+            clientId: requiredEnv("SIXB_GOOGLE_CLIENT_ID"),
+            clientSecret: requiredEnv("SIXB_GOOGLE_CLIENT_SECRET"),
+            allowedDomains,
+            bootstrapUsers,
+            bootstrapGroups: [securityAdmins],
+            from: fromEmail,
+            sendInvitation: sendAuthInvitation,
+          })
+        : magicLink({
+            allowedDomains,
+            bootstrapUsers,
+            bootstrapGroups: [securityAdmins],
+            from: fromEmail,
+            sendMagicLink: sendMagicLinkEmail,
+          }),
+  })
+
+  await seedAuthExampleObjects(runtime)
+  return runtime
+}
 
 async function sendMagicLinkEmail(message: SendMagicLinkInput): Promise<void> {
   // Print the link so you can sign in even without an email provider configured.

@@ -32,6 +32,7 @@ export { WebhookValidationError } from "../webhooks"
 export type { CreateSixbOptions } from "./create"
 export { createSixb } from "./create"
 export { RuntimeError } from "./errors"
+export type { ScopedObjectByIdHandle, ScopedObjectSet, ScopedSixb } from "./scoped"
 export type { SixbOptions } from "./sixb"
 export { Sixb } from "./sixb"
 export type {

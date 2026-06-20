@@ -1,4 +1,5 @@
 import {
+  AuthorizationError,
   countObjects,
   executeObjectQuery,
   existsObjects,
@@ -12,6 +13,7 @@ import {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -54,6 +56,11 @@ function serializePlan(plan: Awaited<ReturnType<typeof executeObjectQuery>>["pla
 }
 
 function handleObjectQueryError(error: unknown, set: { status?: number | string }) {
+  if (error instanceof AuthorizationError) {
+    set.status = 403
+    return { error: error.message }
+  }
+
   if (error instanceof ZodError) {
     set.status = 400
     return {
@@ -102,14 +109,33 @@ function formatZodIssuePath(path: readonly (string | number)[]): string {
   }, "$")
 }
 
+async function getObjectRow(
+  sixb: Sixb<readonly OntologySource[]>,
+  scoped: ReturnType<typeof requestAuthState>["scoped"],
+  params: { objectTypeId: string; objectId: string }
+) {
+  if (scoped) {
+    return scoped.getObject(params.objectTypeId, params.objectId)
+  }
+
+  return sixb.storage.objects.getByPrimaryId({
+    projectId: sixb.id,
+    objectTypeId: params.objectTypeId,
+    primaryId: params.objectId,
+  })
+}
+
 export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/objects",
-      async ({ query, set }) => {
+      async (context) => {
+        const { query, set } = context
+        const { scoped } = requestAuthState(context)
+
         try {
           const parsed = ObjectsQuerySchema.parse(query)
-          const result = await sixb.list({
+          const params = {
             objectTypeIds: parsed.objectTypeId ? [parsed.objectTypeId] : undefined,
             idPrefix: parsed.idPrefix,
             idSuffix: parsed.idSuffix,
@@ -121,7 +147,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             offset: parseOptionalInt(parsed.offset),
             orderBy: parsed.orderBy,
             order: parsed.order,
-          })
+          }
+          const result = scoped ? await scoped.list(params) : await sixb.list(params)
 
           return {
             objects: result.objects.map(serializeObject),
@@ -129,13 +156,22 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             total: result.total,
           }
         } catch (error) {
+          if (error instanceof AuthorizationError) {
+            set.status = 403
+            return { error: error.message }
+          }
+
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
         }
       },
       {
         query: ObjectsQuerySchema,
-        response: { 200: ObjectListResponseSchema, 400: ErrorResponseSchema },
+        response: {
+          200: ObjectListResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
         detail: {
           summary: "List objects",
           tags: ["Objects"],
@@ -145,7 +181,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .post(
       "/api/objects/query",
-      async ({ body, set }) => {
+      async (context) => {
+        const { body, set } = context
         try {
           const parsed = ObjectQueryRequestSchema.parse(body) as {
             query: ObjectQuery
@@ -160,6 +197,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             {
               ontology: sixb.ontology,
               storage: sixb.storage.objects,
+              authorization: requestAuthState(context).authz ?? undefined,
             }
           )
 
@@ -205,6 +243,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
                 },
               },
             },
+            403: {
+              description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -219,7 +265,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .post(
       "/api/objects/query/count",
-      async ({ body, set }) => {
+      async (context) => {
+        const { body, set } = context
         try {
           const parsed = ObjectQueryCountRequestSchema.parse(body) as {
             query: ObjectQuery
@@ -232,6 +279,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             {
               ontology: sixb.ontology,
               storage: sixb.storage.objects,
+              authorization: requestAuthState(context).authz ?? undefined,
             }
           )
 
@@ -274,6 +322,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
                 },
               },
             },
+            403: {
+              description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -288,7 +344,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .post(
       "/api/objects/query/exists",
-      async ({ body, set }) => {
+      async (context) => {
+        const { body, set } = context
         try {
           const parsed = ObjectQueryExistsRequestSchema.parse(body) as {
             query: ObjectQuery
@@ -301,6 +358,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             {
               ontology: sixb.ontology,
               storage: sixb.storage.objects,
+              authorization: requestAuthState(context).authz ?? undefined,
             }
           )
 
@@ -343,6 +401,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
                 },
               },
             },
+            403: {
+              description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -357,7 +423,8 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .post(
       "/api/objects/query/facets",
-      async ({ body, set }) => {
+      async (context) => {
+        const { body, set } = context
         try {
           const parsed = ObjectQueryFacetsRequestSchema.parse(body) as {
             query: ObjectQuery
@@ -372,6 +439,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
             {
               ontology: sixb.ontology,
               storage: sixb.storage.objects,
+              authorization: requestAuthState(context).authz ?? undefined,
             }
           )
 
@@ -414,6 +482,14 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
                 },
               },
             },
+            403: {
+              description: "Response for status 403",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -428,19 +504,27 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .get(
       "/api/objects/:objectTypeId/:objectId",
-      async ({ params, set }) => {
-        const row = await sixb.storage.objects.getByPrimaryId({
-          projectId: sixb.id,
-          objectTypeId: params.objectTypeId,
-          primaryId: params.objectId,
-        })
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
 
-        if (!row) {
-          set.status = 404
-          return { error: "Object not found" }
+        try {
+          const row = await getObjectRow(sixb, scoped, params)
+          if (!row) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          return serializeObject(row)
+        } catch (error) {
+          // Identity reads hide existence: forbidden and missing look the same.
+          if (error instanceof AuthorizationError) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
+          throw error
         }
-
-        return serializeObject(row)
       },
       {
         params: ObjectParamsSchema,

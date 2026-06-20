@@ -28,8 +28,8 @@ import type { RuleDefinition } from "../rules/types"
 import { RuntimeError } from "../runtime/errors"
 import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import type { GroupDefinition, InvitePolicyDefinition } from "../security"
-import { isGroupDefinition, isInvitePolicyDefinition } from "../security"
+import type { GroupDefinition, InvitePolicyDefinition, RoleDefinition } from "../security"
+import { isGroupDefinition, isInvitePolicyDefinition, isRoleDefinition } from "../security"
 import type { SyncDefinition } from "../syncs"
 import { isSyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -283,6 +283,25 @@ export async function discoverGroups(projectRoot: string): Promise<readonly Grou
   return groups
 }
 
+export async function discoverRoles(projectRoot: string): Promise<readonly RoleDefinition[]> {
+  const rolesDir = join(projectRoot, "security", "roles")
+  const modulePaths = await listModuleFiles(rolesDir)
+  const exportedCandidates = await loadModuleExports({
+    modulePaths,
+    projectRoot,
+    kind: "role",
+  })
+
+  const roles: RoleDefinition[] = []
+  for (const candidate of exportedCandidates) {
+    if (isRoleDefinition(candidate)) {
+      roles.push(candidate)
+    }
+  }
+
+  return roles
+}
+
 export async function discoverInvitePolicies(
   projectRoot: string
 ): Promise<readonly InvitePolicyDefinition[]> {
@@ -342,6 +361,7 @@ async function loadModuleExports(options: {
     | "pipeline"
     | "rule"
     | "group"
+    | "role"
     | "invitePolicy"
     | "workflow"
 }): Promise<unknown[]> {

@@ -1,3 +1,5 @@
+import { AuthorizationError } from "@sixb/core"
+
 export function toIsoString(value: Date): string {
   return value.toISOString()
 }
@@ -34,6 +36,11 @@ export function handleRouteError(
 ): {
   error: string
 } {
+  if (error instanceof AuthorizationError) {
+    set.status = 403
+    return { error: error.message }
+  }
+
   const message = error instanceof Error ? error.message : String(error)
   set.status = message.includes("not found") || message.includes("Unknown") ? 404 : 400
   return { error: message }

@@ -1,6 +1,7 @@
 /**
  * Leaf operation: batch upsert objects of a single type.
  */
+import { assertPrivileged } from "../../authorization"
 import type { NewDomainEvent } from "../../events"
 import { validateObjectBatch } from "../../ontology/validation"
 import type { BatchItemResult } from "../../runtime/types"
@@ -11,6 +12,7 @@ export async function upsertObjectBatch(
   ctx: ResolvedObjectContext,
   items: readonly { properties: Record<string, unknown> }[]
 ): Promise<readonly BatchItemResult<ObjectRow>[]> {
+  assertPrivileged(ctx, "upsertObjectBatch")
   const { events: eventsRuntime, storage, projectId, objectType, primaryPropertyId, ontology } = ctx
 
   if (items.length === 0) return []

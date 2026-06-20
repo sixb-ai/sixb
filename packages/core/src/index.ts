@@ -435,28 +435,65 @@ export {
   verifyDoubleSubmitCsrf,
 } from "./auth"
 
+// ── Authorization ──────────────────────────────────────────
+
+export type {
+  AuthorizationContext,
+  AuthzDecision,
+  AuthzRequest,
+  GrantIndex,
+  ResolvedRole,
+} from "./authorization"
+export {
+  AuthorizationError,
+  assertAuthorized,
+  canViewEvent,
+  evaluate,
+  isAllowed,
+  resolveAuthorizationContext,
+  resolveRoleGrants,
+} from "./authorization"
+
 // ── Security Definitions ───────────────────────────────────
 
 export type {
+  ApplyGrant,
   DefineGroupOptions,
   DefineInvitePolicyOptions,
+  DefineRoleOptions,
+  GrantCapability,
+  GrantDefinition,
   GroupDefinition,
   InvitePolicyDefinition,
   InvitePolicyScope,
   RegisteredSecurityDefinitions,
+  RoleDefinition,
+  Scope,
+  ScopeTarget,
   SecurityRegistry,
+  Selection,
+  StartGrant,
+  ViewGrant,
 } from "./security"
 export {
+  actions,
+  assertGrantDefinition,
   assertGroupDefinition,
   assertInvitePolicyDefinition,
+  assertRoleDefinition,
+  can,
   canInviteGroupIds,
   defineGroup,
   defineInvitePolicy,
+  defineRole,
   isGroupDefinition,
   isInvitePolicyDefinition,
+  isRoleDefinition,
   missingInviteGroupIds,
+  ontology,
   resolveInvitePolicyScope,
   SecurityValidationError,
+  workflows,
 } from "./security"
 
 // ── Storage ────────────────────────────────────────────────
@@ -1041,6 +1078,9 @@ export type {
   OntologySource,
   RegisteredObjectType,
   RegisteredValueTypes,
+  ScopedObjectByIdHandle,
+  ScopedObjectSet,
+  ScopedSixb,
   SixbInstance,
   SixbOptions,
   SixbRuntimeContext,

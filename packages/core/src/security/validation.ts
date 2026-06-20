@@ -1,8 +1,10 @@
 import { SecurityValidationError } from "./errors"
 import type {
+  GrantDefinition,
   GroupDefinition,
   InvitePolicyDefinition,
   RegisteredSecurityDefinitions,
+  RoleDefinition,
 } from "./types"
 
 type CreateSecurityError = (message: string) => Error
@@ -134,11 +136,89 @@ export function isInvitePolicyDefinition(value: unknown): value is InvitePolicyD
   }
 }
 
+export function assertGrantDefinition(
+  value: unknown,
+  field: string,
+  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+): asserts value is GrantDefinition {
+  if (!isRecord(value) || value.kind !== "grant") {
+    throw createError(`${field} must contain only grant definitions from 'can'.`)
+  }
+
+  if (value.capability !== "view" && value.capability !== "apply" && value.capability !== "start") {
+    throw createError(`${field} grant capability must be 'view', 'apply', or 'start'.`)
+  }
+
+  assertSelection(value.selection, field, createError)
+}
+
+function assertSelection(
+  value: unknown,
+  field: string,
+  createError: CreateSecurityError
+): asserts value is GrantDefinition["selection"] {
+  if (!isRecord(value) || typeof value.all !== "boolean") {
+    throw createError(`${field} grant must carry a selection from 'can' or a scope.`)
+  }
+
+  const ids = value.all ? value.except : value.ids
+  if (!Array.isArray(ids)) {
+    throw createError(`${field} grant selection must list ids.`)
+  }
+
+  for (const id of ids) {
+    assertNonEmptyString(id, `${field} grant selection id`, createError)
+  }
+}
+
+export function assertRoleDefinition(
+  value: unknown,
+  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+): asserts value is RoleDefinition {
+  if (!isRecord(value)) {
+    throw createError("Role definition must be an object.")
+  }
+
+  if (value.kind !== "role") {
+    throw createError("Role definition kind must be 'role'.")
+  }
+
+  assertNonEmptyString(value.id, "Role id", createError)
+  assertOptionalString(value.label, `Role '${value.id}' label`, createError)
+  assertOptionalString(value.description, `Role '${value.id}' description`, createError)
+  assertStringArray(value.grantedToGroupIds, `Role '${value.id}' grantedTo`, createError)
+
+  if (!Array.isArray(value.grants)) {
+    throw createError(`Role '${value.id}' grants must be an array.`)
+  }
+
+  for (const grant of value.grants) {
+    assertGrantDefinition(grant, `Role '${value.id}' grants`, createError)
+  }
+}
+
+export function isRoleDefinition(value: unknown): value is RoleDefinition {
+  try {
+    assertRoleDefinition(value, (message) => new Error(message))
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function validateSecurityDefinitionsAtStartup(input: {
   readonly groups: readonly GroupDefinition[]
   readonly invitePolicies: readonly InvitePolicyDefinition[]
+  readonly roles?: readonly RoleDefinition[]
+  /** Registered object type ids — when provided, view grants must reference them. */
+  readonly objectTypeIds?: ReadonlySet<string>
+  /** Registered action ids — when provided, apply grants must reference them. */
+  readonly actionIds?: ReadonlySet<string>
+  /** Registered workflow ids — when provided, run grants must reference them. */
+  readonly workflowIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
+  const rolesById = new Map<string, RoleDefinition>()
   const invitePoliciesById = new Map<string, InvitePolicyDefinition>()
 
   for (const group of input.groups) {
@@ -149,6 +229,38 @@ export function validateSecurityDefinitionsAtStartup(input: {
     }
 
     groupsById.set(group.id, group)
+  }
+
+  for (const role of input.roles ?? []) {
+    assertRoleDefinition(role)
+
+    if (rolesById.has(role.id)) {
+      throw new SecurityValidationError(`Duplicate role id: ${role.id}`)
+    }
+
+    if (role.grantedToGroupIds.length === 0) {
+      throw new SecurityValidationError(`Role '${role.id}' must be granted to at least one group.`)
+    }
+
+    if (role.grants.length === 0) {
+      throw new SecurityValidationError(`Role '${role.id}' must declare at least one grant.`)
+    }
+
+    assertNoDuplicateIds(role.grantedToGroupIds, `Role '${role.id}' grantedTo`)
+
+    for (const groupId of role.grantedToGroupIds) {
+      if (!groupsById.has(groupId)) {
+        throw new SecurityValidationError(
+          `Role '${role.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
+        )
+      }
+    }
+
+    for (const grant of role.grants) {
+      assertGrantReferences(role.id, grant, input)
+    }
+
+    rolesById.set(role.id, role)
   }
 
   for (const policy of input.invitePolicies) {
@@ -195,7 +307,59 @@ export function validateSecurityDefinitionsAtStartup(input: {
   return {
     groups: [...groupsById.values()],
     groupsById,
+    roles: [...rolesById.values()],
+    rolesById,
     invitePolicies: [...invitePoliciesById.values()],
     invitePoliciesById,
+  }
+}
+
+const GRANT_REFERENCE_HINTS: Record<
+  GrantDefinition["capability"],
+  { readonly subject: string; readonly fix: string }
+> = {
+  view: {
+    subject: "object type",
+    fix: "Register it in 'ontology/' or pass it to createSixb({ ontologies }).",
+  },
+  apply: { subject: "action", fix: "Add it to 'actions/' or pass it to createSixb({ actions })." },
+  start: {
+    subject: "workflow",
+    fix: "Add it to 'workflows/' or pass it to createSixb({ workflows }).",
+  },
+}
+
+function assertGrantReferences(
+  roleId: string,
+  grant: GrantDefinition,
+  registered: {
+    readonly objectTypeIds?: ReadonlySet<string>
+    readonly actionIds?: ReadonlySet<string>
+    readonly workflowIds?: ReadonlySet<string>
+  }
+): void {
+  const universe =
+    grant.capability === "view"
+      ? registered.objectTypeIds
+      : grant.capability === "apply"
+        ? registered.actionIds
+        : registered.workflowIds
+
+  if (!universe) {
+    return
+  }
+
+  // Explicit selections list ids to include; "all except" selections list ids
+  // to exclude. Either way every named id must be registered — an unknown id is
+  // a typo that would silently widen or no-op the grant.
+  const ids = grant.selection.all ? grant.selection.except : grant.selection.ids
+  const { subject, fix } = GRANT_REFERENCE_HINTS[grant.capability]
+
+  for (const id of ids) {
+    if (!universe.has(id)) {
+      throw new SecurityValidationError(
+        `Role '${roleId}' grants ${grant.capability} on unknown ${subject} '${id}'. ${fix}`
+      )
+    }
   }
 }
