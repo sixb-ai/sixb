@@ -3,6 +3,7 @@ export type {
   ActionEditCommitResult,
   CommitActionEditBatchInput,
   CommitActionEditBatchResult,
+  SerializationRetryOptions,
 } from "./commit-edit-batch"
 export { commitActionEditBatch } from "./commit-edit-batch"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"

@@ -4,12 +4,14 @@ import {
   defineObjectType,
   type EditBatch,
   link,
+  type ObjectStorage,
   ObjectStorageError,
   OntologyRegistry,
   planEditBatch,
   prop,
   type RecordEditsHandler,
   recordEdits,
+  type Storage,
   type StoredObjectUpsertedEvent,
 } from "@sixb/core"
 import type { PostgresStorage } from "../src"
@@ -337,6 +339,72 @@ describe("PostgreSQL edit commit", () => {
       "[Sixb] Edit commit cannot create existing link 'Invoice:inv_1:customer:Customer:cus_1'."
     )
   })
+
+  test("serializable commits prevent concurrent cardinality-one link conflicts", async () => {
+    if (!storage) throw new Error("[SixbPg] Test storage was not initialized.")
+
+    await seedInvoiceAndCustomers(storage)
+    await queueRunningActionRun(storage, "run_link_cus_1")
+    await queueRunningActionRun(storage, "run_link_cus_2")
+
+    const storageWithBarrier = withApplyEditCommitPlanBarrier(storage, 2)
+    const batchA = recordStorageEdits("run_link_cus_1", ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+          properties: { role: "payer" },
+        })
+    })
+    const batchB = recordStorageEdits("run_link_cus_2", ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+          properties: { role: "payer" },
+        })
+    })
+
+    const results = await Promise.allSettled([
+      commitActionEditBatch({
+        storage: storageWithBarrier,
+        projectId: "project-a",
+        runId: "run_link_cus_1",
+        actionId: "linkCustomer",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch: batchA,
+      }),
+      commitActionEditBatch({
+        storage: storageWithBarrier,
+        projectId: "project-a",
+        runId: "run_link_cus_2",
+        actionId: "linkCustomer",
+        subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+        ontology,
+        batch: batchB,
+      }),
+    ])
+
+    const fulfilled = results.filter(isPromiseFulfilled)
+    const rejected = results.filter(isPromiseRejected)
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+    const runs = await Promise.all([
+      storage.actionRuns.getById({ projectId: "project-a", id: "run_link_cus_1" }),
+      storage.actionRuns.getById({ projectId: "project-a", id: "run_link_cus_2" }),
+    ])
+
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]?.reason).toBeInstanceOf(Error)
+    expect((rejected[0]?.reason as Error).message).toContain("cardinality 'one'")
+    expect(links).toHaveLength(1)
+    expect(["cus_1", "cus_2"]).toContain(links[0]?.targetId)
+    expect(runs.filter((run) => run?.commit !== undefined)).toHaveLength(1)
+  })
 })
 
 function objectEvent(
@@ -356,6 +424,132 @@ function objectEvent(
     cursor: id,
     payload: { objectTypeId, primaryId, properties },
   }
+}
+
+function withApplyEditCommitPlanBarrier(storage: PostgresStorage, parties: number): Storage {
+  const waitForConcurrentCommits = createOneShotBarrier(parties)
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const objects = createObjectStorageApplyBarrier(tx.objects, waitForConcurrentCommits)
+        return run({ ...tx, objects })
+      }, options),
+  }
+}
+
+function createObjectStorageApplyBarrier(
+  objects: ObjectStorage,
+  waitForConcurrentCommits: () => Promise<void>
+): ObjectStorage {
+  return new Proxy(objects, {
+    get(target, property, receiver) {
+      if (property === "applyEditCommitPlan") {
+        return async (input: Parameters<ObjectStorage["applyEditCommitPlan"]>[0]) => {
+          await waitForConcurrentCommits()
+          return target.applyEditCommitPlan(input)
+        }
+      }
+
+      const value = Reflect.get(target, property, receiver)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
+
+function createOneShotBarrier(parties: number): () => Promise<void> {
+  let waiting = 0
+  let released = false
+  let release: () => void = () => undefined
+  const ready = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  return async () => {
+    if (released) return
+
+    waiting++
+    if (waiting >= parties) {
+      released = true
+      release()
+    }
+
+    await ready
+  }
+}
+
+function isPromiseFulfilled<T>(
+  result: PromiseSettledResult<T>
+): result is PromiseFulfilledResult<T> {
+  return result.status === "fulfilled"
+}
+
+function isPromiseRejected<T>(result: PromiseSettledResult<T>): result is PromiseRejectedResult {
+  return result.status === "rejected"
+}
+
+async function queueRunningActionRun(storage: PostgresStorage, runId: string): Promise<void> {
+  await storage.actionRuns.queue({
+    id: runId,
+    projectId: "project-a",
+    actionId: "linkCustomer",
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+    params: {},
+    idempotencyKey: `action:project-a:${runId}`,
+  })
+  await storage.actionRuns.start({
+    id: runId,
+    projectId: "project-a",
+  })
+}
+
+async function seedInvoiceAndCustomers(storage: PostgresStorage): Promise<void> {
+  const occurredAt = "2026-06-01T00:00:00.000Z"
+  await storage.objects.applyObjectUpserted({
+    id: "evt_customer_1",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: "Customer:cus_1",
+    occurredAt,
+    cursor: "evt_customer_1",
+    payload: {
+      objectTypeId: "Customer",
+      primaryId: "cus_1",
+      properties: { id: "cus_1", name: "Acme" },
+    },
+  })
+  await storage.objects.applyObjectUpserted({
+    id: "evt_customer_2",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: "Customer:cus_2",
+    occurredAt,
+    cursor: "evt_customer_2",
+    payload: {
+      objectTypeId: "Customer",
+      primaryId: "cus_2",
+      properties: { id: "cus_2", name: "Globex" },
+    },
+  })
+  await storage.objects.applyObjectUpserted({
+    id: "evt_invoice_without_customer",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: "Invoice:inv_1",
+    occurredAt,
+    cursor: "evt_invoice_without_customer",
+    payload: {
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+      properties: { id: "inv_1", status: "draft" },
+    },
+  })
 }
 
 async function seedGraph(storage: PostgresStorage): Promise<void> {

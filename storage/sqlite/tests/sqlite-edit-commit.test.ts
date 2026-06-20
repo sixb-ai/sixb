@@ -367,6 +367,102 @@ describe("SQLite edit commit apply conflicts", () => {
   })
 })
 
+describe("SQLite edit commit concurrency", () => {
+  // SQLite serializes transactions on its single connection, so the PG e2e's barrier (which waits
+  // for both commits to reach `applyEditCommitPlan`) would deadlock here. That serialization is the
+  // guarantee under test: two commits racing on a cardinality-one link resolve to one winner.
+  test("serializes concurrent commits racing on a cardinality-one link", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-edit-concurrency-"))
+    tempDirs.push(tempDir)
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+
+    try {
+      // Seed the endpoints with no customer link so each commit nets to a fresh link `create`.
+      await storage.objects.applyObjectUpserted(
+        objectEvent("Customer", "cus_1", { id: "cus_1", name: "Acme" })
+      )
+      await storage.objects.applyObjectUpserted(
+        objectEvent("Customer", "cus_2", { id: "cus_2", name: "Globex" })
+      )
+      await storage.objects.applyObjectUpserted(
+        objectEvent("Invoice", "inv_1", { id: "inv_1", status: "draft" })
+      )
+      await queueRunningRun(storage, "run_link_cus_1")
+      await queueRunningRun(storage, "run_link_cus_2")
+
+      const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
+      const batchA = recordStorageEdits("run_link_cus_1", ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+            properties: { role: "payer" },
+          })
+      })
+      const batchB = recordStorageEdits("run_link_cus_2", ({ objects }) => {
+        objects(Invoice)
+          .byId("inv_1")
+          .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+            properties: { role: "payer" },
+          })
+      })
+
+      const results = await Promise.allSettled([
+        commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_link_cus_1",
+          actionId: "linkCustomer",
+          subject,
+          ontology,
+          batch: batchA,
+        }),
+        commitActionEditBatch({
+          storage,
+          projectId: "project-a",
+          runId: "run_link_cus_2",
+          actionId: "linkCustomer",
+          subject,
+          ontology,
+          batch: batchB,
+        }),
+      ])
+
+      const fulfilled = results.filter((result) => result.status === "fulfilled")
+      const rejected = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected"
+      )
+      const links = await storage.objects.listLinks({
+        projectId: "project-a",
+        objectTypeId: "Invoice",
+        objectId: "inv_1",
+        linkId: "customer",
+      })
+
+      expect(fulfilled).toHaveLength(1)
+      expect(rejected).toHaveLength(1)
+      expect(rejected[0]?.reason).toBeInstanceOf(Error)
+      expect((rejected[0]?.reason as Error).message).toContain("cardinality 'one'")
+      expect(links).toHaveLength(1)
+      expect(["cus_1", "cus_2"]).toContain(links[0]?.targetId)
+    } finally {
+      closeSqliteStorage(storage)
+    }
+  })
+})
+
+async function queueRunningRun(storage: SqliteStorage, runId: string): Promise<void> {
+  await storage.actionRuns.queue({
+    id: runId,
+    projectId: "project-a",
+    actionId: "linkCustomer",
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+    params: {},
+    idempotencyKey: `action:project-a:${runId}`,
+  })
+  await storage.actionRuns.start({ id: runId, projectId: "project-a" })
+}
+
 function objectEvent(
   objectTypeId: string,
   primaryId: string,

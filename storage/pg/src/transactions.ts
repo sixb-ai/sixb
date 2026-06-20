@@ -3,9 +3,15 @@ import type { SQL, SQLClient } from "./pg-client"
 
 export type PgStoreClient = SQL | SQLClient
 
+export interface RunPgTransactionOptions {
+  /** Open the transaction at `SERIALIZABLE`; omit for the server default (`READ COMMITTED`). */
+  readonly isolation?: "serializable"
+}
+
 export async function runPgTransaction<T>(
   sql: PgStoreClient,
-  run: (tx: SQLClient) => Promise<T>
+  run: (tx: SQLClient) => Promise<T>,
+  options: RunPgTransactionOptions = {}
 ): Promise<T> {
   if (!canStartPgTransaction(sql)) {
     return run(sql)
@@ -14,6 +20,13 @@ export async function runPgTransaction<T>(
   // porsager passes the callback a transaction-scoped client (a TransactionSql, which is an
   // ISql == SQLClient). The `as Promise<T>` only unwraps porsager's UnwrapPromiseArray return
   // type (our callbacks never return the pipelined-array form), not a structural cast.
+  //
+  // The isolation level is folded into `BEGIN` (`BEGIN ISOLATION LEVEL SERIALIZABLE`) rather than
+  // a separate `SET TRANSACTION` statement: one round-trip instead of two, and the level is
+  // guaranteed to take effect before any data statement of the transaction runs.
+  if (options.isolation === "serializable") {
+    return sql.begin("isolation level serializable", run) as Promise<T>
+  }
   return sql.begin(run) as Promise<T>
 }
 

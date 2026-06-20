@@ -17,7 +17,10 @@ import {
   prop,
   type RecordEditsOptions,
   recordEdits,
+  type SerializationRetryOptions,
   type Storage,
+  StorageTransactionError,
+  type StorageTransactionOptions,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -91,6 +94,9 @@ const InvoiceWithRegisteredAmount = defineObjectType({
 })
 
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
+
+/** Removes wall-clock delay from serialization-failure retries so retry tests stay deterministic. */
+const noopSleep = (): Promise<void> => Promise.resolve()
 
 type RuntimeEditHandle = EditObjectRef & {
   update(properties: Record<string, unknown>): void
@@ -663,6 +669,65 @@ describe("EditBatch core contract", () => {
     expect(run?.commit).toBeUndefined()
   })
 
+  test("retries serializable edit commit conflicts", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_serializable_retry",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_serializable_retry",
+    })
+    await storage.actionRuns.start({
+      id: "run_serializable_retry",
+      projectId: "project-a",
+    })
+
+    let attempts = 0
+    const retryingStorage: Storage = {
+      ...storage,
+      transaction: async (run, options?: StorageTransactionOptions) => {
+        attempts++
+        expect(options).toEqual({ isolation: "serializable" })
+        if (attempts === 1) {
+          throw new StorageTransactionError("serialization conflict", {
+            code: "serialization_failure",
+          })
+        }
+        return storage.transaction(run, options)
+      },
+    }
+    const batch = recordRuntimeEdits({ runId: "run_serializable_retry" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    const result = await commitActionEditBatch({
+      storage: retryingStorage,
+      projectId: "project-a",
+      runId: "run_serializable_retry",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      serializationRetry: { sleep: noopSleep },
+    })
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+
+    expect(attempts).toBe(2)
+    expect(result.commit.created).toBe(true)
+    expect(result.commit.committedAt).toEqual(new Date("2026-06-02T00:00:00.000Z"))
+    expect(invoice?.properties.status).toBe("paid")
+  })
+
   test("rejects edit commits for a different action run identity", async () => {
     const storage = await createSeededStorage()
     await seedInvoiceCustomerLink(storage)
@@ -1100,6 +1165,240 @@ describe("EditCommitPlan apply conflicts (concurrent divergence from the plan)",
     )
   })
 })
+
+describe("commitActionEditBatch serialization retry", () => {
+  function alwaysFailingStorage(makeError: () => Error): {
+    storage: Storage
+    attempts: () => number
+  } {
+    let attempts = 0
+    const storage: Storage = {
+      ...new InMemoryStorage(),
+      transaction: async () => {
+        attempts++
+        throw makeError()
+      },
+    }
+    return { storage, attempts: () => attempts }
+  }
+
+  const conflict = () =>
+    new StorageTransactionError("serialization conflict", { code: "serialization_failure" })
+
+  function exhaustionInput(runId: string, serializationRetry: SerializationRetryOptions) {
+    return {
+      projectId: "project-a",
+      runId,
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const,
+      ontology,
+      batch: recordRuntimeEdits({ runId }, ({ objects }) => {
+        objects(Invoice).byId("inv_1").update({ status: "paid" })
+      }),
+      serializationRetry,
+    }
+  }
+
+  test("retries up to the attempt cap, then surfaces the serialization failure", async () => {
+    const { storage, attempts } = alwaysFailingStorage(conflict)
+
+    await expect(
+      commitActionEditBatch({ storage, ...exhaustionInput("run_exhaust", { sleep: noopSleep }) })
+    ).rejects.toThrow(StorageTransactionError)
+
+    // Default cap is 3 attempts (the first plus two retries).
+    expect(attempts()).toBe(3)
+  })
+
+  test("does not retry a non-serialization failure", async () => {
+    const { storage, attempts } = alwaysFailingStorage(() => new Error("boom"))
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        ...exhaustionInput("run_passthrough", { sleep: noopSleep }),
+      })
+    ).rejects.toThrow("boom")
+
+    expect(attempts()).toBe(1)
+  })
+
+  test("honors a custom maxAttempts cap", async () => {
+    const { storage, attempts } = alwaysFailingStorage(conflict)
+
+    await expect(
+      commitActionEditBatch({
+        storage,
+        ...exhaustionInput("run_custom_cap", { sleep: noopSleep, maxAttempts: 5 }),
+      })
+    ).rejects.toThrow(StorageTransactionError)
+
+    expect(attempts()).toBe(5)
+  })
+
+  test("rolls back a failed attempt and replays the commit against the restored state", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+    await queueRunningRun(storage, "run_rollback_replay", "markPaid")
+
+    let attempts = 0
+    const storageWithRollback: Storage = {
+      ...storage,
+      transaction: (run, options) => {
+        attempts++
+        if (attempts === 1) {
+          // Let the first attempt perform its real writes, then force a serialization failure so the
+          // in-memory transaction actually rolls them back (object update + recorded commit) before
+          // the retry runs against the restored state.
+          return storage.transaction(async (tx) => {
+            await run(tx)
+            throw new StorageTransactionError("serialization conflict", {
+              code: "serialization_failure",
+            })
+          }, options)
+        }
+        return storage.transaction(run, options)
+      },
+    }
+
+    const batch = recordRuntimeEdits({ runId: "run_rollback_replay" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    const result = await commitActionEditBatch({
+      storage: storageWithRollback,
+      projectId: "project-a",
+      runId: "run_rollback_replay",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+      serializationRetry: { sleep: noopSleep },
+    })
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+    const run = await requireActionRuns(storage.actionRuns).getById({
+      projectId: "project-a",
+      id: "run_rollback_replay",
+    })
+
+    expect(attempts).toBe(2)
+    // `created: true` proves the first attempt's recorded commit was rolled back: a leaked commit
+    // would route the retry into the idempotent branch (`created: false`). Version 2 proves the
+    // update applied exactly once rather than twice.
+    expect(result.commit.created).toBe(true)
+    expect(invoice?.properties.status).toBe("paid")
+    expect(invoice?.version).toBe(2)
+    expect(run?.commit?.committedAt).toEqual(new Date("2026-06-02T00:00:00.000Z"))
+  })
+})
+
+describe("commitActionEditBatch concurrency (provider serialization)", () => {
+  // In-memory and SQLite serialize transactions on a single connection/lock, so the PG e2e's
+  // barrier (which waits for both commits to reach `applyEditCommitPlan`) would deadlock here — the
+  // second transaction cannot start until the first finishes. That serialization *is* the guarantee
+  // under test: two commits racing on a cardinality-one link resolve to exactly one winner.
+  test("serializes concurrent commits racing on a cardinality-one link", async () => {
+    const storage = await createSeededStorage()
+    await seedSecondCustomer(storage)
+    await queueRunningRun(storage, "run_link_cus_1", "linkCustomer")
+    await queueRunningRun(storage, "run_link_cus_2", "linkCustomer")
+
+    const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
+    const batchA = recordRuntimeEdits({ runId: "run_link_cus_1" }, ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
+          properties: { role: "payer" },
+        })
+    })
+    const batchB = recordRuntimeEdits({ runId: "run_link_cus_2" }, ({ objects }) => {
+      objects(Invoice)
+        .byId("inv_1")
+        .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
+          properties: { role: "payer" },
+        })
+    })
+
+    const results = await Promise.allSettled([
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_link_cus_1",
+        actionId: "linkCustomer",
+        subject,
+        ontology,
+        batch: batchA,
+      }),
+      commitActionEditBatch({
+        storage,
+        projectId: "project-a",
+        runId: "run_link_cus_2",
+        actionId: "linkCustomer",
+        subject,
+        ontology,
+        batch: batchB,
+      }),
+    ])
+
+    const fulfilled = results.filter((result) => result.status === "fulfilled")
+    const rejected = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    )
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]?.reason).toBeInstanceOf(Error)
+    expect((rejected[0]?.reason as Error).message).toContain("cardinality 'one'")
+    expect(links).toHaveLength(1)
+    expect(["cus_1", "cus_2"]).toContain(links[0]?.targetId)
+  })
+})
+
+async function queueRunningRun(
+  storage: InMemoryStorage,
+  runId: string,
+  actionId: string
+): Promise<void> {
+  await storage.actionRuns.queue({
+    id: runId,
+    projectId: "project-a",
+    actionId,
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+    params: {},
+    idempotencyKey: `action:project-a:${runId}`,
+  })
+  await storage.actionRuns.start({ id: runId, projectId: "project-a" })
+}
+
+async function seedSecondCustomer(storage: InMemoryStorage): Promise<void> {
+  await storage.objects.applyObjectUpserted({
+    id: "evt_customer_2",
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: "Customer:cus_2",
+    occurredAt: "2026-06-01T00:00:00.000Z",
+    cursor: "evt_customer_2",
+    payload: {
+      objectTypeId: "Customer",
+      primaryId: "cus_2",
+      properties: { id: "cus_2", name: "Globex" },
+    },
+  })
+}
 
 function withFailingRecordCommit(storage: InMemoryStorage): Storage {
   return {

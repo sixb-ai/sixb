@@ -133,6 +133,7 @@ export type {
   RequestActionInput,
   RequestActionOptions,
   RequestActionResult,
+  SerializationRetryOptions,
   WaitForActionRunInput,
 } from "./actions"
 export {
@@ -590,6 +591,8 @@ export type {
   Storage,
   StorageMigrationResult,
   StorageMigrator,
+  StorageTransactionErrorCode,
+  StorageTransactionErrorOptions,
   StorageTransactionOptions,
   SubmitWorkflowInterventionInput,
   SuspendUserAndRevokeSessionsInput,
@@ -661,6 +664,7 @@ export {
   InMemoryWorkflowNodeRunStorage,
   InMemoryWorkflowRunStorage,
   isMigrationCapableStorage,
+  isStorageSerializationFailure,
   isTerminalActionRun,
   migrateStorage,
   normalizeActionRunCommitDiff,

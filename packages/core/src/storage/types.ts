@@ -65,7 +65,12 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError } from "./auth"
-export { ObjectStorageError, StorageTransactionError } from "./errors"
+export type { StorageTransactionErrorCode, StorageTransactionErrorOptions } from "./errors"
+export {
+  isStorageSerializationFailure,
+  ObjectStorageError,
+  StorageTransactionError,
+} from "./errors"
 export type {
   LinkDirection,
   ObjectLinkRow,
