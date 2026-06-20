@@ -539,6 +539,13 @@ export class InMemoryObjectStorage implements ObjectStorage {
     this.appliedEventIds.add(event.id)
   }
 
+  /**
+   * Reads return the *live* stored row by reference (the SQL providers detach a copy via JSON
+   * round-trip). Callers must treat read results as immutable: mutating a returned row mutates the
+   * store in place — including after the transaction that read it has completed, which escapes the
+   * transaction guard. Internal call sites (e.g. the EditBatch planner) already copy before
+   * mutating; external callers must do the same.
+   */
   async getByPrimaryId(params: {
     projectId: string
     objectTypeId: string

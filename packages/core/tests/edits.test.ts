@@ -12,6 +12,7 @@ import {
   type ObjectLink,
   type ObjectTypeWithPropertyTokens,
   OntologyRegistry,
+  planEditBatch,
   prop,
   type RecordEditsOptions,
   recordEdits,
@@ -668,6 +669,299 @@ describe("EditBatch core contract", () => {
     expect(invoice?.properties.status).toBe("draft")
     expect(invoice?.version).toBe(1)
     expect(run?.commit).toBeUndefined()
+  })
+})
+
+describe("EditBatch net diff (delete then re-create within one batch)", () => {
+  test("re-creating a deleted existing link nets to an update of the live row", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    const batch: EditBatch = {
+      version: 1,
+      operations: [
+        {
+          kind: "link.delete",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+        {
+          kind: "link.create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          properties: { role: "shipTo" },
+        },
+      ],
+    }
+
+    const plan = await planEditBatch({ projectId: "project-a", ontology, storage, batch })
+
+    // The row still physically exists, so the delete+create must collapse to a single update,
+    // never a `create` of a live row (which would fail at apply time).
+    expect(plan.diff.links).toEqual([
+      {
+        operation: "update",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+    ])
+    expect(plan.links.deletes).toEqual([])
+    expect(plan.links.upserts).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        properties: { role: "shipTo" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("re-creating a deleted link replaces (does not merge) the prior properties", async () => {
+    const storage = await createSeededStorage()
+    await storage.objects.applyLinkUpserted({
+      id: "evt_link_props",
+      schemaVersion: 1,
+      projectId: "project-a",
+      type: "link.upserted",
+      topic: "links",
+      partitionKey: "Invoice:inv_1:customer",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      cursor: "evt_link_props",
+      payload: {
+        sourceTypeId: "Invoice",
+        sourceId: "inv_1",
+        linkId: "customer",
+        targetTypeId: "Customer",
+        targetId: "cus_1",
+        properties: { role: "old" },
+      },
+    })
+
+    const batch: EditBatch = {
+      version: 1,
+      operations: [
+        {
+          kind: "link.delete",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        },
+        {
+          kind: "link.create",
+          source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+          linkId: "customer",
+          target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          properties: { role: "new" },
+        },
+      ],
+    }
+
+    const plan = await planEditBatch({ projectId: "project-a", ontology, storage, batch })
+
+    expect(plan.links.upserts).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        properties: { role: "new" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("re-creating a deleted link with identical properties is a no-op", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "billTo" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.links).toEqual([])
+    expect(plan.links.upserts).toEqual([])
+    expect(plan.links.deletes).toEqual([])
+  })
+
+  test("swapping a cardinality-one target via delete then create is allowed", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1
+    await storage.objects.applyObjectUpserted({
+      id: "evt_customer_2",
+      schemaVersion: 1,
+      projectId: "project-a",
+      type: "object.upserted",
+      topic: "objects",
+      partitionKey: "Customer:cus_2",
+      occurredAt: "2026-06-01T00:00:00.000Z",
+      cursor: "evt_customer_2",
+      payload: {
+        objectTypeId: "Customer",
+        primaryId: "cus_2",
+        properties: { id: "cus_2", name: "Second Customer" },
+      },
+    })
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_2" },
+            properties: { role: "shipTo" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.links).toEqual([
+      {
+        operation: "delete",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+      {
+        operation: "create",
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_2" },
+      },
+    ])
+    expect(plan.links.deletes).toEqual([
+      {
+        source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        linkId: "customer",
+        target: { objectTypeId: "Customer", primaryId: "cus_1" },
+      },
+    ])
+  })
+
+  test("re-creating a deleted existing object nets to an update with the full new properties", async () => {
+    const storage = await createSeededStorage() // inv_1 = { amount: 120, status: "draft" }
+
+    const plan = await planEditBatch({
+      projectId: "project-a",
+      ontology,
+      storage,
+      batch: {
+        version: 1,
+        operations: [
+          { kind: "object.delete", objectTypeId: "Invoice", primaryId: "inv_1" },
+          {
+            kind: "object.create",
+            objectTypeId: "Invoice",
+            primaryId: "inv_1",
+            properties: { id: "inv_1", amount: 999, status: "reissued" },
+          },
+        ],
+      },
+    })
+
+    expect(plan.diff.objects).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        operation: "update",
+        changedProperties: ["amount", "status"],
+      },
+    ])
+    expect(plan.objects.deletes).toEqual([])
+    expect(plan.objects.upserts).toEqual([
+      {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        properties: { id: "inv_1", amount: 999, status: "reissued" },
+        operation: "update",
+      },
+    ])
+  })
+
+  test("commits a delete-then-create of an existing link as an in-place update", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage) // inv_1 -> cus_1 { role: "billTo" }
+
+    await storage.actionRuns.queue({
+      id: "run_relink",
+      projectId: "project-a",
+      actionId: "relink",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_relink",
+    })
+    await storage.actionRuns.start({ id: "run_relink", projectId: "project-a" })
+
+    const result = await storage.edits.commit({
+      projectId: "project-a",
+      runId: "run_relink",
+      actionId: "relink",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch: {
+        version: 1,
+        operations: [
+          {
+            kind: "link.delete",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+          },
+          {
+            kind: "link.create",
+            source: { objectTypeId: "Invoice", primaryId: "inv_1" },
+            linkId: "customer",
+            target: { objectTypeId: "Customer", primaryId: "cus_1" },
+            properties: { role: "shipTo" },
+          },
+        ],
+      },
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    expect(result.created).toBe(true)
+    const links = await storage.objects.listLinks({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      objectId: "inv_1",
+      linkId: "customer",
+    })
+    expect(links).toHaveLength(1)
+    expect(links[0]?.properties).toEqual({ role: "shipTo" })
   })
 })
 

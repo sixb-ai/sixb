@@ -13,6 +13,10 @@ export function createTransactionStorageProxy<T extends object>(
     if (existing) return existing as TValue
 
     const proxy = new Proxy(value as ObjectLike, {
+      // The guard runs on property access and on call. Its purpose is to fail fast when a
+      // transaction handle (`tx`) leaks past the transaction's lifetime — using it afterward is a
+      // bug, not a recoverable state. Overhead is bounded: only the storage namespaces reachable
+      // from `tx` are wrapped (a handful), not the row/link data graph, and never per-record.
       get(current, property, receiver) {
         assertTransactionActive(isActive)
         const result = Reflect.get(current, property, receiver)

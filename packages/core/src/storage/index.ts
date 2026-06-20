@@ -255,6 +255,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "./action-runs"
 import { InMemoryAuthStorage } from "./auth"
 import { InMemoryEditStorage } from "./edits"
+import { StorageTransactionError } from "./errors"
 import { InMemoryObjectStorage } from "./objects"
 import { InMemoryPipelineRunStorage } from "./pipeline-runs"
 import { InMemoryProjectionRunStorage } from "./projection-runs"
@@ -286,6 +287,18 @@ export class InMemoryStorage implements Storage {
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private transactionTail: Promise<void> = Promise.resolve()
 
+  /**
+   * Run `run` against a transactional view of this storage.
+   *
+   * Atomicity is achieved by snapshotting every store before the callback and restoring that
+   * snapshot if it throws. The snapshot is a full structural clone of the in-memory dataset, so
+   * its cost scales with total dataset size rather than changeset size. That is acceptable for the
+   * dev/test role of {@link InMemoryStorage} but is the reason it is not intended for large
+   * datasets under heavy transactional load — the SQL providers use real database transactions.
+   *
+   * The `isolation` option is intentionally ignored: the promise-chain lock serializes
+   * transactions one at a time, which is at least as strong as `serializable`.
+   */
   async transaction<T>(
     run: (tx: Storage) => Promise<T> | T,
     _options: StorageTransactionOptions = {}
@@ -302,7 +315,18 @@ export class InMemoryStorage implements Storage {
       try {
         return await this.transactionScope.run(true, async () => run(tx))
       } catch (error) {
-        this.restore(snapshot)
+        // A failed rollback leaves the store in an unknown state. Surface that explicitly instead
+        // of letting the restore error silently replace (mask) the original transaction error.
+        try {
+          this.restore(snapshot)
+        } catch (restoreError) {
+          throw new StorageTransactionError(
+            `[Sixb] In-memory storage failed to roll back after a transaction error; state may be inconsistent. Original transaction error: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+            { cause: restoreError }
+          )
+        }
         throw error
       } finally {
         active = false
