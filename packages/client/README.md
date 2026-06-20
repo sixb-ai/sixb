@@ -51,15 +51,21 @@ const { data: history } = await getTelemetryHistory({
   query: { from: "2025-01-01T00:00:00Z", to: "2025-01-02T00:00:00Z", order: "asc" },
 })
 
-// Request an action on an object
-import { requestAction } from "@sixb/client"
+// Request an action on an object, then inspect the durable run
+import { getActionRun, requestAction } from "@sixb/client"
 
-await requestAction({
+const { data: requested } = await requestAction({
   path: { actionId: "setTemperature" },
   body: {
     subject: { kind: "object", objectTypeId: "thermostat", primaryId: "living-room" },
     params: { target: 72 },
   },
+  throwOnError: true,
+})
+
+const { data: run } = await getActionRun({
+  path: { runId: requested.runId },
+  throwOnError: true,
 })
 ```
 
@@ -121,6 +127,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
+| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
 | `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useSixbEvents` |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

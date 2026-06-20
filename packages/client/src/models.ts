@@ -388,8 +388,8 @@ export async function executeAction(options: {
 
     return {
       data: {
-        success: Boolean(response.data?.success),
-        runId: response.data?.runId,
+        success: true,
+        runId: response.data.runId,
       },
     }
   } catch (error) {
@@ -431,8 +431,8 @@ export async function executeGlobalAction(options: {
 
     return {
       data: {
-        success: Boolean(response.data?.success),
-        runId: response.data?.runId,
+        success: true,
+        runId: response.data.runId,
       },
     }
   } catch (error) {

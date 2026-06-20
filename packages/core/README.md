@@ -402,7 +402,7 @@ src/
 
 | Export | Description |
 |---|---|
-| `defineAction(id)` | Define a first-class action contract and handler |
+| `defineAction(id)` | Define a first-class phased action contract |
 | `param(schema, options?)` | Define a required action parameter inside `.params({...})` |
 | `optional(param(...))` | Mark an action parameter as optional |
 
@@ -432,7 +432,7 @@ src/
 | `.list({ limit, offset, ... })` | List stored objects with storage-system filtering and pagination |
 | `.byId(id)` | Get a handle for link/telemetry/action operations |
 | `.appendTelemetryBatch(items)` | Batch append telemetry for multiple objects |
-| `.requestAction({ id, actionId, params })` | Request an action on an object |
+| `.requestAction({ actionId, params })` | Request an action on an object |
 
 ### ObjectByIdHandle API (`sixb.objects(Type).byId(id)`)
 

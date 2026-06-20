@@ -24,6 +24,9 @@ import type {
   GetActionData,
   GetActionErrors,
   GetActionResponses,
+  GetActionRunData,
+  GetActionRunErrors,
+  GetActionRunResponses,
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsErrors,
   GetAuthInvitationOptionsResponses,
@@ -78,6 +81,9 @@ import type {
   GetWorkflowRunData,
   GetWorkflowRunErrors,
   GetWorkflowRunResponses,
+  ListActionRunsData,
+  ListActionRunsErrors,
+  ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
   ListAuthInvitationsData,
@@ -845,6 +851,28 @@ export const requestAction = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * List action run history
+ */
+export const listActionRuns = <ThrowOnError extends boolean = false>(
+  options?: Options<ListActionRunsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListActionRunsResponses, ListActionRunsErrors, ThrowOnError>({
+    url: "/api/action-runs",
+    ...options,
+  })
+
+/**
+ * Get action run detail
+ */
+export const getActionRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetActionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
+    url: "/api/action-runs/{runId}",
+    ...options,
   })
 
 /**

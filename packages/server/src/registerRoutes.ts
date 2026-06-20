@@ -1,5 +1,6 @@
 import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
 import { registerConnectorRoutes } from "./routes/connectors"
 import { registerDatasetRoutes } from "./routes/datasets"
@@ -29,6 +30,7 @@ export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
   registerOntologyRoutes(app, sixb)
   registerObjectRoutes(app, sixb)
   registerActionRoutes(app, sixb)
+  registerActionRunRoutes(app, sixb)
   registerLinkRoutes(app, sixb)
   registerTelemetryRoutes(app, sixb)
   registerEventRoutes(app, sixb)

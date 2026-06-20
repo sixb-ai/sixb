@@ -4,10 +4,21 @@ export const ErrorResponseSchema = z.object({ error: z.string() })
 
 export const SuccessResponseSchema = z.object({ success: z.boolean() })
 
-export const ActionRequestedResponseSchema = z.object({
-  success: z.boolean(),
-  runId: z.string(),
-  queuedAt: z.string(),
-  jobId: z.string().optional(),
-  created: z.boolean(),
-})
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
+export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number().finite(),
+    z.boolean(),
+    z.null(),
+    z.array(JsonValueSchema),
+    z.record(JsonValueSchema),
+  ])
+)

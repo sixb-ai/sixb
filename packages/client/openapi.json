@@ -9325,35 +9325,8 @@
                       "description": {
                         "type": "string"
                       },
-                      "binding": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": ["global"]
-                              }
-                            },
-                            "required": ["kind"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": ["object"]
-                              },
-                              "objectTypeId": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "required": ["kind", "objectTypeId"],
-                            "additionalProperties": false
-                          }
-                        ]
+                      "objectTypeId": {
+                        "type": "string"
                       },
                       "params": {
                         "type": "array",
@@ -9399,9 +9372,39 @@
                         },
                         "required": ["validate", "writeback", "edits", "effects"],
                         "additionalProperties": false
+                      },
+                      "preview": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "supported": {
+                                "type": "boolean",
+                                "enum": [true]
+                              }
+                            },
+                            "required": ["supported"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "supported": {
+                                "type": "boolean",
+                                "enum": [false]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": ["no_edits", "writeback_required"]
+                              }
+                            },
+                            "required": ["supported", "reason"],
+                            "additionalProperties": false
+                          }
+                        ]
                       }
                     },
-                    "required": ["id", "name", "binding", "params", "phases"],
+                    "required": ["id", "name", "params", "phases", "preview"],
                     "additionalProperties": false
                   }
                 }
@@ -9444,35 +9447,8 @@
                     "description": {
                       "type": "string"
                     },
-                    "binding": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": ["global"]
-                            }
-                          },
-                          "required": ["kind"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "kind": {
-                              "type": "string",
-                              "enum": ["object"]
-                            },
-                            "objectTypeId": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": ["kind", "objectTypeId"],
-                          "additionalProperties": false
-                        }
-                      ]
+                    "objectTypeId": {
+                      "type": "string"
                     },
                     "params": {
                       "type": "array",
@@ -9518,9 +9494,39 @@
                       },
                       "required": ["validate", "writeback", "edits", "effects"],
                       "additionalProperties": false
+                    },
+                    "preview": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "supported": {
+                              "type": "boolean",
+                              "enum": [true]
+                            }
+                          },
+                          "required": ["supported"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "supported": {
+                              "type": "boolean",
+                              "enum": [false]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "enum": ["no_edits", "writeback_required"]
+                            }
+                          },
+                          "required": ["supported", "reason"],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
                   },
-                  "required": ["id", "name", "binding", "params", "phases"],
+                  "required": ["id", "name", "params", "phases", "preview"],
                   "additionalProperties": false
                 }
               }
@@ -9721,16 +9727,13 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "Response for status 200",
+          "202": {
+            "description": "Response for status 202",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
                     "runId": {
                       "type": "string"
                     },
@@ -9744,7 +9747,588 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["success", "runId", "queuedAt", "created"],
+                  "required": ["runId", "queuedAt", "created"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-runs": {
+      "get": {
+        "summary": "List action run history",
+        "tags": ["Actions"],
+        "operationId": "listActionRuns",
+        "parameters": [
+          {
+            "name": "actionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+            }
+          },
+          {
+            "name": "objectTypeId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "primaryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startedAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "actionId": {
+                            "type": "string"
+                          },
+                          "subject": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["none"]
+                                  }
+                                },
+                                "required": ["kind"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["object"]
+                                  },
+                                  "objectTypeId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "primaryId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": ["kind", "objectTypeId", "primaryId"],
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "phase": {
+                            "type": "string",
+                            "enum": [
+                              "request",
+                              "enqueue",
+                              "validation",
+                              "writeback",
+                              "edits",
+                              "commit",
+                              "effects",
+                              "cancelled"
+                            ]
+                          },
+                          "queuedAt": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "error": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              },
+                              "phase": {
+                                "type": "string",
+                                "enum": [
+                                  "request",
+                                  "enqueue",
+                                  "validation",
+                                  "writeback",
+                                  "edits",
+                                  "commit",
+                                  "effects",
+                                  "cancelled"
+                                ]
+                              }
+                            },
+                            "required": ["message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "actionId",
+                          "subject",
+                          "status",
+                          "queuedAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["runs", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/action-runs/{runId}": {
+      "get": {
+        "summary": "Get action run detail",
+        "tags": ["Actions"],
+        "operationId": "getActionRun",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "actionId": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["none"]
+                            }
+                          },
+                          "required": ["kind"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["object"]
+                            },
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["kind", "objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "request",
+                        "enqueue",
+                        "validation",
+                        "writeback",
+                        "edits",
+                        "commit",
+                        "effects",
+                        "cancelled"
+                      ]
+                    },
+                    "queuedAt": {
+                      "type": "string"
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "finishedAt": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "phase": {
+                          "type": "string",
+                          "enum": [
+                            "request",
+                            "enqueue",
+                            "validation",
+                            "writeback",
+                            "edits",
+                            "commit",
+                            "effects",
+                            "cancelled"
+                          ]
+                        }
+                      },
+                      "required": ["message"],
+                      "additionalProperties": false
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "writeback": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["succeeded", "failed"]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "result": {},
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "request",
+                                "enqueue",
+                                "validation",
+                                "writeback",
+                                "edits",
+                                "commit",
+                                "effects",
+                                "cancelled"
+                              ]
+                            }
+                          },
+                          "required": ["message"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["status", "completedAt"],
+                      "additionalProperties": false
+                    },
+                    "commit": {
+                      "type": "object",
+                      "properties": {
+                        "committedAt": {
+                          "type": "string"
+                        },
+                        "diff": {
+                          "type": "object",
+                          "properties": {
+                            "objects": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "objectTypeId": {
+                                    "type": "string"
+                                  },
+                                  "primaryId": {
+                                    "type": "string"
+                                  },
+                                  "operation": {
+                                    "type": "string",
+                                    "enum": ["create", "update", "delete"]
+                                  },
+                                  "changedProperties": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "objectTypeId",
+                                  "primaryId",
+                                  "operation",
+                                  "changedProperties"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "links": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "operation": {
+                                    "type": "string",
+                                    "enum": ["create", "update", "delete"]
+                                  },
+                                  "source": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "primaryId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId", "primaryId"],
+                                    "additionalProperties": false
+                                  },
+                                  "linkId": {
+                                    "type": "string"
+                                  },
+                                  "target": {
+                                    "type": "object",
+                                    "properties": {
+                                      "objectTypeId": {
+                                        "type": "string"
+                                      },
+                                      "primaryId": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["objectTypeId", "primaryId"],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["operation", "source", "linkId", "target"],
+                                "additionalProperties": false
+                              }
+                            }
+                          },
+                          "required": ["objects", "links"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["committedAt", "diff"],
+                      "additionalProperties": false
+                    },
+                    "effects": {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": ["succeeded", "failed"]
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        },
+                        "error": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "request",
+                                "enqueue",
+                                "validation",
+                                "writeback",
+                                "edits",
+                                "commit",
+                                "effects",
+                                "cancelled"
+                              ]
+                            }
+                          },
+                          "required": ["message"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": ["status", "completedAt"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "actionId",
+                    "subject",
+                    "status",
+                    "queuedAt",
+                    "params"
+                  ],
                   "additionalProperties": false
                 }
               }

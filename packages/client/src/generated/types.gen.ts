@@ -3242,14 +3242,7 @@ export type ListActionsResponses = {
     id: string
     name: string
     description?: string
-    binding:
-      | {
-          kind: "global"
-        }
-      | {
-          kind: "object"
-          objectTypeId: string
-        }
+    objectTypeId?: string
     params: Array<{
       id: string
       name: string
@@ -3264,6 +3257,14 @@ export type ListActionsResponses = {
       edits: boolean
       effects: boolean
     }
+    preview:
+      | {
+          supported: true
+        }
+      | {
+          supported: false
+          reason: "no_edits" | "writeback_required"
+        }
   }>
 }
 
@@ -3297,14 +3298,7 @@ export type GetActionResponses = {
     id: string
     name: string
     description?: string
-    binding:
-      | {
-          kind: "global"
-        }
-      | {
-          kind: "object"
-          objectTypeId: string
-        }
+    objectTypeId?: string
     params: Array<{
       id: string
       name: string
@@ -3319,6 +3313,14 @@ export type GetActionResponses = {
       edits: boolean
       effects: boolean
     }
+    preview:
+      | {
+          supported: true
+        }
+      | {
+          supported: false
+          reason: "no_edits" | "writeback_required"
+        }
   }
 }
 
@@ -3366,10 +3368,9 @@ export type RequestActionError = RequestActionErrors[keyof RequestActionErrors]
 
 export type RequestActionResponses = {
   /**
-   * Response for status 200
+   * Response for status 202
    */
-  200: {
-    success: boolean
+  202: {
     runId: string
     queuedAt: string
     jobId?: string
@@ -3378,6 +3379,221 @@ export type RequestActionResponses = {
 }
 
 export type RequestActionResponse = RequestActionResponses[keyof RequestActionResponses]
+
+export type ListActionRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    actionId?: string
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    objectTypeId?: string
+    primaryId?: string
+    startedAfter?: string
+    startedBefore?: string
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/action-runs"
+}
+
+export type ListActionRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListActionRunsError = ListActionRunsErrors[keyof ListActionRunsErrors]
+
+export type ListActionRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      actionId: string
+      subject:
+        | {
+            kind: "none"
+          }
+        | {
+            kind: "object"
+            objectTypeId: string
+            primaryId: string
+          }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      phase?:
+        | "request"
+        | "enqueue"
+        | "validation"
+        | "writeback"
+        | "edits"
+        | "commit"
+        | "effects"
+        | "cancelled"
+      queuedAt: string
+      startedAt?: string
+      finishedAt?: string
+      error?: {
+        name?: string
+        message: string
+        phase?:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListActionRunsResponse = ListActionRunsResponses[keyof ListActionRunsResponses]
+
+export type GetActionRunData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/action-runs/{runId}"
+}
+
+export type GetActionRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetActionRunError = GetActionRunErrors[keyof GetActionRunErrors]
+
+export type GetActionRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    projectId: string
+    actionId: string
+    subject:
+      | {
+          kind: "none"
+        }
+      | {
+          kind: "object"
+          objectTypeId: string
+          primaryId: string
+        }
+    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    phase?:
+      | "request"
+      | "enqueue"
+      | "validation"
+      | "writeback"
+      | "edits"
+      | "commit"
+      | "effects"
+      | "cancelled"
+    queuedAt: string
+    startedAt?: string
+    finishedAt?: string
+    error?: {
+      name?: string
+      message: string
+      phase?:
+        | "request"
+        | "enqueue"
+        | "validation"
+        | "writeback"
+        | "edits"
+        | "commit"
+        | "effects"
+        | "cancelled"
+    }
+    params: {
+      [key: string]: unknown
+    }
+    writeback?: {
+      status: "succeeded" | "failed"
+      completedAt: string
+      result?: unknown
+      error?: {
+        name?: string
+        message: string
+        phase?:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+    }
+    commit?: {
+      committedAt: string
+      diff: {
+        objects: Array<{
+          objectTypeId: string
+          primaryId: string
+          operation: "create" | "update" | "delete"
+          changedProperties: Array<string>
+        }>
+        links: Array<{
+          operation: "create" | "update" | "delete"
+          source: {
+            objectTypeId: string
+            primaryId: string
+          }
+          linkId: string
+          target: {
+            objectTypeId: string
+            primaryId: string
+          }
+        }>
+      }
+    }
+    effects?: {
+      status: "succeeded" | "failed"
+      completedAt: string
+      error?: {
+        name?: string
+        message: string
+        phase?:
+          | "request"
+          | "enqueue"
+          | "validation"
+          | "writeback"
+          | "edits"
+          | "commit"
+          | "effects"
+          | "cancelled"
+      }
+    }
+  }
+}
+
+export type GetActionRunResponse = GetActionRunResponses[keyof GetActionRunResponses]
 
 export type ListObjectLinksData = {
   body?: never
