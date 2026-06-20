@@ -150,7 +150,9 @@ function serializeWorkflow(
           type: "action" as const,
           id: node.id,
           key: node.key,
-          targetObjectTypeId: node.action.binding.objectType.id,
+          ...(node.action.binding.kind === "object"
+            ? { objectTypeId: node.action.binding.objectType.id }
+            : {}),
           params: node.action.params,
         }
       }

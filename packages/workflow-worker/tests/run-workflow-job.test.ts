@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
   type ActionRunStorage,
+  defineAction,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
@@ -70,6 +71,38 @@ const reviewInvoiceMatch = defineWorkflowStep("review-invoice-match")
     invoice: input.invoice,
   }))
 
+const prepareAttachInvoiceAction = defineWorkflowStep("prepare-attach-invoice-action")
+  .input({
+    transaction: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .output({
+    subject: ref(Transaction),
+    invoice: ref(Invoice),
+    confidence: "double",
+  })
+  .run(({ input }) => ({
+    subject: input.transaction,
+    invoice: input.invoice,
+    confidence: input.confidence,
+  }))
+
+const prepareInvoice = defineWorkflowStep("prepare-invoice")
+  .input({
+    transaction: ref(Transaction),
+  })
+  .output({
+    amount: "double",
+    transaction: ref(Transaction),
+    extraContext: "string",
+  })
+  .run(({ input }) => ({
+    amount: 250,
+    transaction: input.transaction,
+    extraContext: "ignored-by-action-request",
+  }))
+
 const reviewInvoiceDecision = defineIntervention("review-invoice-decision")
   .input({
     transaction: ref(Transaction),
@@ -133,20 +166,31 @@ const invalidOutputStep = defineWorkflowStep("invalid-output")
   }))
 
 let actionHandlerCalls = 0
-const attachInvoice: ActionDefinition = {
-  kind: "action",
-  id: "attach-invoice",
-  binding: { kind: "object", objectType: Transaction },
-  params: {
+const attachInvoice = defineAction("attach-invoice")
+  .on(Transaction)
+  .params({
     invoice: param(ref(Invoice)),
-  },
-  phases: {
-    validate: [],
-    writeback: () => {
-      actionHandlerCalls += 1
-    },
-  },
-}
+  })
+  .writeback(() => {
+    actionHandlerCalls += 1
+  })
+
+const createInvoice = defineAction("create-invoice")
+  .params({
+    invoice: param(ref(Invoice)),
+  })
+  .writeback(() => {
+    actionHandlerCalls += 1
+  })
+
+const createInvoiceFromTransaction = defineAction("create-invoice-from-transaction")
+  .params({
+    amount: param("double"),
+    transaction: param(ref(Transaction)),
+  })
+  .writeback(() => {
+    actionHandlerCalls += 1
+  })
 
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
@@ -212,7 +256,8 @@ async function completeRequestedActions(
     readonly storage: { readonly actionRuns?: ActionRunStorage }
   },
   status: "succeeded" | "failed",
-  errorMessage = "action failed"
+  errorMessage = "action failed",
+  options: { readonly effectsErrorMessage?: string } = {}
 ): Promise<() => void> {
   const actionRuns = sixb.storage.actionRuns
   if (!actionRuns) {
@@ -238,6 +283,23 @@ async function completeRequestedActions(
             await actionRuns.start({
               projectId: sixb.id,
               id: event.payload.runId,
+            })
+          }
+
+          if (status === "succeeded" && options.effectsErrorMessage) {
+            await actionRuns.enterPhase({
+              projectId: sixb.id,
+              id: event.payload.runId,
+              phase: "effects",
+            })
+            await actionRuns.recordEffects({
+              projectId: sixb.id,
+              id: event.payload.runId,
+              status: "failed",
+              error: {
+                message: options.effectsErrorMessage,
+                phase: "effects",
+              },
             })
           }
 
@@ -839,7 +901,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
-        target: input.transaction,
+        subject: input.transaction,
         params: {
           invoice: steps.findBestInvoice.invoice,
         },
@@ -875,6 +937,259 @@ describe("runWorkflowJob", () => {
         runId: "wfrun_action:action:1",
       })
       expect(result.nodes[1]?.status).toBe("succeeded")
+      expect(result.nodes[1]?.output).toEqual({
+        actionRunId: "wfrun_action:action:1",
+      })
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("runs global action nodes through the canonical action runtime", async () => {
+    actionHandlerCalls = 0
+    const workflow = defineWorkflow("create-invoice-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(createInvoice, ({ steps }) => ({
+        params: {
+          invoice: steps.findBestInvoice.invoice,
+        },
+      }))
+    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_global_action",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+
+      const events = await sixb.events.read({
+        types: ["action.requested"],
+      })
+      expect(actionHandlerCalls).toBe(0)
+      expect(events[0]?.payload).toMatchObject({
+        subject: { kind: "none" },
+        actionId: "create-invoice",
+        runId: "wfrun_global_action:action:1",
+      })
+      expect(result.nodes[1]?.status).toBe("succeeded")
+      expect(result.nodes[1]?.output).toEqual({
+        actionRunId: "wfrun_global_action:action:1",
+      })
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("runs global action nodes with direct dataflow", async () => {
+    actionHandlerCalls = 0
+    const workflow = defineWorkflow("create-invoice-direct-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(createInvoice)
+    const sixb = createSixb({ actions: [createInvoice], workflows: [workflow] })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_global_action_direct",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+
+      const events = await sixb.events.read({
+        types: ["action.requested"],
+      })
+      expect(actionHandlerCalls).toBe(0)
+      expect(events[0]?.payload).toMatchObject({
+        subject: { kind: "none" },
+        params: {
+          invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        },
+        actionId: "create-invoice",
+        runId: "wfrun_global_action_direct:action:1",
+      })
+      const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
+      expect(params).not.toHaveProperty("transaction")
+      expect(params).not.toHaveProperty("confidence")
+      expect(result.nodes[1]?.input).toEqual({
+        params: {
+          invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        },
+      })
+      expect(result.nodes[1]?.status).toBe("succeeded")
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("picks declared params from direct global action dataflow", async () => {
+    actionHandlerCalls = 0
+    const workflow = defineWorkflow("create-invoice-from-transaction-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(prepareInvoice)
+      .then(createInvoiceFromTransaction)
+    const sixb = createSixb({
+      actions: [createInvoiceFromTransaction],
+      workflows: [workflow],
+    })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_pick_global_action_params",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+
+      const events = await sixb.events.read({
+        types: ["action.requested"],
+      })
+      expect(events[0]?.payload).toMatchObject({
+        subject: { kind: "none" },
+        params: {
+          amount: 250,
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+        actionId: "create-invoice-from-transaction",
+        runId: "wfrun_pick_global_action_params:action:1",
+      })
+      const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
+      expect(params).not.toHaveProperty("extraContext")
+      expect(result.nodes[1]?.input).toEqual({
+        params: {
+          amount: 250,
+          transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+        },
+      })
+      expect(result.nodes[1]?.status).toBe("succeeded")
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("runs object action nodes with direct dataflow", async () => {
+    actionHandlerCalls = 0
+    const workflow = defineWorkflow("attach-invoice-direct-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(prepareAttachInvoiceAction)
+      .then(attachInvoice)
+    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
+    await sixb.upsertObject("Transaction", { id: "txn_1" })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded")
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_object_action_direct",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+
+      const events = await sixb.events.read({
+        types: ["action.requested"],
+      })
+      expect(actionHandlerCalls).toBe(0)
+      expect(events[0]?.payload).toMatchObject({
+        subject: {
+          kind: "object",
+          objectTypeId: "Transaction",
+          primaryId: "txn_1",
+        },
+        params: {
+          invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        },
+        actionId: "attach-invoice",
+        runId: "wfrun_object_action_direct:action:2",
+      })
+      const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
+      expect(params).not.toHaveProperty("confidence")
+      expect(result.nodes[2]?.input).toEqual({
+        subject: {
+          kind: "object",
+          objectTypeId: "Transaction",
+          primaryId: "txn_1",
+        },
+        params: {
+          invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        },
+      })
+      expect(result.nodes[2]?.status).toBe("succeeded")
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("succeeds action nodes when only action effects fail", async () => {
+    const workflow = defineWorkflow("action-effects-fail-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+      .then(attachInvoice, ({ input, steps }) => ({
+        subject: input.transaction,
+        params: {
+          invoice: steps.findBestInvoice.invoice,
+        },
+      }))
+    const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
+    const unsubscribe = await completeRequestedActions(sixb, "succeeded", "action failed", {
+      effectsErrorMessage: "notification failed",
+    })
+
+    try {
+      const result = await runWorkflowJob({
+        runtime: createRuntime(sixb),
+        job: {
+          id: "wfrun_action_effects_failed",
+          workflowId: workflow.id,
+          input: {
+            transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+          },
+        },
+      })
+      const actionRun = await sixb.storage.actionRuns!.getById({
+        projectId: sixb.id,
+        id: "wfrun_action_effects_failed:action:1",
+      })
+
+      expect(result.run.status).toBe("succeeded")
+      expect(result.nodes[1]?.status).toBe("succeeded")
+      expect(actionRun?.status).toBe("succeeded")
+      expect(actionRun?.effects).toMatchObject({
+        status: "failed",
+        error: { message: "notification failed", phase: "effects" },
+      })
     } finally {
       unsubscribe()
     }
@@ -956,7 +1271,7 @@ describe("runWorkflowJob", () => {
       })
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
-        target: input.transaction,
+        subject: input.transaction,
         params: {
           invoice: steps.findBestInvoice.invoice,
         },
@@ -996,14 +1311,14 @@ describe("runWorkflowJob", () => {
     expect(nodes.nodes[1]?.error).toBe("attach failed")
   })
 
-  test("marks action node and workflow failed when the action worker rejects the target", async () => {
-    const workflow = defineWorkflow("missing-target-workflow")
+  test("marks action node and workflow failed when the action run fails after request", async () => {
+    const workflow = defineWorkflow("missing-subject-workflow")
       .input({
         transaction: ref(Transaction),
       })
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
-        target: input.transaction,
+        subject: input.transaction,
         params: {
           invoice: steps.findBestInvoice.invoice,
         },

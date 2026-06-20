@@ -1,4 +1,9 @@
-import type { ActionParamsConfig, InferActionParams } from "../actions"
+import type {
+  ActionDefinition,
+  GlobalActionDefinition,
+  InferActionParams,
+  ObjectActionDefinition,
+} from "../actions"
 import type { JsonValue } from "../json"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { Sixb } from "../runtime/sixb"
@@ -278,28 +283,48 @@ export type InferInterventionResponse<TIntervention extends InterventionDefiniti
     ? NonNullable<TResponseValue>
     : never
 
-export interface WorkflowActionDefinition<
-  TId extends string = string,
-  TTargetId extends string = string,
-  TParams extends ActionParamsConfig = ActionParamsConfig,
-> {
-  readonly kind: "action"
-  readonly id: TId
-  readonly binding: { readonly kind: "object"; readonly objectType: { readonly id: TTargetId } }
-  readonly params: TParams
-}
+export type WorkflowActionDefinition = ActionDefinition
 
-export type WorkflowActionMapperResult<TAction extends WorkflowActionDefinition> = {
-  readonly target: ObjectRef<TAction["binding"]["objectType"]["id"]>
-  readonly params: InferActionParams<TAction["params"]>
-}
+export type WorkflowActionMapperResult<TAction extends WorkflowActionDefinition> =
+  TAction extends ObjectActionDefinition
+    ? {
+        readonly subject: ObjectRef<TAction["binding"]["objectType"]["id"]>
+        readonly params: InferActionParams<TAction["params"]>
+      }
+    : TAction extends GlobalActionDefinition
+      ? {
+          readonly subject?: never
+          readonly params: InferActionParams<TAction["params"]>
+        }
+      : never
 
 export type WorkflowActionMapper<
   TInput extends Record<string, unknown>,
   TSteps extends WorkflowStepOutputs,
   TAction extends WorkflowActionDefinition,
-  TResult extends WorkflowActionMapperResult<TAction> = WorkflowActionMapperResult<TAction>,
-> = (ctx: WorkflowMapperContext<TInput, TSteps>) => TResult
+> = (ctx: WorkflowMapperContext<TInput, TSteps>) => WorkflowActionMapperResult<TAction>
+
+type DirectObjectActionInput<TAction extends ObjectActionDefinition> =
+  "subject" extends keyof InferActionParams<TAction["params"]>
+    ? never
+    : Simplify<
+        {
+          readonly subject: ObjectRef<TAction["binding"]["objectType"]["id"]>
+        } & InferActionParams<TAction["params"]>
+      >
+
+type DirectActionDataflowGuard<
+  TCurrent extends Record<string, unknown>,
+  TAction extends WorkflowActionDefinition,
+> = TAction extends GlobalActionDefinition
+  ? TCurrent extends InferActionParams<TAction["params"]>
+    ? unknown
+    : never
+  : TAction extends ObjectActionDefinition
+    ? TCurrent extends DirectObjectActionInput<TAction>
+      ? unknown
+      : never
+    : never
 
 export interface WorkflowStepNodeDefinition<
   TStep extends StepDefinition = StepDefinition,
@@ -320,7 +345,7 @@ export interface WorkflowActionNodeDefinition<
   readonly id: TAction["id"]
   readonly key: DerivedWorkflowNodeKey<TAction["id"]>
   readonly action: TAction
-  readonly mapper: TMapper
+  readonly mapper?: TMapper
 }
 
 export interface WorkflowInterventionNodeDefinition<
@@ -444,12 +469,18 @@ export interface WorkflowChainDefinition<
     InferInterventionResponse<TIntervention>,
     AddInterventionOutput<TSteps, TIntervention>
   >
-  then<
-    const TAction extends WorkflowActionDefinition,
-    const TResult extends WorkflowActionMapperResult<TAction>,
-  >(
+  then<const TAction extends WorkflowActionDefinition>(
+    action: TAction & DirectActionDataflowGuard<TCurrent, TAction>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    Append<TNodes, WorkflowActionNodeDefinition<TAction, undefined>>,
+    TCurrent,
+    TSteps
+  >
+  then<const TAction extends WorkflowActionDefinition>(
     action: TAction,
-    mapper: WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction, TResult>
+    mapper: WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction>
   ): WorkflowChainDefinition<
     TId,
     TInput,
@@ -457,7 +488,7 @@ export interface WorkflowChainDefinition<
       TNodes,
       WorkflowActionNodeDefinition<
         TAction,
-        WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction, TResult>
+        WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction>
       >
     >,
     TCurrent,
@@ -528,19 +559,25 @@ export interface WorkflowDraftBuilder<
     InferInterventionResponse<TIntervention>,
     AddInterventionOutput<TSteps, TIntervention>
   >
-  then<
-    const TAction extends WorkflowActionDefinition,
-    const TResult extends WorkflowActionMapperResult<TAction>,
-  >(
+  then<const TAction extends WorkflowActionDefinition>(
+    action: TAction & DirectActionDataflowGuard<TCurrent, TAction>
+  ): WorkflowChainDefinition<
+    TId,
+    TInput,
+    [WorkflowActionNodeDefinition<TAction, undefined>],
+    TCurrent,
+    TSteps
+  >
+  then<const TAction extends WorkflowActionDefinition>(
     action: TAction,
-    mapper: WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction, TResult>
+    mapper: WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction>
   ): WorkflowChainDefinition<
     TId,
     TInput,
     [
       WorkflowActionNodeDefinition<
         TAction,
-        WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction, TResult>
+        WorkflowActionMapper<InferSchemaOrRefRecord<TInput>, TSteps, TAction>
       >,
     ],
     TCurrent,

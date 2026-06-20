@@ -1,3 +1,4 @@
+import type { ActionSubject } from "../actions"
 import type { JsonValue } from "../json"
 import { isObjectRefSchema, type Schema, type SchemaOrRef, type ValueType } from "../ontology"
 import { WorkflowValidationError } from "./errors"
@@ -108,16 +109,18 @@ export function snapshotWorkflowInterventionDefaultResponse(params: {
 }
 
 export function snapshotWorkflowActionInput(params: {
-  readonly target: { readonly objectTypeId: string; readonly primaryId: string }
+  readonly subject?: ActionSubject
   readonly params: Readonly<Record<string, unknown>>
 }): WorkflowIOSnapshot {
-  return {
-    target: {
-      objectTypeId: params.target.objectTypeId,
-      primaryId: params.target.primaryId,
-    },
+  const snapshot: Record<string, JsonValue> = {
     params: snapshotJsonValue(params.params, "Workflow action params"),
   }
+
+  if (params.subject && params.subject.kind !== "none") {
+    snapshot.subject = snapshotJsonValue(params.subject, "Workflow action subject")
+  }
+
+  return snapshot
 }
 
 function snapshotWorkflowContractRecord(params: {

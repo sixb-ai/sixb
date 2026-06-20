@@ -5155,7 +5155,7 @@
                                 "key": {
                                   "type": "string"
                                 },
-                                "targetObjectTypeId": {
+                                "objectTypeId": {
                                   "type": "string"
                                 },
                                 "params": {
@@ -5163,7 +5163,7 @@
                                   "additionalProperties": {}
                                 }
                               },
-                              "required": ["type", "id", "key", "targetObjectTypeId", "params"],
+                              "required": ["type", "id", "key", "params"],
                               "additionalProperties": false
                             },
                             {
@@ -5349,7 +5349,7 @@
                               "key": {
                                 "type": "string"
                               },
-                              "targetObjectTypeId": {
+                              "objectTypeId": {
                                 "type": "string"
                               },
                               "params": {
@@ -5357,7 +5357,7 @@
                                 "additionalProperties": {}
                               }
                             },
-                            "required": ["type", "id", "key", "targetObjectTypeId", "params"],
+                            "required": ["type", "id", "key", "params"],
                             "additionalProperties": false
                           },
                           {
