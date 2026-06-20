@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
   type ActionRunRecord,
-  actionParam,
   defineAction,
   defineObjectType,
   EventsRuntime,
@@ -12,6 +11,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type ObjectRow,
+  param,
   prop,
   Sixb,
   type Storage,
@@ -96,9 +96,9 @@ describe("ActionWorker", () => {
 
   test("throws ActionWorkerError when action-run storage is missing", () => {
     const noop = defineAction("noop")
-      .target(Device)
+      .on(Device)
       .params({})
-      .run(() => {})
+      .writeback(() => {})
     const storage = createStorageWithoutActionRuns()
 
     expect(
@@ -115,7 +115,7 @@ describe("ActionWorker", () => {
             return [noop]
           },
           getActionById(actionId) {
-            return actionId === noop.id ? noop : null
+            return actionId === "noop" ? noop : null
           },
         })
     ).toThrow(ActionWorkerError)
@@ -123,16 +123,10 @@ describe("ActionWorker", () => {
 
   test("claims requested action runs and emits action.completed", async () => {
     const setStatus = defineAction("setStatus")
-      .target(Device)
-      .params({ status: actionParam("string", { required: true }) })
-      .run(async ({ params, target, sixb }) => {
-        await sixb.objects(Device).upsert({
-          properties: {
-            id: target.primaryId,
-            name: target.properties.name,
-            status: params.status,
-          },
-        })
+      .on(Device)
+      .params({ status: param("string") })
+      .edits(({ objects, params, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
 
     const sixb = createSixb([setStatus])
@@ -178,22 +172,16 @@ describe("ActionWorker", () => {
 
   test("requestActionAndWait resolves with the terminal action run", async () => {
     const setStatus = defineAction("setStatus")
-      .target(Device)
-      .params({ status: actionParam("string", { required: true }) })
-      .run(async ({ params, target, sixb }) => {
-        await sixb.objects(Device).upsert({
-          properties: {
-            id: target.primaryId,
-            name: target.properties.name,
-            status: params.status,
-          },
-        })
+      .on(Device)
+      .params({ status: param("string") })
+      .edits(({ objects, params, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
     const fail = defineAction("fail")
-      .target(Device)
+      .on(Device)
       .params({})
-      .run(() => {
-        throw new Error("handler failed")
+      .writeback(() => {
+        throw new Error("writeback failed")
       })
 
     const sixb = createSixb([setStatus, fail])
@@ -218,7 +206,7 @@ describe("ActionWorker", () => {
       actionId: "fail",
     })
     expect(failed.status).toBe("failed")
-    expect(failed.error?.message).toBe("handler failed")
+    expect(failed.error?.message).toBe("writeback failed")
 
     await worker.stop()
   })

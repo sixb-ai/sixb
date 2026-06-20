@@ -13,7 +13,6 @@ export type ActionRunPhase =
   | "edits"
   | "commit"
   | "effects"
-  | "legacy_handler"
   | "cancelled"
 
 export type ActionRunParams = Readonly<Record<string, JsonValue>>
@@ -83,7 +82,7 @@ export interface StartActionRunInput {
   readonly id: string
   readonly projectId: string
   readonly startedAt?: Date
-  readonly phase?: Extract<ActionRunPhase, "validation" | "legacy_handler">
+  readonly phase?: Extract<ActionRunPhase, "validation">
 }
 
 export interface EnterActionRunPhaseInput {
@@ -91,7 +90,7 @@ export interface EnterActionRunPhaseInput {
   readonly projectId: string
   readonly phase: Extract<
     ActionRunPhase,
-    "validation" | "writeback" | "edits" | "commit" | "effects" | "legacy_handler"
+    "validation" | "writeback" | "edits" | "commit" | "effects"
   >
 }
 

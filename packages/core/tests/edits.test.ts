@@ -15,8 +15,6 @@ import {
   OntologyRegistry,
   planEditBatch,
   prop,
-  type RecordEditsOptions,
-  recordEdits,
   type SerializationRetryOptions,
   type Storage,
   StorageTransactionError,
@@ -24,6 +22,7 @@ import {
   validateEditBatch,
   valueTypeRef,
 } from "../src"
+import { type RecordEditsOptions, recordEdits } from "../src/actions/worker"
 
 const Customer = defineObjectType({
   id: "Customer",
@@ -117,9 +116,12 @@ type RuntimeRecordObjects = (objectType: ObjectTypeWithPropertyTokens) => {
 function recordRuntimeEdits(
   options: RecordEditsOptions,
   handler: (ctx: { objects: RuntimeRecordObjects }) => void
-): EditBatch {
+): Promise<EditBatch> {
   return (
-    recordEdits as (options: RecordEditsOptions, handler: (ctx: unknown) => void) => EditBatch
+    recordEdits as (
+      options: RecordEditsOptions,
+      handler: (ctx: unknown) => void
+    ) => Promise<EditBatch>
   )(options, handler as (ctx: unknown) => void)
 }
 
@@ -127,7 +129,7 @@ describe("EditBatch core contract", () => {
   test("records object API mutations into one serializable batch", async () => {
     const storage = await createSeededStorage()
     let createdInvoiceId = ""
-    const batch = recordRuntimeEdits({ runId: "act_1" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "act_1" }, ({ objects }) => {
       const createdInvoice = objects(Invoice).create({
         amount: 250,
         status: "draft",
@@ -278,7 +280,7 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
       ontology,
       storage,
-      batch: recordRuntimeEdits({ runId: "act_readonly" }, ({ objects }) => {
+      batch: await recordRuntimeEdits({ runId: "act_readonly" }, ({ objects }) => {
         objects(Invoice).byId("inv_1").update({
           status: "paid",
         })
@@ -296,7 +298,7 @@ describe("EditBatch core contract", () => {
 
   test("normalizes recorded edits with resolved and registered value type refs", async () => {
     let resolvedInvoiceId = ""
-    const resolvedBatch = recordRuntimeEdits(
+    const resolvedBatch = await recordRuntimeEdits(
       { runId: "act_value_type_resolved" },
       ({ objects }) => {
         const resolvedInvoice = objects(InvoiceWithResolvedAmount).create({
@@ -317,7 +319,7 @@ describe("EditBatch core contract", () => {
     })
 
     let registeredInvoiceId = ""
-    const registeredBatch = recordRuntimeEdits(
+    const registeredBatch = await recordRuntimeEdits(
       {
         runId: "act_value_type_registered",
         valueTypesById: new Map([[MoneyAmount.id, MoneyAmount]]),
@@ -349,7 +351,7 @@ describe("EditBatch core contract", () => {
         projectId: "project-a",
         ontology,
         storage,
-        batch: recordRuntimeEdits({ runId: "act_3" }, ({ objects }) => {
+        batch: await recordRuntimeEdits({ runId: "act_3" }, ({ objects }) => {
           objects(Invoice).byId("missing").update({ status: "paid" })
         }),
       })
@@ -438,7 +440,7 @@ describe("EditBatch core contract", () => {
         projectId: "project-a",
         ontology,
         storage,
-        batch: recordRuntimeEdits({ runId: "act_4" }, ({ objects }) => {
+        batch: await recordRuntimeEdits({ runId: "act_4" }, ({ objects }) => {
           objects(Invoice)
             .byId("inv_1")
             .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
@@ -478,7 +480,7 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
       ontology,
       storage,
-      batch: recordRuntimeEdits({ runId: "act_6" }, ({ objects }) => {
+      batch: await recordRuntimeEdits({ runId: "act_6" }, ({ objects }) => {
         objects(Payment).byId("pay_1").delete()
       }),
     })
@@ -505,7 +507,7 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
       ontology,
       storage,
-      batch: recordRuntimeEdits({ runId: "act_delete" }, ({ objects }) => {
+      batch: await recordRuntimeEdits({ runId: "act_delete" }, ({ objects }) => {
         objects(Invoice).byId("inv_1").delete()
       }),
     })
@@ -538,7 +540,7 @@ describe("EditBatch core contract", () => {
 
   test("cancels create and link diffs when a created object is deleted", async () => {
     const storage = await createSeededStorage()
-    const batch = recordRuntimeEdits({ runId: "act_create_delete" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "act_create_delete" }, ({ objects }) => {
       const invoice = objects(Invoice).create({
         id: "inv_created",
         amount: 300,
@@ -577,7 +579,7 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
     })
 
-    const batch = recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_commit_1" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
     const result = await commitActionEditBatch({
@@ -637,7 +639,7 @@ describe("EditBatch core contract", () => {
     })
 
     const failingStorage = withFailingRecordCommit(storage)
-    const batch = recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_rollback" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
@@ -700,7 +702,7 @@ describe("EditBatch core contract", () => {
         return storage.transaction(run, options)
       },
     }
-    const batch = recordRuntimeEdits({ runId: "run_serializable_retry" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_serializable_retry" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
@@ -745,7 +747,7 @@ describe("EditBatch core contract", () => {
       projectId: "project-a",
     })
 
-    const batch = recordRuntimeEdits({ runId: "run_identity" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_identity" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
@@ -1185,14 +1187,14 @@ describe("commitActionEditBatch serialization retry", () => {
   const conflict = () =>
     new StorageTransactionError("serialization conflict", { code: "serialization_failure" })
 
-  function exhaustionInput(runId: string, serializationRetry: SerializationRetryOptions) {
+  async function exhaustionInput(runId: string, serializationRetry: SerializationRetryOptions) {
     return {
       projectId: "project-a",
       runId,
       actionId: "markPaid",
       subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const,
       ontology,
-      batch: recordRuntimeEdits({ runId }, ({ objects }) => {
+      batch: await recordRuntimeEdits({ runId }, ({ objects }) => {
         objects(Invoice).byId("inv_1").update({ status: "paid" })
       }),
       serializationRetry,
@@ -1203,7 +1205,10 @@ describe("commitActionEditBatch serialization retry", () => {
     const { storage, attempts } = alwaysFailingStorage(conflict)
 
     await expect(
-      commitActionEditBatch({ storage, ...exhaustionInput("run_exhaust", { sleep: noopSleep }) })
+      commitActionEditBatch({
+        storage,
+        ...(await exhaustionInput("run_exhaust", { sleep: noopSleep })),
+      })
     ).rejects.toThrow(StorageTransactionError)
 
     // Default cap is 3 attempts (the first plus two retries).
@@ -1216,7 +1221,7 @@ describe("commitActionEditBatch serialization retry", () => {
     await expect(
       commitActionEditBatch({
         storage,
-        ...exhaustionInput("run_passthrough", { sleep: noopSleep }),
+        ...(await exhaustionInput("run_passthrough", { sleep: noopSleep })),
       })
     ).rejects.toThrow("boom")
 
@@ -1229,7 +1234,7 @@ describe("commitActionEditBatch serialization retry", () => {
     await expect(
       commitActionEditBatch({
         storage,
-        ...exhaustionInput("run_custom_cap", { sleep: noopSleep, maxAttempts: 5 }),
+        ...(await exhaustionInput("run_custom_cap", { sleep: noopSleep, maxAttempts: 5 })),
       })
     ).rejects.toThrow(StorageTransactionError)
 
@@ -1261,7 +1266,7 @@ describe("commitActionEditBatch serialization retry", () => {
       },
     }
 
-    const batch = recordRuntimeEdits({ runId: "run_rollback_replay" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_rollback_replay" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
@@ -1310,14 +1315,14 @@ describe("commitActionEditBatch concurrency (provider serialization)", () => {
     await queueRunningRun(storage, "run_link_cus_2", "linkCustomer")
 
     const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
-    const batchA = recordRuntimeEdits({ runId: "run_link_cus_1" }, ({ objects }) => {
+    const batchA = await recordRuntimeEdits({ runId: "run_link_cus_1" }, ({ objects }) => {
       objects(Invoice)
         .byId("inv_1")
         .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
           properties: { role: "payer" },
         })
     })
-    const batchB = recordRuntimeEdits({ runId: "run_link_cus_2" }, ({ objects }) => {
+    const batchB = await recordRuntimeEdits({ runId: "run_link_cus_2" }, ({ objects }) => {
       objects(Invoice)
         .byId("inv_1")
         .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {

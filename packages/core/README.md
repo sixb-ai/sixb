@@ -22,7 +22,9 @@ bun add @sixb/core
 
 **Events** -- All mutations are emitted to a bounded, retained event stream for live coordination and short replay. The runtime emits `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested` events.
 
-**Functions** -- Scheduled and reactive logic that runs against the twin graph. Triggered by cron expressions, intervals, or action requests.
+**Functions** -- Scheduled and reactive logic that runs against the twin graph. Triggered by cron expressions or intervals.
+
+**Actions** -- Typed audited commands. Actions can run external writeback, declare local object/link edits, and run post-commit effects.
 
 **Connectors** -- Typed external system clients that you register with the runtime and resolve lazily with `sixb.connector(...)`.
 
@@ -35,11 +37,13 @@ bun add @sixb/core
 ```ts
 import {
   Sixb,
+  defineAction,
   defineObjectType,
   defineOntology,
   InMemoryBlobStorage,
   InMemoryLakeStorage,
   link,
+  param,
   prop,
   stringEnum,
   InMemoryBroker,
@@ -163,29 +167,32 @@ Trigger types: `cron(expression)`, `interval(ms)`.
 
 ## Actions
 
-Actions define typed commands that can be requested on object instances.
-They live outside ontology definitions and are auto-discovered from `actions/`.
+Actions define typed commands that can be requested globally or for an object subject.
+Local object/link mutations are declared in `.edits(...)` and committed by the action worker.
 
 ```ts
-const setTemperature = defineAction("setTemperature")
-  .target(Room)
+const renameRoom = defineAction("renameRoom")
+  .on(Room)
   .params({
-    value: actionParam("double", { required: true, semanticType: "Temperature" }),
+    name: param("string"),
   })
   .validate(({ params }) => {
-    if (params.value < 10) {
-      return { error: "Temperature is too low" }
+    if (!params.name.trim()) {
+      return { error: "Name is required" }
     }
   })
-  .run(async ({ params, target, sixb }) => {
-    await sixb.objects(Room).appendTelemetryBatch([
-      { id: target.primaryId, properties: { currentTemperature: params.value }, at: new Date() },
-    ])
+  .edits(({ objects, params, subject }) => {
+    objects(Room).byId(subject.primaryId).update({
+      name: params.name,
+    })
   })
-```
 
-`requestAction(...)` validates the action id, params, and target object, then emits
-`action.requested`. V1 stores handlers on the action definition but does not execute them.
+await sixb.actions.request({
+  actionId: "renameRoom",
+  subject: { kind: "object", objectTypeId: "Room", primaryId: "room:101" },
+  params: { name: "Boardroom 101" },
+})
+```
 
 ## Connectors
 
@@ -371,7 +378,7 @@ src/
   connectors/       -- defineConnector, connector types, connector runtime
   syncs/            -- defineSync and sync types
   sixb/            -- Sixb runtime, ObjectSet, ObjectByIdHandle, createSixb
-  actions/          -- defineAction, actionParam, ActionRegistry
+  actions/          -- defineAction, param, optional, ActionRegistry
   functions/        -- defineFunction, FunctionRuntime, cron matcher
 ```
 
@@ -396,7 +403,8 @@ src/
 | Export | Description |
 |---|---|
 | `defineAction(id)` | Define a first-class action contract and handler |
-| `actionParam(schema, options?)` | Define an action parameter inside `.params({...})` |
+| `param(schema, options?)` | Define a required action parameter inside `.params({...})` |
+| `optional(param(...))` | Mark an action parameter as optional |
 
 ### Runtime
 

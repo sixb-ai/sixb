@@ -69,7 +69,7 @@ describe("SqliteActionRunStorage", () => {
       error: {
         name: "FetchError",
         message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "legacy_handler",
+        phase: "writeback",
       },
     })
 
@@ -105,7 +105,7 @@ describe("SqliteActionRunStorage", () => {
     expect(failed?.error).toEqual({
       name: "FetchError",
       message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "legacy_handler",
+      phase: "writeback",
     })
   })
 
@@ -172,8 +172,8 @@ describe("SqliteActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        message: "handler failed",
-        phase: "legacy_handler",
+        message: "writeback failed",
+        phase: "writeback",
       },
     })
 

@@ -1,11 +1,12 @@
 import type { ObjectType } from "../ontology"
 import type { OntologyRegistry } from "../ontology/registry"
-import { ActionDefinitionError } from "./errors"
+import {
+  ActionDefinitionError,
+  effectsWithoutEditsMessage,
+  missingActionMutationMessage,
+} from "./errors"
 import type { ActionDefinition, ObjectActionDefinition } from "./types"
-
-function isObjectActionDefinition(action: ActionDefinition): action is ObjectActionDefinition {
-  return action.binding.kind === "object"
-}
+import { isObjectActionDefinition } from "./validation"
 
 export class ActionRegistry {
   private readonly byId = new Map<string, ActionDefinition>()
@@ -31,6 +32,7 @@ export class ActionRegistry {
         )
       }
 
+      this.validatePhases(action)
       this.byId.set(action.id, action)
 
       if (!isObjectActionDefinition(action)) {
@@ -38,16 +40,31 @@ export class ActionRegistry {
         continue
       }
 
-      const target = this.ontology.getObjectTypeById(action.target.id)
+      const objectType = action.binding.objectType
+      const target = this.ontology.getObjectTypeById(objectType.id)
       if (!target) {
         throw new ActionDefinitionError(
-          `Action "${action.id}" targets unknown object type "${action.target.id}". Add the object type to ontology before registering the action.`
+          `Action "${action.id}" targets unknown object type "${objectType.id}". Add the object type to ontology before registering the action.`
         )
       }
 
-      const bucket = this.byTargetId.get(action.target.id) ?? []
+      const bucket = this.byTargetId.get(objectType.id) ?? []
       bucket.push(action)
-      this.byTargetId.set(action.target.id, bucket)
+      this.byTargetId.set(objectType.id, bucket)
+    }
+  }
+
+  private validatePhases(action: ActionDefinition): void {
+    const hasWriteback = action.phases.writeback !== undefined
+    const hasEdits = action.phases.edits !== undefined
+    const hasEffects = action.phases.effects !== undefined
+
+    if (!hasWriteback && !hasEdits) {
+      throw new ActionDefinitionError(missingActionMutationMessage(action.id))
+    }
+
+    if (hasEffects && !hasEdits) {
+      throw new ActionDefinitionError(effectsWithoutEditsMessage(action.id))
     }
   }
 
@@ -88,25 +105,28 @@ export class ActionRegistry {
       return null
     }
 
-    if (action.target.id === previous.target.id) {
+    const actionObjectType = action.binding.objectType
+    const previousObjectType = previous.binding.objectType
+
+    if (actionObjectType.id === previousObjectType.id) {
       return null
     }
 
-    const actionChain = this.ontology.getAncestorChain(action.target)
-    if (actionChain.some((ancestor) => ancestor.id === previous.target.id)) {
+    const actionChain = this.ontology.getAncestorChain(actionObjectType)
+    if (actionChain.some((ancestor) => ancestor.id === previousObjectType.id)) {
       return {
-        objectTypeId: action.target.id,
-        firstTargetId: previous.target.id,
-        secondTargetId: action.target.id,
+        objectTypeId: actionObjectType.id,
+        firstTargetId: previousObjectType.id,
+        secondTargetId: actionObjectType.id,
       }
     }
 
-    const previousChain = this.ontology.getAncestorChain(previous.target)
-    if (previousChain.some((ancestor) => ancestor.id === action.target.id)) {
+    const previousChain = this.ontology.getAncestorChain(previousObjectType)
+    if (previousChain.some((ancestor) => ancestor.id === actionObjectType.id)) {
       return {
-        objectTypeId: previous.target.id,
-        firstTargetId: action.target.id,
-        secondTargetId: previous.target.id,
+        objectTypeId: previousObjectType.id,
+        firstTargetId: actionObjectType.id,
+        secondTargetId: previousObjectType.id,
       }
     }
 

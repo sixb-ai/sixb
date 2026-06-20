@@ -3258,6 +3258,12 @@ export type ListActionsResponses = {
       semanticType?: string
       schema?: unknown
     }>
+    phases: {
+      validate: boolean
+      writeback: boolean
+      edits: boolean
+      effects: boolean
+    }
   }>
 }
 
@@ -3307,6 +3313,12 @@ export type GetActionResponses = {
       semanticType?: string
       schema?: unknown
     }>
+    phases: {
+      validate: boolean
+      writeback: boolean
+      edits: boolean
+      effects: boolean
+    }
   }
 }
 
@@ -3644,6 +3656,7 @@ export type ListEventsData = {
       | "rules"
     type?:
       | "object.upserted"
+      | "object.deleted"
       | "telemetry.appended"
       | "link.upserted"
       | "link.removed"
@@ -3712,6 +3725,7 @@ export type ListEventsResponses = {
       }
       type:
         | "object.upserted"
+        | "object.deleted"
         | "telemetry.appended"
         | "link.upserted"
         | "link.removed"

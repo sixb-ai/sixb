@@ -1,7 +1,7 @@
 import type { JsonValue } from "../json"
 import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
-import type { LinkToken } from "../ontology/tokens"
+import type { LinkToken, ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 
 export type EditBatchVersion = 1
 
@@ -199,14 +199,19 @@ export interface RecordEditsOptions {
 }
 
 export interface RecordEditsContext<TValueTypes extends readonly ValueType[] = []> {
-  objects<const TObjectType extends ObjectType>(
+  objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
   ): EditObjectSetRecorder<TObjectType, TValueTypes>
 }
 
-export type RecordEditsHandler<TValueTypes extends readonly ValueType[] = []> = {
-  bivarianceHack(ctx: RecordEditsContext<TValueTypes>): void
-}["bivarianceHack"]
+export type RecordEditsHandlerResult = ReturnType<() => void>
+
+export type RecordEditsHandlerReturn = RecordEditsHandlerResult | Promise<RecordEditsHandlerResult>
+
+export type RecordEditsHandler<
+  TValueTypes extends readonly ValueType[] = [],
+  TResult extends RecordEditsHandlerReturn = RecordEditsHandlerReturn,
+> = (ctx: RecordEditsContext<TValueTypes>) => TResult
 
 export interface EditObjectSetRecorder<
   TObjectType extends ObjectType,

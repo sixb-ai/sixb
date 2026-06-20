@@ -1,13 +1,13 @@
-import { actionParam, defineAction } from "@sixb/core"
+import { defineAction, param } from "@sixb/core"
 import { getPanasonicApi } from "../lib/panasonicApi"
 import { PanasonicAcUnit } from "../ontology/acUnit"
 
 export const setPower = defineAction("setPower", {
   description: "Turn the AC unit on or off.",
 })
-  .target(PanasonicAcUnit)
-  .params({ on: actionParam("boolean", { required: true }) })
-  .run(async ({ params, target, sixb }) => {
+  .on(PanasonicAcUnit)
+  .params({ on: param("boolean") })
+  .writeback(async ({ params, target, sixb }) => {
     const api = await getPanasonicApi(sixb)
     if (params.on) {
       await api.powerOn(target.properties.guid)
@@ -15,6 +15,7 @@ export const setPower = defineAction("setPower", {
       await api.powerOff(target.properties.guid)
     }
 
+    // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.
     await sixb
       .objects(PanasonicAcUnit)
       .appendTelemetryBatch([

@@ -1,7 +1,7 @@
-import { assertJsonValue, cloneJsonValue, type JsonValue } from "../json"
+import type { JsonValue } from "../json"
 import type { ObjectLink, Property, ValueType } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
-import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
+import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
   normalizeSchemaValue,
@@ -9,7 +9,7 @@ import {
   validatePropertyValue,
 } from "../ontology/validation"
 import { EditBatchError } from "./errors"
-import type { EditObjectProperties, EditObjectRef } from "./types"
+import type { EditObjectProperties } from "./types"
 
 export function normalizeObjectEditProperties(params: {
   readonly objectType: ObjectTypeWithPropertyTokens
@@ -22,30 +22,6 @@ export function normalizeObjectEditProperties(params: {
   assertNoTelemetryProperties(objectType.properties, properties, path)
   validateObjectProperties(objectType, properties, valueTypesById)
   return normalizeProperties(objectType.properties, properties, valueTypesById, path)
-}
-
-export function normalizePropertyTokenEdit(params: {
-  readonly ref: EditObjectRef
-  readonly property: PropertyToken<string, string, Property>
-  readonly value: unknown
-  readonly valueTypesById: ReadonlyMap<string, ValueType>
-}): EditObjectProperties {
-  const { ref, property, value, valueTypesById } = params
-  assertNoTelemetryProperties([property.property], { [property.id]: value }, ref.objectTypeId)
-  validatePropertyValue(
-    property.property,
-    value,
-    `${ref.objectTypeId}.${property.id}`,
-    valueTypesById
-  )
-  return {
-    [property.id]: normalizePropertyValue(
-      property.property,
-      value,
-      `${ref.objectTypeId}.${property.id}`,
-      valueTypesById
-    ),
-  }
 }
 
 export function normalizeLinkEditProperties(params: {
@@ -114,14 +90,6 @@ export function assertPrimaryPropertyNotUpdated(
       `[Sixb] EditBatch cannot update primary property '${objectType.id}.${primaryProperty.id}'.`
     )
   }
-}
-
-export function cloneJsonProperties(
-  properties: Readonly<Record<string, unknown>>,
-  path: string
-): EditObjectProperties {
-  assertJsonValue(properties, path)
-  return cloneJsonValue(properties as JsonValue) as EditObjectProperties
 }
 
 function normalizeProperties(

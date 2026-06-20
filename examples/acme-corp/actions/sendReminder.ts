@@ -1,45 +1,42 @@
-import { actionParam, defineAction } from "@sixb/core"
+import { defineAction, optional, param } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 export const sendReminder = defineAction("sendReminder", {
   description: "Send a payment reminder to the customer.",
 })
-  .target(Invoice)
+  .on(Invoice)
   .params({
-    approved: actionParam("boolean", { required: true }),
-    message: actionParam("string", { required: true }),
-    reviewerNote: actionParam("string"),
+    approved: param("boolean"),
+    message: param("string"),
+    reviewerNote: optional(param("string")),
   })
-  .run(async ({ params, target, sixb }) => {
+  .edits(async ({ objects, params, read, subject }) => {
     const reviewedAt = new Date().toISOString()
+    const invoice = await read.objects(Invoice).get(subject.primaryId)
+
+    if (!invoice) {
+      throw new Error(`Invoice '${subject.primaryId}' not found.`)
+    }
 
     if (!params.approved) {
-      console.log(`[AcmeCorp] Reminder changes requested for invoice ${target.properties.number}.`)
+      console.log(`[AcmeCorp] Reminder changes requested for invoice ${invoice.properties.number}.`)
 
-      await sixb.objects(Invoice).upsert({
-        properties: {
-          ...target.properties,
-          id: target.primaryId,
-          reminderReviewStatus: "revision_requested",
-          reminderReviewedAt: reviewedAt,
-          reminderReviewerNote: params.reviewerNote,
-        },
+      objects(Invoice).byId(subject.primaryId).update({
+        reminderReviewStatus: "revision_requested",
+        reminderReviewedAt: reviewedAt,
+        reminderReviewerNote: params.reviewerNote,
       })
       return
     }
 
     console.log(
-      `[AcmeCorp] Reminder approved for invoice ${target.properties.number}: ${params.message}`
+      `[AcmeCorp] Reminder approved for invoice ${invoice.properties.number}: ${params.message}`
     )
 
-    await sixb.objects(Invoice).upsert({
-      properties: {
-        ...target.properties,
-        id: target.primaryId,
-        status: "sent",
-        reminderReviewStatus: "approved",
-        reminderReviewedAt: reviewedAt,
-        reminderReviewerNote: params.reviewerNote,
-      },
+    objects(Invoice).byId(subject.primaryId).update({
+      status: "sent",
+      reminderReviewStatus: "approved",
+      reminderReviewedAt: reviewedAt,
+      reminderReviewerNote: params.reviewerNote,
     })
   })

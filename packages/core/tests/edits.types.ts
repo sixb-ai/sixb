@@ -1,4 +1,5 @@
-import { defineObjectType, type EditBatch, link, prop, recordEdits } from "../src"
+import { defineObjectType, type EditBatch, link, prop } from "../src"
+import { recordEdits } from "../src/actions/worker"
 
 const Customer = defineObjectType({
   id: "Customer",
@@ -36,7 +37,7 @@ const Invoice = defineObjectType({
   ],
 })
 
-const batch: EditBatch = recordEdits({ runId: "act_1" }, ({ objects }) => {
+const batch: Promise<EditBatch> = recordEdits({ runId: "act_1" }, ({ objects }) => {
   const invoice = objects(Invoice).create({
     amount: 120,
     status: "draft",

@@ -118,8 +118,8 @@ describe("InMemoryActionRunStorage", () => {
       projectId: "my-app",
       status: "failed",
       error: {
-        message: "handler failed",
-        phase: "legacy_handler",
+        message: "writeback failed",
+        phase: "writeback",
       },
     })
 
@@ -156,7 +156,7 @@ describe("InMemoryActionRunStorage", () => {
       error: {
         name: "FetchError",
         message: "TeamLeader API returned 503 Service Unavailable",
-        phase: "legacy_handler",
+        phase: "writeback",
       },
     })
 
@@ -209,7 +209,7 @@ describe("InMemoryActionRunStorage", () => {
     expect(failed?.error).toEqual({
       name: "FetchError",
       message: "TeamLeader API returned 503 Service Unavailable",
-      phase: "legacy_handler",
+      phase: "writeback",
     })
   })
 

@@ -346,7 +346,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
       'edits',
       'commit',
       'effects',
-      'legacy_handler',
       'cancelled'
     )
   ),
@@ -370,7 +369,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
       'edits',
       'commit',
       'effects',
-      'legacy_handler',
       'cancelled'
     )
   ),
@@ -387,7 +385,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
       'edits',
       'commit',
       'effects',
-      'legacy_handler',
       'cancelled'
     )
   ),
@@ -402,7 +399,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
       'edits',
       'commit',
       'effects',
-      'legacy_handler',
       'cancelled'
     )
   ),

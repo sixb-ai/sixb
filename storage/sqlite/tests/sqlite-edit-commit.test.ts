@@ -12,10 +12,9 @@ import {
   OntologyRegistry,
   planEditBatch,
   prop,
-  type RecordEditsHandler,
-  recordEdits,
   type StoredObjectUpsertedEvent,
 } from "@sixb/core"
+import { type RecordEditsHandler, recordEdits } from "@sixb/core/actions/worker"
 import { SqliteStorage } from "../src"
 
 const Customer = defineObjectType({
@@ -52,7 +51,7 @@ const Payment = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Customer, Invoice, Payment] })
 const tempDirs: string[] = []
 
-function recordStorageEdits(runId: string, handler: RecordEditsHandler): EditBatch {
+async function recordStorageEdits(runId: string, handler: RecordEditsHandler): Promise<EditBatch> {
   return recordEdits({ runId }, handler)
 }
 
@@ -87,7 +86,7 @@ describe("SQLite edit commit", () => {
         projectId: "project-a",
       })
 
-      const batch = recordStorageEdits("run_mark_paid", ({ objects }) => {
+      const batch = await recordStorageEdits("run_mark_paid", ({ objects }) => {
         const invoice = objects(Invoice).byId("inv_1")
 
         invoice.update({ status: "paid" })
@@ -181,7 +180,7 @@ describe("SQLite edit commit", () => {
         projectId: "project-a",
       })
 
-      const batch = recordStorageEdits("run_delete_invoice", ({ objects }) => {
+      const batch = await recordStorageEdits("run_delete_invoice", ({ objects }) => {
         objects(Invoice).byId("inv_1").delete()
       })
       const result = (
@@ -392,14 +391,14 @@ describe("SQLite edit commit concurrency", () => {
       await queueRunningRun(storage, "run_link_cus_2")
 
       const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
-      const batchA = recordStorageEdits("run_link_cus_1", ({ objects }) => {
+      const batchA = await recordStorageEdits("run_link_cus_1", ({ objects }) => {
         objects(Invoice)
           .byId("inv_1")
           .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
             properties: { role: "payer" },
           })
       })
-      const batchB = recordStorageEdits("run_link_cus_2", ({ objects }) => {
+      const batchB = await recordStorageEdits("run_link_cus_2", ({ objects }) => {
         objects(Invoice)
           .byId("inv_1")
           .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {

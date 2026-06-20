@@ -19,20 +19,30 @@ import type {
   EditObjectRef,
   EditObjectUpdateOperation,
   EditOperation,
+  RecordEditsContext,
   RecordEditsHandler,
   RecordEditsOptions,
 } from "./types"
 
+export type { RecordEditsHandler, RecordEditsOptions } from "./types"
+
 const EMPTY_VALUE_TYPES = new Map<string, ValueType>()
 
-export function recordEdits(options: RecordEditsOptions, handler: RecordEditsHandler): EditBatch {
+type RuntimeEditRecorder = {
+  readonly objects: (objectType: ObjectTypeWithPropertyTokens) => unknown
+  toEditBatch(): EditBatch
+}
+
+export async function recordEdits(
+  options: RecordEditsOptions,
+  handler: RecordEditsHandler
+): Promise<EditBatch> {
   const recorder = createEditRecorder(options)
-  const runHandler = handler as (ctx: unknown) => void
-  runHandler({ objects: recorder.objects })
+  await handler({ objects: recorder.objects } as RecordEditsContext)
   return recorder.toEditBatch()
 }
 
-function createEditRecorder(options: RecordEditsOptions) {
+function createEditRecorder(options: RecordEditsOptions): RuntimeEditRecorder {
   if (!options.runId.trim()) {
     throw new EditBatchError("[Sixb] recordEdits requires a non-empty runId.")
   }
@@ -189,7 +199,7 @@ function createEditRecorder(options: RecordEditsOptions) {
       },
     })
 
-    return handle as unknown as EditObjectHandle<ObjectTypeWithPropertyTokens>
+    return handle as EditObjectHandle<ObjectTypeWithPropertyTokens>
   }
 
   return {

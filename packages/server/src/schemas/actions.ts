@@ -38,4 +38,10 @@ export const ActionCatalogItemSchema = z.object({
   description: z.string().optional(),
   binding: ActionBindingSchema,
   params: z.array(ActionParamSchema),
+  phases: z.object({
+    validate: z.boolean(),
+    writeback: z.boolean(),
+    edits: z.boolean(),
+    effects: z.boolean(),
+  }),
 })

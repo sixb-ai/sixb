@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { SecurityContext } from "../auth"
 import type { EventActor } from "../events"
-import { ActionRunTimeoutError, ActionValidationError } from "../objects/action/errors"
-import { requireObject } from "../objects/helpers"
+import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
@@ -15,14 +14,8 @@ import {
   actionSubjectsEqual,
   isTerminalActionRun,
 } from "../storage"
-import type {
-  ActionDefinition,
-  ActionSubject,
-  ActionTargetObject,
-  ObjectActionDefinition,
-} from "./types"
+import type { ActionDefinition, ActionSubject } from "./types"
 import {
-  isGlobalActionDefinition,
   isObjectActionDefinition,
   normalizeActionParams,
   resolveObjectActionSubject,
@@ -95,37 +88,6 @@ function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): Act
   return action
 }
 
-function toActionTargetObject(
-  row: Awaited<ReturnType<typeof requireObject>>,
-  declaredObjectTypeId: string
-): ActionTargetObject {
-  return {
-    primaryId: row.primaryId,
-    objectTypeId: declaredObjectTypeId,
-    properties: row.properties,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
-}
-
-async function loadActionTarget(params: {
-  readonly runtime: SixbRuntimeContext
-  readonly action: ObjectActionDefinition
-  readonly objectType: ObjectTypeWithPropertyTokens
-  readonly subject: Extract<ActionSubject, { kind: "object" }>
-}): Promise<ActionTargetObject> {
-  const { runtime, action, objectType, subject } = params
-  const targetRow = await requireObject(
-    runtime.storage,
-    runtime.projectId,
-    objectType.id,
-    subject.primaryId,
-    "Object not found for action request"
-  )
-
-  return toActionTargetObject(targetRow, action.target.id)
-}
-
 export async function requestAction(
   runtime: SixbRuntimeContext,
   input: RequestActionInput
@@ -135,7 +97,6 @@ export async function requestAction(
   const actionId = action.id
   const rawParams: Record<string, unknown> = input.params ?? {}
   const subject: ActionSubject = input.subject ?? { kind: "none" }
-  const signal = input.signal ?? new AbortController().signal
 
   validateActionSubject(action, subject)
 
@@ -148,25 +109,6 @@ export async function requestAction(
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
-
-  if (isGlobalActionDefinition(action)) {
-    for (const validator of action.validators) {
-      const result = await validator({ params: actionParams, signal })
-
-      if (result && "error" in result) {
-        throw new ActionValidationError(result.error, { actionId, subject })
-      }
-    }
-  } else if (objectType !== null && subject.kind === "object") {
-    const target = await loadActionTarget({ runtime, action, objectType, subject })
-    for (const validator of action.validators) {
-      const result = await validator({ params: actionParams, target, signal })
-
-      if (result && "error" in result) {
-        throw new ActionValidationError(result.error, { actionId, subject })
-      }
-    }
-  }
 
   const runId = createActionRunId(input.runId)
   const existing = await actionRuns.getById({ projectId: runtime.projectId, id: runId })

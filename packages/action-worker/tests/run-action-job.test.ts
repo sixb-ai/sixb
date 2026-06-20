@@ -3,7 +3,6 @@ import {
   type ActionDefinition,
   type ActionRunParams,
   type ActionSubject,
-  actionParam,
   defineAction,
   defineObjectType,
   type EventsRuntime,
@@ -13,6 +12,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type ObjectRow,
+  param,
   prop,
   Sixb,
 } from "@sixb/core"
@@ -110,7 +110,7 @@ describe("runActionJob", () => {
   test("throws ActionWorkerError when the stored run is missing", async () => {
     const count = defineAction("count")
       .params({})
-      .run(() => {})
+      .writeback(() => {})
     const sixb = createSixb([count])
 
     await expect(
@@ -124,19 +124,13 @@ describe("runActionJob", () => {
     ).rejects.toBeInstanceOf(ActionWorkerError)
   })
 
-  test("runs the handler, applies object writes, and stores a succeeded run", async () => {
+  test("commits edits and stores a succeeded run", async () => {
     const setStatus = defineAction("setStatus")
-      .target(Device)
-      .params({ status: actionParam("string", { required: true }) })
-      .run(async ({ params, target, sixb, signal }) => {
+      .on(Device)
+      .params({ status: param("string") })
+      .edits(({ objects, params, subject, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        await sixb.objects(Device).upsert({
-          properties: {
-            id: target.primaryId,
-            name: target.properties.name,
-            status: params.status,
-          },
-        })
+        objects(Device).byId(subject.primaryId).update({ status: params.status })
       })
 
     const sixb = createSixb([setStatus])
@@ -162,36 +156,40 @@ describe("runActionJob", () => {
     expect(result.status).toBe("succeeded")
     const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
     expect(run?.status).toBe("succeeded")
-    expect(run?.phase).toBe("legacy_handler")
-    expect(run?.params).toEqual({ status: "ready" })
+    expect(run?.phase).toBe("commit")
+    expect(run?.commit?.diff.objects).toEqual([
+      {
+        objectTypeId: "Device",
+        primaryId: "device-1",
+        operation: "update",
+        changedProperties: ["status"],
+      },
+    ])
 
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBe("ready")
   })
 
-  test("preserves partial object writes when the handler throws", async () => {
-    const failAfterWrite = defineAction("failAfterWrite")
-      .target(Device)
+  test("fails writeback before local commit", async () => {
+    const failWriteback = defineAction("failWriteback")
+      .on(Device)
       .params({})
-      .run(async ({ target, sixb }) => {
-        await sixb.objects(Device).upsert({
-          properties: {
-            id: target.primaryId,
-            name: target.properties.name,
-            status: "partially-updated",
-          },
-        })
+      .writeback(() => {
         throw new Error("external API failed")
       })
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: "should-not-commit" })
+      })
 
-    const sixb = createSixb([failAfterWrite])
+    const sixb = createSixb([failWriteback])
     await sixb.upsertObject("Device", {
       id: "device-1",
       name: "Device 1",
+      status: "old",
     })
     await queueActionRun(sixb, {
       id: "act_1",
-      actionId: "failAfterWrite",
+      actionId: "failWriteback",
       subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
       params: {},
     })
@@ -200,7 +198,7 @@ describe("runActionJob", () => {
       runtime: createContext(sixb),
       job: {
         id: "act_1",
-        actionId: "failAfterWrite",
+        actionId: "failWriteback",
       },
     })
 
@@ -209,20 +207,23 @@ describe("runActionJob", () => {
       expect(result.error).toEqual({
         name: "Error",
         message: "external API failed",
-        phase: "legacy_handler",
+        phase: "writeback",
       })
     }
 
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    expect(run?.writeback?.status).toBe("failed")
+    expect(run?.commit).toBeUndefined()
     const updated = await deviceObjects(sixb).get("device-1")
-    expect(updated?.properties.status).toBe("partially-updated")
+    expect(updated?.properties.status).toBe("old")
   })
 
-  test("skips duplicate run ids without invoking the handler twice", async () => {
+  test("skips duplicate terminal run ids without invoking phases twice", async () => {
     let invoked = 0
     const count = defineAction("count")
-      .target(Device)
+      .on(Device)
       .params({})
-      .run(() => {
+      .writeback(() => {
         invoked += 1
       })
 
@@ -259,17 +260,15 @@ describe("runActionJob", () => {
     expect("skipped" in duplicate).toBe(true)
   })
 
-  test("runs global action handlers without loading a target", async () => {
+  test("commits global action edits without loading a target", async () => {
     const createDevice = defineAction("createDevice")
-      .params({ id: actionParam("string", { required: true }) })
-      .run(async ({ params, sixb, signal }) => {
+      .params({ id: param("string") })
+      .edits(({ objects, params, signal }) => {
         expect(signal).toBeInstanceOf(AbortSignal)
-        await sixb.objects(Device).upsert({
-          properties: {
-            id: params.id,
-            name: "Created Device",
-            status: "created",
-          },
+        objects(Device).create({
+          id: params.id,
+          name: "Created Device",
+          status: "created",
         })
       })
 
@@ -323,11 +322,11 @@ describe("runActionJob", () => {
     expect(run?.phase).toBe("validation")
   })
 
-  test("marks redelivered running runs failed without invoking the handler again", async () => {
+  test("marks redelivered running runs failed before a resumable boundary", async () => {
     let invoked = 0
     const count = defineAction("count")
       .params({})
-      .run(() => {
+      .writeback(() => {
         invoked += 1
       })
 
@@ -364,12 +363,102 @@ describe("runActionJob", () => {
     expect(run?.finishedAt).toBeInstanceOf(Date)
   })
 
+  test("resumes from a persisted successful writeback without replaying it", async () => {
+    let writebackCalls = 0
+    const setStatus = defineAction("setStatus")
+      .on(Device)
+      .params({})
+      .writeback(() => {
+        writebackCalls += 1
+        return { status: "from-writeback" }
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
+      })
+
+    const sixb = createSixb([setStatus])
+    await sixb.upsertObject("Device", {
+      id: "device-1",
+      name: "Device 1",
+    })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "setStatus",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+    await sixb.storage.actionRuns!.start({ projectId: sixb.id, id: "act_1" })
+    await sixb.storage.actionRuns!.recordWriteback({
+      projectId: sixb.id,
+      id: "act_1",
+      status: "succeeded",
+      result: { status: "persisted" },
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "setStatus",
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    expect(writebackCalls).toBe(0)
+    const updated = await deviceObjects(sixb).get("device-1")
+    expect(updated?.properties.status).toBe("persisted")
+  })
+
+  test("records effects errors without failing committed actions", async () => {
+    const setStatus = defineAction("setStatus")
+      .on(Device)
+      .params({})
+      .edits(({ objects, subject }) => {
+        objects(Device).byId(subject.primaryId).update({ status: "ready" })
+      })
+      .effects(() => {
+        throw new Error("notification failed")
+      })
+
+    const sixb = createSixb([setStatus])
+    await sixb.upsertObject("Device", {
+      id: "device-1",
+      name: "Device 1",
+    })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "setStatus",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "setStatus",
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    const run = await sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: "act_1" })
+    expect(run?.status).toBe("succeeded")
+    expect(run?.effects).toMatchObject({
+      status: "failed",
+      error: {
+        name: "Error",
+        message: "notification failed",
+        phase: "effects",
+      },
+    })
+  })
+
   test("rejects forged object subjects outside the action target hierarchy", async () => {
     let invoked = 0
     const setStatus = defineAction("setStatus")
-      .target(Device)
+      .on(Device)
       .params({})
-      .run(() => {
+      .writeback(() => {
         invoked += 1
       })
 

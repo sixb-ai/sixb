@@ -23,6 +23,12 @@
       "import": "./dist/query.js",
       "default": "./dist/query.js"
     },
+    "./actions/worker": {
+      "types": "./dist/actions/worker.d.ts",
+      "bun": "./src/actions/worker.ts",
+      "import": "./dist/actions/worker.js",
+      "default": "./dist/actions/worker.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "bun": "./src/testing/index.ts",

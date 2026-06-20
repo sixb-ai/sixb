@@ -4,7 +4,6 @@ import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
-  actionParam,
   col,
   datasetUpdated,
   defineAction,
@@ -28,6 +27,7 @@ import {
   interventionField,
   link,
   type OntologySource,
+  param,
   prop,
   Sixb,
   type SixbOptions,
@@ -158,13 +158,13 @@ const reviewDeviceHealthWorkflow = defineWorkflow("review-device-health-workflow
   .then(reviewDeviceHealth)
 
 const setSpeed = defineAction("setSpeed")
-  .target(Device)
-  .params({ speed: actionParam("double", { required: true }) })
-  .run(async () => {})
+  .on(Device)
+  .params({ speed: param("double") })
+  .writeback(async () => {})
 
 const createMaintenanceRun = defineAction("createMaintenanceRun")
-  .params({ note: actionParam("string", { required: true }) })
-  .run(async () => {})
+  .params({ note: param("string") })
+  .writeback(async () => {})
 
 const highRpmRule = defineRule("device.high-rpm")
   .on(Device)
@@ -1089,6 +1089,12 @@ describe("SixbServer HTTP contract", () => {
               required: true,
             },
           ],
+          phases: {
+            validate: false,
+            writeback: true,
+            edits: false,
+            effects: false,
+          },
         },
         {
           id: "createMaintenanceRun",
@@ -1102,6 +1108,12 @@ describe("SixbServer HTTP contract", () => {
               required: true,
             },
           ],
+          phases: {
+            validate: false,
+            writeback: true,
+            edits: false,
+            effects: false,
+          },
         },
       ])
 
@@ -1119,6 +1131,12 @@ describe("SixbServer HTTP contract", () => {
             required: true,
           },
         ],
+        phases: {
+          validate: false,
+          writeback: true,
+          edits: false,
+          effects: false,
+        },
       })
 
       const missingActionResponse = await fetch(`${baseUrl}/api/actions/missing`)

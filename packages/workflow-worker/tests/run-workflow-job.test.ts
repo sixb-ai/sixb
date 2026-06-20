@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ActionDefinition,
   type ActionRunStorage,
-  actionParam,
-  defineAction,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
@@ -14,6 +13,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type OntologySource,
+  param,
   prop,
   ref,
   Sixb,
@@ -133,18 +133,24 @@ const invalidOutputStep = defineWorkflowStep("invalid-output")
   }))
 
 let actionHandlerCalls = 0
-const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
-  .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
-  })
-  .run(() => {
-    actionHandlerCalls += 1
-  })
+const attachInvoice: ActionDefinition = {
+  kind: "action",
+  id: "attach-invoice",
+  binding: { kind: "object", objectType: Transaction },
+  params: {
+    invoice: param(ref(Invoice)),
+  },
+  phases: {
+    validate: [],
+    writeback: () => {
+      actionHandlerCalls += 1
+    },
+  },
+}
 
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
-  readonly actions?: readonly (typeof attachInvoice)[]
+  readonly actions?: readonly ActionDefinition[]
 }) {
   return new Sixb({
     id: "workflow-worker-tests",
@@ -250,7 +256,7 @@ async function completeRequestedActions(
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
                   error: {
                     message: errorMessage,
-                    phase: "legacy_handler",
+                    phase: "writeback",
                   },
                 }
           )
@@ -275,7 +281,7 @@ async function completeRequestedActions(
                       subject: event.payload.subject,
                       error: {
                         message: errorMessage,
-                        phase: "legacy_handler",
+                        phase: "writeback",
                       },
                       finishedAt: "2026-05-08T10:00:00.000Z",
                     },
@@ -990,7 +996,7 @@ describe("runWorkflowJob", () => {
     expect(nodes.nodes[1]?.error).toBe("attach failed")
   })
 
-  test("marks action node and workflow failed when action request validation fails", async () => {
+  test("marks action node and workflow failed when the action worker rejects the target", async () => {
     const workflow = defineWorkflow("missing-target-workflow")
       .input({
         transaction: ref(Transaction),
@@ -1003,19 +1009,28 @@ describe("runWorkflowJob", () => {
         },
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
+    const unsubscribe = await completeRequestedActions(
+      sixb,
+      "failed",
+      "Object not found for action request"
+    )
 
-    await expect(
-      runWorkflowJob({
-        runtime: createRuntime(sixb),
-        job: {
-          id: "wfrun_action_failed",
-          workflowId: workflow.id,
-          input: {
-            transaction: { objectTypeId: "Transaction", primaryId: "missing" },
+    try {
+      await expect(
+        runWorkflowJob({
+          runtime: createRuntime(sixb),
+          job: {
+            id: "wfrun_action_failed",
+            workflowId: workflow.id,
+            input: {
+              transaction: { objectTypeId: "Transaction", primaryId: "missing" },
+            },
           },
-        },
-      })
-    ).rejects.toThrow("Object not found for action request")
+        })
+      ).rejects.toThrow("Object not found for action request")
+    } finally {
+      unsubscribe()
+    }
 
     const run = await sixb.storage.workflowRuns!.getById({
       projectId: sixb.id,
@@ -1031,7 +1046,7 @@ describe("runWorkflowJob", () => {
     })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(events).toHaveLength(0)
+    expect(events).toHaveLength(1)
   })
 
   test("fails clearly when the workflow is missing", async () => {

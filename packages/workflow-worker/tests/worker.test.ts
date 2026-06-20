@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
-  actionParam,
-  defineAction,
+  type ActionDefinition,
   defineIntervention,
   defineObjectType,
   defineWorkflow,
@@ -60,13 +59,6 @@ const failingStep = defineWorkflowStep("explode")
     throw new Error("workflow exploded")
   })
 
-const attachInvoice = defineAction("attach-invoice")
-  .target(Transaction)
-  .params({
-    invoice: actionParam(ref(Invoice), { required: true }),
-  })
-  .run(() => {})
-
 const reviewInvoice = defineIntervention("review-invoice")
   .input({
     invoice: ref(Invoice),
@@ -97,7 +89,7 @@ afterEach(async () => {
 
 function createSixb(options: {
   readonly workflows?: readonly WorkflowDefinition[]
-  readonly actions?: readonly (typeof attachInvoice)[]
+  readonly actions?: readonly ActionDefinition[]
 }) {
   return new Sixb({
     id: "workflow-worker-tests",

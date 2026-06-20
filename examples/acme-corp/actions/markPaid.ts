@@ -4,14 +4,10 @@ import { Invoice } from "../ontology/invoice"
 export const markPaid = defineAction("markPaid", {
   description: "Mark this invoice as paid.",
 })
-  .target(Invoice)
+  .on(Invoice)
   .params({})
-  .run(async ({ target, sixb }) => {
-    await sixb.objects(Invoice).upsert({
-      properties: {
-        ...target.properties,
-        id: target.primaryId,
-        status: "paid",
-      },
+  .edits(({ objects, subject }) => {
+    objects(Invoice).byId(subject.primaryId).update({
+      status: "paid",
     })
   })

@@ -9380,9 +9380,28 @@
                           "required": ["id", "name"],
                           "additionalProperties": false
                         }
+                      },
+                      "phases": {
+                        "type": "object",
+                        "properties": {
+                          "validate": {
+                            "type": "boolean"
+                          },
+                          "writeback": {
+                            "type": "boolean"
+                          },
+                          "edits": {
+                            "type": "boolean"
+                          },
+                          "effects": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": ["validate", "writeback", "edits", "effects"],
+                        "additionalProperties": false
                       }
                     },
-                    "required": ["id", "name", "binding", "params"],
+                    "required": ["id", "name", "binding", "params", "phases"],
                     "additionalProperties": false
                   }
                 }
@@ -9480,9 +9499,28 @@
                         "required": ["id", "name"],
                         "additionalProperties": false
                       }
+                    },
+                    "phases": {
+                      "type": "object",
+                      "properties": {
+                        "validate": {
+                          "type": "boolean"
+                        },
+                        "writeback": {
+                          "type": "boolean"
+                        },
+                        "edits": {
+                          "type": "boolean"
+                        },
+                        "effects": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["validate", "writeback", "edits", "effects"],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["id", "name", "binding", "params"],
+                  "required": ["id", "name", "binding", "params", "phases"],
                   "additionalProperties": false
                 }
               }
@@ -10529,6 +10567,7 @@
               "type": "string",
               "enum": [
                 "object.upserted",
+                "object.deleted",
                 "telemetry.appended",
                 "link.upserted",
                 "link.removed",
@@ -10638,6 +10677,7 @@
                             "type": "string",
                             "enum": [
                               "object.upserted",
+                              "object.deleted",
                               "telemetry.appended",
                               "link.upserted",
                               "link.removed",
