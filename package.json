@@ -33,7 +33,7 @@
     "docs:typecheck": "bun --filter @sixb/docs typecheck",
     "test:publish": "bun scripts/pack-smoke.ts",
     "ui:dev": "bun --filter @sixb/ui dev",
-    "ui:add": "bun --cwd packages/ui x shadcn@latest add"
+    "ui:add": "bun --filter @sixb/ui shadcn:add"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",

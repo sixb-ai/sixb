@@ -29,6 +29,15 @@ export {
   CardHeader,
   CardTitle,
 } from "./ui/card"
+export {
+  type ChartConfig,
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartStyle,
+  ChartTooltip,
+  ChartTooltipContent,
+} from "./ui/chart"
 export { Checkbox } from "./ui/checkbox"
 // Sixb shadcn-composed components
 export { Combobox, type ComboboxOption } from "./ui/combobox"
