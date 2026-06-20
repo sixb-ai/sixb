@@ -26,7 +26,7 @@ import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
-import { isSerializationFailure } from "./storage-errors"
+import { isRetryableTransactionConflict } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
@@ -193,25 +193,25 @@ export class PostgresStorage implements MigrationCapableStorage {
     }
 
     try {
-      return await runPgTransaction(this.sql, async (client) => {
-        if (options.isolation === "serializable") {
-          await client`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`
-        }
+      return await runPgTransaction(
+        this.sql,
+        async (client) => {
+          let active = true
+          const txStorage = this.createTransactionStorage(client)
+          const tx = createTransactionStorageProxy(txStorage, () => active)
 
-        let active = true
-        const txStorage = this.createTransactionStorage(client)
-        const tx = createTransactionStorageProxy(txStorage, () => active)
-
-        try {
-          return await this.transactionScope.run(true, () => run(tx))
-        } finally {
-          active = false
-        }
-      })
+          try {
+            return await this.transactionScope.run(true, () => run(tx))
+          } finally {
+            active = false
+          }
+        },
+        { isolation: options.isolation === "serializable" ? "serializable" : undefined }
+      )
     } catch (error) {
-      if (isSerializationFailure(error)) {
+      if (isRetryableTransactionConflict(error)) {
         throw new StorageTransactionError(
-          "[SixbPg] Storage transaction failed due to a serialization conflict.",
+          "[SixbPg] Storage transaction failed due to a serialization conflict or deadlock and may be retried.",
           { cause: error, code: "serialization_failure" }
         )
       }

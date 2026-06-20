@@ -8,7 +8,25 @@ import type { Storage } from "../storage/types"
 import { ActionEditCommitError } from "./errors"
 import type { ActionSubject } from "./types"
 
-const EDIT_COMMIT_MAX_SERIALIZATION_ATTEMPTS = 3
+const DEFAULT_MAX_SERIALIZATION_ATTEMPTS = 3
+const SERIALIZATION_BASE_DELAY_MS = 10
+const SERIALIZATION_MAX_DELAY_MS = 200
+
+/**
+ * Tunes the serialization-failure retry. Both fields are optional and injectable so tests stay
+ * deterministic: a no-op `sleep` removes wall-clock delay.
+ */
+export interface SerializationRetryOptions {
+  /** Total attempts, including the first. Defaults to 3; values below 1 are clamped to 1. */
+  readonly maxAttempts?: number
+  /** Awaited before each retry. Defaults to a real timer. */
+  readonly sleep?: (ms: number) => Promise<void>
+}
+
+interface ResolvedSerializationRetryPolicy {
+  readonly maxAttempts: number
+  readonly sleep: (ms: number) => Promise<void>
+}
 
 export interface CommitActionEditBatchInput {
   readonly storage: Storage
@@ -23,6 +41,8 @@ export interface CommitActionEditBatchInput {
   readonly batch: EditBatchInput
   readonly committedAt?: Date
   readonly idempotencyKey?: string
+  /** Overrides the serialization-failure retry pacing; defaults are applied per field. */
+  readonly serializationRetry?: SerializationRetryOptions
 }
 
 export interface ActionEditCommitResult {
@@ -45,35 +65,73 @@ export interface CommitActionEditBatchResult {
  * the same storage transaction.
  *
  * The transaction requests serializable isolation because EditBatch validation is state-dependent
- * (for example cardinality-one links). Provider-classified serialization failures are retried since
- * this callback is storage-only and deterministic. `committedAt` is fixed before retrying so every
- * attempt represents the same logical commit.
+ * (for example cardinality-one links). The path takes no advisory locks or fixed lock ordering;
+ * concurrency correctness rests entirely on serializable isolation plus the retry below. The
+ * same-run idempotency short-circuit (returning the recorded commit when `run.commit` is already
+ * set) likewise relies on that isolation to resolve the read-then-write race between two commits of
+ * the same run: under serializable, the loser observes a serialization failure and retries into the
+ * idempotent branch instead of double-applying.
+ *
+ * Provider-classified serialization failures are retried since this callback is storage-only and
+ * deterministic. `committedAt` is fixed before retrying so every attempt represents the same logical
+ * commit. Retries use full-jitter exponential backoff (see {@link SerializationRetryOptions}) so a
+ * herd of conflicting commits de-synchronizes instead of re-colliding in lock-step.
+ *
+ * This helper is the single retry boundary for edit commits: callers must route every edit commit
+ * through it rather than calling `storage.transaction` directly, which (by design) does not retry.
  */
 export async function commitActionEditBatch(
   input: CommitActionEditBatchInput
 ): Promise<CommitActionEditBatchResult> {
   const committedAt = input.committedAt ?? new Date()
-  return commitActionEditBatchWithSerializationRetry(input, committedAt, 1)
+  const policy = resolveSerializationRetryPolicy(input.serializationRetry)
+  return commitActionEditBatchWithSerializationRetry(input, committedAt, policy)
 }
 
 async function commitActionEditBatchWithSerializationRetry(
   input: CommitActionEditBatchInput,
   committedAt: Date,
-  attempt: number
+  policy: ResolvedSerializationRetryPolicy
 ): Promise<CommitActionEditBatchResult> {
-  try {
-    return await commitActionEditBatchOnce(input, committedAt)
-  } catch (error) {
-    if (!shouldRetrySerializationFailure(error, attempt)) {
-      throw error
-    }
+  for (let failures = 0; ; failures++) {
+    try {
+      return await commitActionEditBatchOnce(input, committedAt)
+    } catch (error) {
+      const attempted = failures + 1
+      if (!isStorageSerializationFailure(error) || attempted >= policy.maxAttempts) {
+        throw error
+      }
 
-    return commitActionEditBatchWithSerializationRetry(input, committedAt, attempt + 1)
+      await policy.sleep(serializationBackoffMs(attempted))
+    }
   }
 }
 
-function shouldRetrySerializationFailure(error: unknown, attempt: number): boolean {
-  return isStorageSerializationFailure(error) && attempt < EDIT_COMMIT_MAX_SERIALIZATION_ATTEMPTS
+function resolveSerializationRetryPolicy(
+  options: SerializationRetryOptions = {}
+): ResolvedSerializationRetryPolicy {
+  return {
+    maxAttempts: Math.max(1, Math.trunc(options.maxAttempts ?? DEFAULT_MAX_SERIALIZATION_ATTEMPTS)),
+    sleep: options.sleep ?? defaultSerializationSleep,
+  }
+}
+
+/**
+ * Full-jitter exponential backoff (AWS "Exponential Backoff And Jitter"): a uniformly random delay
+ * in `[0, cap]` where `cap = min(SERIALIZATION_MAX_DELAY_MS, SERIALIZATION_BASE_DELAY_MS * 2 ** (failures - 1))`.
+ * Full jitter de-synchronizes a thundering herd better than fixed or equal-jittered backoff.
+ * `failures` is the number of attempts that have already failed (≥ 1).
+ */
+function serializationBackoffMs(failures: number): number {
+  const cap = Math.min(
+    SERIALIZATION_MAX_DELAY_MS,
+    SERIALIZATION_BASE_DELAY_MS * 2 ** (failures - 1)
+  )
+  return Math.random() * cap
+}
+
+function defaultSerializationSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function commitActionEditBatchOnce(

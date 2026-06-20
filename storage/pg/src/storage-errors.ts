@@ -6,8 +6,15 @@
 /** PostgreSQL SQLSTATE for a unique-constraint violation. */
 const UNIQUE_VIOLATION = "23505"
 
-/** PostgreSQL SQLSTATE for a serializable transaction conflict. */
-const SERIALIZATION_FAILURE = "40001"
+/**
+ * PostgreSQL SQLSTATEs in class 40 (transaction rollback) that are transient and safe to retry by
+ * replaying the whole transaction: `40001` (serialization_failure) and `40P01` (deadlock_detected).
+ * Under `SERIALIZABLE` the server raises *either* — a serialization anomaly surfaces as `40001`,
+ * while two transactions taking row locks in crossing order surface as `40P01` — and both clear on
+ * a fresh attempt. The other class-40 codes (`40002` integrity-constraint violation, `40003`
+ * statement-completion unknown) are deliberately excluded: they are not safe to blindly replay.
+ */
+const RETRYABLE_TRANSACTION_CONFLICT_CODES = new Set(["40001", "40P01"])
 
 const CONNECTION_ERROR_CODES = new Set([
   // porsager-specific
@@ -39,9 +46,14 @@ export function isUniqueViolation(error: unknown): boolean {
   return pgErrorCode(error) === UNIQUE_VIOLATION
 }
 
-/** True when the error is a PostgreSQL serialization failure (SQLSTATE 40001). */
-export function isSerializationFailure(error: unknown): boolean {
-  return pgErrorCode(error) === SERIALIZATION_FAILURE
+/**
+ * True when the error is a transient transaction-rollback conflict that is safe to retry by
+ * replaying the transaction — a serialization failure (SQLSTATE 40001) or a deadlock (40P01).
+ * See {@link RETRYABLE_TRANSACTION_CONFLICT_CODES}.
+ */
+export function isRetryableTransactionConflict(error: unknown): boolean {
+  const code = pgErrorCode(error)
+  return code !== undefined && RETRYABLE_TRANSACTION_CONFLICT_CODES.has(code)
 }
 
 /**

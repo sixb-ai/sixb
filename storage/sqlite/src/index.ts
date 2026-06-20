@@ -99,6 +99,13 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
   }
 
+  /**
+   * The `isolation` option is intentionally ignored. SQLite runs every transaction through one
+   * shared connection serialized by {@link withTransactionLock} and a `BEGIN IMMEDIATE`, so there is
+   * no concurrent transaction to isolate against — the lock already provides serializable semantics
+   * for transaction-vs-transaction races. Postgres, which has true concurrent connections, is where
+   * `isolation: "serializable"` translates to a real isolation level.
+   */
   async transaction<T>(
     run: (tx: Storage) => Promise<T> | T,
     _options: StorageTransactionOptions = {}

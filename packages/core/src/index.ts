@@ -133,6 +133,7 @@ export type {
   RequestActionInput,
   RequestActionOptions,
   RequestActionResult,
+  SerializationRetryOptions,
   WaitForActionRunInput,
 } from "./actions"
 export {
