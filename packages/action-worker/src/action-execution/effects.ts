@@ -1,4 +1,4 @@
-import type { ActionRunRecord, EditCommitResult, JsonValue } from "@sixb/core"
+import type { ActionEditCommitResult, ActionRunRecord, JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
 import { toActionRunFailure } from "../normalize"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
@@ -10,7 +10,7 @@ export async function runEffectsPhase(
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
     readonly writeback: JsonValue | undefined
-    readonly commit: EditCommitResult
+    readonly commit: ActionEditCommitResult
     readonly updateActiveRun: UpdateActiveRun
   }
 ): Promise<ActionRunRecord> {

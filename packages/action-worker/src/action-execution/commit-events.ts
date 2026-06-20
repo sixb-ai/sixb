@@ -1,10 +1,10 @@
-import type { EditCommitResult, NewDomainEvent, ObjectLinkRow, ObjectRow } from "@sixb/core"
+import type { ActionEditCommitResult, NewDomainEvent, ObjectLinkRow, ObjectRow } from "@sixb/core"
 import type { RunActionJobInput } from "../types"
 
 export async function emitLocalCommitEvents(
   runtime: RunActionJobInput["runtime"],
   runId: string,
-  commit: EditCommitResult
+  commit: ActionEditCommitResult
 ): Promise<void> {
   try {
     const events = await buildDomainEventsFromEditCommit(runtime, runId, commit)
@@ -20,7 +20,7 @@ export async function emitLocalCommitEvents(
 async function buildDomainEventsFromEditCommit(
   runtime: RunActionJobInput["runtime"],
   runId: string,
-  commit: EditCommitResult
+  commit: ActionEditCommitResult
 ): Promise<NewDomainEvent[]> {
   const events: NewDomainEvent[] = []
   const objectRows = await loadCommittedObjectRows(runtime, commit)
@@ -89,7 +89,7 @@ async function buildDomainEventsFromEditCommit(
 
 async function loadCommittedObjectRows(
   runtime: RunActionJobInput["runtime"],
-  commit: EditCommitResult
+  commit: ActionEditCommitResult
 ): Promise<Map<string, ObjectRow>> {
   const items = commit.diff.objects
     .filter((diff) => diff.operation !== "delete")
@@ -107,7 +107,7 @@ async function loadCommittedObjectRows(
 
 async function loadCommittedLinkRows(
   runtime: RunActionJobInput["runtime"],
-  commit: EditCommitResult
+  commit: ActionEditCommitResult
 ): Promise<Map<string, ObjectLinkRow>> {
   const items = commit.diff.links
     .filter((diff) => diff.operation !== "delete")

@@ -1,7 +1,6 @@
-import type { ActionRunRecord, EditCommitResult, JsonValue } from "@sixb/core"
-import { isObjectActionDefinition, validateEditBatch } from "@sixb/core"
+import type { ActionEditCommitResult, ActionRunRecord, JsonValue } from "@sixb/core"
+import { commitActionEditBatch, isObjectActionDefinition } from "@sixb/core"
 import { recordEdits } from "@sixb/core/actions/worker"
-import { ActionWorkerError } from "../errors"
 import { emitLocalCommitEvents } from "./commit-events"
 import { type BasePhaseContext, createReadFacade, requireObjectSubject } from "./context"
 import type {
@@ -19,7 +18,7 @@ export async function runEditsAndCommitPhase(
     readonly writeback: JsonValue | undefined
     readonly updateActiveRun: UpdateActiveRun
   }
-): Promise<{ run: ActionRunRecord; result: EditCommitResult | null }> {
+): Promise<{ run: ActionRunRecord; result: ActionEditCommitResult | null }> {
   const handler = input.action.phases.edits as RuntimePhaseHandler | undefined
   if (!handler) {
     return { run: input.run, result: null }
@@ -34,11 +33,6 @@ export async function runEditsAndCommitPhase(
         created: false,
       },
     }
-  }
-
-  const edits = input.runtime.storage.edits
-  if (!edits) {
-    throw new ActionWorkerError("Action workers require storage.edits support for .edits(...).")
   }
 
   let run = await input.runtime.actionRunsStorage.enterPhase({
@@ -73,13 +67,6 @@ export async function runEditsAndCommitPhase(
     }
   )
 
-  await validateEditBatch({
-    projectId: input.runtime.id,
-    ontology: input.runtime.sixb,
-    storage: { objects: input.runtime.storage.objects },
-    batch,
-  })
-
   run = await input.runtime.actionRunsStorage.enterPhase({
     projectId: input.runtime.id,
     id: input.run.id,
@@ -87,27 +74,19 @@ export async function runEditsAndCommitPhase(
   })
   input.updateActiveRun(run)
 
-  const result = await edits.commit({
+  const committed = await commitActionEditBatch({
+    storage: input.runtime.storage,
     projectId: input.runtime.id,
     runId: run.id,
     actionId: input.action.id,
     subject: run.subject,
     ontology: input.runtime.sixb,
     batch,
-    securityContext: run.securityContext,
     idempotencyKey: run.idempotencyKey,
   })
 
-  await emitLocalCommitEvents(input.runtime, run.id, result)
+  await emitLocalCommitEvents(input.runtime, run.id, committed.commit)
 
-  const committedRun = await input.runtime.actionRunsStorage.getById({
-    projectId: input.runtime.id,
-    id: run.id,
-  })
-  if (committedRun) {
-    input.updateActiveRun(committedRun)
-    return { run: committedRun, result }
-  }
-
-  return { run, result }
+  input.updateActiveRun(committed.run)
+  return { run: committed.run, result: committed.commit }
 }

@@ -1187,14 +1187,14 @@ describe("commitActionEditBatch serialization retry", () => {
   const conflict = () =>
     new StorageTransactionError("serialization conflict", { code: "serialization_failure" })
 
-  function exhaustionInput(runId: string, serializationRetry: SerializationRetryOptions) {
+  async function exhaustionInput(runId: string, serializationRetry: SerializationRetryOptions) {
     return {
       projectId: "project-a",
       runId,
       actionId: "markPaid",
       subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const,
       ontology,
-      batch: recordRuntimeEdits({ runId }, ({ objects }) => {
+      batch: await recordRuntimeEdits({ runId }, ({ objects }) => {
         objects(Invoice).byId("inv_1").update({ status: "paid" })
       }),
       serializationRetry,
@@ -1205,7 +1205,10 @@ describe("commitActionEditBatch serialization retry", () => {
     const { storage, attempts } = alwaysFailingStorage(conflict)
 
     await expect(
-      commitActionEditBatch({ storage, ...exhaustionInput("run_exhaust", { sleep: noopSleep }) })
+      commitActionEditBatch({
+        storage,
+        ...(await exhaustionInput("run_exhaust", { sleep: noopSleep })),
+      })
     ).rejects.toThrow(StorageTransactionError)
 
     // Default cap is 3 attempts (the first plus two retries).
@@ -1218,7 +1221,7 @@ describe("commitActionEditBatch serialization retry", () => {
     await expect(
       commitActionEditBatch({
         storage,
-        ...exhaustionInput("run_passthrough", { sleep: noopSleep }),
+        ...(await exhaustionInput("run_passthrough", { sleep: noopSleep })),
       })
     ).rejects.toThrow("boom")
 
@@ -1231,7 +1234,7 @@ describe("commitActionEditBatch serialization retry", () => {
     await expect(
       commitActionEditBatch({
         storage,
-        ...exhaustionInput("run_custom_cap", { sleep: noopSleep, maxAttempts: 5 }),
+        ...(await exhaustionInput("run_custom_cap", { sleep: noopSleep, maxAttempts: 5 })),
       })
     ).rejects.toThrow(StorageTransactionError)
 
@@ -1263,7 +1266,7 @@ describe("commitActionEditBatch serialization retry", () => {
       },
     }
 
-    const batch = recordRuntimeEdits({ runId: "run_rollback_replay" }, ({ objects }) => {
+    const batch = await recordRuntimeEdits({ runId: "run_rollback_replay" }, ({ objects }) => {
       objects(Invoice).byId("inv_1").update({ status: "paid" })
     })
 
@@ -1312,14 +1315,14 @@ describe("commitActionEditBatch concurrency (provider serialization)", () => {
     await queueRunningRun(storage, "run_link_cus_2", "linkCustomer")
 
     const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
-    const batchA = recordRuntimeEdits({ runId: "run_link_cus_1" }, ({ objects }) => {
+    const batchA = await recordRuntimeEdits({ runId: "run_link_cus_1" }, ({ objects }) => {
       objects(Invoice)
         .byId("inv_1")
         .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
           properties: { role: "payer" },
         })
     })
-    const batchB = recordRuntimeEdits({ runId: "run_link_cus_2" }, ({ objects }) => {
+    const batchB = await recordRuntimeEdits({ runId: "run_link_cus_2" }, ({ objects }) => {
       objects(Invoice)
         .byId("inv_1")
         .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {

@@ -391,14 +391,14 @@ describe("SQLite edit commit concurrency", () => {
       await queueRunningRun(storage, "run_link_cus_2")
 
       const subject = { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" } as const
-      const batchA = recordStorageEdits("run_link_cus_1", ({ objects }) => {
+      const batchA = await recordStorageEdits("run_link_cus_1", ({ objects }) => {
         objects(Invoice)
           .byId("inv_1")
           .link(Invoice.l.customer, objects(Customer).byId("cus_1"), {
             properties: { role: "payer" },
           })
       })
-      const batchB = recordStorageEdits("run_link_cus_2", ({ objects }) => {
+      const batchB = await recordStorageEdits("run_link_cus_2", ({ objects }) => {
         objects(Invoice)
           .byId("inv_1")
           .link(Invoice.l.customer, objects(Customer).byId("cus_2"), {
