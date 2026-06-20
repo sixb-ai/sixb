@@ -3,9 +3,12 @@ import { planEditBatch } from "../edits"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ActionRunRecord, ActionRunStorage } from "../storage/action-runs"
 import { actionSubjectsEqual } from "../storage/action-runs"
+import { isStorageSerializationFailure } from "../storage/errors"
 import type { Storage } from "../storage/types"
 import { ActionEditCommitError } from "./errors"
 import type { ActionSubject } from "./types"
+
+const EDIT_COMMIT_MAX_SERIALIZATION_ATTEMPTS = 3
 
 export interface CommitActionEditBatchInput {
   readonly storage: Storage
@@ -33,71 +36,114 @@ export interface CommitActionEditBatchResult {
   readonly commit: ActionEditCommitResult
 }
 
+/**
+ * Atomically commits the local `.edits()` phase for an action run.
+ *
+ * This helper is the core orchestration boundary for local action writes: it validates that the
+ * persisted run still matches the requested action identity, derives the EditBatch plan from the
+ * current transaction state, applies object/link writes, and records the ActionRun commit trail in
+ * the same storage transaction.
+ *
+ * The transaction requests serializable isolation because EditBatch validation is state-dependent
+ * (for example cardinality-one links). Provider-classified serialization failures are retried since
+ * this callback is storage-only and deterministic. `committedAt` is fixed before retrying so every
+ * attempt represents the same logical commit.
+ */
 export async function commitActionEditBatch(
   input: CommitActionEditBatchInput
 ): Promise<CommitActionEditBatchResult> {
-  return input.storage.transaction(async (tx) => {
-    const actionRuns = requireActionRunStorage(tx, input.runId)
-    const run = await actionRuns.getById({
-      projectId: input.projectId,
-      id: input.runId,
-    })
+  const committedAt = input.committedAt ?? new Date()
+  return commitActionEditBatchWithSerializationRetry(input, committedAt, 1)
+}
 
-    if (!run) {
-      throw new ActionEditCommitError(
-        `[Sixb] Action run '${input.runId}' not found for project '${input.projectId}'.`
-      )
+async function commitActionEditBatchWithSerializationRetry(
+  input: CommitActionEditBatchInput,
+  committedAt: Date,
+  attempt: number
+): Promise<CommitActionEditBatchResult> {
+  try {
+    return await commitActionEditBatchOnce(input, committedAt)
+  } catch (error) {
+    if (!shouldRetrySerializationFailure(error, attempt)) {
+      throw error
     }
 
-    assertCommitRunMatchesInput(run, input)
+    return commitActionEditBatchWithSerializationRetry(input, committedAt, attempt + 1)
+  }
+}
 
-    if (run.commit) {
+function shouldRetrySerializationFailure(error: unknown, attempt: number): boolean {
+  return isStorageSerializationFailure(error) && attempt < EDIT_COMMIT_MAX_SERIALIZATION_ATTEMPTS
+}
+
+async function commitActionEditBatchOnce(
+  input: CommitActionEditBatchInput,
+  committedAt: Date
+): Promise<CommitActionEditBatchResult> {
+  return input.storage.transaction(
+    async (tx) => {
+      const actionRuns = requireActionRunStorage(tx, input.runId)
+      const run = await actionRuns.getById({
+        projectId: input.projectId,
+        id: input.runId,
+      })
+
+      if (!run) {
+        throw new ActionEditCommitError(
+          `[Sixb] Action run '${input.runId}' not found for project '${input.projectId}'.`
+        )
+      }
+
+      assertCommitRunMatchesInput(run, input)
+
+      if (run.commit) {
+        return {
+          run,
+          commit: {
+            diff: run.commit.diff,
+            committedAt: run.commit.committedAt,
+            created: false,
+          },
+        }
+      }
+
+      if (run.status !== "running") {
+        throw new ActionEditCommitError(
+          `[Sixb] Action run '${input.runId}' cannot commit edits from status '${run.status}'.`
+        )
+      }
+
+      const plan = await planEditBatch({
+        projectId: input.projectId,
+        ontology: input.ontology,
+        storage: { objects: tx.objects },
+        batch: input.batch,
+      })
+
+      await tx.objects.applyEditCommitPlan({
+        projectId: input.projectId,
+        plan,
+        committedAt,
+      })
+
+      const committedRun = await actionRuns.recordCommit({
+        projectId: input.projectId,
+        id: input.runId,
+        committedAt,
+        diff: plan.diff,
+      })
+
       return {
-        run,
+        run: committedRun,
         commit: {
-          diff: run.commit.diff,
-          committedAt: run.commit.committedAt,
-          created: false,
+          diff: plan.diff,
+          committedAt,
+          created: true,
         },
       }
-    }
-
-    if (run.status !== "running") {
-      throw new ActionEditCommitError(
-        `[Sixb] Action run '${input.runId}' cannot commit edits from status '${run.status}'.`
-      )
-    }
-
-    const committedAt = input.committedAt ?? new Date()
-    const plan = await planEditBatch({
-      projectId: input.projectId,
-      ontology: input.ontology,
-      storage: { objects: tx.objects },
-      batch: input.batch,
-    })
-
-    await tx.objects.applyEditCommitPlan({
-      projectId: input.projectId,
-      plan,
-      committedAt,
-    })
-
-    const committedRun = await actionRuns.recordCommit({
-      projectId: input.projectId,
-      id: input.runId,
-      committedAt,
-      diff: plan.diff,
-    })
-
-    return {
-      run: committedRun,
-      commit: {
-        diff: plan.diff,
-        committedAt,
-        created: true,
-      },
-    }
-  })
+    },
+    { isolation: "serializable" }
+  )
 }
 
 function requireActionRunStorage(storage: Storage, runId: string): ActionRunStorage {

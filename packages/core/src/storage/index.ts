@@ -81,12 +81,18 @@ export type {
   UserStatus,
 } from "./auth"
 export { AuthStorageError, InMemoryAuthStorage } from "./auth"
-export type { EditCommitLinkRef, EditCommitObjectRef } from "./errors"
+export type {
+  EditCommitLinkRef,
+  EditCommitObjectRef,
+  StorageTransactionErrorCode,
+  StorageTransactionErrorOptions,
+} from "./errors"
 export {
   editCommitLinkCreateConflict,
   editCommitLinkUpdateMissing,
   editCommitObjectCreateConflict,
   editCommitObjectUpdateMissing,
+  isStorageSerializationFailure,
   ObjectNotFoundError,
   ObjectStorageError,
   StorageTransactionError,

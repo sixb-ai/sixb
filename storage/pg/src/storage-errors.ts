@@ -6,6 +6,9 @@
 /** PostgreSQL SQLSTATE for a unique-constraint violation. */
 const UNIQUE_VIOLATION = "23505"
 
+/** PostgreSQL SQLSTATE for a serializable transaction conflict. */
+const SERIALIZATION_FAILURE = "40001"
+
 const CONNECTION_ERROR_CODES = new Set([
   // porsager-specific
   "CONNECT_TIMEOUT",
@@ -34,6 +37,11 @@ export function pgErrorCode(error: unknown): string | undefined {
 /** True when the error is a PostgreSQL unique-constraint violation (SQLSTATE 23505). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgErrorCode(error) === UNIQUE_VIOLATION
+}
+
+/** True when the error is a PostgreSQL serialization failure (SQLSTATE 40001). */
+export function isSerializationFailure(error: unknown): boolean {
+  return pgErrorCode(error) === SERIALIZATION_FAILURE
 }
 
 /**

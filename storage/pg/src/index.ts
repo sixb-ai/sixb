@@ -8,6 +8,7 @@ import {
   type MigrationCapableStorage,
   type Storage,
   type StorageMigrator,
+  StorageTransactionError,
   type StorageTransactionOptions,
   throwNestedStorageTransaction,
 } from "@sixb/core"
@@ -25,6 +26,7 @@ import { PgWebhookDeliveryStorage } from "./pg-webhook-delivery-storage"
 import { PgWebhookRunStorage } from "./pg-webhook-run-storage"
 import { PgWorkflowInterventionStorage } from "./pg-workflow-intervention-storage"
 import { PgWorkflowRunStorage } from "./pg-workflow-run-storage"
+import { isSerializationFailure } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
@@ -190,21 +192,31 @@ export class PostgresStorage implements MigrationCapableStorage {
       throwNestedStorageTransaction()
     }
 
-    return runPgTransaction(this.sql, async (client) => {
-      if (options.isolation === "serializable") {
-        await client`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`
-      }
+    try {
+      return await runPgTransaction(this.sql, async (client) => {
+        if (options.isolation === "serializable") {
+          await client`SET TRANSACTION ISOLATION LEVEL SERIALIZABLE`
+        }
 
-      let active = true
-      const txStorage = this.createTransactionStorage(client)
-      const tx = createTransactionStorageProxy(txStorage, () => active)
+        let active = true
+        const txStorage = this.createTransactionStorage(client)
+        const tx = createTransactionStorageProxy(txStorage, () => active)
 
-      try {
-        return await this.transactionScope.run(true, () => run(tx))
-      } finally {
-        active = false
+        try {
+          return await this.transactionScope.run(true, () => run(tx))
+        } finally {
+          active = false
+        }
+      })
+    } catch (error) {
+      if (isSerializationFailure(error)) {
+        throw new StorageTransactionError(
+          "[SixbPg] Storage transaction failed due to a serialization conflict.",
+          { cause: error, code: "serialization_failure" }
+        )
       }
-    })
+      throw error
+    }
   }
 
   /**

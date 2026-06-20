@@ -18,8 +18,30 @@ export class ObjectStorageError extends Error {
   readonly name = "ObjectStorageError"
 }
 
+export type StorageTransactionErrorCode =
+  | "nested_transaction"
+  | "serialization_failure"
+  | "transaction_inactive"
+
+export interface StorageTransactionErrorOptions {
+  readonly cause?: unknown
+  readonly code?: StorageTransactionErrorCode
+}
+
 export class StorageTransactionError extends Error {
   readonly name = "StorageTransactionError"
+  readonly code?: StorageTransactionErrorCode
+  override readonly cause?: unknown
+
+  constructor(message: string, options: StorageTransactionErrorOptions = {}) {
+    super(message)
+    this.code = options.code
+    this.cause = options.cause
+  }
+}
+
+export function isStorageSerializationFailure(error: unknown): boolean {
+  return error instanceof StorageTransactionError && error.code === "serialization_failure"
 }
 
 /** Identity of an object targeted by an edit-commit plan. */

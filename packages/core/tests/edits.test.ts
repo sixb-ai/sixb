@@ -18,6 +18,8 @@ import {
   type RecordEditsOptions,
   recordEdits,
   type Storage,
+  StorageTransactionError,
+  type StorageTransactionOptions,
   validateEditBatch,
   valueTypeRef,
 } from "../src"
@@ -661,6 +663,64 @@ describe("EditBatch core contract", () => {
     expect(invoice?.properties.status).toBe("draft")
     expect(invoice?.version).toBe(1)
     expect(run?.commit).toBeUndefined()
+  })
+
+  test("retries serializable edit commit conflicts", async () => {
+    const storage = await createSeededStorage()
+    await seedInvoiceCustomerLink(storage)
+
+    await storage.actionRuns.queue({
+      id: "run_serializable_retry",
+      projectId: "project-a",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      params: {},
+      idempotencyKey: "action:project-a:run_serializable_retry",
+    })
+    await storage.actionRuns.start({
+      id: "run_serializable_retry",
+      projectId: "project-a",
+    })
+
+    let attempts = 0
+    const retryingStorage: Storage = {
+      ...storage,
+      transaction: async (run, options?: StorageTransactionOptions) => {
+        attempts++
+        expect(options).toEqual({ isolation: "serializable" })
+        if (attempts === 1) {
+          throw new StorageTransactionError("serialization conflict", {
+            code: "serialization_failure",
+          })
+        }
+        return storage.transaction(run, options)
+      },
+    }
+    const batch = recordRuntimeEdits({ runId: "run_serializable_retry" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+
+    const result = await commitActionEditBatch({
+      storage: retryingStorage,
+      projectId: "project-a",
+      runId: "run_serializable_retry",
+      actionId: "markPaid",
+      subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv_1" },
+      ontology,
+      batch,
+      committedAt: new Date("2026-06-02T00:00:00.000Z"),
+    })
+
+    const invoice = await storage.objects.getByPrimaryId({
+      projectId: "project-a",
+      objectTypeId: "Invoice",
+      primaryId: "inv_1",
+    })
+
+    expect(attempts).toBe(2)
+    expect(result.commit.created).toBe(true)
+    expect(result.commit.committedAt).toEqual(new Date("2026-06-02T00:00:00.000Z"))
+    expect(invoice?.properties.status).toBe("paid")
   })
 
   test("rejects edit commits for a different action run identity", async () => {
