@@ -15,6 +15,8 @@ shared runtime.
 - [Sync](./concepts/sync.md)
 - [Rules](./concepts/rules.md)
 - [Workflow](./concepts/workflows.md)
+- [Authentication](./concepts/authentication.md)
+- [Authorization](./concepts/authorization.md)
 
 ## Coming next
 
