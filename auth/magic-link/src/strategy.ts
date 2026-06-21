@@ -194,14 +194,13 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       throw new MagicLinkError("Magic link is invalid or expired.")
     }
 
-    const existingUser = await input.authStorage.users.getByEmail({
-      projectId: input.projectId,
-      email: magicLink.email,
-    })
-    const canBootstrap =
-      !existingUser &&
-      this.bootstrapUsers.has(magicLink.email) &&
-      (await hasNoActiveUsers(input.authStorage, input.projectId))
+    // Every email in the configured bootstrap allowlist may self-provision
+    // without an invitation — at any time, not only as the first user. The
+    // allowlist itself is the trust boundary. Applied on every sign-in (not just
+    // creation), so the configured bootstrap groups stay reconciled for existing
+    // bootstrap users; user creation itself is still gated by storage, which only
+    // creates when no user exists for the email.
+    const canBootstrap = this.bootstrapUsers.has(magicLink.email)
 
     const signIn = await input.authStorage.completeMagicLinkSignIn({
       projectId: input.projectId,
@@ -210,7 +209,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       completedAt: now,
       newUserId: `usr_${randomUUID()}`,
       allowUserCreationWithoutInvitation: canBootstrap,
-      requireNoActiveUsersForUserCreation: canBootstrap,
+      requireNoActiveUsersForUserCreation: false,
       manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
       session: {
         ...input.session,
@@ -249,10 +248,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       return true
     }
 
-    return (
-      this.bootstrapUsers.has(input.email) &&
-      (await hasNoActiveUsers(input.storage, input.projectId))
-    )
+    return this.bootstrapUsers.has(input.email)
   }
 
   private createCallbackUrl(input: {
@@ -271,16 +267,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     const domain = emailDomain(email)
     return domain ? this.allowedDomains.has(domain) : false
   }
-}
-
-async function hasNoActiveUsers(storage: AuthStorage, projectId: string): Promise<boolean> {
-  const page = await storage.users.list({
-    projectId,
-    statuses: ["active"],
-    limit: 1,
-  })
-
-  return page.total === 0
 }
 
 function normalizeStrategyId(value: string | undefined): string {
