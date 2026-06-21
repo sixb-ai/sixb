@@ -749,7 +749,7 @@ function Metric({ label, value, mono }: { label: string; value: React.ReactNode;
     <Card className="p-0">
       <CardContent className="space-y-1.5 p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-        <div className={cn("break-words text-sm text-foreground", mono && "font-mono text-xs")}>
+        <div className={cn("wrap-break-word text-sm text-foreground", mono && "font-mono text-xs")}>
           {value}
         </div>
       </CardContent>
