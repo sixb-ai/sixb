@@ -2,7 +2,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Box, Braces, Brackets, Check, Copy, Hash, Minus, Type } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
-export function RunIOShape({
+export function StructuredValue({
   value,
   emptyLabel = "No data",
 }: {
@@ -66,7 +66,7 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
         </div>
         {value.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <RunIOShape value={value} />
+            <StructuredValue value={value} />
           </div>
         ) : null}
       </div>
@@ -83,7 +83,7 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
         </div>
         {entries.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <RunIOShape value={value} />
+            <StructuredValue value={value} />
           </div>
         ) : null}
       </div>

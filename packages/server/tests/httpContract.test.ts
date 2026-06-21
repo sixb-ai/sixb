@@ -510,11 +510,6 @@ describe("SixbServer HTTP contract", () => {
       params: { label: "Fan 1 audited" },
       idempotencyKey: "action:contract-project:act_audit_previous",
       queuedAt: new Date("2026-02-18T09:12:00.000Z"),
-      securityContext: {
-        principal: { type: "user", id: "usr_contract" },
-        projectId: "contract-project",
-        correlationId: "corr_contract",
-      },
     })
     await sixb.storage.actionRuns!.start({
       id: "act_audit_previous",
@@ -1177,10 +1172,6 @@ describe("SixbServer HTTP contract", () => {
             edits: false,
             effects: false,
           },
-          preview: {
-            supported: false,
-            reason: "no_edits",
-          },
         },
         {
           id: "renameDevice",
@@ -1199,9 +1190,6 @@ describe("SixbServer HTTP contract", () => {
             writeback: false,
             edits: true,
             effects: false,
-          },
-          preview: {
-            supported: true,
           },
         },
         {
@@ -1222,10 +1210,6 @@ describe("SixbServer HTTP contract", () => {
             edits: true,
             effects: true,
           },
-          preview: {
-            supported: false,
-            reason: "writeback_required",
-          },
         },
         {
           id: "createMaintenanceRun",
@@ -1243,10 +1227,6 @@ describe("SixbServer HTTP contract", () => {
             writeback: true,
             edits: false,
             effects: false,
-          },
-          preview: {
-            supported: false,
-            reason: "no_edits",
           },
         },
       ])
@@ -1269,10 +1249,6 @@ describe("SixbServer HTTP contract", () => {
           writeback: true,
           edits: false,
           effects: false,
-        },
-        preview: {
-          supported: false,
-          reason: "no_edits",
         },
       })
 

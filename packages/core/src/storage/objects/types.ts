@@ -199,6 +199,17 @@ export interface ObjectStorage {
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<string, ObjectLinkRow[]>>
 
+  /**
+   * Batch fetch every link incident to any of the given objects, in BOTH directions (the object as
+   * link source or target). Returns a flat, de-duplicated list: a physical link incident to two
+   * listed objects appears once. Used to load cascade-delete state for `object.delete` operations,
+   * which {@link listLinksBatch} cannot express because it keys on a specific linkId.
+   */
+  listIncidentLinksBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; objectId: string }[]
+  }): Promise<readonly ObjectLinkRow[]>
+
   list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]

@@ -775,6 +775,28 @@ export class SqliteObjectStorage implements ObjectStorage {
     return result
   }
 
+  async listIncidentLinksBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; objectId: string }[]
+  }): Promise<readonly ObjectLinkRow[]> {
+    const deduped = new Map<string, ObjectLinkRow>()
+    for (const item of params.items) {
+      const rows = await this.listLinks({
+        projectId: params.projectId,
+        objectTypeId: item.objectTypeId,
+        objectId: item.objectId,
+        direction: "both",
+      })
+      for (const row of rows) {
+        deduped.set(
+          `${row.sourceTypeId}:${row.sourceId}:${row.linkId}:${row.targetTypeId}:${row.targetId}`,
+          row
+        )
+      }
+    }
+    return [...deduped.values()]
+  }
+
   async list(params: {
     projectId: string
     objectTypeId?: string | readonly string[]

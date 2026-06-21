@@ -22,7 +22,6 @@ import type {
   RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
-  SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
 import {
@@ -60,7 +59,6 @@ export class PgActionRunStorage implements ActionRunStorage {
           finished_at,
           params,
           idempotency_key,
-          security_context,
           writeback_status,
           writeback_completed_at,
           writeback_result,
@@ -89,7 +87,6 @@ export class PgActionRunStorage implements ActionRunStorage {
           ${null},
           ${JSON.stringify(input.params)}::text::jsonb,
           ${input.idempotencyKey},
-          ${serializeSecurityContext(input.securityContext)}::text::jsonb,
           ${null},
           ${null},
           ${null},
@@ -143,7 +140,6 @@ export class PgActionRunStorage implements ActionRunStorage {
           queued_at = ${input.queuedAt ?? new Date()},
           started_at = ${null},
           finished_at = ${null},
-          security_context = ${serializeSecurityContext(input.securityContext)}::text::jsonb,
           writeback_status = ${null},
           writeback_completed_at = ${null},
           writeback_result = ${null},
@@ -616,19 +612,6 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 }
 
-function serializeSecurityContext(securityContext: SecurityContext | undefined): string | null {
-  return securityContext ? JSON.stringify(securityContext) : null
-}
-
-function normalizeSecurityContext(
-  value: SecurityContext | string | null
-): SecurityContext | undefined {
-  if (!value) {
-    return undefined
-  }
-  return typeof value === "string" ? (JSON.parse(value) as SecurityContext) : value
-}
-
 function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
   return toFailure(row.error_name, row.error_message, row.error_phase)
 }
@@ -750,7 +733,6 @@ function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord):
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     params: row.params,
     idempotencyKey: row.idempotency_key,
-    securityContext: normalizeSecurityContext(row.security_context),
     writeback: toActionRunWritebackRecord(row),
     commit,
     effects: toActionRunEffectsRecord(row),
@@ -827,7 +809,6 @@ interface DatabaseRow {
   finished_at: Date | string | null
   params: ActionRunParams
   idempotency_key: string
-  security_context: SecurityContext | string | null
   writeback_status: ActionRunWritebackRecord["status"] | null
   writeback_completed_at: Date | string | null
   writeback_result: JsonValue | null

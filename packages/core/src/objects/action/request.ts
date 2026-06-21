@@ -35,7 +35,6 @@ export async function requestAction(
     params: params.params,
     runId: params.options?.runId,
     signal: params.options?.signal,
-    securityContext: params.options?.securityContext,
   })
 }
 
@@ -59,7 +58,6 @@ export async function requestActionAndWait(
     runId: params.options?.runId,
     timeoutMs: params.options?.timeoutMs,
     signal: params.options?.signal,
-    securityContext: params.options?.securityContext,
     onRequested: params.options?.onRequested,
   })
 }

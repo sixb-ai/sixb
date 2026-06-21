@@ -354,7 +354,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
   finished_at TEXT,
   params TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
-  security_context TEXT,
   writeback_status TEXT CHECK (writeback_status IS NULL OR writeback_status IN ('succeeded', 'failed')),
   writeback_completed_at TEXT,
   writeback_result TEXT,

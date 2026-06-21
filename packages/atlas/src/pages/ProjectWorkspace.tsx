@@ -1,6 +1,7 @@
 import type { ObjectSummary } from "@sixb/client"
 import {
   getProjectInfoOptions,
+  listActionsOptions,
   listConnectorsOptions,
   listDatasetsOptions,
   listObjectsPageOptions,
@@ -36,6 +37,8 @@ import {
   type ObjectSortPreference,
   setObjectSortPreference,
 } from "../lib/userPreferences"
+import { ActionRunDetailPage } from "./ActionRunDetailPage"
+import { ActionsPage } from "./ActionsPage"
 import { ConnectorDetailPage, ConnectorsPage } from "./ConnectorsPage"
 import { DatasetDetailPage, DatasetsPage } from "./DatasetsPage"
 import { ObjectDetailPage } from "./ObjectDetailPage"
@@ -219,6 +222,11 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
+  const { data: actions = [] } = useQuery({
+    ...listActionsOptions(),
+    enabled: !!projectInfo,
+  })
+
   const { data: rules = [] } = useQuery({
     ...listRulesOptions(),
     enabled: !!projectInfo,
@@ -257,6 +265,7 @@ export function ProjectWorkspace() {
       syncCount: syncs.length,
       pipelineCount: pipelines.length,
       workflowCount: workflows.length,
+      actionCount: actions.length,
       ruleCount: rules.length,
       ontologyCount: objectTypes.length,
     })
@@ -268,6 +277,7 @@ export function ProjectWorkspace() {
     syncs.length,
     pipelines.length,
     workflows.length,
+    actions.length,
     rules.length,
     objectTypes.length,
     setSidebarData,
@@ -381,6 +391,8 @@ export function ProjectWorkspace() {
             <Route path="syncs" element={<SyncsPage />} />
             <Route path="syncs/:syncId" element={<SyncDetailPage />} />
             <Route path="pipelines" element={<PipelinesPage />} />
+            <Route path="actions" element={<ActionsPage />} />
+            <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
             <Route path="rules" element={<RulesPage />} />
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
             <Route path="settings" element={<Navigate to="/settings/invitations" replace />} />

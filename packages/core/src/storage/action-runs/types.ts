@@ -1,5 +1,4 @@
 import type { ActionSubject } from "../../actions"
-import type { SecurityContext } from "../../auth"
 import type { EditCommitDiff, EditLinkDiff, EditObjectDiff, EditObjectRef } from "../../edits/types"
 import type { JsonValue } from "../../json"
 
@@ -60,7 +59,6 @@ export interface ActionRunRecord {
   readonly finishedAt?: Date
   readonly params: ActionRunParams
   readonly idempotencyKey: string
-  readonly securityContext?: SecurityContext
   readonly writeback?: ActionRunWritebackRecord
   readonly commit?: ActionRunCommitRecord
   readonly effects?: ActionRunEffectsRecord
@@ -74,7 +72,6 @@ export interface QueueActionRunInput {
   readonly subject: ActionSubject
   readonly params: ActionRunParams
   readonly idempotencyKey: string
-  readonly securityContext?: SecurityContext
   readonly queuedAt?: Date
 }
 

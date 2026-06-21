@@ -33,16 +33,6 @@ export const RequestActionResponseSchema = z.object({
   created: z.boolean(),
 })
 
-export const ActionPreviewSchema = z.discriminatedUnion("supported", [
-  z.object({
-    supported: z.literal(true),
-  }),
-  z.object({
-    supported: z.literal(false),
-    reason: z.enum(["no_edits", "writeback_required"]),
-  }),
-])
-
 export const ActionCatalogItemSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -55,7 +45,6 @@ export const ActionCatalogItemSchema = z.object({
     edits: z.boolean(),
     effects: z.boolean(),
   }),
-  preview: ActionPreviewSchema,
 })
 
 export const ActionRunStatusSchema = z.enum([

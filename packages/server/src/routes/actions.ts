@@ -33,28 +33,7 @@ function serializeAction(
       edits: action.phases.edits !== undefined,
       effects: action.phases.effects !== undefined,
     },
-    preview: getActionPreview(action),
   })
-}
-
-function getActionPreview(
-  action: ActionDefinition
-): ReturnType<typeof ActionCatalogItemSchema.parse>["preview"] {
-  if (!action.phases.edits) {
-    return {
-      supported: false,
-      reason: "no_edits",
-    }
-  }
-
-  if (action.phases.writeback) {
-    return {
-      supported: false,
-      reason: "writeback_required",
-    }
-  }
-
-  return { supported: true }
 }
 
 export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {

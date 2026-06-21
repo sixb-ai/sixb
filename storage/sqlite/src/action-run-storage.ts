@@ -23,7 +23,6 @@ import type {
   RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,
-  SecurityContext,
   StartActionRunInput,
 } from "@sixb/core"
 import {
@@ -85,7 +84,6 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             finished_at,
             params,
             idempotency_key,
-            security_context,
             writeback_status,
             writeback_completed_at,
             writeback_result,
@@ -101,7 +99,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             error_message,
             error_phase
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?,
             NULL, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL
@@ -119,8 +117,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           "request",
           queuedAt.toISOString(),
           JSON.stringify(input.params),
-          input.idempotencyKey,
-          serializeSecurityContext(input.securityContext)
+          input.idempotencyKey
         )
     } catch (error) {
       if (isUniqueConstraintError(error)) {
@@ -168,7 +165,6 @@ export class SqliteActionRunStorage implements ActionRunStorage {
             queued_at = ?,
             started_at = NULL,
             finished_at = NULL,
-            security_context = ?,
             writeback_status = NULL,
             writeback_completed_at = NULL,
             writeback_result = NULL,
@@ -186,14 +182,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
           WHERE project_id = ? AND id = ?
         `
         )
-        .run(
-          "queued",
-          "request",
-          queuedAt.toISOString(),
-          serializeSecurityContext(input.securityContext),
-          input.projectId,
-          input.id
-        )
+        .run("queued", "request", queuedAt.toISOString(), input.projectId, input.id)
 
       this.deleteCommitRows(input.projectId, input.id)
 
@@ -697,14 +686,6 @@ function serializeJsonValue(value: JsonValue): string {
   return JSON.stringify(value)
 }
 
-function serializeSecurityContext(securityContext: SecurityContext | undefined): string | null {
-  return securityContext ? JSON.stringify(securityContext) : null
-}
-
-function parseSecurityContext(value: string | null): SecurityContext | undefined {
-  return value ? (JSON.parse(value) as SecurityContext) : undefined
-}
-
 function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
   return toFailure(row.error_name, row.error_message, row.error_phase)
 }
@@ -827,7 +808,6 @@ function rowToActionRunRecord(row: DatabaseRow, commit?: ActionRunCommitRecord):
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     params: JSON.parse(row.params) as ActionRunParams,
     idempotencyKey: row.idempotency_key,
-    securityContext: parseSecurityContext(row.security_context),
     writeback: toActionRunWritebackRecord(row),
     commit,
     effects: toActionRunEffectsRecord(row),
@@ -908,7 +888,6 @@ interface DatabaseRow {
   finished_at: string | null
   params: string
   idempotency_key: string
-  security_context: string | null
   writeback_status: ActionRunWritebackRecord["status"] | null
   writeback_completed_at: string | null
   writeback_result: string | null

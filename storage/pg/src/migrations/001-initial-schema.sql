@@ -356,7 +356,6 @@ CREATE TABLE IF NOT EXISTS action_runs (
   finished_at TIMESTAMPTZ,
   params JSONB NOT NULL,
   idempotency_key TEXT NOT NULL,
-  security_context JSONB,
   writeback_status TEXT CHECK (writeback_status IS NULL OR writeback_status IN ('succeeded', 'failed')),
   writeback_completed_at TIMESTAMPTZ,
   writeback_result JSONB,

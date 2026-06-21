@@ -1,13 +1,14 @@
-import type { ActionDefinition, ActionRunRecord } from "@sixb/core"
-import { ActionValidationError, isObjectActionDefinition } from "@sixb/core"
-import { type BasePhaseContext, requireObjectTarget } from "./context"
-import type { LoadedObjectTarget, RuntimePhaseHandler } from "./types"
+import { ActionValidationError } from "../objects/action/errors"
+import type { ActionDefinition, ActionSubject, ActionTargetObject } from "./types"
+import { isObjectActionDefinition } from "./validation"
 
-export async function runValidators(input: {
+type RuntimePhaseHandler = (ctx: unknown) => unknown | Promise<unknown>
+
+export async function runActionValidators<TBaseContext extends object>(input: {
   readonly action: ActionDefinition
-  readonly run: ActionRunRecord
-  readonly baseContext: BasePhaseContext
-  readonly objectTarget: LoadedObjectTarget | null
+  readonly subject: ActionSubject
+  readonly baseContext: TBaseContext
+  readonly target?: ActionTargetObject | null
 }): Promise<void> {
   const validators = input.action.phases.validate as readonly RuntimePhaseHandler[]
   if (validators.length === 0) {
@@ -20,23 +21,26 @@ export async function runValidators(input: {
       if (isValidatorErrorResult(result)) {
         throw new ActionValidationError(result.error, {
           actionId: input.action.id,
-          subject: input.run.subject,
+          subject: input.subject,
         })
       }
     }
     return
   }
 
-  const target = requireObjectTarget(input.objectTarget, input.action.id)
+  if (!input.target) {
+    throw new Error(`[Sixb] Action '${input.action.id}' requires an object target.`)
+  }
+
   for (const validator of validators) {
     const result = await validator({
       ...input.baseContext,
-      target: target.snapshot,
+      target: input.target,
     })
     if (isValidatorErrorResult(result)) {
       throw new ActionValidationError(result.error, {
         actionId: input.action.id,
-        subject: input.run.subject,
+        subject: input.subject,
       })
     }
   }

@@ -3285,14 +3285,6 @@ export type ListActionsResponses = {
       edits: boolean
       effects: boolean
     }
-    preview:
-      | {
-          supported: true
-        }
-      | {
-          supported: false
-          reason: "no_edits" | "writeback_required"
-        }
   }>
 }
 
@@ -3341,14 +3333,6 @@ export type GetActionResponses = {
       edits: boolean
       effects: boolean
     }
-    preview:
-      | {
-          supported: true
-        }
-      | {
-          supported: false
-          reason: "no_edits" | "writeback_required"
-        }
   }
 }
 

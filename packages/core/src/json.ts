@@ -19,6 +19,26 @@ export function cloneJsonValue(value: JsonValue): JsonValue {
   return JSON.parse(JSON.stringify(value)) as JsonValue
 }
 
+export function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  return stableJsonStringify(left) === stableJsonStringify(right)
+}
+
+export function stableJsonStringify(value: unknown): string {
+  if (value === undefined) return "undefined"
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => compareStrings(left, right))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
+    .join(",")}}`
+}
+
+export function compareStrings(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
+}
+
 export function getInvalidJsonValueReason(
   value: unknown,
   label = "value",

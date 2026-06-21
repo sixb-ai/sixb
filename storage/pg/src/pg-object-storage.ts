@@ -655,6 +655,46 @@ export class PgObjectStorage implements ObjectStorage {
     return result
   }
 
+  async listIncidentLinksBatch(params: {
+    projectId: string
+    items: readonly { objectTypeId: string; objectId: string }[]
+  }): Promise<readonly ObjectLinkRow[]> {
+    if (params.items.length === 0) return []
+    const tuples = params.items.map((item) => [item.objectTypeId, item.objectId])
+
+    // Cover both link directions with two index-friendly equality joins (source-side, then
+    // target-side) rather than a single OR-join, which would defeat index usage. This is a constant
+    // number of round trips regardless of how many objects are deleted — issued sequentially because
+    // these reads run on the serializable commit transaction's single connection. A link incident to
+    // two listed objects matches both halves and is de-duplicated below.
+    const sourceRows = await valuesJoin<LinkDatabaseRow>(
+      this.sql,
+      "SELECT l.* FROM links l",
+      ["source_type_id", "source_id"],
+      tuples,
+      "WHERE l.project_id = $1",
+      [params.projectId]
+    )
+    const targetRows = await valuesJoin<LinkDatabaseRow>(
+      this.sql,
+      "SELECT l.* FROM links l",
+      ["target_type_id", "target_id"],
+      tuples,
+      "WHERE l.project_id = $1",
+      [params.projectId]
+    )
+
+    const deduped = new Map<string, ObjectLinkRow>()
+    for (const row of [...sourceRows, ...targetRows]) {
+      const link = rowToLink(row)
+      deduped.set(
+        `${link.sourceTypeId}:${link.sourceId}:${link.linkId}:${link.targetTypeId}:${link.targetId}`,
+        link
+      )
+    }
+    return [...deduped.values()]
+  }
+
   async applyEditCommitPlan(input: {
     projectId: string
     plan: EditCommitPlan

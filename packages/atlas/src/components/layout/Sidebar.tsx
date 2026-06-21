@@ -17,6 +17,7 @@ import {
 } from "@sixb/ui/components"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
+  Bolt,
   Box,
   Cable,
   Database,
@@ -36,6 +37,7 @@ export type ViewMode =
   | "syncs"
   | "pipelines"
   | "workflows"
+  | "actions"
   | "rules"
   | "ontology"
   | "settings"
@@ -52,6 +54,7 @@ const projectNavItems: NavItem[] = [
   { id: "syncs", label: "Syncs", Icon: RefreshCw },
   { id: "pipelines", label: "Pipelines", Icon: Workflow },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
+  { id: "actions", label: "Actions", Icon: Bolt },
   { id: "ontology", label: "Ontology", Icon: LayoutGrid },
   { id: "home", label: "Objects", Icon: Box },
   { id: "rules", label: "Rules", Icon: ListChecks },
@@ -71,6 +74,7 @@ interface SidebarProps {
   syncCount?: number
   pipelineCount?: number
   workflowCount?: number
+  actionCount?: number
   ruleCount?: number
   ontologyCount?: number
   objectCount?: number
@@ -85,6 +89,7 @@ export function Sidebar({
   syncCount,
   pipelineCount,
   workflowCount,
+  actionCount,
   ruleCount,
   ontologyCount,
   objectCount,
@@ -96,6 +101,7 @@ export function Sidebar({
     if (id === "syncs") return syncCount
     if (id === "pipelines") return pipelineCount
     if (id === "workflows") return workflowCount
+    if (id === "actions") return actionCount
     if (id === "rules") return ruleCount
     if (id === "ontology") return ontologyCount
     return undefined

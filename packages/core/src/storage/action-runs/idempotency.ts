@@ -1,4 +1,5 @@
 import type { ActionSubject } from "../../actions"
+import { compareStrings, stableJsonStringify } from "../../json"
 import { ActionRunError } from "./errors"
 import type {
   ActionRunCommitDiff,
@@ -199,25 +200,6 @@ export function isTerminalActionRun(record: Pick<ActionRunRecord, "status">): bo
   return (
     record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
   )
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value)
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableJsonStringify).join(",")}]`
-  }
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => compareStrings(left, right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
-}
-
-function compareStrings(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
 }
 
 function assertUniqueActionRunCommitDiff(diff: ActionRunCommitDiff): void {

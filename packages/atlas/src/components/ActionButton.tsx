@@ -20,6 +20,7 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { Loader2 } from "lucide-react"
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 
 type ActionParams = Record<string, string | number | boolean>
 
@@ -155,6 +156,7 @@ export function ActionButton({
   size = "compact",
   requireConfirm,
 }: ActionButtonProps) {
+  const navigate = useNavigate()
   const [isExecuting, setIsExecuting] = useState(false)
   const [showParams, setShowParams] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message?: string } | null>(null)
@@ -177,7 +179,10 @@ export function ActionButton({
         body: { params },
       })
 
-      if (response.data?.success) {
+      if (response.data?.success && response.data.runId) {
+        setResult({ success: true })
+        navigate(`/actions/runs/${response.data.runId}`)
+      } else if (response.data?.success) {
         setResult({ success: true })
         setTimeout(() => setResult(null), 2000)
       } else {

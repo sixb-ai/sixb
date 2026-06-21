@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto"
-import type { SecurityContext } from "../auth"
 import { assertAuthorized } from "../authorization"
-import type { EventActor } from "../events"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -15,6 +12,7 @@ import {
   actionSubjectsEqual,
   isTerminalActionRun,
 } from "../storage"
+import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
 import {
   isObjectActionDefinition,
@@ -33,7 +31,6 @@ export interface RequestActionResult {
 export interface RequestActionOptions {
   readonly runId?: string
   readonly signal?: AbortSignal
-  readonly securityContext?: SecurityContext
 }
 
 export interface RequestActionAndWaitOptions extends RequestActionOptions {
@@ -47,7 +44,6 @@ export interface RequestActionInput {
   readonly params?: Record<string, unknown>
   readonly runId?: string
   readonly signal?: AbortSignal
-  readonly securityContext?: SecurityContext
 }
 
 export interface RequestActionAndWaitInput extends RequestActionInput {
@@ -63,17 +59,6 @@ export interface WaitForActionRunInput {
 
 const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
 const DEFAULT_ACTION_WAIT_POLL_MS = 1_000
-
-function createActionRunId(runId: string | undefined): string {
-  if (runId !== undefined) {
-    if (!runId.trim()) {
-      throw new OntologyValidationError("[Sixb] Action run id must not be empty")
-    }
-    return runId
-  }
-
-  return `act_${randomUUID()}`
-}
 
 function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
   if (timer) {
@@ -134,7 +119,6 @@ export async function requestAction(
         subject,
         params: actionParams,
         idempotencyKey: existing.idempotencyKey,
-        securityContext: existing.securityContext,
         queuedAt,
       })
       return enqueueActionRunJob(runtime, {
@@ -145,7 +129,6 @@ export async function requestAction(
         runId,
         queuedAt,
         created: false,
-        securityContext: input.securityContext,
       })
     }
     return {
@@ -165,7 +148,6 @@ export async function requestAction(
     subject,
     params: actionParams,
     idempotencyKey,
-    securityContext: input.securityContext,
     queuedAt,
   })
 
@@ -177,7 +159,6 @@ export async function requestAction(
     runId,
     queuedAt,
     created: true,
-    securityContext: input.securityContext,
   })
 }
 
@@ -191,7 +172,6 @@ async function enqueueActionRunJob(
     readonly runId: string
     readonly queuedAt: Date
     readonly created: boolean
-    readonly securityContext?: SecurityContext
   }
 ): Promise<RequestActionResult> {
   let jobId: string | undefined
@@ -222,8 +202,6 @@ async function enqueueActionRunJob(
 
   try {
     await runtime.events.append({
-      actor: params.securityContext ? toEventActor(params.securityContext) : undefined,
-      correlationId: params.securityContext?.correlationId,
       events: [
         {
           type: "action.requested",
@@ -376,10 +354,6 @@ function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage 
   return actionRuns
 }
 
-function createActionRunIdempotencyKey(projectId: string, runId: string): string {
-  return `action:${projectId}:${runId}`
-}
-
 function assertExistingRunMatchesRequest(
   existing: ActionRunRecord,
   request: {
@@ -419,11 +393,4 @@ function toActionRunFailure(
     message: String(error),
     phase,
   }
-}
-
-function toEventActor(securityContext: SecurityContext): EventActor {
-  if (securityContext.principal.type === "serviceAccount") {
-    return { type: "service", id: securityContext.principal.id }
-  }
-  return securityContext.principal
 }

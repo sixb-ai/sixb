@@ -7,6 +7,7 @@ export const KNOWN_VIEWS = new Set([
   "syncs",
   "pipelines",
   "workflows",
+  "actions",
   "runs",
   "rules",
   "ontology",
@@ -18,6 +19,7 @@ export function getViewModeFromPath(pathname: string): ViewMode {
   const segments = pathname.split("/").filter(Boolean)
   const view = segments[0]
   if (view === "runs") return "workflows"
+  if (view === "actions" && segments[1] === "runs") return "actions"
   if (view && KNOWN_VIEWS.has(view)) return view as ViewMode
   return "home"
 }

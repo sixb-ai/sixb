@@ -55,6 +55,7 @@ export {
 export type {
   EditBatch,
   EditBatchInput,
+  EditBatchLoadedState,
   EditBatchLoadRequests,
   EditBatchProducer,
   EditBatchVersion,
@@ -87,6 +88,7 @@ export {
   collectEditBatchLoadRequests,
   deriveEditCommitDiff,
   EditBatchError,
+  loadEditBatchState,
   normalizeEditBatch,
   normalizeEditOperationInput,
   planEditBatch,
@@ -112,6 +114,7 @@ export type {
   ActionReadFacade,
   ActionReadObjectByIdHandle,
   ActionReadObjectSet,
+  ActionReadObjectSetSource,
   ActionRunPhaseInfo,
   ActionRuntimeFacade,
   ActionSubject,
@@ -158,6 +161,7 @@ export {
   ActionsRuntime,
   coerceActionParamsToTyped,
   commitActionEditBatch,
+  createActionReadFacade,
   defineAction,
   isActionDefinition,
   isGlobalActionDefinition,
@@ -166,6 +170,7 @@ export {
   param,
   requestAction,
   requestActionAndWait,
+  runActionValidators,
   waitForActionRun,
 } from "./actions"
 export {
@@ -209,8 +214,11 @@ export type { JsonValue } from "./json"
 export {
   assertJsonValue,
   cloneJsonValue,
+  compareStrings,
   getInvalidJsonValueReason,
   isJsonValue,
+  jsonValuesEqual,
+  stableJsonStringify,
 } from "./json"
 
 // ── Quantitative Types (units) ──────────────────────────────

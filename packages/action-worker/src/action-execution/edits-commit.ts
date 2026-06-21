@@ -1,8 +1,13 @@
-import type { ActionEditCommitResult, ActionRunRecord, JsonValue } from "@sixb/core"
-import { commitActionEditBatch, isObjectActionDefinition } from "@sixb/core"
+import type {
+  ActionEditCommitResult,
+  ActionReadObjectSetSource,
+  ActionRunRecord,
+  JsonValue,
+} from "@sixb/core"
+import { commitActionEditBatch, createActionReadFacade, isObjectActionDefinition } from "@sixb/core"
 import { recordEdits } from "@sixb/core/actions/worker"
 import { emitLocalCommitEvents } from "./commit-events"
-import { type BasePhaseContext, createReadFacade, requireObjectSubject } from "./context"
+import { type BasePhaseContext, requireObjectSubject } from "./context"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
@@ -51,7 +56,9 @@ export async function runEditsAndCommitPhase(
       const baseContext = {
         ...input.baseContext,
         objects,
-        read: createReadFacade(input.runtime.sixb),
+        read: createActionReadFacade(
+          (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource
+        ),
         writeback: input.writeback,
       }
 

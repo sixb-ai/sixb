@@ -2,8 +2,8 @@ import { Badge, Card, CardContent } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, UserCheck, Workflow, Zap } from "lucide-react"
 import { useState } from "react"
+import { StructuredValue } from "../../../../components/StructuredValue"
 import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"
-import { RunIOShape } from "../runs/RunIOShape"
 import { NodeStatusBadge } from "../runs/StatusBadge"
 import { WorkflowInterventionPanel } from "./WorkflowInterventionPanel"
 
@@ -88,7 +88,7 @@ function JsonPanel({ label, value }: { label: string; value: unknown }) {
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
-      <RunIOShape value={value} />
+      <StructuredValue value={value} />
     </div>
   )
 }

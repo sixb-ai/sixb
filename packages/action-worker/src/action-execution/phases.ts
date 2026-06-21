@@ -1,10 +1,10 @@
 import type { ActionRunRecord } from "@sixb/core"
+import { isObjectActionDefinition, runActionValidators } from "@sixb/core"
 import { throwIfAborted } from "../normalize"
 import { createBasePhaseContext, loadObjectTarget } from "./context"
 import { runEditsAndCommitPhase } from "./edits-commit"
 import { runEffectsPhase } from "./effects"
 import type { PhaseExecutionBase, UpdateActiveRun } from "./types"
-import { runValidators } from "./validation"
 import { runWritebackPhase } from "./writeback"
 
 export async function executeActionPhases(
@@ -25,7 +25,12 @@ export async function executeActionPhases(
       phase: "validation",
     })
     input.updateActiveRun(run)
-    await runValidators({ action, run, baseContext: phaseContext, objectTarget })
+    await runActionValidators({
+      action,
+      subject: run.subject,
+      baseContext: phaseContext,
+      target: isObjectActionDefinition(action) ? objectTarget?.snapshot : undefined,
+    })
   }
 
   throwIfAborted(signal)
