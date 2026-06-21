@@ -124,6 +124,7 @@ export type FinishWorkflowNodeRunInput =
 export interface ListWorkflowRunsInput {
   readonly projectId: string
   readonly workflowId?: string
+  readonly workflowIds?: readonly string[]
   readonly statuses?: readonly WorkflowRunStatus[]
   readonly startedAfter?: Date
   readonly startedBefore?: Date

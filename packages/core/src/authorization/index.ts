@@ -3,4 +3,5 @@ export { assertAuthorized, assertPrivileged, evaluate, isAllowed } from "./decis
 export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"
 export { resolveAuthorizationContext, resolveRoleGrants } from "./resolve"
+export { canViewActionRun, canViewWorkflowIntervention, canViewWorkflowRun } from "./run-visibility"
 export type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"

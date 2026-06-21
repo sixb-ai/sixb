@@ -136,7 +136,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
   }
 
   async list(input: ListWorkflowInterventionsInput): Promise<ListWorkflowInterventionsResult> {
-    if (input.statuses && input.statuses.length === 0) {
+    if ((input.statuses && input.statuses.length === 0) || input.workflowIds?.length === 0) {
       return {
         interventions: [],
         hasMore: false,
@@ -157,6 +157,12 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
     if (input.workflowId) {
       whereClauses.push(`workflow_id = $${index++}`)
       params.push(input.workflowId)
+    }
+
+    if (input.workflowIds) {
+      const placeholders = input.workflowIds.map(() => `$${index++}`)
+      whereClauses.push(`workflow_id IN (${placeholders.join(", ")})`)
+      params.push(...input.workflowIds)
     }
 
     if (input.workflowRunId) {

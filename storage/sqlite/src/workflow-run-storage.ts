@@ -308,7 +308,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -322,6 +322,11 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
     if (input.workflowId) {
       whereClauses.push("workflow_id = ?")
       args.push(input.workflowId)
+    }
+
+    if (input.workflowIds) {
+      whereClauses.push(`workflow_id IN (${input.workflowIds.map(() => "?").join(", ")})`)
+      args.push(...input.workflowIds)
     }
 
     appendRunListFilters(whereClauses, args, input)

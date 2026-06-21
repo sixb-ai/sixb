@@ -184,7 +184,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -194,9 +194,11 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
 
     const order = input.order ?? "desc"
     const statuses = toStatusSet(input.statuses)
+    const workflowIds = input.workflowIds ? new Set(input.workflowIds) : null
     const filtered = [...this.runs.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.workflowId ? record.workflowId === input.workflowId : true))
+      .filter((record) => (workflowIds ? workflowIds.has(record.workflowId) : true))
       .filter((record) =>
         matchesRunListDateFilters(record, {
           statuses,

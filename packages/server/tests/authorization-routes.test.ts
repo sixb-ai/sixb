@@ -348,6 +348,52 @@ describe("authorized action routes", () => {
     )
     expect(denied.status).toBe(403)
   })
+
+  test("action run history inherits action and subject visibility", async () => {
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const request = await app.fetch(
+      new Request("http://localhost/api/actions/send-contract", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({
+          subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+        }),
+      })
+    )
+    const requested = (await request.json()) as { runId: string }
+    await storage.actionRuns.queue({
+      id: "act_hidden_invoice",
+      projectId: "test-project",
+      actionId: "send-contract",
+      subject: { kind: "object", objectTypeId: "invoice", primaryId: "i1" },
+      params: {},
+      idempotencyKey: "act_hidden_invoice",
+      queuedAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+
+    const visibleList = await app.fetch(
+      new Request("http://localhost/api/action-runs?limit=1", { headers: operator.headers })
+    )
+    expect(await visibleList.json()).toMatchObject({
+      runs: [expect.objectContaining({ id: requested.runId })],
+      hasMore: false,
+      total: 1,
+    })
+
+    const hiddenList = await app.fetch(
+      new Request("http://localhost/api/action-runs", { headers: runner.headers })
+    )
+    expect(await hiddenList.json()).toMatchObject({ runs: [], total: 0 })
+
+    const hiddenDetail = await app.fetch(
+      new Request(`http://localhost/api/action-runs/${requested.runId}`, {
+        headers: runner.headers,
+      })
+    )
+    expect(hiddenDetail.status).toBe(404)
+  })
 })
 
 describe("authorized event and workflow routes", () => {
@@ -424,6 +470,101 @@ describe("authorized event and workflow routes", () => {
       })
     )
     expect(denied.status).toBe(403)
+  })
+
+  test("workflow run history and interventions inherit workflow run visibility", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const request = await app.fetch(
+      new Request("http://localhost/api/workflows/renew-contract/runs", {
+        method: "POST",
+        headers: runner.csrfHeaders,
+        body: JSON.stringify({
+          input: { contract: { objectTypeId: "contract", primaryId: "c1" } },
+        }),
+      })
+    )
+    const requested = (await request.json()) as { runId: string }
+    await storage.workflowRuns.queue({
+      id: "wf_hidden",
+      projectId: "test-project",
+      workflowId: "hidden-workflow",
+      input: {},
+      queuedAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+    await storage.workflowInterventions.create({
+      id: "wi_1",
+      projectId: "test-project",
+      workflowId: "renew-contract",
+      workflowRunId: requested.runId,
+      nodeRunId: "node_1",
+      nodeIndex: 0,
+      nodeId: "approval",
+      nodeKey: "approval",
+      interventionId: "approval",
+      input: {},
+      defaultResponse: {},
+      requestedAt: new Date("2026-05-16T10:00:00.000Z"),
+    })
+    await storage.workflowInterventions.create({
+      id: "wi_hidden",
+      projectId: "test-project",
+      workflowId: "hidden-workflow",
+      workflowRunId: "wf_hidden",
+      nodeRunId: "node_hidden",
+      nodeIndex: 0,
+      nodeId: "approval",
+      nodeKey: "approval",
+      interventionId: "approval",
+      input: {},
+      defaultResponse: {},
+      requestedAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+
+    const runnerRuns = await app.fetch(
+      new Request("http://localhost/api/workflow-runs?limit=1", { headers: runner.headers })
+    )
+    expect(await runnerRuns.json()).toMatchObject({
+      runs: [expect.objectContaining({ id: requested.runId })],
+      hasMore: false,
+      total: 1,
+    })
+
+    const operatorRuns = await app.fetch(
+      new Request("http://localhost/api/workflow-runs", { headers: operator.headers })
+    )
+    expect(await operatorRuns.json()).toMatchObject({ runs: [], total: 0 })
+
+    const hiddenRun = await app.fetch(
+      new Request(`http://localhost/api/workflow-runs/${requested.runId}`, {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenRun.status).toBe(404)
+
+    const runnerInterventions = await app.fetch(
+      new Request("http://localhost/api/workflow-interventions?limit=1", {
+        headers: runner.headers,
+      })
+    )
+    expect(await runnerInterventions.json()).toMatchObject({
+      interventions: [expect.objectContaining({ id: "wi_1" })],
+      hasMore: false,
+      total: 1,
+    })
+
+    const operatorInterventions = await app.fetch(
+      new Request("http://localhost/api/workflow-interventions", { headers: operator.headers })
+    )
+    expect(await operatorInterventions.json()).toMatchObject({ interventions: [], total: 0 })
+
+    const hiddenIntervention = await app.fetch(
+      new Request("http://localhost/api/workflow-interventions/wi_1", {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenIntervention.status).toBe(404)
   })
 })
 

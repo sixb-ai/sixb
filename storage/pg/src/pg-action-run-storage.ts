@@ -392,7 +392,7 @@ export class PgActionRunStorage implements ActionRunStorage {
   }
 
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
-    if (input.statuses && input.statuses.length === 0) {
+    if ((input.statuses && input.statuses.length === 0) || input.actionIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -407,6 +407,26 @@ export class PgActionRunStorage implements ActionRunStorage {
     if (input.actionId) {
       whereClauses.push(`action_id = $${index++}`)
       params.push(input.actionId)
+    }
+
+    if (input.actionIds) {
+      const placeholders = input.actionIds.map(() => `$${index++}`)
+      whereClauses.push(`action_id IN (${placeholders.join(", ")})`)
+      params.push(...input.actionIds)
+    }
+
+    if (input.objectTypeIds) {
+      if (input.objectTypeIds.length === 0) {
+        whereClauses.push(`subject_kind <> $${index++}`)
+        params.push("object")
+      } else {
+        const subjectKindIndex = index++
+        const placeholders = input.objectTypeIds.map(() => `$${index++}`)
+        whereClauses.push(
+          `(subject_kind <> $${subjectKindIndex} OR object_type_id IN (${placeholders.join(", ")}))`
+        )
+        params.push("object", ...input.objectTypeIds)
+      }
     }
 
     if (input.objectTypeId) {
