@@ -3,11 +3,18 @@ import { createServer } from "node:net"
 import {
   actions,
   can,
+  col,
   createSessionCredential,
+  datasets,
   defineAction,
+  defineConnector,
+  defineDataset,
   defineGroup,
   defineObjectType,
+  definePipeline,
+  definePipelineStep,
   defineRole,
+  defineSync,
   defineWorkflow,
   defineWorkflowStep,
   InMemoryBlobStorage,
@@ -17,9 +24,12 @@ import {
   InMemoryStorage,
   type OntologySource,
   ontology,
+  type PipelineDefinition,
+  pipelines,
   prop,
   ref,
   Sixb,
+  syncs,
   type WorkflowDefinition,
   workflows,
 } from "@sixb/core"
@@ -37,6 +47,46 @@ const Invoice = defineObjectType({
   name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+
+const OrdersDataset = defineDataset("raw.erp.orders", {
+  schema: [col("id", "string")],
+})
+
+const CustomersDataset = defineDataset("raw.crm.customers", {
+  schema: [col("id", "string")],
+})
+
+const sourceConnector = defineConnector("source", {
+  type: "test",
+  async connect() {
+    return {}
+  },
+})
+
+const ordersSync = defineSync("sync-orders")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(OrdersDataset)
+
+const customersSync = defineSync("sync-customers")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(CustomersDataset)
+
+const normalizeOrdersStep = definePipelineStep("normalize-orders")
+  .inputs({ orders: OrdersDataset })
+  .output(OrdersDataset)
+  .run(async () => {})
+
+const normalizeCustomersStep = definePipelineStep("normalize-customers")
+  .inputs({ customers: CustomersDataset })
+  .output(CustomersDataset)
+  .run(async () => {})
+
+const ordersPipeline: PipelineDefinition =
+  definePipeline("pipeline-orders").then(normalizeOrdersStep)
+const customersPipeline: PipelineDefinition =
+  definePipeline("pipeline-customers").then(normalizeCustomersStep)
 
 const sendContract = defineAction("send-contract")
   .on(Contract)
@@ -59,17 +109,24 @@ const admins = defineGroup("admins")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
-  grants: [can.view(Contract), can.apply(sendContract)],
+  grants: [can.view(Contract), can.view(OrdersDataset), can.apply(sendContract)],
 })
 
 const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
-  grants: [can.run(renewContract)],
+  grants: [can.run(renewContract), can.run(ordersSync), can.run(ordersPipeline)],
 })
 
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
-  grants: [can.view(ontology.objects()), can.apply(actions()), can.run(workflows())],
+  grants: [
+    can.view(ontology.objects()),
+    can.view(datasets()),
+    can.apply(actions()),
+    can.run(workflows()),
+    can.run(syncs()),
+    can.run(pipelines()),
+  ],
 })
 
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
@@ -77,6 +134,9 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
   const sixb = new Sixb<readonly OntologySource[]>({
     id: "test-project",
     ontology: [Contract, Invoice],
+    datasets: [OrdersDataset, CustomersDataset],
+    syncs: [ordersSync, customersSync],
+    pipelines: [ordersPipeline, customersPipeline],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -295,6 +355,102 @@ describe("authorized object routes", () => {
       new Set(["contract", "invoice"])
     )
   })
+
+  test("dataset routes narrow to viewable datasets and hide forbidden identities", async () => {
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    const operatorList = await app.fetch(
+      new Request("http://localhost/api/datasets", { headers: operator.headers })
+    )
+    const operatorDatasets = (await operatorList.json()) as {
+      id: string
+      syncIds: string[]
+      sourcePipelineIds: string[]
+      targetPipelineIds: string[]
+      projectionIds: string[]
+    }[]
+    expect(operatorDatasets.map((dataset) => dataset.id)).toEqual(["raw.erp.orders"])
+    expect(operatorDatasets[0]).toEqual(
+      expect.objectContaining({
+        syncIds: [],
+        sourcePipelineIds: [],
+        targetPipelineIds: [],
+        projectionIds: [],
+      })
+    )
+
+    const operatorDetail = await app.fetch(
+      new Request("http://localhost/api/datasets/raw.erp.orders", { headers: operator.headers })
+    )
+    expect(operatorDetail.status).toBe(200)
+    expect(await operatorDetail.json()).toEqual(
+      expect.objectContaining({
+        syncIds: [],
+        sourcePipelineIds: [],
+        targetPipelineIds: [],
+        projectionIds: [],
+      })
+    )
+
+    const hiddenList = await app.fetch(
+      new Request("http://localhost/api/datasets", { headers: runner.headers })
+    )
+    expect(await hiddenList.json()).toEqual([])
+
+    const hiddenDetail = await app.fetch(
+      new Request("http://localhost/api/datasets/raw.crm.customers", {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenDetail.status).toBe(404)
+
+    const hiddenVersions = await app.fetch(
+      new Request("http://localhost/api/datasets/raw.crm.customers/versions", {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenVersions.status).toBe(404)
+
+    const hiddenRows = await app.fetch(
+      new Request("http://localhost/api/datasets/raw.crm.customers/rows", {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenRows.status).toBe(404)
+
+    const adminList = await app.fetch(
+      new Request("http://localhost/api/datasets", { headers: admin.headers })
+    )
+    const adminDatasets = (await adminList.json()) as {
+      id: string
+      syncIds: string[]
+      sourcePipelineIds: string[]
+      targetPipelineIds: string[]
+      projectionIds: string[]
+    }[]
+    expect(adminDatasets.map((dataset) => dataset.id)).toEqual([
+      "raw.erp.orders",
+      "raw.crm.customers",
+    ])
+    const adminDatasetById = new Map(adminDatasets.map((dataset) => [dataset.id, dataset]))
+    expect(adminDatasetById.get("raw.erp.orders")).toEqual(
+      expect.objectContaining({
+        syncIds: ["sync-orders"],
+        sourcePipelineIds: ["pipeline-orders"],
+        targetPipelineIds: ["pipeline-orders"],
+      })
+    )
+    expect(adminDatasetById.get("raw.crm.customers")).toEqual(
+      expect.objectContaining({
+        syncIds: ["sync-customers"],
+        sourcePipelineIds: ["pipeline-customers"],
+        targetPipelineIds: ["pipeline-customers"],
+      })
+    )
+  })
 })
 
 describe("authorized action routes", () => {
@@ -393,6 +549,232 @@ describe("authorized action routes", () => {
       })
     )
     expect(hiddenDetail.status).toBe(404)
+  })
+})
+
+describe("authorized sync routes", () => {
+  test("sync catalog narrows to runnable syncs and hides the rest as 404", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    const runnerList = await app.fetch(
+      new Request("http://localhost/api/syncs", { headers: runner.headers })
+    )
+    expect(((await runnerList.json()) as { id: string }[]).map((sync) => sync.id)).toEqual([
+      "sync-orders",
+    ])
+
+    const operatorList = await app.fetch(
+      new Request("http://localhost/api/syncs", { headers: operator.headers })
+    )
+    expect(await operatorList.json()).toEqual([])
+
+    const hidden = await app.fetch(
+      new Request("http://localhost/api/syncs/sync-orders", { headers: operator.headers })
+    )
+    expect(hidden.status).toBe(404)
+
+    const adminList = await app.fetch(
+      new Request("http://localhost/api/syncs", { headers: admin.headers })
+    )
+    expect(((await adminList.json()) as { id: string }[]).map((sync) => sync.id)).toEqual([
+      "sync-orders",
+      "sync-customers",
+    ])
+  })
+
+  test("sync run requests require can.run", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+
+    const allowed = await app.fetch(
+      new Request("http://localhost/api/syncs/sync-orders/runs", {
+        method: "POST",
+        headers: runner.csrfHeaders,
+        body: JSON.stringify({ commitMessage: "manual run" }),
+      })
+    )
+    expect(allowed.status).toBe(202)
+
+    const denied = await app.fetch(
+      new Request("http://localhost/api/syncs/sync-orders/runs", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({ commitMessage: "manual run" }),
+      })
+    )
+    expect(denied.status).toBe(403)
+  })
+
+  test("sync run history narrows to runnable syncs", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    await storage.syncRuns!.start({
+      id: "run-orders",
+      projectId: "test-project",
+      syncId: "sync-orders",
+      datasetId: "raw.erp.orders",
+      mode: "snapshot",
+      startedAt: new Date("2026-05-16T12:00:00.000Z"),
+    })
+    await storage.syncRuns!.start({
+      id: "run-customers",
+      projectId: "test-project",
+      syncId: "sync-customers",
+      datasetId: "raw.crm.customers",
+      mode: "snapshot",
+      startedAt: new Date("2026-05-16T13:00:00.000Z"),
+    })
+
+    const runnerRuns = await app.fetch(
+      new Request("http://localhost/api/sync-runs", { headers: runner.headers })
+    )
+    expect(((await runnerRuns.json()) as { runs: { syncId: string }[] }).runs).toEqual([
+      expect.objectContaining({ syncId: "sync-orders" }),
+    ])
+
+    const hiddenRuns = await app.fetch(
+      new Request("http://localhost/api/sync-runs?syncId=sync-customers", {
+        headers: runner.headers,
+      })
+    )
+    expect(await hiddenRuns.json()).toEqual({ runs: [], hasMore: false, total: 0 })
+
+    const operatorRuns = await app.fetch(
+      new Request("http://localhost/api/sync-runs", { headers: operator.headers })
+    )
+    expect(await operatorRuns.json()).toEqual({ runs: [], hasMore: false, total: 0 })
+
+    const adminRuns = await app.fetch(
+      new Request("http://localhost/api/sync-runs", { headers: admin.headers })
+    )
+    expect(
+      ((await adminRuns.json()) as { runs: { syncId: string }[] }).runs.map((run) => run.syncId)
+    ).toEqual(["sync-customers", "sync-orders"])
+  })
+})
+
+describe("authorized pipeline routes", () => {
+  test("pipeline catalog narrows to runnable pipelines and hides the rest as 404", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    const runnerList = await app.fetch(
+      new Request("http://localhost/api/pipelines", { headers: runner.headers })
+    )
+    expect(((await runnerList.json()) as { id: string }[]).map((pipeline) => pipeline.id)).toEqual([
+      "pipeline-orders",
+    ])
+
+    const operatorList = await app.fetch(
+      new Request("http://localhost/api/pipelines", { headers: operator.headers })
+    )
+    expect(await operatorList.json()).toEqual([])
+
+    const hidden = await app.fetch(
+      new Request("http://localhost/api/pipelines/pipeline-orders", { headers: operator.headers })
+    )
+    expect(hidden.status).toBe(404)
+
+    const adminList = await app.fetch(
+      new Request("http://localhost/api/pipelines", { headers: admin.headers })
+    )
+    expect(((await adminList.json()) as { id: string }[]).map((pipeline) => pipeline.id)).toEqual([
+      "pipeline-orders",
+      "pipeline-customers",
+    ])
+  })
+
+  test("pipeline run requests require can.run", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+
+    const allowed = await app.fetch(
+      new Request("http://localhost/api/pipelines/pipeline-orders/runs", {
+        method: "POST",
+        headers: runner.csrfHeaders,
+        body: JSON.stringify({}),
+      })
+    )
+    expect(allowed.status).toBe(202)
+
+    const denied = await app.fetch(
+      new Request("http://localhost/api/pipelines/pipeline-orders/runs", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({}),
+      })
+    )
+    expect(denied.status).toBe(403)
+  })
+
+  test("pipeline run history narrows to runnable pipelines", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    await storage.pipelineRuns!.start({
+      id: "run-orders",
+      projectId: "test-project",
+      pipelineId: "pipeline-orders",
+      startedAt: new Date("2026-05-16T12:00:00.000Z"),
+    })
+    await storage.pipelineRuns!.start({
+      id: "run-customers",
+      projectId: "test-project",
+      pipelineId: "pipeline-customers",
+      startedAt: new Date("2026-05-16T13:00:00.000Z"),
+    })
+
+    const runnerRuns = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs", { headers: runner.headers })
+    )
+    expect(((await runnerRuns.json()) as { runs: { pipelineId: string }[] }).runs).toEqual([
+      expect.objectContaining({ pipelineId: "pipeline-orders" }),
+    ])
+
+    const hiddenRuns = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs?pipelineId=pipeline-customers", {
+        headers: runner.headers,
+      })
+    )
+    expect(await hiddenRuns.json()).toEqual({ runs: [], hasMore: false, total: 0 })
+
+    const hiddenDetail = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs/run-customers", {
+        headers: runner.headers,
+      })
+    )
+    expect(hiddenDetail.status).toBe(404)
+
+    const allowedDetail = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs/run-orders", { headers: runner.headers })
+    )
+    expect(allowedDetail.status).toBe(200)
+
+    const operatorRuns = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs", { headers: operator.headers })
+    )
+    expect(await operatorRuns.json()).toEqual({ runs: [], hasMore: false, total: 0 })
+
+    const adminRuns = await app.fetch(
+      new Request("http://localhost/api/pipeline-runs", { headers: admin.headers })
+    )
+    expect(
+      ((await adminRuns.json()) as { runs: { pipelineId: string }[] }).runs.map(
+        (run) => run.pipelineId
+      )
+    ).toEqual(["pipeline-customers", "pipeline-orders"])
   })
 })
 

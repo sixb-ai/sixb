@@ -7,20 +7,32 @@ import {
   type ActionDefinition,
   can,
   canInviteGroupIds,
+  col,
   createSixb,
+  type DatasetDefinition,
+  datasets,
   defineAction,
+  defineConnector,
+  defineDataset,
   defineGroup,
   defineInvitePolicy,
   defineObjectType,
+  definePipeline,
+  definePipelineStep,
   defineRole,
+  defineSync,
   type GroupDefinition,
   type InvitePolicyDefinition,
   ontology,
+  type PipelineDefinition,
+  pipelines,
   prop,
   type RoleDefinition,
   resolveInvitePolicyScope,
   SecurityValidationError,
   Sixb,
+  type SyncDefinition,
+  syncs,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -32,6 +44,29 @@ const Account = defineObjectType({
   name: "Account",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
+
+const AccountSnapshot = defineDataset("account.snapshot", {
+  schema: [col("id", "string")],
+})
+
+const sourceConnector = defineConnector("source", {
+  type: "test",
+  async connect() {
+    return {}
+  },
+})
+
+const syncAccounts = defineSync("sync-accounts")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(AccountSnapshot)
+
+const normalizeAccountsStep = definePipelineStep("normalize-accounts")
+  .inputs({ snapshot: AccountSnapshot })
+  .output(AccountSnapshot)
+  .run(async () => {})
+
+const normalizeAccountsPipeline = definePipeline("normalize-accounts").then(normalizeAccountsStep)
 
 afterEach(async () => {
   for (const root of tempRoots) {
@@ -282,7 +317,12 @@ describe("role definitions", () => {
       label: "Contract operator",
       grantedToGroupIds: ["commercial", "finance"],
       grants: [
-        { kind: "grant", capability: "view", selection: { all: false, ids: ["account"] } },
+        {
+          kind: "grant",
+          capability: "view",
+          target: "object",
+          selection: { all: false, ids: ["account"] },
+        },
         { kind: "grant", capability: "apply", selection: { all: false, ids: ["reboot"] } },
       ],
     })
@@ -292,7 +332,53 @@ describe("role definitions", () => {
     expect(can.view([Account, Account])).toEqual({
       kind: "grant",
       capability: "view",
+      target: "object",
       selection: { all: false, ids: ["account"] },
+    })
+  })
+
+  test("can.view supports dataset definitions and scopes", () => {
+    expect(can.view(AccountSnapshot)).toEqual({
+      kind: "grant",
+      capability: "view",
+      target: "dataset",
+      selection: { all: false, ids: ["account.snapshot"] },
+    })
+    expect(can.view(datasets()).selection).toEqual({ all: true, except: [] })
+    expect(can.view(datasets().except([AccountSnapshot]))).toEqual({
+      kind: "grant",
+      capability: "view",
+      target: "dataset",
+      selection: { all: true, except: ["account.snapshot"] },
+    })
+  })
+
+  test("can.run supports sync and pipeline definitions and scopes", () => {
+    expect(can.run(syncAccounts)).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "sync",
+      selection: { all: false, ids: ["sync-accounts"] },
+    })
+    expect(can.run(syncs()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(syncs().except([syncAccounts]))).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "sync",
+      selection: { all: true, except: ["sync-accounts"] },
+    })
+    expect(can.run(normalizeAccountsPipeline)).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "pipeline",
+      selection: { all: false, ids: ["normalize-accounts"] },
+    })
+    expect(can.run(pipelines()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(pipelines().except([normalizeAccountsPipeline]))).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "pipeline",
+      selection: { all: true, except: ["normalize-accounts"] },
     })
   })
 
@@ -358,6 +444,26 @@ describe("role definitions", () => {
     )
   })
 
+  test("runtime registration rejects view grants on unknown datasets", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "dataset.viewer",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "view",
+          target: "dataset",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown dataset 'missing'"
+    )
+  })
+
   test("runtime registration rejects apply grants on unknown actions", () => {
     const role: RoleDefinition = {
       kind: "role",
@@ -368,6 +474,46 @@ describe("role definitions", () => {
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
       "unknown action 'missing'"
+    )
+  })
+
+  test("runtime registration rejects run grants on unknown syncs", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "sync.runner",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "run",
+          target: "sync",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown sync 'missing'"
+    )
+  })
+
+  test("runtime registration rejects run grants on unknown pipelines", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "pipeline.runner",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "run",
+          target: "pipeline",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown pipeline 'missing'"
     )
   })
 
@@ -449,7 +595,12 @@ export const contractOperator = defineRole("contract.operator", {
       id: "contract.operator",
       grantedToGroupIds: ["commercial"],
       grants: [
-        { kind: "grant", capability: "view", selection: { all: false, ids: ["account"] } },
+        {
+          kind: "grant",
+          capability: "view",
+          target: "object",
+          selection: { all: false, ids: ["account"] },
+        },
         { kind: "grant", capability: "apply", selection: { all: false, ids: ["reboot"] } },
       ],
     })
@@ -468,6 +619,9 @@ function createRuntime(
     roles?: readonly RoleDefinition[]
     invitePolicies?: readonly InvitePolicyDefinition[]
     actions?: readonly ActionDefinition[]
+    datasets?: readonly DatasetDefinition[]
+    syncs?: readonly SyncDefinition[]
+    pipelines?: readonly PipelineDefinition[]
   } = {}
 ): Sixb<readonly [typeof Account]> {
   return new Sixb<readonly [typeof Account]>({

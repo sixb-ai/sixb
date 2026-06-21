@@ -1,6 +1,5 @@
 import { SecurityValidationError } from "./errors"
 import type {
-  GrantCapability,
   GrantDefinition,
   GroupDefinition,
   InvitePolicyDefinition,
@@ -152,6 +151,25 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} grant capability must be 'view', 'apply', or 'run'.`)
   }
 
+  if (
+    value.capability === "view" &&
+    value.target !== undefined &&
+    value.target !== "object" &&
+    value.target !== "dataset"
+  ) {
+    throw createError(`[Sixb] ${field} view grant target must be 'object' or 'dataset'.`)
+  }
+
+  if (
+    value.capability === "run" &&
+    value.target !== undefined &&
+    value.target !== "workflow" &&
+    value.target !== "sync" &&
+    value.target !== "pipeline"
+  ) {
+    throw createError(`[Sixb] ${field} run grant target must be 'workflow', 'sync', or 'pipeline'.`)
+  }
+
   assertSelection(value.selection, field, createError)
 }
 
@@ -215,10 +233,16 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly roles?: readonly RoleDefinition[]
   /** Registered object type ids — when provided, view grants must reference them. */
   readonly objectTypeIds?: ReadonlySet<string>
+  /** Registered dataset ids — when provided, dataset view grants must reference them. */
+  readonly datasetIds?: ReadonlySet<string>
   /** Registered action ids — when provided, apply grants must reference them. */
   readonly actionIds?: ReadonlySet<string>
   /** Registered workflow ids — when provided, run grants must reference them. */
   readonly workflowIds?: ReadonlySet<string>
+  /** Registered sync ids — when provided, sync run grants must reference them. */
+  readonly syncIds?: ReadonlySet<string>
+  /** Registered pipeline ids — when provided, pipeline run grants must reference them. */
+  readonly pipelineIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()
@@ -319,38 +343,20 @@ export function validateSecurityDefinitionsAtStartup(input: {
   }
 }
 
-const GRANT_REFERENCE_HINTS: Record<
-  GrantDefinition["capability"],
-  { readonly subject: string; readonly fix: string }
-> = {
-  view: {
-    subject: "object type",
-    fix: "Register it in 'ontology/' or pass it to createSixb({ ontologies }).",
-  },
-  apply: { subject: "action", fix: "Add it to 'actions/' or pass it to createSixb({ actions })." },
-  run: {
-    subject: "workflow",
-    fix: "Add it to 'workflows/' or pass it to createSixb({ workflows }).",
-  },
-}
-
 function assertGrantReferences(
   roleId: string,
   grant: GrantDefinition,
   registered: {
     readonly objectTypeIds?: ReadonlySet<string>
+    readonly datasetIds?: ReadonlySet<string>
     readonly actionIds?: ReadonlySet<string>
     readonly workflowIds?: ReadonlySet<string>
+    readonly syncIds?: ReadonlySet<string>
+    readonly pipelineIds?: ReadonlySet<string>
   }
 ): void {
-  // Capability -> its registered id universe. A Record keeps this exhaustive:
-  // a new capability is a compile error until wired here.
-  const universeByCapability: Record<GrantCapability, ReadonlySet<string> | undefined> = {
-    view: registered.objectTypeIds,
-    apply: registered.actionIds,
-    run: registered.workflowIds,
-  }
-  const universe = universeByCapability[grant.capability]
+  const target = grantReferenceTarget(grant, registered)
+  const universe = target.universe
 
   if (!universe) {
     return
@@ -360,13 +366,70 @@ function assertGrantReferences(
   // to exclude. Either way every named id must be registered — an unknown id is
   // a typo that would silently widen or no-op the grant.
   const ids = grant.selection.all ? grant.selection.except : grant.selection.ids
-  const { subject, fix } = GRANT_REFERENCE_HINTS[grant.capability]
 
   for (const id of ids) {
     if (!universe.has(id)) {
       throw new SecurityValidationError(
-        `[Sixb] Role '${roleId}' grants ${grant.capability} on unknown ${subject} '${id}'. ${fix}`
+        `[Sixb] Role '${roleId}' grants ${grant.capability} on unknown ${target.subject} '${id}'. ${target.fix}`
       )
     }
+  }
+}
+
+function grantReferenceTarget(
+  grant: GrantDefinition,
+  registered: {
+    readonly objectTypeIds?: ReadonlySet<string>
+    readonly datasetIds?: ReadonlySet<string>
+    readonly actionIds?: ReadonlySet<string>
+    readonly workflowIds?: ReadonlySet<string>
+    readonly syncIds?: ReadonlySet<string>
+    readonly pipelineIds?: ReadonlySet<string>
+  }
+): {
+  readonly universe?: ReadonlySet<string>
+  readonly subject: string
+  readonly fix: string
+} {
+  switch (grant.capability) {
+    case "view":
+      return (grant.target ?? "object") === "dataset"
+        ? {
+            universe: registered.datasetIds,
+            subject: "dataset",
+            fix: "Add it to 'datasets/' or pass it to createSixb({ datasets }).",
+          }
+        : {
+            universe: registered.objectTypeIds,
+            subject: "object type",
+            fix: "Register it in 'ontology/' or pass it to createSixb({ ontologies }).",
+          }
+    case "apply":
+      return {
+        universe: registered.actionIds,
+        subject: "action",
+        fix: "Add it to 'actions/' or pass it to createSixb({ actions }).",
+      }
+    case "run":
+      switch (grant.target ?? "workflow") {
+        case "sync":
+          return {
+            universe: registered.syncIds,
+            subject: "sync",
+            fix: "Add it to 'syncs/' or pass it to createSixb({ syncs }).",
+          }
+        case "pipeline":
+          return {
+            universe: registered.pipelineIds,
+            subject: "pipeline",
+            fix: "Add it to 'pipelines/' or pass it to createSixb({ pipelines }).",
+          }
+        case "workflow":
+          return {
+            universe: registered.workflowIds,
+            subject: "workflow",
+            fix: "Add it to 'workflows/' or pass it to createSixb({ workflows }).",
+          }
+      }
   }
 }

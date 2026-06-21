@@ -159,8 +159,11 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       roles: options.roles ?? [],
       invitePolicies: options.invitePolicies ?? [],
       objectTypeIds: new Set(this.ontology.getObjectTypesById().keys()),
+      datasetIds: new Set((options.datasets ?? []).map((dataset) => dataset.id)),
       actionIds: registeredActionIds,
       workflowIds: new Set((options.workflows ?? []).map((workflow) => workflow.id)),
+      syncIds: new Set((options.syncs ?? []).map((sync) => sync.id)),
+      pipelineIds: new Set((options.pipelines ?? []).map((pipeline) => pipeline.id)),
       getSubTypes: (objectTypeId) => this.ontology.getSubTypes(objectTypeId),
     })
     this.auth = new AuthRuntime({
@@ -484,7 +487,21 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   as(context: AuthorizationContext): ScopedSixb<TOntologySources> {
     return createScopedSixb<TOntologySources>(
       { ...this.runtimeContext, authorization: context },
-      { workflows: this.workflows }
+      {
+        datasets: {
+          list: () => this.getDatasetDefinitions(),
+          getById: (datasetId) => this.getDatasetById(datasetId),
+        },
+        syncs: {
+          list: () => this.getSyncDefinitions(),
+          getById: (syncId) => this.getSyncById(syncId),
+        },
+        pipelines: {
+          list: () => this.getPipelineDefinitions(),
+          getById: (pipelineId) => this.getPipelineById(pipelineId),
+        },
+        workflows: this.workflows,
+      }
     )
   }
 

@@ -240,7 +240,7 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
   }
 
   async list(input: ListPipelineRunsInput): Promise<ListPipelineRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.pipelineIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -255,6 +255,12 @@ export class PgPipelineRunStorage implements PipelineRunStorage {
     if (input.pipelineId) {
       whereClauses.push(`pipeline_id = $${index++}`)
       params.push(input.pipelineId)
+    }
+
+    if (input.pipelineIds) {
+      const placeholders = input.pipelineIds.map(() => `$${index++}`).join(", ")
+      whereClauses.push(`pipeline_id IN (${placeholders})`)
+      params.push(...input.pipelineIds)
     }
 
     index = appendRunListFilters(whereClauses, params, index, input)

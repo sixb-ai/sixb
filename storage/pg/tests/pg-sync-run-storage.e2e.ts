@@ -124,6 +124,13 @@ describe("PgSyncRunStorage", () => {
     expect(page.hasMore).toBe(true)
     expect(page.runs.map((run) => run.id)).toEqual(["run-3"])
 
+    const selectedSyncs = await storage.syncRuns.list({
+      projectId: "my-app",
+      syncIds: ["sync-customers"],
+    })
+    expect(selectedSyncs.total).toBe(1)
+    expect(selectedSyncs.runs.map((run) => run.id)).toEqual(["run-3"])
+
     const failed = await storage.syncRuns.getById({
       projectId: "my-app",
       id: "run-1",

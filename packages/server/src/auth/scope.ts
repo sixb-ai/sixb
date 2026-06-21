@@ -17,8 +17,8 @@ import type { AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/cor
  *     Using the raw `sixb` on a path an authenticated principal can reach is a
  *     silent god-mode bypass — it will not fail to compile or to run.
  *   - Surfaces with no grant family yet (object/link/telemetry writes,
- *     datasets, syncs, pipelines, projections, workflow run history, auth
- *     admin) stay authenticated-only by design and use the raw `sixb`
+ *     projections, workflow run history, auth admin) stay
+ *     authenticated-only by design and use the raw `sixb`
  *     deliberately, not by omission. Add such a route consciously, and lock it
  *     down when its grant family lands.
  *

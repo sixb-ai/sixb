@@ -166,6 +166,14 @@ describe("InMemorySyncRunStorage", () => {
     expect(page.hasMore).toBe(false)
     expect(page.runs.map((run) => run.id)).toEqual(["run-2"])
 
+    const selectedSyncs = await storage.list({
+      projectId: "my-app",
+      syncIds: ["sync-customers"],
+    })
+
+    expect(selectedSyncs.runs.map((run) => run.id)).toEqual(["run-3"])
+    expect(selectedSyncs.total).toBe(1)
+
     const failed = await storage.getById({
       projectId: "my-app",
       id: "run-1",

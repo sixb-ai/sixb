@@ -97,6 +97,13 @@ describe("InMemoryPipelineRunStorage", () => {
     expect(page.hasMore).toBe(false)
     expect(page.runs.map((run) => run.id)).toEqual(["run-2"])
 
+    const selectedPipelines = await storage.list({
+      projectId: "my-app",
+      pipelineIds: ["orders"],
+    })
+    expect(selectedPipelines.total).toBe(1)
+    expect(selectedPipelines.runs.map((run) => run.id)).toEqual(["run-3"])
+
     const empty = await storage.list({
       projectId: "my-app",
       statuses: [],

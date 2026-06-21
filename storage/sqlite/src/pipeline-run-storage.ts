@@ -288,7 +288,7 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
   }
 
   async list(input: ListPipelineRunsInput): Promise<ListPipelineRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.pipelineIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -302,6 +302,11 @@ export class SqlitePipelineRunStorage implements PipelineRunStorage {
     if (input.pipelineId) {
       whereClauses.push("pipeline_id = ?")
       args.push(input.pipelineId)
+    }
+
+    if (input.pipelineIds) {
+      whereClauses.push(`pipeline_id IN (${input.pipelineIds.map(() => "?").join(", ")})`)
+      args.push(...input.pipelineIds)
     }
 
     appendRunListFilters(whereClauses, args, input)

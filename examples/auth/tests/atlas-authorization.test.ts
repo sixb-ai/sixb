@@ -11,6 +11,7 @@ import {
   resolveAuthorizationContext,
   type Sixb,
 } from "@sixb/core"
+import { adminAuditDataset, teamNotesDataset } from "../datasets/auth-data"
 import { seedAuthExampleObjects } from "../seed"
 
 async function createAuthExampleRuntime() {
@@ -57,6 +58,9 @@ describe("auth example Atlas authorization", () => {
     )
 
     expect(teamMember.listActions().map((action) => action.id)).toEqual(["acknowledge-note"])
+    expect(teamMember.listDatasets().map((dataset) => dataset.id)).toEqual([teamNotesDataset.id])
+    expect(teamMember.getDatasetById(teamNotesDataset.id)?.id).toBe(teamNotesDataset.id)
+    expect(teamMember.getDatasetById(adminAuditDataset.id)).toBeNull()
     await expect(
       teamMember.requestAction({
         actionId: "acknowledge-note",
@@ -93,6 +97,9 @@ describe("auth example Atlas authorization", () => {
         .map((action) => action.id)
         .sort()
     ).toEqual(["acknowledge-note", "resolve-access-request"])
+    expect(new Set(admin.listDatasets().map((dataset) => dataset.id))).toEqual(
+      new Set([teamNotesDataset.id, adminAuditDataset.id])
+    )
     await expect(
       admin.requestAction({
         actionId: "resolve-access-request",
@@ -111,5 +118,6 @@ describe("auth example Atlas authorization", () => {
 
     expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.listActions()).toEqual([])
+    expect(noGroups.listDatasets()).toEqual([])
   })
 })

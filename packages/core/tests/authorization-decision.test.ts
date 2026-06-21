@@ -5,18 +5,24 @@ import {
   evaluate,
   isAllowed,
   type StoredActionRequestedEvent,
+  type StoredDatasetVersionCommittedEvent,
   type StoredLinkUpsertedEvent,
   type StoredObjectUpsertedEvent,
+  type StoredPipelineRunStartedEvent,
   type StoredRuleTriggeredEvent,
   type StoredScheduleTriggeredEvent,
+  type StoredSyncRunStartedEvent,
   type StoredTelemetryAppendedEvent,
   type StoredWorkflowRunStartedEvent,
 } from "../src"
 
 function context(grants: {
   view?: readonly string[]
+  datasets?: readonly string[]
   apply?: readonly string[]
   run?: readonly string[]
+  syncs?: readonly string[]
+  pipelines?: readonly string[]
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -24,8 +30,11 @@ function context(grants: {
     roleIds: [],
     grants: {
       objectTypes: { view: new Set(grants.view ?? []) },
+      datasets: { view: new Set(grants.datasets ?? []) },
       actions: { apply: new Set(grants.apply ?? []) },
       workflows: { run: new Set(grants.run ?? []) },
+      syncs: { run: new Set(grants.syncs ?? []) },
+      pipelines: { run: new Set(grants.pipelines ?? []) },
     },
   }
 }
@@ -45,6 +54,21 @@ describe("evaluate", () => {
     })
   })
 
+  test("dataset.view checks dataset grants", () => {
+    expect(
+      evaluate(context({ datasets: ["raw.orders"] }), {
+        kind: "dataset.view",
+        datasetId: "raw.orders",
+      })
+    ).toEqual({ allowed: true, requirements: ["view:dataset:raw.orders"], missing: [] })
+
+    expect(evaluate(context({}), { kind: "dataset.view", datasetId: "raw.orders" })).toEqual({
+      allowed: false,
+      requirements: ["view:dataset:raw.orders"],
+      missing: ["view:dataset:raw.orders"],
+    })
+  })
+
   test("object.query requires every touched type and lists only the unviewable ones", () => {
     const decision = evaluate(context({ view: ["quote"] }), {
       kind: "object.query",
@@ -54,6 +78,33 @@ describe("evaluate", () => {
     expect(decision.allowed).toBe(false)
     expect(decision.requirements).toEqual(["view:object:quote", "view:object:contact"])
     expect(decision.missing).toEqual(["view:object:contact"])
+  })
+
+  test("sync.run checks sync grants", () => {
+    expect(
+      evaluate(context({ syncs: ["sync-orders"] }), { kind: "sync.run", syncId: "sync-orders" })
+    ).toEqual({ allowed: true, requirements: ["run:sync:sync-orders"], missing: [] })
+
+    expect(evaluate(context({}), { kind: "sync.run", syncId: "sync-orders" })).toEqual({
+      allowed: false,
+      requirements: ["run:sync:sync-orders"],
+      missing: ["run:sync:sync-orders"],
+    })
+  })
+
+  test("pipeline.run checks pipeline grants", () => {
+    expect(
+      evaluate(context({ pipelines: ["pipeline-orders"] }), {
+        kind: "pipeline.run",
+        pipelineId: "pipeline-orders",
+      })
+    ).toEqual({ allowed: true, requirements: ["run:pipeline:pipeline-orders"], missing: [] })
+
+    expect(evaluate(context({}), { kind: "pipeline.run", pipelineId: "pipeline-orders" })).toEqual({
+      allowed: false,
+      requirements: ["run:pipeline:pipeline-orders"],
+      missing: ["run:pipeline:pipeline-orders"],
+    })
   })
 
   test("a missing authorization context (privileged caller) allows everything", () => {
@@ -131,6 +182,34 @@ const workflowEvent: StoredWorkflowRunStartedEvent = {
   payload: { workflowId: "review", runId: "r1", startedAt: envelope.occurredAt },
 }
 
+const syncEvent: StoredSyncRunStartedEvent = {
+  ...envelope,
+  type: "sync.run.started",
+  topic: "syncs",
+  partitionKey: "sync-orders/run_1",
+  payload: { syncId: "sync-orders", runId: "run_1", startedAt: envelope.occurredAt },
+}
+
+const pipelineEvent: StoredPipelineRunStartedEvent = {
+  ...envelope,
+  type: "pipeline.run.started",
+  topic: "pipelines",
+  partitionKey: "pipeline-orders/run_1",
+  payload: { pipelineId: "pipeline-orders", runId: "run_1", startedAt: envelope.occurredAt },
+}
+
+const datasetEvent: StoredDatasetVersionCommittedEvent = {
+  ...envelope,
+  type: "dataset.version.committed",
+  topic: "datasets",
+  partitionKey: "raw.orders",
+  payload: {
+    datasetId: "raw.orders",
+    versionId: "v1",
+    producer: { kind: "sync", id: "erp-orders", runId: "run_1" },
+  },
+}
+
 const ruleEvent: StoredRuleTriggeredEvent = {
   ...envelope,
   type: "rule.triggered",
@@ -183,6 +262,21 @@ describe("canViewEvent", () => {
   test("workflow events require running the workflow", () => {
     expect(canViewEvent(context({ run: ["review"] }), workflowEvent)).toBe(true)
     expect(canViewEvent(context({}), workflowEvent)).toBe(false)
+  })
+
+  test("sync events require running the sync", () => {
+    expect(canViewEvent(context({ syncs: ["sync-orders"] }), syncEvent)).toBe(true)
+    expect(canViewEvent(context({}), syncEvent)).toBe(false)
+  })
+
+  test("pipeline events require running the pipeline", () => {
+    expect(canViewEvent(context({ pipelines: ["pipeline-orders"] }), pipelineEvent)).toBe(true)
+    expect(canViewEvent(context({}), pipelineEvent)).toBe(false)
+  })
+
+  test("dataset events require viewing the dataset", () => {
+    expect(canViewEvent(context({ datasets: ["raw.orders"] }), datasetEvent)).toBe(true)
+    expect(canViewEvent(context({}), datasetEvent)).toBe(false)
   })
 
   test("rule events require viewing the object the rule fired on", () => {

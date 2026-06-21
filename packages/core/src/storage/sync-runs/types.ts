@@ -58,6 +58,7 @@ export type FinishSyncRunInput =
 export interface ListSyncRunsInput {
   readonly projectId: string
   readonly syncId?: string
+  readonly syncIds?: readonly string[]
   readonly datasetId?: string
   readonly statuses?: readonly SyncRunStatus[]
   readonly startedAfter?: Date

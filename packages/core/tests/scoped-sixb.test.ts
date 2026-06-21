@@ -3,13 +3,20 @@ import {
   type ActionDefinition,
   AuthorizationError,
   can,
+  col,
   defineAction,
+  defineConnector,
+  defineDataset,
   defineGroup,
   defineObjectType,
+  definePipeline,
+  definePipelineStep,
   defineRole,
+  defineSync,
   defineWorkflow,
   defineWorkflowStep,
   link,
+  type PipelineDefinition,
   prop,
   ref,
   resolveAuthorizationContext,
@@ -38,6 +45,46 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
   links: [link("contract", Contract)],
 })
+
+const ContractsDataset = defineDataset("raw.contracts", {
+  schema: [col("id", "string")],
+})
+
+const InvoicesDataset = defineDataset("raw.invoices", {
+  schema: [col("id", "string")],
+})
+
+const sourceConnector = defineConnector("source", {
+  type: "test",
+  async connect() {
+    return {}
+  },
+})
+
+const syncContracts = defineSync("sync-contracts")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(ContractsDataset)
+
+const syncInvoices = defineSync("sync-invoices")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(InvoicesDataset)
+
+const contractPipelineStep = definePipelineStep("contract-pipeline-step")
+  .inputs({ contracts: ContractsDataset })
+  .output(ContractsDataset)
+  .run(async () => {})
+
+const invoicePipelineStep = definePipelineStep("invoice-pipeline-step")
+  .inputs({ invoices: InvoicesDataset })
+  .output(InvoicesDataset)
+  .run(async () => {})
+
+const contractPipeline: PipelineDefinition =
+  definePipeline("contract-pipeline").then(contractPipelineStep)
+const invoicePipeline: PipelineDefinition =
+  definePipeline("invoice-pipeline").then(invoicePipelineStep)
 
 // Widened to the base type, like renewContract below: keeps the registered
 // actions array out of the deep Sixb<tuple> instantiation (TS2589).
@@ -69,7 +116,7 @@ const operations = defineGroup("operations")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
-  grants: [can.view(Contract), can.apply(sendContract)],
+  grants: [can.view(Contract), can.view(ContractsDataset), can.apply(sendContract)],
 })
 
 const invoiceViewer = defineRole("invoice.viewer", {
@@ -85,7 +132,7 @@ const contractSender = defineRole("contract.sender", {
 
 const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
-  grants: [can.run(renewContract)],
+  grants: [can.run(renewContract), can.run(syncContracts), can.run(contractPipeline)],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -96,7 +143,10 @@ const principal = { type: "user", id: "adam" } as const
 function createRuntime() {
   return new Sixb<readonly [typeof Contract, typeof SignedContract, typeof Invoice]>({
     ontology: [Contract, SignedContract, Invoice],
+    datasets: [ContractsDataset, InvoicesDataset],
     actions: [sendContract, archiveInvoice],
+    syncs: [syncContracts, syncInvoices],
+    pipelines: [contractPipeline, invoicePipeline],
     workflows: [renewContract],
     groups: [commercial, finance, ops, operations],
     roles: [contractOperator, invoiceViewer, contractSender, operationsRunner],
@@ -217,6 +267,18 @@ describe("sixb.as() actions", () => {
 })
 
 describe("sixb.as() operational access", () => {
+  test("dataset catalog narrows to viewable datasets", () => {
+    const sixb = createRuntime()
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+
+    expect(operator.listDatasets().map((dataset) => dataset.id)).toEqual(["raw.contracts"])
+    expect(operator.getDatasetById("raw.contracts")?.id).toBe("raw.contracts")
+    expect(operator.getDatasetById("raw.invoices")).toBeNull()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    expect(runner.listDatasets()).toEqual([])
+  })
+
   test("workflow runs require can.run", async () => {
     const sixb = createRuntime()
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
@@ -293,6 +355,32 @@ describe("sixb.as() operational access", () => {
     expect(operator.listWorkflows()).toEqual([])
     expect(operator.getWorkflowById("renew-contract")).toBeNull()
   })
+
+  test("sync catalog narrows to runnable syncs", () => {
+    const sixb = createRuntime()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    expect(runner.listSyncs().map((sync) => sync.id)).toEqual(["sync-contracts"])
+    expect(runner.getSyncById("sync-contracts")?.id).toBe("sync-contracts")
+    expect(runner.getSyncById("sync-invoices")).toBeNull()
+
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(operator.listSyncs()).toEqual([])
+    expect(operator.getSyncById("sync-contracts")).toBeNull()
+  })
+
+  test("pipeline catalog narrows to runnable pipelines", () => {
+    const sixb = createRuntime()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    expect(runner.listPipelines().map((pipeline) => pipeline.id)).toEqual(["contract-pipeline"])
+    expect(runner.getPipelineById("contract-pipeline")?.id).toBe("contract-pipeline")
+    expect(runner.getPipelineById("invoice-pipeline")).toBeNull()
+
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(operator.listPipelines()).toEqual([])
+    expect(operator.getPipelineById("contract-pipeline")).toBeNull()
+  })
 })
 
 describe("sixb.as() fails closed on ungranted surfaces", () => {
@@ -350,11 +438,17 @@ describe("ScopedSixb surface", () => {
     expect(Object.keys(scoped).sort()).toEqual(
       [
         "authorization",
+        "getDatasetById",
         "getActionById",
         "getObject",
+        "getPipelineById",
+        "getSyncById",
         "getWorkflowById",
         "list",
         "listActions",
+        "listDatasets",
+        "listPipelines",
+        "listSyncs",
         "listWorkflows",
         "objects",
         "readEvents",

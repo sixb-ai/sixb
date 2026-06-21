@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto"
-import type {
-  OntologySource,
-  PipelineDefinition,
-  PipelineRunRecord,
-  PipelineStepExecutor,
-  PipelineStepRunRecord,
-  Sixb,
+import {
+  assertAuthorized,
+  type OntologySource,
+  type PipelineDefinition,
+  type PipelineRunRecord,
+  type PipelineStepExecutor,
+  type PipelineStepRunRecord,
+  type Sixb,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -135,8 +137,9 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
   return app
     .get(
       "/api/pipelines",
-      async () => {
-        const pipelines = sixb.getPipelineDefinitions()
+      async (context) => {
+        const { scoped } = requestAuthState(context)
+        const pipelines = scoped ? scoped.listPipelines() : sixb.getPipelineDefinitions()
         const latestRuns = await getLatestPipelineRuns(
           sixb,
           pipelines.map((pipeline) => pipeline.id)
@@ -157,8 +160,12 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .get(
       "/api/pipelines/:pipelineId",
-      async ({ params, set }) => {
-        const pipeline = sixb.getPipelineById(params.pipelineId)
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
+        const pipeline = scoped
+          ? scoped.getPipelineById(params.pipelineId)
+          : sixb.getPipelineById(params.pipelineId)
         if (!pipeline) {
           set.status = 404
           return { error: "Pipeline not found" }
@@ -178,7 +185,9 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .get(
       "/api/pipeline-runs",
-      async ({ query, set }) => {
+      async (context) => {
+        const { query, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsed = PipelineRunsQuerySchema.parse(query)
           const storage = sixb.storage.pipelineRuns
@@ -190,9 +199,22 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             }
           }
 
+          if (scoped && parsed.pipelineId && !scoped.getPipelineById(parsed.pipelineId)) {
+            return {
+              runs: [],
+              hasMore: false,
+              total: 0,
+            }
+          }
+
+          const pipelineIds =
+            scoped && !parsed.pipelineId
+              ? scoped.listPipelines().map((pipeline) => pipeline.id)
+              : undefined
           const result = await storage.list({
             projectId: sixb.id,
             pipelineId: parsed.pipelineId,
+            pipelineIds,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
             startedBefore: parseDate(parsed.startedBefore),
@@ -222,7 +244,9 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .get(
       "/api/pipeline-runs/:runId",
-      async ({ params, set }) => {
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.pipelineRuns
           if (!storage) {
@@ -235,6 +259,11 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             id: params.runId,
           })
           if (!run) {
+            set.status = 404
+            return { error: "Pipeline run not found" }
+          }
+
+          if (scoped && !scoped.getPipelineById(run.pipelineId)) {
             set.status = 404
             return { error: "Pipeline run not found" }
           }
@@ -269,7 +298,9 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .post(
       "/api/pipelines/:pipelineId/runs",
-      async ({ params, set }) => {
+      async (context) => {
+        const { params, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const pipeline = sixb.getPipelineById(params.pipelineId)
           if (!pipeline) {
@@ -281,6 +312,11 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             set.status = 400
             return { error: "Pipeline run storage is not configured" }
           }
+
+          assertAuthorized(
+            { authorization: authz ?? undefined },
+            { kind: "pipeline.run", pipelineId: pipeline.id }
+          )
 
           const runId = `run_${randomUUID()}`
           const queuedAt = new Date().toISOString()
@@ -313,6 +349,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: {
           202: RequestPipelineRunResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {

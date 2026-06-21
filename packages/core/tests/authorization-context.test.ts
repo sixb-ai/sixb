@@ -2,17 +2,26 @@ import { describe, expect, test } from "bun:test"
 import {
   actions,
   can,
+  col,
   createSessionCredential,
+  datasets,
   defineAction,
+  defineConnector,
+  defineDataset,
   defineGroup,
   defineObjectType,
+  definePipeline,
+  definePipelineStep,
   defineRole,
+  defineSync,
   ontology,
+  pipelines,
   prop,
   type RoleDefinition,
   resolveAuthorizationContext,
   resolveRoleGrants,
   Sixb,
+  syncs,
   workflows,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -36,6 +45,44 @@ const Invoice = defineObjectType({
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
+const ContractsDataset = defineDataset("raw.contracts", {
+  schema: [col("id", "string")],
+})
+
+const InvoicesDataset = defineDataset("raw.invoices", {
+  schema: [col("id", "string")],
+})
+
+const sourceConnector = defineConnector("source", {
+  type: "test",
+  async connect() {
+    return {}
+  },
+})
+
+const syncContracts = defineSync("sync-contracts")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(ContractsDataset)
+
+const syncInvoices = defineSync("sync-invoices")
+  .from(sourceConnector)
+  .read(() => [])
+  .intoDataset(InvoicesDataset)
+
+const contractsPipelineStep = definePipelineStep("pipeline-contracts-step")
+  .inputs({ contracts: ContractsDataset })
+  .output(ContractsDataset)
+  .run(async () => {})
+
+const invoicesPipelineStep = definePipelineStep("pipeline-invoices-step")
+  .inputs({ invoices: InvoicesDataset })
+  .output(InvoicesDataset)
+  .run(async () => {})
+
+const contractsPipeline = definePipeline("pipeline-contracts").then(contractsPipelineStep)
+const invoicesPipeline = definePipeline("pipeline-invoices").then(invoicesPipelineStep)
+
 const sendContract = defineAction("send-contract")
   .params({})
   .edits(() => {})
@@ -46,17 +93,29 @@ const admins = defineGroup("admins")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
-  grants: [can.view(Contract), can.apply(sendContract)],
+  grants: [
+    can.view(Contract),
+    can.apply(sendContract),
+    can.run(syncContracts),
+    can.run(contractsPipeline),
+  ],
 })
 
 const invoiceViewer = defineRole("invoice.viewer", {
   grantedTo: [finance],
-  grants: [can.view(Invoice)],
+  grants: [can.view(Invoice), can.view(InvoicesDataset)],
 })
 
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
-  grants: [can.view(ontology.objects()), can.apply(actions()), can.run(workflows())],
+  grants: [
+    can.view(ontology.objects()),
+    can.view(datasets()),
+    can.apply(actions()),
+    can.run(workflows()),
+    can.run(syncs()),
+    can.run(pipelines()),
+  ],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -66,8 +125,11 @@ describe("resolveAuthorizationContext", () => {
   // here we expand by hand so the resolver can be exercised in isolation.
   const universe = {
     objectTypeIds: new Set(["contract", "signed-contract", "invoice"]),
+    datasetIds: new Set(["raw.contracts", "raw.invoices"]),
     actionIds: new Set(["send-contract"]),
     workflowIds: new Set<string>(),
+    syncIds: new Set(["sync-contracts", "sync-invoices"]),
+    pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
   }
 
@@ -95,7 +157,10 @@ describe("resolveAuthorizationContext", () => {
     expect(context.groupIds).toEqual(["commercial"])
     expect(context.roleIds).toEqual(["contract.operator"])
     expect(context.grants.objectTypes.view).toEqual(new Set(["contract", "signed-contract"]))
+    expect(context.grants.datasets.view).toEqual(new Set())
     expect(context.grants.actions.apply).toEqual(new Set(["send-contract"]))
+    expect(context.grants.syncs.run).toEqual(new Set(["sync-contracts"]))
+    expect(context.grants.pipelines.run).toEqual(new Set(["pipeline-contracts"]))
   })
 
   test("unions grants across all matched roles", () => {
@@ -105,6 +170,9 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants.objectTypes.view).toEqual(
       new Set(["contract", "signed-contract", "invoice"])
     )
+    expect(context.grants.datasets.view).toEqual(new Set(["raw.invoices"]))
+    expect(context.grants.syncs.run).toEqual(new Set(["sync-contracts"]))
+    expect(context.grants.pipelines.run).toEqual(new Set(["pipeline-contracts"]))
   })
 
   test("principals without matching roles resolve to empty grants", () => {
@@ -112,8 +180,11 @@ describe("resolveAuthorizationContext", () => {
 
     expect(context.roleIds).toEqual([])
     expect(context.grants.objectTypes.view.size).toBe(0)
+    expect(context.grants.datasets.view.size).toBe(0)
     expect(context.grants.actions.apply.size).toBe(0)
     expect(context.grants.workflows.run.size).toBe(0)
+    expect(context.grants.syncs.run.size).toBe(0)
+    expect(context.grants.pipelines.run.size).toBe(0)
   })
 
   test("expands broad grants to the registered universe", () => {
@@ -123,8 +194,49 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants.objectTypes.view).toEqual(
       new Set(["contract", "signed-contract", "invoice"])
     )
+    expect(context.grants.datasets.view).toEqual(new Set(["raw.contracts", "raw.invoices"]))
     expect(context.grants.actions.apply).toEqual(new Set(["send-contract"]))
     expect(context.grants.workflows.run.size).toBe(0)
+    expect(context.grants.syncs.run).toEqual(new Set(["sync-contracts", "sync-invoices"]))
+    expect(context.grants.pipelines.run).toEqual(
+      new Set(["pipeline-contracts", "pipeline-invoices"])
+    )
+  })
+
+  test("except() excludes named datasets and keeps the rest of the dataset universe", () => {
+    const mostDatasets = defineRole("most.datasets", {
+      grantedTo: [admins],
+      grants: [can.view(datasets().except([InvoicesDataset]))],
+    })
+
+    const context = resolve(["admins"], [mostDatasets])
+
+    expect(context.grants.datasets.view).toEqual(new Set(["raw.contracts"]))
+    expect(context.grants.datasets.view.has("raw.invoices")).toBe(false)
+  })
+
+  test("except() excludes named syncs and keeps the rest of the sync universe", () => {
+    const mostSyncs = defineRole("most.syncs", {
+      grantedTo: [admins],
+      grants: [can.run(syncs().except([syncInvoices]))],
+    })
+
+    const context = resolve(["admins"], [mostSyncs])
+
+    expect(context.grants.syncs.run).toEqual(new Set(["sync-contracts"]))
+    expect(context.grants.syncs.run.has("sync-invoices")).toBe(false)
+  })
+
+  test("except() excludes named pipelines and keeps the rest of the pipeline universe", () => {
+    const mostPipelines = defineRole("most.pipelines", {
+      grantedTo: [admins],
+      grants: [can.run(pipelines().except([invoicesPipeline]))],
+    })
+
+    const context = resolve(["admins"], [mostPipelines])
+
+    expect(context.grants.pipelines.run).toEqual(new Set(["pipeline-contracts"]))
+    expect(context.grants.pipelines.run.has("pipeline-invoices")).toBe(false)
   })
 
   test("except() excludes the named types and keeps the rest of the universe", () => {
@@ -162,6 +274,9 @@ describe("auth.createAuthorizationContext", () => {
     const deps = createTestRuntimeDeps()
     const sixb = new Sixb({
       ontology: [Contract, SignedContract, Invoice],
+      datasets: [ContractsDataset, InvoicesDataset],
+      syncs: [syncContracts, syncInvoices],
+      pipelines: [contractsPipeline, invoicesPipeline],
       actions: [sendContract],
       groups: [commercial, finance],
       roles: [contractOperator, invoiceViewer],
@@ -228,7 +343,10 @@ describe("auth.createAuthorizationContext", () => {
     expect(context.groupIds).toEqual(["commercial"])
     expect(context.roleIds).toEqual(["contract.operator"])
     expect(context.grants.objectTypes.view).toEqual(new Set(["contract", "signed-contract"]))
+    expect(context.grants.datasets.view).toEqual(new Set())
     expect(context.grants.actions.apply).toEqual(new Set(["send-contract"]))
+    expect(context.grants.syncs.run).toEqual(new Set(["sync-contracts"]))
+    expect(context.grants.pipelines.run).toEqual(new Set(["pipeline-contracts"]))
   })
 
   test("rejects unauthenticated requests", async () => {
