@@ -1,7 +1,3 @@
-import type {
-  CreateAuthPersonalAccessTokenResponse,
-  ListAuthAccessTokensResponse,
-} from "@sixb/client"
 import {
   createAuthPersonalAccessTokenMutation,
   getAuthAccessManagementOptionsOptions,
@@ -10,42 +6,38 @@ import {
   listAuthAccessTokensQueryKey,
   revokeAuthAccessTokenMutation,
 } from "@sixb/client/hooks"
+import { Button } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { KeyRound, RefreshCw } from "lucide-react"
-import { type FormEvent, useEffect, useMemo, useState } from "react"
+import { Plus, RefreshCw, Search } from "lucide-react"
+import { useMemo, useState } from "react"
 import {
   AccessErrorState,
-  AccessTokensTable,
   apiErrorMessage,
-  dateInputToIso,
-  defaultExpiresOn,
-  ExpirationPicker,
-  GroupPicker,
+  type CreatedTokenState,
   LoadingSpinner,
-  TokenReveal,
+  TokenFormDialog,
+  TokenList,
 } from "./SettingsAccessControls"
 import { SettingsTabs } from "./SettingsTabs"
 
-type AccessToken = ListAuthAccessTokensResponse["accessTokens"][number]
+type StatusFilter = "all" | "active" | "inactive"
+
+const STATUS_FILTERS: readonly { readonly id: StatusFilter; readonly label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "active", label: "Active" },
+  { id: "inactive", label: "Inactive" },
+]
 
 export function SettingsTokensPage() {
   const queryClient = useQueryClient()
-  const [name, setName] = useState("")
-  const [expiresOn, setExpiresOn] = useState(defaultExpiresOn())
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([])
-  const [groupsInitialized, setGroupsInitialized] = useState(false)
-  const [createdToken, setCreatedToken] = useState<CreateAuthPersonalAccessTokenResponse | null>(
-    null
-  )
-  const [message, setMessage] = useState<string | null>(null)
-  const [formError, setFormError] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [created, setCreated] = useState<CreatedTokenState | null>(null)
+  const [query, setQuery] = useState("")
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null)
 
-  const optionsQuery = useQuery({
-    ...getAuthAccessManagementOptionsOptions(),
-    retry: false,
-  })
+  const optionsQuery = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const tokensQuery = useQuery({
     ...listAuthAccessTokensOptions(),
     enabled: optionsQuery.isSuccess,
@@ -54,95 +46,72 @@ export function SettingsTokensPage() {
 
   const groupOptions = optionsQuery.data?.groups ?? []
   const tokens = tokensQuery.data?.accessTokens ?? []
-  const canSubmit = name.trim().length > 0 && expiresOn.length > 0
   const groupOptionsById = useMemo(
     () => new Map(groupOptions.map((group) => [group.id, group])),
     [groupOptions]
   )
+  const allGroupIds = useMemo(() => groupOptions.map((group) => group.id), [groupOptions])
 
-  useEffect(() => {
-    if (groupsInitialized || !optionsQuery.data) return
-    setSelectedGroupIds(optionsQuery.data.groups.map((group) => group.id))
-    setGroupsInitialized(true)
-  }, [groupsInitialized, optionsQuery.data])
+  const filteredTokens = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    return tokens.filter((token) => {
+      if (needle && !token.name.toLowerCase().includes(needle) && !token.id.includes(needle)) {
+        return false
+      }
+      if (statusFilter === "active") return token.status === "active"
+      if (statusFilter === "inactive") return token.status !== "active"
+      return true
+    })
+  }, [tokens, query, statusFilter])
 
-  const refresh = async () => {
-    await Promise.all([
+  const refresh = () =>
+    Promise.all([
       queryClient.invalidateQueries({ queryKey: getAuthAccessManagementOptionsQueryKey() }),
       queryClient.invalidateQueries({ queryKey: listAuthAccessTokensQueryKey() }),
     ])
-  }
 
   const createToken = useMutation({
     ...createAuthPersonalAccessTokenMutation(),
     onSuccess: async (result) => {
-      setCreatedToken(result)
-      setName("")
-      setExpiresOn(defaultExpiresOn())
-      setMessage("Token created.")
-      setFormError(null)
+      setCreated({ tokenValue: result.tokenValue, name: result.accessToken.name })
       await refresh()
-    },
-    onError: (error) => {
-      setCreatedToken(null)
-      setMessage(null)
-      setFormError(apiErrorMessage(error, "Could not create the token."))
     },
   })
 
   const revokeToken = useMutation({
     ...revokeAuthAccessTokenMutation(),
     onSuccess: async () => {
-      setMessage("Token revoked.")
-      setFormError(null)
       await refresh()
-    },
-    onError: (error) => {
-      setMessage(null)
-      setFormError(apiErrorMessage(error, "Could not revoke the token."))
     },
   })
 
-  const submitToken = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setMessage(null)
-    setFormError(null)
-
-    if (!canSubmit || createToken.isPending) {
-      return
-    }
-
-    try {
-      createToken.mutate({
-        body: {
-          name: name.trim(),
-          expiresAt: dateInputToIso(expiresOn),
-          groupIds: selectedGroupIds,
-        },
-      })
-    } catch {
-      setFormError("Choose a valid expiration date.")
+  const handleDialogChange = (open: boolean) => {
+    setDialogOpen(open)
+    // Reset only on open; keeping the reveal mounted on close avoids a flash
+    // back to the form during the dialog's exit animation.
+    if (open) {
+      createToken.reset()
+      setCreated(null)
     }
   }
 
-  const revoke = (tokenId: AccessToken["id"]) => {
-    setMessage(null)
-    setFormError(null)
+  const revoke = (tokenId: string) => {
     setRevokingTokenId(tokenId)
     revokeToken.mutate({ path: { tokenId } }, { onSettled: () => setRevokingTokenId(null) })
   }
 
   if (optionsQuery.isLoading) {
     return (
-      <div className="flex min-h-[360px] items-center justify-center">
-        <LoadingSpinner text="Loading token settings..." />
+      <div className="flex min-h-90 items-center justify-center">
+        <LoadingSpinner text="Loading token settings…" />
       </div>
     )
   }
 
   if (optionsQuery.isError) {
     return (
-      <div className="flex min-h-[360px] items-center justify-center">
+      <div className="space-y-4">
+        <SettingsTabs />
         <AccessErrorState
           title="Token settings unavailable"
           description={apiErrorMessage(optionsQuery.error, "Could not load token settings.")}
@@ -152,130 +121,87 @@ export function SettingsTokensPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <SettingsTabs />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Settings
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-normal text-foreground">
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">
             Personal access tokens
           </h1>
+          <p className="mt-1.5 max-w-[52ch] text-sm text-muted-foreground">
+            Tokens authenticate the CLI and API as you, with at most your own access. Treat them
+            like passwords.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            tokensQuery.refetch()
-            optionsQuery.refetch()
-          }}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-card px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              tokensQuery.refetch()
+              optionsQuery.refetch()
+            }}
+            title="Refresh"
+          >
+            <RefreshCw className={cn("h-4 w-4", tokensQuery.isFetching && "animate-spin")} />
+            <span className="sr-only">Refresh</span>
+          </Button>
+          <Button type="button" onClick={() => handleDialogChange(true)}>
+            <Plus className="h-4 w-4" />
+            New token
+          </Button>
+        </div>
       </div>
 
-      <section className="rounded-xl border border-border/60 bg-card">
-        <form onSubmit={submitToken} className="space-y-4 p-4">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-              <KeyRound className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground">
-                Create personal access token
-              </h2>
-            </div>
-          </div>
-
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
-            <label className="min-w-0">
-              <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Name</span>
-              <input
-                type="text"
-                value={name}
-                onChange={(event) => {
-                  setName(event.target.value)
-                  setMessage(null)
-                  setFormError(null)
-                }}
-                placeholder="Local CLI"
-                className="h-10 w-full rounded-lg border border-border/60 bg-background px-3 text-sm outline-none placeholder:text-muted-foreground/60"
-              />
-            </label>
-
-            <button
-              type="submit"
-              disabled={!canSubmit || createToken.isPending}
-              className="inline-flex h-10 items-center justify-center gap-2 self-end rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {createToken.isPending ? (
-                <LoadingSpinner size="sm" className="text-primary-foreground" />
-              ) : (
-                <KeyRound className="h-4 w-4" />
-              )}
-              Create token
-            </button>
-          </div>
-
-          <label className="block min-w-0">
-            <span className="mb-1.5 block text-xs font-medium text-muted-foreground">Expires</span>
-            <ExpirationPicker
-              value={expiresOn}
-              onChange={(nextValue) => {
-                setExpiresOn(nextValue)
-                setMessage(null)
-                setFormError(null)
-              }}
-            />
-          </label>
-
-          <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Groups</p>
-            <GroupPicker
-              groups={groupOptions}
-              selectedGroupIds={selectedGroupIds}
-              onChange={(nextGroupIds) => {
-                setSelectedGroupIds(nextGroupIds)
-                setMessage(null)
-                setFormError(null)
-              }}
-              disabled={createToken.isPending}
+      {tokens.length > 0 && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search tokens"
+              className="h-9 w-full rounded-lg border border-border/60 bg-card pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20"
             />
           </div>
-
-          {createdToken && (
-            <TokenReveal label="Personal access token ready" tokenValue={createdToken.tokenValue} />
-          )}
-
-          {(message || formError) && (
-            <p
-              className={cn(
-                "rounded-lg px-3 py-2 text-sm",
-                formError
-                  ? "border border-destructive/30 bg-destructive/10 text-destructive"
-                  : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-              )}
-            >
-              {formError ?? message}
-            </p>
-          )}
-        </form>
-      </section>
-
-      <section className="rounded-xl border border-border/60 bg-card">
-        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Personal access tokens</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{tokens.length} visible</p>
+          <div className="inline-flex h-9 shrink-0 overflow-hidden rounded-lg border border-border/60 bg-card">
+            {STATUS_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                aria-pressed={statusFilter === filter.id}
+                onClick={() => setStatusFilter(filter.id)}
+                className={cn(
+                  "border-l border-border/60 px-3 text-xs font-medium transition-colors first:border-l-0",
+                  statusFilter === filter.id
+                    ? "bg-accent text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {filter.label}
+              </button>
+            ))}
           </div>
+        </div>
+      )}
+
+      <section className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+        <div className="flex items-baseline justify-between border-b border-border/60 px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">Your tokens</h2>
+          <span className="text-xs text-muted-foreground">
+            {tokens.length} {tokens.length === 1 ? "token" : "tokens"}
+          </span>
         </div>
 
         {tokensQuery.isLoading ? (
-          <div className="flex min-h-[220px] items-center justify-center">
-            <LoadingSpinner text="Loading tokens..." />
+          <div className="flex min-h-50 items-center justify-center">
+            <LoadingSpinner text="Loading tokens…" />
           </div>
         ) : tokensQuery.isError ? (
           <AccessErrorState
@@ -283,14 +209,36 @@ export function SettingsTokensPage() {
             description={apiErrorMessage(tokensQuery.error, "Could not load tokens.")}
           />
         ) : (
-          <AccessTokensTable
-            tokens={tokens}
+          <TokenList
+            tokens={filteredTokens}
             groupOptionsById={groupOptionsById}
             revokingTokenId={revokingTokenId}
             onRevoke={revoke}
+            emptyTitle={tokens.length === 0 ? "No tokens yet" : "No matching tokens"}
+            emptyDescription={
+              tokens.length === 0
+                ? "Create a token to authenticate the CLI and API as you."
+                : "Try a different search or status filter."
+            }
           />
         )}
       </section>
+
+      <TokenFormDialog
+        open={dialogOpen}
+        onOpenChange={handleDialogChange}
+        kind="personal"
+        groups={groupOptions}
+        defaultGroupIds={allGroupIds}
+        onSubmit={(body) => createToken.mutate({ body })}
+        isSubmitting={createToken.isPending}
+        errorMessage={
+          createToken.isError
+            ? apiErrorMessage(createToken.error, "Could not create the token.")
+            : null
+        }
+        created={created}
+      />
     </div>
   )
 }
