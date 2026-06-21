@@ -12,7 +12,7 @@ import type { ObjectType } from "../ontology"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
 import { isScope, type Scope, scopeIdOf } from "./scopes"
-import type { ApplyGrant, Selection, StartGrant, ViewGrant } from "./types"
+import type { ApplyGrant, RunGrant, Selection, ViewGrant } from "./types"
 
 type GrantInput<TDefinition, TTarget extends Scope["target"]> =
   | TDefinition
@@ -29,7 +29,7 @@ function selectionFrom<TDefinition extends { readonly id?: unknown }>(
 
   const items = Array.isArray(input) ? input : [input as TDefinition]
   if (items.length === 0) {
-    throw new SecurityValidationError(`${label} requires at least one definition.`)
+    throw new SecurityValidationError(`[Sixb] ${label} requires at least one definition.`)
   }
 
   // Dedupe explicit ids up front; resolution would dedupe via Set anyway.
@@ -45,12 +45,12 @@ function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
   return { kind: "grant", capability: "apply", selection: selectionFrom(input, "can.apply") }
 }
 
-function start(input: GrantInput<WorkflowDefinition, "workflow">): StartGrant {
-  return { kind: "grant", capability: "start", selection: selectionFrom(input, "can.start") }
+function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant {
+  return { kind: "grant", capability: "run", selection: selectionFrom(input, "can.run") }
 }
 
 export const can = {
   view,
   apply,
-  start,
+  run,
 }

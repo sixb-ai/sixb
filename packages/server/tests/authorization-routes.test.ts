@@ -64,12 +64,12 @@ const contractOperator = defineRole("contract.operator", {
 
 const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
-  grants: [can.start(renewContract)],
+  grants: [can.run(renewContract)],
 })
 
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
-  grants: [can.view(ontology.objects()), can.apply(actions()), can.start(workflows())],
+  grants: [can.view(ontology.objects()), can.apply(actions()), can.run(workflows())],
 })
 
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
@@ -373,7 +373,33 @@ describe("authorized event and workflow routes", () => {
     expect(runnerBody.events.filter((event) => event.type === "object.upserted")).toEqual([])
   })
 
-  test("workflow runs require can.start", async () => {
+  test("workflow catalog narrows to runnable workflows and hides the rest as 404", async () => {
+    const { app, storage } = await createApp()
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+
+    // The runner can run renew-contract, so it appears in the catalog.
+    const runnerList = await app.fetch(
+      new Request("http://localhost/api/workflows", { headers: runner.headers })
+    )
+    expect(((await runnerList.json()) as { id: string }[]).map((w) => w.id)).toEqual([
+      "renew-contract",
+    ])
+
+    // The operator holds no run grant, so the catalog is empty and the detail
+    // route hides the workflow as 404 (existence-hiding, never 403).
+    const operatorList = await app.fetch(
+      new Request("http://localhost/api/workflows", { headers: operator.headers })
+    )
+    expect(await operatorList.json()).toEqual([])
+
+    const hidden = await app.fetch(
+      new Request("http://localhost/api/workflows/renew-contract", { headers: operator.headers })
+    )
+    expect(hidden.status).toBe(404)
+  })
+
+  test("workflow runs require can.run", async () => {
     const { app, storage } = await createApp()
     const runner = await seedSession(storage, ["operations"], "usr_run")
     const operator = await seedSession(storage, ["commercial"], "usr_op")

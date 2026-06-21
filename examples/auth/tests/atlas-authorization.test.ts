@@ -76,7 +76,7 @@ describe("auth example Atlas authorization", () => {
           accessRequest: { objectTypeId: "access-request", primaryId: "access-request" },
         },
       })
-    ).rejects.toThrow("not allowed to start workflow 'run-access-review'")
+    ).rejects.toThrow("not allowed to run workflow 'run-access-review'")
     // Event visibility is derived from grants: team members see events for the
     // objects they can view (Note), but not for AdminNote or AccessRequest.
     const teamMemberObjectEvents = (await teamMember.readEvents())

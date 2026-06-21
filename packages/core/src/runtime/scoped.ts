@@ -25,6 +25,7 @@ import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ObjectRow } from "../storage"
 import type {
   RequestWorkflowRunInput,
+  WorkflowDefinition,
   WorkflowRunRequestResult,
   WorkflowsRuntime,
 } from "../workflows"
@@ -105,8 +106,14 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Request an action by id (server / dynamic contexts). Requires `can.apply`. */
   requestAction(input: RequestActionInput): Promise<RequestActionResult>
 
-  /** Start a workflow run. Requires `can.start`. */
+  /** Start a workflow run. Requires `can.run`. */
   runWorkflow(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+
+  /** Workflow definitions the principal may run. */
+  listWorkflows(): readonly WorkflowDefinition[]
+
+  /** Look up a runnable workflow definition; null hides workflows the principal cannot run. */
+  getWorkflowById(workflowId: string): WorkflowDefinition | null
 
   /** Read the domain events the principal is allowed to see (derived from grants). */
   readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
@@ -159,10 +166,27 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
 
     runWorkflow: (input: RequestWorkflowRunInput) => deps.workflows.requestByIdAs(runtime, input),
 
+    // Run grant doubles as catalog visibility: a workflow you cannot run is not
+    // worth surfacing, and hiding it also hides the (possibly ungranted) object
+    // types and action params its node graph references.
+    listWorkflows: () =>
+      deps.workflows
+        .list()
+        .filter((workflow) =>
+          isAllowed(runtime.authorization, { kind: "workflow.run", workflowId: workflow.id })
+        ),
+
+    getWorkflowById: (workflowId: string) => {
+      const workflow = deps.workflows.getById(workflowId)
+      return workflow && isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
+        ? workflow
+        : null
+    },
+
     // No standalone events grant: the stream is filtered to events whose
-    // subject the principal may view/apply/start. `limit` applies before this
+    // subject the principal may view/apply/run. `limit` applies before this
     // filter, so a page may return fewer events than requested — acceptable for
-    // a best-effort recent log.
+    // a best-effort recent log (storage-level filtering is the planned fix).
     readEvents: async (input?: EventsReadInput) => {
       const events = await runtime.events.read(input)
       return events.filter((event) => canViewEvent(runtime.authorization, event))

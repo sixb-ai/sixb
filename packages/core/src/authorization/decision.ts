@@ -8,6 +8,12 @@
  * A missing authorization context means a privileged caller (raw `sixb`,
  * syncs, workers, tests) — everything is allowed. Scoped contexts are
  * default-deny: a request without a covering grant is denied.
+ *
+ * SECURITY — this makes "privileged" the silent default: any caller that
+ * reaches a leaf without an authorization context bypasses all grant checks.
+ * That is intended for internal callers, but it means HTTP routes serving
+ * authenticated principals must go through the scoped runtime (`sixb.as(ctx)`),
+ * never the raw runtime. See `RequestAuthState` in the server for the rule.
  */
 
 import { AuthorizationError } from "./errors"
@@ -17,7 +23,7 @@ import type { AuthorizationContext, GrantIndex } from "./types"
 export type AuthzRequest =
   | { readonly kind: "object.view"; readonly objectTypeId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
-  | { readonly kind: "workflow.start"; readonly workflowId: string }
+  | { readonly kind: "workflow.run"; readonly workflowId: string }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
 
 export interface AuthzDecision {
@@ -38,7 +44,7 @@ interface AuthorizedRuntime {
 type Atom =
   | { readonly capability: "view"; readonly id: string }
   | { readonly capability: "apply"; readonly id: string }
-  | { readonly capability: "start"; readonly id: string }
+  | { readonly capability: "run"; readonly id: string }
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
@@ -46,8 +52,8 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ capability: "view", id: request.objectTypeId }]
     case "action.apply":
       return [{ capability: "apply", id: request.actionId }]
-    case "workflow.start":
-      return [{ capability: "start", id: request.workflowId }]
+    case "workflow.run":
+      return [{ capability: "run", id: request.workflowId }]
     case "object.query":
       return request.touchedObjectTypeIds.map((id) => ({ capability: "view", id }))
   }
@@ -59,8 +65,8 @@ function atomKey(atom: Atom): string {
       return `view:object:${atom.id}`
     case "apply":
       return `apply:action:${atom.id}`
-    case "start":
-      return `start:workflow:${atom.id}`
+    case "run":
+      return `run:workflow:${atom.id}`
   }
 }
 
@@ -70,8 +76,8 @@ function holds(grants: GrantIndex, atom: Atom): boolean {
       return grants.objectTypes.view.has(atom.id)
     case "apply":
       return grants.actions.apply.has(atom.id)
-    case "start":
-      return grants.workflows.start.has(atom.id)
+    case "run":
+      return grants.workflows.run.has(atom.id)
   }
 }
 
@@ -133,8 +139,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
     case "action.apply":
       return `[Sixb] Principal '${principalId}' is not allowed to apply action '${request.actionId}'.`
-    case "workflow.start":
-      return `[Sixb] Principal '${principalId}' is not allowed to start workflow '${request.workflowId}'.`
+    case "workflow.run":
+      return `[Sixb] Principal '${principalId}' is not allowed to run workflow '${request.workflowId}'.`
     case "object.query": {
       // Name the first touched type the principal cannot view.
       const blocked = request.touchedObjectTypeIds.find(

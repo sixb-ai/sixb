@@ -45,7 +45,7 @@ export function isScope(value: unknown): value is Scope {
 
 export function scopeIdOf(item: { readonly id?: unknown }, label: string): string {
   if (typeof item?.id !== "string" || !item.id.trim()) {
-    throw new SecurityValidationError(`${label} requires definitions with a non-empty id.`)
+    throw new SecurityValidationError(`[Sixb] ${label} requires definitions with a non-empty id.`)
   }
   return item.id
 }

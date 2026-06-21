@@ -56,7 +56,7 @@ const invoiceViewer = defineRole("invoice.viewer", {
 
 const adminOperator = defineRole("admin.operator", {
   grantedTo: [admins],
-  grants: [can.view(ontology.objects()), can.apply(actions()), can.start(workflows())],
+  grants: [can.view(ontology.objects()), can.apply(actions()), can.run(workflows())],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -113,7 +113,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.roleIds).toEqual([])
     expect(context.grants.objectTypes.view.size).toBe(0)
     expect(context.grants.actions.apply.size).toBe(0)
-    expect(context.grants.workflows.start.size).toBe(0)
+    expect(context.grants.workflows.run.size).toBe(0)
   })
 
   test("expands broad grants to the registered universe", () => {
@@ -124,7 +124,7 @@ describe("resolveAuthorizationContext", () => {
       new Set(["contract", "signed-contract", "invoice"])
     )
     expect(context.grants.actions.apply).toEqual(new Set(["send-contract"]))
-    expect(context.grants.workflows.start.size).toBe(0)
+    expect(context.grants.workflows.run.size).toBe(0)
   })
 
   test("except() excludes the named types and keeps the rest of the universe", () => {

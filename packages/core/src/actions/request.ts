@@ -99,6 +99,12 @@ export async function requestAction(
   const rawParams: Record<string, unknown> = input.params ?? {}
   const subject: ActionSubject = input.subject ?? { kind: "none" }
 
+  assertAuthorized(runtime, { kind: "action.apply", actionId })
+  if (action.binding.kind === "object") {
+    // Object actions also require visibility of the subject's object type.
+    assertAuthorized(runtime, { kind: "object.view", objectTypeId: action.binding.objectType.id })
+  }
+
   validateActionSubject(action, subject)
 
   let pathPrefix = action.id
@@ -110,12 +116,6 @@ export async function requestAction(
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
-
-  assertAuthorized(runtime, { kind: "action.apply", actionId: action.id })
-  if (objectType) {
-    // Object actions also require visibility of the subject's object type.
-    assertAuthorized(runtime, { kind: "object.view", objectTypeId: objectType.id })
-  }
 
   const runId = createActionRunId(input.runId)
   const existing = await actionRuns.getById({ projectId: runtime.projectId, id: runId })

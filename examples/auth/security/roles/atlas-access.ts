@@ -11,5 +11,5 @@ export const teamMemberAtlasAccess = defineRole("team-member.atlas-access", {
 
 export const securityAdminFullAccess = defineRole("security-admin.full-access", {
   grantedTo: [securityAdmins],
-  grants: [can.view(ontology.objects()), can.apply(actions()), can.start(workflows())],
+  grants: [can.view(ontology.objects()), can.apply(actions()), can.run(workflows())],
 })

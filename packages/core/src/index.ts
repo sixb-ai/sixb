@@ -468,11 +468,11 @@ export type {
   InvitePolicyScope,
   RegisteredSecurityDefinitions,
   RoleDefinition,
+  RunGrant,
   Scope,
   ScopeTarget,
   SecurityRegistry,
   Selection,
-  StartGrant,
   ViewGrant,
 } from "./security"
 export {

@@ -14,8 +14,8 @@ export interface GrantIndex {
   readonly objectTypes: { readonly view: ReadonlySet<string> }
   /** Action ids this principal may request. */
   readonly actions: { readonly apply: ReadonlySet<string> }
-  /** Workflow ids this principal may start. */
-  readonly workflows: { readonly start: ReadonlySet<string> }
+  /** Workflow ids this principal may run. */
+  readonly workflows: { readonly run: ReadonlySet<string> }
 }
 
 /** A role with its grants pre-expanded to concrete id sets at startup. */

@@ -18,9 +18,9 @@ export type {
   InvitePolicyDefinition,
   RegisteredSecurityDefinitions,
   RoleDefinition,
+  RunGrant,
   SecurityRegistry,
   Selection,
-  StartGrant,
   ViewGrant,
 } from "./types"
 export {

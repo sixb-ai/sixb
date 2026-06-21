@@ -85,7 +85,7 @@ const contractSender = defineRole("contract.sender", {
 
 const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
-  grants: [can.start(renewContract)],
+  grants: [can.run(renewContract)],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -217,7 +217,7 @@ describe("sixb.as() actions", () => {
 })
 
 describe("sixb.as() operational access", () => {
-  test("workflow runs require can.start", async () => {
+  test("workflow runs require can.run", async () => {
     const sixb = createRuntime()
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     const input = {
@@ -241,7 +241,7 @@ describe("sixb.as() operational access", () => {
     const operator = sixb.as(contextFor(sixb, ["commercial"]))
     expect((await operator.readEvents()).map((event) => event.type)).toContain("object.upserted")
 
-    // The runner can start workflows but cannot view Contract, so the contract
+    // The runner can run workflows but cannot view Contract, so the contract
     // event is filtered out (no workflow has run, so it sees nothing here).
     const runner = sixb.as(contextFor(sixb, ["operations"]))
     expect((await runner.readEvents()).filter((event) => event.type === "object.upserted")).toEqual(
@@ -279,6 +279,19 @@ describe("sixb.as() operational access", () => {
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
     ).rejects.toThrow(AuthorizationError)
+  })
+
+  test("workflow catalog narrows to runnable workflows", () => {
+    const sixb = createRuntime()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    expect(runner.listWorkflows().map((workflow) => workflow.id)).toEqual(["renew-contract"])
+    expect(runner.getWorkflowById("renew-contract")?.id).toBe("renew-contract")
+
+    // No run grant: the workflow is hidden from both listing and lookup.
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(operator.listWorkflows()).toEqual([])
+    expect(operator.getWorkflowById("renew-contract")).toBeNull()
   })
 })
 
@@ -323,5 +336,31 @@ describe("sixb.as() fails closed on ungranted surfaces", () => {
 
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
     expect((await sixb.list({})).objects).toHaveLength(1)
+  })
+})
+
+describe("ScopedSixb surface", () => {
+  // The scoped value is built then `as unknown as ScopedSixb`-cast, so neither
+  // the compiler nor the mask catches a member added to one side but not the
+  // other. Pin the exposed members so any drift fails loudly here.
+  test("exposes exactly the allowlisted members", () => {
+    const sixb = createRuntime()
+    const scoped = sixb.as(contextFor(sixb, ["commercial"]))
+
+    expect(Object.keys(scoped).sort()).toEqual(
+      [
+        "authorization",
+        "getActionById",
+        "getObject",
+        "getWorkflowById",
+        "list",
+        "listActions",
+        "listWorkflows",
+        "objects",
+        "readEvents",
+        "requestAction",
+        "runWorkflow",
+      ].sort()
+    )
   })
 })

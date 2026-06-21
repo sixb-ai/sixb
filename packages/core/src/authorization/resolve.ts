@@ -1,5 +1,5 @@
 import type { Principal } from "../auth/types"
-import type { RoleDefinition, Selection } from "../security"
+import type { GrantCapability, RoleDefinition, Selection } from "../security"
 import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
 
 /**
@@ -20,19 +20,30 @@ export function resolveRoleGrants(
 ): GrantIndex {
   const view = new Set<string>()
   const apply = new Set<string>()
-  const start = new Set<string>()
+  const run = new Set<string>()
 
-  for (const grant of role.grants) {
-    if (grant.capability === "view") {
-      expandSelection(grant.selection, universe.objectTypeIds, view, universe.getSubTypes)
-    } else if (grant.capability === "apply") {
-      expandSelection(grant.selection, universe.actionIds, apply)
-    } else {
-      expandSelection(grant.selection, universe.workflowIds, start)
+  // Capability -> the universe it ranges over, the set it expands into, and any
+  // subtype expansion. A Record keeps this exhaustive:
+  // adding a capability is a compile error until it is wired here.
+  const targets: Record<
+    GrantCapability,
+    {
+      readonly universe: ReadonlySet<string>
+      readonly into: Set<string>
+      readonly expand?: (id: string) => readonly string[]
     }
+  > = {
+    view: { universe: universe.objectTypeIds, into: view, expand: universe.getSubTypes },
+    apply: { universe: universe.actionIds, into: apply },
+    run: { universe: universe.workflowIds, into: run },
   }
 
-  return { objectTypes: { view }, actions: { apply }, workflows: { start } }
+  for (const grant of role.grants) {
+    const target = targets[grant.capability]
+    expandSelection(grant.selection, target.universe, target.into, target.expand)
+  }
+
+  return { objectTypes: { view }, actions: { apply }, workflows: { run } }
 }
 
 function expandSelection(
@@ -78,7 +89,7 @@ export function resolveAuthorizationContext(input: {
   const roleIds: string[] = []
   const view = new Set<string>()
   const apply = new Set<string>()
-  const start = new Set<string>()
+  const run = new Set<string>()
 
   for (const role of input.roles) {
     if (!role.grantedToGroupIds.some((groupId) => memberGroupIds.has(groupId))) {
@@ -92,8 +103,8 @@ export function resolveAuthorizationContext(input: {
     for (const id of role.grants.actions.apply) {
       apply.add(id)
     }
-    for (const id of role.grants.workflows.start) {
-      start.add(id)
+    for (const id of role.grants.workflows.run) {
+      run.add(id)
     }
   }
 
@@ -102,6 +113,6 @@ export function resolveAuthorizationContext(input: {
     ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
     groupIds: input.groupIds,
     roleIds,
-    grants: { objectTypes: { view }, actions: { apply }, workflows: { start } },
+    grants: { objectTypes: { view }, actions: { apply }, workflows: { run } },
   }
 }

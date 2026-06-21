@@ -286,8 +286,9 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
   return app
     .get(
       "/api/workflows",
-      async () => {
-        const workflows = sixb.workflows.list()
+      async (context) => {
+        const { scoped } = requestAuthState(context)
+        const workflows = scoped ? scoped.listWorkflows() : sixb.workflows.list()
         const latestRuns = await getLatestWorkflowRuns(
           sixb,
           workflows.map((workflow) => workflow.id)
@@ -308,8 +309,14 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
     )
     .get(
       "/api/workflows/:workflowId",
-      async ({ params, set }) => {
-        const workflow = sixb.workflows.getById(params.workflowId)
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
+        // Non-runnable workflows are hidden as 404 (existence-hiding), matching
+        // the object/action read routes.
+        const workflow = scoped
+          ? scoped.getWorkflowById(params.workflowId)
+          : sixb.workflows.getById(params.workflowId)
         if (!workflow) {
           set.status = 404
           return { error: "Workflow not found" }

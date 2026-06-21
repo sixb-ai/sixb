@@ -7,6 +7,7 @@ import {
   type StoredActionRequestedEvent,
   type StoredLinkUpsertedEvent,
   type StoredObjectUpsertedEvent,
+  type StoredRuleTriggeredEvent,
   type StoredScheduleTriggeredEvent,
   type StoredTelemetryAppendedEvent,
   type StoredWorkflowRunStartedEvent,
@@ -15,7 +16,7 @@ import {
 function context(grants: {
   view?: readonly string[]
   apply?: readonly string[]
-  start?: readonly string[]
+  run?: readonly string[]
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -24,7 +25,7 @@ function context(grants: {
     grants: {
       objectTypes: { view: new Set(grants.view ?? []) },
       actions: { apply: new Set(grants.apply ?? []) },
-      workflows: { start: new Set(grants.start ?? []) },
+      workflows: { run: new Set(grants.run ?? []) },
     },
   }
 }
@@ -61,7 +62,7 @@ describe("evaluate", () => {
       requirements: ["view:object:anything"],
       missing: [],
     })
-    expect(isAllowed(undefined, { kind: "workflow.start", workflowId: "w" })).toBe(true)
+    expect(isAllowed(undefined, { kind: "workflow.run", workflowId: "w" })).toBe(true)
   })
 })
 
@@ -130,6 +131,18 @@ const workflowEvent: StoredWorkflowRunStartedEvent = {
   payload: { workflowId: "review", runId: "r1", startedAt: envelope.occurredAt },
 }
 
+const ruleEvent: StoredRuleTriggeredEvent = {
+  ...envelope,
+  type: "rule.triggered",
+  topic: "rules",
+  partitionKey: "note/n1",
+  payload: {
+    ruleId: "stale-note",
+    subject: { kind: "object", objectTypeId: "note", primaryId: "n1" },
+    triggeredAt: envelope.occurredAt,
+  },
+}
+
 const scheduleEvent: StoredScheduleTriggeredEvent = {
   ...envelope,
   type: "schedule.triggered",
@@ -158,14 +171,27 @@ describe("canViewEvent", () => {
     expect(canViewEvent(context({ view: ["user"] }), linkEvent)).toBe(false)
   })
 
-  test("action events require apply; workflow events require start", () => {
-    expect(canViewEvent(context({ apply: ["acknowledge-note"] }), actionEvent)).toBe(true)
+  test("object-bound action events require BOTH apply and viewing the subject type", () => {
+    expect(
+      canViewEvent(context({ apply: ["acknowledge-note"], view: ["note"] }), actionEvent)
+    ).toBe(true)
+    // Apply without view must not leak the bound object's id/type via the event.
+    expect(canViewEvent(context({ apply: ["acknowledge-note"] }), actionEvent)).toBe(false)
     expect(canViewEvent(context({ view: ["note"] }), actionEvent)).toBe(false)
-    expect(canViewEvent(context({ start: ["review"] }), workflowEvent)).toBe(true)
+  })
+
+  test("workflow events require running the workflow", () => {
+    expect(canViewEvent(context({ run: ["review"] }), workflowEvent)).toBe(true)
     expect(canViewEvent(context({}), workflowEvent)).toBe(false)
   })
 
-  test("infra-topic events stay visible to any scoped principal (no grant governs them yet)", () => {
+  test("rule events require viewing the object the rule fired on", () => {
+    expect(canViewEvent(context({ view: ["note"] }), ruleEvent)).toBe(true)
+    // No view of the subject type must not leak the hidden object's existence/id.
+    expect(canViewEvent(context({}), ruleEvent)).toBe(false)
+  })
+
+  test("subject-free infra events stay visible to any scoped principal (no grant governs them)", () => {
     expect(canViewEvent(context({}), scheduleEvent)).toBe(true)
   })
 

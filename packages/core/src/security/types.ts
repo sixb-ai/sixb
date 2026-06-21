@@ -29,13 +29,13 @@ export interface ApplyGrant {
   readonly selection: Selection
 }
 
-export interface StartGrant {
+export interface RunGrant {
   readonly kind: "grant"
-  readonly capability: "start"
+  readonly capability: "run"
   readonly selection: Selection
 }
 
-export type GrantDefinition = ViewGrant | ApplyGrant | StartGrant
+export type GrantDefinition = ViewGrant | ApplyGrant | RunGrant
 
 export type GrantCapability = GrantDefinition["capability"]
 
