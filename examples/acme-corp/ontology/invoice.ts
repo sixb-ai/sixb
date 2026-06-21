@@ -36,6 +36,14 @@ export const Invoice = defineObjectType({
     prop("reminderReviewRequestedAt", "timestamp"),
     prop("reminderReviewedAt", "timestamp"),
     prop("reminderReviewerNote", "string"),
+    prop("paymentInfo", {
+      type: "object",
+      properties: {
+        method: { schema: "string", required: true },
+        reference: { schema: "string", required: true },
+        recordedAt: { schema: "timestamp", required: true },
+      },
+    }),
   ],
   search: {
     title: "number",

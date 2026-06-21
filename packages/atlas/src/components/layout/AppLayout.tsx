@@ -43,6 +43,7 @@ export function AppLayout() {
       syncCount={sidebarData?.syncCount}
       pipelineCount={sidebarData?.pipelineCount}
       workflowCount={sidebarData?.workflowCount}
+      actionCount={sidebarData?.actionCount}
       ruleCount={sidebarData?.ruleCount}
       ontologyCount={sidebarData?.ontologyCount}
     />

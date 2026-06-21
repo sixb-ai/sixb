@@ -138,7 +138,6 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
       queuedAt: new Date(input.queuedAt ?? new Date()),
       params: normalizeParams(input.params),
       idempotencyKey: input.idempotencyKey,
-      securityContext: input.securityContext ? structuredClone(input.securityContext) : undefined,
     }
 
     if (existing) {
@@ -153,7 +152,6 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
         writeback: undefined,
         commit: undefined,
         effects: undefined,
-        securityContext: record.securityContext,
       }
       this.rows.set(key, structuredClone(next))
       return cloneActionRunRecord(next)

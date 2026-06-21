@@ -7,6 +7,8 @@ export type {
 } from "./commit-edit-batch"
 export { commitActionEditBatch } from "./commit-edit-batch"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
+export type { ActionReadObjectSetSource } from "./read-facade"
+export { createActionReadFacade } from "./read-facade"
 export { ActionRegistry } from "./registry"
 export type {
   RequestActionAndWaitInput,
@@ -69,3 +71,4 @@ export {
   isGlobalActionDefinition,
   isObjectActionDefinition,
 } from "./validation"
+export { runActionValidators } from "./validators"

@@ -1359,4 +1359,35 @@ describe("SqliteObjectStorage", () => {
     expect(result.get("Room:r1:hasSensors")).toHaveLength(1)
     expect(result.has("Room:r1:noLinks")).toBe(false)
   })
+
+  test("listIncidentLinksBatch — both directions, de-duplicated", async () => {
+    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r1", {}, "1"))
+    await storage.applyObjectUpserted(createObjectEvent("p1", "Room", "r2", {}, "2"))
+    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s1", {}, "3"))
+    await storage.applyObjectUpserted(createObjectEvent("p1", "Sensor", "s2", {}, "4"))
+
+    await storage.applyLinkUpsertedBatch([
+      // r1 as source
+      createLinkUpsertedEvent("p1", "Room", "r1", "hasSensors", "Sensor", "s1", "5"),
+      // r1 as target
+      createLinkUpsertedEvent("p1", "Sensor", "s2", "installedIn", "Room", "r1", "6"),
+      // incident to both listed objects (r1 source, r2 target)
+      createLinkUpsertedEvent("p1", "Room", "r1", "relatedTo", "Room", "r2", "7"),
+    ])
+
+    const links = await storage.listIncidentLinksBatch({
+      projectId: "p1",
+      items: [
+        { objectTypeId: "Room", objectId: "r1" },
+        { objectTypeId: "Room", objectId: "r2" },
+      ],
+    })
+
+    // hasSensors + installedIn + relatedTo. relatedTo is incident to both r1 and r2 but appears once.
+    expect(links).toHaveLength(3)
+    expect(links.filter((link) => link.linkId === "relatedTo")).toHaveLength(1)
+
+    const empty = await storage.listIncidentLinksBatch({ projectId: "p1", items: [] })
+    expect(empty).toHaveLength(0)
+  })
 })

@@ -9446,39 +9446,9 @@
                         },
                         "required": ["validate", "writeback", "edits", "effects"],
                         "additionalProperties": false
-                      },
-                      "preview": {
-                        "anyOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "supported": {
-                                "type": "boolean",
-                                "enum": [true]
-                              }
-                            },
-                            "required": ["supported"],
-                            "additionalProperties": false
-                          },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "supported": {
-                                "type": "boolean",
-                                "enum": [false]
-                              },
-                              "reason": {
-                                "type": "string",
-                                "enum": ["no_edits", "writeback_required"]
-                              }
-                            },
-                            "required": ["supported", "reason"],
-                            "additionalProperties": false
-                          }
-                        ]
                       }
                     },
-                    "required": ["id", "name", "params", "phases", "preview"],
+                    "required": ["id", "name", "params", "phases"],
                     "additionalProperties": false
                   }
                 }
@@ -9568,39 +9538,9 @@
                       },
                       "required": ["validate", "writeback", "edits", "effects"],
                       "additionalProperties": false
-                    },
-                    "preview": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "supported": {
-                              "type": "boolean",
-                              "enum": [true]
-                            }
-                          },
-                          "required": ["supported"],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "supported": {
-                              "type": "boolean",
-                              "enum": [false]
-                            },
-                            "reason": {
-                              "type": "string",
-                              "enum": ["no_edits", "writeback_required"]
-                            }
-                          },
-                          "required": ["supported", "reason"],
-                          "additionalProperties": false
-                        }
-                      ]
                     }
                   },
-                  "required": ["id", "name", "params", "phases", "preview"],
+                  "required": ["id", "name", "params", "phases"],
                   "additionalProperties": false
                 }
               }

@@ -1,15 +1,11 @@
 import type {
   ActionDefinition,
   ActionObjectSubject,
-  ActionReadFacade,
-  ActionReadObjectSet,
   ActionRunRecord,
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
-  ObjectSetListInput,
   ObjectTypeWithPropertyTokens,
-  ValueType,
 } from "@sixb/core"
 import {
   coerceActionParamsToTyped,
@@ -19,16 +15,6 @@ import {
 import { ActionWorkerError } from "../errors"
 import type { RunActionJobInput } from "../types"
 import type { LoadedObjectTarget } from "./types"
-
-type RuntimeReadObjectSet = {
-  get(id: string): Promise<unknown>
-  query(): unknown
-  list(input?: ObjectSetListInput): Promise<unknown>
-  byId(id: string): {
-    get(): Promise<unknown>
-    listLinks(link?: unknown): Promise<unknown>
-  }
-}
 
 export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): ActionRuntimeFacade {
   return {
@@ -129,54 +115,6 @@ export async function loadObjectTarget(input: {
   return {
     subjectObjectType,
     snapshot: toActionTargetObject(targetRow, input.action.binding.objectType.id),
-  }
-}
-
-export function createReadFacade(sixb: RunActionJobInput["runtime"]["sixb"]): ActionReadFacade {
-  const facade = {
-    objects<const TObjectType extends ObjectTypeWithPropertyTokens>(objectType: TObjectType) {
-      return createReadObjectSetAdapter<TObjectType>(
-        sixb.objects(objectType) as RuntimeReadObjectSet
-      )
-    },
-  }
-  // The worker only knows the widened ontology; action validation already checked the
-  // object type, so the read facade can restore the narrow type chosen by the handler.
-  return facade as ActionReadFacade
-}
-
-function createReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
-  objectSet: RuntimeReadObjectSet
-): ActionReadObjectSet<TObjectType, readonly ValueType[], ObjectTypeWithPropertyTokens> {
-  type TypedReadObjectSet = ActionReadObjectSet<
-    TObjectType,
-    readonly ValueType[],
-    ObjectTypeWithPropertyTokens
-  >
-
-  return {
-    get(id) {
-      return objectSet.get(id) as ReturnType<TypedReadObjectSet["get"]>
-    },
-    query() {
-      return objectSet.query() as ReturnType<TypedReadObjectSet["query"]>
-    },
-    list(input) {
-      return objectSet.list(input) as ReturnType<TypedReadObjectSet["list"]>
-    },
-    byId(id) {
-      const handle = objectSet.byId(id)
-      return {
-        get() {
-          return handle.get() as ReturnType<ReturnType<TypedReadObjectSet["byId"]>["get"]>
-        },
-        listLinks(link) {
-          return handle.listLinks(link) as ReturnType<
-            ReturnType<TypedReadObjectSet["byId"]>["listLinks"]
-          >
-        },
-      }
-    },
   }
 }
 

@@ -1,4 +1,4 @@
-import type { JsonValue } from "../json"
+import { compareStrings, type JsonValue, jsonValuesEqual } from "../json"
 import type { ObjectLink, ValueType } from "../ontology"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
@@ -35,7 +35,10 @@ export interface ValidateEditBatchInput {
     "resolveObjectType" | "getPrimaryPropertyId" | "getValueTypesById" | "isValidLinkTarget"
   >
   readonly storage: {
-    readonly objects: Pick<ObjectStorage, "getByPrimaryIdBatch" | "listLinks" | "listLinksBatch">
+    readonly objects: Pick<
+      ObjectStorage,
+      "getByPrimaryIdBatch" | "listLinksBatch" | "listIncidentLinksBatch"
+    >
   }
   readonly batch: EditBatchInput
 }
@@ -49,6 +52,11 @@ export interface EditBatchLoadRequests {
   readonly objects: readonly { objectTypeId: string; primaryId: string }[]
   readonly sourceLinks: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   readonly incidentLinks: readonly { objectTypeId: string; objectId: string }[]
+}
+
+export interface EditBatchLoadedState {
+  readonly existingObjects: Map<string, ObjectRow>
+  readonly existingLinks: Map<string, ObjectLinkRow[]>
 }
 
 export interface EditObjectUpsertPlan {
@@ -164,15 +172,40 @@ export async function deriveEditCommitDiff(input: ValidateEditBatchInput): Promi
 
 export async function planEditBatch(input: ValidateEditBatchInput): Promise<EditCommitPlan> {
   const batch = normalizeEditBatchWithOntology(normalizeEditBatch(input.batch), input)
-  const existingObjects = await loadExistingObjects(input, batch.operations)
-  const existingLinks = await loadExistingLinks(input, batch.operations)
+  const loadedState = await loadEditBatchState({ ...input, batch })
 
   return planEditBatchFromLoadedState({
     ...input,
     batch,
-    existingObjects,
-    existingLinks,
+    ...loadedState,
   })
+}
+
+export async function loadEditBatchState(
+  input: ValidateEditBatchInput
+): Promise<EditBatchLoadedState> {
+  const requests = collectEditBatchLoadRequests(input.batch)
+  const existingObjects = await input.storage.objects.getByPrimaryIdBatch({
+    projectId: input.projectId,
+    items: requests.objects,
+  })
+  const existingLinks = await input.storage.objects.listLinksBatch({
+    projectId: input.projectId,
+    items: requests.sourceLinks,
+  })
+
+  // `listLinksBatch` only returns outgoing links (by source+linkId); a delete cascades to links in
+  // both directions, so load those in one batched read — fewer round trips keep the serializable
+  // commit transaction's lock hold short. Bucket key is arbitrary: `seedLinkIndex` re-keys by link.
+  const incidentLinks = await input.storage.objects.listIncidentLinksBatch({
+    projectId: input.projectId,
+    items: requests.incidentLinks,
+  })
+  if (incidentLinks.length > 0) {
+    existingLinks.set("incident", [...incidentLinks])
+  }
+
+  return { existingObjects, existingLinks }
 }
 
 export function collectEditBatchLoadRequests(batchInput: EditBatchInput): EditBatchLoadRequests {
@@ -342,53 +375,6 @@ function normalizeOperationWithOntology(
       return operation
     }
   }
-}
-
-async function loadExistingObjects(
-  input: ValidateEditBatchInput,
-  operations: readonly EditOperation[]
-): Promise<Map<string, ObjectRow>> {
-  const items = collectEditBatchLoadRequests({ version: 1, operations }).objects
-
-  return input.storage.objects.getByPrimaryIdBatch({
-    projectId: input.projectId,
-    items,
-  })
-}
-
-async function loadExistingLinks(
-  input: ValidateEditBatchInput,
-  operations: readonly EditOperation[]
-): Promise<Map<string, ObjectLinkRow[]>> {
-  const requests = collectEditBatchLoadRequests({ version: 1, operations })
-  const result = await input.storage.objects.listLinksBatch({
-    projectId: input.projectId,
-    items: requests.sourceLinks,
-  })
-
-  // Incident links (links touching an object being deleted, in either direction) cannot be
-  // expressed through `listLinksBatch`, which keys on a specific linkId. Issue the per-object
-  // lookups concurrently rather than awaiting them one at a time so the read phase does not grow
-  // linearly with the number of deleted objects — important because planning runs inside the
-  // serializable commit transaction.
-  const incidentResults = await Promise.all(
-    requests.incidentLinks.map(async (incident) => ({
-      incident,
-      rows: await input.storage.objects.listLinks({
-        projectId: input.projectId,
-        objectTypeId: incident.objectTypeId,
-        objectId: incident.objectId,
-        direction: "both",
-      }),
-    }))
-  )
-  for (const { incident, rows } of incidentResults) {
-    if (rows.length > 0) {
-      result.set(`incident:${incident.objectTypeId}:${incident.objectId}`, [...rows])
-    }
-  }
-
-  return result
 }
 
 function analyzeEditBatch(input: EditAnalysisInput): EditCommitPlan {
@@ -914,20 +900,6 @@ function linkKey(
   ])
 }
 
-function jsonValuesEqual(left: unknown, right: unknown): boolean {
-  return stableJsonStringify(left) === stableJsonStringify(right)
-}
-
-function stableJsonStringify(value: unknown): string {
-  if (value === undefined) return "undefined"
-  if (value === null || typeof value !== "object") return JSON.stringify(value)
-  if (Array.isArray(value)) return `[${value.map(stableJsonStringify).join(",")}]`
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => compareStrings(left, right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableJsonStringify(entry)}`)
-    .join(",")}}`
-}
-
 function compareObjectDiffs(
   left: EditCommitDiff["objects"][number],
   right: EditCommitDiff["objects"][number]
@@ -951,12 +923,6 @@ function compareLinkDiffs(
     compareStrings(left.target.primaryId, right.target.primaryId) ||
     compareStrings(left.operation, right.operation)
   )
-}
-
-function compareStrings(left: string, right: string): number {
-  if (left < right) return -1
-  if (left > right) return 1
-  return 0
 }
 
 function buildObjectPlan(

@@ -25,6 +25,7 @@ export type {
   TypedEditObjectRef,
 } from "./types"
 export type {
+  EditBatchLoadedState,
   EditBatchLoadRequests,
   EditCommitPlan,
   EditLinkDeletePlan,
@@ -37,6 +38,7 @@ export type {
 export {
   collectEditBatchLoadRequests,
   deriveEditCommitDiff,
+  loadEditBatchState,
   planEditBatch,
   planEditBatchFromLoadedState,
   validateEditBatch,
