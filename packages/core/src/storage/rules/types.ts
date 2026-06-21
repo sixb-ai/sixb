@@ -15,6 +15,7 @@ export interface ListActiveRuleStatesInput {
   readonly projectId: string
   readonly ruleId?: string
   readonly objectTypeId?: string
+  readonly objectTypeIds?: readonly string[]
   readonly primaryId?: string
   readonly limit?: number
   readonly offset?: number

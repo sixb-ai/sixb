@@ -74,12 +74,18 @@ export class InMemoryRulesStorage implements RulesStorage {
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
+    if (input.objectTypeIds?.length === 0) {
+      return { states: [], hasMore: false, total: 0 }
+    }
+
     const order = input.order ?? "desc"
     const offset = input.offset ?? 0
+    const objectTypeIds = input.objectTypeIds ? new Set(input.objectTypeIds) : null
     const states = [...this.active.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => !input.ruleId || record.ruleId === input.ruleId)
       .filter((record) => !input.objectTypeId || record.subject.objectTypeId === input.objectTypeId)
+      .filter((record) => (objectTypeIds ? objectTypeIds.has(record.subject.objectTypeId) : true))
       .filter((record) => !input.primaryId || record.subject.primaryId === input.primaryId)
       .sort((left, right) => compareRuleStateRecords(left, right, order))
 

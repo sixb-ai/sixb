@@ -10,6 +10,7 @@ import {
   defineConnector,
   defineDataset,
   defineGroup,
+  defineLinkProjection,
   defineObjectType,
   definePipeline,
   definePipelineStep,
@@ -23,6 +24,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  link,
   type OntologySource,
   ontology,
   type PipelineDefinition,
@@ -37,20 +39,24 @@ import {
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-const Contract = defineObjectType({
-  id: "contract",
-  name: "Contract",
-  properties: [prop("id", "string", { required: true, primary: true })],
-})
-
 const Invoice = defineObjectType({
   id: "invoice",
   name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 
+const Contract = defineObjectType({
+  id: "contract",
+  name: "Contract",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
+  links: [link("invoice", Invoice, { cardinality: "one" })],
+})
+
 const OrdersDataset = defineDataset("raw.erp.orders", {
-  schema: [col("id", "string")],
+  schema: [col("id", "string"), col("invoice_id", "string")],
 })
 
 const CustomersDataset = defineDataset("raw.crm.customers", {
@@ -89,13 +95,21 @@ const ordersPipeline: PipelineDefinition =
 const customersPipeline: PipelineDefinition =
   definePipeline("pipeline-customers").then(normalizeCustomersStep)
 
-// Projections have no grant family yet, so their dataset lineage is exposed
-// only to privileged (unauthenticated) callers and hidden from every scoped
-// principal. Registered here so the `projectionIds` assertions below are
-// load-bearing rather than vacuous.
-const ordersProjection = defineProjection("orders-rollup", Contract)
+const ordersContractProjection = defineProjection("orders-contracts", Contract)
   .fromDataset(OrdersDataset)
   .properties({ id: "id" })
+
+const customersInvoiceProjection = defineProjection("customers-invoices", Invoice)
+  .fromDataset(CustomersDataset)
+  .properties({ id: "id" })
+
+const ordersContractInvoiceProjection = defineLinkProjection(
+  "orders-contract-invoices",
+  Contract.l.invoice
+)
+  .fromDataset(OrdersDataset)
+  .sourceField("id")
+  .targetField("invoice_id")
 
 const sendContract = defineAction("send-contract")
   .on(Contract)
@@ -146,7 +160,11 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     datasets: [OrdersDataset, CustomersDataset],
     syncs: [ordersSync, customersSync],
     pipelines: [ordersPipeline, customersPipeline],
-    projections: [ordersProjection],
+    projections: [
+      ordersContractProjection,
+      customersInvoiceProjection,
+      ordersContractInvoiceProjection,
+    ],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -161,6 +179,17 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
 
   await sixb.upsertObject("contract", { id: "c1" })
   await sixb.upsertObject("invoice", { id: "i1" })
+  await sixb.upsertLink("contract", "c1", "invoice", {
+    targetTypeId: "invoice",
+    targetId: "i1",
+  })
+  await sixb.appendTelemetry("contract", [
+    {
+      id: "c1",
+      properties: { temperature: 72.5 },
+      at: new Date("2026-05-16T10:30:00.000Z"),
+    },
+  ])
 
   return { sixb, storage }
 }
@@ -212,6 +241,39 @@ async function seedSession(
       "content-type": "application/json",
     },
   }
+}
+
+async function seedRuleStates(storage: InMemoryStorage) {
+  await storage.rules.applyTriggered({
+    id: "evt_rule_contract",
+    cursor: "evt_rule_contract",
+    schemaVersion: 1,
+    projectId: "test-project",
+    type: "rule.triggered",
+    topic: "rules",
+    partitionKey: "contract-review:contract:c1",
+    payload: {
+      ruleId: "contract-review",
+      subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+      triggeredAt: "2026-05-16T10:35:00.000Z",
+    },
+    occurredAt: "2026-05-16T10:35:00.000Z",
+  })
+  await storage.rules.applyTriggered({
+    id: "evt_rule_invoice",
+    cursor: "evt_rule_invoice",
+    schemaVersion: 1,
+    projectId: "test-project",
+    type: "rule.triggered",
+    topic: "rules",
+    partitionKey: "invoice-review:invoice:i1",
+    payload: {
+      ruleId: "invoice-review",
+      subject: { kind: "object", objectTypeId: "invoice", primaryId: "i1" },
+      triggeredAt: "2026-05-16T10:40:00.000Z",
+    },
+    occurredAt: "2026-05-16T10:40:00.000Z",
+  })
 }
 
 describe("authorized object routes", () => {
@@ -388,7 +450,7 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: [],
+        projectionIds: ["orders-contracts", "orders-contract-invoices"],
       })
     )
 
@@ -401,7 +463,7 @@ describe("authorized object routes", () => {
         syncIds: [],
         sourcePipelineIds: [],
         targetPipelineIds: [],
-        projectionIds: [],
+        projectionIds: ["orders-contracts", "orders-contract-invoices"],
       })
     )
 
@@ -451,6 +513,7 @@ describe("authorized object routes", () => {
         syncIds: ["sync-orders"],
         sourcePipelineIds: ["pipeline-orders"],
         targetPipelineIds: ["pipeline-orders"],
+        projectionIds: ["orders-contracts", "orders-contract-invoices"],
       })
     )
     expect(adminDatasetById.get("raw.crm.customers")).toEqual(
@@ -458,35 +521,175 @@ describe("authorized object routes", () => {
         syncIds: ["sync-customers"],
         sourcePipelineIds: ["pipeline-customers"],
         targetPipelineIds: ["pipeline-customers"],
+        projectionIds: ["customers-invoices"],
       })
     )
   })
+})
 
-  test("projection lineage is exposed to privileged callers but hidden from every scoped principal", async () => {
-    // The privileged (unauthenticated) catalog populates projectionIds, proving
-    // ordersProjection is registered against raw.erp.orders...
-    const { app: privilegedApp } = await createApp({ auth: false })
-    const privileged = await privilegedApp.fetch(
-      new Request("http://localhost/api/datasets/raw.erp.orders")
-    )
-    expect(privileged.status).toBe(200)
-    expect(await privileged.json()).toEqual(
-      expect.objectContaining({ projectionIds: ["orders-rollup"] })
-    )
-
-    // ...so the scoped operator's empty projectionIds is the guard at work, not
-    // an absent projection. (admins are scoped too, hence also empty.)
+describe("authorized adjacent read routes", () => {
+  test("link reads inherit source and target object visibility", async () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
     const admin = await seedSession(storage, ["admins"], "usr_admin")
 
-    for (const session of [operator, admin]) {
-      const detail = await app.fetch(
-        new Request("http://localhost/api/datasets/raw.erp.orders", { headers: session.headers })
-      )
-      expect(detail.status).toBe(200)
-      expect(await detail.json()).toEqual(expect.objectContaining({ projectionIds: [] }))
+    const operatorLinks = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/links", {
+        headers: operator.headers,
+      })
+    )
+    expect(operatorLinks.status).toBe(200)
+    expect(await operatorLinks.json()).toEqual([])
+
+    const hiddenSource = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/links", {
+        headers: runner.headers,
+      })
+    )
+    expect(hiddenSource.status).toBe(404)
+
+    const adminLinks = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/links", {
+        headers: admin.headers,
+      })
+    )
+    expect(
+      ((await adminLinks.json()) as { targetTypeId: string }[]).map((link) => link.targetTypeId)
+    ).toEqual(["invoice"])
+  })
+
+  test("telemetry reads inherit object visibility", async () => {
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+
+    const history = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/telemetry/temperature/history", {
+        headers: operator.headers,
+      })
+    )
+    expect(history.status).toBe(200)
+    expect(((await history.json()) as { value: number }[]).map((point) => point.value)).toEqual([
+      72.5,
+    ])
+
+    const latest = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/telemetry/temperature/latest", {
+        headers: operator.headers,
+      })
+    )
+    expect(latest.status).toBe(200)
+    expect(await latest.json()).toEqual(expect.objectContaining({ value: 72.5 }))
+
+    const hiddenHistory = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/telemetry/temperature/history", {
+        headers: runner.headers,
+      })
+    )
+    expect(hiddenHistory.status).toBe(404)
+
+    const hiddenLatest = await app.fetch(
+      new Request("http://localhost/api/objects/contract/c1/telemetry/temperature/latest", {
+        headers: runner.headers,
+      })
+    )
+    expect(hiddenLatest.status).toBe(404)
+  })
+
+  test("rule states narrow to viewable object types before pagination", async () => {
+    const { app, storage } = await createApp()
+    await seedRuleStates(storage)
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    const operatorStates = await app.fetch(
+      new Request("http://localhost/api/rule-states?limit=1", { headers: operator.headers })
+    )
+    expect(await operatorStates.json()).toEqual({
+      states: [
+        expect.objectContaining({
+          ruleId: "contract-review",
+          subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+        }),
+      ],
+      hasMore: false,
+      total: 1,
+    })
+
+    const hiddenFilter = await app.fetch(
+      new Request("http://localhost/api/rule-states?objectTypeId=invoice", {
+        headers: operator.headers,
+      })
+    )
+    expect(await hiddenFilter.json()).toEqual({ states: [], hasMore: false, total: 0 })
+
+    const runnerStates = await app.fetch(
+      new Request("http://localhost/api/rule-states", { headers: runner.headers })
+    )
+    expect(await runnerStates.json()).toEqual({ states: [], hasMore: false, total: 0 })
+
+    const adminStates = await app.fetch(
+      new Request("http://localhost/api/rule-states", { headers: admin.headers })
+    )
+    expect(
+      (
+        (await adminStates.json()) as { states: { subject: { objectTypeId: string } }[] }
+      ).states.map((state) => state.subject.objectTypeId)
+    ).toEqual(["invoice", "contract"])
+  })
+
+  test("projection reads inherit dataset visibility", async () => {
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    const operatorList = await app.fetch(
+      new Request("http://localhost/api/projections", { headers: operator.headers })
+    )
+    const operatorProjections = (await operatorList.json()) as {
+      objectProjections: { id: string }[]
+      linkProjections: { id: string }[]
     }
+    expect(operatorProjections.objectProjections.map((projection) => projection.id)).toEqual([
+      "orders-contracts",
+    ])
+    expect(operatorProjections.linkProjections.map((projection) => projection.id)).toEqual([
+      "orders-contract-invoices",
+    ])
+
+    const hiddenDetail = await app.fetch(
+      new Request("http://localhost/api/projections/customers-invoices", {
+        headers: operator.headers,
+      })
+    )
+    expect(hiddenDetail.status).toBe(404)
+
+    const runnerList = await app.fetch(
+      new Request("http://localhost/api/projections", { headers: runner.headers })
+    )
+    expect(await runnerList.json()).toEqual({
+      objectProjections: [],
+      linkProjections: [],
+      telemetryProjections: [],
+    })
+
+    const adminList = await app.fetch(
+      new Request("http://localhost/api/projections", { headers: admin.headers })
+    )
+    const adminProjections = (await adminList.json()) as {
+      objectProjections: { id: string }[]
+      linkProjections: { id: string }[]
+    }
+    expect(adminProjections.objectProjections.map((projection) => projection.id)).toEqual([
+      "orders-contracts",
+      "customers-invoices",
+    ])
+    expect(adminProjections.linkProjections.map((projection) => projection.id)).toEqual([
+      "orders-contract-invoices",
+    ])
   })
 })
 

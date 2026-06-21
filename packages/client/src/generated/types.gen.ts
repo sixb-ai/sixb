@@ -3645,6 +3645,12 @@ export type ListObjectLinksErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
 }
 
 export type ListObjectLinksError = ListObjectLinksErrors[keyof ListObjectLinksErrors]
@@ -3821,6 +3827,12 @@ export type GetTelemetryHistoryErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
     error: string
   }
 }

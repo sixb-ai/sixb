@@ -1,5 +1,6 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import { isAllowed, type ObjectLinkRow, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -12,13 +13,27 @@ import {
 } from "../schemas/links"
 import { handleRouteError, toIsoString } from "../utils/http"
 
+function canViewLink(authz: ReturnType<typeof requestAuthState>["authz"], link: ObjectLinkRow) {
+  return (
+    isAllowed(authz, { kind: "object.view", objectTypeId: link.sourceTypeId }) &&
+    isAllowed(authz, { kind: "object.view", objectTypeId: link.targetTypeId })
+  )
+}
+
 export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/objects/:objectTypeId/:objectId/links",
-      async ({ params, query, set }) => {
+      async (context) => {
+        const { params, query, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const parsedQuery = LinkQuerySchema.parse(query)
+          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
           const links = await sixb.storage.objects.listLinks({
             projectId: sixb.id,
             objectTypeId: params.objectTypeId,
@@ -27,11 +42,13 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             direction: parsedQuery.direction,
           })
 
-          return links.map((link) => ({
-            ...link,
-            createdAt: toIsoString(link.createdAt),
-            updatedAt: toIsoString(link.updatedAt),
-          }))
+          return links
+            .filter((link) => canViewLink(authz, link))
+            .map((link) => ({
+              ...link,
+              createdAt: toIsoString(link.createdAt),
+              updatedAt: toIsoString(link.updatedAt),
+            }))
         } catch (error) {
           set.status = 400
           return { error: error instanceof Error ? error.message : String(error) }
@@ -40,7 +57,11 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       {
         params: LinkSourceParamsSchema,
         query: LinkQuerySchema,
-        response: { 200: ObjectLinkSchema.array(), 400: ErrorResponseSchema },
+        response: {
+          200: ObjectLinkSchema.array(),
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
         detail: {
           summary: "List object links",
           tags: ["Links"],

@@ -225,6 +225,54 @@ describe("SqliteRulesStorage", () => {
     })
   })
 
+  test("listActive filters by visible object type ids before pagination", async () => {
+    await storage.applyTriggered(
+      triggeredEvent({
+        triggeredAt: "2026-05-07T10:00:00.000Z",
+        cursor: "1",
+      })
+    )
+    await storage.applyTriggered(
+      triggeredEvent({
+        ruleId: "transaction.amount-positive",
+        subject: { ...defaultSubject, primaryId: "tx-2" },
+        triggeredAt: "2026-05-07T10:02:00.000Z",
+        cursor: "2",
+      })
+    )
+    await storage.applyTriggered(
+      triggeredEvent({
+        ruleId: "invoice.requires-approval",
+        subject: { kind: "object", objectTypeId: "invoice", primaryId: "inv-1" },
+        triggeredAt: "2026-05-07T10:04:00.000Z",
+        cursor: "3",
+      })
+    )
+
+    await expect(
+      storage.listActive({ projectId: "project-a", objectTypeIds: ["transaction"], limit: 1 })
+    ).resolves.toEqual({
+      states: [
+        {
+          projectId: "project-a",
+          ruleId: "transaction.amount-positive",
+          subject: { kind: "object", objectTypeId: "transaction", primaryId: "tx-2" },
+          triggeredAt: "2026-05-07T10:02:00.000Z",
+        },
+      ],
+      hasMore: true,
+      total: 2,
+    })
+
+    await expect(
+      storage.listActive({ projectId: "project-a", objectTypeIds: [] })
+    ).resolves.toEqual({
+      states: [],
+      hasMore: false,
+      total: 0,
+    })
+  })
+
   test("applyResolved removes active rule state", async () => {
     await storage.applyTriggered(triggeredEvent())
     await storage.applyResolved(resolvedEvent())

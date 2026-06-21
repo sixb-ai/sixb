@@ -1,5 +1,6 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -52,9 +53,16 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     )
     .get(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
-      async ({ params, query, set }) => {
+      async (context) => {
+        const { params, query, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const parsedQuery = TelemetryHistoryQuerySchema.parse(query)
+          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
+
           const history = await sixb.storage.timeseries.getHistory({
             projectId: sixb.id,
             objectTypeId: params.objectTypeId,
@@ -78,7 +86,11 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       {
         params: TelemetryParamsSchema,
         query: TelemetryHistoryQuerySchema,
-        response: { 200: TelemetryPointSchema.array(), 400: ErrorResponseSchema },
+        response: {
+          200: TelemetryPointSchema.array(),
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
         detail: {
           summary: "Get telemetry history",
           tags: ["Telemetry"],
@@ -88,7 +100,14 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     )
     .get(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest",
-      async ({ params, set }) => {
+      async (context) => {
+        const { params, set } = context
+        const { authz } = requestAuthState(context)
+        if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+          set.status = 404
+          return { error: "Object not found" }
+        }
+
         const latest = await sixb.storage.timeseries.getLatest({
           projectId: sixb.id,
           objectTypeId: params.objectTypeId,
