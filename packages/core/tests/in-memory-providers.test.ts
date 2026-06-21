@@ -583,6 +583,39 @@ describe("InMemoryTimeseriesStorage", () => {
     expect(latest?.value).toBe(22)
   })
 
+  test("upserts on equal timestamps: one point per instant, last value wins", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const at = new Date("2026-01-01T10:00:00Z")
+
+    // A telemetry point is identified by (series, at), so two appends at the
+    // same instant collapse to a single point with the last-written value.
+    await storage.applyTelemetryAppended({
+      ...makeTelemetryEvent("p1", "Room", "r1", "temp", 22, at),
+      id: "evt-1",
+    })
+    await storage.applyTelemetryAppended({
+      ...makeTelemetryEvent("p1", "Room", "r1", "temp", 20, at),
+      id: "evt-2",
+    })
+
+    const history = await storage.getHistory({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(history).toHaveLength(1)
+    expect(history[0]?.value).toBe(20)
+
+    const latest = await storage.getLatest({
+      projectId: "p1",
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temp",
+    })
+    expect(latest?.value).toBe(20)
+  })
+
   test("getHistory returns points in order", async () => {
     const storage = new InMemoryTimeseriesStorage()
     const t1 = new Date("2026-01-01T10:00:00Z")

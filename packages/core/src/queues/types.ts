@@ -122,7 +122,7 @@ export interface ProjectionRunRequestedQueueJob
     "projection.run.requested",
     {
       readonly projectionId: string
-      readonly projectionKind: "object" | "link"
+      readonly projectionKind: "object" | "link" | "telemetry"
       readonly datasetId: string
       readonly versionId: string
     }

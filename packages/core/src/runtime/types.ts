@@ -49,6 +49,7 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
@@ -813,7 +814,10 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   /** All registered link projection definitions. */
   getLinkProjections(): readonly LinkProjectionDefinition[]
 
-  /** Lookup a registered object or link projection by id. */
+  /** All registered telemetry projection definitions. */
+  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
+
+  /** Lookup a registered projection by id. */
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
 

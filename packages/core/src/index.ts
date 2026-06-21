@@ -1149,13 +1149,18 @@ export type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "./projections"
 
 export {
   defineLinkProjection,
   defineProjection,
+  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,
   isProjectionDefinition,
+  isTelemetryProjectionDefinition,
+  projectionKindOf,
+  validateTelemetryProjectionFieldMapping,
 } from "./projections"

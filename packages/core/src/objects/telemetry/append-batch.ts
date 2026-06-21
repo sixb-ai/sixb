@@ -13,9 +13,21 @@ import type { ResolvedObjectContext } from "../context"
 import { requireObject } from "../helpers"
 import { writeTelemetryBatch } from "./write-batch"
 
-/** Type guard for telemetry values that carry an explicit unit. */
+/**
+ * Type guard for telemetry values that carry an explicit unit.
+ *
+ * Matches only the exact `{ value, unit }` wrapper (a string `unit` and no other
+ * keys) so a legitimate JSON/object telemetry value is not silently
+ * reinterpreted as value+unit. A fully explicit batch contract (passing units
+ * out-of-band like the single-property appender) is tracked as a follow-up;
+ * this narrows the heuristic without changing the public batch API.
+ */
 function isUnitBearingValue(raw: unknown): raw is { value: unknown; unit: string } {
-  return raw !== null && typeof raw === "object" && "value" in raw && "unit" in raw
+  if (raw === null || typeof raw !== "object") {
+    return false
+  }
+  const record = raw as Record<string, unknown>
+  return "value" in record && typeof record.unit === "string" && Object.keys(record).length === 2
 }
 
 export async function appendTelemetryBatch(

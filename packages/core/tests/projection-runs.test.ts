@@ -31,6 +31,9 @@ describe("InMemoryProjectionRunStorage", () => {
       rowsSkipped: 0,
       objectsUpserted: 0,
       linksUpserted: 0,
+      telemetryPointsAppended: 0,
+      telemetryPointsSkipped: 0,
+      telemetryRowsFailed: 0,
     })
 
     const updated = await storage.update({
@@ -39,6 +42,8 @@ describe("InMemoryProjectionRunStorage", () => {
       rowsProcessed: 10,
       rowsSkipped: 2,
       objectsUpserted: 8,
+      telemetryPointsAppended: 3,
+      telemetryPointsSkipped: 1,
     })
 
     expect(updated).toMatchObject({
@@ -46,6 +51,9 @@ describe("InMemoryProjectionRunStorage", () => {
       rowsSkipped: 2,
       objectsUpserted: 8,
       linksUpserted: 0,
+      telemetryPointsAppended: 3,
+      telemetryPointsSkipped: 1,
+      telemetryRowsFailed: 0,
       status: "running",
     })
 
@@ -56,6 +64,8 @@ describe("InMemoryProjectionRunStorage", () => {
       finishedAt,
       rowsProcessed: 12,
       objectsUpserted: 10,
+      telemetryPointsAppended: 4,
+      telemetryRowsFailed: 1,
     })
 
     const stored = await storage.getById({ projectId: "my-app", id: "projrun_1" })
@@ -66,6 +76,9 @@ describe("InMemoryProjectionRunStorage", () => {
       rowsSkipped: 2,
       objectsUpserted: 10,
       linksUpserted: 0,
+      telemetryPointsAppended: 4,
+      telemetryPointsSkipped: 1,
+      telemetryRowsFailed: 1,
       errorMessage: undefined,
     })
     expect(stored?.startedAt.toISOString()).toBe(startedAt.toISOString())
@@ -223,7 +236,7 @@ describe("InMemoryProjectionRunStorage", () => {
         id: "run-1",
         projectId: "my-app",
         status: "succeeded",
-        objectsUpserted: 1.5,
+        telemetryRowsFailed: 1.5,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })

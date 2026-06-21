@@ -1,4 +1,4 @@
-export type ProjectionKind = "object" | "link"
+export type ProjectionKind = "object" | "link" | "telemetry"
 export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
 export interface ProjectionRunCounters {
@@ -6,6 +6,9 @@ export interface ProjectionRunCounters {
   readonly rowsSkipped: number
   readonly objectsUpserted: number
   readonly linksUpserted: number
+  readonly telemetryPointsAppended: number
+  readonly telemetryPointsSkipped: number
+  readonly telemetryRowsFailed: number
 }
 
 export interface ProjectionRunRecord extends ProjectionRunCounters {

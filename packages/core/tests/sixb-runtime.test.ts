@@ -736,6 +736,50 @@ describe("Sixb runtime", () => {
     expect(events).toHaveLength(2)
   })
 
+  test("late-arriving telemetry does not replace the object latest value", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      id: "late-telemetry-test",
+      ontology: [Room],
+      ...runtimeDeps,
+    })
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "room:101", externalId: "RM-101", name: "Conference 101" },
+    })
+
+    await sixb.objects(Room).appendTelemetryBatch([
+      {
+        id: "room:101",
+        properties: { currentTemperature: { value: 23, unit: "degreeCelsius" } },
+        at: new Date("2026-03-02T12:00:00.000Z"),
+      },
+    ])
+
+    await sixb.objects(Room).appendTelemetryBatch([
+      {
+        id: "room:101",
+        properties: { currentTemperature: { value: 21, unit: "degreeCelsius" } },
+        at: new Date("2026-03-01T12:00:00.000Z"),
+      },
+    ])
+
+    const room = await runtimeDeps.storage.objects.getByPrimaryId({
+      projectId: "late-telemetry-test",
+      objectTypeId: "Room",
+      primaryId: "room:101",
+    })
+    expect(room?.properties.currentTemperature).toBe(23)
+
+    const history = await runtimeDeps.storage.timeseries.getHistory({
+      projectId: "late-telemetry-test",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "currentTemperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([21, 23])
+  })
+
   test("appendTelemetryBatch validates all inputs before writing", async () => {
     const sixb = new Sixb({
       id: "batch-validate-test",

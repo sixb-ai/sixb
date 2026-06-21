@@ -4,6 +4,7 @@ import {
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineTelemetryProjection,
   defineValueType,
   fromForeignKey,
   link,
@@ -44,6 +45,7 @@ const _Room = defineObjectType({
     prop("area", "double"),
     prop("openedOn", "date"),
     prop("lastSeenAt", "timestamp"),
+    prop("currentTemperature", "double", { mode: "telemetry" }),
     prop("mode", stringEnum(["occupied", "vacant"])),
     prop("metadata", {
       type: "object",
@@ -67,11 +69,13 @@ const roomDataset = defineDataset("canonical.rooms", {
     col("col_ref", "string"),
     col("col_room_number", "int64"),
     col("col_area", "float64"),
+    col("col_temperature", "float64"),
     col("col_opened_on", "date"),
     col("col_last_seen_at", "timestamp"),
     col("col_mode", "string"),
     col("col_metadata", "json"),
     col("col_reading", "decimal"),
+    col("col_unit", "string"),
   ],
 })
 
@@ -215,3 +219,56 @@ defineLinkProjection("test", _Room.l.hasSensors)
   .fromDataset(roomSensorsDataset)
   // @ts-expect-error — link projection fields must be string columns
   .sourceField("weight")
+
+// 14. defineTelemetryProjection with valid telemetry property and point mapping
+const telemetryProjection = defineTelemetryProjection("test", _Room.p.currentTemperature)
+  .fromDataset(roomDataset)
+  .points({
+    objectId: "col_id",
+    at: "col_last_seen_at",
+    value: "col_temperature",
+  })
+type _telemetryProjTag = Expect<
+  Equal<typeof telemetryProjection._tag, "TelemetryProjectionDefinition">
+>
+
+defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+  objectId: "col_id",
+  at: "col_last_seen_at",
+  value: "col_temperature",
+  unit: "col_unit",
+})
+
+// @ts-expect-error — telemetry projections require telemetry property tokens
+defineTelemetryProjection("test", _Room.p.name)
+
+defineTelemetryProjection("test", _Room.p.currentTemperature)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — objectId must be a string dataset column
+  .points({ objectId: "col_room_number", at: "col_last_seen_at", value: "col_temperature" })
+
+defineTelemetryProjection("test", _Room.p.currentTemperature)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — at must be a string, date, or timestamp dataset column
+  .points({ objectId: "col_id", at: "col_area", value: "col_temperature" })
+
+defineTelemetryProjection("test", _Room.p.currentTemperature)
+  .fromDataset(roomDataset)
+  // @ts-expect-error — value column must be compatible with the telemetry property schema
+  .points({ objectId: "col_id", at: "col_last_seen_at", value: "col_name" })
+
+defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+  objectId: "col_id",
+  at: "col_last_seen_at",
+  value: "col_temperature",
+  // @ts-expect-error — unit must be a string dataset column
+  unit: "col_room_number",
+})
+
+defineTelemetryProjection("test", _Room.p.currentTemperature).fromDataset(roomDataset).points({
+  objectId: "col_id",
+  at: "col_last_seen_at",
+  value: "col_temperature",
+  // @ts-expect-error — point mappings only accept objectId, at, value, and unit
+  extra: "col_id",
+})

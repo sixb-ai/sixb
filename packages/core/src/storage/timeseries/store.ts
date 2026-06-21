@@ -11,13 +11,14 @@ function pointKey(
 }
 
 export class InMemoryTimeseriesStorage implements TimeseriesStorage {
-  private readonly pointsByKey = new Map<string, TimeseriesPoint[]>()
-  private readonly appliedEventIds = new Set<string>()
+  // A telemetry point is uniquely identified by (series, at): one value per
+  // instant per series. Re-applying the same instant is a last-write-wins
+  // upsert, which makes telemetry writes idempotent under replay for free.
+  private readonly pointsByKey = new Map<string, Map<number, TimeseriesPoint>>()
 
   snapshot(): InMemoryTimeseriesStorageSnapshot {
     return {
       pointsByKey: structuredClone(this.pointsByKey),
-      appliedEventIds: new Set(this.appliedEventIds),
     }
   }
 
@@ -26,38 +27,28 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
     for (const [key, points] of structuredClone(snapshot.pointsByKey)) {
       this.pointsByKey.set(key, points)
     }
-
-    this.appliedEventIds.clear()
-    for (const eventId of snapshot.appliedEventIds) {
-      this.appliedEventIds.add(eventId)
-    }
   }
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    if (this.appliedEventIds.has(event.id)) {
-      return
-    }
-
     const key = pointKey(
       event.projectId,
       event.payload.objectTypeId,
       event.payload.objectId,
       event.payload.propertyId
     )
-
-    const points = this.pointsByKey.get(key) ?? []
-    points.push({
+    const at = new Date(event.payload.at)
+    const series = this.pointsByKey.get(key) ?? new Map<number, TimeseriesPoint>()
+    series.set(at.getTime(), {
       projectId: event.projectId,
       objectTypeId: event.payload.objectTypeId,
       objectId: event.payload.objectId,
       propertyId: event.payload.propertyId,
       value: event.payload.value,
       unit: event.payload.unit,
-      at: new Date(event.payload.at),
+      at,
       sourceEventId: event.id,
     })
-    this.pointsByKey.set(key, points)
-    this.appliedEventIds.add(event.id)
+    this.pointsByKey.set(key, series)
   }
 
   async applyTelemetryAppendedBatch(
@@ -80,12 +71,10 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
   }): Promise<readonly TimeseriesPoint[]> {
     const key = pointKey(params.projectId, params.objectTypeId, params.objectId, params.propertyId)
     const { from, to } = params
-    let points =
-      from || to
-        ? (this.pointsByKey.get(key) ?? []).filter(
-            (point) => (!from || point.at >= from) && (!to || point.at <= to)
-          )
-        : [...(this.pointsByKey.get(key) ?? [])]
+    let points = [...(this.pointsByKey.get(key)?.values() ?? [])]
+    if (from || to) {
+      points = points.filter((point) => (!from || point.at >= from) && (!to || point.at <= to))
+    }
 
     points.sort((a, b) => a.at.getTime() - b.at.getTime())
     if (params.order === "desc") {
@@ -105,17 +94,17 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
     objectId: string
     propertyId: string
   }): Promise<TimeseriesPoint | null> {
-    const key = pointKey(params.projectId, params.objectTypeId, params.objectId, params.propertyId)
-    const points = this.pointsByKey.get(key)
-    if (!points || points.length === 0) {
+    const series = this.pointsByKey.get(
+      pointKey(params.projectId, params.objectTypeId, params.objectId, params.propertyId)
+    )
+    if (!series || series.size === 0) {
       return null
     }
 
-    let latest = points[0]
-    for (let index = 1; index < points.length; index += 1) {
-      const candidate = points[index]
-      if (candidate.at > latest.at) {
-        latest = candidate
+    let latest: TimeseriesPoint | null = null
+    for (const point of series.values()) {
+      if (!latest || point.at.getTime() > latest.at.getTime()) {
+        latest = point
       }
     }
     return latest
@@ -123,6 +112,5 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
 }
 
 export interface InMemoryTimeseriesStorageSnapshot {
-  readonly pointsByKey: Map<string, TimeseriesPoint[]>
-  readonly appliedEventIds: Set<string>
+  readonly pointsByKey: Map<string, Map<number, TimeseriesPoint>>
 }
