@@ -3,6 +3,7 @@ import type { ObjectLink, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 import type { ObjectTypeWithPropertyTokens } from "../tokens"
 import { assertLinkTargetType, validateLinkProperties } from "./links"
+import { normalizeObjectProperties } from "./normalize"
 import {
   assertKnownProperties,
   assertRequiredProperties,
@@ -53,11 +54,23 @@ export function validateObjectBatch(
         )
       }
 
+      // Normalize to JSON-safe values (e.g. Date -> ISO string) so the batch
+      // emits the same serializable shape as the single-item upsert path.
+      const normalizedProperties = normalizeObjectProperties(
+        objectType.properties,
+        properties,
+        valueTypesById,
+        objectType.id
+      )
+
       const existing = existingMap.get(`${objectType.id}:${String(primaryId)}`)
-      const mergedProperties = { ...(existing?.properties ?? {}), ...properties }
+      const mergedProperties = { ...(existing?.properties ?? {}), ...normalizedProperties }
       assertRequiredProperties(objectType, mergedProperties)
 
-      valid.push({ index: i, item: { primaryId: String(primaryId), properties } })
+      valid.push({
+        index: i,
+        item: { primaryId: String(primaryId), properties: normalizedProperties },
+      })
     } catch (e) {
       errors.push({ index: i, error: toError(e) })
     }

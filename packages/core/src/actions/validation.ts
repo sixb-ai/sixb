@@ -3,7 +3,7 @@ import { type SchemaOrRef, type ValueType, validateSchemaOrRefValue } from "../o
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { Schema } from "../ontology/types"
-import { normalizeSchemaValue } from "../ontology/validation"
+import { coerceSchemaValueToTyped, normalizeSchemaValue } from "../ontology/validation"
 import type { ActionRunParams } from "../storage/action-runs"
 import { ActionDefinitionError } from "./errors"
 import type {
@@ -91,6 +91,34 @@ export function normalizeActionParams(
   }
 
   return normalized
+}
+
+/**
+ * Re-hydrate stored action params for the handler-facing surface. Params are
+ * normalized to JSON (e.g. `date`/`timestamp` -> ISO string) for storage; action
+ * handler types promise `Date` for those, so this converts them back before the
+ * handler runs. `objectRef` params pass through unchanged.
+ */
+export function coerceActionParamsToTyped(
+  paramsConfig: ActionParamsConfig,
+  params: Record<string, unknown>,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): Record<string, unknown> {
+  const coerced: Record<string, unknown> = { ...params }
+
+  for (const [paramId, paramDef] of Object.entries(paramsConfig)) {
+    const value = params[paramId]
+    if (value === undefined) continue
+
+    const schema = paramDef.schema
+    if (typeof schema === "object" && schema !== null && schema.type === "objectRef") {
+      continue
+    }
+
+    coerced[paramId] = coerceSchemaValueToTyped(schema as Schema, value, valueTypesById)
+  }
+
+  return coerced
 }
 
 export function validateActionSubject(action: ActionDefinition, subject: ActionSubject): void {

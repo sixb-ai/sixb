@@ -156,6 +156,7 @@ export {
   ActionEditCommitError,
   ActionRegistry,
   ActionsRuntime,
+  coerceActionParamsToTyped,
   commitActionEditBatch,
   defineAction,
   isActionDefinition,
