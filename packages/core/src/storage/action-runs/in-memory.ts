@@ -346,14 +346,26 @@ export class InMemoryActionRunStorage implements ActionRunStorage {
   }
 
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
+    if (input.actionIds?.length === 0) {
+      return { runs: [], hasMore: false, total: 0 }
+    }
+
     const order = input.order ?? "desc"
     const offset = input.offset ?? 0
     const limit = input.limit ?? this.rows.size
+    const actionIds = input.actionIds ? new Set(input.actionIds) : null
+    const objectTypeIds = input.objectTypeIds ? new Set(input.objectTypeIds) : null
     const statuses = input.statuses ? new Set(input.statuses) : null
 
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.actionId ? record.actionId === input.actionId : true))
+      .filter((record) => (actionIds ? actionIds.has(record.actionId) : true))
+      .filter((record) =>
+        objectTypeIds
+          ? record.subject.kind !== "object" || objectTypeIds.has(record.subject.objectTypeId)
+          : true
+      )
       .filter((record) =>
         input.subject ? actionSubjectsEqual(record.subject, input.subject) : true
       )

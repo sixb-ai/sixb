@@ -149,8 +149,10 @@ export type FinishActionRunInput =
 export interface ListActionRunsInput {
   readonly projectId: string
   readonly actionId?: string
+  readonly actionIds?: readonly string[]
   readonly subject?: ActionSubject
   readonly objectTypeId?: string
+  readonly objectTypeIds?: readonly string[]
   readonly primaryId?: string
   readonly statuses?: readonly ActionRunStatus[]
   readonly startedAfter?: Date

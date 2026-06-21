@@ -71,6 +71,7 @@ export interface ListWorkflowInterventionsInput {
   readonly projectId: string
   readonly statuses?: readonly WorkflowInterventionStatus[]
   readonly workflowId?: string
+  readonly workflowIds?: readonly string[]
   readonly workflowRunId?: string
   readonly nodeRunId?: string
   readonly nodeId?: string

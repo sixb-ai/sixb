@@ -112,7 +112,7 @@ export class InMemoryWorkflowInterventionStorage implements WorkflowIntervention
   }
 
   async list(input: ListWorkflowInterventionsInput): Promise<ListWorkflowInterventionsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {
         interventions: [],
         hasMore: false,
@@ -122,10 +122,12 @@ export class InMemoryWorkflowInterventionStorage implements WorkflowIntervention
 
     const order = input.order ?? "desc"
     const statuses = toStatusSet(input.statuses)
+    const workflowIds = input.workflowIds ? new Set(input.workflowIds) : null
     const filtered = [...this.interventions.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (statuses ? statuses.has(record.status) : true))
       .filter((record) => (input.workflowId ? record.workflowId === input.workflowId : true))
+      .filter((record) => (workflowIds ? workflowIds.has(record.workflowId) : true))
       .filter((record) =>
         input.workflowRunId ? record.workflowRunId === input.workflowRunId : true
       )

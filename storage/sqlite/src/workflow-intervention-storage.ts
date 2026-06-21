@@ -187,7 +187,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
   }
 
   async list(input: ListWorkflowInterventionsInput): Promise<ListWorkflowInterventionsResult> {
-    if (input.statuses && input.statuses.length === 0) {
+    if ((input.statuses && input.statuses.length === 0) || input.workflowIds?.length === 0) {
       return {
         interventions: [],
         hasMore: false,
@@ -206,6 +206,11 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
     if (input.workflowId) {
       whereClauses.push("workflow_id = ?")
       args.push(input.workflowId)
+    }
+
+    if (input.workflowIds) {
+      whereClauses.push(`workflow_id IN (${input.workflowIds.map(() => "?").join(", ")})`)
+      args.push(...input.workflowIds)
     }
 
     if (input.workflowRunId) {

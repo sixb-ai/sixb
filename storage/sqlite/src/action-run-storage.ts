@@ -476,7 +476,7 @@ export class SqliteActionRunStorage implements ActionRunStorage {
   }
 
   async list(input: ListActionRunsInput): Promise<ListActionRunsResult> {
-    if (input.statuses && input.statuses.length === 0) {
+    if ((input.statuses && input.statuses.length === 0) || input.actionIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -490,6 +490,25 @@ export class SqliteActionRunStorage implements ActionRunStorage {
     if (input.actionId) {
       whereClauses.push("action_id = ?")
       args.push(input.actionId)
+    }
+
+    if (input.actionIds) {
+      whereClauses.push(`action_id IN (${input.actionIds.map(() => "?").join(", ")})`)
+      args.push(...input.actionIds)
+    }
+
+    if (input.objectTypeIds) {
+      if (input.objectTypeIds.length === 0) {
+        whereClauses.push("subject_kind <> ?")
+        args.push("object")
+      } else {
+        whereClauses.push(
+          `(subject_kind <> ? OR object_type_id IN (${input.objectTypeIds
+            .map(() => "?")
+            .join(", ")}))`
+        )
+        args.push("object", ...input.objectTypeIds)
+      }
     }
 
     if (input.objectTypeId) {

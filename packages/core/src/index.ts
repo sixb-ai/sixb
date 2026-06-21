@@ -456,7 +456,10 @@ export type {
 export {
   AuthorizationError,
   assertAuthorized,
+  canViewActionRun,
   canViewEvent,
+  canViewWorkflowIntervention,
+  canViewWorkflowRun,
   evaluate,
   isAllowed,
   resolveAuthorizationContext,

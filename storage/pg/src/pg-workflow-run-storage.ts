@@ -266,7 +266,7 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
   }
 
   async list(input: ListWorkflowRunsInput): Promise<ListWorkflowRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.workflowIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -281,6 +281,12 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
     if (input.workflowId) {
       whereClauses.push(`workflow_id = $${index++}`)
       params.push(input.workflowId)
+    }
+
+    if (input.workflowIds) {
+      const placeholders = input.workflowIds.map(() => `$${index++}`)
+      whereClauses.push(`workflow_id IN (${placeholders.join(", ")})`)
+      params.push(...input.workflowIds)
     }
 
     index = appendRunListFilters(whereClauses, params, index, input)

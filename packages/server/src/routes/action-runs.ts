@@ -1,5 +1,6 @@
-import type { ActionRunRecord, OntologySource, Sixb } from "@sixb/core"
+import { type ActionRunRecord, canViewActionRun, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import {
   ActionRunDetailSchema,
   ActionRunIdParamsSchema,
@@ -61,7 +62,9 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
   return app
     .get(
       "/api/action-runs",
-      async ({ query, set }) => {
+      async (context) => {
+        const { query, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const storage = sixb.storage.actionRuns
           if (!storage) {
@@ -70,16 +73,22 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           }
 
           const parsed = ActionRunsQuerySchema.parse(query)
+          const limit = parseOptionalInt(parsed.limit)
+          const offset = parseOptionalInt(parsed.offset)
+          const actionIds = authz ? [...authz.grants.actions.apply] : undefined
+          const objectTypeIds = authz ? [...authz.grants.objectTypes.view] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             actionId: parsed.actionId,
+            actionIds,
             objectTypeId: parsed.objectTypeId,
+            objectTypeIds,
             primaryId: parsed.primaryId,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
             startedBefore: parseDate(parsed.startedBefore),
-            limit: parseOptionalInt(parsed.limit),
-            offset: parseOptionalInt(parsed.offset),
+            limit,
+            offset,
             order: parsed.order,
           })
 
@@ -104,7 +113,9 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
     )
     .get(
       "/api/action-runs/:runId",
-      async ({ params, set }) => {
+      async (context) => {
+        const { params, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const storage = sixb.storage.actionRuns
           if (!storage) {
@@ -113,7 +124,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           }
 
           const run = await storage.getById({ projectId: sixb.id, id: params.runId })
-          if (!run) {
+          if (!run || !canViewActionRun(authz, run)) {
             set.status = 404
             return { error: "Action run not found" }
           }
