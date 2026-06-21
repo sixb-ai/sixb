@@ -10,14 +10,11 @@ import type {
   Schema,
   ValueType,
 } from "@sixb/core"
+import { validateTelemetryProjectionFieldMapping } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { isIntegerEnumSchema, resolveProjectionSchema } from "./projection-schema"
 
 type DatasetColumnsByName = Map<string, DatasetColumnDefinition>
-
-export function projectionKindOf(projection: ProjectionDefinition): "object" | "link" {
-  return projection._tag === "ObjectProjectionDefinition" ? "object" : "link"
-}
 
 export function assertDatasetVersionMatchesDefinition(input: {
   readonly dataset: DatasetDefinition
@@ -156,6 +153,78 @@ export function assertProjectionCompatibleWithDataset(input: {
     return
   }
 
+  if (projection._tag === "TelemetryProjectionDefinition") {
+    const objectType = requireObjectType(
+      ontology,
+      projection.objectTypeId,
+      projection.id,
+      "object type"
+    )
+    // Existence + telemetry-mode + field-mapping rules are owned by core so the
+    // startup and worker checks share one implementation and cannot drift. The
+    // worker then layers dataset-version column type compatibility on top.
+    const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
+    const property = validateTelemetryProjectionFieldMapping(
+      projection,
+      objectType,
+      datasetColumnNames,
+      `Projection "${projection.id}"`
+    )
+
+    const objectIdColumn = requireColumn(
+      columnsByName,
+      dataset.id,
+      projection.objectIdField,
+      projection.id
+    )
+    if (objectIdColumn.type !== "string") {
+      throw new ProjectionWorkerError(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' objectId field '${projection.objectIdField}' must be a string dataset column.`
+      )
+    }
+
+    const atColumn = requireColumn(columnsByName, dataset.id, projection.atField, projection.id)
+    if (!isDateLikeColumnType(atColumn.type)) {
+      throw new ProjectionWorkerError(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' at field '${projection.atField}' must be a string, date, or timestamp dataset column.`
+      )
+    }
+
+    const valueColumn = requireColumn(
+      columnsByName,
+      dataset.id,
+      projection.valueField,
+      projection.id
+    )
+    if (
+      !isDatasetColumnCompatibleWithSchema(
+        valueColumn.type,
+        property.schema,
+        ontology.getValueTypesById()
+      )
+    ) {
+      throw new ProjectionWorkerError(
+        `[SixbProjectionWorker] Telemetry projection '${projection.id}' maps dataset column '${valueColumn.name}' (${valueColumn.type}) to incompatible property '${projection.propertyId}'.`
+      )
+    }
+
+    if (projection.unitField !== undefined) {
+      const unitColumn = requireColumn(
+        columnsByName,
+        dataset.id,
+        projection.unitField,
+        projection.id
+      )
+      if (unitColumn.type !== "string") {
+        throw new ProjectionWorkerError(
+          `[SixbProjectionWorker] Telemetry projection '${projection.id}' unit field '${projection.unitField}' must be a string dataset column.`
+        )
+      }
+    }
+
+    return
+  }
+
   const sourceObjectType = requireObjectType(
     ontology,
     projection.sourceObjectTypeId,
@@ -268,6 +337,10 @@ function requireColumn(
     )
   }
   return column
+}
+
+function isDateLikeColumnType(type: DatasetColumnDefinition["type"]): boolean {
+  return type === "string" || type === "date" || type === "timestamp"
 }
 
 function isDatasetColumnCompatibleWithSchema(

@@ -8,6 +8,7 @@ import {
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineTelemetryProjection,
   defineValueType,
   fromForeignKey,
   InMemoryBlobStorage,
@@ -47,6 +48,7 @@ const Room = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string"),
     prop("buildingRef", "string"),
+    prop("temperature", "double", { mode: "telemetry" }),
   ],
   links: [
     link("inBuilding", Building, { cardinality: "one" }),
@@ -64,6 +66,16 @@ const roomsDataset = defineDataset("canonical.rooms", {
 
 const roomSensorsDataset = defineDataset("canonical.room-sensors", {
   schema: [col("room_id", "string"), col("sensor_id", "string")],
+})
+
+const roomReadingsDataset = defineDataset("canonical.room-readings", {
+  schema: [
+    col("room_id", "string"),
+    col("observed_at", "timestamp"),
+    col("temperature", "float64"),
+    col("sync_row_id", "string"),
+    col("unused", "string", { nullable: true }),
+  ],
 })
 
 const roomProjection = defineProjection("room-proj", Room)
@@ -93,6 +105,13 @@ const roomSensorProjection = defineLinkProjection("room-sensor-proj", Room.l.has
   .fromDataset(roomSensorsDataset)
   .sourceField("room_id")
   .targetField("sensor_id")
+
+const roomTemperatureProjection = defineTelemetryProjection(
+  "room-temperature-proj",
+  Room.p.temperature
+)
+  .fromDataset(roomReadingsDataset)
+  .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
 class RecordingLakeStorage implements LakeStorage {
   readonly standard: LakeStorage["standard"]
@@ -301,6 +320,455 @@ describe("runProjectionJob", () => {
       primaryId: "r1",
     })
     expect(room?.properties.name).toBe("Kitchen")
+  })
+
+  test("materializes a telemetry projection from the exact dataset version", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomsDataset, roomReadingsDataset],
+        projections: [roomProjection, roomTemperatureProjection],
+      },
+      deps
+    )
+
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version1 = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+    await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-02T12:00:00.000Z",
+        temperature: 72,
+        sync_row_id: "reading-2",
+        unused: "ignored",
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-1",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: "canonical.room-readings",
+        versionId: version1.versionId,
+      },
+    })
+
+    expect(result.rowsProcessed).toBe(1)
+    expect(result.telemetryPointsAppended).toBe(1)
+    expect(result.telemetryPointsSkipped).toBe(0)
+    expect(result.telemetryRowsFailed).toBe(0)
+    expect(result.objectsUpserted).toBe(0)
+    expect(result.linksUpserted).toBe(0)
+    expect(result.run.status).toBe("succeeded")
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([70.5])
+    expect(history[0]?.at.toISOString()).toBe("2026-06-01T12:00:00.000Z")
+
+    const room = await deps.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      primaryId: "r1",
+    })
+    expect(room?.properties.temperature).toBe(70.5)
+  })
+
+  test("telemetry projections read only mapped dataset columns", async () => {
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      { ...deps, lakeStorage }
+    )
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version = await commitDatasetVersion(lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-column-pruning-telemetry",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(lakeStorage.readInputs).toHaveLength(1)
+    expect(lakeStorage.readInputs[0]?.columns).toEqual(["room_id", "observed_at", "temperature"])
+  })
+
+  test("telemetry projections materialize object latest by telemetry timestamp", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-02T12:00:00.000Z",
+        temperature: 72,
+        sync_row_id: "reading-2",
+        unused: "ignored",
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-late",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.telemetryPointsAppended).toBe(2)
+    expect(result.telemetryPointsSkipped).toBe(0)
+    expect(result.telemetryRowsFailed).toBe(0)
+
+    const room = await deps.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      primaryId: "r1",
+    })
+    expect(room?.properties.temperature).toBe(72)
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([70.5, 72])
+  })
+
+  test("telemetry projections replay idempotently via the (series, at) upsert", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+
+    const first = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-first",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    const replay = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-replay",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(first.telemetryPointsAppended).toBe(1)
+    expect(replay.run.status).toBe("succeeded")
+    expect(replay.telemetryPointsAppended).toBe(1)
+    expect(replay.telemetryRowsFailed).toBe(0)
+
+    // The store upserts on (series, at), so replaying leaves a single point.
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([70.5])
+  })
+
+  test("telemetry projections overwrite a prior value at the same instant (last-write-wins)", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version1 = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+    const version2 = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 71,
+        sync_row_id: "reading-1",
+        unused: "ignored",
+      },
+    ])
+
+    await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-v1",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version1.versionId,
+      },
+    })
+    const second = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-v2",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version2.versionId,
+      },
+    })
+
+    // Same (object, property, instant): the newer value overwrites.
+    expect(second.run.status).toBe("succeeded")
+
+    const room = await deps.storage.objects.getByPrimaryId({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      primaryId: "r1",
+    })
+    expect(room?.properties.temperature).toBe(71)
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([71])
+  })
+
+  test("telemetry projections skip readings for missing objects and keep the run successful", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({
+      properties: { id: "r1", name: "Kitchen" },
+    })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: null,
+      },
+      {
+        room_id: "missing-room",
+        observed_at: "2026-06-01T12:05:00.000Z",
+        temperature: 71,
+        sync_row_id: "reading-2",
+        unused: null,
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      batchSize: 10,
+      job: {
+        id: "projrun-telemetry-partial-failure",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    // A reading for an object that does not exist yet is a benign, retryable
+    // skip (matching object/link projections), not a whole-run failure.
+    expect(result.run.status).toBe("succeeded")
+    expect(result.rowsProcessed).toBe(2)
+    expect(result.rowsSkipped).toBe(1)
+    expect(result.telemetryPointsAppended).toBe(1)
+    expect(result.telemetryPointsSkipped).toBe(1)
+    expect(result.telemetryRowsFailed).toBe(0)
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([70.5])
+  })
+
+  test("telemetry projections parse zone-less timestamps as UTC", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01 12:00:00",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: null,
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-zoneless",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    expect(result.run.status).toBe("succeeded")
+    expect(result.telemetryPointsAppended).toBe(1)
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.at.toISOString())).toEqual(["2026-06-01T12:00:00.000Z"])
+  })
+
+  test("telemetry projections upsert rows that share an instant within one version (last-write-wins)", async () => {
+    const deps = createDeps()
+    const sixb = createSixb(
+      {
+        datasets: [roomReadingsDataset],
+        projections: [roomTemperatureProjection],
+      },
+      deps
+    )
+    await sixb.objects(Room).upsert({ properties: { id: "r1", name: "Kitchen" } })
+    const version = await commitDatasetVersion(deps.lakeStorage, roomReadingsDataset, [
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 70.5,
+        sync_row_id: "reading-1",
+        unused: null,
+      },
+      {
+        room_id: "r1",
+        observed_at: "2026-06-01T12:00:00.000Z",
+        temperature: 71,
+        sync_row_id: "reading-2",
+        unused: null,
+      },
+    ])
+
+    const result = await runProjectionJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-telemetry-inbatch",
+        projectionId: "room-temperature-proj",
+        projectionKind: "telemetry",
+        datasetId: roomReadingsDataset.id,
+        versionId: version.versionId,
+      },
+    })
+
+    // Both rows share (object, property, instant); the upsert keeps the last.
+    expect(result.run.status).toBe("succeeded")
+    expect(result.telemetryRowsFailed).toBe(0)
+
+    const history = await deps.storage.timeseries.getHistory({
+      projectId: sixb.id,
+      objectTypeId: "Room",
+      objectId: "r1",
+      propertyId: "temperature",
+    })
+    expect(history.map((point) => point.value)).toEqual([71])
   })
 
   test("object projections read only mapped dataset columns", async () => {

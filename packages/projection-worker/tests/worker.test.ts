@@ -220,6 +220,7 @@ describe("ProjectionWorker", () => {
       queues: sixb.queues,
       getObjectProjections: () => sixb.getObjectProjections(),
       getLinkProjections: () => sixb.getLinkProjections(),
+      getTelemetryProjections: () => sixb.getTelemetryProjections(),
       getDatasetById: (datasetId: string) => sixb.getDatasetById(datasetId),
       getProjectionById: (projectionId: string) => sixb.getProjectionById(projectionId),
     }
