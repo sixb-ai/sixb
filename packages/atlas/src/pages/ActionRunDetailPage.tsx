@@ -2,7 +2,7 @@ import { getActionRunOptions } from "@sixb/client/hooks"
 import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useParams } from "react-router-dom"
-import { ErrorPage, JsonPreview, LoadingPage, PageFrame } from "../components/common"
+import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import {
   ActionRunDiffSummary,
   ActionRunMetaGrid,
@@ -51,34 +51,34 @@ export function ActionRunDetailPage() {
       <ActionRunMetaGrid run={run} />
 
       {run.error ? (
-        <Card>
-          <CardContent className="p-4">
+        <Card className="p-0">
+          <CardContent className="p-5">
             <div className="mb-3 flex items-center gap-2">
               <ActionRunStatusBadge status={run.status} />
               <span className="text-sm font-medium text-foreground">Failure</span>
             </div>
-            <JsonPreview value={run.error} />
+            <DataPanel value={run.error} />
           </CardContent>
         </Card>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardContent className="p-4">
-            <JsonPreview label="Params" value={run.params} />
+        <Card className="p-0">
+          <CardContent className="p-5">
+            <DataPanel label="Params" value={run.params} />
           </CardContent>
         </Card>
 
-        <Card>
-          <CardContent className="p-4">
-            <JsonPreview label="Writeback" value={run.writeback ?? null} />
+        <Card className="p-0">
+          <CardContent className="p-5">
+            <DataPanel label="Writeback" value={run.writeback ?? null} emptyLabel="No writeback" />
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardContent className="space-y-3 p-4">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <Card className="p-0">
+        <CardContent className="space-y-3 p-5">
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Local commit
           </p>
           {run.commit ? (
@@ -89,9 +89,9 @@ export function ActionRunDetailPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-4">
-          <JsonPreview label="Effects" value={run.effects ?? null} />
+      <Card className="p-0">
+        <CardContent className="p-5">
+          <DataPanel label="Effects" value={run.effects ?? null} emptyLabel="No effects" />
         </CardContent>
       </Card>
     </PageFrame>

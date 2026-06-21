@@ -1,8 +1,9 @@
 import { Button, Card, CardContent, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertCircle, ChevronLeft, Loader2 } from "lucide-react"
-import type { ReactNode } from "react"
+import { type ReactNode, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { StructuredValue } from "./StructuredValue"
 
 type AvatarSize = "xs" | "sm" | "md" | "lg"
 
@@ -158,16 +159,60 @@ export function KeyValue({ label, value, to }: { label: string; value: string; t
   )
 }
 
-export function JsonPreview({ label, value }: { label?: string; value: unknown }) {
-  const rendered = JSON.stringify(value ?? null, null, 2)
+type DataPanelMode = "structured" | "raw"
+
+export function DataPanel({
+  label,
+  value,
+  emptyLabel = "Not recorded",
+}: {
+  label?: string
+  value: unknown
+  emptyLabel?: string
+}) {
+  const [mode, setMode] = useState<DataPanelMode>("structured")
+  const isEmpty = value === null || value === undefined
+
   return (
     <div className="min-w-0 space-y-2">
-      {label ? (
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      ) : null}
-      <pre className="max-h-72 overflow-auto rounded-md border border-border bg-muted/40 p-3 text-xs leading-relaxed text-muted-foreground scrollbar-auto-hide">
-        {rendered}
-      </pre>
+      <div className="flex items-center justify-between gap-2">
+        {label ? (
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {label}
+          </p>
+        ) : (
+          <span />
+        )}
+        {isEmpty ? null : (
+          <div className="inline-flex rounded-md bg-muted p-0.5">
+            {(["structured", "raw"] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setMode(option)}
+                aria-pressed={mode === option}
+                className={cn(
+                  "rounded-[5px] px-2 py-0.5 text-[11px] font-medium capitalize transition-colors",
+                  mode === option
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {isEmpty ? (
+        <p className="text-sm text-muted-foreground">{emptyLabel}</p>
+      ) : mode === "structured" ? (
+        <StructuredValue value={value} emptyLabel={emptyLabel} />
+      ) : (
+        <pre className="max-h-72 overflow-auto text-xs leading-relaxed text-muted-foreground scrollbar-auto-hide">
+          {JSON.stringify(value, null, 2)}
+        </pre>
+      )}
     </div>
   )
 }

@@ -49,8 +49,8 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
-import { type FormEvent, useState } from "react"
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
+import { type SyntheticEvent, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
@@ -160,8 +160,8 @@ function ActionDefinitionCard({ action }: { action: ActionCatalogItem }) {
   const paramCount = action.params.length
 
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="flex h-full flex-col gap-4 p-4">
+    <Card className="overflow-hidden p-0">
+      <CardContent className="flex h-full flex-col gap-3 p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <h3 className="truncate font-medium text-foreground">{action.id}</h3>
@@ -238,7 +238,7 @@ function ActionRunHistoryTab() {
 
 export function ActionRunTable({ runs }: { runs: readonly ActionRunSummary[] }) {
   return (
-    <Card className="overflow-hidden">
+    <Card className="overflow-hidden p-0">
       <Table>
         <TableHeader>
           <TableRow>
@@ -363,7 +363,7 @@ function ActionRequestDialog({
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault()
     requestAction.reset()
     const payload = buildRequestPayload({ updateErrors: true })
@@ -601,52 +601,118 @@ function objectRefLabel(object: { name: string; primaryId: string }): string {
     : object.primaryId
 }
 
+type DiffOperation = ActionCommitDiff["objects"][number]["operation"]
+
+const diffOperationClasses: Record<DiffOperation, string> = {
+  create:
+    "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
+  update:
+    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  delete:
+    "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
+}
+
+function DiffOperationBadge({ operation }: { operation: DiffOperation }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn("rounded-md font-mono text-[10px]", diffOperationClasses[operation])}
+    >
+      {operation}
+    </Badge>
+  )
+}
+
+function DiffGroup({
+  label,
+  count,
+  children,
+}: {
+  label: string
+  count: number
+  children: React.ReactNode
+}) {
+  return (
+    <section className="space-y-2.5">
+      <div className="flex items-baseline gap-2">
+        <h4 className="text-sm font-medium text-foreground">{label}</h4>
+        <span className="text-xs tabular-nums text-muted-foreground">{count}</span>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </section>
+  )
+}
+
+function ObjectRef({ objectTypeId, primaryId }: { objectTypeId: string; primaryId: string }) {
+  return (
+    <span className="font-mono text-sm">
+      <span className="text-muted-foreground">{objectTypeId}:</span>
+      <span className="text-foreground">{primaryId}</span>
+    </span>
+  )
+}
+
 export function ActionRunDiffSummary({ diff }: { diff: ActionCommitDiff }) {
   const objectCount = diff.objects.length
   const linkCount = diff.links.length
 
+  if (objectCount === 0 && linkCount === 0) {
+    return <p className="text-sm text-muted-foreground">No changes recorded.</p>
+  }
+
   return (
-    <div className="space-y-3">
-      <div className="text-sm text-muted-foreground">
-        {objectCount} object {objectCount === 1 ? "change" : "changes"} · {linkCount} link{" "}
-        {linkCount === 1 ? "change" : "changes"}
-      </div>
-      {diff.objects.map((object) => (
-        <div
-          key={`${object.objectTypeId}:${object.primaryId}:${object.operation}`}
-          className="rounded-md border border-border p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="rounded-md font-mono text-[10px]">
-              object.{object.operation}
-            </Badge>
-            <span className="font-mono text-xs text-muted-foreground">
-              {object.objectTypeId}:{object.primaryId}
-            </span>
-          </div>
-          {object.changedProperties.length > 0 ? (
-            <p className="mt-2 font-mono text-xs text-muted-foreground">
-              {object.changedProperties.join(", ")}
-            </p>
-          ) : null}
-        </div>
-      ))}
-      {diff.links.map((link) => (
-        <div
-          key={`${link.source.objectTypeId}:${link.source.primaryId}:${link.linkId}:${link.target.objectTypeId}:${link.target.primaryId}:${link.operation}`}
-          className="rounded-md border border-border p-3"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="rounded-md font-mono text-[10px]">
-              link.{link.operation}
-            </Badge>
-            <span className="font-mono text-xs text-muted-foreground">
-              {link.source.objectTypeId}:{link.source.primaryId}.{link.linkId} -&gt;{" "}
-              {link.target.objectTypeId}:{link.target.primaryId}
-            </span>
-          </div>
-        </div>
-      ))}
+    <div className="space-y-5">
+      {objectCount > 0 ? (
+        <DiffGroup label="Objects" count={objectCount}>
+          {diff.objects.map((object) => (
+            <div
+              key={`${object.objectTypeId}:${object.primaryId}:${object.operation}`}
+              className="space-y-2"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <DiffOperationBadge operation={object.operation} />
+                <ObjectRef objectTypeId={object.objectTypeId} primaryId={object.primaryId} />
+              </div>
+              {object.changedProperties.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {object.changedProperties.map((prop) => (
+                    <span
+                      key={prop}
+                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                    >
+                      {prop}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </DiffGroup>
+      ) : null}
+
+      {linkCount > 0 ? (
+        <DiffGroup label="Links" count={linkCount}>
+          {diff.links.map((link) => (
+            <div
+              key={`${link.source.objectTypeId}:${link.source.primaryId}:${link.linkId}:${link.target.objectTypeId}:${link.target.primaryId}:${link.operation}`}
+              className="flex flex-wrap items-center gap-2"
+            >
+              <DiffOperationBadge operation={link.operation} />
+              <span className="font-mono text-sm">
+                <span className="text-foreground">
+                  {link.source.objectTypeId}:{link.source.primaryId}
+                </span>
+                <span className="text-muted-foreground">.{link.linkId}</span>
+              </span>
+              <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <ObjectRef
+                objectTypeId={link.target.objectTypeId}
+                primaryId={link.target.primaryId}
+              />
+            </div>
+          ))}
+        </DiffGroup>
+      ) : null}
     </div>
   )
 }
@@ -664,8 +730,8 @@ export function ActionRunMetaGrid({ run }: { run: ActionRunSummary }) {
 
 function Metric({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
-    <Card>
-      <CardContent className="space-y-1 p-4">
+    <Card className="p-0">
+      <CardContent className="space-y-1.5 p-4">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
         <div className={cn("break-words text-sm text-foreground", mono && "font-mono text-xs")}>
           {value}

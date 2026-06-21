@@ -6,8 +6,8 @@ import type { ReactNode } from "react"
 import { useEffect, useState } from "react"
 import { Link, Navigate, useParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
+import { StructuredValue } from "../components/StructuredValue"
 import { RunNodeRow } from "../features/workflows/components/nodes/RunNodeRow"
-import { RunIOShape } from "../features/workflows/components/runs/RunIOShape"
 import { RunProgress } from "../features/workflows/components/runs/RunProgress"
 import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
 import {
@@ -249,7 +249,7 @@ function RunInputCard({ value }: { value: unknown }) {
           </div>
         </div>
         <div className="border-t border-border/60 bg-muted/20 p-4">
-          <RunIOShape value={value} />
+          <StructuredValue value={value} />
         </div>
       </CardContent>
     </Card>
