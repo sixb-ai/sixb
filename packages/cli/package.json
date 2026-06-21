@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "sixb": "./dist/index.js",
-    "create-sixb": "./dist/index.js"
+    "sixb": "./src/index.tsx",
+    "create-sixb": "./src/index.tsx"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
