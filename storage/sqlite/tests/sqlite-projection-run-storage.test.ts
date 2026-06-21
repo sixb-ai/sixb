@@ -29,6 +29,8 @@ describe("SqliteProjectionRunStorage", () => {
       projectId: "my-app",
       rowsProcessed: 10,
       objectsUpserted: 8,
+      telemetryPointsAppended: 3,
+      telemetryPointsSkipped: 1,
     })
 
     const finished = await storage.finish({
@@ -52,6 +54,9 @@ describe("SqliteProjectionRunStorage", () => {
       rowsSkipped: 0,
       objectsUpserted: 10,
       linksUpserted: 0,
+      telemetryPointsAppended: 3,
+      telemetryPointsSkipped: 1,
+      telemetryRowsFailed: 0,
     })
     expect(finished.startedAt.toISOString()).toBe("2026-04-06T15:00:00.000Z")
     expect(finished.finishedAt?.toISOString()).toBe("2026-04-06T15:00:01.280Z")
@@ -175,7 +180,7 @@ describe("SqliteProjectionRunStorage", () => {
       storage.update({
         id: "run-2",
         projectId: "my-app",
-        rowsProcessed: -1,
+        telemetryRowsFailed: -1,
       })
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })

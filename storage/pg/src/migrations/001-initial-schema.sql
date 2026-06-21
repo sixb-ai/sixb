@@ -47,13 +47,13 @@ CREATE TABLE IF NOT EXISTS timeseries (
   unit TEXT,
   at TIMESTAMPTZ NOT NULL,
   source_event_id TEXT NOT NULL,
-  PRIMARY KEY (project_id, object_type_id, object_id, property_id, at, source_event_id)
+  -- A telemetry point's identity is (series, at): one value per instant per
+  -- series. Appends upsert on this key, so no separate idempotency ledger is
+  -- needed. This primary-key index also serves point lookups and latest-value
+  -- reads (equality on the series prefix + range/backward scan on `at`), so no
+  -- additional timeseries indexes are required.
+  PRIMARY KEY (project_id, object_type_id, object_id, property_id, at)
 );
-
-CREATE INDEX IF NOT EXISTS idx_timeseries_lookup
-  ON timeseries (project_id, object_type_id, object_id, property_id, at);
-CREATE INDEX IF NOT EXISTS idx_timeseries_latest
-  ON timeseries (project_id, object_type_id, object_id, property_id, at DESC);
 
 CREATE TABLE IF NOT EXISTS sync_runs (
   project_id TEXT NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS projection_runs (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
   projection_id TEXT NOT NULL,
-  projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link')),
+  projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link', 'telemetry')),
   dataset_id TEXT NOT NULL,
   dataset_version_id TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS projection_runs (
   rows_skipped INTEGER NOT NULL DEFAULT 0 CHECK (rows_skipped >= 0),
   objects_upserted INTEGER NOT NULL DEFAULT 0 CHECK (objects_upserted >= 0),
   links_upserted INTEGER NOT NULL DEFAULT 0 CHECK (links_upserted >= 0),
+  telemetry_points_appended INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_points_appended >= 0),
+  telemetry_points_skipped INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_points_skipped >= 0),
+  telemetry_rows_failed INTEGER NOT NULL DEFAULT 0 CHECK (telemetry_rows_failed >= 0),
   error_message TEXT,
   PRIMARY KEY (project_id, id)
 );
@@ -322,12 +325,10 @@ CREATE TABLE IF NOT EXISTS rule_states (
 CREATE INDEX IF NOT EXISTS idx_rule_states_project_rule
   ON rule_states (project_id, rule_id);
 
--- Object and timeseries projections can both apply the same telemetry event.
+-- Object materialization dedupes re-applied events (object.upserted and
+-- telemetry.appended) by id. Timeseries needs no equivalent ledger: its
+-- (series, at) upsert is idempotent on its own.
 CREATE TABLE IF NOT EXISTS applied_events_objects (
-  event_id TEXT PRIMARY KEY
-);
-
-CREATE TABLE IF NOT EXISTS applied_events_timeseries (
   event_id TEXT PRIMARY KEY
 );
 
