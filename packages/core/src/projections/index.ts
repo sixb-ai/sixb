@@ -3,10 +3,13 @@ export {
   categorizeProjections,
   defineLinkProjection,
   defineProjection,
+  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,
   isProjectionDefinition,
+  isTelemetryProjectionDefinition,
+  projectionKindOf,
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"
@@ -16,6 +19,10 @@ export type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "./types"
 // ── Validation ───────────────────────────────────────────────
-export { validateProjectionsAtStartup } from "./validation"
+export {
+  validateProjectionsAtStartup,
+  validateTelemetryProjectionFieldMapping,
+} from "./validation"

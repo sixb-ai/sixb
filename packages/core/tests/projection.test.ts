@@ -5,14 +5,17 @@ import {
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineTelemetryProjection,
   fromForeignKey,
   isLinkProjectionDefinition,
   isObjectProjectionDefinition,
   isProjectionDefinition,
+  isTelemetryProjectionDefinition,
   link,
   ProjectionValidationError,
   prop,
 } from "../src"
+import { categorizeProjections } from "../src/projections"
 
 // ── Test fixtures ────────────────────────────────────────────
 
@@ -30,6 +33,7 @@ const Room = defineObjectType({
     prop("name", "string"),
     prop("buildingRef", "string"),
     prop("sensorRef", "string"),
+    prop("temperature", "double", { mode: "telemetry" }),
   ],
   links: [
     link("inBuilding", Building, { cardinality: "one" }),
@@ -52,6 +56,15 @@ const genericDataset = defineDataset("ds", {
 
 const roomSensorsDataset = defineDataset("join.room-sensors", {
   schema: [col("room_id", "string"), col("sensor_id", "string")],
+})
+
+const roomReadingsDataset = defineDataset("canonical.room-readings", {
+  schema: [
+    col("room_id", "string"),
+    col("observed_at", "timestamp"),
+    col("temperature", "float64"),
+    col("unit", "string"),
+  ],
 })
 
 const TypeWithPolymorphicLink = defineObjectType({
@@ -448,6 +461,107 @@ describe("defineLinkProjection", () => {
   })
 })
 
+// ── defineTelemetryProjection ────────────────────────────────
+
+describe("defineTelemetryProjection", () => {
+  test("builds correct TelemetryProjectionDefinition", () => {
+    const result = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+      .fromDataset(roomReadingsDataset)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        value: "temperature",
+      })
+
+    expect(result._tag).toBe("TelemetryProjectionDefinition")
+    expect(result.id).toBe("room-temperatures")
+    expect(result.objectTypeId).toBe("room")
+    expect(result.propertyId).toBe("temperature")
+    expect(result.datasetId).toBe("canonical.room-readings")
+    expect(result.objectIdField).toBe("room_id")
+    expect(result.atField).toBe("observed_at")
+    expect(result.valueField).toBe("temperature")
+    expect(result.unitField).toBeUndefined()
+  })
+
+  test("builds definition with optional unit field", () => {
+    const result = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+      .fromDataset(roomReadingsDataset)
+      .points({
+        objectId: "room_id",
+        at: "observed_at",
+        value: "temperature",
+        unit: "unit",
+      })
+
+    expect(result.unitField).toBe("unit")
+  })
+
+  test("rejects static property token", () => {
+    expect(() => defineTelemetryProjection("room-names", Room.p.name as never)).toThrow(
+      ProjectionValidationError
+    )
+    expect(() => defineTelemetryProjection("room-names", Room.p.name as never)).toThrow(
+      "must be telemetry-enabled"
+    )
+  })
+
+  test("rejects empty id", () => {
+    expect(() => defineTelemetryProjection("  ", Room.p.temperature)).toThrow(
+      ProjectionValidationError
+    )
+    expect(() => defineTelemetryProjection("  ", Room.p.temperature)).toThrow(
+      "Projection id must not be empty"
+    )
+  })
+
+  test("rejects empty dataset id", () => {
+    const invalidDataset = { kind: "dataset", id: "  ", schema: { columns: [] } } as never
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature).fromDataset(invalidDataset)
+    ).toThrow(ProjectionValidationError)
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature).fromDataset(invalidDataset)
+    ).toThrow("Projection dataset id must not be empty")
+  })
+
+  test("rejects missing required point mapping fields", () => {
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature)
+        .fromDataset(roomReadingsDataset)
+        .points({ objectId: "room_id", value: "temperature" } as never)
+    ).toThrow(ProjectionValidationError)
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature)
+        .fromDataset(roomReadingsDataset)
+        .points({ objectId: "room_id", value: "temperature" } as never)
+    ).toThrow("requires at")
+  })
+
+  test("rejects unknown point mapping keys", () => {
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature)
+        .fromDataset(roomReadingsDataset)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          value: "temperature",
+          extra: "room_id",
+        } as never)
+    ).toThrow(ProjectionValidationError)
+    expect(() =>
+      defineTelemetryProjection("tp", Room.p.temperature)
+        .fromDataset(roomReadingsDataset)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          value: "temperature",
+          extra: "room_id",
+        } as never)
+    ).toThrow("unknown key 'extra'")
+  })
+})
+
 // ── Type guards ──────────────────────────────────────────────
 
 describe("type guards", () => {
@@ -459,6 +573,10 @@ describe("type guards", () => {
     .fromDataset(genericDataset)
     .sourceField("a")
     .targetField("b")
+
+  const telemetryDef = defineTelemetryProjection("tp", Room.p.temperature)
+    .fromDataset(roomReadingsDataset)
+    .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
   test("isObjectProjectionDefinition — positive", () => {
     expect(isObjectProjectionDefinition(objectDef)).toBe(true)
@@ -480,10 +598,29 @@ describe("type guards", () => {
     expect(isLinkProjectionDefinition({ _tag: "LinkProjectionDefinition" })).toBe(false)
   })
 
+  test("isTelemetryProjectionDefinition — positive", () => {
+    expect(isTelemetryProjectionDefinition(telemetryDef)).toBe(true)
+  })
+
+  test("isTelemetryProjectionDefinition — negative", () => {
+    expect(isTelemetryProjectionDefinition(objectDef)).toBe(false)
+    expect(isTelemetryProjectionDefinition(linkDef)).toBe(false)
+    expect(isTelemetryProjectionDefinition({ _tag: "TelemetryProjectionDefinition" })).toBe(false)
+  })
+
   test("isProjectionDefinition", () => {
     expect(isProjectionDefinition(objectDef)).toBe(true)
     expect(isProjectionDefinition(linkDef)).toBe(true)
+    expect(isProjectionDefinition(telemetryDef)).toBe(true)
     expect(isProjectionDefinition({})).toBe(false)
     expect(isProjectionDefinition("string")).toBe(false)
+  })
+
+  test("categorizeProjections groups telemetry definitions separately", () => {
+    const categorized = categorizeProjections([objectDef, linkDef, telemetryDef])
+
+    expect(categorized.objectProjections).toEqual([objectDef])
+    expect(categorized.linkProjections).toEqual([linkDef])
+    expect(categorized.telemetryProjections).toEqual([telemetryDef])
   })
 })

@@ -13,6 +13,7 @@ import {
   defineProjection,
   defineSchedule,
   defineSync,
+  defineTelemetryProjection,
   defineValueType,
   defineWorkflow,
   defineWorkflowStep,
@@ -899,6 +900,75 @@ export const roomProjection = defineProjection("room-proj", Room)
     expect(sixb.getObjectProjections()[0].objectTypeId).toBe("Room")
     expect(sixb.getObjectProjections()[0].datasetId).toBe("canonical.rooms")
     expect(sixb.getLinkProjections()).toHaveLength(0)
+    expect(sixb.getTelemetryProjections()).toHaveLength(0)
+  })
+
+  test("discovers telemetry projections from projections/ directory", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/room.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Room = defineObjectType({
+  id: "Room",
+  name: "Room",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "datasets/room-readings.ts",
+      `import { col, defineDataset } from "${coreModuleUrl}"
+
+export const roomReadingsDataset = defineDataset("canonical.room-readings", {
+  schema: [
+    col("room_id", "string"),
+    col("observed_at", "timestamp"),
+    col("temperature", "float64"),
+  ],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "projections/room-temperatures.ts",
+      `import { defineTelemetryProjection } from "${coreModuleUrl}"
+import { roomReadingsDataset } from "../datasets/room-readings"
+import { Room } from "../ontology/room"
+
+export const roomTemperatureProjection = defineTelemetryProjection(
+  "room-temperatures",
+  Room.p.temperature
+)
+  .fromDataset(roomReadingsDataset)
+  .points({
+    objectId: "room_id",
+    at: "observed_at",
+    value: "temperature",
+  })
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getObjectProjections()).toHaveLength(0)
+    expect(sixb.getLinkProjections()).toHaveLength(0)
+    expect(sixb.getTelemetryProjections()).toHaveLength(1)
+    expect(sixb.getTelemetryProjections()[0].id).toBe("room-temperatures")
+    expect(sixb.getTelemetryProjections()[0].objectTypeId).toBe("Room")
+    expect(sixb.getTelemetryProjections()[0].propertyId).toBe("temperature")
+    expect(sixb.getTelemetryProjections()[0].datasetId).toBe("canonical.room-readings")
   })
 
   test("uses explicit projections when provided", async () => {
@@ -924,6 +994,43 @@ export const roomProjection = defineProjection("room-proj", Room)
 
     expect(sixb.getObjectProjections()).toHaveLength(1)
     expect(sixb.getObjectProjections()[0].id).toBe("room-proj")
+  })
+
+  test("uses explicit telemetry projections when provided", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("temperature", "double", { mode: "telemetry" }),
+      ],
+    })
+    const roomReadingsDataset = defineDataset("canonical.room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
+    })
+
+    const telemetryProjection = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+      .fromDataset(roomReadingsDataset)
+      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      datasets: [roomReadingsDataset],
+      projections: [telemetryProjection],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getObjectProjections()).toHaveLength(0)
+    expect(sixb.getLinkProjections()).toHaveLength(0)
+    expect(sixb.getTelemetryProjections()).toEqual([telemetryProjection])
+    expect(sixb.getProjectionById("room-temperatures")).toBe(telemetryProjection)
   })
 
   test("looks up object and link projections by id", async () => {
@@ -1070,6 +1177,144 @@ export const roomProjection = defineProjection("room-proj", Room)
     ).rejects.toThrow('unknown dataset column "missing_column"')
   })
 
+  test("validates telemetry projection referencing unknown dataset", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("temperature", "double", { mode: "telemetry" }),
+      ],
+    })
+    const roomReadingsDataset = defineDataset("canonical.room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
+    })
+    const telemetryProjection = defineTelemetryProjection("room-temperatures", Room.p.temperature)
+      .fromDataset(roomReadingsDataset)
+      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow('unknown dataset "canonical.room-readings"')
+  })
+
+  test("validates telemetry projection referencing unknown dataset column", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("temperature", "double", { mode: "telemetry" }),
+      ],
+    })
+    const roomReadingsDataset = defineDataset("canonical.room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
+    })
+    const telemetryProjection = {
+      _tag: "TelemetryProjectionDefinition" as const,
+      id: "room-temperatures",
+      objectTypeId: "Room",
+      propertyId: "temperature",
+      datasetId: "canonical.room-readings",
+      objectIdField: "room_id",
+      atField: "missing_observed_at",
+      valueField: "temperature",
+    }
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [roomReadingsDataset],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [roomReadingsDataset],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow('at field "missing_observed_at" references unknown dataset column')
+  })
+
+  test("validates telemetry projection targeting a telemetry property", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("temperature", "double"),
+      ],
+    })
+    const roomReadingsDataset = defineDataset("canonical.room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
+    })
+    const telemetryProjection = {
+      _tag: "TelemetryProjectionDefinition" as const,
+      id: "room-temperatures",
+      objectTypeId: "Room",
+      propertyId: "temperature",
+      datasetId: "canonical.room-readings",
+      objectIdField: "room_id",
+      atField: "observed_at",
+      valueField: "temperature",
+    }
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [roomReadingsDataset],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toBeInstanceOf(ProjectionValidationError)
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [roomReadingsDataset],
+        projections: [telemetryProjection],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow('property "temperature" on type "Room" must be telemetry-enabled')
+  })
+
   test("treats missing projections folder as empty", async () => {
     const projectRoot = await createTempProjectRoot()
 
@@ -1093,6 +1338,7 @@ export const Room = defineObjectType({
 
     expect(sixb.getObjectProjections()).toEqual([])
     expect(sixb.getLinkProjections()).toEqual([])
+    expect(sixb.getTelemetryProjections()).toEqual([])
   })
 
   test("validates projection referencing unknown type", async () => {

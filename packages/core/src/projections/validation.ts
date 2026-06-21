@@ -7,12 +7,13 @@
 
 import type { DatasetDefinition } from "../datasets"
 import type { OntologyRegistry } from "../ontology"
-import type { ObjectType } from "../ontology/types"
+import type { ObjectType, Property } from "../ontology/types"
 import { ProjectionValidationError } from "./errors"
 import type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "./types"
 
 /**
@@ -176,6 +177,52 @@ export function validateLinkProjectionTarget(linkToken: {
 }
 
 /**
+ * Validates a telemetry projection's field mapping against its dataset columns
+ * and object type: the telemetry property exists and is telemetry-enabled, and
+ * every mapped field (objectId/at/value/unit) resolves to a real dataset column.
+ *
+ * Owned here so startup validation and the projection worker's pre-execution
+ * check share one implementation and cannot drift; the worker layers
+ * dataset-version column type compatibility on top of these rules. Returns the
+ * resolved telemetry property for callers that need its schema.
+ */
+export function validateTelemetryProjectionFieldMapping(
+  projection: TelemetryProjectionDefinition,
+  objectType: { readonly id: string; readonly properties: readonly Property[] },
+  datasetColumnNames: ReadonlySet<string>,
+  prefix: string
+): Property {
+  const property = objectType.properties.find((candidate) => candidate.id === projection.propertyId)
+  if (!property) {
+    throw new ProjectionValidationError(
+      `${prefix}: unknown property "${projection.propertyId}" on type "${projection.objectTypeId}"`
+    )
+  }
+  if (property.mode !== "telemetry") {
+    throw new ProjectionValidationError(
+      `${prefix}: property "${projection.propertyId}" on type "${projection.objectTypeId}" must be telemetry-enabled`
+    )
+  }
+
+  const mappedFields = [
+    ["objectId", projection.objectIdField],
+    ["at", projection.atField],
+    ["value", projection.valueField],
+    ...(projection.unitField !== undefined ? ([["unit", projection.unitField]] as const) : []),
+  ] as const
+  for (const [fieldRole, columnName] of mappedFields) {
+    if (!datasetColumnNames.has(columnName)) {
+      throw new ProjectionValidationError(
+        `${prefix}: ${fieldRole} field "${columnName}" references unknown dataset column ` +
+          `"${columnName}" on dataset "${projection.datasetId}"`
+      )
+    }
+  }
+
+  return property
+}
+
+/**
  * Validates all registered projections against the ontology at startup.
  *
  * For object projections:
@@ -193,10 +240,17 @@ export function validateLinkProjectionTarget(linkToken: {
  * 3. The link exists on the source type.
  * 4. Source and target fields exist in the referenced dataset.
  * 5. Both source and target types have primary properties.
+ *
+ * For telemetry projections:
+ * 1. `datasetId` exists in the dataset registry.
+ * 2. `objectTypeId` exists in the type registry.
+ * 3. `propertyId` exists on the object type and is telemetry-enabled.
+ * 4. Point mapping fields exist in the referenced dataset.
  */
 export function validateProjectionsAtStartup(
   objectProjections: readonly ObjectProjectionDefinition[],
   linkProjections: readonly LinkProjectionDefinition[],
+  telemetryProjections: readonly TelemetryProjectionDefinition[],
   ontology: OntologyRegistry,
   datasetsById: ReadonlyMap<string, DatasetDefinition>
 ): void {
@@ -340,5 +394,26 @@ export function validateProjectionsAtStartup(
         `${prefix}: target type "${projection.targetObjectTypeId}" has no primary property`
       )
     }
+  }
+
+  for (const projection of telemetryProjections) {
+    const prefix = `Projection "${projection.id}"`
+    const dataset = datasetsById.get(projection.datasetId)
+    if (!dataset) {
+      throw new ProjectionValidationError(
+        `${prefix}: unknown dataset "${projection.datasetId}". ` +
+          `Add it to 'datasets' in createSixb() or export it from 'datasets/'.`
+      )
+    }
+
+    const objectType = objectTypesById.get(projection.objectTypeId)
+    if (!objectType) {
+      throw new ProjectionValidationError(
+        `${prefix}: unknown object type "${projection.objectTypeId}"`
+      )
+    }
+
+    const datasetColumnNames = new Set(dataset.schema.columns.map((column) => column.name))
+    validateTelemetryProjectionFieldMapping(projection, objectType, datasetColumnNames, prefix)
   }
 }

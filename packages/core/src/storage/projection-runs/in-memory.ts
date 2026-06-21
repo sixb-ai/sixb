@@ -17,6 +17,9 @@ const counterKeys: readonly CounterKey[] = [
   "rowsSkipped",
   "objectsUpserted",
   "linksUpserted",
+  "telemetryPointsAppended",
+  "telemetryPointsSkipped",
+  "telemetryRowsFailed",
 ]
 
 function projectionRunKey(projectId: string, id: string): string {
@@ -80,6 +83,9 @@ function applyCounters(
     rowsSkipped: input.rowsSkipped ?? record.rowsSkipped,
     objectsUpserted: input.objectsUpserted ?? record.objectsUpserted,
     linksUpserted: input.linksUpserted ?? record.linksUpserted,
+    telemetryPointsAppended: input.telemetryPointsAppended ?? record.telemetryPointsAppended,
+    telemetryPointsSkipped: input.telemetryPointsSkipped ?? record.telemetryPointsSkipped,
+    telemetryRowsFailed: input.telemetryRowsFailed ?? record.telemetryRowsFailed,
   }
 }
 
@@ -124,6 +130,9 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       rowsSkipped: 0,
       objectsUpserted: 0,
       linksUpserted: 0,
+      telemetryPointsAppended: 0,
+      telemetryPointsSkipped: 0,
+      telemetryRowsFailed: 0,
     }
 
     this.rows.set(key, structuredClone(record))

@@ -40,6 +40,7 @@ import type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  TelemetryProjectionDefinition,
 } from "../projections/types"
 import { validateProjectionsAtStartup } from "../projections/validation"
 import type { Queues } from "../queues"
@@ -117,6 +118,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly runtimeContext: SixbRuntimeContext
   private readonly objectProjections: readonly ObjectProjectionDefinition[]
   private readonly linkProjections: readonly LinkProjectionDefinition[]
+  private readonly telemetryProjections: readonly TelemetryProjectionDefinition[]
   private readonly projectionsById = new Map<string, ProjectionDefinition>()
   readonly ontology: OntologyRegistry
   readonly actionRegistry: ActionRegistry
@@ -282,10 +284,13 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
 
-    const { objectProjections, linkProjections } = categorizeProjections(options.projections ?? [])
+    const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
+      options.projections ?? []
+    )
     this.objectProjections = objectProjections
     this.linkProjections = linkProjections
-    for (const projection of [...objectProjections, ...linkProjections]) {
+    this.telemetryProjections = telemetryProjections
+    for (const projection of [...objectProjections, ...linkProjections, ...telemetryProjections]) {
       if (this.projectionsById.has(projection.id)) {
         throw new RuntimeError(`Duplicate projection id: ${projection.id}`)
       }
@@ -294,6 +299,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     validateProjectionsAtStartup(
       objectProjections,
       linkProjections,
+      telemetryProjections,
       this.ontology,
       this.datasetsById
     )
@@ -558,6 +564,10 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   getLinkProjections(): readonly LinkProjectionDefinition[] {
     return this.linkProjections
+  }
+
+  getTelemetryProjections(): readonly TelemetryProjectionDefinition[] {
+    return this.telemetryProjections
   }
 
   getProjectionById(projectionId: string): ProjectionDefinition | null {
