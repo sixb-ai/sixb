@@ -5,13 +5,14 @@ import type {
   ProjectionRunCounters,
   ProjectionRunRecord,
 } from "@sixb/core"
+import { projectionKindOf } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { runLinkProjection } from "./run-link-projection"
 import { runObjectProjection } from "./run-object-projection"
+import { runTelemetryProjection } from "./run-telemetry-projection"
 import {
   assertDatasetVersionMatchesDefinition,
   assertProjectionCompatibleWithDataset,
-  projectionKindOf,
 } from "./schema-validation"
 import type {
   ProjectionExecutionResult,
@@ -33,6 +34,9 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
     rowsSkipped: 0,
     objectsUpserted: 0,
     linksUpserted: 0,
+    telemetryPointsAppended: 0,
+    telemetryPointsSkipped: 0,
+    telemetryRowsFailed: 0,
   }
   let started = false
   let finished = false
@@ -119,6 +123,9 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       rowsSkipped: counters.rowsSkipped,
       objectsUpserted: counters.objectsUpserted,
       linksUpserted: counters.linksUpserted,
+      telemetryPointsAppended: counters.telemetryPointsAppended,
+      telemetryPointsSkipped: counters.telemetryPointsSkipped,
+      telemetryRowsFailed: counters.telemetryRowsFailed,
       run,
     }
   } catch (error) {
@@ -159,7 +166,19 @@ async function executeProjection(input: {
     })
   }
 
-  return runLinkProjection({
+  if (projection._tag === "LinkProjectionDefinition") {
+    return runLinkProjection({
+      runtime,
+      projection,
+      dataset,
+      versionId: job.versionId,
+      signal,
+      batchSize,
+      onProgress,
+    })
+  }
+
+  return runTelemetryProjection({
     runtime,
     projection,
     dataset,
@@ -294,7 +313,11 @@ async function finishAfterError(input: {
 }
 
 function hasMaterialized(counters: ProjectionRunCounters): boolean {
-  return counters.objectsUpserted > 0 || counters.linksUpserted > 0
+  return (
+    counters.objectsUpserted > 0 ||
+    counters.linksUpserted > 0 ||
+    counters.telemetryPointsAppended > 0
+  )
 }
 
 function copyCounters(
@@ -303,6 +326,9 @@ function copyCounters(
     rowsSkipped: number
     objectsUpserted: number
     linksUpserted: number
+    telemetryPointsAppended: number
+    telemetryPointsSkipped: number
+    telemetryRowsFailed: number
   },
   source: ProjectionRunCounters
 ): void {
@@ -310,6 +336,9 @@ function copyCounters(
   target.rowsSkipped = source.rowsSkipped
   target.objectsUpserted = source.objectsUpserted
   target.linksUpserted = source.linksUpserted
+  target.telemetryPointsAppended = source.telemetryPointsAppended
+  target.telemetryPointsSkipped = source.telemetryPointsSkipped
+  target.telemetryRowsFailed = source.telemetryRowsFailed
 }
 
 function isAbortError(error: unknown): boolean {
@@ -323,7 +352,7 @@ function createBookkeepingError(input: {
   readonly cause: unknown
 }): Error {
   return new ProjectionWorkerError(
-    `[SixbProjectionWorker] Projection '${input.projectionId}' materialized dataset version '${input.datasetVersionId}', but failed to finalize projection run '${input.runId}'. The materialized object/link state may need repair.`,
+    `[SixbProjectionWorker] Projection '${input.projectionId}' materialized dataset version '${input.datasetVersionId}', but failed to finalize projection run '${input.runId}'. The materialized projection state may need repair.`,
     { cause: input.cause }
   )
 }

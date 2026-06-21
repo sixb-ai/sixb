@@ -5,6 +5,9 @@ export type MutableProjectionCounters = {
   rowsSkipped: number
   objectsUpserted: number
   linksUpserted: number
+  telemetryPointsAppended: number
+  telemetryPointsSkipped: number
+  telemetryRowsFailed: number
 }
 
 export function createZeroCounters(): MutableProjectionCounters {
@@ -13,6 +16,9 @@ export function createZeroCounters(): MutableProjectionCounters {
     rowsSkipped: 0,
     objectsUpserted: 0,
     linksUpserted: 0,
+    telemetryPointsAppended: 0,
+    telemetryPointsSkipped: 0,
+    telemetryRowsFailed: 0,
   }
 }
 
@@ -22,6 +28,9 @@ export function snapshotCounters(counters: MutableProjectionCounters): Projectio
     rowsSkipped: counters.rowsSkipped,
     objectsUpserted: counters.objectsUpserted,
     linksUpserted: counters.linksUpserted,
+    telemetryPointsAppended: counters.telemetryPointsAppended,
+    telemetryPointsSkipped: counters.telemetryPointsSkipped,
+    telemetryRowsFailed: counters.telemetryRowsFailed,
   }
 }
 

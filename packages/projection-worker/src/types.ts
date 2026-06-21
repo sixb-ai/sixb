@@ -8,6 +8,7 @@ import type {
   ProjectionRunRecord,
   ProjectionRunStorage,
   SixbRuntimeContext,
+  TelemetryProjectionDefinition,
 } from "@sixb/core"
 
 export interface ProjectionWorkerContext extends SixbRuntimeContext {
@@ -20,6 +21,7 @@ export interface ProjectionWorkerSixb extends SixbRuntimeContext {
   readonly id: string
   getObjectProjections(): readonly ObjectProjectionDefinition[]
   getLinkProjections(): readonly LinkProjectionDefinition[]
+  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
 }
