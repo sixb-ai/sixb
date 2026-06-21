@@ -186,10 +186,10 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         throw new OidcAuthError("OIDC email domain is not allowed.")
       }
 
-      const canBootstrap =
-        profile.emailVerified &&
-        this.bootstrapUsers.has(email) &&
-        (await hasNoActiveUsers(input.authStorage, input.projectId))
+      // Every verified email in the configured bootstrap allowlist may
+      // self-provision without an invitation — at any time, not only as the
+      // first user. The allowlist itself is the trust boundary.
+      const canBootstrap = profile.emailVerified && this.bootstrapUsers.has(email)
       const signIn = await input.authStorage.completeOidcSignIn({
         projectId: input.projectId,
         oidcAuthorizationAttemptId: attempt.id,
@@ -203,7 +203,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         claims: profile.claims,
         autoLinkByVerifiedEmail: profile.emailVerified,
         allowUserCreationWithoutInvitation: canBootstrap,
-        requireNoActiveUsersForUserCreation: canBootstrap,
+        requireNoActiveUsersForUserCreation: false,
         manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
         newUserId: `usr_${randomUUID()}`,
         session: {
@@ -324,16 +324,6 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }): Promise<void> {
     await input.authStorage.oidcAuthorizationAttempts.consume(input).catch(() => undefined)
   }
-}
-
-async function hasNoActiveUsers(storage: AuthStorage, projectId: string): Promise<boolean> {
-  const page = await storage.users.list({
-    projectId,
-    statuses: ["active"],
-    limit: 1,
-  })
-
-  return page.total === 0
 }
 
 function normalizeStrategyId(value: string | undefined): string {

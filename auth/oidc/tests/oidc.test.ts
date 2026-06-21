@@ -79,6 +79,7 @@ async function startSignIn(input: {
   readonly authStorage: InMemoryAuthStorage
   readonly client: FakeOidcClient
   readonly bootstrapUsers?: readonly string[]
+  readonly bootstrapGroups?: readonly string[]
   readonly returnTo?: string
 }) {
   const strategy = oidc({
@@ -88,7 +89,7 @@ async function startSignIn(input: {
     clientSecret: "client-secret",
     allowedDomains: ["acme.com"],
     bootstrapUsers: input.bootstrapUsers,
-    bootstrapGroups: ["security-admins"],
+    bootstrapGroups: input.bootstrapGroups ?? ["security-admins"],
     clientAdapter: input.client,
   })
   const start = await strategy.startOidcSignIn({
@@ -175,7 +176,7 @@ describe("oidc auth strategy", () => {
     expect(result.groupMemberships).toMatchObject([{ groupId: "commercial" }])
   })
 
-  test("allows first-user bootstrap and then closes bootstrap creation", async () => {
+  test("provisions every bootstrap user, not just the first", async () => {
     const authStorage = new InMemoryAuthStorage()
     const client = new FakeOidcClient()
     client.tokenClaims = {
@@ -191,7 +192,7 @@ describe("oidc auth strategy", () => {
     const { strategy, redirectTo } = await startSignIn({
       authStorage,
       client,
-      bootstrapUsers: ["founder@acme.com"],
+      bootstrapUsers: ["founder@acme.com", "second@acme.com"],
     })
 
     const result = await strategy.completeOidcSignIn({
@@ -210,6 +211,8 @@ describe("oidc auth strategy", () => {
       { groupId: "security-admins", source: "manual" },
     ])
 
+    // A second listed bootstrap user must still self-provision even though an
+    // active user now exists.
     const secondClient = new FakeOidcClient()
     secondClient.tokenClaims = {
       sub: "00u-second",
@@ -224,21 +227,130 @@ describe("oidc auth strategy", () => {
     const second = await startSignIn({
       authStorage,
       client: secondClient,
-      bootstrapUsers: ["second@acme.com"],
+      bootstrapUsers: ["founder@acme.com", "second@acme.com"],
+    })
+
+    const secondResult = await second.strategy.completeOidcSignIn({
+      projectId,
+      authStorage,
+      requestUrl: `http://localhost/auth/callback?code=code&state=${second.redirectTo.searchParams.get(
+        "state"
+      )}`,
+      requestOrigin: "http://localhost",
+      session: sessionInput("ses_second"),
+      now: new Date("2026-05-17T10:02:00.000Z"),
+    })
+
+    expect(secondResult.user.email).toBe("second@acme.com")
+    expect(secondResult.groupMemberships).toMatchObject([
+      { groupId: "security-admins", source: "manual" },
+    ])
+  })
+
+  test("does not bootstrap an allowed-domain email absent from the bootstrap list", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const founderClient = new FakeOidcClient()
+    founderClient.tokenClaims = {
+      sub: "00u-founder",
+      email: "founder@acme.com",
+      email_verified: true,
+    }
+    founderClient.userInfo = founderClient.tokenClaims
+    const founder = await startSignIn({
+      authStorage,
+      client: founderClient,
+      bootstrapUsers: ["founder@acme.com"],
+    })
+    await founder.strategy.completeOidcSignIn({
+      projectId,
+      authStorage,
+      requestUrl: `http://localhost/auth/callback?code=code&state=${founder.redirectTo.searchParams.get(
+        "state"
+      )}`,
+      requestOrigin: "http://localhost",
+      session: sessionInput("ses_founder"),
+      now: new Date("2026-05-17T10:00:00.000Z"),
+    })
+
+    // Same allowed domain, but not on the bootstrap allowlist → needs an invite.
+    const strangerClient = new FakeOidcClient()
+    strangerClient.tokenClaims = {
+      sub: "00u-stranger",
+      email: "stranger@acme.com",
+      email_verified: true,
+    }
+    strangerClient.userInfo = strangerClient.tokenClaims
+    const stranger = await startSignIn({
+      authStorage,
+      client: strangerClient,
+      bootstrapUsers: ["founder@acme.com"],
     })
 
     await expect(
-      second.strategy.completeOidcSignIn({
+      stranger.strategy.completeOidcSignIn({
         projectId,
         authStorage,
-        requestUrl: `http://localhost/auth/callback?code=code&state=${second.redirectTo.searchParams.get(
+        requestUrl: `http://localhost/auth/callback?code=code&state=${stranger.redirectTo.searchParams.get(
           "state"
         )}`,
         requestOrigin: "http://localhost",
-        session: sessionInput("ses_second"),
+        session: sessionInput("ses_stranger"),
         now: new Date("2026-05-17T10:02:00.000Z"),
       })
     ).rejects.toBeInstanceOf(Error)
+  })
+
+  test("reconciles bootstrap groups for an existing user on later sign-in", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { sub: "00u-founder", email: "founder@acme.com", email_verified: true }
+    client.userInfo = client.tokenClaims
+
+    const first = await startSignIn({
+      authStorage,
+      client,
+      bootstrapUsers: ["founder@acme.com"],
+      bootstrapGroups: ["security-admins"],
+    })
+    const created = await first.strategy.completeOidcSignIn({
+      projectId,
+      authStorage,
+      requestUrl: `http://localhost/auth/callback?code=code&state=${first.redirectTo.searchParams.get(
+        "state"
+      )}`,
+      requestOrigin: "http://localhost",
+      session: sessionInput("ses_founder"),
+      now: new Date("2026-05-17T10:00:00.000Z"),
+    })
+    expect(created.groupMemberships).toMatchObject([
+      { groupId: "security-admins", source: "manual" },
+    ])
+
+    // A newly-added bootstrap group must reach the already-existing bootstrap user
+    // on their next sign-in, not only at first creation.
+    const second = await startSignIn({
+      authStorage,
+      client,
+      bootstrapUsers: ["founder@acme.com"],
+      bootstrapGroups: ["security-admins", "billing-admins"],
+    })
+    const reSignIn = await second.strategy.completeOidcSignIn({
+      projectId,
+      authStorage,
+      requestUrl: `http://localhost/auth/callback?code=code&state=${second.redirectTo.searchParams.get(
+        "state"
+      )}`,
+      requestOrigin: "http://localhost",
+      session: sessionInput("ses_founder_2"),
+      now: new Date("2026-05-17T10:05:00.000Z"),
+    })
+
+    expect(reSignIn.user.id).toBe(created.user.id)
+    const groupIds = (
+      await authStorage.groupMemberships.listForUser({ projectId, userId: reSignIn.user.id })
+    ).map((membership) => membership.groupId)
+    expect(groupIds).toContain("security-admins")
+    expect(groupIds).toContain("billing-admins")
   })
 
   test("rejects disallowed domains and consumes the attempt after state validation", async () => {

@@ -257,7 +257,7 @@ describe("magicLink", () => {
     expect(messages).toHaveLength(1)
   })
 
-  test("allows bootstrap requests only while no active users exist", async () => {
+  test("allows bootstrap requests even after active users exist", async () => {
     const storage = new InMemoryAuthStorage()
     const { messages, sendMagicLink } = createSender()
     const strategy = magicLink({
@@ -270,6 +270,8 @@ describe("magicLink", () => {
       requestMagicLink({ storage, strategy, email: "founder@acme.com" })
     ).resolves.toEqual({ status: "sent" })
 
+    // Another user now exists; a listed bootstrap user must still be able to
+    // request a magic link (the allowlist is the trust boundary, not "first user only").
     await storage.users.create({
       id: "usr_existing",
       projectId,
@@ -282,9 +284,9 @@ describe("magicLink", () => {
         email: "founder@acme.com",
         now: at("2026-05-16T10:02:00.000Z"),
       })
-    ).resolves.toEqual({ status: "skipped" })
+    ).resolves.toEqual({ status: "sent" })
 
-    expect(messages).toHaveLength(1)
+    expect(messages).toHaveLength(2)
   })
 
   test("completes bootstrap magic-link sign-in and applies bootstrap groups", async () => {
@@ -315,6 +317,63 @@ describe("magicLink", () => {
     await expect(
       storage.groupMemberships.listForUser({ projectId, userId: result.user.id })
     ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+  })
+
+  test("reconciles bootstrap groups for an existing user on later sign-in", async () => {
+    const storage = new InMemoryAuthStorage()
+
+    const first = createSender()
+    const strategyV1 = magicLink({
+      allowedDomains: ["acme.com"],
+      bootstrapUsers: ["founder@acme.com"],
+      bootstrapGroups: ["security-admins"],
+      sendMagicLink: first.sendMagicLink,
+    })
+    await requestMagicLink({ storage, strategy: strategyV1, email: "founder@acme.com" })
+    const firstLink = linkFromLatestMessage(first.messages)
+    const created = await strategyV1.completeMagicLinkSignIn({
+      projectId,
+      authStorage: storage,
+      magicLinkId: firstLink.searchParams.get("magicLinkId") ?? "",
+      token: firstLink.searchParams.get("token") ?? "",
+      session: sessionInput("ses_1"),
+      now: at("2026-05-16T10:05:00.000Z"),
+    })
+    await expect(
+      storage.groupMemberships.listForUser({ projectId, userId: created.user.id })
+    ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+
+    // A newly-added bootstrap group must reach the already-existing bootstrap user
+    // on their next sign-in, not only at first creation.
+    const second = createSender()
+    const strategyV2 = magicLink({
+      allowedDomains: ["acme.com"],
+      bootstrapUsers: ["founder@acme.com"],
+      bootstrapGroups: ["security-admins", "billing-admins"],
+      sendMagicLink: second.sendMagicLink,
+    })
+    await requestMagicLink({
+      storage,
+      strategy: strategyV2,
+      email: "founder@acme.com",
+      now: at("2026-05-17T10:00:00.000Z"),
+    })
+    const secondLink = linkFromLatestMessage(second.messages)
+    const reSignIn = await strategyV2.completeMagicLinkSignIn({
+      projectId,
+      authStorage: storage,
+      magicLinkId: secondLink.searchParams.get("magicLinkId") ?? "",
+      token: secondLink.searchParams.get("token") ?? "",
+      session: sessionInput("ses_2"),
+      now: at("2026-05-17T10:05:00.000Z"),
+    })
+
+    expect(reSignIn.user.id).toBe(created.user.id)
+    const groupIds = (
+      await storage.groupMemberships.listForUser({ projectId, userId: reSignIn.user.id })
+    ).map((membership) => membership.groupId)
+    expect(groupIds).toContain("security-admins")
+    expect(groupIds).toContain("billing-admins")
   })
 
   test("invalidates the previous active magic link when requesting a new one", async () => {
