@@ -3,6 +3,8 @@
  * Validation, planning, fallback, and execution all run in-process here; the
  * HTTP executor in `@sixb/client` is the remote counterpart.
  */
+
+import type { AuthorizationContext } from "../../authorization"
 import type { OntologyRegistry } from "../../ontology"
 import type { Storage } from "../../storage"
 import {
@@ -21,9 +23,10 @@ export function createRuntimeQueryExecutor(params: {
   projectId: string
   ontology: OntologyRegistry
   storage: Storage
+  authorization?: AuthorizationContext
 }): ObjectQueryExecutor {
-  const { projectId, ontology, storage } = params
-  const executorOptions = { ontology, storage: storage.objects }
+  const { projectId, ontology, storage, authorization } = params
+  const executorOptions = { ontology, storage: storage.objects, authorization }
 
   return {
     async list(query: ObjectQuery, options?: { includeTotal?: boolean }) {

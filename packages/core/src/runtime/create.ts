@@ -12,6 +12,7 @@ import {
   discoverOntologySources,
   discoverPipelines,
   discoverProjections,
+  discoverRoles,
   discoverRules,
   discoverSchedules,
   discoverSyncs,
@@ -27,7 +28,7 @@ import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { ScheduleDefinition } from "../schedules"
-import type { GroupDefinition, InvitePolicyDefinition } from "../security"
+import type { GroupDefinition, InvitePolicyDefinition, RoleDefinition } from "../security"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -55,6 +56,7 @@ export interface CreateSixbOptions {
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
+  roles?: readonly RoleDefinition[]
   invitePolicies?: readonly InvitePolicyDefinition[]
   auth?: SixbAuthConfig
   projectRoot?: string
@@ -92,6 +94,7 @@ export async function createSixb(
     rules,
     workflows,
     groups,
+    roles,
     invitePolicies,
   ] = await Promise.all([
     options.actions ?? discoverActions(projectRoot),
@@ -105,6 +108,7 @@ export async function createSixb(
     discoverRules(projectRoot),
     discoverWorkflows(projectRoot),
     discoverGroups(projectRoot),
+    discoverRoles(projectRoot),
     discoverInvitePolicies(projectRoot),
   ])
 
@@ -129,6 +133,7 @@ export async function createSixb(
     rules: [...(options.rules ?? []), ...rules],
     workflows: [...(options.workflows ?? []), ...workflows],
     groups: [...(options.groups ?? []), ...groups],
+    roles: [...(options.roles ?? []), ...roles],
     invitePolicies: [...(options.invitePolicies ?? []), ...invitePolicies],
     auth: options.auth,
   })

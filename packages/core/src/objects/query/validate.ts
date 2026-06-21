@@ -18,6 +18,8 @@ export interface ObjectQueryValidationIssue {
 export interface ValidatedObjectQuery {
   query: ObjectQuery
   result: ObjectQueryResultShape
+  /** Every object type the query touches, including intermediate traversal types. */
+  touchedObjectTypeIds: readonly string[]
 }
 
 export interface ObjectQueryValidationOptions {
@@ -33,6 +35,7 @@ type QueryValidationContext = Required<
   ontology: OntologyRegistry
   valueTypesById: ReadonlyMap<string, ValueType>
   issues: ObjectQueryValidationIssue[]
+  touchedObjectTypeIds: Set<string>
 }
 
 interface QueryValidationResult {
@@ -62,6 +65,7 @@ export function validateObjectQuery(
   return {
     query: validation.query,
     result: validation.result,
+    touchedObjectTypeIds: [...ctx.touchedObjectTypeIds],
   }
 }
 
@@ -89,10 +93,27 @@ function createValidationContext(options: ObjectQueryValidationOptions): QueryVa
     maxLimit: options.maxLimit ?? DEFAULT_MAX_LIMIT,
     maxPageSize: options.maxPageSize ?? DEFAULT_MAX_PAGE_SIZE,
     issues: [],
+    touchedObjectTypeIds: new Set<string>(),
   }
 }
 
 function validateQueryNode(
+  query: ObjectQuery,
+  path: string,
+  ctx: QueryValidationContext
+): QueryValidationResult {
+  const validation = dispatchQueryNode(query, path, ctx)
+
+  // Record every intermediate result shape so callers can authorize all
+  // object types a query touches, not just the types it returns.
+  for (const objectTypeId of validation.result.objectTypeIds) {
+    ctx.touchedObjectTypeIds.add(objectTypeId)
+  }
+
+  return validation
+}
+
+function dispatchQueryNode(
   query: ObjectQuery,
   path: string,
   ctx: QueryValidationContext

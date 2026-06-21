@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import {
   canInviteGroupIds,
   missingInviteGroupIds,
@@ -287,6 +288,34 @@ export class AuthRuntime {
       projectId: this.projectId,
       correlationId: resolveCorrelationId(request),
     }
+  }
+
+  /**
+   * Resolve the authenticated principal's authorization context for a request.
+   *
+   * Grants resolve eagerly (`groups -> roles -> grants`, subtype-expanded), so
+   * the returned context supports synchronous set-lookup checks and `sixb.as()`.
+   */
+  async createAuthorizationContext(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<AuthorizationContext> {
+    const session = await this.requireUser(request, options)
+    return this.contextFromSession(session)
+  }
+
+  /**
+   * Build an authorization context from an already-resolved session, so callers
+   * that resolve the session themselves (e.g. the server auth guard) don't read
+   * the request twice.
+   */
+  contextFromSession(session: AuthenticatedAuthSession): AuthorizationContext {
+    return resolveAuthorizationContext({
+      principal: session.principal,
+      sessionId: session.session.id,
+      groupIds: session.groupIds,
+      roles: this.security.getResolvedRoles(),
+    })
   }
 
   async getInvitationOptions(

@@ -4,16 +4,18 @@
  * while preserving compile-time property types inferred from the ontology definition.
  */
 
-import type { ActionDefinition, ActionRegistry } from "../../actions"
-import type { BlobStorage } from "../../blob-storage"
-import type { EventsRuntime } from "../../events"
-import type { LakeStorage } from "../../lake-storage"
-import type { OntologyRegistry, ValueType } from "../../ontology"
+import type { ActionDefinition } from "../../actions"
+import type { AuthorizationContext } from "../../authorization"
+import { assertAuthorized } from "../../authorization"
+import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import type { Queues } from "../../queues"
-import type { ObjectSet, ObjectSetListInput, TwinObject } from "../../runtime/types"
-import type { Storage } from "../../storage"
+import type {
+  ObjectSet,
+  ObjectSetListInput,
+  SixbRuntimeContext,
+  TwinObject,
+} from "../../runtime/types"
 import {
   requestActionAndWait as requestActionAndWaitLeaf,
   requestAction as requestActionLeaf,
@@ -31,19 +33,20 @@ export function createObjectSet<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
->(params: {
-  objectType: TObjectType
-  projectId: string
-  ontology: OntologyRegistry
-  actionRegistry: ActionRegistry
-  events: EventsRuntime
-  lakeStorage: LakeStorage
-  blobStorage: BlobStorage
-  storage: Storage
-  queues: Queues
-}): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
+>(
+  params: SixbRuntimeContext & {
+    readonly objectType: TObjectType
+    readonly authorization?: AuthorizationContext
+  }
+): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
+  const { objectType } = params
+  const primaryProp = objectType.properties.find((p) => p.primary)
+  if (!primaryProp) {
+    throw new OntologyValidationError(`Object type '${objectType.id}' has no primary property`)
+  }
+  const primaryPropertyId = primaryProp.id
+
   const {
-    objectType,
     projectId,
     ontology,
     actionRegistry,
@@ -52,15 +55,9 @@ export function createObjectSet<
     blobStorage,
     storage,
     queues,
+    authorization,
   } = params
-
-  const primaryProp = objectType.properties.find((p) => p.primary)
-  if (!primaryProp) {
-    throw new OntologyValidationError(`Object type '${objectType.id}' has no primary property`)
-  }
-  const primaryPropertyId = primaryProp.id
-
-  const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage })
+  const queryExecutor = createRuntimeQueryExecutor({ projectId, ontology, storage, authorization })
 
   const resolvedCtx: ResolvedObjectContext = {
     projectId,
@@ -71,12 +68,14 @@ export function createObjectSet<
     blobStorage,
     storage,
     queues,
+    authorization,
     objectType,
     primaryPropertyId,
   }
 
   const objectSet = {
     get: async (id: string) => {
+      assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
       const row = await storage.objects.getByPrimaryId({
         projectId,
         objectTypeId: objectType.id,
@@ -105,6 +104,7 @@ export function createObjectSet<
     byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
 
     list: async (input?: ObjectSetListInput) => {
+      assertAuthorized(resolvedCtx, { kind: "object.view", objectTypeId: objectType.id })
       const result = await storage.objects.list({
         projectId,
         objectTypeId: objectType.id,

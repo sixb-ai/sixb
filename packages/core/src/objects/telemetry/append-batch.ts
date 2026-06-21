@@ -1,6 +1,7 @@
 /**
  * Leaf operation: batch telemetry append for multiple objects of a single type.
  */
+import { assertPrivileged } from "../../authorization"
 import type { NewDomainEvent } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import {
@@ -25,6 +26,7 @@ export async function appendTelemetryBatch(
     at?: Date
   }[]
 ): Promise<void> {
+  assertPrivileged(ctx, "appendTelemetry")
   const { storage, projectId, objectType, ontology } = ctx
   const checkedIds = new Set<string>()
   const events: NewDomainEvent[] = []

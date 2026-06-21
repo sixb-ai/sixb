@@ -8,6 +8,7 @@ export {
   discoverOntologySources,
   discoverPipelines,
   discoverProjections,
+  discoverRoles,
   discoverRules,
   discoverSchedules,
   discoverSyncs,

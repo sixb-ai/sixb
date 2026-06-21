@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto"
+import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { WorkflowValidationError } from "./errors"
 import { snapshotWorkflowInput } from "./snapshot"
@@ -37,6 +38,7 @@ export async function requestWorkflowRun(
   workflow: WorkflowDefinition,
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
+  assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
   const storage = runtime.storage.workflowRuns
   if (!storage) {
     throw new WorkflowValidationError("[Sixb] Workflow run storage is not configured.")

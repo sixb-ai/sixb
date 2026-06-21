@@ -1,0 +1,77 @@
+/**
+ * Event visibility derived from grants.
+ *
+ * There is no standalone "view events" capability: a principal sees a domain
+ * event only when it can view/apply/run the event's subject. A privileged
+ * caller (no authorization context) sees everything.
+ *
+ * The topic switch is fail-closed: an unrecognized topic is hidden, because a
+ * topic we don't yet model may carry a subject the principal is not allowed to
+ * see. Adding an event topic therefore requires an explicit visibility decision
+ * here, never a silent default.
+ */
+
+import type { StoredDomainEvent } from "../events"
+import { isAllowed } from "./decision"
+import type { AuthorizationContext } from "./types"
+
+export function canViewEvent(
+  authorization: AuthorizationContext | null | undefined,
+  event: StoredDomainEvent
+): boolean {
+  if (!authorization) {
+    return true
+  }
+
+  switch (event.topic) {
+    case "objects":
+    case "telemetry":
+      return isAllowed(authorization, {
+        kind: "object.view",
+        objectTypeId: event.payload.objectTypeId,
+      })
+    case "links":
+      return (
+        isAllowed(authorization, {
+          kind: "object.view",
+          objectTypeId: event.payload.sourceTypeId,
+        }) &&
+        isAllowed(authorization, { kind: "object.view", objectTypeId: event.payload.targetTypeId })
+      )
+    case "actions": {
+      // Apply is necessary; for object-bound actions the principal must also be
+      // able to view the subject type, or the event would leak a hidden
+      // object's id/type — mirroring the rule in `canListAction`.
+      if (!isAllowed(authorization, { kind: "action.apply", actionId: event.payload.actionId })) {
+        return false
+      }
+      const subject = event.payload.subject
+      return subject.kind === "object"
+        ? isAllowed(authorization, { kind: "object.view", objectTypeId: subject.objectTypeId })
+        : true
+    }
+    case "workflows":
+      return isAllowed(authorization, {
+        kind: "workflow.run",
+        workflowId: event.payload.workflowId,
+      })
+    case "rules":
+      // Rule events carry the object they fired on, so gate on viewing it —
+      // otherwise they leak the existence and id of hidden-type objects.
+      return isAllowed(authorization, {
+        kind: "object.view",
+        objectTypeId: event.payload.subject.objectTypeId,
+      })
+    case "schedules":
+    case "syncs":
+    case "pipelines":
+    case "datasets":
+      // Infra topics with no object/action/workflow subject: no grant governs
+      // them yet, so they stay visible to any authorized reader. When they gain
+      // their own grants, add the checks here.
+      return true
+    default:
+      // Fail closed: an unmodeled topic may carry a subject we don't yet gate.
+      return false
+  }
+}

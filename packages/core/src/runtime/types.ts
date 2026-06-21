@@ -14,6 +14,7 @@ import type {
   RequestActionResult,
 } from "../actions"
 import type { AuthRuntime } from "../auth"
+import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../connectors"
@@ -57,6 +58,7 @@ import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../stor
 import type { SyncDefinition } from "../syncs"
 import type { RegisteredWebhook } from "../webhooks"
 import type { WorkflowsRuntime } from "../workflows"
+import type { ScopedSixb } from "./scoped"
 
 // ── Shared runtime context ──────────────────────────────────
 
@@ -79,6 +81,12 @@ export interface SixbRuntimeContext {
   readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly rules?: readonly RuleDefinition[]
+  /**
+   * Principal scope for this context. Absent on privileged runtimes (raw
+   * `sixb`, syncs, workers, tests); present on contexts created by
+   * `sixb.as(context)`, where data operations enforce default-deny grants.
+   */
+  readonly authorization?: AuthorizationContext
 }
 
 // ── Batch result envelopes ──────────────────────────────────
@@ -626,6 +634,9 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly auth: AuthRuntime
   readonly actions: ActionsRuntime
   readonly workflows: WorkflowsRuntime
+
+  /** Create a principal-scoped runtime surface that enforces authorization grants. */
+  as(context: AuthorizationContext): ScopedSixb<_>
 
   /** All registered object types. */
   listObjectTypes(): readonly ObjectTypeWithPropertyTokens[]

@@ -1,0 +1,6 @@
+export type { AuthzDecision, AuthzRequest } from "./decision"
+export { assertAuthorized, assertPrivileged, evaluate, isAllowed } from "./decision"
+export { AuthorizationError } from "./errors"
+export { canViewEvent } from "./event-visibility"
+export { resolveAuthorizationContext, resolveRoleGrants } from "./resolve"
+export type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"

@@ -1,0 +1,200 @@
+/**
+ * Scoped SDK surface returned by `sixb.as(context)`.
+ *
+ * The scoped types are masks over the full SDK types — derived from the same
+ * declarations, never copies — so signatures cannot drift and new surface area
+ * stays hidden until its grants are enforceable end to end. The runtime values
+ * are the same factories running over an authorization-carrying runtime
+ * context; leaf asserts and query planning enforce the grants.
+ */
+
+import type { ActionDefinition, RequestActionInput, RequestActionResult } from "../actions"
+import { requestAction as requestRuntimeAction } from "../actions/request"
+import {
+  type AuthorizationContext,
+  assertAuthorized,
+  canViewEvent,
+  isAllowed,
+} from "../authorization"
+import type { EventsReadInput, StoredDomainEvent } from "../events"
+import { createObjectSet, objectService } from "../objects"
+import type { ListObjectsParams } from "../objects/service"
+import type { ValueType } from "../ontology"
+import { assertObjectTypeRegistered } from "../ontology"
+import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import type { ObjectRow } from "../storage"
+import type {
+  RequestWorkflowRunInput,
+  WorkflowDefinition,
+  WorkflowRunRequestResult,
+  WorkflowsRuntime,
+} from "../workflows"
+import type {
+  ListResult,
+  ObjectByIdHandle,
+  ObjectSet,
+  OntologySource,
+  RegisteredObjectType,
+  RegisteredValueTypes,
+  SixbRuntimeContext,
+} from "./types"
+
+// Scoped members are indexed accesses of the full SDK types rather than
+// `Pick`s: signatures stay single-sourced (no drift), while indexed access
+// stays lazy — mapped types would eagerly materialize every method's deep
+// query/telemetry conditionals and blow the instantiation depth limit.
+export interface ScopedObjectByIdHandle<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TValueTypes extends readonly ValueType[],
+> {
+  get: ObjectByIdHandle<TObjectType, TValueTypes>["get"]
+  requestAction: ObjectByIdHandle<TObjectType, TValueTypes>["requestAction"]
+  requestActionAndWait: ObjectByIdHandle<TObjectType, TValueTypes>["requestActionAndWait"]
+}
+
+export interface ScopedObjectSet<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TValueTypes extends readonly ValueType[],
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens = TObjectType,
+> {
+  get: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["get"]
+  list: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["list"]
+  query: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["query"]
+  requestAction: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["requestAction"]
+  requestActionAndWait: ObjectSet<
+    TObjectType,
+    TValueTypes,
+    TRegisteredObjectTypes
+  >["requestActionAndWait"]
+
+  /** Bind read and action operations to a specific object id. */
+  byId(id: string): ScopedObjectByIdHandle<TObjectType, TValueTypes>
+}
+
+/**
+ * Principal-scoped runtime surface.
+ *
+ * Exposes only operations whose grants are enforceable end to end
+ * (`can.view`, `can.apply`). Everything else — writes, links, telemetry,
+ * infra handles, lifecycle, auth — stays on the privileged runtime.
+ */
+export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> {
+  /** The authorization context this SDK instance enforces. */
+  readonly authorization: AuthorizationContext
+
+  /** Type-safe ObjectSet narrowed to grant-enforceable operations. */
+  objects<TObjectType extends RegisteredObjectType<TOntologySources>>(
+    objectType: TObjectType
+  ): ScopedObjectSet<
+    TObjectType,
+    RegisteredValueTypes<TOntologySources>,
+    RegisteredObjectType<TOntologySources>
+  >
+
+  /** Cross-type listing narrowed to the principal's viewable object types. */
+  list(params: ListObjectsParams): Promise<ListResult<ObjectRow>>
+
+  /** Get an object by type id and primary id (server / dynamic contexts). */
+  getObject(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
+
+  /** Action definitions the principal may apply. */
+  listActions(): readonly ActionDefinition[]
+
+  /** Look up an applicable action definition; null hides ungranted actions. */
+  getActionById(actionId: string): ActionDefinition | null
+
+  /** Request an action by id (server / dynamic contexts). Requires `can.apply`. */
+  requestAction(input: RequestActionInput): Promise<RequestActionResult>
+
+  /** Start a workflow run. Requires `can.run`. */
+  runWorkflow(input: RequestWorkflowRunInput): Promise<WorkflowRunRequestResult>
+
+  /** Workflow definitions the principal may run. */
+  listWorkflows(): readonly WorkflowDefinition[]
+
+  /** Look up a runnable workflow definition; null hides workflows the principal cannot run. */
+  getWorkflowById(workflowId: string): WorkflowDefinition | null
+
+  /** Read the domain events the principal is allowed to see (derived from grants). */
+  readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
+}
+
+export function createScopedSixb<TOntologySources extends readonly OntologySource[]>(
+  runtime: SixbRuntimeContext & { readonly authorization: AuthorizationContext },
+  deps: { readonly workflows: WorkflowsRuntime }
+): ScopedSixb<TOntologySources> {
+  const canListAction = (action: ActionDefinition) =>
+    isAllowed(runtime.authorization, { kind: "action.apply", actionId: action.id }) &&
+    (action.binding.kind === "global" ||
+      isAllowed(runtime.authorization, {
+        kind: "object.view",
+        objectTypeId: action.binding.objectType.id,
+      }))
+
+  const scoped = {
+    authorization: runtime.authorization,
+
+    objects<TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) {
+      assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
+
+      return createObjectSet<
+        TObjectType,
+        RegisteredObjectType<TOntologySources>,
+        RegisteredValueTypes<TOntologySources>
+      >({ ...runtime, objectType })
+    },
+
+    list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
+
+    getObject: async (objectTypeId: string, primaryId: string) => {
+      assertAuthorized(runtime, { kind: "object.view", objectTypeId })
+      return runtime.storage.objects.getByPrimaryId({
+        projectId: runtime.projectId,
+        objectTypeId,
+        primaryId,
+      })
+    },
+
+    listActions: () => runtime.actionRegistry.list().filter((action) => canListAction(action)),
+
+    getActionById: (actionId: string) => {
+      const action = runtime.actionRegistry.getById(actionId)
+      return action && canListAction(action) ? action : null
+    },
+
+    requestAction: (input: RequestActionInput) => requestRuntimeAction(runtime, input),
+
+    runWorkflow: (input: RequestWorkflowRunInput) => deps.workflows.requestByIdAs(runtime, input),
+
+    // Run grant doubles as catalog visibility: a workflow you cannot run is not
+    // worth surfacing, and hiding it also hides the (possibly ungranted) object
+    // types and action params its node graph references.
+    listWorkflows: () =>
+      deps.workflows
+        .list()
+        .filter((workflow) =>
+          isAllowed(runtime.authorization, { kind: "workflow.run", workflowId: workflow.id })
+        ),
+
+    getWorkflowById: (workflowId: string) => {
+      const workflow = deps.workflows.getById(workflowId)
+      return workflow && isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
+        ? workflow
+        : null
+    },
+
+    // No standalone events grant: the stream is filtered to events whose
+    // subject the principal may view/apply/run. `limit` applies before this
+    // filter, so a page may return fewer events than requested — acceptable for
+    // a best-effort recent log (storage-level filtering is the planned fix).
+    readEvents: async (input?: EventsReadInput) => {
+      const events = await runtime.events.read(input)
+      return events.filter((event) => canViewEvent(runtime.authorization, event))
+    },
+  }
+
+  // Boundary cast: checking the literal against ScopedSixb<TOntologySources>
+  // triggers excessively deep ObjectSet instantiation (same constraint noted
+  // on SixbInstance). The mask only hides members of the full SDK values.
+  return scoped as unknown as ScopedSixb<TOntologySources>
+}

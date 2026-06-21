@@ -4,14 +4,20 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
+  type ActionDefinition,
+  can,
   canInviteGroupIds,
   createSixb,
+  defineAction,
   defineGroup,
   defineInvitePolicy,
   defineObjectType,
+  defineRole,
   type GroupDefinition,
   type InvitePolicyDefinition,
+  ontology,
   prop,
+  type RoleDefinition,
   resolveInvitePolicyScope,
   SecurityValidationError,
   Sixb,
@@ -251,7 +257,202 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
     const sixb = createRuntime()
 
     expect(sixb.security.getGroupDefinitions()).toEqual([])
+    expect(sixb.security.getRoleDefinitions()).toEqual([])
     expect(sixb.security.getInvitePolicyDefinitions()).toEqual([])
+  })
+})
+
+describe("role definitions", () => {
+  const commercial = defineGroup("commercial")
+  const finance = defineGroup("finance")
+  const reboot = defineAction("reboot")
+    .params({})
+    .edits(() => {})
+
+  test("defineRole normalizes groups and preserves grants in order", () => {
+    expect(
+      defineRole("contract.operator", {
+        label: "Contract operator",
+        grantedTo: [commercial, finance],
+        grants: [can.view([Account]), can.apply(reboot)],
+      })
+    ).toEqual({
+      kind: "role",
+      id: "contract.operator",
+      label: "Contract operator",
+      grantedToGroupIds: ["commercial", "finance"],
+      grants: [
+        { kind: "grant", capability: "view", selection: { all: false, ids: ["account"] } },
+        { kind: "grant", capability: "apply", selection: { all: false, ids: ["reboot"] } },
+      ],
+    })
+  })
+
+  test("can.view dedupes ids within an explicit selection", () => {
+    expect(can.view([Account, Account])).toEqual({
+      kind: "grant",
+      capability: "view",
+      selection: { all: false, ids: ["account"] },
+    })
+  })
+
+  test("scopes select the whole universe, with optional exclusions", () => {
+    expect(can.view(ontology.objects()).selection).toEqual({ all: true, except: [] })
+    expect(can.view(ontology.objects().except([Account])).selection).toEqual({
+      all: true,
+      except: ["account"],
+    })
+  })
+
+  test("defineRole rejects roles granted to no groups", () => {
+    expect(() => defineRole("empty", { grantedTo: [], grants: [can.view(Account)] })).toThrow(
+      SecurityValidationError
+    )
+  })
+
+  test("defineRole rejects roles with no grants", () => {
+    expect(() => defineRole("empty", { grantedTo: [commercial], grants: [] })).toThrow(
+      SecurityValidationError
+    )
+  })
+
+  test("defineRole rejects grant items that are not grants", () => {
+    expect(() =>
+      defineRole("invalid", {
+        grantedTo: [commercial],
+        grants: [{ kind: "group", id: "commercial" } as unknown as GroupDefinition & never],
+      })
+    ).toThrow("must contain only grant definitions from 'can'")
+  })
+
+  test("runtime registration rejects duplicate role ids", () => {
+    const role = defineRole("contract.operator", {
+      grantedTo: [commercial],
+      grants: [can.view(Account)],
+    })
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role, role] })).toThrow(
+      "Duplicate role id"
+    )
+  })
+
+  test("runtime registration rejects roles referencing unknown groups", () => {
+    const role = defineRole("contract.operator", {
+      grantedTo: [commercial],
+      grants: [can.view(Account)],
+    })
+
+    expect(() => createRuntime({ roles: [role] })).toThrow("unknown group 'commercial'")
+  })
+
+  test("runtime registration rejects view grants on unknown object types", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "contract.operator",
+      grantedToGroupIds: ["commercial"],
+      grants: [{ kind: "grant", capability: "view", selection: { all: false, ids: ["missing"] } }],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown object type 'missing'"
+    )
+  })
+
+  test("runtime registration rejects apply grants on unknown actions", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "contract.operator",
+      grantedToGroupIds: ["commercial"],
+      grants: [{ kind: "grant", capability: "apply", selection: { all: false, ids: ["missing"] } }],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown action 'missing'"
+    )
+  })
+
+  test("valid roles register and resolve from the security registry", () => {
+    const role = defineRole("contract.operator", {
+      grantedTo: [commercial],
+      grants: [can.view(Account), can.apply(reboot)],
+    })
+
+    const sixb = createRuntime({
+      groups: [commercial],
+      roles: [role],
+      actions: [reboot],
+    })
+
+    expect(sixb.security.getRoleDefinitions()).toEqual([role])
+    expect(sixb.security.getRoleById("contract.operator")).toEqual(role)
+    expect(sixb.security.getRoleById("missing")).toBeNull()
+  })
+
+  test("createSixb discovers roles from security/roles", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/account.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Account = defineObjectType({
+  id: "account",
+  name: "Account",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "actions/reboot.ts",
+      `import { defineAction } from "${coreModuleUrl}"
+
+export const reboot = defineAction("reboot")
+  .params({})
+  .edits(() => {})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "security/groups/team.ts",
+      `import { defineGroup } from "${coreModuleUrl}"
+
+export const commercial = defineGroup("commercial")
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "security/roles/contract-operator.ts",
+      `import { can, defineRole } from "${coreModuleUrl}"
+import { reboot } from "../../actions/reboot"
+import { Account } from "../../ontology/account"
+import { commercial } from "../groups/team"
+
+export const contractOperator = defineRole("contract.operator", {
+  grantedTo: [commercial],
+  grants: [can.view(Account), can.apply(reboot)],
+})
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.security.getRoleById("contract.operator")).toEqual({
+      kind: "role",
+      id: "contract.operator",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        { kind: "grant", capability: "view", selection: { all: false, ids: ["account"] } },
+        { kind: "grant", capability: "apply", selection: { all: false, ids: ["reboot"] } },
+      ],
+    })
   })
 })
 
@@ -264,7 +465,9 @@ async function createTempProjectRoot(): Promise<string> {
 function createRuntime(
   options: {
     groups?: readonly GroupDefinition[]
+    roles?: readonly RoleDefinition[]
     invitePolicies?: readonly InvitePolicyDefinition[]
+    actions?: readonly ActionDefinition[]
   } = {}
 ): Sixb<readonly [typeof Account]> {
   return new Sixb<readonly [typeof Account]>({

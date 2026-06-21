@@ -19,6 +19,17 @@ export interface ServerAuthGuardOptions {
   readonly resolveAuthContext: ResolveRequestAuthContext
 }
 
+/**
+ * Per-request authentication decision.
+ *
+ * `deny` carries the short-circuit response. `allow` carries the resolved
+ * session so downstream handlers can use it without resolving it again
+ * (null when auth is disabled or the route is public).
+ */
+export type ServerAuthGuardDecision =
+  | { readonly kind: "deny"; readonly response: Response }
+  | { readonly kind: "allow"; readonly session: AuthSessionResult | null }
+
 export class ServerAuthGuard {
   private readonly sixb: Sixb<readonly OntologySource[]>
   private readonly resolveAuthContext: ResolveRequestAuthContext
@@ -36,19 +47,19 @@ export class ServerAuthGuard {
     this.sixb.auth.assertCanServeHttp(params)
   }
 
-  async handle(request: Request): Promise<Response | undefined> {
+  async resolve(request: Request): Promise<ServerAuthGuardDecision> {
     if (!this.isAuthEnabled()) {
-      return undefined
+      return { kind: "allow", session: null }
     }
 
     const route = classifyRoute(request)
     if (route.kind === "public") {
-      return undefined
+      return { kind: "allow", session: null }
     }
 
     const authContext = this.tryResolveAuthContext(request)
     if (authContext instanceof Response) {
-      return authContext
+      return { kind: "deny", response: authContext }
     }
 
     const session = await this.sixb.auth.getSession(request, {
@@ -56,29 +67,27 @@ export class ServerAuthGuard {
     })
     if (!session.authenticated) {
       if (route.kind === "html") {
-        return htmlAuthRedirectResponse(request, {
-          absoluteReturnTo: authContext.absoluteReturnTo ?? false,
-          audience: authContext.audience,
-        })
+        return {
+          kind: "deny",
+          response: htmlAuthRedirectResponse(request, {
+            absoluteReturnTo: authContext.absoluteReturnTo ?? false,
+            audience: authContext.audience,
+          }),
+        }
       }
 
       if (route.kind === "websocket") {
-        return websocketAuthFailedResponse()
+        return { kind: "deny", response: websocketAuthFailedResponse() }
       }
 
-      return jsonAuthRequiredResponse()
+      return { kind: "deny", response: jsonAuthRequiredResponse() }
     }
 
     if (route.csrfProtected && !this.verifyCsrf(request, session)) {
-      return jsonCsrfFailedResponse()
+      return { kind: "deny", response: jsonCsrfFailedResponse() }
     }
 
-    return undefined
-  }
-
-  async getSession(request: Request): Promise<AuthSessionResult> {
-    const authContext = this.resolveAuthContext(request)
-    return this.sixb.auth.getSession(request, { audience: authContext.audience })
+    return { kind: "allow", session }
   }
 
   getCsrfCookieName(request: Request): string {

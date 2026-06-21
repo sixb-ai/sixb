@@ -1,5 +1,6 @@
 import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import {
   ActionCatalogItemSchema,
@@ -60,8 +61,10 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
   return app
     .get(
       "/api/actions",
-      async () => {
-        return sixb.getActionDefinitions().map(serializeAction)
+      async (context) => {
+        const { scoped } = requestAuthState(context)
+        const actions = scoped ? scoped.listActions() : sixb.getActionDefinitions()
+        return actions.map(serializeAction)
       },
       {
         response: { 200: ActionCatalogItemSchema.array() },
@@ -74,8 +77,12 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .get(
       "/api/actions/:actionId",
-      async ({ params, set }) => {
-        const action = sixb.getActionById(params.actionId)
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
+        const action = scoped
+          ? scoped.getActionById(params.actionId)
+          : sixb.getActionById(params.actionId)
         if (!action) {
           set.status = 404
           return { error: "Action not found" }
@@ -95,15 +102,20 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
     )
     .post(
       "/api/actions/:actionId",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
-          const result = await sixb.actions.request({
+          const input = {
             actionId: params.actionId,
             subject: parsedBody.subject,
             params: parsedBody.params,
             runId: parsedBody.runId,
-          })
+          }
+          const result = scoped
+            ? await scoped.requestAction(input)
+            : await sixb.actions.request(input)
 
           set.status = 202
           return RequestActionResponseSchema.parse(result)
@@ -117,6 +129,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         response: {
           202: RequestActionResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {

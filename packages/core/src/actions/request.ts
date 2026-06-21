@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { SecurityContext } from "../auth"
+import { assertAuthorized } from "../authorization"
 import type { EventActor } from "../events"
 import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
@@ -97,6 +98,12 @@ export async function requestAction(
   const actionId = action.id
   const rawParams: Record<string, unknown> = input.params ?? {}
   const subject: ActionSubject = input.subject ?? { kind: "none" }
+
+  assertAuthorized(runtime, { kind: "action.apply", actionId })
+  if (action.binding.kind === "object") {
+    // Object actions also require visibility of the subject's object type.
+    assertAuthorized(runtime, { kind: "object.view", objectTypeId: action.binding.objectType.id })
+  }
 
   validateActionSubject(action, subject)
 

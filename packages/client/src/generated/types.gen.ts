@@ -2423,6 +2423,12 @@ export type RequestWorkflowRunErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -3000,6 +3006,12 @@ export type ListObjectsErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
 }
 
 export type ListObjectsError = ListObjectsErrors[keyof ListObjectsErrors]
@@ -3038,6 +3050,10 @@ export type QueryObjectsErrors = {
    */
   400: ObjectQueryErrorResponse
   /**
+   * Response for status 403
+   */
+  403: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -3066,6 +3082,10 @@ export type CountObjectsErrors = {
    * Response for status 400
    */
   400: ObjectQueryErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ErrorResponse
   /**
    * Response for status 500
    */
@@ -3096,6 +3116,10 @@ export type ExistsObjectsErrors = {
    */
   400: ObjectQueryErrorResponse
   /**
+   * Response for status 403
+   */
+  403: ErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -3124,6 +3148,10 @@ export type FacetObjectsErrors = {
    * Response for status 400
    */
   400: ObjectQueryErrorResponse
+  /**
+   * Response for status 403
+   */
+  403: ErrorResponse
   /**
    * Response for status 500
    */
@@ -3354,6 +3382,12 @@ export type RequestActionErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
     error: string
   }
   /**
@@ -3911,6 +3945,12 @@ export type ListEventsErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
     error: string
   }
 }
