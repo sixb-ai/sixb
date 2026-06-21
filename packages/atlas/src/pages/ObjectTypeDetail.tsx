@@ -80,16 +80,18 @@ export function ObjectTypeDetail() {
   }, [objectType, allTypes])
 
   const typeProjections = useMemo(() => {
-    if (!projections || !typeId) return { object: [], link: [] }
+    if (!projections || !typeId) return { object: [], link: [], telemetry: [] }
     return {
       object: projections.objectProjections.filter((p) => p.objectTypeId === typeId),
       link: projections.linkProjections.filter(
         (p) => p.sourceObjectTypeId === typeId || p.targetObjectTypeId === typeId
       ),
+      telemetry: projections.telemetryProjections.filter((p) => p.objectTypeId === typeId),
     }
   }, [projections, typeId])
 
-  const projectionCount = typeProjections.object.length + typeProjections.link.length
+  const projectionCount =
+    typeProjections.object.length + typeProjections.link.length + typeProjections.telemetry.length
   const resolvedTab: TabValue =
     activeTab === "projections" && projectionCount === 0 ? DEFAULT_TAB : activeTab
 
@@ -400,6 +402,32 @@ export function ObjectTypeDetail() {
                 </div>
               </section>
             ) : null}
+
+            {typeProjections.telemetry.length > 0 ? (
+              <section className="space-y-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Telemetry projections
+                </h3>
+                <div className="space-y-3">
+                  {typeProjections.telemetry.map((proj) => (
+                    <Card key={proj.id} className="space-y-4 p-4">
+                      <ProjectionHeader id={proj.id} datasetId={proj.datasetId} />
+                      <div className="space-y-1.5">
+                        <SectionLabel>Point mapping</SectionLabel>
+                        <dl className="grid grid-cols-[max-content_max-content_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 font-mono text-xs">
+                          <TelemetryMappingRow label={proj.propertyId} column={proj.valueField} />
+                          <TelemetryMappingRow label="at" column={proj.atField} />
+                          <TelemetryMappingRow label="object" column={proj.objectIdField} />
+                          {proj.unitField ? (
+                            <TelemetryMappingRow label="unit" column={proj.unitField} />
+                          ) : null}
+                        </dl>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </section>
+            ) : null}
           </TabsContent>
         ) : null}
       </Tabs>
@@ -521,6 +549,18 @@ function SectionLabel({ children }: { children: ReactNode }) {
     <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
     </p>
+  )
+}
+
+function TelemetryMappingRow({ label, column }: { label: string; column: string }) {
+  return (
+    <Fragment>
+      <dt className="text-foreground">{label}</dt>
+      <span aria-hidden="true" className="text-muted-foreground/40">
+        ←
+      </span>
+      <dd className="truncate text-muted-foreground">{column}</dd>
+    </Fragment>
   )
 }
 
