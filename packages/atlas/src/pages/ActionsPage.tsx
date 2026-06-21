@@ -9,7 +9,7 @@ import {
   listActionRunsQueryKey,
   listActionsOptions,
   listActionsQueryKey,
-  listObjectsOptions,
+  listObjectsInfiniteOptions,
   requestActionMutation,
 } from "@sixb/client/hooks"
 import {
@@ -20,6 +20,8 @@ import {
   Button,
   Card,
   CardContent,
+  Combobox,
+  type ComboboxOption,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -48,9 +50,9 @@ import {
   Textarea,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
-import { type SyntheticEvent, useState } from "react"
+import { type SyntheticEvent, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
@@ -388,18 +390,20 @@ function ActionRequestDialog({
         </DialogHeader>
 
         <form className="space-y-5" onSubmit={handleSubmit}>
-          <section className="max-h-[min(33rem,calc(100vh-17rem))] space-y-4 overflow-y-auto pr-1">
+          {/* p-1 insets the fields so focus rings (drawn outside the input) aren't
+              clipped by the scroll container's overflow. */}
+          <section className="max-h-[min(33rem,calc(100vh-17rem))] space-y-4 overflow-y-auto p-1">
             {action.objectTypeId ? (
               <div className="space-y-1.5">
                 <Label htmlFor={`action-${action.id}-subject`} className="text-xs">
-                  Target {action.objectTypeId} id
+                  Target {action.objectTypeId}
                 </Label>
-                <Input
-                  id={`action-${action.id}-subject`}
+                <ObjectRefField
+                  objectTypeId={action.objectTypeId}
                   value={subjectPrimaryId}
-                  onChange={(event) => handleSubjectPrimaryIdChange(event.target.value)}
+                  onChange={handleSubjectPrimaryIdChange}
+                  fieldId={`action-${action.id}-subject`}
                   disabled={Boolean(subject)}
-                  required
                 />
                 {fieldErrors.__subject ? (
                   <p className="text-xs text-destructive">{fieldErrors.__subject}</p>
@@ -545,18 +549,34 @@ function ObjectRefField({
   value,
   onChange,
   fieldId,
+  disabled,
 }: {
   objectTypeId: string
   value: string
   onChange: (value: string) => void
   fieldId: string
+  disabled?: boolean
 }) {
-  const objectsQuery = useQuery(
-    listObjectsOptions({
-      query: { objectTypeId, limit: "100", orderBy: "primaryId", order: "asc" },
+  const objectsQuery = useInfiniteQuery(
+    listObjectsInfiniteOptions({
+      query: { objectTypeId, limit: "50", orderBy: "primaryId", order: "asc" },
     })
   )
-  const objects = objectsQuery.data ?? []
+
+  const options = useMemo<ComboboxOption[]>(
+    () =>
+      (objectsQuery.data?.pages ?? []).flatMap((page) =>
+        page.objects.map((object) => {
+          const hasName = Boolean(object.name) && object.name !== object.primaryId
+          return {
+            value: object.primaryId,
+            label: hasName ? object.name : object.primaryId,
+            description: hasName ? object.primaryId : undefined,
+          }
+        })
+      ),
+    [objectsQuery.data]
+  )
 
   if (objectsQuery.isError) {
     return (
@@ -565,40 +585,36 @@ function ObjectRefField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={`${objectTypeId} id`}
+        disabled={disabled}
       />
     )
   }
 
-  const isEmpty = !objectsQuery.isLoading && objects.length === 0
+  const isEmpty = !objectsQuery.isLoading && options.length === 0
 
   return (
-    <Select value={value} onValueChange={onChange} disabled={objectsQuery.isLoading || isEmpty}>
-      <SelectTrigger id={fieldId} className="w-full">
-        <SelectValue
-          placeholder={
-            objectsQuery.isLoading
-              ? "Loading..."
-              : isEmpty
-                ? `No ${objectTypeId} found`
-                : `Select ${objectTypeId}...`
-          }
-        />
-      </SelectTrigger>
-      <SelectContent>
-        {objects.map((object) => (
-          <SelectItem key={object.primaryId} value={object.primaryId}>
-            {objectRefLabel(object)}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Combobox
+      id={fieldId}
+      value={value}
+      options={options}
+      onValueChange={onChange}
+      disabled={disabled || isEmpty}
+      placeholder={
+        objectsQuery.isLoading
+          ? "Loading..."
+          : isEmpty
+            ? `No ${objectTypeId} found`
+            : `Select ${objectTypeId}...`
+      }
+      searchPlaceholder={`Search ${objectTypeId}...`}
+      emptyLabel={`No matching ${objectTypeId} found.`}
+      hasMore={objectsQuery.hasNextPage}
+      loadingMore={objectsQuery.isFetchingNextPage}
+      onLoadMore={() => {
+        void objectsQuery.fetchNextPage()
+      }}
+    />
   )
-}
-
-function objectRefLabel(object: { name: string; primaryId: string }): string {
-  return object.name && object.name !== object.primaryId
-    ? `${object.name} · ${object.primaryId}`
-    : object.primaryId
 }
 
 type DiffOperation = ActionCommitDiff["objects"][number]["operation"]

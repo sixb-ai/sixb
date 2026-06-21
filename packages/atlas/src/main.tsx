@@ -15,6 +15,15 @@ import "../.sixb/ui.css"
 let canRenderApp = false
 let browserClient: ReturnType<typeof configureSixbBrowserClient> | null = null
 
+// "ResizeObserver loop" notifications are a benign browser quirk (Radix/cmdk
+// popovers trigger them), not a real error. Keep them out of the console/overlay.
+window.addEventListener("error", (event) => {
+  if (event.message.startsWith("ResizeObserver loop")) {
+    event.stopImmediatePropagation()
+    event.preventDefault()
+  }
+})
+
 interface BuiltInUiHotData {
   root?: Root
   queryClient?: QueryClient

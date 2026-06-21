@@ -22,6 +22,7 @@ export interface ComboboxOption {
 }
 
 export function Combobox({
+  id,
   value,
   options,
   onValueChange,
@@ -37,6 +38,7 @@ export function Combobox({
   loadMoreLabel = "Scroll to load more...",
   onLoadMore,
 }: {
+  readonly id?: string
   readonly value?: string
   readonly options: readonly ComboboxOption[]
   readonly onValueChange: (value: string) => void
@@ -86,6 +88,7 @@ export function Combobox({
         <Button
           type="button"
           variant="outline"
+          id={id}
           ref={triggerRef}
           role="combobox"
           aria-expanded={open}
