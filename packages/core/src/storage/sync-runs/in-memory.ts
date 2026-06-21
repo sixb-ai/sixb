@@ -129,14 +129,24 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
+    if (input.syncIds && input.syncIds.length === 0) {
+      return {
+        runs: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
     const order = input.order ?? "desc"
     const offset = input.offset ?? 0
     const limit = input.limit ?? this.rows.size
+    const syncIds = input.syncIds ? new Set(input.syncIds) : null
     const statuses = input.statuses ? new Set(input.statuses) : null
 
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.syncId ? record.syncId === input.syncId : true))
+      .filter((record) => (syncIds ? syncIds.has(record.syncId) : true))
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
       .filter((record) => (statuses ? statuses.has(record.status) : true))
       .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))

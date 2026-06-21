@@ -155,6 +155,14 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
+    if (input.syncIds && input.syncIds.length === 0) {
+      return {
+        runs: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
     if (input.statuses && input.statuses.length === 0) {
       return {
         runs: [],
@@ -169,6 +177,11 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     if (input.syncId) {
       whereClauses.push("sync_id = ?")
       args.push(input.syncId)
+    }
+
+    if (input.syncIds) {
+      whereClauses.push(`sync_id IN (${input.syncIds.map(() => "?").join(", ")})`)
+      args.push(...input.syncIds)
     }
 
     if (input.datasetId) {

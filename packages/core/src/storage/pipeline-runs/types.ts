@@ -92,6 +92,7 @@ export type FinishPipelineStepRunInput =
 export interface ListPipelineRunsInput {
   readonly projectId: string
   readonly pipelineId?: string
+  readonly pipelineIds?: readonly string[]
   readonly statuses?: readonly PipelineRunStatus[]
   readonly startedAfter?: Date
   readonly startedBefore?: Date

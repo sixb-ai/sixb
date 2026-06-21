@@ -1376,6 +1376,12 @@ export type RequestSyncRunErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 404
    */
   404: {
@@ -1791,6 +1797,12 @@ export type RequestPipelineRunErrors = {
    * Response for status 400
    */
   400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
     error: string
   }
   /**

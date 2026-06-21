@@ -12,10 +12,16 @@ import type { Principal } from "../auth/types"
 export interface GrantIndex {
   /** Object type ids viewable, expanded from grants (broad grants + subtypes). */
   readonly objectTypes: { readonly view: ReadonlySet<string> }
+  /** Dataset ids viewable. */
+  readonly datasets: { readonly view: ReadonlySet<string> }
   /** Action ids this principal may request. */
   readonly actions: { readonly apply: ReadonlySet<string> }
   /** Workflow ids this principal may run. */
   readonly workflows: { readonly run: ReadonlySet<string> }
+  /** Sync ids this principal may run. */
+  readonly syncs: { readonly run: ReadonlySet<string> }
+  /** Pipeline ids this principal may run. */
+  readonly pipelines: { readonly run: ReadonlySet<string> }
 }
 
 /** A role with its grants pre-expanded to concrete id sets at startup. */

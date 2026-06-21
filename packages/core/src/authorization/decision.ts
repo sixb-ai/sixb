@@ -22,8 +22,11 @@ import type { AuthorizationContext, GrantIndex } from "./types"
 /** Something a principal may attempt, paired with the resource it targets. */
 export type AuthzRequest =
   | { readonly kind: "object.view"; readonly objectTypeId: string }
+  | { readonly kind: "dataset.view"; readonly datasetId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
   | { readonly kind: "workflow.run"; readonly workflowId: string }
+  | { readonly kind: "sync.run"; readonly syncId: string }
+  | { readonly kind: "pipeline.run"; readonly pipelineId: string }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
 
 export interface AuthzDecision {
@@ -42,42 +45,65 @@ interface AuthorizedRuntime {
 // the single unit that both names a requirement and tests the grant index, so
 // the two can never drift.
 type Atom =
-  | { readonly capability: "view"; readonly id: string }
+  | { readonly capability: "view"; readonly target: "object" | "dataset"; readonly id: string }
   | { readonly capability: "apply"; readonly id: string }
-  | { readonly capability: "run"; readonly id: string }
+  | {
+      readonly capability: "run"
+      readonly target: "workflow" | "sync" | "pipeline"
+      readonly id: string
+    }
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
     case "object.view":
-      return [{ capability: "view", id: request.objectTypeId }]
+      return [{ capability: "view", target: "object", id: request.objectTypeId }]
+    case "dataset.view":
+      return [{ capability: "view", target: "dataset", id: request.datasetId }]
     case "action.apply":
       return [{ capability: "apply", id: request.actionId }]
     case "workflow.run":
-      return [{ capability: "run", id: request.workflowId }]
+      return [{ capability: "run", target: "workflow", id: request.workflowId }]
+    case "sync.run":
+      return [{ capability: "run", target: "sync", id: request.syncId }]
+    case "pipeline.run":
+      return [{ capability: "run", target: "pipeline", id: request.pipelineId }]
     case "object.query":
-      return request.touchedObjectTypeIds.map((id) => ({ capability: "view", id }))
+      return request.touchedObjectTypeIds.map((id) => ({
+        capability: "view",
+        target: "object",
+        id,
+      }))
   }
 }
 
 function atomKey(atom: Atom): string {
   switch (atom.capability) {
     case "view":
-      return `view:object:${atom.id}`
+      return `view:${atom.target}:${atom.id}`
     case "apply":
       return `apply:action:${atom.id}`
     case "run":
-      return `run:workflow:${atom.id}`
+      return `run:${atom.target}:${atom.id}`
   }
 }
 
 function holds(grants: GrantIndex, atom: Atom): boolean {
   switch (atom.capability) {
     case "view":
-      return grants.objectTypes.view.has(atom.id)
+      return atom.target === "dataset"
+        ? grants.datasets.view.has(atom.id)
+        : grants.objectTypes.view.has(atom.id)
     case "apply":
       return grants.actions.apply.has(atom.id)
     case "run":
-      return grants.workflows.run.has(atom.id)
+      switch (atom.target) {
+        case "sync":
+          return grants.syncs.run.has(atom.id)
+        case "pipeline":
+          return grants.pipelines.run.has(atom.id)
+        case "workflow":
+          return grants.workflows.run.has(atom.id)
+      }
   }
 }
 
@@ -137,10 +163,16 @@ function deniedMessage(
   switch (request.kind) {
     case "object.view":
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
+    case "dataset.view":
+      return `[Sixb] Principal '${principalId}' is not allowed to view dataset '${request.datasetId}'.`
     case "action.apply":
       return `[Sixb] Principal '${principalId}' is not allowed to apply action '${request.actionId}'.`
     case "workflow.run":
       return `[Sixb] Principal '${principalId}' is not allowed to run workflow '${request.workflowId}'.`
+    case "sync.run":
+      return `[Sixb] Principal '${principalId}' is not allowed to run sync '${request.syncId}'.`
+    case "pipeline.run":
+      return `[Sixb] Principal '${principalId}' is not allowed to run pipeline '${request.pipelineId}'.`
     case "object.query": {
       // Name the first touched type the principal cannot view.
       const blocked = request.touchedObjectTypeIds.find(

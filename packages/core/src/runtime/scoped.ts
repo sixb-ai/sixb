@@ -16,13 +16,16 @@ import {
   canViewEvent,
   isAllowed,
 } from "../authorization"
+import type { DatasetDefinition } from "../datasets"
 import type { EventsReadInput, StoredDomainEvent } from "../events"
 import { createObjectSet, objectService } from "../objects"
 import type { ListObjectsParams } from "../objects/service"
 import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import type { PipelineDefinition } from "../pipelines"
 import type { ObjectRow } from "../storage"
+import type { SyncDefinition } from "../syncs"
 import type {
   RequestWorkflowRunInput,
   WorkflowDefinition,
@@ -97,6 +100,12 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Get an object by type id and primary id (server / dynamic contexts). */
   getObject(objectTypeId: string, primaryId: string): Promise<ObjectRow | null>
 
+  /** Dataset definitions the principal may view. */
+  listDatasets(): readonly DatasetDefinition[]
+
+  /** Look up a viewable dataset definition; null hides ungranted datasets. */
+  getDatasetById(datasetId: string): DatasetDefinition | null
+
   /** Action definitions the principal may apply. */
   listActions(): readonly ActionDefinition[]
 
@@ -115,13 +124,39 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Look up a runnable workflow definition; null hides workflows the principal cannot run. */
   getWorkflowById(workflowId: string): WorkflowDefinition | null
 
+  /** Sync definitions the principal may run. */
+  listSyncs(): readonly SyncDefinition[]
+
+  /** Look up a runnable sync definition; null hides syncs the principal cannot run. */
+  getSyncById(syncId: string): SyncDefinition | null
+
+  /** Pipeline definitions the principal may run. */
+  listPipelines(): readonly PipelineDefinition[]
+
+  /** Look up a runnable pipeline definition; null hides pipelines the principal cannot run. */
+  getPipelineById(pipelineId: string): PipelineDefinition | null
+
   /** Read the domain events the principal is allowed to see (derived from grants). */
   readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
 }
 
 export function createScopedSixb<TOntologySources extends readonly OntologySource[]>(
   runtime: SixbRuntimeContext & { readonly authorization: AuthorizationContext },
-  deps: { readonly workflows: WorkflowsRuntime }
+  deps: {
+    readonly datasets: {
+      readonly list: () => readonly DatasetDefinition[]
+      readonly getById: (datasetId: string) => DatasetDefinition | null
+    }
+    readonly syncs: {
+      readonly list: () => readonly SyncDefinition[]
+      readonly getById: (syncId: string) => SyncDefinition | null
+    }
+    readonly pipelines: {
+      readonly list: () => readonly PipelineDefinition[]
+      readonly getById: (pipelineId: string) => PipelineDefinition | null
+    }
+    readonly workflows: WorkflowsRuntime
+  }
 ): ScopedSixb<TOntologySources> {
   const canListAction = (action: ActionDefinition) =>
     isAllowed(runtime.authorization, { kind: "action.apply", actionId: action.id }) &&
@@ -155,6 +190,21 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       })
     },
 
+    listDatasets: () =>
+      deps.datasets
+        .list()
+        .filter((dataset) =>
+          isAllowed(runtime.authorization, { kind: "dataset.view", datasetId: dataset.id })
+        ),
+
+    getDatasetById: (datasetId: string) => {
+      const dataset = deps.datasets.getById(datasetId)
+      return dataset &&
+        isAllowed(runtime.authorization, { kind: "dataset.view", datasetId: dataset.id })
+        ? dataset
+        : null
+    },
+
     listActions: () => runtime.actionRegistry.list().filter((action) => canListAction(action)),
 
     getActionById: (actionId: string) => {
@@ -180,6 +230,30 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       const workflow = deps.workflows.getById(workflowId)
       return workflow && isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
         ? workflow
+        : null
+    },
+
+    listSyncs: () =>
+      deps.syncs
+        .list()
+        .filter((sync) => isAllowed(runtime.authorization, { kind: "sync.run", syncId: sync.id })),
+
+    getSyncById: (syncId: string) => {
+      const sync = deps.syncs.getById(syncId)
+      return sync && isAllowed(runtime.authorization, { kind: "sync.run", syncId }) ? sync : null
+    },
+
+    listPipelines: () =>
+      deps.pipelines
+        .list()
+        .filter((pipeline) =>
+          isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId: pipeline.id })
+        ),
+
+    getPipelineById: (pipelineId: string) => {
+      const pipeline = deps.pipelines.getById(pipelineId)
+      return pipeline && isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId })
+        ? pipeline
         : null
     },
 

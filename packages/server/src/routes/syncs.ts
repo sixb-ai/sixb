@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto"
-import type { OntologySource, Sixb, SyncDefinition, SyncRunRecord } from "@sixb/core"
+import {
+  assertAuthorized,
+  type OntologySource,
+  type Sixb,
+  type SyncDefinition,
+  type SyncRunRecord,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -92,8 +99,9 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
   return app
     .get(
       "/api/syncs",
-      async () => {
-        const syncs = sixb.getSyncDefinitions()
+      async (context) => {
+        const { scoped } = requestAuthState(context)
+        const syncs = scoped ? scoped.listSyncs() : sixb.getSyncDefinitions()
         const latestRuns = await getLatestSyncRuns(
           sixb,
           syncs.map((sync) => sync.id)
@@ -112,8 +120,10 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .get(
       "/api/syncs/:syncId",
-      async ({ params, set }) => {
-        const sync = sixb.getSyncById(params.syncId)
+      async (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
+        const sync = scoped ? scoped.getSyncById(params.syncId) : sixb.getSyncById(params.syncId)
         if (!sync) {
           set.status = 404
           return { error: "Sync not found" }
@@ -133,7 +143,9 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .get(
       "/api/sync-runs",
-      async ({ query, set }) => {
+      async (context) => {
+        const { query, set } = context
+        const { scoped } = requestAuthState(context)
         try {
           const parsed = SyncRunsQuerySchema.parse(query)
           const storage = sixb.storage.syncRuns
@@ -145,9 +157,20 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             }
           }
 
+          if (scoped && parsed.syncId && !scoped.getSyncById(parsed.syncId)) {
+            return {
+              runs: [],
+              hasMore: false,
+              total: 0,
+            }
+          }
+
+          const syncIds =
+            scoped && !parsed.syncId ? scoped.listSyncs().map((sync) => sync.id) : undefined
           const result = await storage.list({
             projectId: sixb.id,
             syncId: parsed.syncId,
+            syncIds,
             datasetId: parsed.datasetId,
             statuses: parsed.status ? [parsed.status] : undefined,
             startedAfter: parseDate(parsed.startedAfter),
@@ -178,7 +201,9 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .post(
       "/api/syncs/:syncId/runs",
-      async ({ params, body, set }) => {
+      async (context) => {
+        const { params, body, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const sync = sixb.getSyncById(params.syncId)
           if (!sync) {
@@ -190,6 +215,11 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             set.status = 400
             return { error: "Sync run storage is not configured" }
           }
+
+          assertAuthorized(
+            { authorization: authz ?? undefined },
+            { kind: "sync.run", syncId: sync.id }
+          )
 
           const parsedBody = RequestSyncRunBodySchema.parse(body)
           const runId = `run_${randomUUID()}`
@@ -226,6 +256,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: {
           202: RequestSyncRunResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {

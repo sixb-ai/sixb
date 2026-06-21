@@ -62,14 +62,26 @@ export function canViewEvent(
         kind: "object.view",
         objectTypeId: event.payload.subject.objectTypeId,
       })
-    case "schedules":
     case "syncs":
+      return isAllowed(authorization, {
+        kind: "sync.run",
+        syncId: event.payload.syncId,
+      })
     case "pipelines":
-    case "datasets":
-      // Infra topics with no object/action/workflow subject: no grant governs
-      // them yet, so they stay visible to any authorized reader. When they gain
-      // their own grants, add the checks here.
+      return isAllowed(authorization, {
+        kind: "pipeline.run",
+        pipelineId: event.payload.pipelineId,
+      })
+    case "schedules":
+      // Infra topics with no object/action/workflow/dataset subject: no grant
+      // governs them yet, so they stay visible to any authorized reader. When
+      // they gain their own grants, add the checks here.
       return true
+    case "datasets":
+      return isAllowed(authorization, {
+        kind: "dataset.view",
+        datasetId: event.payload.datasetId,
+      })
     default:
       // Fail closed: an unmodeled topic may carry a subject we don't yet gate.
       return false

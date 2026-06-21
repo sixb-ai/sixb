@@ -481,11 +481,13 @@ export type {
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,
+  RunGrantTarget,
   Scope,
   ScopeTarget,
   SecurityRegistry,
   Selection,
   ViewGrant,
+  ViewGrantTarget,
 } from "./security"
 export {
   actions,
@@ -495,6 +497,7 @@ export {
   assertRoleDefinition,
   can,
   canInviteGroupIds,
+  datasets,
   defineGroup,
   defineInvitePolicy,
   defineRole,
@@ -503,8 +506,10 @@ export {
   isRoleDefinition,
   missingInviteGroupIds,
   ontology,
+  pipelines,
   resolveInvitePolicyScope,
   SecurityValidationError,
+  syncs,
   workflows,
 } from "./security"
 

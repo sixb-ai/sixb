@@ -120,6 +120,14 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
+    if (input.syncIds && input.syncIds.length === 0) {
+      return {
+        runs: [],
+        hasMore: false,
+        total: 0,
+      }
+    }
+
     if (input.statuses && input.statuses.length === 0) {
       return {
         runs: [],
@@ -135,6 +143,12 @@ export class PgSyncRunStorage implements SyncRunStorage {
     if (input.syncId) {
       whereClauses.push(`sync_id = $${index++}`)
       params.push(input.syncId)
+    }
+
+    if (input.syncIds) {
+      const placeholders = input.syncIds.map(() => `$${index++}`)
+      whereClauses.push(`sync_id IN (${placeholders.join(", ")})`)
+      params.push(...input.syncIds)
     }
 
     if (input.datasetId) {

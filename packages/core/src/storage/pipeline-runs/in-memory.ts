@@ -177,7 +177,7 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
   }
 
   async list(input: ListPipelineRunsInput): Promise<ListPipelineRunsResult> {
-    if (hasEmptyStatuses(input)) {
+    if (hasEmptyStatuses(input) || input.pipelineIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -187,9 +187,11 @@ export class InMemoryPipelineRunStorage implements PipelineRunStorage {
 
     const order = input.order ?? "desc"
     const statuses = toStatusSet(input.statuses)
+    const pipelineIds = input.pipelineIds ? new Set(input.pipelineIds) : null
     const filtered = [...this.runs.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.pipelineId ? record.pipelineId === input.pipelineId : true))
+      .filter((record) => (pipelineIds ? pipelineIds.has(record.pipelineId) : true))
       .filter((record) =>
         matchesRunListDateFilters(record, {
           statuses,

@@ -1,5 +1,5 @@
 import type { Principal } from "../auth/types"
-import type { GrantCapability, RoleDefinition, Selection } from "../security"
+import type { RoleDefinition, Selection } from "../security"
 import type { AuthorizationContext, GrantIndex, ResolvedRole } from "./types"
 
 /**
@@ -13,37 +13,62 @@ export function resolveRoleGrants(
   role: RoleDefinition,
   universe: {
     readonly objectTypeIds: ReadonlySet<string>
+    readonly datasetIds: ReadonlySet<string>
     readonly actionIds: ReadonlySet<string>
     readonly workflowIds: ReadonlySet<string>
+    readonly syncIds: ReadonlySet<string>
+    readonly pipelineIds: ReadonlySet<string>
     readonly getSubTypes: (objectTypeId: string) => readonly string[]
   }
 ): GrantIndex {
-  const view = new Set<string>()
+  const viewObjects = new Set<string>()
+  const viewDatasets = new Set<string>()
   const apply = new Set<string>()
-  const run = new Set<string>()
-
-  // Capability -> the universe it ranges over, the set it expands into, and any
-  // subtype expansion. A Record keeps this exhaustive:
-  // adding a capability is a compile error until it is wired here.
-  const targets: Record<
-    GrantCapability,
-    {
-      readonly universe: ReadonlySet<string>
-      readonly into: Set<string>
-      readonly expand?: (id: string) => readonly string[]
-    }
-  > = {
-    view: { universe: universe.objectTypeIds, into: view, expand: universe.getSubTypes },
-    apply: { universe: universe.actionIds, into: apply },
-    run: { universe: universe.workflowIds, into: run },
-  }
+  const runWorkflows = new Set<string>()
+  const runSyncs = new Set<string>()
+  const runPipelines = new Set<string>()
 
   for (const grant of role.grants) {
-    const target = targets[grant.capability]
-    expandSelection(grant.selection, target.universe, target.into, target.expand)
+    switch (grant.capability) {
+      case "view":
+        if ((grant.target ?? "object") === "dataset") {
+          expandSelection(grant.selection, universe.datasetIds, viewDatasets)
+        } else {
+          expandSelection(
+            grant.selection,
+            universe.objectTypeIds,
+            viewObjects,
+            universe.getSubTypes
+          )
+        }
+        break
+      case "apply":
+        expandSelection(grant.selection, universe.actionIds, apply)
+        break
+      case "run":
+        switch (grant.target ?? "workflow") {
+          case "sync":
+            expandSelection(grant.selection, universe.syncIds, runSyncs)
+            break
+          case "pipeline":
+            expandSelection(grant.selection, universe.pipelineIds, runPipelines)
+            break
+          case "workflow":
+            expandSelection(grant.selection, universe.workflowIds, runWorkflows)
+            break
+        }
+        break
+    }
   }
 
-  return { objectTypes: { view }, actions: { apply }, workflows: { run } }
+  return {
+    objectTypes: { view: viewObjects },
+    datasets: { view: viewDatasets },
+    actions: { apply },
+    workflows: { run: runWorkflows },
+    syncs: { run: runSyncs },
+    pipelines: { run: runPipelines },
+  }
 }
 
 function expandSelection(
@@ -87,9 +112,12 @@ export function resolveAuthorizationContext(input: {
 }): AuthorizationContext {
   const memberGroupIds = new Set(input.groupIds)
   const roleIds: string[] = []
-  const view = new Set<string>()
+  const viewObjects = new Set<string>()
+  const viewDatasets = new Set<string>()
   const apply = new Set<string>()
-  const run = new Set<string>()
+  const runWorkflows = new Set<string>()
+  const runSyncs = new Set<string>()
+  const runPipelines = new Set<string>()
 
   for (const role of input.roles) {
     if (!role.grantedToGroupIds.some((groupId) => memberGroupIds.has(groupId))) {
@@ -98,13 +126,22 @@ export function resolveAuthorizationContext(input: {
 
     roleIds.push(role.id)
     for (const id of role.grants.objectTypes.view) {
-      view.add(id)
+      viewObjects.add(id)
+    }
+    for (const id of role.grants.datasets.view) {
+      viewDatasets.add(id)
     }
     for (const id of role.grants.actions.apply) {
       apply.add(id)
     }
     for (const id of role.grants.workflows.run) {
-      run.add(id)
+      runWorkflows.add(id)
+    }
+    for (const id of role.grants.syncs.run) {
+      runSyncs.add(id)
+    }
+    for (const id of role.grants.pipelines.run) {
+      runPipelines.add(id)
     }
   }
 
@@ -113,6 +150,13 @@ export function resolveAuthorizationContext(input: {
     ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
     groupIds: input.groupIds,
     roleIds,
-    grants: { objectTypes: { view }, actions: { apply }, workflows: { run } },
+    grants: {
+      objectTypes: { view: viewObjects },
+      datasets: { view: viewDatasets },
+      actions: { apply },
+      workflows: { run: runWorkflows },
+      syncs: { run: runSyncs },
+      pipelines: { run: runPipelines },
+    },
   }
 }
