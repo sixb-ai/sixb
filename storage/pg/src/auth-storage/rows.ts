@@ -1,4 +1,5 @@
 import type {
+  AccessTokenRecord,
   GroupMembershipRecord,
   GroupMembershipSource,
   InvitationRecord,
@@ -6,6 +7,9 @@ import type {
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
   Principal,
+  ServiceAccountGroupMembershipRecord,
+  ServiceAccountRecord,
+  ServiceAccountStatus,
   SessionRecord,
   UserIdentityRecord,
   UserRecord,
@@ -35,6 +39,28 @@ export interface PgAuthUserIdentityRow {
   readonly updated_at: PgDate
 }
 
+export interface PgAuthServiceAccountRow {
+  readonly project_id: string
+  readonly id: string
+  readonly name: string
+  readonly description: string | null
+  readonly status: ServiceAccountStatus
+  readonly created_by_user_id: string | null
+  readonly created_by_service_account_id: string | null
+  readonly created_by_system_id: string | null
+  readonly created_by_session_id: string | null
+  readonly created_at: PgDate
+  readonly updated_at: PgDate
+}
+
+export interface PgAuthServiceAccountGroupMembershipRow {
+  readonly project_id: string
+  readonly service_account_id: string
+  readonly group_id: string
+  readonly source: GroupMembershipSource
+  readonly created_at: PgDate
+}
+
 export interface PgAuthSessionRow {
   readonly project_id: string
   readonly id: string
@@ -48,6 +74,27 @@ export interface PgAuthSessionRow {
   readonly last_seen_at: PgDate | null
   readonly user_agent: string | null
   readonly ip_address: string | null
+}
+
+export interface PgAuthAccessTokenRow {
+  readonly project_id: string
+  readonly id: string
+  readonly name: string
+  readonly kind: AccessTokenRecord["kind"]
+  readonly subject_type: AccessTokenRecord["subjectType"]
+  readonly subject_id: string
+  readonly token_hash: string
+  readonly group_ids: readonly string[] | string | null
+  readonly created_by_user_id: string | null
+  readonly created_by_service_account_id: string | null
+  readonly created_by_system_id: string | null
+  readonly created_by_session_id: string | null
+  readonly created_at: PgDate
+  readonly expires_at: PgDate
+  readonly revoked_at: PgDate | null
+  readonly last_used_at: PgDate | null
+  readonly last_used_user_agent: string | null
+  readonly last_used_ip_address: string | null
 }
 
 export interface PgAuthInvitationRow {
@@ -127,6 +174,32 @@ export function rowToIdentityRecord(row: PgAuthUserIdentityRow): UserIdentityRec
   }
 }
 
+export function rowToServiceAccountRecord(row: PgAuthServiceAccountRow): ServiceAccountRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    description: row.description ?? undefined,
+    status: row.status,
+    createdByPrincipal: principalFromColumns(row),
+    createdBySessionId: row.created_by_session_id ?? undefined,
+    createdAt: toDate(row.created_at),
+    updatedAt: toDate(row.updated_at),
+  }
+}
+
+export function rowToServiceAccountGroupMembershipRecord(
+  row: PgAuthServiceAccountGroupMembershipRow
+): ServiceAccountGroupMembershipRecord {
+  return {
+    projectId: row.project_id,
+    serviceAccountId: row.service_account_id,
+    groupId: row.group_id,
+    source: row.source,
+    createdAt: toDate(row.created_at),
+  }
+}
+
 export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
   return {
     id: row.id,
@@ -141,6 +214,27 @@ export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
     lastSeenAt: row.last_seen_at ? toDate(row.last_seen_at) : undefined,
     userAgent: row.user_agent ?? undefined,
     ipAddress: row.ip_address ?? undefined,
+  }
+}
+
+export function rowToAccessTokenRecord(row: PgAuthAccessTokenRow): AccessTokenRecord {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    kind: row.kind,
+    subjectType: row.subject_type,
+    subjectId: row.subject_id,
+    tokenHash: row.token_hash,
+    groupIds: parseOptionalStringArray(row.group_ids),
+    createdByPrincipal: principalFromColumns(row),
+    createdBySessionId: row.created_by_session_id ?? undefined,
+    createdAt: toDate(row.created_at),
+    expiresAt: toDate(row.expires_at),
+    revokedAt: row.revoked_at ? toDate(row.revoked_at) : undefined,
+    lastUsedAt: row.last_used_at ? toDate(row.last_used_at) : undefined,
+    lastUsedUserAgent: row.last_used_user_agent ?? undefined,
+    lastUsedIpAddress: row.last_used_ip_address ?? undefined,
   }
 }
 
@@ -214,7 +308,15 @@ export function serializeOptionalRecord(
   return value ? JSON.stringify(value) : null
 }
 
-function invitationCreatorFromRow(row: PgAuthInvitationRow): Principal | undefined {
+export function serializeOptionalStringArray(value: readonly string[] | undefined): string | null {
+  return value === undefined ? null : JSON.stringify(value)
+}
+
+function principalFromColumns(row: {
+  readonly created_by_user_id: string | null
+  readonly created_by_service_account_id: string | null
+  readonly created_by_system_id: string | null
+}): Principal | undefined {
   if (row.created_by_user_id) return { type: "user", id: row.created_by_user_id }
   if (row.created_by_service_account_id) {
     return { type: "serviceAccount", id: row.created_by_service_account_id }
@@ -223,12 +325,24 @@ function invitationCreatorFromRow(row: PgAuthInvitationRow): Principal | undefin
   return undefined
 }
 
+function invitationCreatorFromRow(row: PgAuthInvitationRow): Principal | undefined {
+  return principalFromColumns(row)
+}
+
 function parseOptionalRecord(
   value: Readonly<Record<string, unknown>> | string | null
 ): Readonly<Record<string, unknown>> | undefined {
   if (!value) return undefined
   if (typeof value === "string") return JSON.parse(value) as Readonly<Record<string, unknown>>
   return structuredClone(value)
+}
+
+function parseOptionalStringArray(
+  value: readonly string[] | string | null
+): readonly string[] | undefined {
+  if (value === null) return undefined
+  if (typeof value === "string") return JSON.parse(value) as readonly string[]
+  return [...value]
 }
 
 function toDate(value: PgDate): Date {

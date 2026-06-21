@@ -532,6 +532,93 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_created
   ON auth_sessions (project_id, user_id, audience, created_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS auth_service_accounts (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active', 'suspended')),
+  created_by_user_id TEXT,
+  created_by_service_account_id TEXT,
+  created_by_system_id TEXT,
+  created_by_session_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_id, id),
+  CHECK (
+    num_nonnulls(created_by_user_id, created_by_service_account_id, created_by_system_id) <= 1
+  ),
+  FOREIGN KEY (project_id, created_by_user_id)
+    REFERENCES auth_users (project_id, id),
+  FOREIGN KEY (project_id, created_by_service_account_id)
+    REFERENCES auth_service_accounts (project_id, id),
+  FOREIGN KEY (project_id, created_by_session_id)
+    REFERENCES auth_sessions (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_status_created
+  ON auth_service_accounts (project_id, status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_created
+  ON auth_service_accounts (project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_created_by_user
+  ON auth_service_accounts (project_id, created_by_user_id)
+  WHERE created_by_user_id IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS auth_service_account_group_memberships (
+  project_id TEXT NOT NULL,
+  service_account_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual')),
+  created_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_id, service_account_id, group_id),
+  FOREIGN KEY (project_id, service_account_id)
+    REFERENCES auth_service_accounts (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_service_account_group_memberships_group
+  ON auth_service_account_group_memberships (project_id, group_id);
+
+CREATE TABLE IF NOT EXISTS auth_access_tokens (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('personal', 'serviceAccount')),
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'serviceAccount')),
+  subject_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  group_ids JSONB,
+  created_by_user_id TEXT,
+  created_by_service_account_id TEXT,
+  created_by_system_id TEXT,
+  created_by_session_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  last_used_user_agent TEXT,
+  last_used_ip_address TEXT,
+  PRIMARY KEY (project_id, id),
+  CHECK (
+    (kind = 'personal' AND subject_type = 'user')
+      OR (kind = 'serviceAccount' AND subject_type = 'serviceAccount')
+  ),
+  CHECK (
+    num_nonnulls(created_by_user_id, created_by_service_account_id, created_by_system_id) <= 1
+  ),
+  FOREIGN KEY (project_id, created_by_user_id)
+    REFERENCES auth_users (project_id, id),
+  FOREIGN KEY (project_id, created_by_service_account_id)
+    REFERENCES auth_service_accounts (project_id, id),
+  FOREIGN KEY (project_id, created_by_session_id)
+    REFERENCES auth_sessions (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_lookup
+  ON auth_access_tokens (project_id, id, kind, token_hash, expires_at DESC)
+  WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_subject_created
+  ON auth_access_tokens (project_id, subject_type, subject_id, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS auth_invitations (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,

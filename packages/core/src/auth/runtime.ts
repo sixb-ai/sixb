@@ -7,8 +7,20 @@ import {
   type SecurityRegistry,
 } from "../security"
 import type { Storage } from "../storage"
-import { type AuthStorage, AuthStorageError, type InvitationRecord } from "../storage/auth"
+import {
+  type AccessTokenRecord,
+  type AuthStorage,
+  AuthStorageError,
+  type InvitationRecord,
+  type ServiceAccountGroupMembershipRecord,
+} from "../storage/auth"
 import { paginate } from "../storage/pagination"
+import {
+  createAccessTokenCredential,
+  getBearerAccessTokenValue,
+  hashAccessTokenSecret,
+  parseAccessTokenValue,
+} from "./access-tokens"
 import {
   getCookie,
   type ResolvedAuthCookieOptions,
@@ -19,9 +31,16 @@ import { SessionCache } from "./session-cache"
 import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
 import type {
   AuthenticatedAuthSession,
+  AuthenticatedRequestAuthSession,
+  AuthRequestResult,
   AuthSessionResolutionOptions,
   AuthSessionResult,
   AuthStrategy,
+  CreateAccessTokenResult,
+  CreatePersonalAccessTokenInput,
+  CreateServiceAccountAccessTokenInput,
+  CreateServiceAccountInput,
+  CreateServiceAccountResult,
   GetInvitationOptionsResult,
   InvitationDeliveryAuthStrategy,
   InvitationRecipientStatus,
@@ -34,6 +53,8 @@ import type {
   ListInvitationsResult,
   Principal,
   ResolvedAuthConfig,
+  RevokeAccessTokenInput,
+  RevokeAccessTokenResult,
   RevokeInvitationInput,
   RevokeInvitationResult,
   SecurityContext,
@@ -60,6 +81,7 @@ export {
 // Throttle `lastSeenAt` writes: only refresh when the previous value is older
 // than this, so an active session does not incur a write on every request.
 const SESSION_TOUCH_INTERVAL_MS = 60_000
+const ACCESS_TOKEN_TOUCH_INTERVAL_MS = 60_000
 
 export interface AuthRuntimeOptions {
   readonly projectId: string
@@ -142,13 +164,50 @@ export class AuthRuntime {
 
   async getSession(
     request: Request,
+    options?: AuthSessionResolutionOptions & { readonly credentialSource?: "session" }
+  ): Promise<AuthSessionResult>
+  async getSession(
+    request: Request,
+    options: AuthSessionResolutionOptions & { readonly credentialSource: "accessToken" | "any" }
+  ): Promise<AuthRequestResult>
+  async getSession(
+    request: Request,
+    options: AuthSessionResolutionOptions
+  ): Promise<AuthRequestResult>
+  async getSession(
+    request: Request,
     options: AuthSessionResolutionOptions = {}
-  ): Promise<AuthSessionResult> {
+  ): Promise<AuthSessionResult | AuthRequestResult> {
     if (!this.isEnabled()) {
       return { authenticated: false, reason: "auth_disabled" }
     }
 
     const audience = resolveAuthSessionAudience(options.audience)
+    const credentialSource = options.credentialSource ?? "session"
+
+    if (credentialSource !== "session") {
+      const authorizationHeader = request.headers.get("authorization")
+      const tokenValue = getBearerAccessTokenValue(request)
+      if (tokenValue) {
+        return this.resolveAccessTokenSession(request, tokenValue)
+      }
+
+      if (authorizationHeader) {
+        return { authenticated: false, reason: "invalid_access_token" }
+      }
+
+      if (credentialSource === "accessToken") {
+        return { authenticated: false, reason: "missing_access_token" }
+      }
+    }
+
+    return this.resolveCookieSession(request, audience)
+  }
+
+  private async resolveCookieSession(
+    request: Request,
+    audience: ReturnType<typeof resolveAuthSessionAudience>
+  ): Promise<AuthSessionResult> {
     const cookieOptions = this.getCookieOptions({ audience })
     const cookieValue = getCookie(request, cookieOptions.sessionCookieName)
     if (!cookieValue) {
@@ -209,6 +268,7 @@ export class AuthRuntime {
 
     const result: AuthenticatedAuthSession = {
       authenticated: true,
+      credentialSource: "session",
       principal: { type: "user", id: user.id },
       user,
       session,
@@ -225,6 +285,94 @@ export class AuthRuntime {
     })
 
     return result
+  }
+
+  private async resolveAccessTokenSession(
+    request: Request,
+    tokenValue: string
+  ): Promise<AuthRequestResult> {
+    const parts = parseAccessTokenValue(tokenValue)
+    if (!parts) {
+      return { authenticated: false, reason: "invalid_access_token" }
+    }
+
+    const storage = this.requireAuthStorage()
+    const now = new Date()
+    const accessToken = await storage.accessTokens.findValidByTokenHash({
+      projectId: this.projectId,
+      id: parts.tokenId,
+      kind: parts.kind,
+      tokenHash: hashAccessTokenSecret(parts.tokenSecret),
+      now,
+    })
+
+    if (!accessToken) {
+      return { authenticated: false, reason: "invalid_access_token" }
+    }
+
+    await this.touchAccessTokenLastUsed(storage, accessToken, request, now)
+
+    if (accessToken.subjectType === "user") {
+      const user = await storage.users.getById({
+        projectId: this.projectId,
+        id: accessToken.subjectId,
+      })
+
+      if (!user) {
+        return { authenticated: false, reason: "missing_user" }
+      }
+
+      if (user.status === "suspended") {
+        return { authenticated: false, reason: "suspended_user" }
+      }
+
+      const memberships = await storage.groupMemberships.listForUser({
+        projectId: this.projectId,
+        userId: user.id,
+      })
+
+      return {
+        authenticated: true,
+        credentialSource: "accessToken",
+        principal: { type: "user", id: user.id },
+        user,
+        accessToken,
+        groupIds: constrainTokenGroupIds(
+          memberships.map((membership) => membership.groupId),
+          accessToken
+        ),
+      }
+    }
+
+    const serviceAccount = await storage.serviceAccounts.getById({
+      projectId: this.projectId,
+      id: accessToken.subjectId,
+    })
+
+    if (!serviceAccount) {
+      return { authenticated: false, reason: "missing_service_account" }
+    }
+
+    if (serviceAccount.status === "suspended") {
+      return { authenticated: false, reason: "suspended_service_account" }
+    }
+
+    const memberships = await storage.serviceAccountGroupMemberships.listForServiceAccount({
+      projectId: this.projectId,
+      serviceAccountId: serviceAccount.id,
+    })
+
+    return {
+      authenticated: true,
+      credentialSource: "accessToken",
+      principal: { type: "serviceAccount", id: serviceAccount.id },
+      serviceAccount,
+      accessToken,
+      groupIds: constrainTokenGroupIds(
+        memberships.map((membership) => membership.groupId),
+        accessToken
+      ),
+    }
   }
 
   /**
@@ -253,6 +401,30 @@ export class AuthRuntime {
     }
   }
 
+  private async touchAccessTokenLastUsed(
+    storage: AuthStorage,
+    accessToken: AccessTokenRecord,
+    request: Request,
+    now: Date
+  ): Promise<void> {
+    const lastUsed = accessToken.lastUsedAt?.getTime() ?? 0
+    if (now.getTime() - lastUsed < ACCESS_TOKEN_TOUCH_INTERVAL_MS) {
+      return
+    }
+
+    try {
+      await storage.accessTokens.touch({
+        projectId: this.projectId,
+        id: accessToken.id,
+        lastUsedAt: now,
+        userAgent: request.headers.get("user-agent")?.trim() || undefined,
+        ipAddress: resolveRequestIpAddress(request),
+      })
+    } catch {
+      // Touch is non-critical; ignore failures so auth still succeeds.
+    }
+  }
+
   async requirePrincipal(
     request: Request,
     options: AuthSessionResolutionOptions = {}
@@ -269,7 +441,7 @@ export class AuthRuntime {
     request: Request,
     options: AuthSessionResolutionOptions = {}
   ): Promise<AuthenticatedAuthSession> {
-    const session = await this.getSession(request, options)
+    const session = await this.getSession(request, { ...options, credentialSource: "session" })
     if (!session.authenticated) {
       throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
     }
@@ -300,7 +472,11 @@ export class AuthRuntime {
     request: Request,
     options: AuthSessionResolutionOptions = {}
   ): Promise<AuthorizationContext> {
-    const session = await this.requireUser(request, options)
+    const session = await this.getSession(request, options)
+    if (!session.authenticated) {
+      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+    }
+
     return this.contextFromSession(session)
   }
 
@@ -309,13 +485,133 @@ export class AuthRuntime {
    * that resolve the session themselves (e.g. the server auth guard) don't read
    * the request twice.
    */
-  contextFromSession(session: AuthenticatedAuthSession): AuthorizationContext {
+  contextFromSession(session: AuthenticatedRequestAuthSession): AuthorizationContext {
     return resolveAuthorizationContext({
       principal: session.principal,
-      sessionId: session.session.id,
+      sessionId: session.credentialSource === "session" ? session.session.id : undefined,
       groupIds: session.groupIds,
       roles: this.security.getResolvedRoles(),
     })
+  }
+
+  async createPersonalAccessToken(
+    request: Request,
+    input: CreatePersonalAccessTokenInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<CreateAccessTokenResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const credential = createAccessTokenCredential("personal")
+    const accessToken = await storage.accessTokens.create({
+      id: credential.tokenId,
+      projectId: this.projectId,
+      name: input.name,
+      kind: "personal",
+      subjectType: "user",
+      subjectId: session.user.id,
+      tokenHash: credential.tokenHash,
+      groupIds: input.groupIds,
+      createdByPrincipal: session.principal,
+      createdBySessionId: session.session.id,
+      createdAt: new Date(),
+      expiresAt: input.expiresAt,
+    })
+
+    return { accessToken, tokenValue: credential.tokenValue }
+  }
+
+  async createServiceAccount(
+    request: Request,
+    input: CreateServiceAccountInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<CreateServiceAccountResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const now = new Date()
+    const serviceAccount = await storage.serviceAccounts.create({
+      id: input.id ?? `svc_${randomUUID()}`,
+      projectId: this.projectId,
+      name: input.name,
+      description: input.description,
+      createdByPrincipal: session.principal,
+      createdBySessionId: session.session.id,
+      createdAt: now,
+      updatedAt: now,
+    })
+    const groupMemberships: ServiceAccountGroupMembershipRecord[] = []
+    for (const groupId of input.groupIds ?? []) {
+      groupMemberships.push(
+        await storage.serviceAccountGroupMemberships.upsert({
+          projectId: this.projectId,
+          serviceAccountId: serviceAccount.id,
+          groupId,
+          source: "manual",
+          createdAt: now,
+        })
+      )
+    }
+
+    return { serviceAccount, groupMemberships }
+  }
+
+  async createServiceAccountAccessToken(
+    request: Request,
+    input: CreateServiceAccountAccessTokenInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<CreateAccessTokenResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const serviceAccount = await storage.serviceAccounts.getById({
+      projectId: this.projectId,
+      id: input.serviceAccountId,
+    })
+
+    if (!serviceAccount) {
+      throw new AuthStorageError(
+        "missing_service_account",
+        `[Sixb] Service account '${input.serviceAccountId}' not found for project '${this.projectId}'.`
+      )
+    }
+
+    if (serviceAccount.status === "suspended") {
+      throw new AuthStorageError(
+        "suspended_service_account",
+        `[Sixb] Service account '${input.serviceAccountId}' is suspended for project '${this.projectId}'.`
+      )
+    }
+
+    const credential = createAccessTokenCredential("serviceAccount")
+    const accessToken = await storage.accessTokens.create({
+      id: credential.tokenId,
+      projectId: this.projectId,
+      name: input.name,
+      kind: "serviceAccount",
+      subjectType: "serviceAccount",
+      subjectId: serviceAccount.id,
+      tokenHash: credential.tokenHash,
+      groupIds: input.groupIds,
+      createdByPrincipal: session.principal,
+      createdBySessionId: session.session.id,
+      createdAt: new Date(),
+      expiresAt: input.expiresAt,
+    })
+
+    return { accessToken, tokenValue: credential.tokenValue }
+  }
+
+  async revokeAccessToken(
+    request: Request,
+    input: RevokeAccessTokenInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<RevokeAccessTokenResult> {
+    await this.requireUser(request, options)
+    const accessToken = await this.requireAuthStorage().accessTokens.revoke({
+      projectId: this.projectId,
+      id: input.tokenId,
+      revokedAt: new Date(),
+    })
+
+    return { accessToken }
   }
 
   async getInvitationOptions(
@@ -609,6 +905,26 @@ function resolveCorrelationId(request: Request): string {
   return (
     request.headers.get("x-correlation-id") ?? request.headers.get("x-request-id") ?? randomUUID()
   )
+}
+
+function resolveRequestIpAddress(request: Request): string | undefined {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip")?.trim() ||
+    undefined
+  )
+}
+
+function constrainTokenGroupIds(
+  principalGroupIds: readonly string[],
+  accessToken: AccessTokenRecord
+): readonly string[] {
+  if (accessToken.groupIds === undefined) {
+    return principalGroupIds
+  }
+
+  const allowed = new Set(accessToken.groupIds)
+  return principalGroupIds.filter((groupId) => allowed.has(groupId))
 }
 
 function createInvitationRecipientError(

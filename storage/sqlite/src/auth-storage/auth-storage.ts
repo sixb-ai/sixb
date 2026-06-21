@@ -19,6 +19,7 @@ import {
   runImmediateTransaction,
   type SqliteStoreConnection,
 } from "../transactions"
+import { SqliteAuthAccessTokenStore } from "./access-tokens"
 import { SqliteAuthGroupMembershipStore } from "./group-memberships"
 import { SqliteAuthUserIdentityStore } from "./identities"
 import { SqliteAuthInvitationStore } from "./invitations"
@@ -26,6 +27,8 @@ import { SqliteAuthMagicLinkStore } from "./magic-links"
 import { SqliteAuthOidcAuthorizationAttemptStore } from "./oidc-attempts"
 import type { SqliteAuthMagicLinkRow, SqliteAuthOidcAttemptRow } from "./rows"
 import { rowToIdentityRecord, rowToUserRecord, serializeOptionalRecord } from "./rows"
+import { SqliteAuthServiceAccountGroupMembershipStore } from "./service-account-group-memberships"
+import { SqliteAuthServiceAccountStore } from "./service-accounts"
 import { SqliteAuthSessionStore } from "./sessions"
 import {
   assertNonEmpty,
@@ -65,7 +68,10 @@ export class SqliteAuthStorage implements AuthStorage {
 
   readonly users: SqliteAuthUserStore
   readonly identities: SqliteAuthUserIdentityStore
+  readonly serviceAccounts: SqliteAuthServiceAccountStore
+  readonly serviceAccountGroupMemberships: SqliteAuthServiceAccountGroupMembershipStore
   readonly sessions: SqliteAuthSessionStore
+  readonly accessTokens: SqliteAuthAccessTokenStore
   readonly invitations: SqliteAuthInvitationStore
   readonly groupMemberships: SqliteAuthGroupMembershipStore
   readonly magicLinks: SqliteAuthMagicLinkStore
@@ -81,7 +87,10 @@ export class SqliteAuthStorage implements AuthStorage {
 
     this.users = new SqliteAuthUserStore(this.db)
     this.identities = new SqliteAuthUserIdentityStore(this.db)
+    this.serviceAccounts = new SqliteAuthServiceAccountStore(this.db)
+    this.serviceAccountGroupMemberships = new SqliteAuthServiceAccountGroupMembershipStore(this.db)
     this.sessions = new SqliteAuthSessionStore(this.db)
+    this.accessTokens = new SqliteAuthAccessTokenStore(this.db)
     this.invitations = new SqliteAuthInvitationStore(this.db)
     this.groupMemberships = new SqliteAuthGroupMembershipStore(this.db)
     this.magicLinks = new SqliteAuthMagicLinkStore(this.db)

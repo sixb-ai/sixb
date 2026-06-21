@@ -110,7 +110,10 @@ describe("Postgres storage migrations", () => {
         expect.arrayContaining([
           "auth_users",
           "auth_user_identities",
+          "auth_service_accounts",
+          "auth_service_account_group_memberships",
           "auth_sessions",
+          "auth_access_tokens",
           "auth_invitations",
           "auth_invitation_groups",
           "auth_group_memberships",

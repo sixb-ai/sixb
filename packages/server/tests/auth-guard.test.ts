@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
+  createAccessTokenCredential,
   createSessionCredential,
   defineConnector,
   defineObjectType,
@@ -125,6 +126,28 @@ async function seedSession(
   }
 }
 
+async function seedAccessToken(storage: InMemoryStorage) {
+  const credential = createAccessTokenCredential("personal", "tok_server")
+  await storage.auth.users.create({
+    id: "usr_token",
+    projectId: "test-project",
+    email: "token@acme.com",
+  })
+  await storage.auth.accessTokens.create({
+    id: credential.tokenId,
+    projectId: "test-project",
+    name: "Server test token",
+    kind: "personal",
+    subjectType: "user",
+    subjectId: "usr_token",
+    tokenHash: credential.tokenHash,
+    createdAt: new Date("2026-05-16T10:00:00.000Z"),
+    expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+  })
+
+  return credential
+}
+
 describe("server auth guard", () => {
   test("leaves routes open when auth is not configured outside production", async () => {
     const { sixb } = createRuntime()
@@ -166,6 +189,41 @@ describe("server auth guard", () => {
 
     expect(response.status).toBe(401)
     expect(await response.json()).toEqual({ error: "Authentication required" })
+  })
+
+  test("accepts bearer tokens only on the access token route boundary", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const credential = await seedAccessToken(storage)
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const headers = { authorization: `Bearer ${credential.tokenValue}` }
+
+    const accepted = await app.fetch(
+      new Request("http://localhost/api/project", {
+        headers,
+      })
+    )
+    const rejectedAuthManagement = await app.fetch(
+      new Request("http://localhost/api/auth/sessions", {
+        headers,
+      })
+    )
+    const rejectedRawWrite = await app.fetch(
+      new Request("http://localhost/api/objects/device/fan-1", {
+        method: "PUT",
+        headers: {
+          ...headers,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ properties: { name: "Fan 1" } }),
+      })
+    )
+
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toEqual({ id: "test-project" })
+    expect(rejectedAuthManagement.status).toBe(403)
+    expect(rejectedRawWrite.status).toBe(403)
   })
 
   test("returns a safe session shape", async () => {
@@ -322,7 +380,9 @@ describe("server auth guard", () => {
     expect(allowed.status).toBe(204)
     expect(allowed.headers.get("access-control-allow-origin")).toBe("http://atlas.localhost")
     expect(allowed.headers.get("access-control-allow-credentials")).toBe("true")
-    expect(allowed.headers.get("access-control-allow-headers")).toBe("content-type, x-sixb-csrf")
+    expect(allowed.headers.get("access-control-allow-headers")).toBe(
+      "authorization, content-type, x-sixb-csrf"
+    )
     expect(rejected.status).toBe(403)
   })
 

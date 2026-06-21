@@ -15,6 +15,18 @@ import type {
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
+  CreateAuthPersonalAccessTokenData,
+  CreateAuthPersonalAccessTokenErrors,
+  CreateAuthPersonalAccessTokenResponses,
+  CreateAuthServiceAccountAccessTokenData,
+  CreateAuthServiceAccountAccessTokenErrors,
+  CreateAuthServiceAccountAccessTokenResponses,
+  CreateAuthServiceAccountData,
+  CreateAuthServiceAccountErrors,
+  CreateAuthServiceAccountResponses,
+  DisableAuthServiceAccountData,
+  DisableAuthServiceAccountErrors,
+  DisableAuthServiceAccountResponses,
   ExistsObjectsData,
   ExistsObjectsErrors,
   ExistsObjectsResponses,
@@ -27,6 +39,9 @@ import type {
   GetActionRunData,
   GetActionRunErrors,
   GetActionRunResponses,
+  GetAuthAccessManagementOptionsData,
+  GetAuthAccessManagementOptionsErrors,
+  GetAuthAccessManagementOptionsResponses,
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsErrors,
   GetAuthInvitationOptionsResponses,
@@ -86,9 +101,18 @@ import type {
   ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
+  ListAuthAccessTokensData,
+  ListAuthAccessTokensErrors,
+  ListAuthAccessTokensResponses,
   ListAuthInvitationsData,
   ListAuthInvitationsErrors,
   ListAuthInvitationsResponses,
+  ListAuthServiceAccountAccessTokensData,
+  ListAuthServiceAccountAccessTokensErrors,
+  ListAuthServiceAccountAccessTokensResponses,
+  ListAuthServiceAccountsData,
+  ListAuthServiceAccountsErrors,
+  ListAuthServiceAccountsResponses,
   ListAuthSessionsData,
   ListAuthSessionsErrors,
   ListAuthSessionsResponses,
@@ -160,9 +184,15 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunErrors,
   RequestWorkflowRunResponses,
+  RevokeAuthAccessTokenData,
+  RevokeAuthAccessTokenErrors,
+  RevokeAuthAccessTokenResponses,
   RevokeAuthInvitationData,
   RevokeAuthInvitationErrors,
   RevokeAuthInvitationResponses,
+  RevokeAuthServiceAccountAccessTokenData,
+  RevokeAuthServiceAccountAccessTokenErrors,
+  RevokeAuthServiceAccountAccessTokenResponses,
   RevokeAuthSessionData,
   RevokeAuthSessionErrors,
   RevokeAuthSessionResponses,
@@ -263,6 +293,162 @@ export const signOutAll = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Get auth access-token management options
+ */
+export const getAuthAccessManagementOptions = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAuthAccessManagementOptionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetAuthAccessManagementOptionsResponses,
+    GetAuthAccessManagementOptionsErrors,
+    ThrowOnError
+  >({ url: "/api/auth/access-management-options", ...options })
+
+/**
+ * List personal access tokens for the current user
+ */
+export const listAuthAccessTokens = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAuthAccessTokensData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListAuthAccessTokensResponses,
+    ListAuthAccessTokensErrors,
+    ThrowOnError
+  >({ url: "/api/auth/access-tokens", ...options })
+
+/**
+ * Create a personal access token
+ */
+export const createAuthPersonalAccessToken = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAuthPersonalAccessTokenData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateAuthPersonalAccessTokenResponses,
+    CreateAuthPersonalAccessTokenErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/access-tokens",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Revoke one of the current user's personal access tokens
+ */
+export const revokeAuthAccessToken = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeAuthAccessTokenData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RevokeAuthAccessTokenResponses,
+    RevokeAuthAccessTokenErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/access-tokens/{tokenId}/revoke",
+    ...options,
+  })
+
+/**
+ * List auth service accounts
+ */
+export const listAuthServiceAccounts = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAuthServiceAccountsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListAuthServiceAccountsResponses,
+    ListAuthServiceAccountsErrors,
+    ThrowOnError
+  >({ url: "/api/auth/service-accounts", ...options })
+
+/**
+ * Create an auth service account
+ */
+export const createAuthServiceAccount = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAuthServiceAccountData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateAuthServiceAccountResponses,
+    CreateAuthServiceAccountErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/service-accounts",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Disable an auth service account
+ */
+export const disableAuthServiceAccount = <ThrowOnError extends boolean = false>(
+  options: Options<DisableAuthServiceAccountData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    DisableAuthServiceAccountResponses,
+    DisableAuthServiceAccountErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/service-accounts/{serviceAccountId}/disable",
+    ...options,
+  })
+
+/**
+ * List access tokens for an auth service account
+ */
+export const listAuthServiceAccountAccessTokens = <ThrowOnError extends boolean = false>(
+  options: Options<ListAuthServiceAccountAccessTokensData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAuthServiceAccountAccessTokensResponses,
+    ListAuthServiceAccountAccessTokensErrors,
+    ThrowOnError
+  >({ url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens", ...options })
+
+/**
+ * Create an access token for an auth service account
+ */
+export const createAuthServiceAccountAccessToken = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAuthServiceAccountAccessTokenData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateAuthServiceAccountAccessTokenResponses,
+    CreateAuthServiceAccountAccessTokenErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Revoke an access token for an auth service account
+ */
+export const revokeAuthServiceAccountAccessToken = <ThrowOnError extends boolean = false>(
+  options: Options<RevokeAuthServiceAccountAccessTokenData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RevokeAuthServiceAccountAccessTokenResponses,
+    RevokeAuthServiceAccountAccessTokenErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke",
+    ...options,
+  })
+
+/**
  * List auth invitations
  */
 export const listAuthInvitations = <ThrowOnError extends boolean = false>(
@@ -329,6 +515,7 @@ export const getProjectInfo = <ThrowOnError extends boolean = false>(
   options?: Options<GetProjectInfoData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetProjectInfoResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/project",
     ...options,
   })
@@ -537,6 +724,7 @@ export const listWorkflows = <ThrowOnError extends boolean = false>(
   options?: Options<ListWorkflowsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListWorkflowsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/workflows",
     ...options,
   })
@@ -548,6 +736,7 @@ export const getWorkflow = <ThrowOnError extends boolean = false>(
   options: Options<GetWorkflowData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/workflows/{workflowId}",
     ...options,
   })
@@ -649,7 +838,10 @@ export const requestWorkflowRun = <ThrowOnError extends boolean = false>(
     RequestWorkflowRunErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflows/{workflowId}/runs",
     ...options,
     headers: {
@@ -698,6 +890,7 @@ export const listObjectTypes = <ThrowOnError extends boolean = false>(
   options?: Options<ListObjectTypesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListObjectTypesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/object-types",
     ...options,
   })
@@ -709,6 +902,7 @@ export const getObjectType = <ThrowOnError extends boolean = false>(
   options: Options<GetObjectTypeData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetObjectTypeResponses, GetObjectTypeErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/object-types/{objectTypeId}",
     ...options,
   })
@@ -720,6 +914,7 @@ export const listObjects = <ThrowOnError extends boolean = false>(
   options?: Options<ListObjectsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListObjectsResponses, ListObjectsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/objects",
     ...options,
   })
@@ -731,7 +926,10 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
   options: Options<QueryObjectsData, ThrowOnError>
 ) =>
   (options.client ?? client).post<QueryObjectsResponses, QueryObjectsErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/query",
     ...options,
     headers: {
@@ -747,7 +945,10 @@ export const countObjects = <ThrowOnError extends boolean = false>(
   options: Options<CountObjectsData, ThrowOnError>
 ) =>
   (options.client ?? client).post<CountObjectsResponses, CountObjectsErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/query/count",
     ...options,
     headers: {
@@ -763,7 +964,10 @@ export const existsObjects = <ThrowOnError extends boolean = false>(
   options: Options<ExistsObjectsData, ThrowOnError>
 ) =>
   (options.client ?? client).post<ExistsObjectsResponses, ExistsObjectsErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/query/exists",
     ...options,
     headers: {
@@ -779,7 +983,10 @@ export const facetObjects = <ThrowOnError extends boolean = false>(
   options: Options<FacetObjectsData, ThrowOnError>
 ) =>
   (options.client ?? client).post<FacetObjectsResponses, FacetObjectsErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/objects/query/facets",
     ...options,
     headers: {
@@ -795,6 +1002,7 @@ export const getObject = <ThrowOnError extends boolean = false>(
   options: Options<GetObjectData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetObjectResponses, GetObjectErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/objects/{objectTypeId}/{objectId}",
     ...options,
   })
@@ -822,6 +1030,7 @@ export const listActions = <ThrowOnError extends boolean = false>(
   options?: Options<ListActionsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListActionsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/actions",
     ...options,
   })
@@ -833,6 +1042,7 @@ export const getAction = <ThrowOnError extends boolean = false>(
   options: Options<GetActionData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetActionResponses, GetActionErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/actions/{actionId}",
     ...options,
   })
@@ -844,7 +1054,10 @@ export const requestAction = <ThrowOnError extends boolean = false>(
   options: Options<RequestActionData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestActionResponses, RequestActionErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/actions/{actionId}",
     ...options,
     headers: {
@@ -965,6 +1178,7 @@ export const listEvents = <ThrowOnError extends boolean = false>(
   options?: Options<ListEventsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListEventsResponses, ListEventsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/events",
     ...options,
   })

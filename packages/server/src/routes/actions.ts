@@ -1,7 +1,10 @@
 import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import {
+  SIXB_BEARER_SECURITY_REQUIREMENT,
+  SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+} from "../openapi/security"
 import {
   ActionCatalogItemSchema,
   ActionIdParamsSchema,
@@ -72,6 +75,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "List registered actions",
           tags: ["Actions"],
           operationId: "listActions",
+          security: SIXB_BEARER_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -97,6 +101,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Get action metadata",
           tags: ["Actions"],
           operationId: "getAction",
+          security: SIXB_BEARER_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -136,7 +141,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Request an action",
           tags: ["Actions"],
           operationId: "requestAction",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
         },
       }
     )

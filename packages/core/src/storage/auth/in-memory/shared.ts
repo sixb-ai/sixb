@@ -1,13 +1,19 @@
 import { AuthStorageError } from "../errors"
 import type {
+  AccessTokenRecord,
   CompleteAuthSessionInput,
+  CreateAuthAccessTokenInput,
+  CreateAuthServiceAccountInput,
   CreateAuthSessionInput,
   GroupMembershipRecord,
   InvitationRecord,
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
+  ServiceAccountGroupMembershipRecord,
+  ServiceAccountRecord,
   SessionRecord,
   UpsertAuthGroupMembershipInput,
+  UpsertAuthServiceAccountGroupMembershipInput,
   UserIdentityRecord,
   UserRecord,
 } from "../types"
@@ -15,7 +21,10 @@ import type {
 export interface AuthStorageState {
   readonly users: Map<string, UserRecord>
   readonly identities: Map<string, UserIdentityRecord>
+  readonly serviceAccounts: Map<string, ServiceAccountRecord>
+  readonly serviceAccountGroupMemberships: Map<string, ServiceAccountGroupMembershipRecord>
   readonly sessions: Map<string, SessionRecord>
+  readonly accessTokens: Map<string, AccessTokenRecord>
   readonly invitations: Map<string, InvitationRecord>
   readonly groupMemberships: Map<string, GroupMembershipRecord>
   readonly magicLinks: Map<string, MagicLinkRecord>
@@ -26,7 +35,10 @@ export function createAuthStorageState(): AuthStorageState {
   return {
     users: new Map(),
     identities: new Map(),
+    serviceAccounts: new Map(),
+    serviceAccountGroupMemberships: new Map(),
     sessions: new Map(),
+    accessTokens: new Map(),
     invitations: new Map(),
     groupMemberships: new Map(),
     magicLinks: new Map(),
@@ -46,7 +58,23 @@ export function identityKey(projectId: string, strategyId: string, subject: stri
   return scopedKey(projectId, strategyId, subject)
 }
 
+export function serviceAccountKey(projectId: string, id: string): string {
+  return scopedKey(projectId, id)
+}
+
+export function serviceAccountGroupMembershipKey(
+  projectId: string,
+  serviceAccountId: string,
+  groupId: string
+): string {
+  return scopedKey(projectId, serviceAccountId, groupId)
+}
+
 export function sessionKey(projectId: string, id: string): string {
+  return scopedKey(projectId, id)
+}
+
+export function accessTokenKey(projectId: string, id: string): string {
   return scopedKey(projectId, id)
 }
 
@@ -98,6 +126,12 @@ export function normalizeGroupIds(groupIds: readonly string[] | undefined): read
   return [...new Set((groupIds ?? []).map((groupId) => assertNonEmpty(groupId, "Group id")))]
 }
 
+export function normalizeOptionalGroupIds(
+  groupIds: readonly string[] | undefined
+): readonly string[] | undefined {
+  return groupIds === undefined ? undefined : normalizeGroupIds(groupIds)
+}
+
 export function normalizeClaims(
   claims: Readonly<Record<string, unknown>> | undefined
 ): Readonly<Record<string, unknown>> | undefined {
@@ -119,6 +153,10 @@ export function compareByCreatedAt<T extends { readonly id: string; readonly cre
 
 export function isActiveSession(session: SessionRecord, now: Date): boolean {
   return !session.revokedAt && session.expiresAt > now
+}
+
+export function isActiveAccessToken(token: AccessTokenRecord, now: Date): boolean {
+  return !token.revokedAt && token.expiresAt > now
 }
 
 export function isActiveInvitation(invitation: InvitationRecord, now: Date): boolean {
@@ -275,6 +313,111 @@ export function createSessionRecord(
   return session
 }
 
+export function createServiceAccountRecord(
+  state: AuthStorageState,
+  input: CreateAuthServiceAccountInput
+): ServiceAccountRecord {
+  const id = assertNonEmpty(input.id, "Service account id")
+  const projectId = assertNonEmpty(input.projectId, "Project id")
+  const name = assertNonEmpty(input.name, "Service account name")
+  const key = serviceAccountKey(projectId, id)
+
+  if (state.serviceAccounts.has(key)) {
+    throw new AuthStorageError(
+      "duplicate_service_account",
+      `[Sixb] Service account '${id}' already exists for project '${projectId}'.`
+    )
+  }
+
+  const createdAt = dateOrNow(input.createdAt)
+  const serviceAccount: ServiceAccountRecord = {
+    id,
+    projectId,
+    name,
+    description: input.description,
+    status: input.status ?? "active",
+    createdByPrincipal: input.createdByPrincipal,
+    createdBySessionId: input.createdBySessionId,
+    createdAt,
+    updatedAt: input.updatedAt ? cloneDate(input.updatedAt) : cloneDate(createdAt),
+  }
+
+  state.serviceAccounts.set(key, cloneRecord(serviceAccount))
+  return serviceAccount
+}
+
+export function upsertServiceAccountGroupMembershipRecord(
+  state: AuthStorageState,
+  input: UpsertAuthServiceAccountGroupMembershipInput
+): ServiceAccountGroupMembershipRecord {
+  const projectId = assertNonEmpty(input.projectId, "Project id")
+  const serviceAccountId = assertNonEmpty(input.serviceAccountId, "Service account id")
+  const groupId = assertNonEmpty(input.groupId, "Group id")
+  if (!state.serviceAccounts.has(serviceAccountKey(projectId, serviceAccountId))) {
+    throw new AuthStorageError(
+      "missing_service_account",
+      `[Sixb] Service account '${serviceAccountId}' not found for project '${projectId}'.`
+    )
+  }
+
+  const key = serviceAccountGroupMembershipKey(projectId, serviceAccountId, groupId)
+  const existing = state.serviceAccountGroupMemberships.get(key)
+  if (existing) {
+    return existing
+  }
+
+  const membership: ServiceAccountGroupMembershipRecord = {
+    projectId,
+    serviceAccountId,
+    groupId,
+    source: input.source,
+    createdAt: dateOrNow(input.createdAt),
+  }
+
+  state.serviceAccountGroupMemberships.set(key, cloneRecord(membership))
+  return membership
+}
+
+export function createAccessTokenRecord(
+  state: AuthStorageState,
+  input: CreateAuthAccessTokenInput
+): AccessTokenRecord {
+  const id = assertNonEmpty(input.id, "Access token id")
+  const projectId = assertNonEmpty(input.projectId, "Project id")
+  const name = assertNonEmpty(input.name, "Access token name")
+  const subjectId = assertNonEmpty(input.subjectId, "Access token subject id")
+  const tokenHash = assertNonEmpty(input.tokenHash, "Access token hash")
+
+  assertAccessTokenSubject(input.kind, input.subjectType)
+  assertAccessTokenSubjectExists(state, projectId, input.subjectType, subjectId)
+
+  const key = accessTokenKey(projectId, id)
+  if (state.accessTokens.has(key)) {
+    throw new AuthStorageError(
+      "duplicate_access_token",
+      `[Sixb] Access token '${id}' already exists for project '${projectId}'.`
+    )
+  }
+
+  const token: AccessTokenRecord = {
+    id,
+    projectId,
+    name,
+    kind: input.kind,
+    subjectType: input.subjectType,
+    subjectId,
+    tokenHash,
+    groupIds: normalizeOptionalGroupIds(input.groupIds),
+    createdByPrincipal: input.createdByPrincipal,
+    createdBySessionId: input.createdBySessionId,
+    createdAt: cloneDate(input.createdAt),
+    expiresAt: cloneDate(input.expiresAt),
+  }
+
+  state.accessTokens.set(key, cloneRecord(token))
+  return token
+}
+
 export function upsertGroupMembershipRecord(
   state: AuthStorageState,
   input: UpsertAuthGroupMembershipInput
@@ -306,6 +449,44 @@ export function upsertGroupMembershipRecord(
 
   state.groupMemberships.set(key, cloneRecord(membership))
   return membership
+}
+
+function assertAccessTokenSubject(
+  kind: CreateAuthAccessTokenInput["kind"],
+  subjectType: CreateAuthAccessTokenInput["subjectType"]
+): void {
+  if (
+    (kind === "personal" && subjectType === "user") ||
+    (kind === "serviceAccount" && subjectType === "serviceAccount")
+  ) {
+    return
+  }
+
+  throw new AuthStorageError(
+    "invalid_input",
+    `[Sixb] Access token kind '${kind}' cannot target subject type '${subjectType}'.`
+  )
+}
+
+function assertAccessTokenSubjectExists(
+  state: AuthStorageState,
+  projectId: string,
+  subjectType: CreateAuthAccessTokenInput["subjectType"],
+  subjectId: string
+): void {
+  if (subjectType === "user") {
+    if (state.users.has(userKey(projectId, subjectId))) return
+    throw new AuthStorageError(
+      "missing_user",
+      `[Sixb] User '${subjectId}' not found for project '${projectId}'.`
+    )
+  }
+
+  if (state.serviceAccounts.has(serviceAccountKey(projectId, subjectId))) return
+  throw new AuthStorageError(
+    "missing_service_account",
+    `[Sixb] Service account '${subjectId}' not found for project '${projectId}'.`
+  )
 }
 
 export function consumeMagicLinkRecord(

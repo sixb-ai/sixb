@@ -65,8 +65,8 @@ async function createUser(
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
  * The suite is the storage-independent specification for Sixb auth state: users, identities,
- * sessions, invitations, group memberships, magic links, OIDC attempts, and atomic sign-in
- * completion.
+ * sessions, invitations, group memberships, service accounts, access tokens,
+ * magic links, OIDC attempts, and atomic sign-in completion.
  */
 export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
   label: string,
@@ -481,6 +481,209 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             createdAt: at("2026-05-14T10:00:00.000Z"),
           }),
           "missing_user"
+        )
+      })
+    })
+
+    test("manages service accounts and their group memberships", async () => {
+      await withStorage(async (storage) => {
+        const serviceAccount = await storage.serviceAccounts.create({
+          id: "svc_ingest",
+          projectId,
+          name: "Ingest worker",
+          description: "Reads source data into Sixb.",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+        })
+        expect(serviceAccount).toMatchObject({
+          id: "svc_ingest",
+          name: "Ingest worker",
+          status: "active",
+        })
+
+        const membership = await storage.serviceAccountGroupMemberships.upsert({
+          projectId,
+          serviceAccountId: "svc_ingest",
+          groupId: "commercial",
+          source: "manual",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        expect(membership.groupId).toBe("commercial")
+        const repeated = await storage.serviceAccountGroupMemberships.upsert({
+          projectId,
+          serviceAccountId: "svc_ingest",
+          groupId: "commercial",
+          source: "invitation",
+          createdAt: at("2026-05-14T10:02:00.000Z"),
+        })
+        expect(repeated.source).toBe("manual")
+
+        await expect(
+          storage.serviceAccountGroupMemberships.listForServiceAccount({
+            projectId,
+            serviceAccountId: "svc_ingest",
+          })
+        ).resolves.toHaveLength(1)
+        await expect(
+          storage.serviceAccountGroupMemberships.listForGroup({
+            projectId,
+            groupId: "commercial",
+          })
+        ).resolves.toMatchObject([{ serviceAccountId: "svc_ingest" }])
+
+        const updated = await storage.serviceAccounts.update({
+          projectId,
+          id: "svc_ingest",
+          name: "Ingest worker v2",
+          status: "suspended",
+          updatedAt: at("2026-05-14T10:03:00.000Z"),
+        })
+        expect(updated).toMatchObject({ name: "Ingest worker v2", status: "suspended" })
+        await expect(
+          storage.serviceAccounts.list({ projectId, statuses: ["suspended"] })
+        ).resolves.toMatchObject({
+          serviceAccounts: [{ id: "svc_ingest" }],
+          total: 1,
+        })
+      })
+    })
+
+    test("rejects service account memberships for missing service accounts", async () => {
+      await withStorage(async (storage) => {
+        await expectAuthError(
+          storage.serviceAccountGroupMemberships.upsert({
+            projectId,
+            serviceAccountId: "svc_missing",
+            groupId: "commercial",
+            source: "manual",
+            createdAt: at("2026-05-14T10:00:00.000Z"),
+          }),
+          "missing_service_account"
+        )
+      })
+    })
+
+    test("creates, resolves, touches, lists, and revokes access tokens", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.serviceAccounts.create({
+          id: "svc_ingest",
+          projectId,
+          name: "Ingest worker",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+        })
+
+        const personal = await storage.accessTokens.create({
+          id: "tok_personal",
+          projectId,
+          name: "Local CLI",
+          kind: "personal",
+          subjectType: "user",
+          subjectId: "usr_1",
+          tokenHash: "hash-personal",
+          groupIds: ["commercial", "commercial", "finance"],
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+          expiresAt: at("2026-05-21T10:01:00.000Z"),
+        })
+        expect(personal.groupIds).toEqual(["commercial", "finance"])
+        await expect(
+          storage.accessTokens.findValidByTokenHash({
+            projectId,
+            id: "tok_personal",
+            kind: "personal",
+            tokenHash: "hash-personal",
+            now: at("2026-05-14T10:02:00.000Z"),
+          })
+        ).resolves.toMatchObject({ id: "tok_personal" })
+        await expect(
+          storage.accessTokens.findValidByTokenHash({
+            projectId,
+            id: "tok_personal",
+            kind: "personal",
+            tokenHash: "wrong",
+            now: at("2026-05-14T10:02:00.000Z"),
+          })
+        ).resolves.toBeNull()
+
+        const touched = await storage.accessTokens.touch({
+          projectId,
+          id: "tok_personal",
+          lastUsedAt: at("2026-05-14T10:03:00.000Z"),
+          userAgent: "sixb-cli/0.1",
+          ipAddress: "203.0.113.10",
+        })
+        expect(touched.lastUsedAt?.toISOString()).toBe("2026-05-14T10:03:00.000Z")
+        expect(touched.lastUsedUserAgent).toBe("sixb-cli/0.1")
+
+        await storage.accessTokens.create({
+          id: "tok_service",
+          projectId,
+          name: "Sandbox agent",
+          kind: "serviceAccount",
+          subjectType: "serviceAccount",
+          subjectId: "svc_ingest",
+          tokenHash: "hash-service",
+          createdAt: at("2026-05-14T10:04:00.000Z"),
+          expiresAt: at("2026-05-21T10:04:00.000Z"),
+        })
+        await expect(
+          storage.accessTokens.list({
+            projectId,
+            subjectType: "serviceAccount",
+            subjectId: "svc_ingest",
+          })
+        ).resolves.toMatchObject({
+          accessTokens: [{ id: "tok_service" }],
+          total: 1,
+        })
+
+        await storage.accessTokens.revoke({
+          projectId,
+          id: "tok_personal",
+          revokedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+        await expect(
+          storage.accessTokens.findValidByTokenHash({
+            projectId,
+            id: "tok_personal",
+            kind: "personal",
+            tokenHash: "hash-personal",
+            now: at("2026-05-14T10:06:00.000Z"),
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("rejects invalid access token subjects", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        await expectAuthError(
+          storage.accessTokens.create({
+            id: "tok_bad_kind",
+            projectId,
+            name: "Bad kind",
+            kind: "serviceAccount",
+            subjectType: "user",
+            subjectId: "usr_1",
+            tokenHash: "hash",
+            createdAt: at("2026-05-14T10:00:00.000Z"),
+            expiresAt: at("2026-05-21T10:00:00.000Z"),
+          }),
+          "invalid_input"
+        )
+        await expectAuthError(
+          storage.accessTokens.create({
+            id: "tok_missing_subject",
+            projectId,
+            name: "Missing subject",
+            kind: "serviceAccount",
+            subjectType: "serviceAccount",
+            subjectId: "svc_missing",
+            tokenHash: "hash",
+            createdAt: at("2026-05-14T10:00:00.000Z"),
+            expiresAt: at("2026-05-21T10:00:00.000Z"),
+          }),
+          "missing_service_account"
         )
       })
     })

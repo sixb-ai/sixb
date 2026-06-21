@@ -1,10 +1,13 @@
 import type { GroupDefinition } from "../security"
 import type {
+  AccessTokenRecord,
   AuthStorage,
   CompleteAuthSessionInput,
   CompleteSignInResult,
   InvitationRecord,
   InvitationStatus,
+  ServiceAccountGroupMembershipRecord,
+  ServiceAccountRecord,
   SessionRecord,
   UserRecord,
 } from "../storage/auth"
@@ -208,7 +211,11 @@ export interface GetInvitationOptionsResult {
   }
 }
 
-export type AuthSessionResolutionOptions = AuthSessionAudienceOptions
+export type AuthCredentialSource = "session" | "accessToken" | "any"
+
+export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
+  readonly credentialSource?: AuthCredentialSource
+}
 
 export interface InviteUserOptions extends AuthSessionAudienceOptions {
   readonly delivery?: {
@@ -223,6 +230,44 @@ export interface RevokeInvitationInput {
 
 export interface RevokeInvitationResult {
   readonly invitation: InvitationRecord
+}
+
+export interface CreatePersonalAccessTokenInput {
+  readonly name: string
+  readonly expiresAt: Date
+  readonly groupIds?: readonly string[]
+}
+
+export interface CreateServiceAccountInput {
+  readonly id?: string
+  readonly name: string
+  readonly description?: string
+  readonly groupIds?: readonly string[]
+}
+
+export interface CreateServiceAccountResult {
+  readonly serviceAccount: ServiceAccountRecord
+  readonly groupMemberships: readonly ServiceAccountGroupMembershipRecord[]
+}
+
+export interface CreateServiceAccountAccessTokenInput {
+  readonly serviceAccountId: string
+  readonly name: string
+  readonly expiresAt: Date
+  readonly groupIds?: readonly string[]
+}
+
+export interface CreateAccessTokenResult {
+  readonly accessToken: AccessTokenRecord
+  readonly tokenValue: string
+}
+
+export interface RevokeAccessTokenInput {
+  readonly tokenId: string
+}
+
+export interface RevokeAccessTokenResult {
+  readonly accessToken: AccessTokenRecord
 }
 
 export interface AuthSessionOptions {
@@ -255,10 +300,15 @@ export type SixbAuthConfig =
 
 export type AuthSessionFailureReason =
   | "auth_disabled"
+  | "missing_credentials"
   | "missing_cookie"
+  | "missing_access_token"
   | "invalid_cookie"
+  | "invalid_access_token"
   | "invalid_session"
   | "missing_user"
+  | "missing_service_account"
+  | "suspended_service_account"
   | "suspended_user"
 
 export interface UnauthenticatedAuthSession {
@@ -268,13 +318,39 @@ export interface UnauthenticatedAuthSession {
 
 export interface AuthenticatedAuthSession {
   readonly authenticated: true
+  readonly credentialSource: "session"
   readonly principal: Extract<Principal, { readonly type: "user" }>
   readonly user: UserRecord
   readonly session: SessionRecord
   readonly groupIds: readonly string[]
 }
 
+export interface AuthenticatedUserAccessTokenSession {
+  readonly authenticated: true
+  readonly credentialSource: "accessToken"
+  readonly principal: Extract<Principal, { readonly type: "user" }>
+  readonly user: UserRecord
+  readonly accessToken: AccessTokenRecord
+  readonly groupIds: readonly string[]
+}
+
+export interface AuthenticatedServiceAccountAccessTokenSession {
+  readonly authenticated: true
+  readonly credentialSource: "accessToken"
+  readonly principal: Extract<Principal, { readonly type: "serviceAccount" }>
+  readonly serviceAccount: ServiceAccountRecord
+  readonly accessToken: AccessTokenRecord
+  readonly groupIds: readonly string[]
+}
+
 export type AuthSessionResult = UnauthenticatedAuthSession | AuthenticatedAuthSession
+
+export type AuthenticatedRequestAuthSession =
+  | AuthenticatedAuthSession
+  | AuthenticatedUserAccessTokenSession
+  | AuthenticatedServiceAccountAccessTokenSession
+
+export type AuthRequestResult = UnauthenticatedAuthSession | AuthenticatedRequestAuthSession
 
 export interface ResolvedAuthConfig {
   readonly strategy: AuthStrategy | null

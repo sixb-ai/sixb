@@ -1,6 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import {
   type AuthStrategy,
+  createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   createSessionCredential,
@@ -180,6 +181,198 @@ describe("Sixb auth runtime", () => {
       user: { id: "usr_1", email: "ava@acme.com" },
       groupIds: ["commercial"],
     })
+  })
+
+  test("resolves personal access tokens with constrained user groups", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: authStrategy,
+    })
+    const credential = createAccessTokenCredential("personal", "tok_personal")
+
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: sixb.id,
+      email: "ava@acme.com",
+    })
+    for (const groupId of ["commercial", "finance"]) {
+      await deps.storage.auth.groupMemberships.upsert({
+        projectId: sixb.id,
+        userId: "usr_1",
+        groupId,
+        source: "manual",
+      })
+    }
+    await deps.storage.auth.accessTokens.create({
+      id: credential.tokenId,
+      projectId: sixb.id,
+      name: "Local CLI",
+      kind: "personal",
+      subjectType: "user",
+      subjectId: "usr_1",
+      tokenHash: credential.tokenHash,
+      groupIds: ["finance"],
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+
+    const request = new Request("http://localhost/api/project", {
+      headers: { authorization: `Bearer ${credential.tokenValue}` },
+    })
+
+    await expect(sixb.auth.getSession(request)).resolves.toEqual({
+      authenticated: false,
+      reason: "missing_cookie",
+    })
+
+    const session = await sixb.auth.getSession(request, { credentialSource: "accessToken" })
+    expect(session).toMatchObject({
+      authenticated: true,
+      credentialSource: "accessToken",
+      principal: { type: "user", id: "usr_1" },
+      user: { id: "usr_1", email: "ava@acme.com" },
+      accessToken: { id: "tok_personal", name: "Local CLI" },
+      groupIds: ["finance"],
+    })
+    await expect(
+      deps.storage.auth.accessTokens.getById({ projectId: sixb.id, id: "tok_personal" })
+    ).resolves.toMatchObject({
+      lastUsedAt: expect.any(Date),
+    })
+  })
+
+  test("resolves service account access tokens with service account groups", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: authStrategy,
+    })
+    const credential = createAccessTokenCredential("serviceAccount", "tok_service")
+
+    await deps.storage.auth.serviceAccounts.create({
+      id: "svc_ingest",
+      projectId: sixb.id,
+      name: "Ingest worker",
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+    })
+    await deps.storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId: sixb.id,
+      serviceAccountId: "svc_ingest",
+      groupId: "commercial",
+      source: "manual",
+    })
+    await deps.storage.auth.accessTokens.create({
+      id: credential.tokenId,
+      projectId: sixb.id,
+      name: "Sandbox agent",
+      kind: "serviceAccount",
+      subjectType: "serviceAccount",
+      subjectId: "svc_ingest",
+      tokenHash: credential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+
+    const request = new Request("http://localhost/api/project", {
+      headers: { authorization: `Bearer ${credential.tokenValue}` },
+    })
+    const session = await sixb.auth.getSession(request, { credentialSource: "any" })
+    expect(session).toMatchObject({
+      authenticated: true,
+      credentialSource: "accessToken",
+      principal: { type: "serviceAccount", id: "svc_ingest" },
+      serviceAccount: { id: "svc_ingest", name: "Ingest worker" },
+      groupIds: ["commercial"],
+    })
+
+    await deps.storage.auth.serviceAccounts.update({
+      projectId: sixb.id,
+      id: "svc_ingest",
+      status: "suspended",
+    })
+    await expect(sixb.auth.getSession(request, { credentialSource: "any" })).resolves.toEqual({
+      authenticated: false,
+      reason: "suspended_service_account",
+    })
+  })
+
+  test("creates and revokes personal and service account access tokens", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: authStrategy,
+    })
+    const sessionCredential = createSessionCredential("ses_1")
+
+    await deps.storage.auth.users.create({
+      id: "usr_1",
+      projectId: sixb.id,
+      email: "ava@acme.com",
+    })
+    await deps.storage.auth.sessions.create({
+      id: sessionCredential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_1",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: sessionCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const request = new Request("http://localhost/api/project", {
+      headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
+    })
+
+    const personal = await sixb.auth.createPersonalAccessToken(request, {
+      name: "Local CLI",
+      groupIds: [],
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    expect(personal.tokenValue).toStartWith("sixb_pat_tok_")
+    expect(personal.accessToken).toMatchObject({
+      kind: "personal",
+      subjectType: "user",
+      subjectId: "usr_1",
+      groupIds: [],
+    })
+
+    const serviceAccount = await sixb.auth.createServiceAccount(request, {
+      id: "svc_agent",
+      name: "Sandbox agent",
+      groupIds: ["commercial"],
+    })
+    expect(serviceAccount.serviceAccount).toMatchObject({
+      id: "svc_agent",
+      name: "Sandbox agent",
+    })
+    expect(serviceAccount.groupMemberships).toMatchObject([{ groupId: "commercial" }])
+
+    const serviceToken = await sixb.auth.createServiceAccountAccessToken(request, {
+      serviceAccountId: "svc_agent",
+      name: "Agent token",
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    expect(serviceToken.tokenValue).toStartWith("sixb_sat_tok_")
+    expect(serviceToken.accessToken).toMatchObject({
+      kind: "serviceAccount",
+      subjectType: "serviceAccount",
+      subjectId: "svc_agent",
+    })
+
+    await sixb.auth.revokeAccessToken(request, { tokenId: serviceToken.accessToken.id })
+    await expect(
+      deps.storage.auth.accessTokens.findValidByTokenHash({
+        projectId: sixb.id,
+        id: serviceToken.accessToken.id,
+        kind: "serviceAccount",
+        tokenHash: serviceToken.accessToken.tokenHash,
+        now: new Date("2026-05-16T10:01:00.000Z"),
+      })
+    ).resolves.toBeNull()
   })
 
   test("resolves sessions and cookie names by audience", async () => {

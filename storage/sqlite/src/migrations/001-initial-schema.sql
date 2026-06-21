@@ -504,6 +504,40 @@ CREATE TABLE IF NOT EXISTS auth_user_identities (
 CREATE INDEX IF NOT EXISTS idx_auth_user_identities_user
   ON auth_user_identities(project_id, user_id);
 
+CREATE TABLE IF NOT EXISTS auth_service_accounts (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active', 'suspended')),
+  created_by_principal_type TEXT CHECK (
+    created_by_principal_type IS NULL
+      OR created_by_principal_type IN ('user', 'serviceAccount', 'system')
+  ),
+  created_by_principal_id TEXT,
+  created_by_session_id TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_status_created
+  ON auth_service_accounts(project_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_service_accounts_project_created
+  ON auth_service_accounts(project_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS auth_service_account_group_memberships (
+  project_id TEXT NOT NULL,
+  service_account_id TEXT NOT NULL,
+  group_id TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (project_id, service_account_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_service_account_group_memberships_group
+  ON auth_service_account_group_memberships(project_id, group_id);
+
 CREATE TABLE IF NOT EXISTS auth_sessions (
   project_id TEXT NOT NULL,
   id TEXT NOT NULL,
@@ -524,6 +558,39 @@ CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_active
   ON auth_sessions(project_id, user_id, audience, revoked_at, expires_at);
 CREATE INDEX IF NOT EXISTS idx_auth_sessions_token
   ON auth_sessions(project_id, id, token_hash);
+
+CREATE TABLE IF NOT EXISTS auth_access_tokens (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('personal', 'serviceAccount')),
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('user', 'serviceAccount')),
+  subject_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  group_ids TEXT,
+  created_by_principal_type TEXT CHECK (
+    created_by_principal_type IS NULL
+      OR created_by_principal_type IN ('user', 'serviceAccount', 'system')
+  ),
+  created_by_principal_id TEXT,
+  created_by_session_id TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  last_used_at TEXT,
+  last_used_user_agent TEXT,
+  last_used_ip_address TEXT,
+  PRIMARY KEY (project_id, id),
+  CHECK (
+    (kind = 'personal' AND subject_type = 'user')
+      OR (kind = 'serviceAccount' AND subject_type = 'serviceAccount')
+  )
+);
+
+CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_lookup
+  ON auth_access_tokens(project_id, id, kind, token_hash, revoked_at, expires_at);
+CREATE INDEX IF NOT EXISTS idx_auth_access_tokens_subject_created
+  ON auth_access_tokens(project_id, subject_type, subject_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS auth_invitations (
   project_id TEXT NOT NULL,

@@ -1,8 +1,10 @@
 export type AuthStorageErrorCode =
+  | "duplicate_access_token"
   | "duplicate_identity"
   | "duplicate_invitation"
   | "duplicate_magic_link"
   | "duplicate_oidc_attempt"
+  | "duplicate_service_account"
   | "duplicate_session"
   | "duplicate_user"
   | "email_link_not_allowed"
@@ -15,8 +17,11 @@ export type AuthStorageErrorCode =
   | "missing_invitation"
   | "missing_magic_link"
   | "missing_oidc_attempt"
+  | "missing_access_token"
+  | "missing_service_account"
   | "missing_session"
   | "missing_user"
+  | "suspended_service_account"
   | "suspended_user"
   | "user_creation_not_allowed"
 

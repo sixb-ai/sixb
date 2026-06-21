@@ -14,10 +14,15 @@ import {
   cancelWorkflowIntervention,
   countObjects,
   createAuthInvitation,
+  createAuthPersonalAccessToken,
+  createAuthServiceAccount,
+  createAuthServiceAccountAccessToken,
+  disableAuthServiceAccount,
   existsObjects,
   facetObjects,
   getAction,
   getActionRun,
+  getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthSession,
   getConnector,
@@ -39,7 +44,10 @@ import {
   getWorkflowRun,
   listActionRuns,
   listActions,
+  listAuthAccessTokens,
   listAuthInvitations,
+  listAuthServiceAccountAccessTokens,
+  listAuthServiceAccounts,
   listAuthSessions,
   listConnectors,
   listDatasetRows,
@@ -67,7 +75,9 @@ import {
   requestPipelineRun,
   requestSyncRun,
   requestWorkflowRun,
+  revokeAuthAccessToken,
   revokeAuthInvitation,
+  revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
   signOut,
   signOutAll,
@@ -88,6 +98,18 @@ import type {
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
+  CreateAuthPersonalAccessTokenData,
+  CreateAuthPersonalAccessTokenError,
+  CreateAuthPersonalAccessTokenResponse,
+  CreateAuthServiceAccountAccessTokenData,
+  CreateAuthServiceAccountAccessTokenError,
+  CreateAuthServiceAccountAccessTokenResponse,
+  CreateAuthServiceAccountData,
+  CreateAuthServiceAccountError,
+  CreateAuthServiceAccountResponse,
+  DisableAuthServiceAccountData,
+  DisableAuthServiceAccountError,
+  DisableAuthServiceAccountResponse,
   ExistsObjectsData,
   ExistsObjectsError,
   ExistsObjectsResponse,
@@ -100,6 +122,9 @@ import type {
   GetActionRunData,
   GetActionRunError,
   GetActionRunResponse,
+  GetAuthAccessManagementOptionsData,
+  GetAuthAccessManagementOptionsError,
+  GetAuthAccessManagementOptionsResponse,
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsError,
   GetAuthInvitationOptionsResponse,
@@ -159,9 +184,18 @@ import type {
   ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
+  ListAuthAccessTokensData,
+  ListAuthAccessTokensError,
+  ListAuthAccessTokensResponse,
   ListAuthInvitationsData,
   ListAuthInvitationsError,
   ListAuthInvitationsResponse,
+  ListAuthServiceAccountAccessTokensData,
+  ListAuthServiceAccountAccessTokensError,
+  ListAuthServiceAccountAccessTokensResponse,
+  ListAuthServiceAccountsData,
+  ListAuthServiceAccountsError,
+  ListAuthServiceAccountsResponse,
   ListAuthSessionsData,
   ListAuthSessionsError,
   ListAuthSessionsResponse,
@@ -233,9 +267,15 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunError,
   RequestWorkflowRunResponse,
+  RevokeAuthAccessTokenData,
+  RevokeAuthAccessTokenError,
+  RevokeAuthAccessTokenResponse,
   RevokeAuthInvitationData,
   RevokeAuthInvitationError,
   RevokeAuthInvitationResponse,
+  RevokeAuthServiceAccountAccessTokenData,
+  RevokeAuthServiceAccountAccessTokenError,
+  RevokeAuthServiceAccountAccessTokenResponse,
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
@@ -404,6 +444,274 @@ export const signOutAllMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await signOutAll({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAuthAccessManagementOptionsQueryKey = (
+  options?: Options<GetAuthAccessManagementOptionsData>
+) => createQueryKey("getAuthAccessManagementOptions", options)
+
+/**
+ * Get auth access-token management options
+ */
+export const getAuthAccessManagementOptionsOptions = (
+  options?: Options<GetAuthAccessManagementOptionsData>
+) =>
+  queryOptions<
+    GetAuthAccessManagementOptionsResponse,
+    GetAuthAccessManagementOptionsError,
+    GetAuthAccessManagementOptionsResponse,
+    ReturnType<typeof getAuthAccessManagementOptionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAuthAccessManagementOptions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAuthAccessManagementOptionsQueryKey(options),
+  })
+
+export const listAuthAccessTokensQueryKey = (options?: Options<ListAuthAccessTokensData>) =>
+  createQueryKey("listAuthAccessTokens", options)
+
+/**
+ * List personal access tokens for the current user
+ */
+export const listAuthAccessTokensOptions = (options?: Options<ListAuthAccessTokensData>) =>
+  queryOptions<
+    ListAuthAccessTokensResponse,
+    ListAuthAccessTokensError,
+    ListAuthAccessTokensResponse,
+    ReturnType<typeof listAuthAccessTokensQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAuthAccessTokens({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAuthAccessTokensQueryKey(options),
+  })
+
+/**
+ * Create a personal access token
+ */
+export const createAuthPersonalAccessTokenMutation = (
+  options?: Partial<Options<CreateAuthPersonalAccessTokenData>>
+): UseMutationOptions<
+  CreateAuthPersonalAccessTokenResponse,
+  CreateAuthPersonalAccessTokenError,
+  Options<CreateAuthPersonalAccessTokenData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateAuthPersonalAccessTokenResponse,
+    CreateAuthPersonalAccessTokenError,
+    Options<CreateAuthPersonalAccessTokenData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createAuthPersonalAccessToken({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Revoke one of the current user's personal access tokens
+ */
+export const revokeAuthAccessTokenMutation = (
+  options?: Partial<Options<RevokeAuthAccessTokenData>>
+): UseMutationOptions<
+  RevokeAuthAccessTokenResponse,
+  RevokeAuthAccessTokenError,
+  Options<RevokeAuthAccessTokenData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RevokeAuthAccessTokenResponse,
+    RevokeAuthAccessTokenError,
+    Options<RevokeAuthAccessTokenData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await revokeAuthAccessToken({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAuthServiceAccountsQueryKey = (options?: Options<ListAuthServiceAccountsData>) =>
+  createQueryKey("listAuthServiceAccounts", options)
+
+/**
+ * List auth service accounts
+ */
+export const listAuthServiceAccountsOptions = (options?: Options<ListAuthServiceAccountsData>) =>
+  queryOptions<
+    ListAuthServiceAccountsResponse,
+    ListAuthServiceAccountsError,
+    ListAuthServiceAccountsResponse,
+    ReturnType<typeof listAuthServiceAccountsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAuthServiceAccounts({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAuthServiceAccountsQueryKey(options),
+  })
+
+/**
+ * Create an auth service account
+ */
+export const createAuthServiceAccountMutation = (
+  options?: Partial<Options<CreateAuthServiceAccountData>>
+): UseMutationOptions<
+  CreateAuthServiceAccountResponse,
+  CreateAuthServiceAccountError,
+  Options<CreateAuthServiceAccountData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateAuthServiceAccountResponse,
+    CreateAuthServiceAccountError,
+    Options<CreateAuthServiceAccountData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createAuthServiceAccount({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Disable an auth service account
+ */
+export const disableAuthServiceAccountMutation = (
+  options?: Partial<Options<DisableAuthServiceAccountData>>
+): UseMutationOptions<
+  DisableAuthServiceAccountResponse,
+  DisableAuthServiceAccountError,
+  Options<DisableAuthServiceAccountData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    DisableAuthServiceAccountResponse,
+    DisableAuthServiceAccountError,
+    Options<DisableAuthServiceAccountData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await disableAuthServiceAccount({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAuthServiceAccountAccessTokensQueryKey = (
+  options: Options<ListAuthServiceAccountAccessTokensData>
+) => createQueryKey("listAuthServiceAccountAccessTokens", options)
+
+/**
+ * List access tokens for an auth service account
+ */
+export const listAuthServiceAccountAccessTokensOptions = (
+  options: Options<ListAuthServiceAccountAccessTokensData>
+) =>
+  queryOptions<
+    ListAuthServiceAccountAccessTokensResponse,
+    ListAuthServiceAccountAccessTokensError,
+    ListAuthServiceAccountAccessTokensResponse,
+    ReturnType<typeof listAuthServiceAccountAccessTokensQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAuthServiceAccountAccessTokens({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAuthServiceAccountAccessTokensQueryKey(options),
+  })
+
+/**
+ * Create an access token for an auth service account
+ */
+export const createAuthServiceAccountAccessTokenMutation = (
+  options?: Partial<Options<CreateAuthServiceAccountAccessTokenData>>
+): UseMutationOptions<
+  CreateAuthServiceAccountAccessTokenResponse,
+  CreateAuthServiceAccountAccessTokenError,
+  Options<CreateAuthServiceAccountAccessTokenData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateAuthServiceAccountAccessTokenResponse,
+    CreateAuthServiceAccountAccessTokenError,
+    Options<CreateAuthServiceAccountAccessTokenData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createAuthServiceAccountAccessToken({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Revoke an access token for an auth service account
+ */
+export const revokeAuthServiceAccountAccessTokenMutation = (
+  options?: Partial<Options<RevokeAuthServiceAccountAccessTokenData>>
+): UseMutationOptions<
+  RevokeAuthServiceAccountAccessTokenResponse,
+  RevokeAuthServiceAccountAccessTokenError,
+  Options<RevokeAuthServiceAccountAccessTokenData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RevokeAuthServiceAccountAccessTokenResponse,
+    RevokeAuthServiceAccountAccessTokenError,
+    Options<RevokeAuthServiceAccountAccessTokenData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await revokeAuthServiceAccountAccessToken({
         ...options,
         ...fnOptions,
         throwOnError: true,

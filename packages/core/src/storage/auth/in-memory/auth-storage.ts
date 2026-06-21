@@ -11,11 +11,14 @@ import type {
   UserIdentityRecord,
   UserRecord,
 } from "../types"
+import { InMemoryAuthAccessTokenStore } from "./access-tokens"
 import { InMemoryAuthGroupMembershipStore } from "./group-memberships"
 import { InMemoryAuthUserIdentityStore } from "./identities"
 import { InMemoryAuthInvitationStore } from "./invitations"
 import { InMemoryAuthMagicLinkStore } from "./magic-links"
 import { InMemoryAuthOidcAuthorizationAttemptStore } from "./oidc-attempts"
+import { InMemoryAuthServiceAccountGroupMembershipStore } from "./service-account-group-memberships"
+import { InMemoryAuthServiceAccountStore } from "./service-accounts"
 import { InMemoryAuthSessionStore } from "./sessions"
 import type { AuthStorageState } from "./shared"
 import {
@@ -47,7 +50,12 @@ export class InMemoryAuthStorage implements AuthStorage {
 
   readonly users = new InMemoryAuthUserStore(this.state)
   readonly identities = new InMemoryAuthUserIdentityStore(this.state)
+  readonly serviceAccounts = new InMemoryAuthServiceAccountStore(this.state)
+  readonly serviceAccountGroupMemberships = new InMemoryAuthServiceAccountGroupMembershipStore(
+    this.state
+  )
   readonly sessions = new InMemoryAuthSessionStore(this.state)
+  readonly accessTokens = new InMemoryAuthAccessTokenStore(this.state)
   readonly invitations = new InMemoryAuthInvitationStore(this.state)
   readonly groupMemberships = new InMemoryAuthGroupMembershipStore(this.state)
   readonly magicLinks = new InMemoryAuthMagicLinkStore(this.state)
@@ -57,7 +65,10 @@ export class InMemoryAuthStorage implements AuthStorage {
     return {
       users: structuredClone(this.state.users),
       identities: structuredClone(this.state.identities),
+      serviceAccounts: structuredClone(this.state.serviceAccounts),
+      serviceAccountGroupMemberships: structuredClone(this.state.serviceAccountGroupMemberships),
       sessions: structuredClone(this.state.sessions),
+      accessTokens: structuredClone(this.state.accessTokens),
       invitations: structuredClone(this.state.invitations),
       groupMemberships: structuredClone(this.state.groupMemberships),
       magicLinks: structuredClone(this.state.magicLinks),
@@ -68,7 +79,10 @@ export class InMemoryAuthStorage implements AuthStorage {
   restore(snapshot: InMemoryAuthStorageSnapshot): void {
     restoreMap(this.state.users, snapshot.users)
     restoreMap(this.state.identities, snapshot.identities)
+    restoreMap(this.state.serviceAccounts, snapshot.serviceAccounts)
+    restoreMap(this.state.serviceAccountGroupMemberships, snapshot.serviceAccountGroupMemberships)
     restoreMap(this.state.sessions, snapshot.sessions)
+    restoreMap(this.state.accessTokens, snapshot.accessTokens)
     restoreMap(this.state.invitations, snapshot.invitations)
     restoreMap(this.state.groupMemberships, snapshot.groupMemberships)
     restoreMap(this.state.magicLinks, snapshot.magicLinks)

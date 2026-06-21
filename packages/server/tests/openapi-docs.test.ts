@@ -62,29 +62,66 @@ describe("OpenAPI docs", () => {
       description:
         "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session.",
     })
+    expect(spec.components?.securitySchemes?.sixbBearer).toEqual({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "Sixb access token",
+      description:
+        "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on scoped API routes.",
+    })
 
-    const csrfRoutes = [
+    const csrfOnlyRoutes = [
       ["post", "/api/auth/sign-out"],
+      ["post", "/api/auth/access-tokens"],
+      ["post", "/api/auth/access-tokens/{tokenId}/revoke"],
+      ["post", "/api/auth/service-accounts"],
+      ["post", "/api/auth/service-accounts/{serviceAccountId}/disable"],
+      ["post", "/api/auth/service-accounts/{serviceAccountId}/access-tokens"],
+      ["post", "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke"],
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
       ["post", "/api/syncs/{syncId}/runs"],
       ["post", "/api/pipelines/{pipelineId}/runs"],
-      ["post", "/api/workflows/{workflowId}/runs"],
       ["post", "/api/workflow-interventions/{interventionId}/submit"],
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
-      ["post", "/api/actions/{actionId}"],
-      ["post", "/api/objects/query"],
-      ["post", "/api/objects/query/count"],
-      ["post", "/api/objects/query/exists"],
-      ["post", "/api/objects/query/facets"],
       ["put", "/api/objects/{objectTypeId}/{objectId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["delete", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["post", "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}"],
     ] as const
 
-    for (const [method, path] of csrfRoutes) {
+    for (const [method, path] of csrfOnlyRoutes) {
       expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbCsrf: [] }])
+    }
+
+    const bearerOnlyRoutes = [
+      ["get", "/api/project"],
+      ["get", "/api/object-types"],
+      ["get", "/api/object-types/{objectTypeId}"],
+      ["get", "/api/objects"],
+      ["get", "/api/objects/{objectTypeId}/{objectId}"],
+      ["get", "/api/actions"],
+      ["get", "/api/actions/{actionId}"],
+      ["get", "/api/workflows"],
+      ["get", "/api/workflows/{workflowId}"],
+      ["get", "/api/events"],
+    ] as const
+
+    for (const [method, path] of bearerOnlyRoutes) {
+      expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbBearer: [] }])
+    }
+
+    const csrfOrBearerRoutes = [
+      ["post", "/api/actions/{actionId}"],
+      ["post", "/api/workflows/{workflowId}/runs"],
+      ["post", "/api/objects/query"],
+      ["post", "/api/objects/query/count"],
+      ["post", "/api/objects/query/exists"],
+      ["post", "/api/objects/query/facets"],
+    ] as const
+
+    for (const [method, path] of csrfOrBearerRoutes) {
+      expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbCsrf: [] }, { sixbBearer: [] }])
     }
 
     expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()

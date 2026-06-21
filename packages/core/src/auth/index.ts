@@ -1,3 +1,14 @@
+export type { AccessTokenCredential, AccessTokenKind, AccessTokenParts } from "./access-tokens"
+export {
+  createAccessTokenCredential,
+  formatAccessTokenValue,
+  generateAccessTokenSecret,
+  getBearerAccessTokenValue,
+  hashAccessTokenSecret,
+  PERSONAL_ACCESS_TOKEN_PREFIX,
+  parseAccessTokenValue,
+  SERVICE_ACCOUNT_ACCESS_TOKEN_PREFIX,
+} from "./access-tokens"
 export type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
 export {
   AUTH_SESSION_AUDIENCE_PATTERN,
@@ -44,18 +55,28 @@ export {
 } from "./sessions"
 export type {
   AuthCookieOptions,
+  AuthCredentialSource,
   AuthEmailDeliveryStatus,
   AuthenticatedAuthSession,
+  AuthenticatedRequestAuthSession,
+  AuthenticatedServiceAccountAccessTokenSession,
+  AuthenticatedUserAccessTokenSession,
   AuthInvitationRecipientInput,
   AuthInvitationRecipientResult,
   AuthInvitationRecipientStatus,
+  AuthRequestResult,
   AuthSessionFailureReason,
   AuthSessionOptions,
   AuthSessionResolutionOptions,
   AuthSessionResult,
   AuthStrategy,
   AuthStrategyKind,
+  CreateAccessTokenResult,
   CreateInvitationCapability,
+  CreatePersonalAccessTokenInput,
+  CreateServiceAccountAccessTokenInput,
+  CreateServiceAccountInput,
+  CreateServiceAccountResult,
   GetInvitationOptionsResult,
   InvitationDeliveryAuthStrategy,
   InvitationDeliveryInput,
@@ -86,6 +107,8 @@ export type {
   OidcStartSignInResult,
   Principal,
   ResolvedAuthConfig,
+  RevokeAccessTokenInput,
+  RevokeAccessTokenResult,
   RevokeInvitationInput,
   RevokeInvitationResult,
   SecurityContext,

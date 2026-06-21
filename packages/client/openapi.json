@@ -12,6 +12,12 @@
         "in": "header",
         "name": "x-sixb-csrf",
         "description": "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session."
+      },
+      "sixbBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Sixb access token",
+        "description": "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on scoped API routes."
       }
     },
     "schemas": {
@@ -1089,6 +1095,1656 @@
         }
       }
     },
+    "/api/auth/access-management-options": {
+      "get": {
+        "summary": "Get auth access-token management options",
+        "tags": ["Auth"],
+        "operationId": "getAuthAccessManagementOptions",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["groups"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/access-tokens": {
+      "get": {
+        "summary": "List personal access tokens for the current user",
+        "tags": ["Auth"],
+        "operationId": "listAuthAccessTokens",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["personal", "serviceAccount"]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "expired", "revoked"]
+                          },
+                          "subjectType": {
+                            "type": "string",
+                            "enum": ["user", "serviceAccount"]
+                          },
+                          "subjectId": {
+                            "type": "string"
+                          },
+                          "subjectLabel": {
+                            "type": "string"
+                          },
+                          "groupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "revokedAt": {
+                            "type": "string"
+                          },
+                          "lastUsedAt": {
+                            "type": "string"
+                          },
+                          "lastUsedUserAgent": {
+                            "type": "string"
+                          },
+                          "lastUsedIpAddress": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "status",
+                          "subjectType",
+                          "subjectId",
+                          "createdAt",
+                          "expiresAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["accessTokens"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a personal access token",
+        "tags": ["Auth"],
+        "operationId": "createAuthPersonalAccessToken",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["personal", "serviceAccount"]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "expired", "revoked"]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "subjectId": {
+                          "type": "string"
+                        },
+                        "subjectLabel": {
+                          "type": "string"
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedUserAgent": {
+                          "type": "string"
+                        },
+                        "lastUsedIpAddress": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "kind",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "tokenValue": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["accessToken", "tokenValue"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/access-tokens/{tokenId}/revoke": {
+      "post": {
+        "summary": "Revoke one of the current user's personal access tokens",
+        "tags": ["Auth"],
+        "operationId": "revokeAuthAccessToken",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tokenId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["personal", "serviceAccount"]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "expired", "revoked"]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "subjectId": {
+                          "type": "string"
+                        },
+                        "subjectLabel": {
+                          "type": "string"
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedUserAgent": {
+                          "type": "string"
+                        },
+                        "lastUsedIpAddress": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "kind",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["accessToken"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/service-accounts": {
+      "get": {
+        "summary": "List auth service accounts",
+        "tags": ["Auth"],
+        "operationId": "listAuthServiceAccounts",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serviceAccounts": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "suspended"]
+                          },
+                          "groupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id", "name", "status", "groupIds", "createdAt", "updatedAt"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["serviceAccounts"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an auth service account",
+        "tags": ["Auth"],
+        "operationId": "createAuthServiceAccount",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serviceAccount": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "suspended"]
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "name", "status", "groupIds", "createdAt", "updatedAt"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["serviceAccount"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/service-accounts/{serviceAccountId}/disable": {
+      "post": {
+        "summary": "Disable an auth service account",
+        "tags": ["Auth"],
+        "operationId": "disableAuthServiceAccount",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "serviceAccount": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "suspended"]
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["id", "name", "status", "groupIds", "createdAt", "updatedAt"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["serviceAccount"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/service-accounts/{serviceAccountId}/access-tokens": {
+      "get": {
+        "summary": "List access tokens for an auth service account",
+        "tags": ["Auth"],
+        "operationId": "listAuthServiceAccountAccessTokens",
+        "parameters": [
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessTokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["personal", "serviceAccount"]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "expired", "revoked"]
+                          },
+                          "subjectType": {
+                            "type": "string",
+                            "enum": ["user", "serviceAccount"]
+                          },
+                          "subjectId": {
+                            "type": "string"
+                          },
+                          "subjectLabel": {
+                            "type": "string"
+                          },
+                          "groupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "expiresAt": {
+                            "type": "string"
+                          },
+                          "revokedAt": {
+                            "type": "string"
+                          },
+                          "lastUsedAt": {
+                            "type": "string"
+                          },
+                          "lastUsedUserAgent": {
+                            "type": "string"
+                          },
+                          "lastUsedIpAddress": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "status",
+                          "subjectType",
+                          "subjectId",
+                          "createdAt",
+                          "expiresAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["accessTokens"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create an access token for an auth service account",
+        "tags": ["Auth"],
+        "operationId": "createAuthServiceAccountAccessToken",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["name", "expiresAt"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Response for status 201",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["personal", "serviceAccount"]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "expired", "revoked"]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "subjectId": {
+                          "type": "string"
+                        },
+                        "subjectLabel": {
+                          "type": "string"
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedUserAgent": {
+                          "type": "string"
+                        },
+                        "lastUsedIpAddress": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "kind",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "tokenValue": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["accessToken", "tokenValue"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke": {
+      "post": {
+        "summary": "Revoke an access token for an auth service account",
+        "tags": ["Auth"],
+        "operationId": "revokeAuthServiceAccountAccessToken",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "serviceAccountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "tokenId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": ["personal", "serviceAccount"]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["active", "expired", "revoked"]
+                        },
+                        "subjectType": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount"]
+                        },
+                        "subjectId": {
+                          "type": "string"
+                        },
+                        "subjectLabel": {
+                          "type": "string"
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        },
+                        "revokedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedAt": {
+                          "type": "string"
+                        },
+                        "lastUsedUserAgent": {
+                          "type": "string"
+                        },
+                        "lastUsedIpAddress": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "kind",
+                        "status",
+                        "subjectType",
+                        "subjectId",
+                        "createdAt",
+                        "expiresAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["accessToken"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/invitations": {
       "post": {
         "summary": "Create an auth invitation",
@@ -1858,6 +3514,11 @@
         "summary": "Get current project metadata",
         "tags": ["Project"],
         "operationId": "getProjectInfo",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -5079,6 +6740,11 @@
         "summary": "List registered workflows",
         "tags": ["Workflows"],
         "operationId": "listWorkflows",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -5264,6 +6930,11 @@
         "summary": "Get workflow metadata",
         "tags": ["Workflows"],
         "operationId": "getWorkflow",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "workflowId",
@@ -6769,6 +8440,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [
@@ -8108,6 +9782,11 @@
         "summary": "List registered object types",
         "tags": ["Ontology"],
         "operationId": "listObjectTypes",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -8402,6 +10081,11 @@
         "summary": "Get object type definition",
         "tags": ["Ontology"],
         "operationId": "getObjectType",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",
@@ -8721,6 +10405,11 @@
         "summary": "List objects",
         "tags": ["Objects"],
         "operationId": "listObjects",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",
@@ -8911,6 +10600,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -8975,6 +10667,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -9039,6 +10734,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -9103,6 +10801,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -9164,6 +10865,11 @@
         "summary": "Get object by id",
         "tags": ["Objects"],
         "operationId": "getObject",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",
@@ -9380,6 +11086,11 @@
         "summary": "List registered actions",
         "tags": ["Actions"],
         "operationId": "listActions",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -9493,6 +11204,11 @@
         "summary": "Get action metadata",
         "tags": ["Actions"],
         "operationId": "getAction",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "actionId",
@@ -9632,6 +11348,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [
@@ -11213,6 +12932,11 @@
         "summary": "Read domain events",
         "tags": ["Events"],
         "operationId": "listEvents",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "topic",
