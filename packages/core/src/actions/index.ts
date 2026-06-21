@@ -64,6 +64,7 @@ export type {
   ObjectActionPhaseBuilder,
 } from "./types"
 export {
+  coerceActionParamsToTyped,
   isActionDefinition,
   isGlobalActionDefinition,
   isObjectActionDefinition,

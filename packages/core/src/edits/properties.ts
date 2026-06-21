@@ -1,10 +1,9 @@
-import type { JsonValue } from "../json"
 import type { ObjectLink, Property, ValueType } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
-  normalizeSchemaValue,
+  normalizeObjectProperties,
   validateObjectProperties,
   validatePropertyValue,
 } from "../ontology/validation"
@@ -21,7 +20,7 @@ export function normalizeObjectEditProperties(params: {
   assertKnownProperties(objectType, properties)
   assertNoTelemetryProperties(objectType.properties, properties, path)
   validateObjectProperties(objectType, properties, valueTypesById)
-  return normalizeProperties(objectType.properties, properties, valueTypesById, path)
+  return normalizeObjectProperties(objectType.properties, properties, valueTypesById, path)
 }
 
 export function normalizeLinkEditProperties(params: {
@@ -62,7 +61,7 @@ export function normalizeLinkEditProperties(params: {
     )
   }
 
-  return normalizeProperties(
+  return normalizeObjectProperties(
     linkProperties,
     properties,
     valueTypesById,
@@ -90,38 +89,6 @@ export function assertPrimaryPropertyNotUpdated(
       `[Sixb] EditBatch cannot update primary property '${objectType.id}.${primaryProperty.id}'.`
     )
   }
-}
-
-function normalizeProperties(
-  definitions: readonly Property[],
-  properties: Readonly<Record<string, unknown>>,
-  valueTypesById: ReadonlyMap<string, ValueType>,
-  path: string
-): EditObjectProperties {
-  const normalized: Record<string, JsonValue> = {}
-  for (const [propertyId, value] of Object.entries(properties)) {
-    const property = definitions.find((candidate) => candidate.id === propertyId)
-    if (!property) continue
-    normalized[propertyId] = normalizePropertyValue(
-      property,
-      value,
-      `${path}.${propertyId}`,
-      valueTypesById
-    )
-  }
-  return normalized
-}
-
-function normalizePropertyValue(
-  property: Property,
-  value: unknown,
-  path: string,
-  valueTypesById: ReadonlyMap<string, ValueType>
-): JsonValue {
-  if (value === null) {
-    return null
-  }
-  return normalizeSchemaValue(property.schema, value, path, valueTypesById)
 }
 
 function assertNoTelemetryProperties(

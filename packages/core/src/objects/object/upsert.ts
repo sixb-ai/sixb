@@ -5,6 +5,7 @@
 import {
   assertKnownProperties,
   assertRequiredProperties,
+  normalizeObjectProperties,
   validateObjectProperties,
 } from "../../ontology/validation"
 import type { ObjectRow } from "../../storage"
@@ -21,6 +22,16 @@ export async function upsertObject(
   assertKnownProperties(objectType, properties)
   validateObjectProperties(objectType, properties, ontology.getValueTypesById())
 
+  // Normalize to JSON-safe values (e.g. Date -> ISO string) before the value
+  // reaches the event store, which only accepts JSON. The typed surface accepts
+  // `Date | string`; without this a `Date` would be rejected at append time.
+  const normalizedProperties = normalizeObjectProperties(
+    objectType.properties,
+    properties,
+    ontology.getValueTypesById(),
+    objectType.id
+  )
+
   const existing = await storage.objects.getByPrimaryId({
     projectId,
     objectTypeId: objectType.id,
@@ -29,7 +40,7 @@ export async function upsertObject(
 
   const mergedProperties = {
     ...(existing?.properties ?? {}),
-    ...properties,
+    ...normalizedProperties,
   }
   assertRequiredProperties(objectType, mergedProperties)
 
@@ -40,7 +51,7 @@ export async function upsertObject(
         payload: {
           objectTypeId: objectType.id,
           primaryId,
-          properties,
+          properties: normalizedProperties,
         },
       },
     ],

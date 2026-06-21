@@ -121,6 +121,44 @@ describe("ActionWorker", () => {
     ).toThrow(ActionWorkerError)
   })
 
+  test("date/timestamp params arrive as Date objects in handlers", async () => {
+    const observed: { dueDate: unknown; day: unknown }[] = []
+    const setDue = defineAction("setDue")
+      .on(Device)
+      .params({ dueDate: param("timestamp"), day: param("date") })
+      .writeback((ctx) => {
+        observed.push({ dueDate: ctx.params.dueDate, day: ctx.params.day })
+        // Typed as Date, so this must not throw at runtime.
+        return { iso: ctx.params.dueDate.toISOString() }
+      })
+
+    const sixb = createSixb([setDue])
+    const worker = new ActionWorker(sixb)
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+
+    await worker.start()
+    const { runId } = await deviceObjects(sixb).requestAction({
+      id: "device-1",
+      actionId: "setDue",
+      params: {
+        dueDate: new Date("2026-06-20T12:34:56.000Z"),
+        day: new Date("2026-06-20T12:34:56.000Z"),
+      },
+    })
+
+    const run = await waitFor(
+      () => sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: runId }),
+      (value) => value?.status === "succeeded" || value?.status === "failed"
+    )
+    expect(run?.status).toBe("succeeded")
+    const seen = observed[0]
+    expect(seen?.dueDate).toBeInstanceOf(Date)
+    expect(seen?.day).toBeInstanceOf(Date)
+    expect((seen?.dueDate as Date).toISOString()).toBe("2026-06-20T12:34:56.000Z")
+
+    await worker.stop()
+  })
+
   test("claims requested action runs and emits action.completed", async () => {
     const setStatus = defineAction("setStatus")
       .on(Device)

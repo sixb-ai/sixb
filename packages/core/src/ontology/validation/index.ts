@@ -1,7 +1,11 @@
 export type { BatchValidationResult } from "./batch"
 export { validateLinkBatch, validateObjectBatch } from "./batch"
 export { assertLinkTargetType, assertTargetTypeCompatible, validateLinkProperties } from "./links"
-export { normalizeSchemaValue } from "./normalize"
+export {
+  coerceSchemaValueToTyped,
+  normalizeObjectProperties,
+  normalizeSchemaValue,
+} from "./normalize"
 
 export {
   assertKnownProperties,

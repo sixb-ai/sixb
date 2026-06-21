@@ -16,7 +16,7 @@ export async function executeActionPhases(
   const { runtime, action, signal } = input
   let run = input.run
   const objectTarget = await loadObjectTarget({ runtime, action, run })
-  const phaseContext = createBasePhaseContext({ runtime, run, signal })
+  const phaseContext = createBasePhaseContext({ runtime, action, run, signal })
 
   if (!run.writeback && !run.commit) {
     run = await runtime.actionRunsStorage.enterPhase({

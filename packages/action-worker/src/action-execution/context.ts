@@ -11,7 +11,11 @@ import type {
   ObjectTypeWithPropertyTokens,
   ValueType,
 } from "@sixb/core"
-import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
+import {
+  coerceActionParamsToTyped,
+  isObjectActionDefinition,
+  ObjectNotFoundError,
+} from "@sixb/core"
 import { ActionWorkerError } from "../errors"
 import type { RunActionJobInput } from "../types"
 import type { LoadedObjectTarget } from "./types"
@@ -61,6 +65,7 @@ function toActionTargetObject(
 
 export function createBasePhaseContext(input: {
   readonly runtime: RunActionJobInput["runtime"]
+  readonly action: ActionDefinition
   readonly run: ActionRunRecord
   readonly signal: AbortSignal
 }) {
@@ -70,7 +75,13 @@ export function createBasePhaseContext(input: {
       startedAt: input.run.startedAt ?? input.run.queuedAt,
       idempotencyKey: input.run.idempotencyKey,
     },
-    params: input.run.params,
+    // Params are stored as JSON (date/timestamp -> ISO string); handler types
+    // promise `Date`, so re-hydrate them before the handler sees them.
+    params: coerceActionParamsToTyped(
+      input.action.params,
+      input.run.params,
+      input.runtime.sixb.getValueTypesById()
+    ),
     subject: input.run.subject,
     signal: input.signal,
   }
