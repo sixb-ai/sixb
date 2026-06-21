@@ -27,13 +27,30 @@ export const LinkProjectionSchema = z.object({
   targetField: z.string(),
 })
 
+export const TelemetryProjectionSchema = z.object({
+  _tag: z.literal("TelemetryProjectionDefinition"),
+  id: z.string(),
+  objectTypeId: z.string(),
+  propertyId: z.string(),
+  datasetId: z.string(),
+  objectIdField: z.string(),
+  atField: z.string(),
+  valueField: z.string(),
+  unitField: z.string().optional(),
+})
+
 export const ProjectionListResponseSchema = z.object({
   objectProjections: z.array(ObjectProjectionSchema),
   linkProjections: z.array(LinkProjectionSchema),
+  telemetryProjections: z.array(TelemetryProjectionSchema),
 })
 
 export const ProjectionParamsSchema = z.object({
   projectionId: z.string().min(1),
 })
 
-export const ProjectionResponseSchema = z.union([ObjectProjectionSchema, LinkProjectionSchema])
+export const ProjectionResponseSchema = z.union([
+  ObjectProjectionSchema,
+  LinkProjectionSchema,
+  TelemetryProjectionSchema,
+])

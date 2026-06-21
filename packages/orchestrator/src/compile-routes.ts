@@ -1,4 +1,4 @@
-import type { DomainEvent, ProjectionDefinition, RunTrigger } from "@sixb/core"
+import { type DomainEvent, projectionKindOf, type RunTrigger } from "@sixb/core"
 import type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
@@ -152,10 +152,6 @@ function addDatasetVersionCommittedRouteJob(
     },
     job
   )
-}
-
-function projectionKindOf(projection: ProjectionDefinition): "object" | "link" {
-  return projection._tag === "ObjectProjectionDefinition" ? "object" : "link"
 }
 
 function triggerToRoute(trigger: NonScheduleRunTrigger): {

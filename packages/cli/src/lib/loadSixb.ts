@@ -16,6 +16,7 @@ import type {
   ScheduleDefinition,
   SixbRuntimeContext,
   SyncDefinition,
+  TelemetryProjectionDefinition,
   WorkflowsRuntime,
 } from "@sixb/core"
 
@@ -33,6 +34,7 @@ export interface LoadedSixb extends SixbRuntimeContext {
   readonly workflows: WorkflowsRuntime
   getObjectProjections(): readonly ObjectProjectionDefinition[]
   getLinkProjections(): readonly LinkProjectionDefinition[]
+  getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
   getDatasetDefinitions(): readonly DatasetDefinition[]
   getRuleDefinitions(): readonly RuleDefinition[]
   getDatasetById(datasetId: string): DatasetDefinition | null
@@ -87,6 +89,8 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     typeof (value as { workflows?: { getById?: unknown } }).workflows?.getById === "function" &&
     typeof (value as { getObjectProjections?: unknown }).getObjectProjections === "function" &&
     typeof (value as { getLinkProjections?: unknown }).getLinkProjections === "function" &&
+    typeof (value as { getTelemetryProjections?: unknown }).getTelemetryProjections ===
+      "function" &&
     typeof (value as { getDatasetDefinitions?: unknown }).getDatasetDefinitions === "function" &&
     typeof (value as { getRuleDefinitions?: unknown }).getRuleDefinitions === "function" &&
     typeof (value as { getDatasetById?: unknown }).getDatasetById === "function" &&

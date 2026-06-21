@@ -11513,9 +11513,56 @@
                         ],
                         "additionalProperties": false
                       }
+                    },
+                    "telemetryProjections": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "_tag": {
+                            "type": "string",
+                            "enum": ["TelemetryProjectionDefinition"]
+                          },
+                          "id": {
+                            "type": "string"
+                          },
+                          "objectTypeId": {
+                            "type": "string"
+                          },
+                          "propertyId": {
+                            "type": "string"
+                          },
+                          "datasetId": {
+                            "type": "string"
+                          },
+                          "objectIdField": {
+                            "type": "string"
+                          },
+                          "atField": {
+                            "type": "string"
+                          },
+                          "valueField": {
+                            "type": "string"
+                          },
+                          "unitField": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "_tag",
+                          "id",
+                          "objectTypeId",
+                          "propertyId",
+                          "datasetId",
+                          "objectIdField",
+                          "atField",
+                          "valueField"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
-                  "required": ["objectProjections", "linkProjections"],
+                  "required": ["objectProjections", "linkProjections", "telemetryProjections"],
                   "additionalProperties": false
                 }
               }
@@ -11640,6 +11687,50 @@
                         "datasetId",
                         "sourceField",
                         "targetField"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "_tag": {
+                          "type": "string",
+                          "enum": ["TelemetryProjectionDefinition"]
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "objectTypeId": {
+                          "type": "string"
+                        },
+                        "propertyId": {
+                          "type": "string"
+                        },
+                        "datasetId": {
+                          "type": "string"
+                        },
+                        "objectIdField": {
+                          "type": "string"
+                        },
+                        "atField": {
+                          "type": "string"
+                        },
+                        "valueField": {
+                          "type": "string"
+                        },
+                        "unitField": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "_tag",
+                        "id",
+                        "objectTypeId",
+                        "propertyId",
+                        "datasetId",
+                        "objectIdField",
+                        "atField",
+                        "valueField"
                       ],
                       "additionalProperties": false
                     }

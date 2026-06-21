@@ -4051,6 +4051,17 @@ export type ListProjectionsResponses = {
       sourceField: string
       targetField: string
     }>
+    telemetryProjections: Array<{
+      _tag: "TelemetryProjectionDefinition"
+      id: string
+      objectTypeId: string
+      propertyId: string
+      datasetId: string
+      objectIdField: string
+      atField: string
+      valueField: string
+      unitField?: string
+    }>
   }
 }
 
@@ -4107,6 +4118,17 @@ export type GetProjectionResponses = {
         datasetId: string
         sourceField: string
         targetField: string
+      }
+    | {
+        _tag: "TelemetryProjectionDefinition"
+        id: string
+        objectTypeId: string
+        propertyId: string
+        datasetId: string
+        objectIdField: string
+        atField: string
+        valueField: string
+        unitField?: string
       }
 }
 

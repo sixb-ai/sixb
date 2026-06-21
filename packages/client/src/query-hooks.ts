@@ -6,6 +6,7 @@
  * query IR, so identical queries share cache entries — inline builders are
  * safe to construct on every render.
  */
+import type { InferPropertyValue, Property, TelemetryPropertyToken } from "@sixb/core"
 import type {
   ListResult,
   ListResultWithoutTotal,
@@ -13,6 +14,7 @@ import type {
   ObjectQueryExecutor,
   ObjectQueryFacetResult,
   ObjectQueryListOptions,
+  ObjectTypeWithPropertyTokens,
 } from "@sixb/core/query"
 import {
   infiniteQueryOptions,
@@ -23,12 +25,35 @@ import {
 } from "@tanstack/react-query"
 import { createContext, createElement, type ReactNode, useContext, useMemo } from "react"
 import type { Client } from "./generated/client"
+import { getTelemetryHistory, type Options } from "./generated/sdk.gen"
+import type { GetTelemetryHistoryData } from "./generated/types.gen"
 import { createHttpQueryExecutor } from "./query"
 
 const objectQueryBaseKey = ["sixb", "objects"] as const
 
 function objectQueryKey(scope: string, ir: ObjectQuery, extra?: unknown) {
   return [...objectQueryBaseKey, scope, ir, extra ?? null] as const
+}
+
+const telemetryHistoryBaseKey = ["sixb", "telemetry", "history"] as const
+
+function toTelemetryHistoryDate(value: Date | string | undefined): string | undefined {
+  return value instanceof Date ? value.toISOString() : value
+}
+
+function toTelemetryHistoryLimit(value: number | string | undefined): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(1, Math.trunc(value)).toString()
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10)
+    if (Number.isFinite(parsed)) {
+      return Math.max(1, parsed).toString()
+    }
+  }
+
+  return undefined
 }
 
 // Options factories accept anything query-shaped, so they work with builders
@@ -166,6 +191,126 @@ type QueryHookExtras = {
   retry?: boolean | number
 }
 
+export type TelemetryHistoryValue<
+  TProperty extends { readonly property: Pick<Property, "schema" | "nullable"> },
+> = InferPropertyValue<TProperty["property"]>
+
+export interface TelemetryHistoryPoint<TValue> {
+  readonly projectId: string
+  readonly objectTypeId: string
+  readonly objectId: string
+  readonly propertyId: string
+  readonly value: TValue
+  readonly unit?: string
+  readonly at: string
+}
+
+export type TelemetryHistoryPoints<
+  TProperty extends { readonly property: Pick<Property, "schema" | "nullable"> },
+> = readonly TelemetryHistoryPoint<TelemetryHistoryValue<TProperty>>[]
+
+export interface TelemetryHistoryQueryOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType> = TelemetryPropertyToken<TObjectType>,
+> extends Omit<Options<GetTelemetryHistoryData>, "path" | "query"> {
+  readonly objectType: TObjectType
+  readonly objectId: string
+  readonly property: TProperty & TelemetryPropertyToken<NoInfer<TObjectType>>
+  readonly from?: Date | string
+  readonly to?: Date | string
+  readonly limit?: number | string
+  readonly order?: "asc" | "desc"
+}
+
+export type TelemetryHistoryHookOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType> = TelemetryPropertyToken<TObjectType>,
+> = TelemetryHistoryQueryOptions<TObjectType, TProperty> & QueryHookExtras
+
+function telemetryHistoryPath<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(options: TelemetryHistoryQueryOptions<TObjectType, TProperty>) {
+  return {
+    objectTypeId: options.objectType.id,
+    objectId: options.objectId,
+    propertyId: options.property.id,
+  }
+}
+
+function telemetryHistoryQuery<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(options: TelemetryHistoryQueryOptions<TObjectType, TProperty>) {
+  return {
+    from: toTelemetryHistoryDate(options.from),
+    to: toTelemetryHistoryDate(options.to),
+    limit: toTelemetryHistoryLimit(options.limit),
+    order: options.order ?? "asc",
+  }
+}
+
+export function telemetryHistoryQueryKey<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(options: TelemetryHistoryQueryOptions<TObjectType, TProperty>) {
+  return [
+    ...telemetryHistoryBaseKey,
+    telemetryHistoryPath(options),
+    telemetryHistoryQuery(options),
+  ] as const
+}
+
+async function fetchTelemetryHistory<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(
+  options: TelemetryHistoryQueryOptions<TObjectType, TProperty>,
+  signal?: AbortSignal
+): Promise<TelemetryHistoryPoints<TProperty>> {
+  const path = telemetryHistoryPath(options)
+  const query = telemetryHistoryQuery(options)
+  const {
+    objectType: _objectType,
+    objectId: _objectId,
+    property: _property,
+    from: _from,
+    to: _to,
+    limit: _limit,
+    order: _order,
+    ...rest
+  } = options
+
+  const { data } = await getTelemetryHistory({
+    ...rest,
+    path,
+    query,
+    signal,
+    responseStyle: "fields",
+    throwOnError: true,
+  })
+
+  return data.map((point) => ({
+    projectId: point.projectId,
+    objectTypeId: point.objectTypeId,
+    objectId: point.objectId,
+    propertyId: point.propertyId,
+    value: point.value as TelemetryHistoryValue<TProperty>,
+    unit: point.unit,
+    at: point.at,
+  }))
+}
+
+export function telemetryHistoryQueryOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(options: TelemetryHistoryQueryOptions<TObjectType, TProperty>) {
+  return queryOptions({
+    queryKey: telemetryHistoryQueryKey(options),
+    queryFn: ({ signal }) => fetchTelemetryHistory(options, signal),
+  })
+}
+
 /**
  * Executor bound to the nearest `SixbProvider` client, or the global client.
  * Hooks run the query IR through this, so the binding a query was built with
@@ -174,6 +319,40 @@ type QueryHookExtras = {
 function useClientQueryExecutor(): ObjectQueryExecutor {
   const client = useContext(SixbClientContext)
   return useMemo(() => createHttpQueryExecutor(client), [client])
+}
+
+export function useTelemetryHistoryQuery<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperty extends TelemetryPropertyToken<TObjectType>,
+>(
+  options: TelemetryHistoryHookOptions<TObjectType, TProperty>
+): UseQueryResult<TelemetryHistoryPoints<TProperty>, Error> {
+  const client = useContext(SixbClientContext)
+  const {
+    enabled,
+    staleTime,
+    gcTime,
+    refetchInterval,
+    refetchOnWindowFocus,
+    retry,
+    ...historyOptions
+  } = options
+
+  const historyInput: TelemetryHistoryQueryOptions<TObjectType, TProperty> = {
+    ...historyOptions,
+    client: historyOptions.client ?? client,
+  }
+
+  return useQuery({
+    queryKey: telemetryHistoryQueryKey(historyInput),
+    queryFn: ({ signal }) => fetchTelemetryHistory(historyInput, signal),
+    enabled,
+    staleTime,
+    gcTime,
+    refetchInterval,
+    refetchOnWindowFocus,
+    retry,
+  })
 }
 
 export function useObjectsQuery<TBuilt extends { readonly ir: ObjectQuery }>(

@@ -121,7 +121,11 @@ export async function startOrchestratorRuntime(
   const { routes, diagnostics } = compileRoutesWithDiagnostics({
     syncs: sixb.getSyncDefinitions(),
     pipelines: sixb.getPipelineDefinitions(),
-    projections: [...sixb.getObjectProjections(), ...sixb.getLinkProjections()],
+    projections: [
+      ...sixb.getObjectProjections(),
+      ...sixb.getLinkProjections(),
+      ...sixb.getTelemetryProjections(),
+    ],
     workflows: sixb.workflows.list(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
@@ -217,7 +221,10 @@ export async function startSixbRuntime(
         await actionWorker.start()
       }
 
-      const projectionCount = sixb.getObjectProjections().length + sixb.getLinkProjections().length
+      const projectionCount =
+        sixb.getObjectProjections().length +
+        sixb.getLinkProjections().length +
+        sixb.getTelemetryProjections().length
       if (projectionCount > 0) {
         projectionWorker = new ProjectionWorker(sixb)
         await projectionWorker.start()
