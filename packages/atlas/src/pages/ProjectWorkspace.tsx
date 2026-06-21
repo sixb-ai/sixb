@@ -29,7 +29,9 @@ import {
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
+import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccountsPage"
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
+import { SettingsTokensPage } from "../components/SettingsTokensPage"
 import { WorkflowLiveUpdatesBoundary } from "../features/workflows/components/WorkflowLiveUpdatesBoundary"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
 import {
@@ -395,7 +397,9 @@ export function ProjectWorkspace() {
             <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
             <Route path="rules" element={<RulesPage />} />
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
-            <Route path="settings" element={<Navigate to="/settings/invitations" replace />} />
+            <Route path="settings" element={<Navigate to="/settings/tokens" replace />} />
+            <Route path="settings/tokens" element={<SettingsTokensPage />} />
+            <Route path="settings/service-accounts" element={<SettingsServiceAccountsPage />} />
             <Route path="settings/invitations" element={<SettingsInvitationsPage />} />
             <Route path="settings/sessions" element={<SettingsSessionsPage />} />
             <Route

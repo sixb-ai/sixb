@@ -2,6 +2,12 @@ import { z } from "zod"
 
 export const AuthInvitationStatusSchema = z.enum(["pending", "accepted", "revoked"])
 
+export const AuthGroupOptionSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  description: z.string().optional(),
+})
+
 export const AuthInvitationSchema = z.object({
   id: z.string(),
   email: z.string(),
@@ -18,10 +24,112 @@ export const AuthInvitationDeliverySchema = z.object({
   status: z.enum(["sent", "skipped", "rate_limited", "not_supported"]),
 })
 
-export const AuthInvitationGroupOptionSchema = z.object({
+export const AuthInvitationGroupOptionSchema = AuthGroupOptionSchema
+
+export const AuthAccessTokenKindSchema = z.enum(["personal", "serviceAccount"])
+export const AuthAccessTokenSubjectTypeSchema = z.enum(["user", "serviceAccount"])
+export const AuthAccessTokenStatusSchema = z.enum(["active", "expired", "revoked"])
+export const AuthServiceAccountStatusSchema = z.enum(["active", "suspended"])
+
+export const AuthAccessTokenSchema = z.object({
   id: z.string(),
-  label: z.string().optional(),
+  name: z.string(),
+  kind: AuthAccessTokenKindSchema,
+  status: AuthAccessTokenStatusSchema,
+  subjectType: AuthAccessTokenSubjectTypeSchema,
+  subjectId: z.string(),
+  subjectLabel: z.string().optional(),
+  groupIds: z.array(z.string()).optional(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  revokedAt: z.string().optional(),
+  lastUsedAt: z.string().optional(),
+  lastUsedUserAgent: z.string().optional(),
+  lastUsedIpAddress: z.string().optional(),
+})
+
+export const AuthServiceAccountSchema = z.object({
+  id: z.string(),
+  name: z.string(),
   description: z.string().optional(),
+  status: AuthServiceAccountStatusSchema,
+  groupIds: z.array(z.string()),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export const GetAuthAccessManagementOptionsResponseSchema = z.object({
+  groups: z.array(AuthGroupOptionSchema),
+})
+
+export const ListAuthAccessTokensResponseSchema = z.object({
+  accessTokens: z.array(AuthAccessTokenSchema),
+})
+
+export const CreateAuthPersonalAccessTokenBodySchema = z.object({
+  name: z.string().trim().min(1),
+  expiresAt: z.string().min(1),
+  groupIds: z.array(z.string().min(1)).optional(),
+})
+
+export const CreateAuthPersonalAccessTokenResponseSchema = z.object({
+  accessToken: AuthAccessTokenSchema,
+  tokenValue: z.string(),
+})
+
+export const RevokeAuthAccessTokenParamsSchema = z.object({
+  tokenId: z.string().min(1),
+})
+
+export const RevokeAuthAccessTokenResponseSchema = z.object({
+  accessToken: AuthAccessTokenSchema,
+})
+
+export const ListAuthServiceAccountsResponseSchema = z.object({
+  serviceAccounts: z.array(AuthServiceAccountSchema),
+})
+
+export const CreateAuthServiceAccountBodySchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1),
+  description: z.string().trim().optional(),
+  groupIds: z.array(z.string().min(1)).optional(),
+})
+
+export const CreateAuthServiceAccountResponseSchema = z.object({
+  serviceAccount: AuthServiceAccountSchema,
+})
+
+export const AuthServiceAccountParamsSchema = z.object({
+  serviceAccountId: z.string().min(1),
+})
+
+export const DisableAuthServiceAccountResponseSchema = z.object({
+  serviceAccount: AuthServiceAccountSchema,
+})
+
+export const ListAuthServiceAccountAccessTokensResponseSchema = z.object({
+  accessTokens: z.array(AuthAccessTokenSchema),
+})
+
+export const CreateAuthServiceAccountAccessTokenBodySchema = z.object({
+  name: z.string().trim().min(1),
+  expiresAt: z.string().min(1),
+  groupIds: z.array(z.string().min(1)).optional(),
+})
+
+export const CreateAuthServiceAccountAccessTokenResponseSchema = z.object({
+  accessToken: AuthAccessTokenSchema,
+  tokenValue: z.string(),
+})
+
+export const RevokeAuthServiceAccountAccessTokenParamsSchema =
+  AuthServiceAccountParamsSchema.extend({
+    tokenId: z.string().min(1),
+  })
+
+export const RevokeAuthServiceAccountAccessTokenResponseSchema = z.object({
+  accessToken: AuthAccessTokenSchema,
 })
 
 export const AuthCreateInvitationCapabilitySchema = z.union([

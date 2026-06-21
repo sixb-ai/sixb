@@ -1,9 +1,10 @@
 import {
-  type AuthSessionResult,
+  type AuthenticatedRequestAuthSession,
   type OntologySource,
   type Sixb,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core"
+import { isAccessTokenRoute, shouldVerifyCsrfForAuthSource } from "./access-token-boundary"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
@@ -28,7 +29,7 @@ export interface ServerAuthGuardOptions {
  */
 export type ServerAuthGuardDecision =
   | { readonly kind: "deny"; readonly response: Response }
-  | { readonly kind: "allow"; readonly session: AuthSessionResult | null }
+  | { readonly kind: "allow"; readonly session: AuthenticatedRequestAuthSession | null }
 
 export class ServerAuthGuard {
   private readonly sixb: Sixb<readonly OntologySource[]>
@@ -64,6 +65,7 @@ export class ServerAuthGuard {
 
     const session = await this.sixb.auth.getSession(request, {
       audience: authContext.audience,
+      credentialSource: "any",
     })
     if (!session.authenticated) {
       if (route.kind === "html") {
@@ -83,7 +85,17 @@ export class ServerAuthGuard {
       return { kind: "deny", response: jsonAuthRequiredResponse() }
     }
 
-    if (route.csrfProtected && !this.verifyCsrf(request, session)) {
+    if (session.credentialSource === "accessToken" && !isAccessTokenRoute(request)) {
+      return {
+        kind: "deny",
+        response: jsonForbiddenResponse("Access tokens cannot authenticate this route"),
+      }
+    }
+
+    if (
+      shouldVerifyCsrfForAuthSource(route, session.credentialSource) &&
+      !this.verifyCsrf(request, session)
+    ) {
       return { kind: "deny", response: jsonCsrfFailedResponse() }
     }
 
@@ -95,10 +107,7 @@ export class ServerAuthGuard {
     return this.sixb.auth.getCookieOptions({ audience }).csrfCookieName
   }
 
-  verifyCsrf(
-    request: Request,
-    _session: Extract<AuthSessionResult, { authenticated: true }>
-  ): boolean {
+  verifyCsrf(request: Request, _session: AuthenticatedRequestAuthSession): boolean {
     return verifyDoubleSubmitCsrf(request, {
       cookieName: this.getCsrfCookieName(request),
     })

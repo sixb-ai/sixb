@@ -2,6 +2,8 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Link, useLocation } from "react-router-dom"
 
 const TABS = [
+  { label: "Tokens", path: "/settings/tokens" },
+  { label: "Service accounts", path: "/settings/service-accounts" },
   { label: "Invitations", path: "/settings/invitations" },
   { label: "Sessions", path: "/settings/sessions" },
 ] as const

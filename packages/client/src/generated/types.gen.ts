@@ -375,6 +375,603 @@ export type SignOutAllResponses = {
 
 export type SignOutAllResponse = SignOutAllResponses[keyof SignOutAllResponses]
 
+export type GetAuthAccessManagementOptionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/access-management-options"
+}
+
+export type GetAuthAccessManagementOptionsErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type GetAuthAccessManagementOptionsError =
+  GetAuthAccessManagementOptionsErrors[keyof GetAuthAccessManagementOptionsErrors]
+
+export type GetAuthAccessManagementOptionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    groups: Array<{
+      id: string
+      label?: string
+      description?: string
+    }>
+  }
+}
+
+export type GetAuthAccessManagementOptionsResponse =
+  GetAuthAccessManagementOptionsResponses[keyof GetAuthAccessManagementOptionsResponses]
+
+export type ListAuthAccessTokensData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/access-tokens"
+}
+
+export type ListAuthAccessTokensErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type ListAuthAccessTokensError = ListAuthAccessTokensErrors[keyof ListAuthAccessTokensErrors]
+
+export type ListAuthAccessTokensResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accessTokens: Array<{
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }>
+  }
+}
+
+export type ListAuthAccessTokensResponse =
+  ListAuthAccessTokensResponses[keyof ListAuthAccessTokensResponses]
+
+export type CreateAuthPersonalAccessTokenData = {
+  body: {
+    name: string
+    expiresAt: string
+    groupIds?: Array<string>
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/access-tokens"
+}
+
+export type CreateAuthPersonalAccessTokenErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type CreateAuthPersonalAccessTokenError =
+  CreateAuthPersonalAccessTokenErrors[keyof CreateAuthPersonalAccessTokenErrors]
+
+export type CreateAuthPersonalAccessTokenResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    accessToken: {
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }
+    tokenValue: string
+  }
+}
+
+export type CreateAuthPersonalAccessTokenResponse =
+  CreateAuthPersonalAccessTokenResponses[keyof CreateAuthPersonalAccessTokenResponses]
+
+export type RevokeAuthAccessTokenData = {
+  body?: never
+  path: {
+    tokenId: string
+  }
+  query?: never
+  url: "/api/auth/access-tokens/{tokenId}/revoke"
+}
+
+export type RevokeAuthAccessTokenErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type RevokeAuthAccessTokenError =
+  RevokeAuthAccessTokenErrors[keyof RevokeAuthAccessTokenErrors]
+
+export type RevokeAuthAccessTokenResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accessToken: {
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }
+  }
+}
+
+export type RevokeAuthAccessTokenResponse =
+  RevokeAuthAccessTokenResponses[keyof RevokeAuthAccessTokenResponses]
+
+export type ListAuthServiceAccountsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/service-accounts"
+}
+
+export type ListAuthServiceAccountsErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type ListAuthServiceAccountsError =
+  ListAuthServiceAccountsErrors[keyof ListAuthServiceAccountsErrors]
+
+export type ListAuthServiceAccountsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    serviceAccounts: Array<{
+      id: string
+      name: string
+      description?: string
+      status: "active" | "suspended"
+      groupIds: Array<string>
+      createdAt: string
+      updatedAt: string
+    }>
+  }
+}
+
+export type ListAuthServiceAccountsResponse =
+  ListAuthServiceAccountsResponses[keyof ListAuthServiceAccountsResponses]
+
+export type CreateAuthServiceAccountData = {
+  body: {
+    id?: string
+    name: string
+    description?: string
+    groupIds?: Array<string>
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/service-accounts"
+}
+
+export type CreateAuthServiceAccountErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type CreateAuthServiceAccountError =
+  CreateAuthServiceAccountErrors[keyof CreateAuthServiceAccountErrors]
+
+export type CreateAuthServiceAccountResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    serviceAccount: {
+      id: string
+      name: string
+      description?: string
+      status: "active" | "suspended"
+      groupIds: Array<string>
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type CreateAuthServiceAccountResponse =
+  CreateAuthServiceAccountResponses[keyof CreateAuthServiceAccountResponses]
+
+export type DisableAuthServiceAccountData = {
+  body?: never
+  path: {
+    serviceAccountId: string
+  }
+  query?: never
+  url: "/api/auth/service-accounts/{serviceAccountId}/disable"
+}
+
+export type DisableAuthServiceAccountErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type DisableAuthServiceAccountError =
+  DisableAuthServiceAccountErrors[keyof DisableAuthServiceAccountErrors]
+
+export type DisableAuthServiceAccountResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    serviceAccount: {
+      id: string
+      name: string
+      description?: string
+      status: "active" | "suspended"
+      groupIds: Array<string>
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type DisableAuthServiceAccountResponse =
+  DisableAuthServiceAccountResponses[keyof DisableAuthServiceAccountResponses]
+
+export type ListAuthServiceAccountAccessTokensData = {
+  body?: never
+  path: {
+    serviceAccountId: string
+  }
+  query?: never
+  url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens"
+}
+
+export type ListAuthServiceAccountAccessTokensErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type ListAuthServiceAccountAccessTokensError =
+  ListAuthServiceAccountAccessTokensErrors[keyof ListAuthServiceAccountAccessTokensErrors]
+
+export type ListAuthServiceAccountAccessTokensResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accessTokens: Array<{
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }>
+  }
+}
+
+export type ListAuthServiceAccountAccessTokensResponse =
+  ListAuthServiceAccountAccessTokensResponses[keyof ListAuthServiceAccountAccessTokensResponses]
+
+export type CreateAuthServiceAccountAccessTokenData = {
+  body: {
+    name: string
+    expiresAt: string
+    groupIds?: Array<string>
+  }
+  path: {
+    serviceAccountId: string
+  }
+  query?: never
+  url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens"
+}
+
+export type CreateAuthServiceAccountAccessTokenErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type CreateAuthServiceAccountAccessTokenError =
+  CreateAuthServiceAccountAccessTokenErrors[keyof CreateAuthServiceAccountAccessTokenErrors]
+
+export type CreateAuthServiceAccountAccessTokenResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    accessToken: {
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }
+    tokenValue: string
+  }
+}
+
+export type CreateAuthServiceAccountAccessTokenResponse =
+  CreateAuthServiceAccountAccessTokenResponses[keyof CreateAuthServiceAccountAccessTokenResponses]
+
+export type RevokeAuthServiceAccountAccessTokenData = {
+  body?: never
+  path: {
+    serviceAccountId: string
+    tokenId: string
+  }
+  query?: never
+  url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke"
+}
+
+export type RevokeAuthServiceAccountAccessTokenErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type RevokeAuthServiceAccountAccessTokenError =
+  RevokeAuthServiceAccountAccessTokenErrors[keyof RevokeAuthServiceAccountAccessTokenErrors]
+
+export type RevokeAuthServiceAccountAccessTokenResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accessToken: {
+      id: string
+      name: string
+      kind: "personal" | "serviceAccount"
+      status: "active" | "expired" | "revoked"
+      subjectType: "user" | "serviceAccount"
+      subjectId: string
+      subjectLabel?: string
+      groupIds?: Array<string>
+      createdAt: string
+      expiresAt: string
+      revokedAt?: string
+      lastUsedAt?: string
+      lastUsedUserAgent?: string
+      lastUsedIpAddress?: string
+    }
+  }
+}
+
+export type RevokeAuthServiceAccountAccessTokenResponse =
+  RevokeAuthServiceAccountAccessTokenResponses[keyof RevokeAuthServiceAccountAccessTokenResponses]
+
 export type ListAuthInvitationsData = {
   body?: never
   path?: never

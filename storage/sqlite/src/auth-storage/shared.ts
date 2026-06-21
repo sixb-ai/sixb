@@ -649,10 +649,12 @@ export function revokeActiveMagicLinksForEmail(
 export function mapUniqueConstraintError(
   error: unknown,
   code:
+    | "duplicate_access_token"
     | "duplicate_identity"
     | "duplicate_invitation"
     | "duplicate_magic_link"
     | "duplicate_oidc_attempt"
+    | "duplicate_service_account"
     | "duplicate_session"
     | "duplicate_user",
   message: string

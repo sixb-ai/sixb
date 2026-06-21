@@ -1,8 +1,10 @@
-import type { AuthSessionAudience, Principal } from "../../auth"
+import type { AccessTokenKind, AuthSessionAudience, Principal } from "../../auth"
 
 export type UserStatus = "active" | "suspended"
+export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
 export type GroupMembershipSource = "invitation" | "manual"
+export type AccessTokenSubjectType = "user" | "serviceAccount"
 
 export interface UserRecord {
   readonly id: string
@@ -25,6 +27,26 @@ export interface UserIdentityRecord {
   readonly updatedAt: Date
 }
 
+export interface ServiceAccountRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly name: string
+  readonly description?: string
+  readonly status: ServiceAccountStatus
+  readonly createdByPrincipal?: Principal
+  readonly createdBySessionId?: string
+  readonly createdAt: Date
+  readonly updatedAt: Date
+}
+
+export interface ServiceAccountGroupMembershipRecord {
+  readonly projectId: string
+  readonly serviceAccountId: string
+  readonly groupId: string
+  readonly source: GroupMembershipSource
+  readonly createdAt: Date
+}
+
 export interface SessionRecord {
   readonly id: string
   readonly projectId: string
@@ -40,6 +62,30 @@ export interface SessionRecord {
   // view. Display only — never used for authorization.
   readonly userAgent?: string
   readonly ipAddress?: string
+}
+
+export interface AccessTokenRecord {
+  readonly id: string
+  readonly projectId: string
+  readonly name: string
+  readonly kind: AccessTokenKind
+  readonly subjectType: AccessTokenSubjectType
+  readonly subjectId: string
+  readonly tokenHash: string
+  /**
+   * Optional group constraint. Undefined means "inherit every current group";
+   * an empty array means the token authenticates but has no group-derived grants.
+   */
+  readonly groupIds?: readonly string[]
+  readonly createdByPrincipal?: Principal
+  readonly createdBySessionId?: string
+  readonly createdAt: Date
+  readonly expiresAt: Date
+  readonly revokedAt?: Date
+  readonly lastUsedAt?: Date
+  // Best-effort client metadata for audit/debugging. Display only.
+  readonly lastUsedUserAgent?: string
+  readonly lastUsedIpAddress?: string
 }
 
 export interface InvitationRecord {
@@ -143,6 +189,49 @@ export interface UpsertAuthUserIdentityInput {
   readonly updatedAt?: Date
 }
 
+export interface CreateAuthServiceAccountInput {
+  readonly id: string
+  readonly projectId: string
+  readonly name: string
+  readonly description?: string
+  readonly status?: ServiceAccountStatus
+  readonly createdByPrincipal?: Principal
+  readonly createdBySessionId?: string
+  readonly createdAt?: Date
+  readonly updatedAt?: Date
+}
+
+export interface UpdateAuthServiceAccountInput {
+  readonly projectId: string
+  readonly id: string
+  readonly name?: string
+  readonly description?: string
+  readonly status?: ServiceAccountStatus
+  readonly updatedAt?: Date
+}
+
+export interface ListAuthServiceAccountsInput {
+  readonly projectId: string
+  readonly statuses?: readonly ServiceAccountStatus[]
+  readonly limit?: number
+  readonly offset?: number
+  readonly order?: "asc" | "desc"
+}
+
+export interface ListAuthServiceAccountsResult {
+  readonly serviceAccounts: readonly ServiceAccountRecord[]
+  readonly hasMore: boolean
+  readonly total: number
+}
+
+export interface UpsertAuthServiceAccountGroupMembershipInput {
+  readonly projectId: string
+  readonly serviceAccountId: string
+  readonly groupId: string
+  readonly source: GroupMembershipSource
+  readonly createdAt?: Date
+}
+
 export interface CreateAuthSessionInput {
   readonly id: string
   readonly projectId: string
@@ -154,6 +243,38 @@ export interface CreateAuthSessionInput {
   readonly expiresAt: Date
   readonly userAgent?: string
   readonly ipAddress?: string
+}
+
+export interface CreateAuthAccessTokenInput {
+  readonly id: string
+  readonly projectId: string
+  readonly name: string
+  readonly kind: AccessTokenKind
+  readonly subjectType: AccessTokenSubjectType
+  readonly subjectId: string
+  readonly tokenHash: string
+  readonly groupIds?: readonly string[]
+  readonly createdByPrincipal?: Principal
+  readonly createdBySessionId?: string
+  readonly createdAt: Date
+  readonly expiresAt: Date
+}
+
+export interface ListAuthAccessTokensInput {
+  readonly projectId: string
+  readonly kind?: AccessTokenKind
+  readonly subjectType?: AccessTokenSubjectType
+  readonly subjectId?: string
+  readonly includeRevoked?: boolean
+  readonly limit?: number
+  readonly offset?: number
+  readonly order?: "asc" | "desc"
+}
+
+export interface ListAuthAccessTokensResult {
+  readonly accessTokens: readonly AccessTokenRecord[]
+  readonly hasMore: boolean
+  readonly total: number
 }
 
 export interface CompleteAuthSessionInput {
@@ -299,6 +420,30 @@ export interface AuthUserIdentityStore {
   }): Promise<readonly UserIdentityRecord[]>
 }
 
+export interface AuthServiceAccountStore {
+  create(input: CreateAuthServiceAccountInput): Promise<ServiceAccountRecord>
+  getById(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<ServiceAccountRecord | null>
+  update(input: UpdateAuthServiceAccountInput): Promise<ServiceAccountRecord>
+  list(input: ListAuthServiceAccountsInput): Promise<ListAuthServiceAccountsResult>
+}
+
+export interface AuthServiceAccountGroupMembershipStore {
+  upsert(
+    input: UpsertAuthServiceAccountGroupMembershipInput
+  ): Promise<ServiceAccountGroupMembershipRecord>
+  listForServiceAccount(params: {
+    readonly projectId: string
+    readonly serviceAccountId: string
+  }): Promise<readonly ServiceAccountGroupMembershipRecord[]>
+  listForGroup(params: {
+    readonly projectId: string
+    readonly groupId: string
+  }): Promise<readonly ServiceAccountGroupMembershipRecord[]>
+}
+
 export interface AuthSessionStore {
   create(input: CreateAuthSessionInput): Promise<SessionRecord>
   getById(params: {
@@ -341,6 +486,34 @@ export interface AuthSessionStore {
     readonly id: string
     readonly lastSeenAt: Date
   }): Promise<SessionRecord>
+}
+
+export interface AuthAccessTokenStore {
+  create(input: CreateAuthAccessTokenInput): Promise<AccessTokenRecord>
+  getById(params: {
+    readonly projectId: string
+    readonly id: string
+  }): Promise<AccessTokenRecord | null>
+  list(input: ListAuthAccessTokensInput): Promise<ListAuthAccessTokensResult>
+  findValidByTokenHash(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly kind: AccessTokenKind
+    readonly tokenHash: string
+    readonly now: Date
+  }): Promise<AccessTokenRecord | null>
+  revoke(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly revokedAt: Date
+  }): Promise<AccessTokenRecord>
+  touch(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly lastUsedAt: Date
+    readonly userAgent?: string
+    readonly ipAddress?: string
+  }): Promise<AccessTokenRecord>
 }
 
 export interface AuthInvitationStore {
@@ -420,7 +593,10 @@ export interface AuthOidcAuthorizationAttemptStore {
 export interface AuthStorage {
   readonly users: AuthUserStore
   readonly identities: AuthUserIdentityStore
+  readonly serviceAccounts: AuthServiceAccountStore
+  readonly serviceAccountGroupMemberships: AuthServiceAccountGroupMembershipStore
   readonly sessions: AuthSessionStore
+  readonly accessTokens: AuthAccessTokenStore
   readonly invitations: AuthInvitationStore
   readonly groupMemberships: AuthGroupMembershipStore
   readonly magicLinks: AuthMagicLinkStore

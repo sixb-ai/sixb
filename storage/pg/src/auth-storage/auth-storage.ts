@@ -18,6 +18,7 @@ import {
   type PgStoreClient,
   runPgTransaction,
 } from "../transactions"
+import { PgAuthAccessTokenStore } from "./access-tokens"
 import { PgAuthGroupMembershipStore } from "./group-memberships"
 import { PgAuthUserIdentityStore } from "./identities"
 import { PgAuthInvitationStore } from "./invitations"
@@ -30,6 +31,8 @@ import type {
   PgAuthUserRow,
 } from "./rows"
 import { rowToIdentityRecord, rowToUserRecord, serializeOptionalRecord } from "./rows"
+import { PgAuthServiceAccountGroupMembershipStore } from "./service-account-group-memberships"
+import { PgAuthServiceAccountStore } from "./service-accounts"
 import { PgAuthSessionStore } from "./sessions"
 import {
   assertMagicLinkUsable,
@@ -66,7 +69,10 @@ export class PgAuthStorage implements AuthStorage {
 
   readonly users: PgAuthUserStore
   readonly identities: PgAuthUserIdentityStore
+  readonly serviceAccounts: PgAuthServiceAccountStore
+  readonly serviceAccountGroupMemberships: PgAuthServiceAccountGroupMembershipStore
   readonly sessions: PgAuthSessionStore
+  readonly accessTokens: PgAuthAccessTokenStore
   readonly invitations: PgAuthInvitationStore
   readonly groupMemberships: PgAuthGroupMembershipStore
   readonly magicLinks: PgAuthMagicLinkStore
@@ -76,7 +82,10 @@ export class PgAuthStorage implements AuthStorage {
     this.sql = options.sql
     this.users = new PgAuthUserStore(this.sql)
     this.identities = new PgAuthUserIdentityStore(this.sql)
+    this.serviceAccounts = new PgAuthServiceAccountStore(this.sql)
+    this.serviceAccountGroupMemberships = new PgAuthServiceAccountGroupMembershipStore(this.sql)
     this.sessions = new PgAuthSessionStore(this.sql)
+    this.accessTokens = new PgAuthAccessTokenStore(this.sql)
     this.invitations = new PgAuthInvitationStore(this.sql)
     this.groupMemberships = new PgAuthGroupMembershipStore(this.sql)
     this.magicLinks = new PgAuthMagicLinkStore(this.sql)

@@ -18,7 +18,12 @@ import {
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
-import { SIXB_CSRF_SECURITY_SCHEME, SIXB_CSRF_SECURITY_SCHEME_ID } from "./openapi/security"
+import {
+  SIXB_BEARER_SECURITY_SCHEME,
+  SIXB_BEARER_SECURITY_SCHEME_ID,
+  SIXB_CSRF_SECURITY_SCHEME,
+  SIXB_CSRF_SECURITY_SCHEME_ID,
+} from "./openapi/security"
 import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
@@ -144,7 +149,7 @@ export function createSixbApi(server: SixbServer) {
       origin: (request) => isAllowedApiBrowserOrigin(apiBrowserPolicy, request),
       credentials: true,
       methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["content-type", CSRF_HEADER_NAME],
+      allowedHeaders: ["authorization", "content-type", CSRF_HEADER_NAME],
       exposeHeaders: [],
       maxAge: 600,
     })
@@ -178,6 +183,7 @@ export function createSixbApi(server: SixbServer) {
         components: {
           securitySchemes: {
             [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
+            [SIXB_BEARER_SECURITY_SCHEME_ID]: SIXB_BEARER_SECURITY_SCHEME,
           },
           schemas: ObjectQueryOpenApiSchemas,
         },
