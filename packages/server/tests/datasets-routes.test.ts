@@ -60,6 +60,7 @@ function createSixbStub(
     getPipelineDefinitions: () => [],
     getObjectProjections: () => [],
     getLinkProjections: () => [],
+    getTelemetryProjections: () => [],
   } as unknown as Sixb<readonly OntologySource[]>
 }
 

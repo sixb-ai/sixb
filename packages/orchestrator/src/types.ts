@@ -2,20 +2,27 @@ import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
   EventsRuntime,
+  LinkProjectionDefinition,
   NewQueueJob,
+  ObjectProjectionDefinition,
   PipelineDefinition,
   PipelineRunFinishedEvent,
   PipelineRunRequestedQueueJob,
-  ProjectionDefinition,
   ProjectionRunRequestedQueueJob,
   Queues,
   ScheduleTriggeredEvent,
   SyncDefinition,
   SyncRunFinishedEvent,
   SyncRunRequestedQueueJob,
+  TelemetryProjectionDefinition,
   WorkflowDefinition,
   WorkflowRunRequestedQueueJob,
 } from "@sixb/core"
+
+export type RoutableProjectionDefinition =
+  | ObjectProjectionDefinition
+  | LinkProjectionDefinition
+  | TelemetryProjectionDefinition
 
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`
@@ -58,7 +65,7 @@ export type OrchestratorRoutes = ReadonlyMap<OrchestratorRouteKey, OrchestratorR
 export interface CompileRoutesParams {
   readonly syncs: readonly SyncDefinition[]
   readonly pipelines: readonly PipelineDefinition[]
-  readonly projections?: readonly ProjectionDefinition[]
+  readonly projections?: readonly RoutableProjectionDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
 }
 

@@ -108,7 +108,11 @@ function buildDatasetReferenceIndex(
     }
   }
 
-  for (const projection of [...sixb.getObjectProjections(), ...sixb.getLinkProjections()]) {
+  for (const projection of [
+    ...sixb.getObjectProjections(),
+    ...sixb.getLinkProjections(),
+    ...sixb.getTelemetryProjections(),
+  ]) {
     referencesFor(projection.datasetId).projectionIds.push(projection.id)
   }
 

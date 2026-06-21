@@ -62,7 +62,12 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixb): readonly string[
     workerTypes.push("pipeline")
   }
 
-  if (sixb.getObjectProjections().length + sixb.getLinkProjections().length > 0) {
+  if (
+    sixb.getObjectProjections().length +
+      sixb.getLinkProjections().length +
+      sixb.getTelemetryProjections().length >
+    0
+  ) {
     workerTypes.push("projection")
   }
 

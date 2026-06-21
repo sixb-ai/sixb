@@ -12,6 +12,7 @@ import {
   defineProjection,
   defineSchedule,
   defineSync,
+  defineTelemetryProjection,
   defineWorkflow,
   defineWorkflowStep,
   link,
@@ -42,7 +43,10 @@ const Sensor = defineObjectType({
 const Room = defineObjectType({
   id: "room",
   name: "Room",
-  properties: [prop("id", "string", { required: true, primary: true })],
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("temperature", "double", { mode: "telemetry" }),
+  ],
   links: [link("hasSensors", Sensor, { cardinality: "many" })],
 })
 
@@ -55,6 +59,16 @@ function makeDataset(id: string) {
 function makeJoinDataset(id: string) {
   return defineDataset(id, {
     schema: [col("room_id", "string"), col("sensor_id", "string")],
+  })
+}
+
+function makeTelemetryDataset(id: string) {
+  return defineDataset(id, {
+    schema: [
+      col("room_id", "string"),
+      col("observed_at", "timestamp"),
+      col("temperature", "float64"),
+    ],
   })
 }
 
@@ -126,6 +140,12 @@ function makeLinkProjection(id: string, datasetId: string) {
     .fromDataset(makeJoinDataset(datasetId))
     .sourceField("room_id")
     .targetField("sensor_id")
+}
+
+function makeTelemetryProjection(id: string, datasetId: string) {
+  return defineTelemetryProjection(id, Room.p.temperature)
+    .fromDataset(makeTelemetryDataset(datasetId))
+    .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 }
 
 function getJobs(routes: OrchestratorRoutes, key: OrchestratorRouteKey) {
@@ -441,6 +461,29 @@ describe("compileRoutes", () => {
           projectionId: "room-sensors",
           projectionKind: "link",
           datasetId: "join.room-sensors",
+        },
+      },
+    })
+  })
+
+  test("one telemetry projection produces one projection route", () => {
+    const routes = compileRoutes({
+      syncs: [],
+      pipelines: [],
+      projections: [makeTelemetryProjection("room-temperature", "canonical.room-readings")],
+    })
+
+    expect(routes.size).toBe(1)
+    const jobs = getJobs(routes, "dataset.version.committed:canonical.room-readings")
+    expect(jobs).toHaveLength(1)
+    expect(jobs![0]).toEqual({
+      queue: "projections",
+      job: {
+        type: "projection.run.requested",
+        payload: {
+          projectionId: "room-temperature",
+          projectionKind: "telemetry",
+          datasetId: "canonical.room-readings",
         },
       },
     })

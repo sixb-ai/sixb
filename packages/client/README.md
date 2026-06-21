@@ -42,12 +42,12 @@ const { data: objects } = await listObjects({
 
 // Get a single object
 const { data: object } = await getObject({
-  path: { objectTypeId: "thermostat", objectKey: "living-room" },
+  path: { objectTypeId: "thermostat", objectId: "living-room" },
 })
 
 // Fetch telemetry history
 const { data: history } = await getTelemetryHistory({
-  path: { objectTypeId: "thermostat", objectKey: "living-room", propertyId: "temperature" },
+  path: { objectTypeId: "thermostat", objectId: "living-room", propertyId: "temperature" },
   query: { from: "2025-01-01T00:00:00Z", to: "2025-01-02T00:00:00Z", order: "asc" },
 })
 
@@ -77,6 +77,8 @@ import {
   listObjectsOptions,
   getObjectOptions,
   getTelemetryHistoryOptions,
+  telemetryHistoryQueryOptions,
+  useTelemetryHistoryQuery,
 } from "@sixb/client/hooks"
 
 // List objects with automatic caching and refetching
@@ -94,6 +96,22 @@ const { data: history } = useQuery(
     query: { range: "5m" },
   })
 )
+
+// Typed telemetry history with ontology tokens
+const { data: temperatureHistory } = useTelemetryHistoryQuery({
+  objectType: Thermostat,
+  objectId: "living-room",
+  property: Thermostat.p.temperature,
+  from: new Date("2025-01-01T00:00:00Z"),
+  to: new Date("2025-01-02T00:00:00Z"),
+})
+
+// The same token-based shape is available as a query options factory.
+const temperatureHistoryOptions = telemetryHistoryQueryOptions({
+  objectType: Thermostat,
+  objectId: "living-room",
+  property: Thermostat.p.temperature,
+})
 ```
 
 ### Domain events
@@ -128,5 +146,5 @@ The models module provides normalized types and adapter functions that transform
 | Entry point | What it provides |
 |---|---|
 | `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
-| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `listRelationshipsOptions`) and `useSixbEvents` |
+| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks), and `useSixbEvents` |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

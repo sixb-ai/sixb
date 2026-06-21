@@ -1,4 +1,9 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type {
+  OntologySource,
+  ProjectionDefinition,
+  Sixb,
+  TelemetryProjectionDefinition,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -15,6 +20,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         return {
           objectProjections: [...sixb.getObjectProjections()],
           linkProjections: [...sixb.getLinkProjections()],
+          telemetryProjections: sixb.getTelemetryProjections().map(serializeTelemetryProjection),
         }
       },
       {
@@ -29,13 +35,17 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
     .get(
       "/api/projections/:projectionId",
       ({ params, set }) => {
-        const all = [...sixb.getObjectProjections(), ...sixb.getLinkProjections()]
+        const all = [
+          ...sixb.getObjectProjections(),
+          ...sixb.getLinkProjections(),
+          ...sixb.getTelemetryProjections(),
+        ]
         const found = all.find((p) => p.id === params.projectionId)
         if (!found) {
           set.status = 404
           return { error: `Projection '${params.projectionId}' not found` }
         }
-        return found
+        return serializeProjection(found)
       },
       {
         params: ProjectionParamsSchema,
@@ -47,4 +57,26 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         },
       }
     )
+}
+
+function serializeProjection(projection: ProjectionDefinition) {
+  if (projection._tag !== "TelemetryProjectionDefinition") {
+    return projection
+  }
+
+  return serializeTelemetryProjection(projection)
+}
+
+function serializeTelemetryProjection(projection: TelemetryProjectionDefinition) {
+  return {
+    _tag: projection._tag,
+    id: projection.id,
+    objectTypeId: projection.objectTypeId,
+    propertyId: projection.propertyId,
+    datasetId: projection.datasetId,
+    objectIdField: projection.objectIdField,
+    atField: projection.atField,
+    valueField: projection.valueField,
+    ...(projection.unitField !== undefined ? { unitField: projection.unitField } : {}),
+  }
 }
