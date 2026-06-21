@@ -7,6 +7,7 @@ import {
   erpEmployeesDataset,
   erpInvoicesDataset,
   erpProjectMembersDataset,
+  erpProjectProgressDataset,
   erpProjectsDataset,
   erpTasksDataset,
 } from "../datasets/erp"
@@ -59,3 +60,9 @@ export const syncErpTasks = defineSync("sync-erp-tasks")
   .from(acmeErpConnector)
   .read((client) => client.listTasks())
   .intoDataset(erpTasksDataset)
+
+export const syncErpProjectProgress = defineSync("sync-erp-project-progress")
+  .when(syncFinished(syncErpTasks.id))
+  .from(acmeErpConnector)
+  .read((client) => client.listProjectProgress())
+  .intoDataset(erpProjectProgressDataset)

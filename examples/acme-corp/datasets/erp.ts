@@ -56,6 +56,12 @@ export const erpProjectMembersDataset = defineDataset("erp.project_members", {
   schema: [col("project_id", "string"), col("employee_id", "string")],
 })
 
+export const erpProjectProgressDataset = defineDataset("erp.project_progress", {
+  // recorded_at is a string column carrying zone-less local timestamps; the
+  // telemetry projection normalizes them to UTC instants when it materializes.
+  schema: [col("project_id", "string"), col("recorded_at", "string"), col("progress_pct", "int64")],
+})
+
 export const erpDocumentsDataset = defineDataset("erp.documents", {
   schema: [
     col("id", "string"),

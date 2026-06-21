@@ -1,6 +1,6 @@
 # Projection
 
-A projection turns dataset rows into ontology objects and links.
+A projection turns dataset rows into ontology objects, links, and telemetry points.
 
 Use projections after syncs and pipelines have produced clean table data. Projections are the
 step that makes that data show up as typed app objects.
@@ -14,6 +14,7 @@ A projection connects those two worlds:
 - map dataset columns to object properties
 - create or update objects from rows
 - create links from foreign key columns
+- append timestamped readings to telemetry properties
 - keep app state in sync with committed dataset versions
 
 In a typical app, syncs and pipelines prepare clean datasets before projections create objects and
@@ -99,6 +100,49 @@ export const projectMembersProjection = defineLinkProjection("project-members", 
 
 Each row creates one link from a `Project` to an `Employee`.
 
+## Project telemetry points
+
+A telemetry projection records timestamped readings onto a telemetry-mode property. Use it
+when a dataset has one row per measurement: a value, the object it belongs to, and when it
+was recorded.
+
+First mark the property as telemetry in the ontology:
+
+```ts
+prop("progress", "integer", { mode: "telemetry" })
+```
+
+Then map a dataset of readings onto it:
+
+```ts
+import { defineTelemetryProjection } from "@sixb/core"
+import { projectProgressDataset } from "../datasets/projects"
+import { Project } from "../ontology/project"
+
+export const projectProgressProjection = defineTelemetryProjection(
+  "project-progress",
+  Project.p.progress
+)
+  .fromDataset(projectProgressDataset)
+  .points({
+    objectId: "project_id",
+    at: "recorded_at",
+    value: "progress_pct",
+  })
+```
+
+Each row appends one point to the `progress` series of the `Project` named by `project_id`.
+
+| Mapping key | Meaning |
+| --- | --- |
+| `objectId` | Dataset column holding the target object's primary id |
+| `at` | Timestamp column for the reading |
+| `value` | Column holding the reading |
+| `unit` | Optional column holding the reading's unit (required for properties that carry a unit) |
+
+The most recent reading also materializes onto the object, so the property always reflects
+the latest value while the full history stays queryable.
+
 ## Projection vs pipeline
 
 Pipelines and projections solve different problems.
@@ -108,6 +152,7 @@ Pipelines and projections solve different problems.
 | Clean, filter, join, or reshape rows | Pipeline |
 | Create app objects from rows | Projection |
 | Create object relationships from foreign keys | Projection |
+| Record timestamped readings on a property | Projection |
 | Keep data as tables | Dataset or pipeline |
 
 A good rule: pipelines make better rows; projections make objects.
@@ -184,5 +229,8 @@ sixb worker projection
 - projection execution is triggered by committed dataset versions.
 - projections are set-only in V1: missing rows do not delete existing objects or links.
 - link projections require string source and target fields.
+- telemetry projections target a telemetry-mode property; the `at` column must be a string, date, or timestamp.
+- `at` values without a time zone (no trailing `Z` or numeric offset) are read as UTC.
+- a telemetry point's identity is its object, property, and time: re-projecting the same instant updates the value instead of adding a duplicate.
 
 The important first step is to decide which clean table should become which object type.

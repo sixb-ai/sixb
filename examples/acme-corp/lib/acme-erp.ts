@@ -41,6 +41,12 @@ export interface ErpProjectMemberRow {
   readonly employee_id: string
 }
 
+export interface ErpProjectProgressRow {
+  readonly project_id: string
+  readonly recorded_at: string
+  readonly progress_pct: number
+}
+
 export interface ErpDocumentRow {
   readonly id: string
   readonly title: string
@@ -80,6 +86,7 @@ export interface AcmeErpClient {
   listCustomers(): Promise<readonly ErpCustomerRow[]>
   listProjects(): Promise<readonly ErpProjectRow[]>
   listProjectMembers(): Promise<readonly ErpProjectMemberRow[]>
+  listProjectProgress(): Promise<readonly ErpProjectProgressRow[]>
   listDocuments(): Promise<readonly ErpDocumentRow[]>
   listInvoices(): Promise<readonly ErpInvoiceRow[]>
   listTasks(): Promise<readonly ErpTaskRow[]>
@@ -247,6 +254,33 @@ const projectMembers = [
   { project_id: "proj-healthfirst-portal", employee_id: "emp-bob" },
   { project_id: "proj-healthfirst-portal", employee_id: "emp-francois" },
 ] satisfies readonly ErpProjectMemberRow[]
+
+// Progress snapshots arrive from the ERP as zone-less local timestamps (no "Z"
+// and no numeric offset), and some carry single-digit (non-zero-padded) hours
+// like "9:30:00" exactly as the source system emits them. The telemetry
+// projection normalizes every form to UTC so a reading materializes at the same
+// absolute instant on any worker host.
+const projectProgress = [
+  { project_id: "proj-techstart-platform", recorded_at: "2024-02-29 17:00:00", progress_pct: 15 },
+  { project_id: "proj-techstart-platform", recorded_at: "2024-05-31 9:30:00", progress_pct: 38 },
+  { project_id: "proj-techstart-platform", recorded_at: "2024-08-30 17:15:00", progress_pct: 60 },
+  { project_id: "proj-techstart-platform", recorded_at: "2024-10-31 8:00:00", progress_pct: 72 },
+  { project_id: "proj-greenenergy-dashboard", recorded_at: "2024-03-29 9:00:00", progress_pct: 12 },
+  {
+    project_id: "proj-greenenergy-dashboard",
+    recorded_at: "2024-05-31 14:00:00",
+    progress_pct: 34,
+  },
+  {
+    project_id: "proj-greenenergy-dashboard",
+    recorded_at: "2024-07-31 17:30:00",
+    progress_pct: 55,
+  },
+  { project_id: "proj-eduplatform-redesign", recorded_at: "2024-06-14 9:30:00", progress_pct: 5 },
+  { project_id: "proj-healthfirst-portal", recorded_at: "2023-08-31 17:00:00", progress_pct: 30 },
+  { project_id: "proj-healthfirst-portal", recorded_at: "2023-11-30 17:00:00", progress_pct: 65 },
+  { project_id: "proj-healthfirst-portal", recorded_at: "2024-01-31 18:00:00", progress_pct: 100 },
+] satisfies readonly ErpProjectProgressRow[]
 
 const documents = [
   {
@@ -438,6 +472,9 @@ export function createAcmeErpClient(): AcmeErpClient {
     },
     async listProjectMembers() {
       return cloneRows(projectMembers)
+    },
+    async listProjectProgress() {
+      return cloneRows(projectProgress)
     },
     async listDocuments() {
       return cloneRows(documents)
