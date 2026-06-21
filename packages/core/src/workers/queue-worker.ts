@@ -9,6 +9,13 @@ export interface QueueWorkerConfig<TJob extends QueueJob> {
   readonly leaseMs?: number
   readonly claimLimit?: number
   readonly idlePollMs?: number
+  /**
+   * When true, the worker stays alive but never claims jobs — it simply waits
+   * for shutdown. Used when a worker has no definitions to run: idling keeps the
+   * process healthy under a supervisor instead of exiting non-zero and being
+   * restarted forever.
+   */
+  readonly idle?: boolean
 }
 
 export interface QueueWorkerFailureDecision {
@@ -32,10 +39,16 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
       claimLimit: config.claimLimit ?? DEFAULT_CLAIM_LIMIT,
       idlePollMs: config.idlePollMs ?? DEFAULT_IDLE_POLL_MS,
+      idle: config.idle ?? false,
     }
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
+    if (this.config.idle) {
+      await waitForAbort(signal)
+      return
+    }
+
     while (!signal.aborted) {
       const claimed = await this.claimOrIdle(signal)
       for (const claimedJob of claimed) {
@@ -145,6 +158,16 @@ function toQueueJobError(error: unknown): QueueJobError {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError"
+}
+
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+    signal.addEventListener("abort", () => resolve(), { once: true })
+  })
 }
 
 async function sleep(ms: number, signal: AbortSignal): Promise<void> {

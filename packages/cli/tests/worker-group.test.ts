@@ -69,12 +69,12 @@ describe("sixb worker-group", () => {
   })
 
   test("stops workers and providers when a worker fails to start", async () => {
-    // The prod-roles fixture has no projection definitions, so the projection
+    // The fixture registers a sync but omits storage.syncRuns, so the sync
     // worker throws on start; the group must still close providers and exit.
-    const result = await runOnce(["worker-group", "projection"], "prod-roles")
+    const result = await runOnce(["worker-group", "sync"], "worker-missing-run-storage")
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("No projection definitions are registered")
+    expect(result.stdout).toContain("storage.syncRuns")
     expect(result.logEntries).toContainEqual({ type: "queues:close" })
     expect(result.logEntries).toContainEqual({ type: "lake-storage:close" })
   })

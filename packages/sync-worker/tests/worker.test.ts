@@ -72,6 +72,23 @@ function createSixbForSync(sync: SyncDefinition) {
 }
 
 describe("SyncWorker", () => {
+  test("idles instead of crashing without sync definitions", async () => {
+    const emptySixb = new Sixb({
+      id: "sync-worker-tests",
+      ontology: [Room],
+      connectors: [erpDb],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+
+    const worker = new SyncWorker(emptySixb)
+    await worker.start()
+    await worker.stop()
+  })
+
   test("processes queued sync jobs end-to-end", async () => {
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")

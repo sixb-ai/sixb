@@ -196,11 +196,13 @@ describe("ProjectionWorker", () => {
     }
   })
 
-  test("requires registered projections and projection run storage", () => {
-    expect(() => new ProjectionWorker(createSixb({ datasets: [roomsDataset] }))).toThrow(
-      "No projection definitions"
-    )
+  test("idles instead of crashing without projection definitions", async () => {
+    const worker = new ProjectionWorker(createSixb({ datasets: [roomsDataset] }))
+    await worker.start()
+    await worker.stop()
+  })
 
+  test("requires projection run storage when projections are registered", () => {
     const sixb = createSixb({
       datasets: [roomsDataset],
       projections: [roomProjection],

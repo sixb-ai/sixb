@@ -130,10 +130,12 @@ describe("sixb worker", () => {
 
   test("closes runtime providers when startup fails after loading the runtime", async () => {
     const logPath = await tempLogPath()
-    const result = runWorkerFixture("prod-roles", ["projection"], { logPath })
+    // The fixture registers a sync but omits storage.syncRuns, so the worker
+    // throws during construction — a real post-load startup failure.
+    const result = runWorkerFixture("worker-missing-run-storage", ["sync"], { logPath })
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout).toContain("No projection definitions are registered")
+    expect(result.stdout).toContain("storage.syncRuns")
     expect(result.stderr).toBe("")
 
     const logEntries = await readLogEntries(logPath)

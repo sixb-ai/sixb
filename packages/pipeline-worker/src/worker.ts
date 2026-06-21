@@ -16,12 +16,25 @@ import { runPipelineJob } from "./run-pipeline-job"
 import type { PipelineJob, PipelineWorkerContext, PipelineWorkerSixb } from "./types"
 
 export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
-  private readonly context: PipelineWorkerContext
+  private readonly context: PipelineWorkerContext | null
   private readonly sixb: PipelineWorkerSixb
 
   constructor(sixb: PipelineWorkerSixb) {
-    if (sixb.getPipelineDefinitions().length === 0) {
-      throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
+    const idle = sixb.getPipelineDefinitions().length === 0
+
+    super({
+      projectId: sixb.id,
+      queue: sixb.queues.pipelines,
+      workerId: `pipeline-worker-${sixb.id}`,
+      idle,
+    })
+
+    this.sixb = sixb
+
+    if (idle) {
+      console.log("[SixbPipelineWorker] No pipeline definitions are registered; worker will idle.")
+      this.context = null
+      return
     }
 
     const pipelineRunsStorage = sixb.storage.pipelineRuns
@@ -29,20 +42,14 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       throw new Error("[SixbPipelineWorker] Pipeline workers require storage.pipelineRuns support.")
     }
 
-    super({
-      projectId: sixb.id,
-      queue: sixb.queues.pipelines,
-      workerId: `pipeline-worker-${sixb.id}`,
-    })
-
     this.context = buildPipelineContext(sixb, pipelineRunsStorage)
-    this.sixb = sixb
   }
 
   protected async execute(
     claimed: ClaimedQueueJob<PipelineRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
+    const context = this.requireContext()
     const { job } = claimed
     const pipelineJob: PipelineJob = {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
@@ -50,7 +57,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     }
 
     const result = await runPipelineJob({
-      runtime: this.context,
+      runtime: context,
       job: pipelineJob,
       signal,
       onRunStarted: (run) => emitPipelineRunStarted(this.sixb.events, run),
@@ -95,7 +102,7 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       pipelineId: job.payload.pipelineId,
     }
 
-    if (!(await hasCommittedStep(this.context, pipelineJob.id))) {
+    if (!(await hasCommittedStep(this.requireContext(), pipelineJob.id))) {
       return { kind: "retry" }
     }
 
@@ -107,6 +114,13 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
     })
 
     return { kind: "fail" }
+  }
+
+  private requireContext(): PipelineWorkerContext {
+    if (!this.context) {
+      throw new Error("[SixbPipelineWorker] No pipeline definitions are registered.")
+    }
+    return this.context
   }
 }
 

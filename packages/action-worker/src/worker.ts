@@ -34,9 +34,10 @@ export interface ActionWorkerOptions {
 export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
   private readonly context: ActionWorkerContext | null
   private readonly sixb: ActionWorkerSixb
-  private readonly idleWithoutDefinitions: boolean
 
   constructor(sixb: ActionWorkerSixb, options: ActionWorkerOptions = {}) {
+    const idle = sixb.getActionDefinitions().length === 0
+
     super({
       projectId: sixb.id,
       queue: sixb.queues.actions,
@@ -44,31 +45,15 @@ export class ActionWorker extends QueueWorker<ActionRunRequestedQueueJob> {
       claimLimit: 1,
       leaseMs: options.leaseMs,
       idlePollMs: options.idlePollMs,
+      idle,
     })
 
-    const actions = sixb.getActionDefinitions()
-    if (actions.length === 0) {
+    if (idle) {
       console.log("[SixbActionWorker] No action definitions registered; worker will idle.")
     }
 
-    this.context = actions.length > 0 ? buildActionContext(sixb) : null
+    this.context = idle ? null : buildActionContext(sixb)
     this.sixb = sixb
-    this.idleWithoutDefinitions = actions.length === 0
-  }
-
-  protected override async run(signal: AbortSignal): Promise<void> {
-    if (!this.idleWithoutDefinitions) {
-      await super.run(signal)
-      return
-    }
-
-    await new Promise<void>((resolve) => {
-      if (signal.aborted) {
-        resolve()
-        return
-      }
-      signal.addEventListener("abort", () => resolve(), { once: true })
-    })
   }
 
   protected async execute(

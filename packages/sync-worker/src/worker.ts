@@ -34,21 +34,24 @@ export interface SyncWorkerSixb {
 }
 
 export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
-  private readonly context: SyncWorkerContext
+  private readonly context: SyncWorkerContext | null
   private readonly sixb: SyncWorkerSixb
 
   constructor(sixb: SyncWorkerSixb) {
-    if (sixb.getSyncDefinitions().length === 0) {
-      throw new Error("[SixbSyncWorker] No sync definitions are registered.")
-    }
+    const idle = sixb.getSyncDefinitions().length === 0
 
     super({
       projectId: sixb.id,
       queue: sixb.queues.syncRuns,
       workerId: `sync-worker-${sixb.id}`,
+      idle,
     })
 
-    this.context = buildSyncContext(sixb)
+    if (idle) {
+      console.log("[SixbSyncWorker] No sync definitions are registered; worker will idle.")
+    }
+
+    this.context = idle ? null : buildSyncContext(sixb)
     this.sixb = sixb
   }
 
@@ -56,6 +59,7 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
+    const context = this.requireContext()
     const { job } = claimed
     const syncJob: SyncJob = {
       id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
@@ -65,13 +69,20 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
     }
 
     const result = await runSyncJob({
-      runtime: this.context,
+      runtime: context,
       job: syncJob,
       signal,
       onRunStarted: (run) => emitSyncRunStarted(this.sixb, run),
     })
 
     await emitSyncSucceededEvents(this.sixb, syncJob, result)
+  }
+
+  private requireContext(): SyncWorkerContext {
+    if (!this.context) {
+      throw new Error("[SixbSyncWorker] No sync definitions are registered.")
+    }
+    return this.context
   }
 
   protected override async onExecutionError(

@@ -16,12 +16,25 @@ import type {
 } from "./types"
 
 export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
-  private readonly context: WorkflowWorkerContext
+  private readonly context: WorkflowWorkerContext | null
   private readonly observer: WorkflowRunObserver
 
   constructor(sixb: WorkflowWorkerSixb) {
-    if (sixb.workflows.list().length === 0) {
-      throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
+    const idle = sixb.workflows.list().length === 0
+
+    super({
+      projectId: sixb.projectId,
+      queue: sixb.queues.workflows,
+      workerId: `workflow-worker-${sixb.id}`,
+      idle,
+    })
+
+    this.observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
+
+    if (idle) {
+      console.log("[SixbWorkflowWorker] No workflow definitions are registered; worker will idle.")
+      this.context = null
+      return
     }
 
     const workflowRuns = sixb.storage.workflowRuns
@@ -35,23 +48,17 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
       )
     }
 
-    super({
-      projectId: sixb.projectId,
-      queue: sixb.queues.workflows,
-      workerId: `workflow-worker-${sixb.id}`,
-    })
-
     this.context = buildWorkflowContext(sixb, workflowRuns)
-    this.observer = new EventsRuntimeWorkflowRunObserver(sixb.events)
   }
 
   protected async execute(
     claimed: ClaimedQueueJob<WorkflowQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
+    const context = this.requireContext()
     if (claimed.job.type === "workflow.run.resume.requested") {
       await runWorkflowResumeJob({
-        runtime: this.context,
+        runtime: context,
         job: workflowResumeJobFromClaimed(claimed),
         signal,
         observer: this.observer,
@@ -62,11 +69,18 @@ export class WorkflowWorker extends QueueWorker<WorkflowQueueJob> {
     const workflowJob = workflowJobFromClaimed(claimed)
 
     await runWorkflowJob({
-      runtime: this.context,
+      runtime: context,
       job: workflowJob,
       signal,
       observer: this.observer,
     })
+  }
+
+  private requireContext(): WorkflowWorkerContext {
+    if (!this.context) {
+      throw new Error("[SixbWorkflowWorker] No workflow definitions are registered.")
+    }
+    return this.context
   }
 
   protected override async onExecutionError(

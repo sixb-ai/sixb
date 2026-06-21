@@ -50,6 +50,39 @@ describe("QueueWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
+  test("idle workers never claim jobs and stop cleanly", async () => {
+    const queues = new InMemoryQueues()
+    let executeCalls = 0
+
+    class IdleWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+      protected async execute(): Promise<void> {
+        executeCalls += 1
+      }
+    }
+
+    const worker = new IdleWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      workerId: "w",
+      idlePollMs: 10,
+      idle: true,
+    })
+
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+    })
+
+    await worker.start()
+    await Bun.sleep(50)
+    await worker.stop()
+
+    expect(executeCalls).toBe(0)
+    // The job is left untouched for a non-idle worker to claim later.
+    const claimed = await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "observer" })
+    expect(claimed).toHaveLength(1)
+  })
+
   test("default policy fails jobs on execution errors", async () => {
     const queues = new InMemoryQueues()
 

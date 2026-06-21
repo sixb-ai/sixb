@@ -78,7 +78,7 @@ async function seedDatasetVersion(
 }
 
 describe("PipelineWorker", () => {
-  test("requires registered pipelines and pipeline run storage", () => {
+  test("idles instead of crashing without pipeline definitions", async () => {
     const emptySixb = new Sixb({
       id: "pipeline-worker-tests",
       ontology: [Room],
@@ -89,8 +89,13 @@ describe("PipelineWorker", () => {
       queues: new InMemoryQueues(),
       datasets: [rawCustomersDataset],
     })
-    expect(() => new PipelineWorker(emptySixb)).toThrow("No pipeline definitions")
 
+    const worker = new PipelineWorker(emptySixb)
+    await worker.start()
+    await worker.stop()
+  })
+
+  test("requires pipeline run storage when pipelines are registered", () => {
     const cleanStep = definePipelineStep("clean-customers")
       .inputs({ rawCustomers: rawCustomersDataset })
       .output(customersDataset)

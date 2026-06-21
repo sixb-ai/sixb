@@ -8,24 +8,31 @@ import { runProjectionJob } from "./run-projection-job"
 import type { ProjectionWorkerContext, ProjectionWorkerSixb } from "./types"
 
 export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob> {
-  private readonly context: ProjectionWorkerContext
+  private readonly context: ProjectionWorkerContext | null
 
   constructor(sixb: ProjectionWorkerSixb) {
     const projectionCount = sixb.getObjectProjections().length + sixb.getLinkProjections().length
-    if (projectionCount === 0) {
-      throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
+    const idle = projectionCount === 0
+
+    super({
+      projectId: sixb.projectId,
+      queue: sixb.queues.projections,
+      workerId: `projection-worker-${sixb.id}`,
+      idle,
+    })
+
+    if (idle) {
+      console.log(
+        "[SixbProjectionWorker] No projection definitions are registered; worker will idle."
+      )
+      this.context = null
+      return
     }
 
     const projectionRunsStorage = sixb.storage.projectionRuns
     if (!projectionRunsStorage) {
       throw new Error("[SixbProjectionWorker] Projection workers require storage.projectionRuns.")
     }
-
-    super({
-      projectId: sixb.projectId,
-      queue: sixb.queues.projections,
-      workerId: `projection-worker-${sixb.id}`,
-    })
 
     this.context = buildProjectionContext(sixb, projectionRunsStorage)
   }
@@ -34,9 +41,10 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
     claimed: ClaimedQueueJob<ProjectionRunRequestedQueueJob>,
     signal: AbortSignal
   ): Promise<void> {
+    const context = this.requireContext()
     const { job } = claimed
     await runProjectionJob({
-      runtime: this.context,
+      runtime: context,
       job: {
         id: `${job.id}:attempt:${job.attempt}`,
         projectionId: job.payload.projectionId,
@@ -47,6 +55,13 @@ export class ProjectionWorker extends QueueWorker<ProjectionRunRequestedQueueJob
       },
       signal,
     })
+  }
+
+  private requireContext(): ProjectionWorkerContext {
+    if (!this.context) {
+      throw new Error("[SixbProjectionWorker] No projection definitions are registered.")
+    }
+    return this.context
   }
 }
 

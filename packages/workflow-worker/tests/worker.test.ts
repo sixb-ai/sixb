@@ -124,9 +124,13 @@ async function waitFor<T>(
 }
 
 describe("WorkflowWorker", () => {
-  test("requires registered workflows and workflow storage", () => {
-    expect(() => new WorkflowWorker(createSixb({}))).toThrow("No workflow definitions")
+  test("idles instead of crashing without workflow definitions", async () => {
+    const worker = new WorkflowWorker(createSixb({}))
+    await worker.start()
+    await worker.stop()
+  })
 
+  test("requires workflow storage when workflows are registered", () => {
     const workflow = defineWorkflow("reconcile-transaction")
       .input({
         transaction: ref(Transaction),
