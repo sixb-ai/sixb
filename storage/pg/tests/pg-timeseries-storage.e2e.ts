@@ -90,6 +90,50 @@ describe("PgTimeseriesStorage", () => {
     expect(history).toHaveLength(1)
   })
 
+  test("overwrites an existing point at the same instant (last-write-wins)", async () => {
+    const at = new Date().toISOString()
+    const first = createTelemetryEvent(
+      "project-a",
+      "Room",
+      "room:101",
+      "temperature",
+      22.5,
+      at,
+      "1"
+    )
+    const second = createTelemetryEvent(
+      "project-a",
+      "Room",
+      "room:101",
+      "temperature",
+      23.5,
+      at,
+      "2"
+    )
+
+    await storage.timeseries.applyTelemetryAppended(first)
+    await storage.timeseries.applyTelemetryAppended(second)
+
+    // (series, at) is the point's identity: two events at the same instant
+    // collapse to one row, and the most recent write wins.
+    const history = await storage.timeseries.getHistory({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "temperature",
+    })
+    expect(history).toHaveLength(1)
+    expect(history[0]?.value).toBe(23.5)
+
+    const latest = await storage.timeseries.getLatest({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "temperature",
+    })
+    expect(latest?.value).toBe(23.5)
+  })
+
   test("getHistory returns chronological data", async () => {
     const baseTime = new Date("2024-01-01T00:00:00Z")
 

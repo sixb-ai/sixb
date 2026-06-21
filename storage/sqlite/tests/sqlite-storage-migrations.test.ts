@@ -8,6 +8,7 @@ import { SqliteStorage } from "../src"
 import {
   migrateSqliteStorage,
   SQLITE_STORAGE_ADAPTER_ID,
+  sqliteStorageMigrations,
   sqliteStoragePath,
 } from "../src/migrations"
 
@@ -138,6 +139,9 @@ describe("SQLite storage migrations", () => {
     expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
     expect(projectionRun?.status).toBe("succeeded")
     expect(projectionRun?.objectsUpserted).toBe(4)
+    expect(projectionRun?.telemetryPointsAppended).toBe(0)
+    expect(projectionRun?.telemetryPointsSkipped).toBe(0)
+    expect(projectionRun?.telemetryRowsFailed).toBe(0)
     expect(workflowRun?.status).toBe("succeeded")
     expect(workflowRun?.input).toEqual({ transactionId: "txn-1" })
     expect(webhookRun).toMatchObject({
@@ -165,6 +169,29 @@ describe("SQLite storage migrations", () => {
     await expect(migrateStorage(storage)).rejects.toThrow("dirty migration state")
 
     closeStorage(storage)
+  })
+
+  test("the timeseries primary key enforces the (series, at) natural key", () => {
+    const db = new Database(":memory:")
+    try {
+      sqliteStorageMigrations.steps[0]?.up(db)
+
+      const insert = db.query(`
+        INSERT INTO timeseries (
+          project_id, object_type_id, object_id, property_id,
+          value, unit, at, source_event_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      insert.run("p", "Room", "r1", "temp", "70.5", null, "2026-06-01T12:00:00.000Z", "evt-1")
+
+      // A second row at the same (series, at) is rejected by the natural-key
+      // PRIMARY KEY, even with a different source_event_id — appends must upsert.
+      expect(() =>
+        insert.run("p", "Room", "r1", "temp", "71", null, "2026-06-01T12:00:00.000Z", "evt-2")
+      ).toThrow()
+    } finally {
+      db.close()
+    }
   })
 })
 

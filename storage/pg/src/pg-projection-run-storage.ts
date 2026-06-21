@@ -22,6 +22,9 @@ const counterKeys: readonly CounterKey[] = [
   "rowsSkipped",
   "objectsUpserted",
   "linksUpserted",
+  "telemetryPointsAppended",
+  "telemetryPointsSkipped",
+  "telemetryRowsFailed",
 ]
 
 export class PgProjectionRunStorage implements ProjectionRunStorage {
@@ -48,7 +51,10 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           rows_processed,
           rows_skipped,
           objects_upserted,
-          links_upserted
+          links_upserted,
+          telemetry_points_appended,
+          telemetry_points_skipped,
+          telemetry_rows_failed
         ) VALUES (
           ${input.projectId},
           ${input.id},
@@ -58,6 +64,9 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           ${input.datasetVersionId},
           ${"running"},
           ${input.startedAt ?? new Date()},
+          ${0},
+          ${0},
+          ${0},
           ${0},
           ${0},
           ${0},
@@ -89,7 +98,10 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           rows_processed = ${counters.rowsProcessed},
           rows_skipped = ${counters.rowsSkipped},
           objects_upserted = ${counters.objectsUpserted},
-          links_upserted = ${counters.linksUpserted}
+          links_upserted = ${counters.linksUpserted},
+          telemetry_points_appended = ${counters.telemetryPointsAppended},
+          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
+          telemetry_rows_failed = ${counters.telemetryRowsFailed}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -112,6 +124,9 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           rows_skipped = ${counters.rowsSkipped},
           objects_upserted = ${counters.objectsUpserted},
           links_upserted = ${counters.linksUpserted},
+          telemetry_points_appended = ${counters.telemetryPointsAppended},
+          telemetry_points_skipped = ${counters.telemetryPointsSkipped},
+          telemetry_rows_failed = ${counters.telemetryRowsFailed},
           error_message = ${input.status === "succeeded" ? null : (input.errorMessage ?? null)}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
@@ -257,6 +272,9 @@ function mergeCounters(
     rowsSkipped: input.rowsSkipped ?? existing.rowsSkipped,
     objectsUpserted: input.objectsUpserted ?? existing.objectsUpserted,
     linksUpserted: input.linksUpserted ?? existing.linksUpserted,
+    telemetryPointsAppended: input.telemetryPointsAppended ?? existing.telemetryPointsAppended,
+    telemetryPointsSkipped: input.telemetryPointsSkipped ?? existing.telemetryPointsSkipped,
+    telemetryRowsFailed: input.telemetryRowsFailed ?? existing.telemetryRowsFailed,
   }
 }
 
@@ -266,6 +284,9 @@ function rowToCounters(row: DatabaseRow): ProjectionRunCounters {
     rowsSkipped: Number(row.rows_skipped),
     objectsUpserted: Number(row.objects_upserted),
     linksUpserted: Number(row.links_upserted),
+    telemetryPointsAppended: Number(row.telemetry_points_appended),
+    telemetryPointsSkipped: Number(row.telemetry_points_skipped),
+    telemetryRowsFailed: Number(row.telemetry_rows_failed),
   }
 }
 
@@ -325,5 +346,8 @@ interface DatabaseRow {
   rows_skipped: number | string
   objects_upserted: number | string
   links_upserted: number | string
+  telemetry_points_appended: number | string
+  telemetry_points_skipped: number | string
+  telemetry_rows_failed: number | string
   error_message: string | null
 }

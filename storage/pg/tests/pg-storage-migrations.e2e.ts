@@ -73,6 +73,9 @@ describe("Postgres storage migrations", () => {
       expect(syncRun?.checkpoint).toEqual({ cursor: "legacy" })
       expect(projectionRun?.status).toBe("succeeded")
       expect(projectionRun?.objectsUpserted).toBe(4)
+      expect(projectionRun?.telemetryPointsAppended).toBe(0)
+      expect(projectionRun?.telemetryPointsSkipped).toBe(0)
+      expect(projectionRun?.telemetryRowsFailed).toBe(0)
       expect(workflowRun?.status).toBe("succeeded")
       expect(workflowRun?.input).toEqual({ transactionId: "txn-1" })
       expect(webhookRun).toMatchObject({

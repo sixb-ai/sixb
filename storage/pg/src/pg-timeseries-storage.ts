@@ -13,34 +13,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
   constructor(private readonly sql: PgStoreClient) {}
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    await runPgTransaction(this.sql, async (tx) => {
-      // Idempotence check inside transaction to prevent race conditions
-      const [applied] = await tx`
-        SELECT 1 FROM applied_events_timeseries WHERE event_id = ${event.id}
-      `
-      if (applied) return
-
-      await tx`
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id
-        ) VALUES (
-          ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
-          ${event.payload.propertyId},
-          ${JSON.stringify(event.payload.value)}::text::jsonb,
-          ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
-          ${event.id}
-        )
-        ON CONFLICT (project_id, object_type_id, object_id, property_id, at, source_event_id)
-        DO NOTHING
-      `
-
-      await tx`
-        INSERT INTO applied_events_timeseries (event_id)
-        VALUES (${event.id})
-        ON CONFLICT DO NOTHING
-      `
-    })
+    await this.upsertPoint(this.sql, event)
   }
 
   async applyTelemetryAppendedBatch(
@@ -48,39 +21,36 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
   ): Promise<void> {
     if (events.length === 0) return
     await runPgTransaction(this.sql, async (tx) => {
-      // Batch idempotence check: single query instead of N individual SELECTs
-      const allEventIds = events.map((e) => e.id)
-      const appliedRows = await tx<{ event_id: string }[]>`
-        SELECT event_id FROM applied_events_timeseries
-        WHERE event_id IN ${this.sql(allEventIds)}
-      `
-      const appliedSet = new Set(appliedRows.map((r) => r.event_id))
-
       for (const event of events) {
-        if (appliedSet.has(event.id)) continue
-
-        await tx`
-          INSERT INTO timeseries (
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, source_event_id
-          ) VALUES (
-            ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
-            ${event.payload.propertyId},
-            ${JSON.stringify(event.payload.value)}::text::jsonb,
-            ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
-            ${event.id}
-          )
-          ON CONFLICT (project_id, object_type_id, object_id, property_id, at, source_event_id)
-          DO NOTHING
-        `
-
-        await tx`
-          INSERT INTO applied_events_timeseries (event_id)
-          VALUES (${event.id})
-          ON CONFLICT DO NOTHING
-        `
+        await this.upsertPoint(tx, event)
       }
     })
+  }
+
+  // A telemetry point is uniquely identified by (series, at). Re-applying the
+  // same instant is a last-write-wins upsert, so telemetry writes are idempotent
+  // under replay without a separate dedup ledger.
+  private async upsertPoint(
+    sql: PgStoreClient,
+    event: StoredTelemetryAppendedEvent
+  ): Promise<void> {
+    await sql`
+      INSERT INTO timeseries (
+        project_id, object_type_id, object_id, property_id,
+        value, unit, at, source_event_id
+      ) VALUES (
+        ${event.projectId}, ${event.payload.objectTypeId}, ${event.payload.objectId},
+        ${event.payload.propertyId},
+        ${JSON.stringify(event.payload.value)}::text::jsonb,
+        ${event.payload.unit ?? null}, ${event.payload.at}::timestamptz,
+        ${event.id}
+      )
+      ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
+      DO UPDATE SET
+        value = EXCLUDED.value,
+        unit = EXCLUDED.unit,
+        source_event_id = EXCLUDED.source_event_id
+    `
   }
 
   async getHistory(params: {

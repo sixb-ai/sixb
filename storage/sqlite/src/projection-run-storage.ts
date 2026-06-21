@@ -38,6 +38,9 @@ const counterKeys: readonly CounterKey[] = [
   "rowsSkipped",
   "objectsUpserted",
   "linksUpserted",
+  "telemetryPointsAppended",
+  "telemetryPointsSkipped",
+  "telemetryRowsFailed",
 ]
 
 export class SqliteProjectionRunStorage implements ProjectionRunStorage {
@@ -78,8 +81,11 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             rows_processed,
             rows_skipped,
             objects_upserted,
-            links_upserted
-          ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, 0, 0, 0, 0)
+            links_upserted,
+            telemetry_points_appended,
+            telemetry_points_skipped,
+            telemetry_rows_failed
+          ) VALUES (?, ?, ?, ?, ?, ?, 'running', ?, 0, 0, 0, 0, 0, 0, 0)
         `
         )
         .run(
@@ -124,7 +130,10 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             rows_processed = ?,
             rows_skipped = ?,
             objects_upserted = ?,
-            links_upserted = ?
+            links_upserted = ?,
+            telemetry_points_appended = ?,
+            telemetry_points_skipped = ?,
+            telemetry_rows_failed = ?
           WHERE project_id = ? AND id = ?
         `
         )
@@ -133,6 +142,9 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           counters.rowsSkipped,
           counters.objectsUpserted,
           counters.linksUpserted,
+          counters.telemetryPointsAppended,
+          counters.telemetryPointsSkipped,
+          counters.telemetryRowsFailed,
           input.projectId,
           input.id
         )
@@ -157,6 +169,9 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             rows_skipped = ?,
             objects_upserted = ?,
             links_upserted = ?,
+            telemetry_points_appended = ?,
+            telemetry_points_skipped = ?,
+            telemetry_rows_failed = ?,
             error_message = ?
           WHERE project_id = ? AND id = ?
         `
@@ -168,6 +183,9 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           counters.rowsSkipped,
           counters.objectsUpserted,
           counters.linksUpserted,
+          counters.telemetryPointsAppended,
+          counters.telemetryPointsSkipped,
+          counters.telemetryRowsFailed,
           input.status === "succeeded" ? null : (input.errorMessage ?? null),
           input.projectId,
           input.id
@@ -316,6 +334,9 @@ function mergeCounters(
     rowsSkipped: input.rowsSkipped ?? existing.rowsSkipped,
     objectsUpserted: input.objectsUpserted ?? existing.objectsUpserted,
     linksUpserted: input.linksUpserted ?? existing.linksUpserted,
+    telemetryPointsAppended: input.telemetryPointsAppended ?? existing.telemetryPointsAppended,
+    telemetryPointsSkipped: input.telemetryPointsSkipped ?? existing.telemetryPointsSkipped,
+    telemetryRowsFailed: input.telemetryRowsFailed ?? existing.telemetryRowsFailed,
   }
 }
 
@@ -325,6 +346,9 @@ function rowToCounters(row: DatabaseRow): ProjectionRunCounters {
     rowsSkipped: row.rows_skipped,
     objectsUpserted: row.objects_upserted,
     linksUpserted: row.links_upserted,
+    telemetryPointsAppended: row.telemetry_points_appended,
+    telemetryPointsSkipped: row.telemetry_points_skipped,
+    telemetryRowsFailed: row.telemetry_rows_failed,
   }
 }
 
@@ -343,6 +367,9 @@ function rowToProjectionRunRecord(row: DatabaseRow): ProjectionRunRecord {
     rowsSkipped: row.rows_skipped,
     objectsUpserted: row.objects_upserted,
     linksUpserted: row.links_upserted,
+    telemetryPointsAppended: row.telemetry_points_appended,
+    telemetryPointsSkipped: row.telemetry_points_skipped,
+    telemetryRowsFailed: row.telemetry_rows_failed,
     errorMessage: row.error_message ?? undefined,
   }
 }
@@ -365,5 +392,8 @@ interface DatabaseRow {
   rows_skipped: number
   objects_upserted: number
   links_upserted: number
+  telemetry_points_appended: number
+  telemetry_points_skipped: number
+  telemetry_rows_failed: number
   error_message: string | null
 }

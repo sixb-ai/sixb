@@ -14,6 +14,36 @@ export interface SqliteTimeseriesStorageOptions {
   connection?: SqliteStoreConnection
 }
 
+// A telemetry point is uniquely identified by (series, at). Re-applying the
+// same instant is a last-write-wins upsert, so telemetry writes are idempotent
+// under replay without a separate dedup ledger.
+const UPSERT_POINT_SQL = `
+  INSERT INTO timeseries (
+    project_id, object_type_id, object_id, property_id,
+    value, unit, at, source_event_id
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT (project_id, object_type_id, object_id, property_id, at)
+  DO UPDATE SET
+    value = excluded.value,
+    unit = excluded.unit,
+    source_event_id = excluded.source_event_id
+`
+
+function pointParams(
+  event: StoredTelemetryAppendedEvent
+): [string, string, string, string, string, string | null, string, string] {
+  return [
+    event.projectId,
+    event.payload.objectTypeId,
+    event.payload.objectId,
+    event.payload.propertyId,
+    JSON.stringify(event.payload.value),
+    event.payload.unit ?? null,
+    event.payload.at,
+    event.id,
+  ]
+}
+
 /**
  * SQLite-based TimeseriesStorage implementation.
  *
@@ -33,36 +63,7 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
   }
 
   async applyTelemetryAppended(event: StoredTelemetryAppendedEvent): Promise<void> {
-    // Check idempotency
-    const applied = this.db
-      .query("SELECT 1 FROM applied_events_timeseries WHERE event_id = ?")
-      .get(event.id)
-
-    if (applied) return
-
-    this.db
-      .query(
-        `
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `
-      )
-      .run(
-        event.projectId,
-        event.payload.objectTypeId,
-        event.payload.objectId,
-        event.payload.propertyId,
-        JSON.stringify(event.payload.value),
-        event.payload.unit ?? null,
-        event.payload.at,
-        event.id
-      )
-
-    this.db
-      .query("INSERT OR IGNORE INTO applied_events_timeseries (event_id) VALUES (?)")
-      .run(event.id)
+    this.db.query(UPSERT_POINT_SQL).run(...pointParams(event))
   }
 
   async applyTelemetryAppendedBatch(
@@ -71,33 +72,9 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
     if (events.length === 0) return
 
     this.db.transaction(() => {
-      const checkApplied = this.db.query(
-        "SELECT 1 FROM applied_events_timeseries WHERE event_id = ?"
-      )
-      const insertPoint = this.db.query(`
-        INSERT INTO timeseries (
-          project_id, object_type_id, object_id, property_id,
-          value, unit, at, source_event_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      const markApplied = this.db.query(
-        "INSERT OR IGNORE INTO applied_events_timeseries (event_id) VALUES (?)"
-      )
-
+      const upsert = this.db.query(UPSERT_POINT_SQL)
       for (const event of events) {
-        if (checkApplied.get(event.id)) continue
-
-        insertPoint.run(
-          event.projectId,
-          event.payload.objectTypeId,
-          event.payload.objectId,
-          event.payload.propertyId,
-          JSON.stringify(event.payload.value),
-          event.payload.unit ?? null,
-          event.payload.at,
-          event.id
-        )
-        markApplied.run(event.id)
+        upsert.run(...pointParams(event))
       }
     })()
   }
