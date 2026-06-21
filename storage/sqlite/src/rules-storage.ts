@@ -70,6 +70,10 @@ export class SqliteRulesStorage implements RulesStorage {
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
+    if (input.objectTypeIds?.length === 0) {
+      return { states: [], hasMore: false, total: 0 }
+    }
+
     const whereClauses = ["project_id = ?"]
     const args: (string | number)[] = [input.projectId]
 
@@ -81,6 +85,11 @@ export class SqliteRulesStorage implements RulesStorage {
     if (input.objectTypeId) {
       whereClauses.push("object_type_id = ?")
       args.push(input.objectTypeId)
+    }
+
+    if (input.objectTypeIds) {
+      whereClauses.push(`object_type_id IN (${input.objectTypeIds.map(() => "?").join(", ")})`)
+      args.push(...input.objectTypeIds)
     }
 
     if (input.primaryId) {

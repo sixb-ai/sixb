@@ -110,14 +110,15 @@ function buildDatasetReferenceIndex(
     }
   }
 
-  // Projection grants do not exist yet, so scoped callers do not get
-  // projection lineage ids through dataset metadata.
-  if (!scoped) {
-    for (const projection of [
-      ...sixb.getObjectProjections(),
-      ...sixb.getLinkProjections(),
-      ...sixb.getTelemetryProjections(),
-    ]) {
+  // Projections inherit dataset visibility: a scoped caller sees a
+  // projection's lineage only when it can view the projection's source
+  // dataset. Privileged callers (no scoped runtime) see them all.
+  for (const projection of [
+    ...sixb.getObjectProjections(),
+    ...sixb.getLinkProjections(),
+    ...sixb.getTelemetryProjections(),
+  ]) {
+    if (!scoped || scoped.getDatasetById(projection.datasetId)) {
       referencesFor(projection.datasetId).projectionIds.push(projection.id)
     }
   }

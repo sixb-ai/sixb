@@ -38,6 +38,10 @@ export class PgRulesStorage implements RulesStorage {
   }
 
   async listActive(input: ListActiveRuleStatesInput): Promise<ListActiveRuleStatesResult> {
+    if (input.objectTypeIds?.length === 0) {
+      return { states: [], hasMore: false, total: 0 }
+    }
+
     const whereClauses = ["project_id = $1"]
     const params: SqlParameter[] = [input.projectId]
     let index = 2
@@ -50,6 +54,12 @@ export class PgRulesStorage implements RulesStorage {
     if (input.objectTypeId) {
       whereClauses.push(`object_type_id = $${index++}`)
       params.push(input.objectTypeId)
+    }
+
+    if (input.objectTypeIds) {
+      const placeholders = input.objectTypeIds.map(() => `$${index++}`)
+      whereClauses.push(`object_type_id IN (${placeholders.join(", ")})`)
+      params.push(...input.objectTypeIds)
     }
 
     if (input.primaryId) {

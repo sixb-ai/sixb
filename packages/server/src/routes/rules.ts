@@ -1,11 +1,13 @@
 import {
   deriveRuleEventDependencies,
+  isAllowed,
   type OntologySource,
   type RuleDefinition,
   type RuleStateRecord,
   type Sixb,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { requestAuthState } from "../auth/scope"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RuleParamsSchema,
@@ -66,7 +68,9 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     )
     .get(
       "/api/rule-states",
-      async ({ query, set }) => {
+      async (context) => {
+        const { query, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const parsed = RuleStatesQuerySchema.parse(query)
           const storage = sixb.storage.rules
@@ -78,10 +82,24 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             }
           }
 
+          const objectTypeIds = authz ? [...authz.grants["view:object"]] : undefined
+          if (
+            authz &&
+            parsed.objectTypeId &&
+            !isAllowed(authz, { kind: "object.view", objectTypeId: parsed.objectTypeId })
+          ) {
+            return {
+              states: [],
+              hasMore: false,
+              total: 0,
+            }
+          }
+
           const result = await storage.listActive({
             projectId: sixb.id,
             ruleId: parsed.ruleId,
             objectTypeId: parsed.objectTypeId,
+            objectTypeIds,
             primaryId: parsed.primaryId,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),
