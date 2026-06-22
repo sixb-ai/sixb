@@ -33,5 +33,5 @@ export const SIXB_BEARER_SECURITY_SCHEME = {
   scheme: "bearer",
   bearerFormat: "Sixb access token",
   description:
-    "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on scoped API routes.",
+    "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme.",
 } as const

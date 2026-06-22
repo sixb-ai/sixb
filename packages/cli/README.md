@@ -16,6 +16,16 @@ bun add @sixb/cli
 | `sixb api` | Start the production API/docs/WebSocket server |
 | `sixb atlas` | Start the production Atlas UI server |
 | `sixb app` | Start the production custom app server |
+| `sixb auth status` | Check API token authentication |
+| `sixb token list` | List personal access tokens |
+| `sixb token create` | Create a personal access token |
+| `sixb token revoke <id>` | Revoke a personal access token |
+| `sixb service-account list` | List service accounts |
+| `sixb service-account create` | Create a service account |
+| `sixb service-account disable <id>` | Disable a service account |
+| `sixb service-account token list <service-account-id>` | List service-account tokens |
+| `sixb service-account token create <service-account-id>` | Create a service-account token |
+| `sixb service-account token revoke <service-account-id> <token-id>` | Revoke a service-account token |
 | `sixb scheduler` | Start the production scheduler event producer |
 | `sixb orchestrator` | Start the production event-to-queue dispatcher |
 | `sixb functions` | Start registered functions |
@@ -46,6 +56,15 @@ Also available as `create-sixb <name>` (alias for `sixb create`).
 | `--api-public-origin <origin>` | browser/API commands | dev: `http://localhost:<api-port>` | Public API origin |
 | `--atlas-public-origin <origin>` | `dev`, `api`, `atlas` | dev: `http://localhost:<port>` | Public Atlas UI origin |
 | `--app-public-origin <origin>` | `dev`, `api`, `app` | dev: `http://localhost:<port+1>` | Public custom app origin |
+| `--api-url <url>` | auth/token commands | `SIXB_API_URL` or `http://localhost:3002` | API origin or `/api` URL |
+| `--token <token>` | auth/token commands | `SIXB_API_TOKEN` or `SIXB_TOKEN` | API bearer token |
+| `--id <id>` | token/service-account commands | generated when supported | Token or service-account id |
+| `--name <name>` | token/service-account commands | required for create | Token or service-account name |
+| `--description <text>` | `service-account create` | none | Service-account description |
+| `--expires-in <duration>` | token create commands | `90d` | Token lifetime, e.g. `30d`, `4w`, or `1y` |
+| `--expires-at <iso>` | token create commands | none | Token expiration timestamp |
+| `--group <id>` | token/service-account create commands | inherited/none | Assignable auth group; may repeat or use commas |
+| `--json` | auth/token commands | false | Print machine-readable JSON |
 | `--outdir <path>` | `build` | `.sixb/dist` | Build output directory |
 | `--dry-run` | `lake cleanup` | false | Preview cleanup without changing storage |
 | `--expire-older-than <interval>` | `lake cleanup` | `7 days` | Snapshot expiration window |
@@ -98,6 +117,57 @@ cd my-project && bun install && sixb dev
 # Initialize sixb in an existing directory
 sixb init .
 ```
+
+## API authentication commands
+
+Use a personal access token to call management commands from a terminal, script, or CI job.
+`--token` wins over `SIXB_API_TOKEN`, which wins over `SIXB_TOKEN`. `--api-url` wins over
+`SIXB_API_URL`, then `SIXB_API_PUBLIC_ORIGIN`, then defaults to `http://localhost:3002`.
+
+```bash
+export SIXB_API_URL=http://localhost:3002/api
+export SIXB_API_TOKEN=sixb_pat_...
+
+sixb auth status
+```
+
+Personal access tokens are user-owned credentials. They can manage personal tokens, service
+accounts, and service-account tokens within the caller's existing groups and permissions.
+
+```bash
+sixb token list
+sixb token create --name "Local CLI" --expires-in 90d --group agents
+sixb token revoke tok_...
+```
+
+Service accounts are machine identities for agents, sandboxes, deploy jobs, and external systems.
+Create the service account first, then mint one or more service-account tokens for it.
+
+```bash
+sixb service-account list
+sixb service-account create \
+  --id svc_sandbox \
+  --name "Sandbox agent" \
+  --description "Used by sandboxed agents" \
+  --group agents
+
+sixb service-account token list svc_sandbox
+sixb service-account token create svc_sandbox \
+  --name "Sandbox token" \
+  --expires-in 30d \
+  --group agents
+sixb service-account token revoke svc_sandbox tok_...
+sixb service-account disable svc_sandbox
+```
+
+Use `--json` on auth/token commands when scripting:
+
+```bash
+sixb service-account token create svc_sandbox --name "CI token" --expires-in 30d --json
+```
+
+Service-account tokens are runtime credentials. They can authenticate API requests that accept
+bearer tokens, but they cannot manage personal tokens, service accounts, or mint more credentials.
 
 `sixb dev` remains the local all-in-one command. Production deployments should prefer one long-running command per process so API, browser UIs, scheduler, orchestrator, functions, rules, and queue workers can scale and fail independently.
 

@@ -61,6 +61,7 @@ export type {
   AuthenticatedRequestAuthSession,
   AuthenticatedServiceAccountAccessTokenSession,
   AuthenticatedUserAccessTokenSession,
+  AuthenticatedUserRequestSession,
   AuthInvitationRecipientInput,
   AuthInvitationRecipientResult,
   AuthInvitationRecipientStatus,

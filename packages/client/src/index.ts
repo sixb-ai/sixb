@@ -1,5 +1,6 @@
 // Generated SDK surface (modern)
 
+export * from "./api"
 export type {
   SixbBrowserClientController,
   SixbBrowserRuntimeConfig,

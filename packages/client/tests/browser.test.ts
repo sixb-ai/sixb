@@ -15,7 +15,7 @@ const runtimeConfig: SixbBrowserRuntimeConfig = {
 
 afterEach(() => {
   client.interceptors.request.clear()
-  client.setConfig({ baseUrl: undefined, credentials: undefined })
+  client.setConfig({ auth: undefined, baseUrl: undefined, credentials: undefined })
 })
 
 describe("event websocket URLs", () => {

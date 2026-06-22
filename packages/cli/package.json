@@ -19,6 +19,7 @@
     "@sixb/app": "workspace:*",
     "@sixb/action-worker": "workspace:*",
     "@sixb/atlas": "workspace:*",
+    "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/orchestrator": "workspace:*",
     "@sixb/pipeline-worker": "workspace:*",

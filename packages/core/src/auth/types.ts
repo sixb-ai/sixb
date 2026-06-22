@@ -390,9 +390,12 @@ export interface AuthenticatedServiceAccountAccessTokenSession {
 
 export type AuthSessionResult = UnauthenticatedAuthSession | AuthenticatedAuthSession
 
-export type AuthenticatedRequestAuthSession =
+export type AuthenticatedUserRequestSession =
   | AuthenticatedAuthSession
   | AuthenticatedUserAccessTokenSession
+
+export type AuthenticatedRequestAuthSession =
+  | AuthenticatedUserRequestSession
   | AuthenticatedServiceAccountAccessTokenSession
 
 export type AuthRequestResult = UnauthenticatedAuthSession | AuthenticatedRequestAuthSession
