@@ -4,6 +4,7 @@ export type {
   BatchSyncConfig,
   BatchSyncDefinitionConfig,
   DatasetSyncTarget,
+  SyncBlobContext,
   SyncBuilder,
   SyncDefinition,
   SyncReadBuilder,

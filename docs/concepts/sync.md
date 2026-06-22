@@ -134,6 +134,50 @@ Better left to a [pipeline](./pipeline.md):
 - business calculations
 - turning raw rows into canonical rows
 
+## Sync files and blobs
+
+Datasets can include `fileRef` columns for blob-backed files. When a sync needs to ingest
+file bytes, use the blob facade on the read context.
+
+```ts
+import { col, defineDataset, defineSync } from "@sixb/core"
+import { fileSource } from "../connectors/file-source"
+
+export const rawFiles = defineDataset("raw.files", {
+  schema: [
+    col("id", "string"),
+    col("name", "string"),
+    col("relativePath", "string"),
+    col("fileRef", "fileRef", { nullable: true }),
+  ],
+})
+
+export const syncFiles = defineSync("sync-files")
+  .from(fileSource)
+  .read(async function* (client, context) {
+    for await (const file of client.walk("/documents")) {
+      const fileRef = await context.blobs.put({
+        body: await client.open(file.path),
+        fileName: file.name,
+        mediaType: file.mediaType,
+        logicalPath: file.relativePath,
+      })
+
+      yield {
+        id: file.id,
+        name: file.name,
+        relativePath: file.relativePath,
+        fileRef,
+      }
+    }
+  })
+  .intoDataset(rawFiles)
+```
+
+The connector reads the external source; `context.blobs` stores bytes in Sixb and returns the
+`fileRef` to write into the row. The sync worker validates returned `fileRef` values before
+committing, including existence, digest, and size.
+
 ## Convention
 
 Put sync definitions in `syncs/` and export them.
@@ -188,7 +232,7 @@ Good sync names usually start with the action and source entity:
 ## Extra details
 
 - `read(...)` receives `(client, context)`.
-- `context` includes `projectId`, `syncId`, and `signal`.
+- `context` includes `projectId`, `syncId`, `signal`, and `blobs`.
 - `read(...)` may return one row, an iterable, or an async iterable.
 - sync definitions are inert until a worker runs them.
 - `sixb dev` can co-host sync workers during local development.

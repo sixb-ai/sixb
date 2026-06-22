@@ -9,6 +9,7 @@ import type {
   ConnectorDefinition,
   DatasetDefinition,
   DatasetRow,
+  FileRef,
   LakeStorage,
   LakeWriteSession,
   SyncDefinition,
@@ -669,6 +670,68 @@ describe("runSyncJob", () => {
       error: {
         message:
           "[SixbSyncWorker] Sync 'sync-docs' returned row 1 with dataset 'raw.docs' column 'attachment' referencing unknown blob 'blob_missing'.",
+      },
+    })
+  })
+
+  test("lets sync read handlers store blobs and return validated fileRefs", async () => {
+    const syncRunsStorage = new InMemorySyncRunStorage()
+    const blobStorage = new InMemoryBlobStorage()
+    const body = new TextEncoder().encode("hello from a synced document")
+    let storedFileRef: FileRef | undefined
+
+    const sync = defineSync("sync-docs")
+      .from(erpDb)
+      .read(async (_client, context) => {
+        const fileRef = await context.blobs.put({
+          body,
+          fileName: "hello.txt",
+          mediaType: "text/plain",
+          logicalPath: "docs/hello.txt",
+        })
+        storedFileRef = fileRef
+
+        return [{ id: "doc_1", attachment: fileRef }]
+      })
+      .intoDataset(rawDocsDataset)
+
+    const runtime = createRuntime({
+      sync,
+      syncRunsStorage,
+      blobStorage,
+    })
+
+    const result = await runSyncJob({
+      runtime,
+      job: {
+        id: "run_blob_ingestion",
+        syncId: "sync-docs",
+      },
+    })
+
+    expect(result.rowsRead).toBe(1)
+    expect(storedFileRef).toBeDefined()
+
+    const fileRef = storedFileRef!
+    await expect(blobStorage.stat(fileRef.blobId)).resolves.toEqual({
+      blobId: fileRef.blobId,
+      digest: fileRef.digest,
+      sizeBytes: fileRef.sizeBytes,
+    })
+
+    const rows = await collectRows(runtime.lakeStorage.readRows({ datasetId: rawDocsDataset.id }))
+    expect(rows).toEqual([{ id: "doc_1", attachment: fileRef }])
+
+    const run = await syncRunsStorage.getById({
+      projectId: "project-1",
+      id: "run_blob_ingestion",
+    })
+    expect(run).toMatchObject({
+      status: "succeeded",
+      rowsRead: 1,
+      output: {
+        datasetId: "raw.docs",
+        versionId: result.version.versionId,
       },
     })
   })

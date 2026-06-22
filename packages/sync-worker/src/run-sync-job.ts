@@ -164,6 +164,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       projectId: runtime.id,
       syncId: sync.id,
       signal,
+      blobs: blobStorage,
       checkpoint: previousCheckpoint !== undefined ? cloneJsonValue(previousCheckpoint) : undefined,
       setCheckpoint(next: unknown) {
         assertJsonValue(next, `Sync '${sync.id}' checkpoint`)
