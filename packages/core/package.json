@@ -42,7 +42,9 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@ai-sdk/provider": "^3.0.10"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "typescript": "^5.7.0"

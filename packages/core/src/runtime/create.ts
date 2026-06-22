@@ -1,9 +1,11 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
+import type { AgentDefinition } from "../agents"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import {
   discoverActions,
+  discoverAgents,
   discoverConnectors,
   discoverDatasets,
   discoverFunctions,
@@ -47,6 +49,8 @@ export interface CreateSixbOptions {
   sandboxes?: SandboxFactory
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
+  /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
+  agents?: readonly AgentDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions to register in addition to auto-discovered `connectors/` exports. */
   connectors?: readonly ConnectorDefinition[]
@@ -98,6 +102,7 @@ export async function createSixb(
     groups,
     roles,
     invitePolicies,
+    agents,
   ] = await Promise.all([
     options.actions ?? discoverActions(projectRoot),
     options.functions ?? discoverFunctions(projectRoot),
@@ -112,6 +117,7 @@ export async function createSixb(
     discoverGroups(projectRoot),
     discoverRoles(projectRoot),
     discoverInvitePolicies(projectRoot),
+    discoverAgents(projectRoot),
   ])
 
   // Explicit definitions come first so local setup can override ordering while
@@ -138,6 +144,7 @@ export async function createSixb(
     groups: [...(options.groups ?? []), ...groups],
     roles: [...(options.roles ?? []), ...roles],
     invitePolicies: [...(options.invitePolicies ?? []), ...invitePolicies],
+    agents: [...(options.agents ?? []), ...agents],
     auth: options.auth,
   })
 }

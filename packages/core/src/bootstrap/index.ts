@@ -1,5 +1,6 @@
 export {
   discoverActions,
+  discoverAgents,
   discoverConnectors,
   discoverDatasets,
   discoverFunctions,

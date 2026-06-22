@@ -1220,6 +1220,11 @@ export type {
 } from "./functions"
 export { defineFunction } from "./functions"
 
+// ── Agents ──────────────────────────────────────────────────
+
+export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./agents"
+export { AgentDefinitionError, AgentsRuntime, defineAgent, isAgentDefinition } from "./agents"
+
 // ── Scheduling ──────────────────────────────────────────────
 
 export { CronValidationError, createCronMatcher, nextCronOccurrence } from "./schedules"
