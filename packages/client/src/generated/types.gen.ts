@@ -617,6 +617,12 @@ export type ListAuthServiceAccountsErrors = {
     error: string
   }
   /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
    * Response for status 500
    */
   500: {
@@ -782,6 +788,12 @@ export type ListAuthServiceAccountAccessTokensErrors = {
    * Response for status 401
    */
   401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
     error: string
   }
   /**

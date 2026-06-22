@@ -17,7 +17,7 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Sixb access token",
-        "description": "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on scoped API routes."
+        "description": "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme."
       }
     },
     "schemas": {
@@ -1100,6 +1100,11 @@
         "summary": "Get auth access-token management options",
         "tags": ["Auth"],
         "operationId": "getAuthAccessManagementOptions",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -1176,6 +1181,11 @@
         "summary": "List personal access tokens for the current user",
         "tags": ["Auth"],
         "operationId": "listAuthAccessTokens",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -1301,6 +1311,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -1541,6 +1554,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [
@@ -1709,6 +1725,11 @@
         "summary": "List auth service accounts",
         "tags": ["Auth"],
         "operationId": "listAuthServiceAccounts",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -1776,6 +1797,23 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -1802,6 +1840,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -2016,6 +2057,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [
@@ -2152,6 +2196,11 @@
         "summary": "List access tokens for an auth service account",
         "tags": ["Auth"],
         "operationId": "listAuthServiceAccountAccessTokens",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "serviceAccountId",
@@ -2262,6 +2311,23 @@
               }
             }
           },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
           "404": {
             "description": "Response for status 404",
             "content": {
@@ -2305,6 +2371,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [
@@ -2573,6 +2642,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "parameters": [

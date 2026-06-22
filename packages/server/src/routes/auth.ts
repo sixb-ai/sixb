@@ -1,5 +1,7 @@
 import {
   type AccessTokenRecord,
+  type AuthenticatedUserRequestSession,
+  type AuthRequestResult,
   AuthRuntimeError,
   type AuthSessionAudience,
   type AuthStorage,
@@ -21,6 +23,7 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@sixb/core"
 import { type Elysia, t } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import {
   type AuthRedirectContext,
   BrowserOriginError,
@@ -326,9 +329,14 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, {
+              ...authOptions,
+              credentialSource: "any",
+            })
+          )
+          if (session instanceof Response) {
+            return session
           }
 
           const assignableGroupIds = new Set(session.groupIds)
@@ -359,6 +367,7 @@ export function registerAuthRoutes(
           summary: "Get auth access-token management options",
           tags: ["Auth"],
           operationId: "getAuthAccessManagementOptions",
+          security: bearerSecurityRequirement("getAuthAccessManagementOptions"),
         },
       }
     )
@@ -367,9 +376,14 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, {
+              ...authOptions,
+              credentialSource: "any",
+            })
+          )
+          if (session instanceof Response) {
+            return session
           }
 
           const { accessTokens } = await sixb.auth.listPersonalAccessTokens(request, authOptions)
@@ -396,6 +410,7 @@ export function registerAuthRoutes(
           summary: "List personal access tokens for the current user",
           tags: ["Auth"],
           operationId: "listAuthAccessTokens",
+          security: bearerSecurityRequirement("listAuthAccessTokens"),
         },
       }
     )
@@ -405,9 +420,14 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthPersonalAccessTokenBodySchema.parse(body)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, {
+              ...authOptions,
+              credentialSource: "any",
+            })
+          )
+          if (session instanceof Response) {
+            return session
           }
 
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
@@ -445,7 +465,7 @@ export function registerAuthRoutes(
           summary: "Create a personal access token",
           tags: ["Auth"],
           operationId: "createAuthPersonalAccessToken",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("createAuthPersonalAccessToken"),
         },
       }
     )
@@ -454,9 +474,14 @@ export function registerAuthRoutes(
       async ({ request, params }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, {
+              ...authOptions,
+              credentialSource: "any",
+            })
+          )
+          if (session instanceof Response) {
+            return session
           }
 
           const { tokenId } = RevokeAuthAccessTokenParamsSchema.parse(params)
@@ -490,7 +515,7 @@ export function registerAuthRoutes(
           summary: "Revoke one of the current user's personal access tokens",
           tags: ["Auth"],
           operationId: "revokeAuthAccessToken",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("revokeAuthAccessToken"),
         },
       }
     )
@@ -499,10 +524,10 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const { serviceAccounts } = await sixb.auth.listServiceAccounts(request, authOptions)
 
@@ -522,12 +547,14 @@ export function registerAuthRoutes(
         response: {
           200: ListAuthServiceAccountsResponseSchema,
           401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           500: ErrorResponseSchema,
         },
         detail: {
           summary: "List auth service accounts",
           tags: ["Auth"],
           operationId: "listAuthServiceAccounts",
+          security: bearerSecurityRequirement("listAuthServiceAccounts"),
         },
       }
     )
@@ -537,10 +564,10 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthServiceAccountBodySchema.parse(body)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const result = await sixb.auth.createServiceAccount(
             request,
@@ -550,7 +577,7 @@ export function registerAuthRoutes(
               description: optionalTrimmed(parsed.description),
               groupIds: parsed.groupIds,
             },
-            authOptions
+            { ...authOptions, credentialSource: "any" }
           )
 
           return jsonResponse(
@@ -579,7 +606,7 @@ export function registerAuthRoutes(
           summary: "Create an auth service account",
           tags: ["Auth"],
           operationId: "createAuthServiceAccount",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("createAuthServiceAccount"),
         },
       }
     )
@@ -588,10 +615,10 @@ export function registerAuthRoutes(
       async ({ request, params }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
           const result = await sixb.auth.disableServiceAccount(
@@ -623,7 +650,7 @@ export function registerAuthRoutes(
           summary: "Disable an auth service account",
           tags: ["Auth"],
           operationId: "disableAuthServiceAccount",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("disableAuthServiceAccount"),
         },
       }
     )
@@ -632,10 +659,10 @@ export function registerAuthRoutes(
       async ({ request, params }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
           const { serviceAccount, accessTokens } = await sixb.auth.listServiceAccountAccessTokens(
@@ -661,6 +688,7 @@ export function registerAuthRoutes(
         response: {
           200: ListAuthServiceAccountAccessTokensResponseSchema,
           401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           500: ErrorResponseSchema,
         },
@@ -668,6 +696,7 @@ export function registerAuthRoutes(
           summary: "List access tokens for an auth service account",
           tags: ["Auth"],
           operationId: "listAuthServiceAccountAccessTokens",
+          security: bearerSecurityRequirement("listAuthServiceAccountAccessTokens"),
         },
       }
     )
@@ -678,10 +707,10 @@ export function registerAuthRoutes(
           const authOptions = resolveAuthOptions(options, request)
           const parsedParams = AuthServiceAccountParamsSchema.parse(params)
           const parsed = CreateAuthServiceAccountAccessTokenBodySchema.parse(body)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
           const result = await sixb.auth.createServiceAccountAccessToken(
@@ -692,7 +721,7 @@ export function registerAuthRoutes(
               expiresAt,
               groupIds: parsed.groupIds,
             },
-            authOptions
+            { ...authOptions, credentialSource: "any" }
           )
 
           return jsonResponse(
@@ -723,7 +752,7 @@ export function registerAuthRoutes(
           summary: "Create an access token for an auth service account",
           tags: ["Auth"],
           operationId: "createAuthServiceAccountAccessToken",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("createAuthServiceAccountAccessToken"),
         },
       }
     )
@@ -733,10 +762,10 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = RevokeAuthServiceAccountAccessTokenParamsSchema.parse(params)
-          const session = await sixb.auth.getSession(request, authOptions)
-          if (!session.authenticated) {
-            return jsonResponse({ error: "Authentication required" }, 401)
-          }
+          const session = requireAuthenticatedUserSession(
+            await sixb.auth.getSession(request, { ...authOptions, credentialSource: "any" })
+          )
+          if (session instanceof Response) return session
 
           const result = await sixb.auth.revokeServiceAccountAccessToken(
             request,
@@ -769,7 +798,7 @@ export function registerAuthRoutes(
           summary: "Revoke an access token for an auth service account",
           tags: ["Auth"],
           operationId: "revokeAuthServiceAccountAccessToken",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("revokeAuthServiceAccountAccessToken"),
         },
       }
     )
@@ -1543,6 +1572,31 @@ function parseRequiredFutureDate(value: string): Date {
 function optionalTrimmed(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
+}
+
+// Token and service-account management can be driven by a personal access
+// token (for CLI credential rotation) as well as a browser session, so reject
+// unauthenticated requests with 401 and non-user principals (service-account
+// tokens) with 403. Service-account tokens are runtime credentials and must not
+// mint or manage further credentials.
+function requireAuthenticatedUserSession(
+  session: AuthRequestResult
+): AuthenticatedUserRequestSession | Response {
+  if (!session.authenticated) {
+    return jsonResponse({ error: "Authentication required" }, 401)
+  }
+
+  if (!isAuthenticatedUserSession(session)) {
+    return jsonResponse({ error: "User authentication is required" }, 403)
+  }
+
+  return session
+}
+
+function isAuthenticatedUserSession(
+  session: AuthRequestResult & { readonly authenticated: true }
+): session is AuthenticatedUserRequestSession {
+  return session.principal.type === "user"
 }
 
 function serializeInvitation(invitation: InvitationRecord) {

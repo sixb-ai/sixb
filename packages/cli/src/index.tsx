@@ -31,6 +31,25 @@ function getFlag(name: string): string | undefined {
   return undefined
 }
 
+function getFlags(name: string): string[] {
+  const values: string[] = []
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]
+    if (arg === `--${name}`) {
+      const value = args[index + 1]
+      if (value && !value.startsWith("--")) {
+        values.push(value)
+        index++
+      }
+    } else if (arg?.startsWith(`--${name}=`)) {
+      values.push(arg.slice(name.length + 3))
+    }
+  }
+
+  return values
+}
+
 function hasFlag(name: string): boolean {
   return args.includes(`--${name}`)
 }
@@ -52,6 +71,14 @@ const flagsWithValues = new Set([
   "dir",
   "expire-older-than",
   "delete-older-than",
+  "api-url",
+  "token",
+  "id",
+  "name",
+  "description",
+  "expires-at",
+  "expires-in",
+  "group",
 ])
 
 function getCommandPositionals(): string[] {
@@ -172,6 +199,53 @@ async function main(): Promise<void> {
         host: getFlag("host"),
         apiPublicOrigin: getFlag("api-public-origin"),
         appPublicOrigin: getFlag("app-public-origin"),
+      })
+      break
+    }
+
+    case "auth": {
+      const { runAuth } = await import("./commands/auth")
+      const positionals = getCommandPositionals()
+      await runAuth({
+        action: positionals[0],
+        apiUrl: getFlag("api-url"),
+        token: getFlag("token"),
+        json: hasFlag("json"),
+      })
+      break
+    }
+
+    case "token": {
+      const { runToken } = await import("./commands/token")
+      const positionals = getCommandPositionals()
+      await runToken({
+        action: positionals[0],
+        positionals,
+        apiUrl: getFlag("api-url"),
+        token: getFlag("token"),
+        id: getFlag("id"),
+        name: getFlag("name"),
+        expiresAt: getFlag("expires-at"),
+        expiresIn: getFlag("expires-in"),
+        groupIds: getFlags("group"),
+        json: hasFlag("json"),
+      })
+      break
+    }
+
+    case "service-account": {
+      const { runServiceAccount } = await import("./commands/service-account")
+      await runServiceAccount({
+        positionals: getCommandPositionals(),
+        apiUrl: getFlag("api-url"),
+        token: getFlag("token"),
+        id: getFlag("id"),
+        name: getFlag("name"),
+        description: getFlag("description"),
+        expiresAt: getFlag("expires-at"),
+        expiresIn: getFlag("expires-in"),
+        groupIds: getFlags("group"),
+        json: hasFlag("json"),
       })
       break
     }

@@ -34,13 +34,19 @@ function padLabel(label: string, width: number) {
   return label.padEnd(width, " ")
 }
 
-type KeyValueItem = { label: string; value: string }
+export type KeyValueItem = { label: string; value: string }
 
 function isUrl(value: string): boolean {
   return /^(https?|wss?):\/\//.test(value)
 }
 
-function KeyValueList({ items, labelWidth }: { items: KeyValueItem[]; labelWidth?: number }) {
+function KeyValueList({
+  items,
+  labelWidth,
+}: {
+  items: readonly KeyValueItem[]
+  labelWidth?: number
+}) {
   const resolvedWidth = Math.max(labelWidth ?? 0, ...items.map((item) => item.label.length))
 
   return (
@@ -49,6 +55,42 @@ function KeyValueList({ items, labelWidth }: { items: KeyValueItem[]; labelWidth
         <Text key={`${item.label}:${item.value}`}>
           <Text dimColor>{padLabel(item.label, resolvedWidth + 2)}</Text>
           <Text color={isUrl(item.value) ? "cyan" : undefined}>{item.value}</Text>
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
+function Table({
+  headers,
+  rows,
+}: {
+  headers: readonly string[]
+  rows: readonly (readonly string[])[]
+}) {
+  const widths = headers.map((header, index) =>
+    Math.max(header.length, ...rows.map((row) => row[index]?.length ?? 0))
+  )
+
+  return (
+    <Box flexDirection="column">
+      <Text>
+        {headers.map((header, index) => (
+          <Text key={`${index}:${header}`} bold>
+            {padLabel(header, widths[index] ?? header.length)}
+            {index === headers.length - 1 ? "" : "  "}
+          </Text>
+        ))}
+      </Text>
+      <Text dimColor>{widths.map((width) => "-".repeat(width)).join("  ")}</Text>
+      {rows.map((row, rowIndex) => (
+        <Text key={`${rowIndex}:${row.join(":")}`}>
+          {row.map((value, index) => (
+            <Text key={`${index}:${value}`}>
+              {padLabel(value, widths[index] ?? value.length)}
+              {index === row.length - 1 ? "" : "  "}
+            </Text>
+          ))}
         </Text>
       ))}
     </Box>
@@ -74,6 +116,103 @@ function Panel({
       </Box>
       <Spacer />
       {children}
+    </Box>
+  )
+}
+
+export function KeyValueResultView({
+  title,
+  subtitle,
+  items,
+  titleColor = "green",
+  message,
+}: {
+  title: string
+  subtitle?: string
+  items: readonly KeyValueItem[]
+  titleColor?: string
+  message?: string
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color={titleColor} bold>
+        {title}
+      </Text>
+      {subtitle ? <Text dimColor>{subtitle}</Text> : null}
+      <Spacer />
+      <KeyValueList items={items} />
+      {message ? (
+        <>
+          <Spacer />
+          <Text dimColor>{message}</Text>
+        </>
+      ) : null}
+    </Box>
+  )
+}
+
+export function TableResultView({
+  title,
+  subtitle,
+  headers,
+  rows,
+  emptyMessage,
+}: {
+  title: string
+  subtitle?: string
+  headers: readonly string[]
+  rows: readonly (readonly string[])[]
+  emptyMessage: string
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {title}
+      </Text>
+      {subtitle ? <Text dimColor>{subtitle}</Text> : null}
+      <Spacer />
+      {rows.length > 0 ? (
+        <Table headers={headers} rows={rows} />
+      ) : (
+        <Text dimColor>{emptyMessage}</Text>
+      )}
+    </Box>
+  )
+}
+
+export function SecretResultView({
+  title,
+  subtitle,
+  items,
+  secretLabel = "Token",
+  secret,
+  message = "Store this token now. Sixb will not show it again.",
+}: {
+  title: string
+  subtitle?: string
+  items: readonly KeyValueItem[]
+  secretLabel?: string
+  secret: string
+  message?: string
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {title}
+      </Text>
+      {subtitle ? <Text dimColor>{subtitle}</Text> : null}
+      <Spacer />
+      <KeyValueList items={items} />
+      <Spacer />
+      <Panel title={secretLabel} borderColor="yellow">
+        <Text>{secret}</Text>
+      </Panel>
+      {message ? (
+        <>
+          <Spacer />
+          <Text dimColor>{message}</Text>
+        </>
+      ) : null}
     </Box>
   )
 }
@@ -167,6 +306,17 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "api", value: "Start production API/docs/WebSocket server" },
           { label: "atlas", value: "Start production Atlas UI server" },
           { label: "app", value: "Start production custom app server" },
+          { label: "auth status", value: "Check API token authentication" },
+          { label: "token list", value: "List personal access tokens" },
+          { label: "token create", value: "Create a personal access token" },
+          { label: "token revoke <id>", value: "Revoke a personal access token" },
+          { label: "service-account list", value: "List service accounts" },
+          { label: "service-account create", value: "Create a service account" },
+          { label: "service-account disable", value: "Disable a service account" },
+          {
+            label: "service-account token",
+            value: "List, create, or revoke service-account tokens",
+          },
           { label: "scheduler", value: "Start production scheduler event producer" },
           { label: "orchestrator", value: "Start production event-to-queue dispatcher" },
           { label: "functions", value: "Start production functions runtime" },
@@ -201,6 +351,14 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           { label: "--api-public-origin <origin>", value: "Public API origin" },
           { label: "--atlas-public-origin <origin>", value: "Public Atlas origin" },
           { label: "--app-public-origin <origin>", value: "Public custom app origin" },
+          { label: "--api-url <url>", value: "API origin for auth/token commands" },
+          { label: "--token <token>", value: "API token for auth/token commands" },
+          { label: "--name <name>", value: "Token or service-account name" },
+          { label: "--description <text>", value: "Service-account description" },
+          { label: "--expires-in <duration>", value: "Token lifetime, e.g. 30d or 1y" },
+          { label: "--expires-at <iso>", value: "Token expiration timestamp" },
+          { label: "--group <id>", value: "Assignable token group; may repeat" },
+          { label: "--json", value: "Print JSON for auth/token commands" },
           { label: "--outdir <path>", value: "Build output directory" },
           { label: "--dry-run", value: "Preview lake cleanup without changing storage" },
           { label: "--expire-older-than <interval>", value: "Lake snapshot expiration window" },
@@ -217,6 +375,11 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "sixb dev",
           "sixb build",
           "sixb api",
+          "SIXB_API_URL=http://localhost:3002 SIXB_API_TOKEN=sixb_pat_... sixb token list",
+          "sixb token create --name 'Local CLI' --expires-in 90d",
+          "sixb service-account create --id svc_sandbox --name 'Sandbox agent' --group agents",
+          "sixb service-account token create svc_sandbox --name 'Sandbox token' --expires-in 30d",
+          "sixb auth status",
           "sixb atlas",
           "sixb app",
           "sixb scheduler",

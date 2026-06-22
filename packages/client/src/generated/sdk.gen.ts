@@ -302,7 +302,11 @@ export const getAuthAccessManagementOptions = <ThrowOnError extends boolean = fa
     GetAuthAccessManagementOptionsResponses,
     GetAuthAccessManagementOptionsErrors,
     ThrowOnError
-  >({ url: "/api/auth/access-management-options", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/access-management-options",
+    ...options,
+  })
 
 /**
  * List personal access tokens for the current user
@@ -314,7 +318,11 @@ export const listAuthAccessTokens = <ThrowOnError extends boolean = false>(
     ListAuthAccessTokensResponses,
     ListAuthAccessTokensErrors,
     ThrowOnError
-  >({ url: "/api/auth/access-tokens", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/access-tokens",
+    ...options,
+  })
 
 /**
  * Create a personal access token
@@ -327,7 +335,10 @@ export const createAuthPersonalAccessToken = <ThrowOnError extends boolean = fal
     CreateAuthPersonalAccessTokenErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/access-tokens",
     ...options,
     headers: {
@@ -347,7 +358,10 @@ export const revokeAuthAccessToken = <ThrowOnError extends boolean = false>(
     RevokeAuthAccessTokenErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/access-tokens/{tokenId}/revoke",
     ...options,
   })
@@ -362,7 +376,11 @@ export const listAuthServiceAccounts = <ThrowOnError extends boolean = false>(
     ListAuthServiceAccountsResponses,
     ListAuthServiceAccountsErrors,
     ThrowOnError
-  >({ url: "/api/auth/service-accounts", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/service-accounts",
+    ...options,
+  })
 
 /**
  * Create an auth service account
@@ -375,7 +393,10 @@ export const createAuthServiceAccount = <ThrowOnError extends boolean = false>(
     CreateAuthServiceAccountErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts",
     ...options,
     headers: {
@@ -395,7 +416,10 @@ export const disableAuthServiceAccount = <ThrowOnError extends boolean = false>(
     DisableAuthServiceAccountErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts/{serviceAccountId}/disable",
     ...options,
   })
@@ -410,7 +434,11 @@ export const listAuthServiceAccountAccessTokens = <ThrowOnError extends boolean 
     ListAuthServiceAccountAccessTokensResponses,
     ListAuthServiceAccountAccessTokensErrors,
     ThrowOnError
-  >({ url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",
+    ...options,
+  })
 
 /**
  * Create an access token for an auth service account
@@ -423,7 +451,10 @@ export const createAuthServiceAccountAccessToken = <ThrowOnError extends boolean
     CreateAuthServiceAccountAccessTokenErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",
     ...options,
     headers: {
@@ -443,7 +474,10 @@ export const revokeAuthServiceAccountAccessToken = <ThrowOnError extends boolean
     RevokeAuthServiceAccountAccessTokenErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke",
     ...options,
   })

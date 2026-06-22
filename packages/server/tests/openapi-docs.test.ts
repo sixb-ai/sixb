@@ -69,17 +69,11 @@ describe("OpenAPI docs", () => {
       scheme: "bearer",
       bearerFormat: "Sixb access token",
       description:
-        "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on scoped API routes.",
+        "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme.",
     })
 
     const csrfOnlyRoutes = [
       ["post", "/api/auth/sign-out"],
-      ["post", "/api/auth/access-tokens"],
-      ["post", "/api/auth/access-tokens/{tokenId}/revoke"],
-      ["post", "/api/auth/service-accounts"],
-      ["post", "/api/auth/service-accounts/{serviceAccountId}/disable"],
-      ["post", "/api/auth/service-accounts/{serviceAccountId}/access-tokens"],
-      ["post", "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke"],
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
       ["post", "/api/syncs/{syncId}/runs"],

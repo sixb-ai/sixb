@@ -23,6 +23,44 @@ export interface AccessTokenRoute {
 // until each has an intentional scoped API surface.
 export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = [
   { operationId: "getProjectInfo", method: "GET", path: "/api/project" },
+  // Token and service-account management is bearer-capable so the CLI can
+  // authenticate with a personal access token. The runtime still confines every
+  // operation to the caller's own groups, and service-account tokens are
+  // rejected (only user principals may manage credentials).
+  {
+    operationId: "getAuthAccessManagementOptions",
+    method: "GET",
+    path: "/api/auth/access-management-options",
+  },
+  { operationId: "listAuthAccessTokens", method: "GET", path: "/api/auth/access-tokens" },
+  { operationId: "createAuthPersonalAccessToken", method: "POST", path: "/api/auth/access-tokens" },
+  {
+    operationId: "revokeAuthAccessToken",
+    method: "POST",
+    path: "/api/auth/access-tokens/:tokenId/revoke",
+  },
+  { operationId: "listAuthServiceAccounts", method: "GET", path: "/api/auth/service-accounts" },
+  { operationId: "createAuthServiceAccount", method: "POST", path: "/api/auth/service-accounts" },
+  {
+    operationId: "disableAuthServiceAccount",
+    method: "POST",
+    path: "/api/auth/service-accounts/:serviceAccountId/disable",
+  },
+  {
+    operationId: "listAuthServiceAccountAccessTokens",
+    method: "GET",
+    path: "/api/auth/service-accounts/:serviceAccountId/access-tokens",
+  },
+  {
+    operationId: "createAuthServiceAccountAccessToken",
+    method: "POST",
+    path: "/api/auth/service-accounts/:serviceAccountId/access-tokens",
+  },
+  {
+    operationId: "revokeAuthServiceAccountAccessToken",
+    method: "POST",
+    path: "/api/auth/service-accounts/:serviceAccountId/access-tokens/:tokenId/revoke",
+  },
   { operationId: "listObjectTypes", method: "GET", path: "/api/object-types" },
   { operationId: "getObjectType", method: "GET", path: "/api/object-types/:objectTypeId" },
   { operationId: "listObjects", method: "GET", path: "/api/objects" },

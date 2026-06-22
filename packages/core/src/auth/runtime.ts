@@ -33,6 +33,7 @@ import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
 import type {
   AuthenticatedAuthSession,
   AuthenticatedRequestAuthSession,
+  AuthenticatedUserRequestSession,
   AuthRequestResult,
   AuthSessionResolutionOptions,
   AuthSessionResult,
@@ -459,6 +460,22 @@ export class AuthRuntime {
     return session
   }
 
+  async requireUserRequest(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<AuthenticatedUserRequestSession> {
+    const session = await this.getSession(request, { ...options, credentialSource: "any" })
+    if (!session.authenticated) {
+      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
+    }
+
+    if (!isAuthenticatedUserRequestSession(session)) {
+      throw new AuthRuntimeError("authorization_denied", "[Sixb] User authentication is required.")
+    }
+
+    return session
+  }
+
   async createSecurityContext(
     request: Request,
     options: AuthSessionResolutionOptions = {}
@@ -508,7 +525,7 @@ export class AuthRuntime {
     request: Request,
     options: AuthSessionResolutionOptions = {}
   ): Promise<ListPersonalAccessTokensResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const result = await storage.accessTokens.list({
       projectId: this.projectId,
@@ -528,7 +545,7 @@ export class AuthRuntime {
     input: CreatePersonalAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<CreateAccessTokenResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     // A personal token can only carry groups the caller currently belongs to.
     const groupIds = constrainRequestedGroupIds(input.groupIds, session.groupIds, {
@@ -545,7 +562,7 @@ export class AuthRuntime {
       tokenHash: credential.tokenHash,
       groupIds,
       createdByPrincipal: session.principal,
-      createdBySessionId: session.session.id,
+      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     })
@@ -558,7 +575,7 @@ export class AuthRuntime {
     input: RevokePersonalAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<RevokeAccessTokenResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const token = await storage.accessTokens.getById({
       projectId: this.projectId,
@@ -588,7 +605,7 @@ export class AuthRuntime {
     request: Request,
     options: AuthSessionResolutionOptions = {}
   ): Promise<ListServiceAccountsResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const result = await storage.serviceAccounts.list({
       projectId: this.projectId,
@@ -616,7 +633,7 @@ export class AuthRuntime {
     input: CreateServiceAccountInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<CreateServiceAccountResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     // A caller can only place a service account in groups it itself belongs to.
     const groupIds =
@@ -630,7 +647,7 @@ export class AuthRuntime {
       name: input.name,
       description: input.description,
       createdByPrincipal: session.principal,
-      createdBySessionId: session.session.id,
+      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
       createdAt: now,
       updatedAt: now,
     })
@@ -655,7 +672,7 @@ export class AuthRuntime {
     input: DisableServiceAccountInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<DisableServiceAccountResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds } = await this.requireManageableServiceAccount(
       storage,
@@ -677,7 +694,7 @@ export class AuthRuntime {
     input: ListServiceAccountAccessTokensInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<ListServiceAccountAccessTokensResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount } = await this.requireManageableServiceAccount(
       storage,
@@ -702,7 +719,7 @@ export class AuthRuntime {
     input: CreateServiceAccountAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<CreateServiceAccountAccessTokenResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds: serviceAccountGroupIds } =
       await this.requireManageableServiceAccount(storage, session.groupIds, input.serviceAccountId)
@@ -731,7 +748,7 @@ export class AuthRuntime {
       tokenHash: credential.tokenHash,
       groupIds,
       createdByPrincipal: session.principal,
-      createdBySessionId: session.session.id,
+      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     })
@@ -744,7 +761,7 @@ export class AuthRuntime {
     input: RevokeServiceAccountAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
   ): Promise<RevokeServiceAccountAccessTokenResult> {
-    const session = await this.requireUser(request, options)
+    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount } = await this.requireManageableServiceAccount(
       storage,
@@ -1112,6 +1129,12 @@ function resolveCorrelationId(request: Request): string {
   return (
     request.headers.get("x-correlation-id") ?? request.headers.get("x-request-id") ?? randomUUID()
   )
+}
+
+function isAuthenticatedUserRequestSession(
+  session: AuthenticatedRequestAuthSession
+): session is AuthenticatedUserRequestSession {
+  return session.principal.type === "user"
 }
 
 function resolveRequestIpAddress(request: Request): string | undefined {

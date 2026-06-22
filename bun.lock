@@ -267,13 +267,14 @@
       "name": "@sixb/cli",
       "version": "0.1.0",
       "bin": {
-        "sixb": "./dist/index.js",
-        "create-sixb": "./dist/index.js",
+        "sixb": "./src/index.tsx",
+        "create-sixb": "./src/index.tsx",
       },
       "dependencies": {
         "@sixb/action-worker": "workspace:*",
         "@sixb/app": "workspace:*",
         "@sixb/atlas": "workspace:*",
+        "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/orchestrator": "workspace:*",
         "@sixb/pipeline-worker": "workspace:*",
