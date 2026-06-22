@@ -8,6 +8,7 @@
     "connectors/*",
     "broker/*",
     "queues/*",
+    "sandboxes/*",
     "storage/*",
     "examples/*"
   ],
@@ -20,7 +21,7 @@
     "test": "bun test",
     "test:e2e": "bun run --workspaces --if-present test:e2e",
     "test:all": "bun run test && bun run test:e2e",
-    "lint": "biome check auth/*/src packages/*/src connectors/*/src",
+    "lint": "biome check auth/*/src packages/*/src connectors/*/src sandboxes/*/src",
     "typecheck": "bun --filter '@sixb/*' typecheck",
     "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/sixb && echo 'Linked sixb CLI to ~/.bun/bin/sixb'",
     "sixb": "bun packages/cli/src/index.tsx",

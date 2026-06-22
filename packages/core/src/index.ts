@@ -832,6 +832,23 @@ export { InMemoryQueues, QueueError } from "./queues"
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./workers"
 export { QueueWorker, Worker, WorkerAbortError } from "./workers"
 
+// ── Sandboxes ──────────────────────────────────────────────
+
+export type {
+  CommandResult,
+  CreateSandboxOptions,
+  RunCommandOptions,
+  Sandbox,
+  SandboxFactory,
+  SandboxStatus,
+} from "./sandboxes"
+export {
+  SandboxError,
+  SandboxIsolationUnavailableError,
+  SandboxNotRunningError,
+  SandboxTimeoutError,
+} from "./sandboxes"
+
 // ── Object Operations ───────────────────────────────────────
 
 export { objectService } from "./objects"

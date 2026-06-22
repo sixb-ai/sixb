@@ -27,6 +27,7 @@ import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
+import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { GroupDefinition, InvitePolicyDefinition, RoleDefinition } from "../security"
 import type { Storage } from "../storage"
@@ -43,6 +44,7 @@ export interface CreateSixbOptions {
   lakeStorage: LakeStorage
   blobStorage: BlobStorage
   queues: Queues
+  sandboxes?: SandboxFactory
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
@@ -122,6 +124,7 @@ export async function createSixb(
     lakeStorage: options.lakeStorage,
     blobStorage: options.blobStorage,
     queues: options.queues,
+    sandboxes: options.sandboxes,
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],

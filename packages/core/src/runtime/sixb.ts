@@ -45,6 +45,7 @@ import { validateProjectionsAtStartup } from "../projections/validation"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import { validateRulesAtStartup } from "../rules"
+import type { SandboxFactory } from "../sandboxes"
 import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
@@ -81,6 +82,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   lakeStorage: LakeStorage
   blobStorage: BlobStorage
   queues: Queues
+  sandboxes?: SandboxFactory
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this runtime. */
@@ -126,6 +128,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
+  readonly sandboxes?: SandboxFactory
   readonly rules: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
@@ -142,6 +145,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.lakeStorage = options.lakeStorage
     this.blobStorage = options.blobStorage
     this.queues = options.queues
+    this.sandboxes = options.sandboxes
     this.rules = options.rules ?? []
     // Ontology and actions resolve first so every later registry (security,
     // rules, workflows, projections) can validate its references against them.
@@ -273,6 +277,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       lakeStorage: this.lakeStorage,
       blobStorage: this.blobStorage,
       queues: this.queues,
+      sandboxes: this.sandboxes,
     }
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
