@@ -344,8 +344,7 @@ export function useTelemetryHistoryQuery<
   }
 
   return useQuery({
-    queryKey: telemetryHistoryQueryKey(historyInput),
-    queryFn: ({ signal }) => fetchTelemetryHistory(historyInput, signal),
+    ...telemetryHistoryQueryOptions(historyInput),
     enabled,
     staleTime,
     gcTime,
