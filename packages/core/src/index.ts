@@ -735,6 +735,7 @@ export {
   normalizeActionRunCommitDiff,
   ObjectStorageError,
   PipelineRunError,
+  PROJECTION_COUNTER_KEYS,
   ProjectionRunError,
   planMigrationSet,
   runMigrationSet,
@@ -745,6 +746,7 @@ export {
   WebhookRunError,
   WorkflowInterventionError,
   WorkflowRunError,
+  zeroProjectionRunCounters,
 } from "./storage"
 
 // ── Blob Storage ───────────────────────────────────────────

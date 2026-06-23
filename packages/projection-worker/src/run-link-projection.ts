@@ -6,18 +6,13 @@ import {
   ObjectNotFoundError,
   objectService,
 } from "@sixb/core"
+import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
 import type {
   ProjectionExecutionResult,
   ProjectionProgressReporter,
   ProjectionWorkerContext,
 } from "./types"
-import {
-  createZeroCounters,
-  errorMessage,
-  isBlank,
-  snapshotCounters,
-  throwIfAborted,
-} from "./utils"
+import { errorMessage, isBlank } from "./utils"
 
 interface RunLinkProjectionInput {
   readonly runtime: ProjectionWorkerContext
@@ -48,92 +43,73 @@ export async function runLinkProjection(
   input: RunLinkProjectionInput
 ): Promise<ProjectionExecutionResult> {
   const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const counters = createZeroCounters()
+  const readColumns = linkProjectionReadColumns(projection)
   const seenPairs = new Set<string>()
-  const batch: CollectedLinkRow[] = []
-  let firstErrorMessage: string | undefined
 
-  const rememberError = (message: string): void => {
-    firstErrorMessage ??= message
-  }
+  return runStreamingProjection<CollectedLinkRow>({
+    runtime,
+    signal,
+    batchSize,
+    onProgress,
+    spec: {
+      datasetId: projection.datasetId,
+      versionId,
+      readColumns,
+      projectRow(row) {
+        const validationError = getDatasetRowValidationError(row, dataset, { columns: readColumns })
+        if (validationError) {
+          return { status: "fail", errorMessage: validationError }
+        }
 
-  const flushBatch = async (): Promise<void> => {
-    if (batch.length === 0) {
-      return
-    }
+        const linkRow = collectLinkRow(projection, row)
+        if (!linkRow) {
+          return { status: "skip" }
+        }
 
-    const rows = batch.splice(0, batch.length)
-    const linkItems: LinkItem[] = rows.map((row) => ({
-      objectTypeId: projection.sourceObjectTypeId,
-      sourceId: row.sourceId,
-      linkId: projection.linkId,
-      target: {
-        targetTypeId: projection.targetObjectTypeId,
-        targetId: row.targetId,
+        const pairKey = `${linkRow.sourceId}\0${linkRow.targetId}`
+        if (seenPairs.has(pairKey)) {
+          return { status: "skip" }
+        }
+        seenPairs.add(pairKey)
+
+        return { status: "item", item: linkRow }
       },
-    }))
+      flushBatch: (rows, ctx) => flushLinkBatch({ runtime, projection, rows, ctx }),
+    },
+  })
+}
 
-    const linkResults = await objectService.upsertLinkBatch(runtime, linkItems)
-    for (let index = 0; index < linkResults.length; index += 1) {
-      const result = linkResults[index]
-      if (result?.ok) {
-        counters.linksUpserted += 1
-        continue
-      }
+async function flushLinkBatch(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly projection: LinkProjectionDefinition
+  readonly rows: readonly CollectedLinkRow[]
+  readonly ctx: FlushContext
+}): Promise<void> {
+  const { runtime, projection, rows, ctx } = input
+  const { counters, rememberError } = ctx
 
-      counters.rowsSkipped += 1
-      if (!(result?.error instanceof ObjectNotFoundError)) {
-        rememberError(errorMessage(result?.error))
-      }
-    }
+  const linkItems: LinkItem[] = rows.map((row) => ({
+    objectTypeId: projection.sourceObjectTypeId,
+    sourceId: row.sourceId,
+    linkId: projection.linkId,
+    target: {
+      targetTypeId: projection.targetObjectTypeId,
+      targetId: row.targetId,
+    },
+  }))
 
-    await onProgress?.(snapshotCounters(counters))
-  }
-
-  for await (const row of runtime.lakeStorage.readRows({
-    datasetId: projection.datasetId,
-    versionId,
-    columns: linkProjectionReadColumns(projection),
-  })) {
-    throwIfAborted(signal)
-    counters.rowsProcessed += 1
-
-    const validationError = getDatasetRowValidationError(row, dataset, {
-      columns: linkProjectionReadColumns(projection),
-    })
-    if (validationError) {
-      counters.rowsSkipped += 1
-      rememberError(validationError)
+  const linkResults = await objectService.upsertLinkBatch(runtime, linkItems)
+  for (let index = 0; index < linkResults.length; index += 1) {
+    const result = linkResults[index]
+    if (result?.ok) {
+      counters.linksUpserted += 1
       continue
     }
 
-    const linkRow = collectLinkRow(projection, row)
-    if (!linkRow) {
-      counters.rowsSkipped += 1
-      continue
+    counters.rowsSkipped += 1
+    if (!(result?.error instanceof ObjectNotFoundError)) {
+      rememberError(errorMessage(result?.error))
     }
-
-    const pairKey = `${linkRow.sourceId}\0${linkRow.targetId}`
-    if (seenPairs.has(pairKey)) {
-      counters.rowsSkipped += 1
-      continue
-    }
-    seenPairs.add(pairKey)
-
-    batch.push(linkRow)
-    if (batch.length >= batchSize) {
-      await flushBatch()
-    }
-  }
-
-  throwIfAborted(signal)
-  await flushBatch()
-  throwIfAborted(signal)
-  await onProgress?.(snapshotCounters(counters))
-
-  return {
-    ...snapshotCounters(counters),
-    firstErrorMessage,
   }
 }
 

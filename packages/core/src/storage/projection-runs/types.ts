@@ -4,11 +4,43 @@ export type ProjectionRunStatus = "running" | "succeeded" | "failed" | "cancelle
 export interface ProjectionRunCounters {
   readonly rowsProcessed: number
   readonly rowsSkipped: number
+  // objectsUpserted, linksUpserted, and telemetryPointsAppended count
+  // materialization operations *attempted* during the run, not distinct
+  // surviving rows. Operations collapse under last-write-wins upserts (e.g. two
+  // rows for the same (object, property, at) telemetry point, or the same
+  // object/link key), so these counters can exceed the number of stored rows.
   readonly objectsUpserted: number
   readonly linksUpserted: number
   readonly telemetryPointsAppended: number
   readonly telemetryPointsSkipped: number
   readonly telemetryRowsFailed: number
+}
+
+// Single source of truth for the counter field names. The Record type forces
+// this map to list every ProjectionRunCounters key — omitting one is a compile
+// error — so zeroing, merging, and snapshotting can iterate the keys instead of
+// re-listing the fields by hand (and silently dropping one).
+const counterKeyFlags: Record<keyof ProjectionRunCounters, true> = {
+  rowsProcessed: true,
+  rowsSkipped: true,
+  objectsUpserted: true,
+  linksUpserted: true,
+  telemetryPointsAppended: true,
+  telemetryPointsSkipped: true,
+  telemetryRowsFailed: true,
+}
+
+export const PROJECTION_COUNTER_KEYS = Object.keys(
+  counterKeyFlags
+) as readonly (keyof ProjectionRunCounters)[]
+
+/** Builds a fresh counter record with every field zeroed. */
+export function zeroProjectionRunCounters(): ProjectionRunCounters {
+  const counters = {} as Record<keyof ProjectionRunCounters, number>
+  for (const key of PROJECTION_COUNTER_KEYS) {
+    counters[key] = 0
+  }
+  return counters
 }
 
 export interface ProjectionRunRecord extends ProjectionRunCounters {

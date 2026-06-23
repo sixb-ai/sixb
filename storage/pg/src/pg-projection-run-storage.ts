@@ -10,22 +10,10 @@ import type {
   StartProjectionRunInput,
   UpdateProjectionRunInput,
 } from "@sixb/core"
-import { ProjectionRunError } from "@sixb/core"
+import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
-
-type CounterKey = keyof ProjectionRunCounters
-
-const counterKeys: readonly CounterKey[] = [
-  "rowsProcessed",
-  "rowsSkipped",
-  "objectsUpserted",
-  "linksUpserted",
-  "telemetryPointsAppended",
-  "telemetryPointsSkipped",
-  "telemetryRowsFailed",
-]
 
 export class PgProjectionRunStorage implements ProjectionRunStorage {
   constructor(private readonly sql: PgStoreClient) {}
@@ -263,19 +251,12 @@ function mergeCounters(
   existing: ProjectionRunCounters,
   input: Partial<ProjectionRunCounters>
 ): ProjectionRunCounters {
-  for (const key of counterKeys) {
+  const merged = {} as Record<keyof ProjectionRunCounters, number>
+  for (const key of PROJECTION_COUNTER_KEYS) {
     assertOptionalCounter(input[key], key)
+    merged[key] = input[key] ?? existing[key]
   }
-
-  return {
-    rowsProcessed: input.rowsProcessed ?? existing.rowsProcessed,
-    rowsSkipped: input.rowsSkipped ?? existing.rowsSkipped,
-    objectsUpserted: input.objectsUpserted ?? existing.objectsUpserted,
-    linksUpserted: input.linksUpserted ?? existing.linksUpserted,
-    telemetryPointsAppended: input.telemetryPointsAppended ?? existing.telemetryPointsAppended,
-    telemetryPointsSkipped: input.telemetryPointsSkipped ?? existing.telemetryPointsSkipped,
-    telemetryRowsFailed: input.telemetryRowsFailed ?? existing.telemetryRowsFailed,
-  }
+  return merged
 }
 
 function rowToCounters(row: DatabaseRow): ProjectionRunCounters {

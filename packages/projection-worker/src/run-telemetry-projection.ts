@@ -12,18 +12,13 @@ import {
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
+import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
 import type {
   ProjectionExecutionResult,
   ProjectionProgressReporter,
   ProjectionWorkerContext,
 } from "./types"
-import {
-  createZeroCounters,
-  errorMessage,
-  isBlank,
-  snapshotCounters,
-  throwIfAborted,
-} from "./utils"
+import { errorMessage, isBlank } from "./utils"
 
 interface RunTelemetryProjectionInput {
   readonly runtime: ProjectionWorkerContext
@@ -57,103 +52,97 @@ type ProjectTelemetryRowResult =
  * Telemetry projections append points keyed by (object, property, at); the
  * timeseries store upserts on that identity, so replays are idempotent without
  * any worker-side dedup ledger. This mirrors the object/link projections:
- * read rows, project each, append in batches.
+ * read rows, project each, append in batches — sharing the streaming-batch
+ * driver and contributing only the telemetry-specific row projection and flush.
  */
 export async function runTelemetryProjection(
   input: RunTelemetryProjectionInput
 ): Promise<ProjectionExecutionResult> {
   const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const counters = createZeroCounters()
   const projectionPlan = buildTelemetryProjectionPlan({ runtime, projection, dataset })
-  const batch: ProjectedTelemetryItem[] = []
-  let firstErrorMessage: string | undefined
 
-  const rememberError = (message: string): void => {
-    firstErrorMessage ??= message
-  }
-
-  const appendItems = async (items: readonly ProjectedTelemetryItem[]): Promise<void> => {
-    await objectService.appendTelemetry(runtime, projection.objectTypeId, items)
-  }
-
-  const appendSingleItem = async (item: ProjectedTelemetryItem): Promise<void> => {
-    try {
-      await appendItems([item])
-      counters.telemetryPointsAppended += 1
-      await onProgress?.(snapshotCounters(counters))
-    } catch (error) {
-      if (error instanceof ObjectNotFoundError) {
-        // A reading for an object that does not exist yet is a benign, retryable
-        // skip (matching object/link projections); a later run after the object
-        // is created appends the point.
-        counters.rowsSkipped += 1
+  return runStreamingProjection<ProjectedTelemetryItem>({
+    runtime,
+    signal,
+    batchSize,
+    onProgress,
+    spec: {
+      datasetId: projection.datasetId,
+      versionId,
+      readColumns: projectionPlan.readColumns,
+      projectRow(row) {
+        const projected = projectTelemetryRow(projectionPlan, row)
+        if (!projected.ok) {
+          return { status: "fail", errorMessage: projected.errorMessage }
+        }
+        if (!projected.item) {
+          return { status: "skip" }
+        }
+        return { status: "item", item: projected.item }
+      },
+      // A blank reading is a clean skip; an invalid projection is a row failure.
+      onSkip: (counters) => {
         counters.telemetryPointsSkipped += 1
-        return
-      }
-      if (!isRecoverableTelemetryRowError(error)) {
-        throw error
-      }
-      counters.rowsSkipped += 1
-      counters.telemetryRowsFailed += 1
-      rememberError(errorMessage(error))
+      },
+      onFail: (counters) => {
+        counters.telemetryRowsFailed += 1
+      },
+      flushBatch: (items, ctx) => appendTelemetryItems({ runtime, projection, items, ctx }),
+    },
+  })
+}
+
+async function appendTelemetryItems(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly projection: TelemetryProjectionDefinition
+  readonly items: readonly ProjectedTelemetryItem[]
+  readonly ctx: FlushContext
+}): Promise<void> {
+  const { runtime, projection, items, ctx } = input
+  const { counters, rememberError } = ctx
+
+  const appendItems = (batch: readonly ProjectedTelemetryItem[]): Promise<void> =>
+    objectService.appendTelemetry(runtime, projection.objectTypeId, batch)
+
+  try {
+    await appendItems(items)
+    counters.telemetryPointsAppended += items.length
+  } catch (error) {
+    if (!isRecoverableTelemetryRowError(error)) {
+      throw error
+    }
+    // Isolate the failing row: re-apply individually so the good rows still land.
+    for (const item of items) {
+      await appendSingleTelemetryItem({ appendItems, item, counters, rememberError })
     }
   }
+}
 
-  const flushBatch = async (): Promise<void> => {
-    if (batch.length === 0) {
-      return
-    }
-    const items = batch.splice(0, batch.length)
-    try {
-      await appendItems(items)
-      counters.telemetryPointsAppended += items.length
-      await onProgress?.(snapshotCounters(counters))
-    } catch (error) {
-      if (!isRecoverableTelemetryRowError(error)) {
-        throw error
-      }
-      // Isolate the failing row: re-apply individually so the good rows still land.
-      for (const item of items) {
-        await appendSingleItem(item)
-      }
-    }
-  }
-
-  for await (const row of runtime.lakeStorage.readRows({
-    datasetId: projection.datasetId,
-    versionId,
-    columns: projectionPlan.readColumns,
-  })) {
-    throwIfAborted(signal)
-    counters.rowsProcessed += 1
-
-    const projected = projectTelemetryRow(projectionPlan, row)
-    if (!projected.ok) {
-      counters.rowsSkipped += 1
-      counters.telemetryRowsFailed += 1
-      rememberError(projected.errorMessage)
-      continue
-    }
-    if (!projected.item) {
+async function appendSingleTelemetryItem(input: {
+  readonly appendItems: (batch: readonly ProjectedTelemetryItem[]) => Promise<void>
+  readonly item: ProjectedTelemetryItem
+  readonly counters: FlushContext["counters"]
+  readonly rememberError: FlushContext["rememberError"]
+}): Promise<void> {
+  const { appendItems, item, counters, rememberError } = input
+  try {
+    await appendItems([item])
+    counters.telemetryPointsAppended += 1
+  } catch (error) {
+    if (error instanceof ObjectNotFoundError) {
+      // A reading for an object that does not exist yet is a benign, retryable
+      // skip (matching object/link projections); a later run after the object
+      // is created appends the point.
       counters.rowsSkipped += 1
       counters.telemetryPointsSkipped += 1
-      continue
+      return
     }
-
-    batch.push(projected.item)
-    if (batch.length >= batchSize) {
-      await flushBatch()
+    if (!isRecoverableTelemetryRowError(error)) {
+      throw error
     }
-  }
-
-  throwIfAborted(signal)
-  await flushBatch()
-  throwIfAborted(signal)
-  await onProgress?.(snapshotCounters(counters))
-
-  return {
-    ...snapshotCounters(counters),
-    firstErrorMessage,
+    counters.rowsSkipped += 1
+    counters.telemetryRowsFailed += 1
+    rememberError(errorMessage(error))
   }
 }
 

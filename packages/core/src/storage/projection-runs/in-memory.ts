@@ -1,26 +1,16 @@
 import { ProjectionRunError } from "./errors"
-import type {
-  FinishProjectionRunInput,
-  ListProjectionRunsInput,
-  ListProjectionRunsResult,
-  ProjectionRunCounters,
-  ProjectionRunRecord,
-  ProjectionRunStorage,
-  StartProjectionRunInput,
-  UpdateProjectionRunInput,
+import {
+  type FinishProjectionRunInput,
+  type ListProjectionRunsInput,
+  type ListProjectionRunsResult,
+  PROJECTION_COUNTER_KEYS,
+  type ProjectionRunCounters,
+  type ProjectionRunRecord,
+  type ProjectionRunStorage,
+  type StartProjectionRunInput,
+  type UpdateProjectionRunInput,
+  zeroProjectionRunCounters,
 } from "./types"
-
-type CounterKey = keyof ProjectionRunCounters
-
-const counterKeys: readonly CounterKey[] = [
-  "rowsProcessed",
-  "rowsSkipped",
-  "objectsUpserted",
-  "linksUpserted",
-  "telemetryPointsAppended",
-  "telemetryPointsSkipped",
-  "telemetryRowsFailed",
-]
 
 function projectionRunKey(projectId: string, id: string): string {
   return `${projectId}:${id}`
@@ -73,20 +63,13 @@ function applyCounters(
   record: ProjectionRunRecord,
   input: Partial<ProjectionRunCounters>
 ): ProjectionRunRecord {
-  for (const key of counterKeys) {
+  const merged = {} as Record<keyof ProjectionRunCounters, number>
+  for (const key of PROJECTION_COUNTER_KEYS) {
     assertOptionalCounter(input[key], key)
+    merged[key] = input[key] ?? record[key]
   }
 
-  return {
-    ...record,
-    rowsProcessed: input.rowsProcessed ?? record.rowsProcessed,
-    rowsSkipped: input.rowsSkipped ?? record.rowsSkipped,
-    objectsUpserted: input.objectsUpserted ?? record.objectsUpserted,
-    linksUpserted: input.linksUpserted ?? record.linksUpserted,
-    telemetryPointsAppended: input.telemetryPointsAppended ?? record.telemetryPointsAppended,
-    telemetryPointsSkipped: input.telemetryPointsSkipped ?? record.telemetryPointsSkipped,
-    telemetryRowsFailed: input.telemetryRowsFailed ?? record.telemetryRowsFailed,
-  }
+  return { ...record, ...merged }
 }
 
 export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
@@ -126,13 +109,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       datasetVersionId: input.datasetVersionId,
       status: "running",
       startedAt: new Date(input.startedAt ?? new Date()),
-      rowsProcessed: 0,
-      rowsSkipped: 0,
-      objectsUpserted: 0,
-      linksUpserted: 0,
-      telemetryPointsAppended: 0,
-      telemetryPointsSkipped: 0,
-      telemetryRowsFailed: 0,
+      ...zeroProjectionRunCounters(),
     }
 
     this.rows.set(key, structuredClone(record))
