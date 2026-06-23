@@ -5,7 +5,7 @@ import type {
   ProjectionRunCounters,
   ProjectionRunRecord,
 } from "@sixb/core"
-import { projectionKindOf } from "@sixb/core"
+import { PROJECTION_COUNTER_KEYS, projectionKindOf } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { runLinkProjection } from "./run-link-projection"
 import { runObjectProjection } from "./run-object-projection"
@@ -20,7 +20,13 @@ import type {
   ProjectionJobResult,
   RunProjectionJobInput,
 } from "./types"
-import { createAbortError, errorMessage, throwIfAborted } from "./utils"
+import {
+  createAbortError,
+  createZeroCounters,
+  errorMessage,
+  snapshotCounters,
+  throwIfAborted,
+} from "./utils"
 
 const DEFAULT_BATCH_SIZE = 500
 
@@ -29,15 +35,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   const signal = input.signal ?? new AbortController().signal
   const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE
   const projectId = runtime.projectId
-  const counters = {
-    rowsProcessed: 0,
-    rowsSkipped: 0,
-    objectsUpserted: 0,
-    linksUpserted: 0,
-    telemetryPointsAppended: 0,
-    telemetryPointsSkipped: 0,
-    telemetryRowsFailed: 0,
-  }
+  const counters = createZeroCounters()
   let started = false
   let finished = false
   let runFinishAttempted = false
@@ -84,7 +82,9 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       },
     })
 
-    copyCounters(counters, execution)
+    for (const key of PROJECTION_COUNTER_KEYS) {
+      counters[key] = execution[key]
+    }
     materialized = hasMaterialized(counters)
 
     if (execution.firstErrorMessage) {
@@ -119,13 +119,7 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       projectionKind: job.projectionKind,
       datasetId: job.datasetId,
       datasetVersionId: job.versionId,
-      rowsProcessed: counters.rowsProcessed,
-      rowsSkipped: counters.rowsSkipped,
-      objectsUpserted: counters.objectsUpserted,
-      linksUpserted: counters.linksUpserted,
-      telemetryPointsAppended: counters.telemetryPointsAppended,
-      telemetryPointsSkipped: counters.telemetryPointsSkipped,
-      telemetryRowsFailed: counters.telemetryRowsFailed,
+      ...snapshotCounters(counters),
       run,
     }
   } catch (error) {
@@ -318,27 +312,6 @@ function hasMaterialized(counters: ProjectionRunCounters): boolean {
     counters.linksUpserted > 0 ||
     counters.telemetryPointsAppended > 0
   )
-}
-
-function copyCounters(
-  target: {
-    rowsProcessed: number
-    rowsSkipped: number
-    objectsUpserted: number
-    linksUpserted: number
-    telemetryPointsAppended: number
-    telemetryPointsSkipped: number
-    telemetryRowsFailed: number
-  },
-  source: ProjectionRunCounters
-): void {
-  target.rowsProcessed = source.rowsProcessed
-  target.rowsSkipped = source.rowsSkipped
-  target.objectsUpserted = source.objectsUpserted
-  target.linksUpserted = source.linksUpserted
-  target.telemetryPointsAppended = source.telemetryPointsAppended
-  target.telemetryPointsSkipped = source.telemetryPointsSkipped
-  target.telemetryRowsFailed = source.telemetryRowsFailed
 }
 
 function isAbortError(error: unknown): boolean {

@@ -1,37 +1,17 @@
-import type { ProjectionRunCounters } from "@sixb/core"
+import { type ProjectionRunCounters, zeroProjectionRunCounters } from "@sixb/core"
 
+// A writable view of the canonical counter shape, derived so the field set
+// stays in lockstep with ProjectionRunCounters.
 export type MutableProjectionCounters = {
-  rowsProcessed: number
-  rowsSkipped: number
-  objectsUpserted: number
-  linksUpserted: number
-  telemetryPointsAppended: number
-  telemetryPointsSkipped: number
-  telemetryRowsFailed: number
+  -readonly [K in keyof ProjectionRunCounters]: ProjectionRunCounters[K]
 }
 
 export function createZeroCounters(): MutableProjectionCounters {
-  return {
-    rowsProcessed: 0,
-    rowsSkipped: 0,
-    objectsUpserted: 0,
-    linksUpserted: 0,
-    telemetryPointsAppended: 0,
-    telemetryPointsSkipped: 0,
-    telemetryRowsFailed: 0,
-  }
+  return { ...zeroProjectionRunCounters() }
 }
 
 export function snapshotCounters(counters: MutableProjectionCounters): ProjectionRunCounters {
-  return {
-    rowsProcessed: counters.rowsProcessed,
-    rowsSkipped: counters.rowsSkipped,
-    objectsUpserted: counters.objectsUpserted,
-    linksUpserted: counters.linksUpserted,
-    telemetryPointsAppended: counters.telemetryPointsAppended,
-    telemetryPointsSkipped: counters.telemetryPointsSkipped,
-    telemetryRowsFailed: counters.telemetryRowsFailed,
-  }
+  return { ...counters }
 }
 
 export function isBlank(value: unknown): boolean {

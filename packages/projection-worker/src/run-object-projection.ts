@@ -9,18 +9,13 @@ import {
   type ProjectedObjectRow,
   projectObjectRow,
 } from "./object-projection-plan"
+import { type FlushContext, runStreamingProjection } from "./run-streaming-projection"
 import type {
   ProjectionExecutionResult,
   ProjectionProgressReporter,
   ProjectionWorkerContext,
 } from "./types"
-import {
-  createZeroCounters,
-  errorMessage,
-  isBlank,
-  snapshotCounters,
-  throwIfAborted,
-} from "./utils"
+import { errorMessage, isBlank } from "./utils"
 
 interface RunObjectProjectionInput {
   readonly runtime: ProjectionWorkerContext
@@ -46,7 +41,6 @@ export async function runObjectProjection(
   input: RunObjectProjectionInput
 ): Promise<ProjectionExecutionResult> {
   const { runtime, projection, dataset, versionId, signal, batchSize, onProgress } = input
-  const counters = createZeroCounters()
   const primaryPropertyId = runtime.ontology.getPrimaryPropertyId(projection.objectTypeId)
   const projectionPlan = buildObjectProjectionPlan({
     ontology: runtime.ontology,
@@ -54,87 +48,69 @@ export async function runObjectProjection(
     dataset,
     primaryPropertyId,
   })
-  const batch: ProjectedObjectRow[] = []
-  let firstErrorMessage: string | undefined
 
-  const rememberError = (message: string): void => {
-    firstErrorMessage ??= message
-  }
+  return runStreamingProjection<ProjectedObjectRow>({
+    runtime,
+    signal,
+    batchSize,
+    onProgress,
+    spec: {
+      datasetId: projection.datasetId,
+      versionId,
+      readColumns: objectProjectionReadColumns(projection),
+      projectRow(row) {
+        const projected = projectObjectRow(projectionPlan, row)
+        if (!projected.ok) {
+          return { status: "fail", errorMessage: projected.errorMessage }
+        }
+        if (isBlank(projected.row.primaryValue)) {
+          return { status: "skip" }
+        }
+        return { status: "item", item: projected.row }
+      },
+      flushBatch: (rows, ctx) => flushObjectBatch({ runtime, projection, rows, ctx }),
+    },
+  })
+}
 
-  const flushBatch = async (): Promise<void> => {
-    if (batch.length === 0) {
-      return
+async function flushObjectBatch(input: {
+  readonly runtime: ProjectionWorkerContext
+  readonly projection: ObjectProjectionDefinition
+  readonly rows: readonly ProjectedObjectRow[]
+  readonly ctx: FlushContext
+}): Promise<void> {
+  const { runtime, projection, rows, ctx } = input
+  const { counters, rememberError } = ctx
+
+  const batchResults = await objectService.upsertObjectBatch(
+    runtime,
+    projection.objectTypeId,
+    rows.map((row) => ({ properties: row.properties }))
+  )
+
+  const succeededRows: ProjectedObjectRow[] = []
+  for (let index = 0; index < rows.length; index += 1) {
+    const result = batchResults[index]
+    const row = rows[index]!
+    if (result?.ok) {
+      counters.objectsUpserted += 1
+      succeededRows.push(row)
+      continue
     }
 
-    const rows = batch.splice(0, batch.length)
-    const batchResults = await objectService.upsertObjectBatch(
-      runtime,
-      projection.objectTypeId,
-      rows.map((row) => ({ properties: row.properties }))
+    counters.rowsSkipped += 1
+    rememberError(
+      `Failed to upsert object '${String(row.primaryValue)}': ${errorMessage(result?.error)}`
     )
-
-    const succeededRows: ProjectedObjectRow[] = []
-    for (let index = 0; index < rows.length; index += 1) {
-      const result = batchResults[index]
-      const row = rows[index]!
-      if (result?.ok) {
-        counters.objectsUpserted += 1
-        succeededRows.push(row)
-        continue
-      }
-
-      counters.rowsSkipped += 1
-      rememberError(
-        `Failed to upsert object '${String(row.primaryValue)}': ${errorMessage(result?.error)}`
-      )
-    }
-
-    await upsertForeignKeyLinks({
-      runtime,
-      projection,
-      rows: succeededRows,
-      counters,
-      rememberError,
-    })
-
-    await onProgress?.(snapshotCounters(counters))
   }
 
-  for await (const row of runtime.lakeStorage.readRows({
-    datasetId: projection.datasetId,
-    versionId,
-    columns: objectProjectionReadColumns(projection),
-  })) {
-    throwIfAborted(signal)
-    counters.rowsProcessed += 1
-
-    const projected = projectObjectRow(projectionPlan, row)
-    if (!projected.ok) {
-      counters.rowsSkipped += 1
-      rememberError(projected.errorMessage)
-      continue
-    }
-
-    if (isBlank(projected.row.primaryValue)) {
-      counters.rowsSkipped += 1
-      continue
-    }
-
-    batch.push(projected.row)
-    if (batch.length >= batchSize) {
-      await flushBatch()
-    }
-  }
-
-  throwIfAborted(signal)
-  await flushBatch()
-  throwIfAborted(signal)
-  await onProgress?.(snapshotCounters(counters))
-
-  return {
-    ...snapshotCounters(counters),
-    firstErrorMessage,
-  }
+  await upsertForeignKeyLinks({
+    runtime,
+    projection,
+    rows: succeededRows,
+    counters,
+    rememberError,
+  })
 }
 
 function objectProjectionReadColumns(projection: ObjectProjectionDefinition): readonly string[] {

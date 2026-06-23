@@ -169,7 +169,12 @@ export type {
   StartProjectionRunInput,
   UpdateProjectionRunInput,
 } from "./projection-runs"
-export { InMemoryProjectionRunStorage, ProjectionRunError } from "./projection-runs"
+export {
+  InMemoryProjectionRunStorage,
+  PROJECTION_COUNTER_KEYS,
+  ProjectionRunError,
+  zeroProjectionRunCounters,
+} from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
   ListActiveRuleStatesResult,

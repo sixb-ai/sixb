@@ -12,3 +12,4 @@ export type {
   StartProjectionRunInput,
   UpdateProjectionRunInput,
 } from "./types"
+export { PROJECTION_COUNTER_KEYS, zeroProjectionRunCounters } from "./types"
