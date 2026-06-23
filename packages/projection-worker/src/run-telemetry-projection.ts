@@ -248,21 +248,30 @@ function projectTelemetryRow(
   }
 }
 
-// A trailing "Z" or a numeric ±HH:MM / ±HHMM offset names the zone, so the
-// instant is unambiguous and the engine can resolve it as-is.
-const TIMESTAMP_WITH_EXPLICIT_ZONE = /(?:[zZ]|[+-]\d{2}:?\d{2})$/
+// Calendar date or datetime with an optional zone designator. Tolerates
+// non-zero-padded month / day / hour fields. A trailing "Z" or a numeric
+// ±HH:MM / ±HHMM offset names the zone; its absence means UTC. Capture groups:
+// year, month, day, hour, minute, second, fraction, zone.
+const TELEMETRY_TIMESTAMP =
+  /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?([zZ]|[+-]\d{2}:?\d{2})?$/
 
-// Zone-less calendar date or datetime, tolerating non-zero-padded month / day /
-// hour fields. Capture groups: year, month, day, hour, minute, second, fraction.
-const ZONE_LESS_TIMESTAMP =
-  /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?)?$/
+interface TimestampComponents {
+  readonly year: number
+  readonly month: number
+  readonly day: number
+  readonly hour: number
+  readonly minute: number
+  readonly second: number
+  readonly milliseconds: number
+}
 
-// Parse a telemetry `at` value to an absolute instant. Zone-less inputs are
-// interpreted as UTC by building the instant from explicit components via
-// Date.UTC, so a row materializes at the same instant regardless of the worker
-// process timezone. We never hand a zone-less string to new Date(), which would
-// silently fall back to local-time parsing for any non-ISO (e.g. non-padded)
-// form and break the (series, at) idempotency invariant across worker hosts.
+// Parse a telemetry `at` value to an absolute instant from explicit calendar
+// components, never via new Date(string) — which would fall back to local-time
+// parsing for non-ISO forms and silently roll over out-of-range fields. The
+// written wall-clock fields are validated as a real calendar date/time
+// (timezone-independent) before the named offset is applied, so a row
+// materializes at the same instant regardless of the worker process timezone
+// and an invalid timestamp is rejected rather than shifted.
 export function parseTelemetryTimestamp(value: unknown): Date | null {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value
@@ -270,40 +279,73 @@ export function parseTelemetryTimestamp(value: unknown): Date | null {
   if (typeof value !== "string") {
     return null
   }
-  const trimmed = value.trim()
 
-  if (TIMESTAMP_WITH_EXPLICIT_ZONE.test(trimmed)) {
-    const date = new Date(trimmed)
-    return Number.isNaN(date.getTime()) ? null : date
-  }
-
-  const match = ZONE_LESS_TIMESTAMP.exec(trimmed)
+  const match = TELEMETRY_TIMESTAMP.exec(value.trim())
   if (match === null) {
     return null
   }
-  const [, year, month, day, hour, minute, second, fraction] = match
-  const milliseconds = fraction === undefined ? 0 : Math.trunc(Number(`0.${fraction}`) * 1000)
-  const date = new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      hour === undefined ? 0 : Number(hour),
-      minute === undefined ? 0 : Number(minute),
-      second === undefined ? 0 : Number(second),
-      milliseconds
-    )
-  )
-  // Reject calendar rollover (e.g. "2026-13-01" → 2027) so an out-of-range
-  // timestamp is flagged as invalid rather than silently shifted.
-  if (
-    date.getUTCFullYear() !== Number(year) ||
-    date.getUTCMonth() !== Number(month) - 1 ||
-    date.getUTCDate() !== Number(day)
-  ) {
+  const [, year, month, day, hour, minute, second, fraction, zone] = match
+
+  const offsetMinutes = parseZoneOffsetMinutes(zone)
+  if (offsetMinutes === null) {
     return null
   }
-  return date
+
+  const components: TimestampComponents = {
+    year: Number(year),
+    month: Number(month),
+    day: Number(day),
+    hour: hour === undefined ? 0 : Number(hour),
+    minute: minute === undefined ? 0 : Number(minute),
+    second: second === undefined ? 0 : Number(second),
+    milliseconds: fraction === undefined ? 0 : Math.trunc(Number(`0.${fraction}`) * 1000),
+  }
+
+  // Build the wall-clock instant as if UTC, then re-read every field to reject
+  // any that rolled over (e.g. "2026-02-29", "...09:99", "...24:00"). Calendar
+  // validity is timezone-independent, so this guards both zone-less and zoned
+  // inputs; only after it round-trips do we shift by the offset.
+  const wallClock = Date.UTC(
+    components.year,
+    components.month - 1,
+    components.day,
+    components.hour,
+    components.minute,
+    components.second,
+    components.milliseconds
+  )
+  if (!wallClockMatchesComponents(wallClock, components)) {
+    return null
+  }
+
+  return new Date(wallClock - offsetMinutes * 60_000)
+}
+
+// Returns the offset in minutes to subtract from the wall-clock UTC instant, or
+// null if the offset is out of range. Zone-less and "Z" inputs are UTC (0).
+function parseZoneOffsetMinutes(zone: string | undefined): number | null {
+  if (zone === undefined || zone === "Z" || zone === "z") {
+    return 0
+  }
+  const digits = zone.slice(1).replace(":", "")
+  const hours = Number(digits.slice(0, 2))
+  const minutes = Number(digits.slice(2, 4))
+  if (hours > 23 || minutes > 59) {
+    return null
+  }
+  return (zone[0] === "-" ? -1 : 1) * (hours * 60 + minutes)
+}
+
+function wallClockMatchesComponents(wallClock: number, components: TimestampComponents): boolean {
+  const date = new Date(wallClock)
+  return (
+    date.getUTCFullYear() === components.year &&
+    date.getUTCMonth() === components.month - 1 &&
+    date.getUTCDate() === components.day &&
+    date.getUTCHours() === components.hour &&
+    date.getUTCMinutes() === components.minute &&
+    date.getUTCSeconds() === components.second
+  )
 }
 
 function isRecoverableTelemetryRowError(error: unknown): boolean {
