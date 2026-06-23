@@ -13,8 +13,10 @@ export {
   ObjectQueryValidationError,
 } from "./objects/query/errors"
 export type {
+  ObjectExpansion,
   ObjectQuery,
   ObjectQueryDirection,
+  ObjectQueryExpand,
   ObjectQueryFilter,
   ObjectQueryLimit,
   ObjectQueryPage,
@@ -55,6 +57,9 @@ export type { ValueType } from "./ontology/types"
 export type {
   ListResult,
   ListResultWithoutTotal,
+  ObjectExpandBuilder,
+  ObjectExpandOptions,
+  ObjectExpansionSort,
   ObjectQueryBuilder,
   ObjectQueryFacetBucket,
   ObjectQueryFacetInput,

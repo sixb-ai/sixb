@@ -2,6 +2,7 @@ import type { ObjectType, OntologyRegistry, Property, Schema, ValueType } from "
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { ObjectQueryValidationError } from "./errors"
 import type {
+  ObjectExpansion,
   ObjectQuery,
   ObjectQueryPredicate,
   ObjectQueryResultShape,
@@ -178,6 +179,13 @@ function dispatchQueryNode(
     case "project": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
       validateProjection(query.properties, input.result, path, ctx)
+      return { result: input.result, query: { ...query, input: input.query } }
+    }
+    case "expand": {
+      const input = validateQueryNode(query.input, `${path}.input`, ctx)
+      // expand is output-shaping: it attaches links without changing the matched
+      // set, so the result type is the input's result type.
+      validateExpansions(query.expansions, input.result, `${path}.expansions`, ctx)
       return { result: input.result, query: { ...query, input: input.query } }
     }
   }
@@ -644,6 +652,201 @@ function validateIncomingTraverse(
   }
 
   return { objectTypeIds: uniqueStrings(sourceTypeIds) }
+}
+
+function validateExpansions(
+  expansions: readonly ObjectExpansion[],
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext
+): void {
+  expansions.forEach((expansion, index) => {
+    validateExpansion(expansion, shape, `${path}[${index}]`, ctx)
+  })
+}
+
+function validateExpansion(
+  expansion: ObjectExpansion,
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext
+): void {
+  if (!expansion.linkId) {
+    addIssue(ctx, path, "missing_expand_link", "expand.linkId is required")
+    return
+  }
+
+  const targetShape =
+    expansion.direction === "incoming"
+      ? resolveIncomingExpansionTargets(
+          expansion.linkId,
+          expansion.sourceObjectTypeId,
+          shape,
+          path,
+          ctx
+        )
+      : resolveOutgoingExpansionTargets(
+          expansion.linkId,
+          expansion.sourceObjectTypeId,
+          shape,
+          path,
+          ctx
+        )
+
+  // Expansion targets are touched types: the principal must be able to `view`
+  // every type a query hydrates, exactly like `start`/`traverse`. `dispatch`'s
+  // automatic fold only covers result types, and expansion targets are not in
+  // the result — so add them here (recursively, via the nested call below).
+  for (const targetTypeId of targetShape.objectTypeIds) {
+    ctx.touchedObjectTypeIds.add(targetTypeId)
+  }
+
+  validateExpansionLimit(expansion.limit, path, ctx)
+  if (expansion.orderBy) {
+    validateSortFields(expansion.orderBy, targetShape, `${path}.orderBy`, ctx)
+  }
+
+  if (expansion.expand) {
+    validateExpansions(expansion.expand, targetShape, `${path}.expand`, ctx)
+  }
+}
+
+function resolveOutgoingExpansionTargets(
+  linkId: string,
+  sourceObjectTypeId: string | undefined,
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext
+): ObjectQueryResultShape {
+  if (sourceObjectTypeId !== undefined) {
+    addIssue(
+      ctx,
+      path,
+      "expand_source_not_applicable",
+      "expand.sourceObjectTypeId only applies to incoming expansion"
+    )
+  }
+
+  const targetTypeIds: string[] = []
+  let foundOnAnyType = false
+
+  for (const objectType of getObjectTypesForResult(shape, ctx)) {
+    const link = objectType.links.find((candidate) => candidate.id === linkId)
+    if (!link) continue
+    foundOnAnyType = true
+
+    if (link.targetObjectTypeId === "*") {
+      addIssue(
+        ctx,
+        path,
+        "wildcard_expand_target",
+        `Expansion over wildcard link '${objectType.id}.${linkId}' cannot infer a target object type`
+      )
+      continue
+    }
+
+    const declaredTargets = Array.isArray(link.targetObjectTypeId)
+      ? link.targetObjectTypeId
+      : [link.targetObjectTypeId]
+
+    for (const targetId of declaredTargets) {
+      if (!ctx.ontology.getObjectTypeById(targetId)) {
+        addIssue(
+          ctx,
+          path,
+          "unknown_expand_target",
+          `Expansion over '${objectType.id}.${linkId}' targets unknown object type '${targetId}'`
+        )
+      } else {
+        targetTypeIds.push(targetId)
+      }
+    }
+  }
+
+  // A link absent from every result type is the "abandoned by a later traverse"
+  // case: expands hoist above traverse, so an expand on a type the traverse
+  // replaced cannot resolve its link on the final result type.
+  if (!foundOnAnyType) {
+    addIssue(
+      ctx,
+      path,
+      "unknown_expand_link",
+      `Expansion references link '${linkId}' not present on result type ${shape.objectTypeIds.join(
+        " | "
+      )} (an expand abandoned by a later traverse?)`
+    )
+  }
+
+  return { objectTypeIds: uniqueStrings(targetTypeIds) }
+}
+
+function resolveIncomingExpansionTargets(
+  linkId: string,
+  sourceObjectTypeId: string | undefined,
+  shape: ObjectQueryResultShape,
+  path: string,
+  ctx: QueryValidationContext
+): ObjectQueryResultShape {
+  let candidateTypes = ctx.ontology.listObjectTypes()
+  if (sourceObjectTypeId !== undefined) {
+    const sourceType = ctx.ontology.getObjectTypeById(sourceObjectTypeId)
+    if (!sourceType) {
+      addIssue(
+        ctx,
+        path,
+        "unknown_expand_source",
+        `Incoming expansion references unknown source object type '${sourceObjectTypeId}'`
+      )
+      return { objectTypeIds: [] }
+    }
+    candidateTypes = [sourceType]
+  }
+
+  const sourceTypeIds: string[] = []
+
+  for (const sourceType of candidateTypes) {
+    const link = sourceType.links.find((candidate) => candidate.id === linkId)
+    if (!link) continue
+
+    if (link.targetObjectTypeId === "*") {
+      sourceTypeIds.push(sourceType.id)
+      continue
+    }
+
+    const matches = shape.objectTypeIds.some((targetTypeId) =>
+      ctx.ontology.isValidLinkTarget(link.targetObjectTypeId, targetTypeId)
+    )
+    if (matches) sourceTypeIds.push(sourceType.id)
+  }
+
+  if (sourceTypeIds.length === 0) {
+    addIssue(
+      ctx,
+      path,
+      "incoming_expand_link_not_found",
+      `Incoming expansion found no source object types with link '${linkId}' targeting ${shape.objectTypeIds.join(
+        " | "
+      )}`
+    )
+  }
+
+  return { objectTypeIds: uniqueStrings(sourceTypeIds) }
+}
+
+function validateExpansionLimit(
+  limit: number | undefined,
+  path: string,
+  ctx: QueryValidationContext
+): void {
+  if (limit === undefined) return
+  if (!Number.isInteger(limit) || limit < 0) {
+    addIssue(
+      ctx,
+      `${path}.limit`,
+      "invalid_expand_limit",
+      "expand.limit must be a non-negative integer"
+    )
+  }
 }
 
 function validateSet(

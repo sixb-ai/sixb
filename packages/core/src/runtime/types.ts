@@ -447,6 +447,97 @@ type ObjectTypeForId<
   ? ObjectTypeWithPropertyTokens
   : Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>
 
+/**
+ * True when the target type is a concrete ontology type rather than the degraded
+ * generic base. When a link's target is not in the registry (the client path
+ * until a registry is generated), `ObjectTypeForId` falls back to the base type,
+ * whose property ids are `string`; instantiating the typed token map over the
+ * broad `Property` union there overflows TypeScript (the same reason
+ * `UntypedPropertyPredicate` exists). The expand option/sort types degrade to a
+ * loose shape in that case so the client path stays shallow instead of failing.
+ */
+type HasKnownObjectType<TObjectType extends ObjectTypeWithPropertyTokens> =
+  string extends TObjectType["id"] ? false : true
+
+/** Deterministic top-N ordering for a bounded `"many"` expansion, typed against the target type. */
+export type ObjectExpansionSort<TObjectType extends ObjectTypeWithPropertyTokens> =
+  HasKnownObjectType<TObjectType> extends false
+    ? { property: PropertyToken; direction?: ObjectQuerySortDirection }
+    : { property: ObjectSetQueryPropertyToken<TObjectType>; direction?: ObjectQuerySortDirection }
+
+/** Options for a single `.expand(...)` of an outgoing link. */
+export type ObjectExpandOptions<TObjectType extends ObjectTypeWithPropertyTokens> = {
+  /** Bound a `"many"` expansion to the top-N target objects per parent. */
+  limit?: number
+  /** Order the target objects of a bounded `"many"` expansion. */
+  orderBy?: readonly ObjectExpansionSort<TObjectType>[]
+}
+
+/**
+ * Builder passed to the nested `.expand(..., (e) => …)` callback. Exposes only
+ * `expand`, resolving the next target type by id against the registry so deeper
+ * hops stay typed.
+ *
+ * A type alias (not an interface) so relating two instantiations stays
+ * structural — the same discipline `TwinObject` follows to avoid TS2589
+ * (see the note above `TwinObject`). The only recursion is in the lazily
+ * evaluated return/callback positions.
+ *
+ * When the target type is the degraded base (an unregistered link target, i.e.
+ * the client path until a registry is generated), the builder collapses to the
+ * untyped, non-generic {@link UntypedExpandBuilder}: nested expansion still
+ * works, just without target-specific link/property checking, and — crucially —
+ * without the self-referential generic instantiation over the broad base type
+ * that would otherwise overflow TypeScript.
+ */
+export type ObjectExpandBuilder<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
+> =
+  HasKnownObjectType<TObjectType> extends false
+    ? UntypedExpandBuilder
+    : {
+        expand<TLinkToken extends LinkToken<TObjectType["id"], string, string>>(
+          link: TLinkToken,
+          build: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes>
+        ): ObjectExpandBuilder<TObjectType, TRegisteredObjectTypes>
+        expand<TLinkToken extends LinkToken<TObjectType["id"], string, string>>(
+          link: TLinkToken,
+          options?: ObjectExpandOptions<
+            ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>
+          >,
+          build?: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes>
+        ): ObjectExpandBuilder<TObjectType, TRegisteredObjectTypes>
+      }
+
+/**
+ * Loose expand builder for degraded targets. Non-generic and self-referential,
+ * so it never instantiates the typed token machinery over the broad base type.
+ */
+type UntypedExpandBuilder = {
+  expand(
+    link: LinkToken,
+    optionsOrBuild?:
+      | ObjectExpandOptions<ObjectTypeWithPropertyTokens>
+      | ((nested: UntypedExpandBuilder) => UntypedExpandBuilder),
+    build?: (nested: UntypedExpandBuilder) => UntypedExpandBuilder
+  ): UntypedExpandBuilder
+}
+
+/** The nested-expansion callback for a link token's resolved target type. */
+type ObjectExpandNested<TLinkToken, TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens> =
+  TLinkToken extends LinkToken<string, string, string>
+    ? (
+        nested: ObjectExpandBuilder<
+          ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>,
+          TRegisteredObjectTypes
+        >
+      ) => ObjectExpandBuilder<
+        ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>,
+        TRegisteredObjectTypes
+      >
+    : never
+
 export interface ObjectQueryBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
@@ -496,6 +587,26 @@ export interface ObjectQueryBuilder<
     TRegisteredObjectTypes,
     TValueTypes
   >
+
+  /**
+   * Attach an outgoing link's target objects to each row under `.links`, without
+   * changing the result type — the additive counterpart to `traverse` (which
+   * replaces the set). The callback nests deeper hops.
+   *
+   * Slice 1 lands the IR, the typed authoring surface, and validation; the
+   * `.links` row type and execution arrive in later slices.
+   */
+  expand<TLinkToken extends LinkToken<TObjectType["id"], string, string>>(
+    link: TLinkToken,
+    build: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes>
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+  expand<TLinkToken extends LinkToken<TObjectType["id"], string, string>>(
+    link: TLinkToken,
+    options?: ObjectExpandOptions<
+      ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>
+    >,
+    build?: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes>
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
 
   /** Add property ordering at the current object type. */
   orderBy(

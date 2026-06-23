@@ -304,6 +304,11 @@ export class InMemoryObjectStorage implements ObjectStorage {
           })),
         }
       }
+      case "expand":
+        // `expand` is output-shaping and is gated off by the planner in this
+        // slice (and stripped before aggregates run), so the in-memory engine
+        // should never receive one. Link hydration lands in a later slice.
+        throw new Error("[Sixb] In-memory object storage does not support 'expand' execution yet")
     }
   }
 
@@ -1101,6 +1106,9 @@ function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
     case "page":
     case "project":
     case "sort":
+    // `expand` is output-shaping: aggregates ignore it (it never changes which
+    // objects match).
+    case "expand":
       return stripOuterRowShape(query.input)
     default:
       return query

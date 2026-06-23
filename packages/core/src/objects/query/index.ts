@@ -30,8 +30,10 @@ export type {
 export { explainObjectQuery } from "./explain"
 export { formatObjectQueryExplanation } from "./explain-format"
 export type {
+  ObjectExpansion,
   ObjectQuery,
   ObjectQueryDirection,
+  ObjectQueryExpand,
   ObjectQueryFilter,
   ObjectQueryLimit,
   ObjectQueryPage,

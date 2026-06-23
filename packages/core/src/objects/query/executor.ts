@@ -415,6 +415,7 @@ function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): 
     case "limit":
     case "page":
     case "project":
+    case "expand":
       return { ...query, input: expandIncludeSubtypes(query.input, ontology) }
     case "set":
       return {
@@ -500,6 +501,10 @@ async function evaluateFallbackQuery(
     case "vector":
     case "traverse":
     case "set":
+    // `expand` is gated off by the planner in this slice (not in the fallback
+    // node set); link hydration arrives in a later slice. This guards against
+    // planner drift in the meantime.
+    case "expand":
       throw new ObjectQueryExecutionError(
         "fallback_node_not_supported",
         `Fallback execution does not support query node '${query.kind}'`
@@ -654,6 +659,9 @@ function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
     case "page":
     case "project":
     case "sort":
+    // `expand` is output-shaping: it attaches links but does not change which
+    // objects match, so aggregates (count/exists/facets) ignore it.
+    case "expand":
       return stripOuterRowShape(query.input)
     default:
       return query
