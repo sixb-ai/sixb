@@ -43,7 +43,10 @@ export { normalizeObjectQuery } from "./objects/query/normalize"
 export { createObjectQueryBuilder } from "./objects/sdk/query-builder"
 export type {
   ObjectQueryExecutor,
+  ObjectQueryExecutorExpandedRow,
   ObjectQueryExecutorFacetRequest,
+  ObjectQueryExecutorLinks,
+  ObjectQueryExecutorLinkValue,
   ObjectQueryExecutorListResult,
   ObjectQueryExecutorRow,
 } from "./objects/sdk/query-executor"
@@ -65,6 +68,7 @@ export type {
   ObjectQueryFacetInput,
   ObjectQueryFacetResult,
   ObjectQueryListOptions,
+  ObjectQueryRow,
   ObjectWhereBuilder,
   ObjectWhereClause,
   TwinObject,
