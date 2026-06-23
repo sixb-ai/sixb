@@ -42,7 +42,10 @@ import { createTestBrowserPolicy } from "./helpers"
 const Invoice = defineObjectType({
   id: "invoice",
   name: "Invoice",
-  properties: [prop("id", "string", { required: true, primary: true })],
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("score", "integer", { mode: "telemetry" }),
+  ],
 })
 
 const Contract = defineObjectType({
@@ -188,6 +191,13 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
       id: "c1",
       properties: { temperature: 72.5 },
       at: new Date("2026-05-16T10:30:00.000Z"),
+    },
+  ])
+  await sixb.appendTelemetry("invoice", [
+    {
+      id: "i1",
+      properties: { score: 20 },
+      at: new Date("2026-05-16T10:00:00.000Z"),
     },
   ])
 
@@ -385,6 +395,85 @@ describe("authorized object routes", () => {
     expect(await missing.json()).toEqual({ error: "Object not found" })
   })
 
+  test("bulk telemetry history follows object view grants", async () => {
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const runner = await seedSession(storage, ["operations"], "usr_run")
+
+    const allowedBulk = await app.fetch(
+      new Request("http://localhost/api/telemetry/history", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({
+          series: [
+            { objectTypeId: "contract", objectId: "c1", propertyId: "temperature" },
+            { objectTypeId: "contract", objectId: "missing", propertyId: "temperature" },
+          ],
+        }),
+      })
+    )
+    expect(allowedBulk.status).toBe(200)
+    expect(await allowedBulk.json()).toEqual({
+      series: [
+        {
+          objectTypeId: "contract",
+          objectId: "c1",
+          propertyId: "temperature",
+          points: [
+            expect.objectContaining({
+              objectTypeId: "contract",
+              objectId: "c1",
+              propertyId: "temperature",
+              value: 72.5,
+            }),
+          ],
+        },
+        {
+          objectTypeId: "contract",
+          objectId: "missing",
+          propertyId: "temperature",
+          points: [],
+        },
+      ],
+    })
+
+    const forbiddenBulk = await app.fetch(
+      new Request("http://localhost/api/telemetry/history", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({
+          series: [{ objectTypeId: "invoice", objectId: "i1", propertyId: "score" }],
+        }),
+      })
+    )
+    expect(forbiddenBulk.status).toBe(403)
+
+    const mixedBulk = await app.fetch(
+      new Request("http://localhost/api/telemetry/history", {
+        method: "POST",
+        headers: operator.csrfHeaders,
+        body: JSON.stringify({
+          series: [
+            { objectTypeId: "contract", objectId: "c1", propertyId: "temperature" },
+            { objectTypeId: "invoice", objectId: "i1", propertyId: "score" },
+          ],
+        }),
+      })
+    )
+    expect(mixedBulk.status).toBe(403)
+
+    const ungrantedBulk = await app.fetch(
+      new Request("http://localhost/api/telemetry/history", {
+        method: "POST",
+        headers: runner.csrfHeaders,
+        body: JSON.stringify({
+          series: [{ objectTypeId: "contract", objectId: "c1", propertyId: "temperature" }],
+        }),
+      })
+    )
+    expect(ungrantedBulk.status).toBe(403)
+  })
+
   test("object queries deny forbidden touched types with 403", async () => {
     const { app, storage } = await createApp()
     const session = await seedSession(storage, ["commercial"])
@@ -426,6 +515,40 @@ describe("authorized object routes", () => {
     expect(new Set(body.objects.map((row) => row.objectTypeId))).toEqual(
       new Set(["contract", "invoice"])
     )
+
+    const latest = await app.fetch(
+      new Request("http://localhost/api/objects/invoice/i1/telemetry/score/latest")
+    )
+    expect(latest.status).toBe(200)
+    expect(await latest.json()).toMatchObject({ objectTypeId: "invoice", value: 20 })
+
+    const bulk = await app.fetch(
+      new Request("http://localhost/api/telemetry/history", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          series: [{ objectTypeId: "invoice", objectId: "i1", propertyId: "score" }],
+        }),
+      })
+    )
+    expect(bulk.status).toBe(200)
+    expect(await bulk.json()).toEqual({
+      series: [
+        {
+          objectTypeId: "invoice",
+          objectId: "i1",
+          propertyId: "score",
+          points: [
+            expect.objectContaining({
+              objectTypeId: "invoice",
+              objectId: "i1",
+              propertyId: "score",
+              value: 20,
+            }),
+          ],
+        },
+      ],
+    })
   })
 
   test("dataset routes narrow to viewable datasets and hide forbidden identities", async () => {

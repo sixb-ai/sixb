@@ -698,6 +698,39 @@ describe("InMemoryTimeseriesStorage", () => {
     expect(limited).toHaveLength(3)
   })
 
+  test("getHistoryBatch returns requested series with per-series limits", async () => {
+    const storage = new InMemoryTimeseriesStorage()
+    const t1 = new Date("2026-01-01T10:00:00Z")
+    const t2 = new Date("2026-01-01T11:00:00Z")
+
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 20, t1, "1")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "temp", 22, t2, "2")
+    )
+    await storage.applyTelemetryAppended(
+      makeTelemetryEvent("p1", "Room", "r1", "humidity", 40, t1, "3")
+    )
+
+    const batch = await storage.getHistoryBatch({
+      projectId: "p1",
+      series: [
+        { objectTypeId: "Room", objectId: "r1", propertyId: "temp" },
+        { objectTypeId: "Room", objectId: "r1", propertyId: "humidity" },
+        { objectTypeId: "Room", objectId: "missing", propertyId: "temp" },
+      ],
+      limitPerSeries: 1,
+      order: "desc",
+    })
+
+    expect(batch.map((series) => series.points.map((point) => point.value))).toEqual([
+      [22],
+      [40],
+      [],
+    ])
+  })
+
   test("applyTelemetryAppended is idempotent", async () => {
     const storage = new InMemoryTimeseriesStorage()
     const event = makeTelemetryEvent("p1", "Room", "r1", "temp", 22, new Date(), "1")

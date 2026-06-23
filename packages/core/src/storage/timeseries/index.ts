@@ -1,2 +1,8 @@
 export { InMemoryTimeseriesStorage } from "./store"
-export type { TimeseriesPoint, TimeseriesStorage } from "./types"
+export type {
+  TimeseriesHistoryBatchInput,
+  TimeseriesHistoryBatchResult,
+  TimeseriesHistorySeriesInput,
+  TimeseriesPoint,
+  TimeseriesStorage,
+} from "./types"

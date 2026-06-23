@@ -1,5 +1,11 @@
 import type { Database } from "bun:sqlite"
-import type { StoredTelemetryAppendedEvent, TimeseriesPoint, TimeseriesStorage } from "@sixb/core"
+import type {
+  StoredTelemetryAppendedEvent,
+  TimeseriesHistoryBatchInput,
+  TimeseriesHistoryBatchResult,
+  TimeseriesPoint,
+  TimeseriesStorage,
+} from "@sixb/core"
 import { installFreshSqliteSchema } from "./migrations"
 import {
   closeSqliteStoreConnection,
@@ -138,6 +144,81 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
     const rows = this.db.query(query).all(...args) as DatabaseRow[]
 
     return rows.map((row) => this.rowToPoint(row))
+  }
+
+  async getHistoryBatch(
+    input: TimeseriesHistoryBatchInput
+  ): Promise<readonly TimeseriesHistoryBatchResult[]> {
+    if (input.series.length === 0) {
+      return []
+    }
+
+    const order = input.order === "desc" ? "DESC" : "ASC"
+    const values = input.series.map(() => "(?, ?, ?, ?)").join(", ")
+    const args: (string | number | null)[] = []
+
+    input.series.forEach((series, index) => {
+      args.push(index, series.objectTypeId, series.objectId, series.propertyId)
+    })
+
+    let query = `
+      WITH requested(series_index, object_type_id, object_id, property_id) AS (
+        VALUES ${values}
+      ),
+      ranked AS (
+        SELECT
+          requested.series_index,
+          timeseries.*,
+          ROW_NUMBER() OVER (
+            PARTITION BY requested.series_index
+            ORDER BY timeseries.at ${order}
+          ) AS series_row_number
+        FROM requested
+        JOIN timeseries
+          ON timeseries.project_id = ?
+         AND timeseries.object_type_id = requested.object_type_id
+         AND timeseries.object_id = requested.object_id
+         AND timeseries.property_id = requested.property_id
+        WHERE 1 = 1
+    `
+    args.push(input.projectId)
+
+    if (input.from) {
+      query += " AND timeseries.at >= ?"
+      args.push(input.from.toISOString())
+    }
+
+    if (input.to) {
+      query += " AND timeseries.at <= ?"
+      args.push(input.to.toISOString())
+    }
+
+    query += "\n      )\n      SELECT * FROM ranked"
+
+    if (input.limitPerSeries !== undefined) {
+      query += " WHERE series_row_number <= ?"
+      args.push(Math.max(0, input.limitPerSeries))
+    }
+
+    query += ` ORDER BY series_index ASC, at ${order}`
+
+    const rows = this.db.query(query).all(...args) as (DatabaseRow & {
+      series_index: number
+      series_row_number: number
+    })[]
+    const results = input.series.map((series) => ({
+      ...series,
+      points: [] as TimeseriesPoint[],
+    }))
+
+    for (const row of rows) {
+      const result = results[row.series_index]
+      if (result) {
+        result.points.push(this.rowToPoint(row))
+      }
+    }
+
+    return results
   }
 
   async getLatest(params: {

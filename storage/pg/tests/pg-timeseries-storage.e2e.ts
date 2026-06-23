@@ -280,6 +280,38 @@ describe("PgTimeseriesStorage", () => {
     expect(history).toHaveLength(3)
   })
 
+  test("getHistoryBatch returns requested series with per-series limits", async () => {
+    const t1 = "2024-01-01T00:00:00.000Z"
+    const t2 = "2024-01-01T00:01:00.000Z"
+
+    await storage.timeseries.applyTelemetryAppended(
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 20, t1, "1")
+    )
+    await storage.timeseries.applyTelemetryAppended(
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 21, t2, "2")
+    )
+    await storage.timeseries.applyTelemetryAppended(
+      createTelemetryEvent("project-a", "Room", "room:101", "humidity", 40, t1, "3")
+    )
+
+    const batch = await storage.timeseries.getHistoryBatch({
+      projectId: "project-a",
+      series: [
+        { objectTypeId: "Room", objectId: "room:101", propertyId: "temperature" },
+        { objectTypeId: "Room", objectId: "room:101", propertyId: "humidity" },
+        { objectTypeId: "Room", objectId: "missing", propertyId: "temperature" },
+      ],
+      limitPerSeries: 1,
+      order: "desc",
+    })
+
+    expect(batch.map((series) => series.points.map((point) => point.value))).toEqual([
+      [21],
+      [40],
+      [],
+    ])
+  })
+
   test("getHistory with desc order", async () => {
     const baseTime = new Date("2024-01-01T00:00:00Z")
 

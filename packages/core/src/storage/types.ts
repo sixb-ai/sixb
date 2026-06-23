@@ -127,7 +127,13 @@ export type {
   SyncRunStorage,
 } from "./sync-runs"
 export { SyncRunError } from "./sync-runs"
-export type { TimeseriesPoint, TimeseriesStorage } from "./timeseries/types"
+export type {
+  TimeseriesHistoryBatchInput,
+  TimeseriesHistoryBatchResult,
+  TimeseriesHistorySeriesInput,
+  TimeseriesPoint,
+  TimeseriesStorage,
+} from "./timeseries/types"
 export type {
   WebhookDeliveryClaimRecord,
   WebhookDeliveryClaimResult,

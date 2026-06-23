@@ -1,5 +1,5 @@
 import type { StoredTelemetryAppendedEvent } from "../../events"
-import type { TimeseriesPoint, TimeseriesStorage } from "./types"
+import type { TimeseriesHistoryBatchInput, TimeseriesPoint, TimeseriesStorage } from "./types"
 
 function pointKey(
   projectId: string,
@@ -86,6 +86,33 @@ export class InMemoryTimeseriesStorage implements TimeseriesStorage {
     }
 
     return points
+  }
+
+  async getHistoryBatch(input: TimeseriesHistoryBatchInput): Promise<
+    readonly {
+      objectTypeId: string
+      objectId: string
+      propertyId: string
+      points: readonly TimeseriesPoint[]
+    }[]
+  > {
+    const results = []
+    for (const series of input.series) {
+      results.push({
+        ...series,
+        points: await this.getHistory({
+          projectId: input.projectId,
+          objectTypeId: series.objectTypeId,
+          objectId: series.objectId,
+          propertyId: series.propertyId,
+          from: input.from,
+          to: input.to,
+          limit: input.limitPerSeries,
+          order: input.order,
+        }),
+      })
+    }
+    return results
   }
 
   async getLatest(params: {

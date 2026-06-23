@@ -81,6 +81,7 @@ describe("OpenAPI docs", () => {
       ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["delete", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["post", "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}"],
+      ["post", "/api/telemetry/history"],
     ] as const
 
     for (const [method, path] of csrfRoutes) {

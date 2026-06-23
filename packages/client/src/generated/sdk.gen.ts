@@ -32,6 +32,9 @@ import type {
   GetAuthInvitationOptionsResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
+  GetBulkTelemetryHistoryData,
+  GetBulkTelemetryHistoryErrors,
+  GetBulkTelemetryHistoryResponses,
   GetConnectorData,
   GetConnectorErrors,
   GetConnectorResponses,
@@ -927,6 +930,26 @@ export const appendTelemetry = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<AppendTelemetryResponses, AppendTelemetryErrors, ThrowOnError>({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get bulk telemetry history
+ */
+export const getBulkTelemetryHistory = <ThrowOnError extends boolean = false>(
+  options: Options<GetBulkTelemetryHistoryData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    GetBulkTelemetryHistoryResponses,
+    GetBulkTelemetryHistoryErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/telemetry/history",
     ...options,
     headers: {
       "Content-Type": "application/json",

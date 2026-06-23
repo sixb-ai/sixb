@@ -1,15 +1,38 @@
-import { isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import { assertAuthorized, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   AppendTelemetryBodySchema,
+  BulkTelemetryHistoryBodySchema,
+  BulkTelemetryHistoryResponseSchema,
   TelemetryHistoryQuerySchema,
   TelemetryParamsSchema,
   TelemetryPointSchema,
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+
+function assertCanReadTelemetry(context: unknown, objectTypeId: string): void {
+  const { authz } = requestAuthState(context)
+  assertAuthorized({ authorization: authz ?? undefined }, { kind: "object.view", objectTypeId })
+}
+
+function serializeTelemetryPoint(point: {
+  projectId: string
+  objectTypeId: string
+  objectId: string
+  propertyId: string
+  value: unknown
+  unit?: string
+  at: Date
+  sourceEventId?: string
+}) {
+  return {
+    ...point,
+    at: toIsoString(point.at),
+  }
+}
 
 export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
@@ -51,6 +74,53 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
       }
     )
+    .post(
+      "/api/telemetry/history",
+      async (context) => {
+        const { body, set } = context
+        try {
+          const parsedBody = BulkTelemetryHistoryBodySchema.parse(body)
+          for (const objectTypeId of new Set(
+            parsedBody.series.map((series) => series.objectTypeId)
+          )) {
+            assertCanReadTelemetry(context, objectTypeId)
+          }
+          const from = parseDate(parsedBody.from)
+          const to = parseDate(parsedBody.to)
+          const history = await sixb.storage.timeseries.getHistoryBatch({
+            projectId: sixb.id,
+            series: parsedBody.series,
+            from,
+            to,
+            limitPerSeries: parsedBody.limitPerSeries,
+            order: parsedBody.order,
+          })
+
+          return {
+            series: history.map((series) => ({
+              ...series,
+              points: series.points.map(serializeTelemetryPoint),
+            })),
+          }
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        body: BulkTelemetryHistoryBodySchema,
+        response: {
+          200: BulkTelemetryHistoryResponseSchema,
+          400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get bulk telemetry history",
+          tags: ["Telemetry"],
+          operationId: "getBulkTelemetryHistory",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
     .get(
       "/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history",
       async (context) => {
@@ -74,13 +144,9 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
             order: parsedQuery.order,
           })
 
-          return history.map((point) => ({
-            ...point,
-            at: toIsoString(point.at),
-          }))
+          return history.map(serializeTelemetryPoint)
         } catch (error) {
-          set.status = 400
-          return { error: error instanceof Error ? error.message : String(error) }
+          return handleRouteError(error, set)
         }
       },
       {
@@ -103,31 +169,36 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       async (context) => {
         const { params, set } = context
         const { authz } = requestAuthState(context)
-        if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
-          set.status = 404
-          return { error: "Object not found" }
-        }
+        try {
+          if (!isAllowed(authz, { kind: "object.view", objectTypeId: params.objectTypeId })) {
+            set.status = 404
+            return { error: "Object not found" }
+          }
 
-        const latest = await sixb.storage.timeseries.getLatest({
-          projectId: sixb.id,
-          objectTypeId: params.objectTypeId,
-          objectId: params.objectId,
-          propertyId: params.propertyId,
-        })
+          const latest = await sixb.storage.timeseries.getLatest({
+            projectId: sixb.id,
+            objectTypeId: params.objectTypeId,
+            objectId: params.objectId,
+            propertyId: params.propertyId,
+          })
 
-        if (!latest) {
-          set.status = 404
-          return { error: "Telemetry point not found" }
-        }
+          if (!latest) {
+            set.status = 404
+            return { error: "Telemetry point not found" }
+          }
 
-        return {
-          ...latest,
-          at: toIsoString(latest.at),
+          return serializeTelemetryPoint(latest)
+        } catch (error) {
+          return handleRouteError(error, set)
         }
       },
       {
         params: TelemetryParamsSchema,
-        response: { 200: TelemetryPointSchema, 404: ErrorResponseSchema },
+        response: {
+          200: TelemetryPointSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
         detail: {
           summary: "Get latest telemetry point",
           tags: ["Telemetry"],
