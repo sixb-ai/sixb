@@ -10,6 +10,7 @@ import {
 import { ProjectionWorkerError } from "./errors"
 import { resolveProjectionSchema } from "./projection-schema"
 import { normalizeProjectedValue } from "./projection-value-coercion"
+import { isPlainObject } from "./utils"
 
 export interface ObjectProjectionPlan {
   readonly projection: ObjectProjectionDefinition
@@ -201,13 +202,4 @@ function collectForeignKeyValues(
   }
 
   return values
-}
-
-function isPlainObject(value: unknown): value is DatasetRow {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false
-  }
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }

@@ -214,7 +214,7 @@ export function validateTelemetryProjectionFieldMapping(
     if (!datasetColumnNames.has(columnName)) {
       throw new ProjectionValidationError(
         `${prefix}: ${fieldRole} field "${columnName}" references unknown dataset column ` +
-          `"${columnName}" on dataset "${projection.datasetId}"`
+          `on dataset "${projection.datasetId}"`
       )
     }
   }
@@ -328,7 +328,7 @@ export function validateProjectionsAtStartup(
       }
       if (sourceField && !datasetColumnNames.has(sourceField)) {
         throw new ProjectionValidationError(
-          `${prefix}: FK link "${linkId}" source field "${sourceField}" references unknown dataset column "${sourceField}" on dataset "${projection.datasetId}"`
+          `${prefix}: FK link "${linkId}" source field "${sourceField}" references unknown dataset column on dataset "${projection.datasetId}"`
         )
       }
       if (!objectTypesById.has(fk.targetObjectTypeId)) {
@@ -375,13 +375,13 @@ export function validateProjectionsAtStartup(
     if (!datasetColumnNames.has(projection.sourceField)) {
       throw new ProjectionValidationError(
         `${prefix}: source field "${projection.sourceField}" references unknown dataset column ` +
-          `"${projection.sourceField}" on dataset "${projection.datasetId}"`
+          `on dataset "${projection.datasetId}"`
       )
     }
     if (!datasetColumnNames.has(projection.targetField)) {
       throw new ProjectionValidationError(
         `${prefix}: target field "${projection.targetField}" references unknown dataset column ` +
-          `"${projection.targetField}" on dataset "${projection.datasetId}"`
+          `on dataset "${projection.datasetId}"`
       )
     }
     if (!primaryByTypeId.has(projection.sourceObjectTypeId)) {

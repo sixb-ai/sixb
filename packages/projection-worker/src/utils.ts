@@ -1,4 +1,4 @@
-import { type ProjectionRunCounters, zeroProjectionRunCounters } from "@sixb/core"
+import { type DatasetRow, type ProjectionRunCounters, zeroProjectionRunCounters } from "@sixb/core"
 
 // A writable view of the canonical counter shape, derived so the field set
 // stays in lockstep with ProjectionRunCounters.
@@ -32,4 +32,15 @@ export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw createAbortError()
   }
+}
+
+// Narrows a raw value to a plain-object dataset row, rejecting class instances
+// and arrays. Shared by the object and telemetry row projectors.
+export function isPlainObject(value: unknown): value is DatasetRow {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false
+  }
+
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }

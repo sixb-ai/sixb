@@ -172,15 +172,21 @@ async function executeProjection(input: {
     })
   }
 
-  return runTelemetryProjection({
-    runtime,
-    projection,
-    dataset,
-    versionId: job.versionId,
-    signal,
-    batchSize,
-    onProgress,
-  })
+  if (projection._tag === "TelemetryProjectionDefinition") {
+    return runTelemetryProjection({
+      runtime,
+      projection,
+      dataset,
+      versionId: job.versionId,
+      signal,
+      batchSize,
+      onProgress,
+    })
+  }
+
+  throw new ProjectionWorkerError(
+    `[SixbProjectionWorker] Unsupported projection kind '${(projection as { _tag: string })._tag}'.`
+  )
 }
 
 function requireProjection(

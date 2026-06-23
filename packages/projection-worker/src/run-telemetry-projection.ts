@@ -1,7 +1,6 @@
 import {
   type DatasetColumnDefinition,
   type DatasetDefinition,
-  type DatasetRow,
   getDatasetRowValidationError,
   ObjectNotFoundError,
   OntologyValidationError,
@@ -18,7 +17,7 @@ import type {
   ProjectionProgressReporter,
   ProjectionWorkerContext,
 } from "./types"
-import { errorMessage, isBlank } from "./utils"
+import { errorMessage, isBlank, isPlainObject } from "./utils"
 
 interface RunTelemetryProjectionInput {
   readonly runtime: ProjectionWorkerContext
@@ -350,13 +349,4 @@ function wallClockMatchesComponents(wallClock: number, components: TimestampComp
 
 function isRecoverableTelemetryRowError(error: unknown): boolean {
   return error instanceof ObjectNotFoundError || error instanceof OntologyValidationError
-}
-
-function isPlainObject(value: unknown): value is DatasetRow {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false
-  }
-
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
 }

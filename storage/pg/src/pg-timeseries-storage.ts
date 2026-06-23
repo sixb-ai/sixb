@@ -97,7 +97,7 @@ export class PgTimeseriesStorage implements TimeseriesStorage {
         AND object_type_id = ${params.objectTypeId}
         AND object_id = ${params.objectId}
         AND property_id = ${params.propertyId}
-      ORDER BY at DESC, source_event_id DESC
+      ORDER BY at DESC
       LIMIT 1
     `
 

@@ -151,7 +151,7 @@ export class SqliteTimeseriesStorage implements TimeseriesStorage {
         `
         SELECT * FROM timeseries
         WHERE project_id = ? AND object_type_id = ? AND object_id = ? AND property_id = ?
-        ORDER BY at DESC, source_event_id DESC
+        ORDER BY at DESC
         LIMIT 1
       `
       )
