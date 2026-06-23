@@ -2,8 +2,8 @@
 
 A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
-- **Repositories** — list or iterate, for a user or an org
-- **Issues** — list, create, update, close
+- **Repositories** — list, for a user or an org
+- **Issues** — list repository issues, create, update
 - **Webhooks** — receive GitHub events through one inbound route
 
 ## Register
@@ -41,21 +41,35 @@ export const githubConnector = defineConnector(
 const gh = await sixb.connector(githubConnector)
 ```
 
-| Method                          | Description                                                  |
-| ------------------------------- | ------------------------------------------------------------ |
-| `listRepositories(opts?)`       | One page of the auth user's repos, or an org's via `{ org }`. |
-| `iterRepositories(opts?)`       | Async iterator over repositories, following pagination.       |
-| `listIssues(opts?)`             | One page of a repo's issues; pull requests filtered out.     |
-| `iterIssues(opts?)`             | Async iterator over issues, following pagination.             |
-| `createIssue(input)`            | Create an issue (`title` required).                          |
-| `updateIssue(number, patch)`    | Update title, body, state, labels, or assignees.             |
-| `deleteIssue(number, target?)`  | Closes the issue — see [Notes](#notes).                      |
+| Method                                      | Description                                         |
+| ------------------------------------------- | --------------------------------------------------- |
+| `listRepositoriesForAuthenticatedUser(opts?)` | One page of the authenticated user's repositories. |
+| `listOrganizationRepositories(opts)`        | One page of an organization's repositories.         |
+| `listRepositoryIssues(opts?)`               | One page of a repository's issues.                  |
+| `createIssue(input)`                        | Create an issue (`title` required).                 |
+| `updateIssue(number, patch)`                | Update title, body, state, labels, or assignees.    |
 
 ```ts
-const page = await gh.listRepositories({ org: "acme", pageSize: 100 })
+const userRepos = await gh.listRepositoriesForAuthenticatedUser({
+  visibility: "private",
+  affiliation: ["owner", "collaborator"],
+  sort: "updated",
+  direction: "desc",
+})
+const orgRepos = await gh.listOrganizationRepositories({
+  org: "acme",
+  type: "sources",
+  pageSize: 100,
+})
 const issue = await gh.createIssue({ title: "Bug", labels: ["triage"] })
 await gh.updateIssue(issue.number, { body: "Updated", state: "closed" })
 ```
+
+Repository list options follow GitHub's two endpoint shapes. Authenticated-user
+repository calls support `visibility`, `affiliation`, `type`, `sort`,
+`direction`, `since`, and `before`; `type` cannot be combined with `visibility`
+or `affiliation`. Organization repository calls use `{ org }` and support
+`type`, `sort`, and `direction`.
 
 The list methods return a **single page** envelope. Pass `pageSize`, then pass
 `nextPageToken` back to fetch the next page:
@@ -63,18 +77,15 @@ The list methods return a **single page** envelope. Pass `pageSize`, then pass
 ```ts
 let pageToken: string | undefined
 do {
-  const page = await gh.listIssues({ repo: "web", state: "all", pageSize: 100, pageToken })
+  const page = await gh.listRepositoryIssues({
+    repo: "web",
+    state: "all",
+    pageSize: 100,
+    pageToken,
+  })
   // handle page.items
   pageToken = page.nextPageToken
 } while (pageToken)
-```
-
-Use the iterator helpers when you want all items without managing page tokens:
-
-```ts
-for await (const issue of gh.iterIssues({ repo: "web", state: "all", pageSize: 100 })) {
-  // handle issue
-}
 ```
 
 Every issue method takes an optional `owner` / `repo` to override the connector
@@ -146,8 +157,7 @@ connector recomputes the HMAC over the raw body and rejects mismatches before
 
 ## Notes
 
-- **Delete = close.** GitHub's REST API can't delete issues, so `deleteIssue`
-  closes it (`state: "closed"`, `state_reason: "not_planned"`). True deletion
-  needs the GraphQL `deleteIssue` mutation and repo-admin rights.
-- **Pull requests.** `listIssues` drops entries GitHub returns with a
-  `pull_request` field, so you only get real issues.
+- **Closing issues.** Use `updateIssue(number, { state: "closed" })`, matching
+  GitHub's Update an issue REST endpoint.
+- **Pull requests.** GitHub's repository issues endpoint can return pull
+  requests with a `pull_request` field; this connector returns them unchanged.

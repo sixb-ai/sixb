@@ -1,22 +1,38 @@
+export type { GitHubClient } from "./client"
 export type { GitHubConnector } from "./github"
-export { GitHubApiError, github } from "./github"
+export { github } from "./github"
+export { GitHubApiError } from "./http"
 export type {
   CreateIssueInput,
-  GitHubClient,
+  GitHubIssue,
+  GitHubIssueStateReason,
+  GitHubLabel,
+  IssuesClient,
+  ListRepositoryIssuesOptions,
+  UpdateIssueInput,
+} from "./issues"
+export type {
+  GitHubOrganizationRepositoryType,
+  GitHubRepository,
+  GitHubRepositoryAffiliation,
+  GitHubRepositorySort,
+  GitHubRepositoryVisibility,
+  GitHubRepositoryVisibilityFilter,
+  GitHubSortDirection,
+  GitHubUserRepositoryType,
+  ListOrganizationRepositoriesOptions,
+  ListRepositoriesForAuthenticatedUserOptions,
+  RepositoriesClient,
+} from "./repos"
+export type {
   GitHubConnectorOptions,
   GitHubEventContext,
   GitHubEventHandler,
-  GitHubIssue,
   GitHubIssueEvent,
-  GitHubLabel,
   GitHubPage,
   GitHubPaginationOptions,
-  GitHubRepository,
   GitHubUser,
   GitHubWebhookEvent,
-  ListIssuesOptions,
-  ListRepositoriesOptions,
   RepoTarget,
-  UpdateIssueInput,
 } from "./types"
 export { githubEventsWebhook } from "./webhook"
