@@ -811,7 +811,11 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
             query: {
               kind: "expand",
               expansions: [{ linkId: "hasDevice", direction: "incoming" }],
-              input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: Device.id } },
+              input: {
+                kind: "limit",
+                limit: 10,
+                input: { kind: "start", objectTypeId: Device.id },
+              },
             },
           },
           { ontology: objectQueryContractOntology, storage }
