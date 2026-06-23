@@ -51,8 +51,32 @@
           },
           "updatedAt": {
             "type": "string"
+          },
+          "links": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ObjectQueryLinkValue"
+            }
+          },
+          "linkProperties": {
+            "type": "object",
+            "additionalProperties": true
           }
         }
+      },
+      "ObjectQueryLinkValue": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ObjectQueryObject"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQueryObject"
+            }
+          }
+        ],
+        "nullable": true
       },
       "ObjectQueryIssue": {
         "type": "object",
@@ -502,10 +526,65 @@
                 }
               }
             }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "expansions"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["expand"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "expansions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ObjectExpansion"
+                }
+              }
+            }
           }
         ],
         "discriminator": {
           "propertyName": "kind"
+        }
+      },
+      "ObjectExpansion": {
+        "type": "object",
+        "required": ["linkId", "direction"],
+        "additionalProperties": false,
+        "properties": {
+          "linkId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["outgoing", "incoming"]
+          },
+          "sourceObjectTypeId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "orderBy": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectQuerySortField"
+            }
+          },
+          "expand": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObjectExpansion"
+            }
+          }
         }
       },
       "ObjectQueryPredicate": {

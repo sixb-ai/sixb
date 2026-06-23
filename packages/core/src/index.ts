@@ -1176,6 +1176,7 @@ export type {
   ObjectQueryFacetInput,
   ObjectQueryFacetResult,
   ObjectQueryListOptions,
+  ObjectQueryRow,
   ObjectSet,
   ObjectSetListInput,
   ObjectSetQueryPropertyToken,

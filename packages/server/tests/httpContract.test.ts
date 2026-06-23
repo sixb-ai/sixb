@@ -1520,6 +1520,46 @@ describe("SixbServer HTTP contract", () => {
     })
   })
 
+  test("serializes expand links on the query route", async () => {
+    await withHttpContractServer(async ({ baseUrl }) => {
+      // `space` contains `device` ("many"); the setup links system → fan-1.
+      const response = await fetch(`${baseUrl}/api/objects/query`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          query: {
+            kind: "expand",
+            input: { kind: "limit", limit: 5, input: { kind: "start", objectTypeId: "space" } },
+            expansions: [{ linkId: "contains", direction: "outgoing" }],
+          },
+        }),
+      })
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as {
+        plan: { mode: string }
+        objects: Array<{
+          primaryId: string
+          links?: Record<
+            string,
+            Array<{ primaryId: string; objectTypeId: string; properties: Record<string, unknown> }>
+          >
+        }>
+      }
+
+      // No provider speaks expand, so it runs through the bounded fallback.
+      expect(body.plan.mode).toBe("fallback")
+      const system = body.objects.find((object) => object.primaryId === "system")
+      // "many" cardinality serializes as an array of the linked objects.
+      expect(system?.links?.contains).toEqual([
+        expect.objectContaining({
+          primaryId: "fan-1",
+          objectTypeId: "device",
+          properties: expect.objectContaining({ label: "Fan 1" }),
+        }),
+      ])
+    })
+  })
+
   test("supports workflow intervention review endpoints", async () => {
     await withHttpContractServer(async ({ baseUrl, events, sixb }) => {
       const pending = await seedPendingReviewIntervention(sixb, "submit")

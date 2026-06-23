@@ -90,6 +90,19 @@ export const ObjectQuerySortFieldSchema = z.union([
     .strict(),
 ])
 
+export const ObjectExpansionSchema: z.ZodType<unknown> = z.lazy(() =>
+  z
+    .object({
+      linkId: z.string().min(1),
+      direction: z.enum(["outgoing", "incoming"]),
+      sourceObjectTypeId: z.string().min(1).optional(),
+      limit: z.number().int().nonnegative().optional(),
+      orderBy: z.array(ObjectQuerySortFieldSchema).optional(),
+      expand: z.array(ObjectExpansionSchema).optional(),
+    })
+    .strict()
+)
+
 export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
   z.discriminatedUnion("kind", [
     z
@@ -168,6 +181,13 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
         properties: z.array(z.string().min(1)).optional(),
       })
       .strict(),
+    z
+      .object({
+        kind: z.literal("expand"),
+        input: ObjectQuerySchema,
+        expansions: z.array(ObjectExpansionSchema),
+      })
+      .strict(),
   ])
 )
 
@@ -223,6 +243,7 @@ const stringArraySchema = { type: "array", items: { type: "string", minLength: 1
 const objectQueryRef = { $ref: "#/components/schemas/ObjectQuery" }
 const objectQueryPredicateRef = { $ref: "#/components/schemas/ObjectQueryPredicate" }
 const objectQuerySortFieldRef = { $ref: "#/components/schemas/ObjectQuerySortField" }
+const objectExpansionRef = { $ref: "#/components/schemas/ObjectExpansion" }
 
 /**
  * zod-to-json-schema currently drops recursive z.lazy schemas when the server's
@@ -248,7 +269,25 @@ export const ObjectQueryOpenApiSchemas = {
       properties: { type: "object", additionalProperties: true },
       createdAt: { type: "string" },
       updatedAt: { type: "string" },
+      // Populated only on the query route, by an `expand` node: linked objects
+      // keyed by link id. Recursive (nested expands), so the value references
+      // ObjectQueryObject again. `linkProperties` carries relationship metadata
+      // on an expanded child.
+      links: {
+        type: "object",
+        additionalProperties: { $ref: "#/components/schemas/ObjectQueryLinkValue" },
+      },
+      linkProperties: { type: "object", additionalProperties: true },
     },
+  },
+  // One expanded link value: a single child ("one" cardinality, or null when
+  // absent), or an array of children ("many"). Recurses through ObjectQueryObject.
+  ObjectQueryLinkValue: {
+    oneOf: [
+      { $ref: "#/components/schemas/ObjectQueryObject" },
+      { type: "array", items: { $ref: "#/components/schemas/ObjectQueryObject" } },
+    ],
+    nullable: true,
   },
   ObjectQueryIssue: {
     type: "object",
@@ -522,8 +561,31 @@ export const ObjectQueryOpenApiSchemas = {
           properties: stringArraySchema,
         },
       },
+      {
+        type: "object",
+        required: ["kind", "input", "expansions"],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["expand"] },
+          input: objectQueryRef,
+          expansions: { type: "array", items: objectExpansionRef },
+        },
+      },
     ],
     discriminator: { propertyName: "kind" },
+  },
+  ObjectExpansion: {
+    type: "object",
+    required: ["linkId", "direction"],
+    additionalProperties: false,
+    properties: {
+      linkId: { type: "string", minLength: 1 },
+      direction: { type: "string", enum: ["outgoing", "incoming"] },
+      sourceObjectTypeId: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 0 },
+      orderBy: { type: "array", items: objectQuerySortFieldRef },
+      expand: { type: "array", items: objectExpansionRef },
+    },
   },
   ObjectQueryPredicate: {
     oneOf: [
