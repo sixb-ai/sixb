@@ -168,7 +168,7 @@ export function assertProjectionCompatibleWithDataset(input: {
       projection,
       objectType,
       datasetColumnNames,
-      `Projection "${projection.id}"`
+      `[SixbProjectionWorker] Projection "${projection.id}"`
     )
 
     const objectIdColumn = requireColumn(

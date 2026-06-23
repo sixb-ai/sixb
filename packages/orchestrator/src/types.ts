@@ -2,27 +2,22 @@ import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
   EventsRuntime,
-  LinkProjectionDefinition,
   NewQueueJob,
-  ObjectProjectionDefinition,
   PipelineDefinition,
   PipelineRunFinishedEvent,
   PipelineRunRequestedQueueJob,
+  ProjectionDefinition,
   ProjectionRunRequestedQueueJob,
   Queues,
   ScheduleTriggeredEvent,
   SyncDefinition,
   SyncRunFinishedEvent,
   SyncRunRequestedQueueJob,
-  TelemetryProjectionDefinition,
   WorkflowDefinition,
   WorkflowRunRequestedQueueJob,
 } from "@sixb/core"
 
-export type RoutableProjectionDefinition =
-  | ObjectProjectionDefinition
-  | LinkProjectionDefinition
-  | TelemetryProjectionDefinition
+export type RoutableProjectionDefinition = ProjectionDefinition
 
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`
