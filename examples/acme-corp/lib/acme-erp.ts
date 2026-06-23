@@ -255,32 +255,104 @@ const projectMembers = [
   { project_id: "proj-healthfirst-portal", employee_id: "emp-francois" },
 ] satisfies readonly ErpProjectMemberRow[]
 
+const minuteMs = 60_000
+const hourMs = 60 * minuteMs
+const dayMs = 24 * hourMs
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0")
+}
+
+function recentDatePart(daysAgo: number): string {
+  const date = new Date(Date.now() - daysAgo * dayMs)
+  return [
+    date.getUTCFullYear(),
+    padDatePart(date.getUTCMonth() + 1),
+    padDatePart(date.getUTCDate()),
+  ].join("-")
+}
+
+function recentTimestamp(offsetMs: number): string {
+  const date = new Date(Date.now() - offsetMs)
+  const datePart = [
+    date.getUTCFullYear(),
+    padDatePart(date.getUTCMonth() + 1),
+    padDatePart(date.getUTCDate()),
+  ].join("-")
+  return `${datePart} ${padDatePart(date.getUTCHours())}:${padDatePart(
+    date.getUTCMinutes()
+  )}:${padDatePart(date.getUTCSeconds())}`
+}
+
 // Progress snapshots arrive from the ERP as zone-less local timestamps (no "Z"
 // and no numeric offset), and some carry single-digit (non-zero-padded) hours
 // like "9:30:00" exactly as the source system emits them. The telemetry
 // projection normalizes every form to UTC so a reading materializes at the same
 // absolute instant on any worker host.
-const projectProgress = [
-  { project_id: "proj-techstart-platform", recorded_at: "2024-02-29 17:00:00", progress_pct: 15 },
-  { project_id: "proj-techstart-platform", recorded_at: "2024-05-31 9:30:00", progress_pct: 38 },
-  { project_id: "proj-techstart-platform", recorded_at: "2024-08-30 17:15:00", progress_pct: 60 },
-  { project_id: "proj-techstart-platform", recorded_at: "2024-10-31 8:00:00", progress_pct: 72 },
-  { project_id: "proj-greenenergy-dashboard", recorded_at: "2024-03-29 9:00:00", progress_pct: 12 },
-  {
-    project_id: "proj-greenenergy-dashboard",
-    recorded_at: "2024-05-31 14:00:00",
-    progress_pct: 34,
-  },
-  {
-    project_id: "proj-greenenergy-dashboard",
-    recorded_at: "2024-07-31 17:30:00",
-    progress_pct: 55,
-  },
-  { project_id: "proj-eduplatform-redesign", recorded_at: "2024-06-14 9:30:00", progress_pct: 5 },
-  { project_id: "proj-healthfirst-portal", recorded_at: "2023-08-31 17:00:00", progress_pct: 30 },
-  { project_id: "proj-healthfirst-portal", recorded_at: "2023-11-30 17:00:00", progress_pct: 65 },
-  { project_id: "proj-healthfirst-portal", recorded_at: "2024-01-31 18:00:00", progress_pct: 100 },
-] satisfies readonly ErpProjectProgressRow[]
+function createRecentProjectProgress(): readonly ErpProjectProgressRow[] {
+  return [
+    {
+      project_id: "proj-techstart-platform",
+      recorded_at: `${recentDatePart(6)} 17:00:00`,
+      progress_pct: 15,
+    },
+    {
+      project_id: "proj-techstart-platform",
+      recorded_at: `${recentDatePart(4)} 9:30:00`,
+      progress_pct: 38,
+    },
+    {
+      project_id: "proj-techstart-platform",
+      recorded_at: `${recentDatePart(2)} 17:15:00`,
+      progress_pct: 60,
+    },
+    {
+      project_id: "proj-techstart-platform",
+      recorded_at: recentTimestamp(35 * minuteMs),
+      progress_pct: 72,
+    },
+    {
+      project_id: "proj-greenenergy-dashboard",
+      recorded_at: `${recentDatePart(5)} 9:00:00`,
+      progress_pct: 12,
+    },
+    {
+      project_id: "proj-greenenergy-dashboard",
+      recorded_at: `${recentDatePart(2)} 14:00:00`,
+      progress_pct: 34,
+    },
+    {
+      project_id: "proj-greenenergy-dashboard",
+      recorded_at: recentTimestamp(45 * minuteMs),
+      progress_pct: 55,
+    },
+    {
+      project_id: "proj-eduplatform-redesign",
+      recorded_at: `${recentDatePart(1)} 9:30:00`,
+      progress_pct: 5,
+    },
+    {
+      project_id: "proj-healthfirst-portal",
+      recorded_at: `${recentDatePart(6)} 17:00:00`,
+      progress_pct: 30,
+    },
+    {
+      project_id: "proj-healthfirst-portal",
+      recorded_at: `${recentDatePart(3)} 17:00:00`,
+      progress_pct: 65,
+    },
+    {
+      project_id: "proj-healthfirst-portal",
+      recorded_at: recentTimestamp(50 * minuteMs),
+      progress_pct: 90,
+    },
+    {
+      project_id: "proj-healthfirst-portal",
+      recorded_at: recentTimestamp(3 * minuteMs),
+      progress_pct: 100,
+    },
+  ]
+}
 
 const documents = [
   {
@@ -452,7 +524,7 @@ const tasks = [
   },
 ] satisfies readonly ErpTaskRow[]
 
-function cloneRows<T extends Record<string, unknown>>(rows: readonly T[]): T[] {
+function cloneRows<T extends object>(rows: readonly T[]): T[] {
   return rows.map((row) => ({ ...row }))
 }
 
@@ -474,7 +546,7 @@ export function createAcmeErpClient(): AcmeErpClient {
       return cloneRows(projectMembers)
     },
     async listProjectProgress() {
-      return cloneRows(projectProgress)
+      return cloneRows(createRecentProjectProgress())
     },
     async listDocuments() {
       return cloneRows(documents)
