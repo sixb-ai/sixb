@@ -13,6 +13,7 @@
     "@sixb/cli": "latest",
     "@sixb/client": "latest",
     "@sixb/core": "latest",
+    "@sixb/app": "latest",
     "@sixb/lake-local": "latest",
     "@sixb/sqlite": "latest",
     "@sixb/ui": "latest",

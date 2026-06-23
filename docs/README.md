@@ -17,8 +17,8 @@ shared runtime.
 - [Workflow](./concepts/workflows.md)
 - [Authentication](./concepts/authentication.md)
 - [Authorization](./concepts/authorization.md)
+- [App](./concepts/app.md)
 
 ## Coming next
 
 - Server and client
-- Apps

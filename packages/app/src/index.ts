@@ -9,6 +9,7 @@ export {
   type CustomAppStartOptions,
   createCustomApp,
 } from "./createCustomApp"
+export type { AppMetadata } from "./metadata"
 export { type PageRoute, scanPages } from "./scanner"
 export {
   type CustomAppStylesheet,
