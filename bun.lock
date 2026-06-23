@@ -76,6 +76,18 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/companycam": {
+      "name": "@sixb/connector-companycam",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "connectors/rest": {
       "name": "@sixb/connector-rest",
       "version": "0.1.0",
@@ -860,6 +872,8 @@
     "@sixb/cli": ["@sixb/cli@workspace:packages/cli"],
 
     "@sixb/client": ["@sixb/client@workspace:packages/client"],
+
+    "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
 
     "@sixb/connector-rest": ["@sixb/connector-rest@workspace:connectors/rest"],
 
