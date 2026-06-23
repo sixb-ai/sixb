@@ -13,6 +13,7 @@ import {
   defineObjectType,
   definePipeline,
   definePipelineStep,
+  defineProjection,
   defineRole,
   defineSync,
   defineWorkflow,
@@ -88,6 +89,14 @@ const ordersPipeline: PipelineDefinition =
 const customersPipeline: PipelineDefinition =
   definePipeline("pipeline-customers").then(normalizeCustomersStep)
 
+// Projections have no grant family yet, so their dataset lineage is exposed
+// only to privileged (unauthenticated) callers and hidden from every scoped
+// principal. Registered here so the `projectionIds` assertions below are
+// load-bearing rather than vacuous.
+const ordersProjection = defineProjection("orders-rollup", Contract)
+  .fromDataset(OrdersDataset)
+  .properties({ id: "id" })
+
 const sendContract = defineAction("send-contract")
   .on(Contract)
   .params({})
@@ -137,6 +146,7 @@ async function createRuntime(options: { readonly auth?: boolean } = {}) {
     datasets: [OrdersDataset, CustomersDataset],
     syncs: [ordersSync, customersSync],
     pipelines: [ordersPipeline, customersPipeline],
+    projections: [ordersProjection],
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -285,7 +295,7 @@ describe("authorized object routes", () => {
     const response = await app.fetch(
       new Request("http://localhost/api/objects", { headers: session.headers })
     )
-    const body = (await response.json()) as { objects: unknown[]; total: number }
+    const body = (await response.json()) as { objects: unknown[]; hasMore: boolean; total: number }
 
     expect(response.status).toBe(200)
     expect(body).toEqual({ objects: [], hasMore: false, total: 0 })
@@ -450,6 +460,33 @@ describe("authorized object routes", () => {
         targetPipelineIds: ["pipeline-customers"],
       })
     )
+  })
+
+  test("projection lineage is exposed to privileged callers but hidden from every scoped principal", async () => {
+    // The privileged (unauthenticated) catalog populates projectionIds, proving
+    // ordersProjection is registered against raw.erp.orders...
+    const { app: privilegedApp } = await createApp({ auth: false })
+    const privileged = await privilegedApp.fetch(
+      new Request("http://localhost/api/datasets/raw.erp.orders")
+    )
+    expect(privileged.status).toBe(200)
+    expect(await privileged.json()).toEqual(
+      expect.objectContaining({ projectionIds: ["orders-rollup"] })
+    )
+
+    // ...so the scoped operator's empty projectionIds is the guard at work, not
+    // an absent projection. (admins are scoped too, hence also empty.)
+    const { app, storage } = await createApp()
+    const operator = await seedSession(storage, ["commercial"], "usr_op")
+    const admin = await seedSession(storage, ["admins"], "usr_admin")
+
+    for (const session of [operator, admin]) {
+      const detail = await app.fetch(
+        new Request("http://localhost/api/datasets/raw.erp.orders", { headers: session.headers })
+      )
+      expect(detail.status).toBe(200)
+      expect(await detail.json()).toEqual(expect.objectContaining({ projectionIds: [] }))
+    }
   })
 })
 
