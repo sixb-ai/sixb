@@ -39,9 +39,27 @@ function pointParams(
     event.payload.propertyId,
     JSON.stringify(event.payload.value),
     event.payload.unit ?? null,
-    event.payload.at,
+    assertCanonicalUtcAt(event.payload.at),
     event.id,
   ]
+}
+
+// `at` is stored and compared as TEXT, so SQLite's lexicographic ordering and
+// range scans match chronological order — and the (series, at) identity stays
+// well-defined — only when every value is the canonical UTC ISO-8601 form that
+// appendTelemetryBatch produces via Date.toISOString(). Enforce that invariant
+// here so a writer that bypasses the normalization fails loudly instead of
+// silently corrupting history queries. (pg needs no equivalent: TIMESTAMPTZ
+// compares by instant regardless of textual form.)
+function assertCanonicalUtcAt(at: string): string {
+  const instant = new Date(at)
+  if (Number.isNaN(instant.getTime()) || instant.toISOString() !== at) {
+    throw new Error(
+      `[SixbSqlite] Telemetry 'at' must be a canonical UTC ISO-8601 timestamp ` +
+        `(e.g. "2026-06-21T10:00:00.000Z"), received "${at}".`
+    )
+  }
+  return at
 }
 
 /**
