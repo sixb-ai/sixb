@@ -1,5 +1,12 @@
 import { cloneJsonValue, type JsonValue } from "../../json"
-import { latestStartedAtByOwnerId } from "../run-listing"
+import {
+  compareStartedAt,
+  hasEmptyStatuses,
+  latestStartedAtByOwnerId,
+  matchesRunListDateFilters,
+  paginate,
+  toStatusSet,
+} from "../run-listing"
 import { SyncRunError } from "./errors"
 import type {
   FinishSyncRunInput,
@@ -27,19 +34,6 @@ function normalizeCheckpoint(checkpoint: JsonValue | undefined): JsonValue | und
 
 function normalizeError(error: SyncRunFailure | undefined): SyncRunFailure | undefined {
   return error ? structuredClone(error) : undefined
-}
-
-function compareRuns(a: SyncRunRecord, b: SyncRunRecord, order: "asc" | "desc"): number {
-  const delta = a.startedAt.getTime() - b.startedAt.getTime()
-  if (delta !== 0) {
-    return order === "asc" ? delta : -delta
-  }
-
-  if (a.id === b.id) {
-    return 0
-  }
-
-  return order === "asc" ? a.id.localeCompare(b.id) : b.id.localeCompare(a.id)
 }
 
 export class InMemorySyncRunStorage implements SyncRunStorage {
@@ -129,7 +123,7 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
-    if (input.syncIds && input.syncIds.length === 0) {
+    if (hasEmptyStatuses(input) || input.syncIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -138,27 +132,28 @@ export class InMemorySyncRunStorage implements SyncRunStorage {
     }
 
     const order = input.order ?? "desc"
-    const offset = input.offset ?? 0
-    const limit = input.limit ?? this.rows.size
+    const statuses = toStatusSet(input.statuses)
     const syncIds = input.syncIds ? new Set(input.syncIds) : null
-    const statuses = input.statuses ? new Set(input.statuses) : null
 
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
       .filter((record) => (input.syncId ? record.syncId === input.syncId : true))
       .filter((record) => (syncIds ? syncIds.has(record.syncId) : true))
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
-      .filter((record) => (statuses ? statuses.has(record.status) : true))
-      .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))
-      .filter((record) => (input.startedBefore ? record.startedAt <= input.startedBefore : true))
-      .sort((a, b) => compareRuns(a, b, order))
+      .filter((record) =>
+        matchesRunListDateFilters(record, {
+          statuses,
+          startedAfter: input.startedAfter,
+          startedBefore: input.startedBefore,
+        })
+      )
+      .sort((left, right) => compareStartedAt(left, right, order))
 
-    const total = filtered.length
-    const runs = filtered.slice(offset, offset + limit).map(cloneSyncRunRecord)
+    const { page, total, hasMore } = paginate(filtered, input)
 
     return {
-      runs,
-      hasMore: offset + runs.length < total,
+      runs: page.map(cloneSyncRunRecord),
+      hasMore,
       total,
     }
   }

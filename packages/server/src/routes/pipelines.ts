@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import {
   assertAuthorized,
+  canViewPipelineRun,
   type OntologySource,
   type PipelineDefinition,
   type PipelineRunRecord,
@@ -187,7 +188,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipeline-runs",
       async (context) => {
         const { query, set } = context
-        const { scoped } = requestAuthState(context)
+        const { authz } = requestAuthState(context)
         try {
           const parsed = PipelineRunsQuerySchema.parse(query)
           const storage = sixb.storage.pipelineRuns
@@ -199,18 +200,11 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             }
           }
 
-          if (scoped && parsed.pipelineId && !scoped.getPipelineById(parsed.pipelineId)) {
-            return {
-              runs: [],
-              hasMore: false,
-              total: 0,
-            }
-          }
-
-          const pipelineIds =
-            scoped && !parsed.pipelineId
-              ? scoped.listPipelines().map((pipeline) => pipeline.id)
-              : undefined
+          // Scope to runnable pipelines the same way workflow run history does:
+          // pass the grant allowlist alongside any explicit pipelineId and let
+          // storage AND them. An ungranted pipelineId yields an empty
+          // intersection, and an empty allowlist short-circuits to no rows.
+          const pipelineIds = authz ? [...authz.grants["run:pipeline"]] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             pipelineId: parsed.pipelineId,
@@ -246,7 +240,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
       "/api/pipeline-runs/:runId",
       async (context) => {
         const { params, set } = context
-        const { scoped } = requestAuthState(context)
+        const { authz } = requestAuthState(context)
         try {
           const storage = sixb.storage.pipelineRuns
           if (!storage) {
@@ -258,12 +252,9 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             projectId: sixb.id,
             id: params.runId,
           })
-          if (!run) {
-            set.status = 404
-            return { error: "Pipeline run not found" }
-          }
-
-          if (scoped && !scoped.getPipelineById(run.pipelineId)) {
+          // A run the principal cannot run is hidden as 404, never surfaced as a
+          // distinct 403, mirroring the catalog and run-history routes.
+          if (!run || !canViewPipelineRun(authz, run)) {
             set.status = 404
             return { error: "Pipeline run not found" }
           }

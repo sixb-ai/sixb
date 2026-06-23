@@ -15,6 +15,12 @@ import { SyncRunError } from "@sixb/core"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {
+  appendRunListFilters,
+  hasEmptyStatuses,
+  queryRunList,
+  type SqliteValue,
+} from "./run-list-query"
+import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
   type SqliteStoreConnection,
@@ -155,15 +161,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
-    if (input.syncIds && input.syncIds.length === 0) {
-      return {
-        runs: [],
-        hasMore: false,
-        total: 0,
-      }
-    }
-
-    if (input.statuses && input.statuses.length === 0) {
+    if (hasEmptyStatuses(input) || input.syncIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -172,7 +170,7 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
     }
 
     const whereClauses = ["project_id = ?"]
-    const args: (string | number)[] = [input.projectId]
+    const args: SqliteValue[] = [input.projectId]
 
     if (input.syncId) {
       whereClauses.push("sync_id = ?")
@@ -189,52 +187,22 @@ export class SqliteSyncRunStorage implements SyncRunStorage {
       args.push(input.datasetId)
     }
 
-    if (input.statuses) {
-      whereClauses.push(`status IN (${input.statuses.map(() => "?").join(", ")})`)
-      args.push(...input.statuses)
-    }
+    appendRunListFilters(whereClauses, args, input)
 
-    if (input.startedAfter) {
-      whereClauses.push("started_at >= ?")
-      args.push(input.startedAfter.toISOString())
-    }
-
-    if (input.startedBefore) {
-      whereClauses.push("started_at <= ?")
-      args.push(input.startedBefore.toISOString())
-    }
-
-    const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
-    const offset = input.offset ?? 0
-    const limit = input.limit
-
-    const totalRow = this.db
-      .query(`SELECT COUNT(*) AS count FROM sync_runs ${where}`)
-      .get(...args) as { count: number }
-
-    let query = `
-      SELECT * FROM sync_runs
-      ${where}
-      ORDER BY started_at ${order}, id ${order}
-    `
-    const queryArgs = [...args]
-
-    if (limit !== undefined) {
-      query += " LIMIT ? OFFSET ?"
-      queryArgs.push(limit, offset)
-    } else if (offset > 0) {
-      query += " LIMIT -1 OFFSET ?"
-      queryArgs.push(offset)
-    }
-
-    const rows = this.db.query(query).all(...queryArgs) as DatabaseRow[]
-    const runs = rows.map(rowToSyncRunRecord)
+    const { rows, total, hasMore } = queryRunList<DatabaseRow>({
+      db: this.db,
+      tableName: "sync_runs",
+      whereClauses,
+      args,
+      order: input.order,
+      limit: input.limit,
+      offset: input.offset,
+    })
 
     return {
-      runs,
-      hasMore: offset + runs.length < totalRow.count,
-      total: totalRow.count,
+      runs: rows.map(rowToSyncRunRecord),
+      hasMore,
+      total,
     }
   }
 

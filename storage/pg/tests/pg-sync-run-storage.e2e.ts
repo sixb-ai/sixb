@@ -131,6 +131,10 @@ describe("PgSyncRunStorage", () => {
     expect(selectedSyncs.total).toBe(1)
     expect(selectedSyncs.runs.map((run) => run.id)).toEqual(["run-3"])
 
+    // An empty allowlist must deny all — never fall through to an unfiltered list.
+    const noneAllowed = await storage.syncRuns.list({ projectId: "my-app", syncIds: [] })
+    expect(noneAllowed).toEqual({ runs: [], hasMore: false, total: 0 })
+
     const failed = await storage.syncRuns.getById({
       projectId: "my-app",
       id: "run-1",

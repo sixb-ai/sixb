@@ -71,7 +71,7 @@ function resolveAuthorizedTypeFilter(
   if (!expanded) {
     // Broad listings narrow to the visible universe rather than failing. The
     // set already contains every registered type when "all" was granted.
-    return [...runtime.authorization.grants.objectTypes.view]
+    return [...runtime.authorization.grants["view:object"]]
   }
 
   // Explicitly requested types must all be viewable.

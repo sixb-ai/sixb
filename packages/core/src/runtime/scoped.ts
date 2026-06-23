@@ -12,6 +12,7 @@ import type { ActionDefinition, RequestActionInput, RequestActionResult } from "
 import { requestAction as requestRuntimeAction } from "../actions/request"
 import {
   type AuthorizationContext,
+  type AuthzRequest,
   assertAuthorized,
   canViewEvent,
   isAllowed,
@@ -166,6 +167,38 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
         objectTypeId: action.binding.objectType.id,
       }))
 
+  // A scoped catalog narrows a definition source to what the principal may see.
+  // The run/view grant doubles as catalog visibility: a definition the principal
+  // cannot run/view is not worth surfacing, and hiding it also hides the
+  // (possibly ungranted) resources its shape references.
+  const scopedCatalog = <T extends { readonly id: string }>(
+    source: { list(): readonly T[]; getById(id: string): T | null },
+    toRequest: (id: string) => AuthzRequest
+  ) => {
+    const allowed = (id: string) => isAllowed(runtime.authorization, toRequest(id))
+    return {
+      list: () => source.list().filter((item) => allowed(item.id)),
+      getById: (id: string) => {
+        const item = source.getById(id)
+        return item && allowed(id) ? item : null
+      },
+    }
+  }
+
+  const datasets = scopedCatalog(deps.datasets, (datasetId) => ({
+    kind: "dataset.view",
+    datasetId,
+  }))
+  const syncs = scopedCatalog(deps.syncs, (syncId) => ({ kind: "sync.run", syncId }))
+  const pipelines = scopedCatalog(deps.pipelines, (pipelineId) => ({
+    kind: "pipeline.run",
+    pipelineId,
+  }))
+  const workflows = scopedCatalog(deps.workflows, (workflowId) => ({
+    kind: "workflow.run",
+    workflowId,
+  }))
+
   const scoped = {
     authorization: runtime.authorization,
 
@@ -190,20 +223,8 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       })
     },
 
-    listDatasets: () =>
-      deps.datasets
-        .list()
-        .filter((dataset) =>
-          isAllowed(runtime.authorization, { kind: "dataset.view", datasetId: dataset.id })
-        ),
-
-    getDatasetById: (datasetId: string) => {
-      const dataset = deps.datasets.getById(datasetId)
-      return dataset &&
-        isAllowed(runtime.authorization, { kind: "dataset.view", datasetId: dataset.id })
-        ? dataset
-        : null
-    },
+    listDatasets: datasets.list,
+    getDatasetById: datasets.getById,
 
     listActions: () => runtime.actionRegistry.list().filter((action) => canListAction(action)),
 
@@ -216,46 +237,14 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
 
     runWorkflow: (input: RequestWorkflowRunInput) => deps.workflows.requestByIdAs(runtime, input),
 
-    // Run grant doubles as catalog visibility: a workflow you cannot run is not
-    // worth surfacing, and hiding it also hides the (possibly ungranted) object
-    // types and action params its node graph references.
-    listWorkflows: () =>
-      deps.workflows
-        .list()
-        .filter((workflow) =>
-          isAllowed(runtime.authorization, { kind: "workflow.run", workflowId: workflow.id })
-        ),
+    listWorkflows: workflows.list,
+    getWorkflowById: workflows.getById,
 
-    getWorkflowById: (workflowId: string) => {
-      const workflow = deps.workflows.getById(workflowId)
-      return workflow && isAllowed(runtime.authorization, { kind: "workflow.run", workflowId })
-        ? workflow
-        : null
-    },
+    listSyncs: syncs.list,
+    getSyncById: syncs.getById,
 
-    listSyncs: () =>
-      deps.syncs
-        .list()
-        .filter((sync) => isAllowed(runtime.authorization, { kind: "sync.run", syncId: sync.id })),
-
-    getSyncById: (syncId: string) => {
-      const sync = deps.syncs.getById(syncId)
-      return sync && isAllowed(runtime.authorization, { kind: "sync.run", syncId }) ? sync : null
-    },
-
-    listPipelines: () =>
-      deps.pipelines
-        .list()
-        .filter((pipeline) =>
-          isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId: pipeline.id })
-        ),
-
-    getPipelineById: (pipelineId: string) => {
-      const pipeline = deps.pipelines.getById(pipelineId)
-      return pipeline && isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId })
-        ? pipeline
-        : null
-    },
+    listPipelines: pipelines.list,
+    getPipelineById: pipelines.getById,
 
     // No standalone events grant: the stream is filtered to events whose
     // subject the principal may view/apply/run. `limit` applies before this

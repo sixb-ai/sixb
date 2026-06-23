@@ -22,8 +22,7 @@ export type ViewGrantTarget = "object" | "dataset"
 export interface ViewGrant<TTarget extends ViewGrantTarget = ViewGrantTarget> {
   readonly kind: "grant"
   readonly capability: "view"
-  /** Missing target is treated as "object" for older hand-authored role data. */
-  readonly target?: TTarget
+  readonly target: TTarget
   readonly selection: Selection
 }
 
@@ -38,8 +37,7 @@ export type RunGrantTarget = "workflow" | "sync" | "pipeline"
 export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
   readonly kind: "grant"
   readonly capability: "run"
-  /** Missing target is treated as "workflow" for older hand-authored role data. */
-  readonly target?: TTarget
+  readonly target: TTarget
   readonly selection: Selection
 }
 

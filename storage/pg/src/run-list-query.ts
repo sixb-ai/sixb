@@ -3,9 +3,13 @@ import type { SQLClient, SqlParameter } from "./pg-client"
 type PgRunListTable =
   | "pipeline_runs"
   | "pipeline_step_runs"
+  | "sync_runs"
   | "webhook_runs"
   | "workflow_runs"
   | "workflow_node_runs"
+
+/** Column projection — `sync_runs` needs the derived `checkpoint_present` flag. */
+type PgRunListSelectList = "*" | "*, checkpoint IS NOT NULL AS checkpoint_present"
 
 export function hasEmptyStatuses(input: { readonly statuses?: readonly unknown[] }): boolean {
   return input.statuses !== undefined && input.statuses.length === 0
@@ -55,6 +59,7 @@ export async function queryRunList<TRow>(input: {
   readonly order?: "asc" | "desc"
   readonly limit?: number
   readonly offset?: number
+  readonly selectList?: PgRunListSelectList
 }): Promise<{ readonly rows: readonly TRow[]; readonly total: number; readonly hasMore: boolean }> {
   const where = `WHERE ${input.whereClauses.join(" AND ")}`
   const order = input.order === "asc" ? "ASC" : "DESC"
@@ -67,7 +72,7 @@ export async function queryRunList<TRow>(input: {
 
   const queryParams = [...input.params] as SqlParameter[]
   let query = `
-    SELECT * FROM ${input.tableName}
+    SELECT ${input.selectList ?? "*"} FROM ${input.tableName}
     ${where}
     ORDER BY started_at ${order}, id ${order}
   `
