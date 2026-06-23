@@ -25,6 +25,10 @@ function json(body: unknown, init?: ResponseInit): Response {
   })
 }
 
+function pageToken(path: string): string {
+  return Buffer.from(path).toString("base64url")
+}
+
 describe("github connector", () => {
   const originalFetch = globalThis.fetch
 
@@ -48,14 +52,14 @@ describe("github connector", () => {
 
     const adapter = github({ token: "pat-123", owner: "acme", repo: "web" })
     const client = await adapter.connect(CONTEXT)
-    await client.listRepositories()
+    await client.listRepositoriesForAuthenticatedUser()
 
     expect(adapter.type).toBe("github")
     expect(auth).toBe("Bearer pat-123")
     expect(version).toBe("2022-11-28")
   })
 
-  test("listRepositories fetches a page envelope with paging params", async () => {
+  test("listRepositoriesForAuthenticatedUser fetches a page envelope with paging params", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -69,7 +73,7 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    const page = await client.listRepositories({ pageSize: 50 })
+    const page = await client.listRepositoriesForAuthenticatedUser({ pageSize: 50 })
 
     const url = new URL(calls[0] ?? "")
     expect(url.searchParams.get("per_page")).toBe("50")
@@ -86,14 +90,14 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await client.listRepositories()
+    await client.listRepositoriesForAuthenticatedUser()
 
     const url = new URL(requested)
     expect(url.searchParams.has("page")).toBe(false)
     expect(url.searchParams.has("per_page")).toBe(false)
   })
 
-  test("listRepositories follows a pageToken returned from the Link header", async () => {
+  test("listRepositoriesForAuthenticatedUser follows a pageToken returned from the Link header", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -110,15 +114,133 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    const first = await client.listRepositories({ pageSize: 1 })
-    const second = await client.listRepositories({ pageToken: first.nextPageToken })
+    const first = await client.listRepositoriesForAuthenticatedUser({ pageSize: 1 })
+    const second = await client.listRepositoriesForAuthenticatedUser({
+      pageToken: first.nextPageToken,
+    })
 
     expect(new URL(calls[1] ?? "").searchParams.get("page")).toBe("2")
     expect(second.items.map((repo) => repo.id)).toEqual([2])
     expect(second.hasMore).toBe(false)
   })
 
-  test("listIssues drops pull requests", async () => {
+  test("listRepositoriesForAuthenticatedUser maps authenticated user repository filters", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.listRepositoriesForAuthenticatedUser({
+      visibility: "private",
+      affiliation: ["owner", "collaborator"],
+      sort: "updated",
+      direction: "desc",
+      since: "2026-01-01T00:00:00Z",
+      before: "2026-02-01T00:00:00Z",
+    })
+
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/user/repos")
+    expect(url.searchParams.get("visibility")).toBe("private")
+    expect(url.searchParams.get("affiliation")).toBe("owner,collaborator")
+    expect(url.searchParams.get("sort")).toBe("updated")
+    expect(url.searchParams.get("direction")).toBe("desc")
+    expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
+    expect(url.searchParams.get("before")).toBe("2026-02-01T00:00:00Z")
+  })
+
+  test("listOrganizationRepositories maps organization repository filters", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.listOrganizationRepositories({
+      org: "acme",
+      type: "sources",
+      sort: "full_name",
+      direction: "asc",
+    })
+
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/orgs/acme/repos")
+    expect(url.searchParams.get("type")).toBe("sources")
+    expect(url.searchParams.get("sort")).toBe("full_name")
+    expect(url.searchParams.get("direction")).toBe("asc")
+    expect(url.searchParams.has("visibility")).toBe(false)
+    expect(url.searchParams.has("affiliation")).toBe(false)
+  })
+
+  test("rejects caller-provided pageTokens that decode to absolute URLs", async () => {
+    let called = false
+    mockFetch(() => {
+      called = true
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await expect(
+      client.listRepositoriesForAuthenticatedUser({
+        pageToken: pageToken("https://evil.example/repos?page=2"),
+      })
+    ).rejects.toThrow("Invalid pageToken")
+
+    expect(called).toBe(false)
+  })
+
+  test("rejects pagination Link URLs outside the configured API base", async () => {
+    const calls: string[] = []
+    mockFetch((input) => {
+      calls.push(String(input))
+      return Promise.resolve(
+        json([{ id: 1, name: "one" }], {
+          headers: {
+            link: '<https://evil.example/user/repos?page=2>; rel="next"',
+          },
+        })
+      )
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await expect(client.listRepositoriesForAuthenticatedUser()).rejects.toThrow(
+      "Refusing pagination URL outside the configured API base"
+    )
+
+    expect(calls).toHaveLength(1)
+    expect(new URL(calls[0] ?? "").origin).toBe("https://api.github.com")
+  })
+
+  test("keeps trusted pageToken paths within a configured API base path", async () => {
+    const calls: string[] = []
+    mockFetch((input) => {
+      calls.push(String(input))
+      return Promise.resolve(
+        json([{ id: calls.length, name: `repo-${calls.length}` }], {
+          headers:
+            calls.length === 1
+              ? {
+                  link: '<https://ghe.example.com/api/v3/user/repos?page=2>; rel="next"',
+                }
+              : undefined,
+        })
+      )
+    })
+
+    const client = await github({
+      token: "t",
+      baseUrl: "https://ghe.example.com/api/v3/",
+    }).connect(CONTEXT)
+    const first = await client.listRepositoriesForAuthenticatedUser()
+    await client.listRepositoriesForAuthenticatedUser({ pageToken: first.nextPageToken })
+
+    expect(new URL(calls[1] ?? "").pathname).toBe("/api/v3/user/repos")
+  })
+
+  test("listRepositoryIssues preserves pull requests returned by GitHub", async () => {
     mockFetch(() =>
       Promise.resolve(
         json([
@@ -129,12 +251,39 @@ describe("github connector", () => {
     )
 
     const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const page = await client.listIssues()
+    const page = await client.listRepositoryIssues()
 
-    expect(page.items.map((issue) => issue.number)).toEqual([1])
+    expect(page.items.map((issue) => issue.number)).toEqual([1, 2])
   })
 
-  test("iterIssues follows next page tokens", async () => {
+  test("listRepositoryIssues maps documented repository issue filters", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
+    await client.listRepositoryIssues({
+      state: "all",
+      labels: ["bug", "ui"],
+      assignee: "octocat",
+      sort: "comments",
+      direction: "asc",
+      since: "2026-01-01T00:00:00Z",
+    })
+
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/repos/acme/web/issues")
+    expect(url.searchParams.get("state")).toBe("all")
+    expect(url.searchParams.get("labels")).toBe("bug,ui")
+    expect(url.searchParams.get("assignee")).toBe("octocat")
+    expect(url.searchParams.get("sort")).toBe("comments")
+    expect(url.searchParams.get("direction")).toBe("asc")
+    expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
+  })
+
+  test("listRepositoryIssues follows next page tokens", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -151,13 +300,12 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const numbers: number[] = []
-    for await (const issue of client.iterIssues({ state: "all" })) {
-      numbers.push(issue.number)
-    }
+    const first = await client.listRepositoryIssues({ state: "all" })
+    const second = await client.listRepositoryIssues({ pageToken: first.nextPageToken })
 
     expect(calls).toHaveLength(2)
-    expect(numbers).toEqual([1, 2])
+    expect(first.items.map((issue) => issue.number)).toEqual([1])
+    expect(second.items.map((issue) => issue.number)).toEqual([2])
   })
 
   test("createIssue posts to the repo issues endpoint", async () => {
@@ -195,26 +343,9 @@ describe("github connector", () => {
     expect(payload.state_reason).toBe("reopened")
   })
 
-  test("deleteIssue closes the issue via PATCH", async () => {
-    let method = ""
-    let payload: Record<string, unknown> = {}
-    mockFetch((_, init) => {
-      method = init?.method ?? ""
-      payload = JSON.parse(String(init?.body))
-      return Promise.resolve(json({ id: 1, number: 7, state: "closed" }))
-    })
-
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const issue = await client.deleteIssue(7)
-
-    expect(method).toBe("PATCH")
-    expect(payload.state).toBe("closed")
-    expect(issue.state).toBe("closed")
-  })
-
   test("requires owner and repo for issue operations", async () => {
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await expect(client.listIssues()).rejects.toThrow("owner and repo are required")
+    await expect(client.listRepositoryIssues()).rejects.toThrow("owner and repo are required")
   })
 
   test("throws GitHubApiError on non-2xx responses", async () => {

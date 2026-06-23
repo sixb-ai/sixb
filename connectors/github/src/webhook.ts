@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
 import { defineWebhook } from "@sixb/core"
-import type { GitHubClient, GitHubEventHandler, GitHubWebhookEvent } from "./types"
+import type { GitHubClient } from "./client"
+import type { GitHubEventHandler, GitHubWebhookEvent } from "./types"
 
 interface GitHubWebhookOptions {
   readonly secret?: string
