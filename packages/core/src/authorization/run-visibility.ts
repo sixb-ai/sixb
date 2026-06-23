@@ -1,4 +1,5 @@
 import type { ActionRunRecord } from "../storage/action-runs"
+import type { PipelineRunRecord } from "../storage/pipeline-runs"
 import type { WorkflowInterventionRecord } from "../storage/workflow-interventions"
 import type { WorkflowRunRecord } from "../storage/workflow-runs"
 import { isAllowed } from "./decision"
@@ -40,5 +41,14 @@ export function canViewWorkflowIntervention(
   return (
     !authorization ||
     isAllowed(authorization, { kind: "workflow.run", workflowId: intervention.workflowId })
+  )
+}
+
+export function canViewPipelineRun(
+  authorization: AuthorizationContext | null | undefined,
+  run: Pick<PipelineRunRecord, "pipelineId">
+): boolean {
+  return (
+    !authorization || isAllowed(authorization, { kind: "pipeline.run", pipelineId: run.pipelineId })
   )
 }

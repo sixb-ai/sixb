@@ -13,6 +13,7 @@ import type {
 import { SyncRunError } from "@sixb/core"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
+import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
@@ -120,15 +121,7 @@ export class PgSyncRunStorage implements SyncRunStorage {
   }
 
   async list(input: ListSyncRunsInput): Promise<ListSyncRunsResult> {
-    if (input.syncIds && input.syncIds.length === 0) {
-      return {
-        runs: [],
-        hasMore: false,
-        total: 0,
-      }
-    }
-
-    if (input.statuses && input.statuses.length === 0) {
+    if (hasEmptyStatuses(input) || input.syncIds?.length === 0) {
       return {
         runs: [],
         hasMore: false,
@@ -156,53 +149,23 @@ export class PgSyncRunStorage implements SyncRunStorage {
       params.push(input.datasetId)
     }
 
-    if (input.statuses) {
-      const placeholders = input.statuses.map(() => `$${index++}`)
-      whereClauses.push(`status IN (${placeholders.join(", ")})`)
-      params.push(...input.statuses)
-    }
+    index = appendRunListFilters(whereClauses, params, index, input)
 
-    if (input.startedAfter) {
-      whereClauses.push(`started_at >= $${index++}`)
-      params.push(input.startedAfter)
-    }
-
-    if (input.startedBefore) {
-      whereClauses.push(`started_at <= $${index++}`)
-      params.push(input.startedBefore)
-    }
-
-    const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
-    const offset = input.offset ?? 0
-
-    const [totalRow] = await this.sql.unsafe<{ count: string | number }[]>(
-      `SELECT COUNT(*)::bigint AS count FROM sync_runs ${where}`,
-      params
-    )
-
-    const queryParams = [...params]
-    let query = `
-      SELECT *, checkpoint IS NOT NULL AS checkpoint_present FROM sync_runs
-      ${where}
-      ORDER BY started_at ${order}, id ${order}
-    `
-
-    if (input.limit !== undefined) {
-      query += ` LIMIT $${index++} OFFSET $${index++}`
-      queryParams.push(input.limit, offset)
-    } else if (offset > 0) {
-      query += ` OFFSET $${index++}`
-      queryParams.push(offset)
-    }
-
-    const rows = await this.sql.unsafe<DatabaseRow[]>(query, queryParams)
-    const total = Number(totalRow?.count ?? 0)
-    const runs = rows.map(rowToSyncRunRecord)
+    const { rows, total, hasMore } = await queryRunList<DatabaseRow>({
+      sql: this.sql,
+      tableName: "sync_runs",
+      selectList: "*, checkpoint IS NOT NULL AS checkpoint_present",
+      whereClauses,
+      params,
+      nextIndex: index,
+      order: input.order,
+      limit: input.limit,
+      offset: input.offset,
+    })
 
     return {
-      runs,
-      hasMore: offset + runs.length < total,
+      runs: rows.map(rowToSyncRunRecord),
+      hasMore,
       total,
     }
   }

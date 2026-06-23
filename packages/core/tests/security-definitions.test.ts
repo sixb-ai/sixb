@@ -436,7 +436,14 @@ describe("role definitions", () => {
       kind: "role",
       id: "contract.operator",
       grantedToGroupIds: ["commercial"],
-      grants: [{ kind: "grant", capability: "view", selection: { all: false, ids: ["missing"] } }],
+      grants: [
+        {
+          kind: "grant",
+          capability: "view",
+          target: "object",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
     }
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(

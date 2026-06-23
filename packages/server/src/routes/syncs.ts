@@ -145,7 +145,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       "/api/sync-runs",
       async (context) => {
         const { query, set } = context
-        const { scoped } = requestAuthState(context)
+        const { authz } = requestAuthState(context)
         try {
           const parsed = SyncRunsQuerySchema.parse(query)
           const storage = sixb.storage.syncRuns
@@ -157,16 +157,11 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             }
           }
 
-          if (scoped && parsed.syncId && !scoped.getSyncById(parsed.syncId)) {
-            return {
-              runs: [],
-              hasMore: false,
-              total: 0,
-            }
-          }
-
-          const syncIds =
-            scoped && !parsed.syncId ? scoped.listSyncs().map((sync) => sync.id) : undefined
+          // Scope to runnable syncs the same way workflow run history does: pass
+          // the grant allowlist alongside any explicit syncId and let storage AND
+          // them. An ungranted syncId yields an empty intersection (no rows), and
+          // an empty allowlist short-circuits to no rows.
+          const syncIds = authz ? [...authz.grants["run:sync"]] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             syncId: parsed.syncId,

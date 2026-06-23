@@ -350,7 +350,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { interventions: [], hasMore: false, total: 0 }
           }
 
-          const workflowIds = authz ? [...authz.grants.workflows.run] : undefined
+          const workflowIds = authz ? [...authz.grants["run:workflow"]] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             workflowId: parsed.workflowId,
@@ -637,7 +637,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
             return { runs: [], hasMore: false, total: 0 }
           }
 
-          const workflowIds = authz ? [...authz.grants.workflows.run] : undefined
+          const workflowIds = authz ? [...authz.grants["run:workflow"]] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             workflowId: parsed.workflowId,

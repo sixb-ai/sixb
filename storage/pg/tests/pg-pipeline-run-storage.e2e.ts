@@ -109,6 +109,10 @@ describe("PgPipelineRunStorage", () => {
     expect(selectedPipelines.total).toBe(1)
     expect(selectedPipelines.runs.map((run) => run.id)).toEqual(["run-3"])
 
+    // An empty allowlist must deny all — never fall through to an unfiltered list.
+    const noneAllowed = await storage.pipelineRuns.list({ projectId: "my-app", pipelineIds: [] })
+    expect(noneAllowed).toEqual({ runs: [], hasMore: false, total: 0 })
+
     const empty = await storage.pipelineRuns.list({
       projectId: "my-app",
       statuses: [],

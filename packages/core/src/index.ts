@@ -451,6 +451,8 @@ export type {
   AuthzDecision,
   AuthzRequest,
   GrantIndex,
+  GrantKind,
+  GrantUniverse,
   ResolvedRole,
 } from "./authorization"
 export {
@@ -458,6 +460,7 @@ export {
   assertAuthorized,
   canViewActionRun,
   canViewEvent,
+  canViewPipelineRun,
   canViewWorkflowIntervention,
   canViewWorkflowRun,
   evaluate,

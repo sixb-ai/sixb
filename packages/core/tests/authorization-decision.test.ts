@@ -29,12 +29,12 @@ function context(grants: {
     groupIds: [],
     roleIds: [],
     grants: {
-      objectTypes: { view: new Set(grants.view ?? []) },
-      datasets: { view: new Set(grants.datasets ?? []) },
-      actions: { apply: new Set(grants.apply ?? []) },
-      workflows: { run: new Set(grants.run ?? []) },
-      syncs: { run: new Set(grants.syncs ?? []) },
-      pipelines: { run: new Set(grants.pipelines ?? []) },
+      "view:object": new Set(grants.view ?? []),
+      "view:dataset": new Set(grants.datasets ?? []),
+      "apply:action": new Set(grants.apply ?? []),
+      "run:workflow": new Set(grants.run ?? []),
+      "run:sync": new Set(grants.syncs ?? []),
+      "run:pipeline": new Set(grants.pipelines ?? []),
     },
   }
 }
@@ -277,6 +277,16 @@ describe("canViewEvent", () => {
   test("dataset events require viewing the dataset", () => {
     expect(canViewEvent(context({ datasets: ["raw.orders"] }), datasetEvent)).toBe(true)
     expect(canViewEvent(context({}), datasetEvent)).toBe(false)
+  })
+
+  test("dataset version provenance is visible to a dataset viewer who cannot run the producer", () => {
+    // datasetEvent.payload.producer is sync 'erp-orders'. A principal who can
+    // view the dataset but cannot run that sync still sees the event (and its
+    // producer): provenance is intentionally exposed to dataset viewers,
+    // matching the versions API. It is NOT gated on running the producer.
+    const datasetViewerOnly = context({ datasets: ["raw.orders"] })
+    expect(canViewEvent(datasetViewerOnly, datasetEvent)).toBe(true)
+    expect(isAllowed(datasetViewerOnly, { kind: "sync.run", syncId: "erp-orders" })).toBe(false)
   })
 
   test("rule events require viewing the object the rule fired on", () => {

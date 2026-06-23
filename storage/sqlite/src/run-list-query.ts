@@ -5,6 +5,7 @@ export type SqliteValue = string | number | null
 type SqliteRunListTable =
   | "pipeline_runs"
   | "pipeline_step_runs"
+  | "sync_runs"
   | "webhook_runs"
   | "workflow_runs"
   | "workflow_node_runs"

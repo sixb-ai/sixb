@@ -75,8 +75,8 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           const parsed = ActionRunsQuerySchema.parse(query)
           const limit = parseOptionalInt(parsed.limit)
           const offset = parseOptionalInt(parsed.offset)
-          const actionIds = authz ? [...authz.grants.actions.apply] : undefined
-          const objectTypeIds = authz ? [...authz.grants.objectTypes.view] : undefined
+          const actionIds = authz ? [...authz.grants["apply:action"]] : undefined
+          const objectTypeIds = authz ? [...authz.grants["view:object"]] : undefined
           const result = await storage.list({
             projectId: sixb.id,
             actionId: parsed.actionId,

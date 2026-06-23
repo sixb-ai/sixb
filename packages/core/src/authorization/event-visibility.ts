@@ -62,6 +62,10 @@ export function canViewEvent(
         kind: "object.view",
         objectTypeId: event.payload.subject.objectTypeId,
       })
+    // Run grant gates the operational stream. These payloads may also carry the
+    // produced datasetId/versionId; that target is already visible to a runner
+    // through the sync/pipeline catalog (`sync.target.dataset`), so surfacing it
+    // here discloses nothing new.
     case "syncs":
       return isAllowed(authorization, {
         kind: "sync.run",
@@ -78,6 +82,12 @@ export function canViewEvent(
       // they gain their own grants, add the checks here.
       return true
     case "datasets":
+      // dataset.view alone. The payload's `producer` (the sync/pipeline that
+      // produced the version, plus its runId) is intentionally visible to any
+      // dataset viewer as provenance — the same identity the versions API
+      // already serializes for that principal. This is distinct from the
+      // operational `references` in the dataset catalog (which syncs/pipelines
+      // are wired to a dataset), which stays gated on the run grants.
       return isAllowed(authorization, {
         kind: "dataset.view",
         datasetId: event.payload.datasetId,

@@ -17,6 +17,7 @@
  */
 
 import { AuthorizationError } from "./errors"
+import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
 
 /** Something a principal may attempt, paired with the resource it targets. */
@@ -41,70 +42,40 @@ interface AuthorizedRuntime {
   readonly authorization?: AuthorizationContext
 }
 
-// A request expands to one or more atomic (capability, id) checks. The atom is
+// A request expands to one or more atomic (grant kind, id) checks. The atom is
 // the single unit that both names a requirement and tests the grant index, so
-// the two can never drift.
-type Atom =
-  | { readonly capability: "view"; readonly target: "object" | "dataset"; readonly id: string }
-  | { readonly capability: "apply"; readonly id: string }
-  | {
-      readonly capability: "run"
-      readonly target: "workflow" | "sync" | "pipeline"
-      readonly id: string
-    }
+// the two can never drift. `kind` is the resolved-index key, so enforcement is
+// a direct lookup with no per-target dispatch.
+interface Atom {
+  readonly kind: GrantKind
+  readonly id: string
+}
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
     case "object.view":
-      return [{ capability: "view", target: "object", id: request.objectTypeId }]
+      return [{ kind: "view:object", id: request.objectTypeId }]
     case "dataset.view":
-      return [{ capability: "view", target: "dataset", id: request.datasetId }]
+      return [{ kind: "view:dataset", id: request.datasetId }]
     case "action.apply":
-      return [{ capability: "apply", id: request.actionId }]
+      return [{ kind: "apply:action", id: request.actionId }]
     case "workflow.run":
-      return [{ capability: "run", target: "workflow", id: request.workflowId }]
+      return [{ kind: "run:workflow", id: request.workflowId }]
     case "sync.run":
-      return [{ capability: "run", target: "sync", id: request.syncId }]
+      return [{ kind: "run:sync", id: request.syncId }]
     case "pipeline.run":
-      return [{ capability: "run", target: "pipeline", id: request.pipelineId }]
+      return [{ kind: "run:pipeline", id: request.pipelineId }]
     case "object.query":
-      return request.touchedObjectTypeIds.map((id) => ({
-        capability: "view",
-        target: "object",
-        id,
-      }))
+      return request.touchedObjectTypeIds.map((id) => ({ kind: "view:object", id }))
   }
 }
 
 function atomKey(atom: Atom): string {
-  switch (atom.capability) {
-    case "view":
-      return `view:${atom.target}:${atom.id}`
-    case "apply":
-      return `apply:action:${atom.id}`
-    case "run":
-      return `run:${atom.target}:${atom.id}`
-  }
+  return `${atom.kind}:${atom.id}`
 }
 
 function holds(grants: GrantIndex, atom: Atom): boolean {
-  switch (atom.capability) {
-    case "view":
-      return atom.target === "dataset"
-        ? grants.datasets.view.has(atom.id)
-        : grants.objectTypes.view.has(atom.id)
-    case "apply":
-      return grants.actions.apply.has(atom.id)
-    case "run":
-      switch (atom.target) {
-        case "sync":
-          return grants.syncs.run.has(atom.id)
-        case "pipeline":
-          return grants.pipelines.run.has(atom.id)
-        case "workflow":
-          return grants.workflows.run.has(atom.id)
-      }
-  }
+  return grants[atom.kind].has(atom.id)
 }
 
 /** Resolve a request against a principal's grants. Never throws. */
