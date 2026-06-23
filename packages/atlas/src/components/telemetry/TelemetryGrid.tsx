@@ -14,6 +14,7 @@ interface TelemetryGridProps {
     { value: number | string | boolean; quality?: "good" | "bad" | "uncertain" }
   >
   compact?: boolean
+  hideSingleGroupHeader?: boolean
 }
 
 interface GroupedTelemetry {
@@ -29,6 +30,7 @@ export function TelemetryGrid({
   onSelectProperty,
   latestUpdates = {},
   compact = false,
+  hideSingleGroupHeader = false,
 }: TelemetryGridProps) {
   const grouped = useMemo(() => {
     const result: GroupedTelemetry = {
@@ -51,6 +53,9 @@ export function TelemetryGrid({
     return result
   }, [telemetry])
 
+  const nonEmptyGroupCount = Object.values(grouped).filter((items) => items.length > 0).length
+  const showGroupHeaders = !hideSingleGroupHeader || nonEmptyGroupCount > 1
+
   const renderSection = (
     title: string,
     items: [string, TelemetryProperty][],
@@ -59,15 +64,17 @@ export function TelemetryGrid({
     if (items.length === 0) return null
 
     return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            {title}
-          </h3>
-          <Badge variant="secondary" className={cn("text-[10px] font-medium", colorClass)}>
-            {items.length}
-          </Badge>
-        </div>
+      <div className={cn(showGroupHeaders && "space-y-3")}>
+        {showGroupHeaders ? (
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              {title}
+            </h3>
+            <Badge variant="secondary" className={cn("text-[10px] font-medium", colorClass)}>
+              {items.length}
+            </Badge>
+          </div>
+        ) : null}
         <div
           className={cn(
             "grid gap-3",

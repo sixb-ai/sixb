@@ -1,5 +1,5 @@
 import type { TelemetryHistory } from "@sixb/client"
-import { getTelemetryHistoryOptions } from "@sixb/client/hooks"
+import { type GetTelemetryHistoryOptions, getTelemetryHistoryOptions } from "@sixb/client/hooks"
 import { Button, Card } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { X } from "lucide-react"
@@ -14,13 +14,19 @@ import {
   XAxis,
   YAxis,
 } from "recharts/lib/index.js"
-import type { TelemetryUpdate } from "../lib/telemetryEvents"
+import { objectIdAliases, type TelemetryUpdate } from "../lib/telemetryEvents"
+import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { TelemetryValue } from "./TelemetryValue"
 
 interface TelemetryChartProps {
   objectId: string
   propertyId: string
   projectName: string
+  propertyLabel: string
+  rangeLabel: string
+  historyQuery: GetTelemetryHistoryOptions["query"]
+  historyEnabled?: boolean
+  objectDisplayName?: string
   unit?: string
   latestUpdate?: TelemetryUpdate | null
   onClose: () => void
@@ -63,6 +69,23 @@ function formatTooltip(value: number, unit?: string): string {
   return value.toFixed(2)
 }
 
+function formatChartTickTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+}
+
+function formatChartTooltipTime(timestamp: string): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  })
+}
+
 function getTimestampMs(timestamp: string): number {
   const value = new Date(timestamp).getTime()
   return Number.isFinite(value) ? value : 0
@@ -103,16 +126,20 @@ function createChartTicks(points: ChartPoint[]): string[] {
   return Array.from(new Set(ticks))
 }
 
-const rangeWindowMs = 5 * 60 * 1000
-
 export function TelemetryChart({
   objectId,
   propertyId,
   projectName,
+  propertyLabel,
+  rangeLabel,
+  historyQuery,
+  historyEnabled = true,
+  objectDisplayName,
   unit,
   latestUpdate,
   onClose,
 }: TelemetryChartProps) {
+  const objectAliases = useMemo(() => new Set(objectIdAliases(objectId)), [objectId])
   const {
     data: history,
     isLoading: loading,
@@ -120,8 +147,9 @@ export function TelemetryChart({
   } = useQuery({
     ...getTelemetryHistoryOptions({
       path: { projectName, objectId, propertyId },
-      query: { range: "5m" },
+      query: historyQuery,
     }),
+    enabled: historyEnabled,
   })
   const error = queryError ? String(queryError) : null
   const [liveHistory, setLiveHistory] = useState<TelemetryHistory | null>(
@@ -129,6 +157,11 @@ export function TelemetryChart({
   )
 
   useEffect(() => {
+    if (!historyEnabled) {
+      setLiveHistory(null)
+      return
+    }
+
     if (!history) {
       setLiveHistory(null)
       return
@@ -141,48 +174,50 @@ export function TelemetryChart({
         return historyData
 
       const historyEnd = new Date(historyData.range.end).getTime()
+      const bounds = getHistoryBounds(historyQuery)
       const appended = prev.data.filter(
-        (sample: { timestamp: string }) => new Date(sample.timestamp).getTime() > historyEnd
+        (sample: { timestamp: string }) =>
+          new Date(sample.timestamp).getTime() > historyEnd && isSampleInBounds(sample, bounds)
       )
 
       if (appended.length === 0) return historyData
 
-      const cutoff = Date.now() - rangeWindowMs
       const mergedData = [...historyData.data, ...appended].filter(
-        (sample: { timestamp: string }) => new Date(sample.timestamp).getTime() >= cutoff
+        (sample: { timestamp: string }) => isSampleInBounds(sample, bounds)
       )
 
       return {
         ...historyData,
         range: {
-          start: new Date(cutoff).toISOString(),
+          start: new Date(bounds.startMs).toISOString(),
           end: appended[appended.length - 1]?.timestamp ?? historyData.range.end,
         },
         data: mergedData,
       }
     })
-  }, [history])
+  }, [history, historyEnabled, historyQuery])
 
   useEffect(() => {
+    if (!historyEnabled) return
     if (!latestUpdate) return
     if (latestUpdate.projectName !== projectName) return
-    if (latestUpdate.objectId !== objectId || latestUpdate.propertyId !== propertyId) return
+    if (!objectAliases.has(latestUpdate.objectId) || latestUpdate.propertyId !== propertyId) return
 
     setLiveHistory((prev: TelemetryHistory | null) => {
-      const cutoff = Date.now() - rangeWindowMs
-
       const nextSample = {
         value: latestUpdate.value,
         timestamp: latestUpdate.timestamp,
         quality: latestUpdate.quality,
       }
+      const bounds = getHistoryBounds(historyQuery)
+      if (!isSampleInBounds(nextSample, bounds)) return prev
 
       if (!prev) {
         return {
           objectId,
           propertyId,
           range: {
-            start: new Date(cutoff).toISOString(),
+            start: new Date(bounds.startMs).toISOString(),
             end: latestUpdate.timestamp,
           },
           data: [nextSample],
@@ -196,20 +231,20 @@ export function TelemetryChart({
         ? [...prev.data.slice(0, -1), nextSample]
         : [...prev.data, nextSample]
 
-      const trimmedData = nextData.filter(
-        (sample: { timestamp: string }) => new Date(sample.timestamp).getTime() >= cutoff
+      const trimmedData = nextData.filter((sample: { timestamp: string }) =>
+        isSampleInBounds(sample, bounds)
       )
 
       return {
         ...prev,
         range: {
-          start: new Date(cutoff).toISOString(),
+          start: new Date(bounds.startMs).toISOString(),
           end: latestUpdate.timestamp,
         },
         data: trimmedData,
       }
     })
-  }, [objectId, propertyId, latestUpdate, projectName])
+  }, [objectId, propertyId, latestUpdate, projectName, objectAliases, historyQuery, historyEnabled])
 
   const chartData = useMemo(() => {
     return sortAndDedupeChartData(
@@ -229,9 +264,11 @@ export function TelemetryChart({
       <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
         <div className="min-w-0">
           <h3 className="break-all text-[14px] font-semibold tracking-tight text-foreground sm:text-[15px] sm:break-normal">
-            {objectId} / {propertyId}
+            {propertyLabel}
           </h3>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">Last 5 minutes</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">
+            {objectDisplayName ? `${objectDisplayName} / ${rangeLabel}` : rangeLabel}
+          </p>
         </div>
         <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-6">
           {latestValue && (
@@ -294,13 +331,8 @@ export function TelemetryChart({
                 <XAxis
                   dataKey="timestamp"
                   ticks={xTicks}
-                  tickFormatter={(value: string) =>
-                    new Date(value).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })
-                  }
+                  padding={{ left: 16, right: 36 }}
+                  tickFormatter={(value: string) => formatChartTickTime(value)}
                   tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                   tickLine={false}
                   axisLine={{ stroke: "var(--border)" }}
@@ -324,15 +356,8 @@ export function TelemetryChart({
                     boxShadow: "0 6px 16px -4px rgb(0 0 0 / 0.3)",
                     color: "var(--foreground)",
                   }}
-                  formatter={(value: number) => [formatTooltip(value, unit), propertyId]}
-                  labelFormatter={(label) =>
-                    new Date(label).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      second: "2-digit",
-                      hour12: false,
-                    })
-                  }
+                  formatter={(value: number) => [formatTooltip(value, unit), propertyLabel]}
+                  labelFormatter={(label: string) => formatChartTooltipTime(label)}
                   labelStyle={{ color: "var(--muted-foreground)", marginBottom: "4px" }}
                 />
                 <Line

@@ -7,14 +7,26 @@ import type {
 } from "@sixb/client"
 import { decodeObjectId, encodeObjectId } from "@sixb/client"
 import {
+  type GetTelemetryHistoryOptions,
   getObjectOptions,
   getTelemetryHistoryOptions,
   listRelationshipsOptions,
 } from "@sixb/client/hooks"
-import { Badge, Button, Card, EmptyState } from "@sixb/ui/components"
+import {
+  Badge,
+  Button,
+  Calendar,
+  Card,
+  EmptyState,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useQuery } from "@tanstack/react-query"
-import { Box } from "lucide-react"
+import { Box, CalendarIcon } from "lucide-react"
 import { Fragment, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { ActionButton } from "../components/ActionButton"
@@ -25,7 +37,8 @@ import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
-import type { TelemetryUpdate } from "../lib/telemetryEvents"
+import { objectIdAliases, type TelemetryUpdate, telemetryUpdateKey } from "../lib/telemetryEvents"
+import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { formatRelativeTime } from "../lib/time"
 
 interface ObjectDetailPageProps {
@@ -33,6 +46,18 @@ interface ObjectDetailPageProps {
   latestUpdates: Record<string, TelemetryUpdate>
   objectLookup: Record<string, ObjectSummary>
 }
+
+const telemetryRanges = [
+  { value: "5m", label: "5m" },
+  { value: "1h", label: "1h" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+  { value: "custom", label: "Custom" },
+] as const
+
+type TelemetryRangeValue = (typeof telemetryRanges)[number]["value"]
+
+const defaultTelemetryRange: TelemetryRangeValue = "7d"
 
 function formatHistoryValue(value: string | number | boolean): string {
   if (typeof value === "boolean") return value ? "True" : "False"
@@ -44,6 +69,104 @@ function qualityDotClass(quality?: "good" | "uncertain" | "bad"): string {
   if (quality === "uncertain") return "bg-amber-500"
   if (quality === "bad") return "bg-red-500"
   return "bg-muted-foreground/40"
+}
+
+function telemetryPropertyLabel(
+  propertyId: string,
+  property?: (TelemetryProperty & { name?: string }) | undefined
+): string {
+  const explicitName =
+    typeof property?.name === "string" && property.name.length > 0 ? property.name : null
+  return humanizeIdentifier(explicitName ?? propertyId)
+}
+
+function isoTimestamp(date: Date): string {
+  return date.toISOString()
+}
+
+function parseTimestamp(value: string): Date | null {
+  if (!value) return null
+
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function timestampIso(value: string): string | undefined {
+  return parseTimestamp(value)?.toISOString()
+}
+
+function startOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+}
+
+function endOfLocalDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
+}
+
+function dateBoundaryIso(day: Date, boundary: "start" | "end"): string {
+  return isoTimestamp(boundary === "start" ? startOfLocalDay(day) : endOfLocalDay(day))
+}
+
+function formatCustomDate(value: string): string {
+  const date = parseTimestamp(value)
+  if (!date) return "Select date"
+
+  return date.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
+}
+
+function telemetryRangeLabel(range: TelemetryRangeValue, fromIso?: string, toIso?: string): string {
+  if (range === "5m") return "Last 5 minutes"
+  if (range === "1h") return "Last hour"
+  if (range === "24h") return "Last 24 hours"
+  if (range === "7d") return "Last 7 days"
+
+  const from = fromIso ? new Date(fromIso) : null
+  const to = toIso ? new Date(toIso) : null
+  if (from && to && !Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) {
+    return `${from.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })} to ${to.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    })}`
+  }
+
+  return "Custom range"
+}
+
+function telemetryRangeSentenceLabel(range: TelemetryRangeValue): string {
+  if (range === "5m") return "last 5 minutes"
+  if (range === "1h") return "last hour"
+  if (range === "24h") return "last 24 hours"
+  if (range === "7d") return "last 7 days"
+  return "selected range"
+}
+
+function latestUpdateForProperty(
+  latestUpdates: Record<string, TelemetryUpdate>,
+  projectName: string,
+  objectIds: readonly string[],
+  propertyId: string
+): TelemetryUpdate | null {
+  let latest: TelemetryUpdate | null = null
+
+  for (const objectId of objectIds) {
+    const update = latestUpdates[telemetryUpdateKey(projectName, objectId, propertyId)]
+    if (!update) continue
+
+    if (!latest || +new Date(update.timestamp) > +new Date(latest.timestamp)) {
+      latest = update
+    }
+  }
+
+  return latest
 }
 
 interface ActionPresentation {
@@ -117,10 +240,17 @@ export function ObjectDetailPage({
   const { objectId } = useParams<{ objectId: string }>()
   const navigate = useNavigate()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
+  const [trendDismissed, setTrendDismissed] = useState(false)
+  const [telemetryRange, setTelemetryRange] = useState<TelemetryRangeValue>(defaultTelemetryRange)
+  const [customFrom, setCustomFrom] = useState(() =>
+    isoTimestamp(startOfLocalDay(new Date(Date.now() - 7 * 86_400_000)))
+  )
+  const [customTo, setCustomTo] = useState(() => isoTimestamp(endOfLocalDay(new Date())))
 
   useEffect(() => {
     if (!objectId) return
     setSelectedPropertyId(null)
+    setTrendDismissed(false)
   }, [objectId])
 
   const canonicalObjectId = useMemo(() => {
@@ -144,21 +274,39 @@ export function ObjectDetailPage({
     enabled: !!objectId,
   })
 
+  const liveObjectIdAliases = useMemo(() => {
+    const ids = [objectId, canonicalObjectId, object?.id, object?.primaryId].filter(
+      (id): id is string => typeof id === "string" && id.length > 0
+    )
+    return Array.from(new Set(ids.flatMap((id) => objectIdAliases(id))))
+  }, [objectId, canonicalObjectId, object?.id, object?.primaryId])
+
+  const liveObjectIdAliasSet = useMemo(() => new Set(liveObjectIdAliases), [liveObjectIdAliases])
+
   const latestTelemetryUpdates = useMemo(() => {
-    if (!objectId) return {}
-    const prefix = `${projectName}:${objectId}:`
-    const entries = Object.entries(latestUpdates)
-      .filter(([key]) => key.startsWith(prefix))
-      .map(([, update]) => [update.propertyId, { value: update.value, quality: update.quality }])
-    return Object.fromEntries(entries)
-  }, [latestUpdates, projectName, objectId])
+    if (liveObjectIdAliasSet.size === 0) return {}
+
+    const byProperty = new Map<string, TelemetryUpdate>()
+    for (const update of Object.values(latestUpdates)) {
+      if (update.projectName !== projectName) continue
+      if (!liveObjectIdAliasSet.has(update.objectId)) continue
+
+      const previous = byProperty.get(update.propertyId)
+      if (!previous || +new Date(update.timestamp) > +new Date(previous.timestamp)) {
+        byProperty.set(update.propertyId, update)
+      }
+    }
+
+    return Object.fromEntries(
+      Array.from(byProperty.entries()).map(([propertyId, update]) => [
+        propertyId,
+        { value: update.value, quality: update.quality },
+      ])
+    )
+  }, [latestUpdates, projectName, liveObjectIdAliasSet])
 
   const telemetryProperties = useMemo(
-    () =>
-      (object?.telemetry as Record<
-        string,
-        { class?: string; dataType?: string; currentValue?: unknown; unit?: string }
-      >) ?? {},
+    () => (object?.telemetry as Record<string, TelemetryProperty>) ?? {},
     [object]
   )
 
@@ -193,30 +341,57 @@ export function ObjectDetailPage({
       .filter(
         (update) =>
           update.projectName === projectName &&
-          update.objectId === objectId &&
+          liveObjectIdAliasSet.has(update.objectId) &&
           numericPropertyIds.includes(update.propertyId)
       )
       .sort((left, right) => +new Date(right.timestamp) - +new Date(left.timestamp))[0]
     if (recentNumericUpdate) return recentNumericUpdate.propertyId
     return numericPropertyIds[0]
-  }, [objectId, numericPropertyIds, latestUpdates, projectName])
+  }, [objectId, numericPropertyIds, latestUpdates, projectName, liveObjectIdAliasSet])
 
   useEffect(() => {
     if (!object) return
+    if (trendDismissed) return
     if (selectedPropertyId && telemetryProperties[selectedPropertyId]) return
     if (defaultNumericPropertyId) {
       setSelectedPropertyId(defaultNumericPropertyId)
     }
-  }, [object, selectedPropertyId, telemetryProperties, defaultNumericPropertyId])
+  }, [object, trendDismissed, selectedPropertyId, telemetryProperties, defaultNumericPropertyId])
 
   const selectedPropertyUnit = selectedPropertyId
     ? telemetryProperties[selectedPropertyId]?.unit
     : undefined
 
-  const selectedPropertyLatestUpdate =
-    selectedPropertyId && objectId
-      ? (latestUpdates[`${projectName}:${objectId}:${selectedPropertyId}`] ?? null)
-      : null
+  const selectedProperty = selectedPropertyId ? telemetryProperties[selectedPropertyId] : undefined
+  const selectedPropertyLabel = selectedPropertyId
+    ? telemetryPropertyLabel(selectedPropertyId, selectedProperty)
+    : ""
+  const selectedPropertyLatestUpdate = selectedPropertyId
+    ? latestUpdateForProperty(latestUpdates, projectName, liveObjectIdAliases, selectedPropertyId)
+    : null
+  const customFromIso = useMemo(() => timestampIso(customFrom), [customFrom])
+  const customToIso = useMemo(() => timestampIso(customTo), [customTo])
+  const telemetryHistoryEnabled =
+    telemetryRange !== "custom" || (customFromIso !== undefined && customToIso !== undefined)
+  const telemetryHistoryQuery = useMemo<GetTelemetryHistoryOptions["query"]>(() => {
+    if (telemetryRange === "custom") {
+      return {
+        from: customFromIso,
+        to: customToIso,
+        order: "asc",
+      }
+    }
+
+    return {
+      range: telemetryRange,
+      order: "asc",
+    }
+  }, [telemetryRange, customFromIso, customToIso])
+  const telemetryRangeLabelText = useMemo(
+    () => telemetryRangeLabel(telemetryRange, customFromIso, customToIso),
+    [telemetryRange, customFromIso, customToIso]
+  )
+  const telemetryRangeSampleLabel = telemetryRangeSentenceLabel(telemetryRange)
 
   const selectedPropertyIsNumeric = useMemo(() => {
     if (!selectedPropertyId) return false
@@ -235,9 +410,10 @@ export function ObjectDetailPage({
   } = useQuery({
     ...getTelemetryHistoryOptions({
       path: { projectName, objectId: objectId!, propertyId: selectedPropertyId! },
-      query: { range: "5m" },
+      query: telemetryHistoryQuery,
     }),
-    enabled: !!objectId && !!selectedPropertyId && !selectedPropertyIsNumeric,
+    enabled:
+      !!objectId && !!selectedPropertyId && !selectedPropertyIsNumeric && telemetryHistoryEnabled,
   })
 
   const nonNumericHistory = useMemo(() => {
@@ -255,11 +431,12 @@ export function ObjectDetailPage({
         timestamp: selectedPropertyLatestUpdate.timestamp,
         quality: selectedPropertyLatestUpdate.quality,
       }
+      const bounds = getHistoryBounds(telemetryHistoryQuery)
       const duplicate = mergedSamples.some(
         (sample) =>
           sample.timestamp === latestSample.timestamp && sample.value === latestSample.value
       )
-      if (!duplicate) mergedSamples.push(latestSample)
+      if (!duplicate && isSampleInBounds(latestSample, bounds)) mergedSamples.push(latestSample)
     }
 
     mergedSamples.sort((left, right) => +new Date(left.timestamp) - +new Date(right.timestamp))
@@ -302,6 +479,7 @@ export function ObjectDetailPage({
     selectedPropertyIsNumeric,
     selectedPropertyHistory,
     selectedPropertyLatestUpdate,
+    telemetryHistoryQuery,
   ])
 
   const actions = useMemo(() => {
@@ -433,36 +611,85 @@ export function ObjectDetailPage({
       </header>
 
       {Object.keys(telemetryWithLive).length > 0 ? (
-        <Section title="Live state" count={Object.keys(telemetryWithLive).length}>
-          <Card className="p-4 sm:p-5">
-            <TelemetryGrid
-              telemetry={telemetryWithLive}
-              selectedPropertyId={selectedPropertyId}
-              onSelectProperty={setSelectedPropertyId}
-              latestUpdates={latestTelemetryUpdates}
-            />
-          </Card>
+        <Section title="Telemetries" count={Object.keys(telemetryWithLive).length}>
+          <TelemetryGrid
+            telemetry={telemetryWithLive}
+            selectedPropertyId={selectedPropertyId}
+            onSelectProperty={(propertyId) => {
+              setTrendDismissed(false)
+              setSelectedPropertyId(propertyId)
+            }}
+            latestUpdates={latestTelemetryUpdates}
+            hideSingleGroupHeader
+          />
         </Section>
       ) : null}
 
       {selectedPropertyId ? (
         <Section title="Trend">
-          <div className="space-y-2">
-            <code className="ml-1 inline-block rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-foreground">
-              {selectedPropertyId}
-            </code>
+          <div className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <ToggleGroup
+                type="single"
+                value={telemetryRange}
+                onValueChange={(next) => {
+                  if (next) setTelemetryRange(next as TelemetryRangeValue)
+                }}
+                variant="outline"
+                size="sm"
+                className="flex-wrap"
+              >
+                {telemetryRanges.map((range) => (
+                  <ToggleGroupItem key={range.value} value={range.value}>
+                    {range.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+              {telemetryRange === "custom" ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TelemetryDatePicker
+                    label="From"
+                    boundary="start"
+                    value={customFrom}
+                    onChange={setCustomFrom}
+                  />
+                  <TelemetryDatePicker
+                    label="To"
+                    boundary="end"
+                    value={customTo}
+                    onChange={setCustomTo}
+                  />
+                </div>
+              ) : null}
+            </div>
             {selectedPropertyIsNumeric ? (
               <TelemetryChart
                 objectId={object.id}
                 propertyId={selectedPropertyId}
                 projectName={projectName}
+                propertyLabel={selectedPropertyLabel}
+                rangeLabel={telemetryRangeLabelText}
+                historyQuery={telemetryHistoryQuery}
+                historyEnabled={telemetryHistoryEnabled}
+                objectDisplayName={displayName}
                 unit={selectedPropertyUnit}
                 latestUpdate={selectedPropertyLatestUpdate}
-                onClose={() => setSelectedPropertyId(defaultNumericPropertyId)}
+                onClose={() => {
+                  setTrendDismissed(true)
+                  setSelectedPropertyId(null)
+                }}
               />
             ) : (
               <Card className="overflow-hidden p-0">
-                <div className="border-b border-border px-4 py-4">
+                <div className="space-y-3 border-b border-border px-4 py-4">
+                  <div className="min-w-0">
+                    <h3 className="text-[14px] font-semibold tracking-tight text-foreground sm:text-[15px]">
+                      {selectedPropertyLabel}
+                    </h3>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {displayName} / {telemetryRangeLabelText}
+                    </p>
+                  </div>
                   {selectedPropertyHistoryLoading ? (
                     <LoadingState />
                   ) : nonNumericHistory?.current ? (
@@ -477,7 +704,9 @@ export function ObjectDetailPage({
                           Changed {formatRelativeTime(nonNumericHistory.current.timestamp)}
                         </span>
                         <span className="text-border">|</span>
-                        <span>{nonNumericHistory.sampleCount} samples in last 5m</span>
+                        <span>
+                          {nonNumericHistory.sampleCount} samples in {telemetryRangeSampleLabel}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -603,6 +832,47 @@ export function ObjectDetailPage({
         </Section>
       ) : null}
     </div>
+  )
+}
+
+function TelemetryDatePicker({
+  label,
+  boundary,
+  value,
+  onChange,
+}: {
+  label: string
+  boundary: "start" | "end"
+  value: string
+  onChange: (value: string) => void
+}) {
+  const selectedDate = parseTimestamp(value) ?? new Date()
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 justify-start gap-2 px-2.5 text-left font-normal sm:w-56"
+        >
+          <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="min-w-0 truncate">
+            {label} {formatCustomDate(value)}
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-auto p-0">
+        <Calendar
+          mode="single"
+          selected={selectedDate}
+          onSelect={(day) => {
+            if (day) onChange(dateBoundaryIso(day, boundary))
+          }}
+        />
+      </PopoverContent>
+    </Popover>
   )
 }
 

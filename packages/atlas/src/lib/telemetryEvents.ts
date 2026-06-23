@@ -1,4 +1,4 @@
-import type { SixbEventOfType } from "@sixb/client"
+import { decodeObjectId, encodeObjectId, type SixbEventOfType } from "@sixb/client"
 
 export interface TelemetryUpdate {
   readonly type: "telemetryUpdate"
@@ -28,6 +28,21 @@ export function telemetryUpdateFromEvent(
     quality: "good",
     unit: event.payload.unit,
   }
+}
+
+export function objectIdAliases(objectId: string): readonly string[] {
+  const parsed = decodeObjectId(objectId)
+  if (!parsed) return [objectId]
+
+  return [objectId, parsed.primaryId, encodeObjectId(parsed.objectTypeId, parsed.primaryId)]
+}
+
+export function telemetryUpdateKey(
+  projectId: string,
+  objectId: string,
+  propertyId: string
+): string {
+  return `${projectId}:${objectId}:${propertyId}`
 }
 
 function normalizeTelemetryValue(value: unknown): number | string | boolean {

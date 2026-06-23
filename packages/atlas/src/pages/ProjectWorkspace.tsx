@@ -33,7 +33,11 @@ import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccoun
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
 import { SettingsTokensPage } from "../components/SettingsTokensPage"
 import { WorkflowLiveUpdatesBoundary } from "../features/workflows/components/WorkflowLiveUpdatesBoundary"
-import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
+import {
+  type TelemetryUpdate,
+  telemetryUpdateFromEvent,
+  telemetryUpdateKey,
+} from "../lib/telemetryEvents"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -238,7 +242,7 @@ export function ProjectWorkspace() {
     (update: TelemetryUpdate) => {
       if (resolvedProjectName && update.projectName !== resolvedProjectName) return
 
-      const key = `${update.projectName}:${update.objectId}:${update.propertyId}`
+      const key = telemetryUpdateKey(update.projectName, update.objectId, update.propertyId)
       setLatestUpdates((previous) => ({
         ...previous,
         [key]: update,
