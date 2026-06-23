@@ -12778,6 +12778,265 @@
         }
       }
     },
+    "/api/telemetry/history": {
+      "post": {
+        "summary": "Get bulk telemetry history",
+        "tags": ["Telemetry"],
+        "operationId": "getBulkTelemetryHistory",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "series": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "objectTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "objectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "propertyId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["objectTypeId", "objectId", "propertyId"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "limitPerSeries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "order": {
+                    "type": "string",
+                    "enum": ["asc", "desc"]
+                  }
+                },
+                "required": ["series"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "series": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "objectTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "objectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "propertyId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["objectTypeId", "objectId", "propertyId"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "limitPerSeries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "order": {
+                    "type": "string",
+                    "enum": ["asc", "desc"]
+                  }
+                },
+                "required": ["series"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "series": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "objectTypeId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "objectId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "propertyId": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["objectTypeId", "objectId", "propertyId"],
+                      "additionalProperties": false
+                    },
+                    "minItems": 1
+                  },
+                  "from": {
+                    "type": "string"
+                  },
+                  "to": {
+                    "type": "string"
+                  },
+                  "limitPerSeries": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "order": {
+                    "type": "string",
+                    "enum": ["asc", "desc"]
+                  }
+                },
+                "required": ["series"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "series": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "objectTypeId": {
+                            "type": "string"
+                          },
+                          "objectId": {
+                            "type": "string"
+                          },
+                          "propertyId": {
+                            "type": "string"
+                          },
+                          "points": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "projectId": {
+                                  "type": "string"
+                                },
+                                "objectTypeId": {
+                                  "type": "string"
+                                },
+                                "objectId": {
+                                  "type": "string"
+                                },
+                                "propertyId": {
+                                  "type": "string"
+                                },
+                                "value": {},
+                                "unit": {
+                                  "type": "string"
+                                },
+                                "at": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "projectId",
+                                "objectTypeId",
+                                "objectId",
+                                "propertyId",
+                                "at"
+                              ],
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "required": ["objectTypeId", "objectId", "propertyId", "points"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["series"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/history": {
       "get": {
         "summary": "Get telemetry history",
@@ -12982,6 +13241,23 @@
                     }
                   },
                   "required": ["projectId", "objectTypeId", "objectId", "propertyId", "at"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
                   "additionalProperties": false
                 }
               }

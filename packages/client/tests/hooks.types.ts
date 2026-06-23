@@ -1,5 +1,8 @@
 import { defineObjectType, prop } from "@sixb/core"
 import {
+  type BulkTelemetryHistory,
+  type BulkTelemetryHistorySeries,
+  bulkTelemetryHistoryQueryOptions,
   type TelemetryHistoryPoint,
   type TelemetryHistoryPoints,
   telemetryHistoryQueryOptions,
@@ -54,6 +57,26 @@ type _BooleanHistory = Expect<
   >
 >
 
+const _bulkNumberHistory = bulkTelemetryHistoryQueryOptions({
+  objectType: MetricSeries,
+  objectIds: ["series-1", "series-2"],
+  properties: [MetricSeries.p.value] as const,
+})
+
+type _BulkNumberHistory = Expect<
+  Equal<
+    BulkTelemetryHistory<readonly [typeof MetricSeries.p.value]>,
+    readonly BulkTelemetryHistorySeries<number>[]
+  >
+>
+
+type _BulkMixedHistory = Expect<
+  Equal<
+    BulkTelemetryHistory<readonly [typeof MetricSeries.p.value, typeof MetricSeries.p.online]>,
+    readonly BulkTelemetryHistorySeries<number | boolean>[]
+  >
+>
+
 telemetryHistoryQueryOptions({
   objectType: MetricSeries,
   objectId: "series-1",
@@ -66,4 +89,18 @@ telemetryHistoryQueryOptions({
   objectId: "series-1",
   // @ts-expect-error telemetry property tokens must belong to the selected object type
   property: OtherMetricSeries.p.value,
+})
+
+bulkTelemetryHistoryQueryOptions({
+  objectType: MetricSeries,
+  objectIds: ["series-1"],
+  // @ts-expect-error static properties cannot be used as telemetry history properties
+  properties: [MetricSeries.p.name],
+})
+
+bulkTelemetryHistoryQueryOptions({
+  objectType: MetricSeries,
+  objectIds: ["series-1"],
+  // @ts-expect-error telemetry property tokens must belong to the selected object type
+  properties: [OtherMetricSeries.p.value],
 })

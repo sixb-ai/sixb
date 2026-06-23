@@ -83,6 +83,13 @@ function parseLimit(value: string | number | undefined): string | undefined {
   return undefined
 }
 
+function toHistoryDate(value: Date | string | undefined): string | undefined {
+  if (value === undefined) return undefined
+
+  const date = typeof value === "string" ? new Date(value) : value
+  return Number.isNaN(date.getTime()) ? undefined : date.toISOString()
+}
+
 function parseOffset(value: string | undefined): number {
   if (value === undefined) return 0
 
@@ -337,7 +344,10 @@ export interface GetTelemetryHistoryOptions
   }
   query?: {
     range?: string
+    from?: Date | string
+    to?: Date | string
     limit?: string | number
+    order?: "asc" | "desc"
   }
 }
 
@@ -359,8 +369,10 @@ export const getTelemetryHistoryOptions = (options: GetTelemetryHistoryOptions) 
 
       const now = new Date()
       const duration = options.query?.range ? parseDurationMs(options.query.range) : null
-      const rangeStart = new Date(now.getTime() - (duration ?? 5 * 60_000)).toISOString()
-      const rangeEnd = now.toISOString()
+      const rangeStart =
+        toHistoryDate(options.query?.from) ??
+        new Date(now.getTime() - (duration ?? 5 * 60_000)).toISOString()
+      const rangeEnd = toHistoryDate(options.query?.to) ?? now.toISOString()
 
       const { data } = await getTelemetryHistory({
         path: {
@@ -371,7 +383,7 @@ export const getTelemetryHistoryOptions = (options: GetTelemetryHistoryOptions) 
         query: {
           from: rangeStart,
           to: rangeEnd,
-          order: "asc",
+          order: options.query?.order ?? "asc",
           limit: parseLimit(options.query?.limit),
         },
         throwOnError: true,

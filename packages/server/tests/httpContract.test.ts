@@ -1465,6 +1465,45 @@ describe("SixbServer HTTP contract", () => {
       const history = (await historyResponse.json()) as Array<{ value: number }>
       expect(history.map((point) => point.value)).toEqual([1200, 1100])
 
+      const bulkHistoryResponse = await fetch(`${baseUrl}/api/telemetry/history`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          series: [
+            { objectTypeId: "device", objectId: "fan-1", propertyId: "rpm" },
+            { objectTypeId: "device", objectId: "fan-1", propertyId: "online" },
+            { objectTypeId: "device", objectId: "missing", propertyId: "rpm" },
+            { objectTypeId: "device", objectId: "missing", propertyId: "online" },
+          ],
+          limitPerSeries: 1,
+          order: "desc",
+        }),
+      })
+      expect(bulkHistoryResponse.status).toBe(200)
+      const bulkHistory = (await bulkHistoryResponse.json()) as {
+        series: Array<{
+          objectId: string
+          propertyId: string
+          points: Array<{ value: number | boolean }>
+        }>
+      }
+      expect(bulkHistory.series).toHaveLength(4)
+      expect(
+        bulkHistory.series
+          .find((series) => series.objectId === "fan-1" && series.propertyId === "rpm")
+          ?.points.map((point) => point.value)
+      ).toEqual([1200])
+      expect(
+        bulkHistory.series
+          .find((series) => series.objectId === "fan-1" && series.propertyId === "online")
+          ?.points.map((point) => point.value)
+      ).toEqual([true])
+      expect(
+        bulkHistory.series.find(
+          (series) => series.objectId === "missing" && series.propertyId === "rpm"
+        )?.points
+      ).toEqual([])
+
       const latestResponse = await fetch(`${baseUrl}/api/objects/device/fan-1/telemetry/rpm/latest`)
       expect(latestResponse.status).toBe(200)
       const latest = (await latestResponse.json()) as { value: number }

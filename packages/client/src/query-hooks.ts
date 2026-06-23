@@ -25,8 +25,8 @@ import {
 } from "@tanstack/react-query"
 import { createContext, createElement, type ReactNode, useContext, useMemo } from "react"
 import type { Client } from "./generated/client"
-import { getTelemetryHistory, type Options } from "./generated/sdk.gen"
-import type { GetTelemetryHistoryData } from "./generated/types.gen"
+import { getBulkTelemetryHistory, getTelemetryHistory, type Options } from "./generated/sdk.gen"
+import type { GetBulkTelemetryHistoryData, GetTelemetryHistoryData } from "./generated/types.gen"
 import { createHttpQueryExecutor } from "./query"
 
 const objectQueryBaseKey = ["sixb", "objects"] as const
@@ -54,6 +54,12 @@ function toTelemetryHistoryLimit(value: number | string | undefined): string | u
   }
 
   return undefined
+}
+
+function toBulkTelemetryHistoryLimit(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.trunc(value))
+    : undefined
 }
 
 // Options factories accept anything query-shaped, so they work with builders
@@ -209,6 +215,17 @@ export type TelemetryHistoryPoints<
   TProperty extends { readonly property: Pick<Property, "schema" | "nullable"> },
 > = readonly TelemetryHistoryPoint<TelemetryHistoryValue<TProperty>>[]
 
+export interface BulkTelemetryHistorySeries<TValue> {
+  readonly objectTypeId: string
+  readonly objectId: string
+  readonly propertyId: string
+  readonly points: readonly TelemetryHistoryPoint<TValue>[]
+}
+
+export type BulkTelemetryHistory<
+  TProperties extends readonly { readonly property: Pick<Property, "schema" | "nullable"> }[],
+> = readonly BulkTelemetryHistorySeries<TelemetryHistoryValue<TProperties[number]>>[]
+
 export interface TelemetryHistoryQueryOptions<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TProperty extends TelemetryPropertyToken<TObjectType> = TelemetryPropertyToken<TObjectType>,
@@ -226,6 +243,26 @@ export type TelemetryHistoryHookOptions<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TProperty extends TelemetryPropertyToken<TObjectType> = TelemetryPropertyToken<TObjectType>,
 > = TelemetryHistoryQueryOptions<TObjectType, TProperty> & QueryHookExtras
+
+export interface BulkTelemetryHistoryQueryOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends
+    readonly TelemetryPropertyToken<TObjectType>[] = readonly TelemetryPropertyToken<TObjectType>[],
+> extends Omit<Options<GetBulkTelemetryHistoryData>, "path" | "body"> {
+  readonly objectType: TObjectType
+  readonly objectIds: readonly string[]
+  readonly properties: TProperties & readonly TelemetryPropertyToken<NoInfer<TObjectType>>[]
+  readonly from?: Date | string
+  readonly to?: Date | string
+  readonly limit?: number
+  readonly order?: "asc" | "desc"
+}
+
+export type BulkTelemetryHistoryHookOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends
+    readonly TelemetryPropertyToken<TObjectType>[] = readonly TelemetryPropertyToken<TObjectType>[],
+> = BulkTelemetryHistoryQueryOptions<TObjectType, TProperties> & QueryHookExtras
 
 function telemetryHistoryPath<
   TObjectType extends ObjectTypeWithPropertyTokens,
@@ -301,6 +338,76 @@ async function fetchTelemetryHistory<
   }))
 }
 
+function bulkTelemetryHistoryBody<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends readonly TelemetryPropertyToken<TObjectType>[],
+>(options: BulkTelemetryHistoryQueryOptions<TObjectType, TProperties>) {
+  const propertyIds = options.properties.map((property) => property.id)
+  return {
+    series: options.objectIds.flatMap((objectId) =>
+      propertyIds.map((propertyId) => ({
+        objectTypeId: options.objectType.id,
+        objectId,
+        propertyId,
+      }))
+    ),
+    from: toTelemetryHistoryDate(options.from),
+    to: toTelemetryHistoryDate(options.to),
+    limitPerSeries: toBulkTelemetryHistoryLimit(options.limit),
+    order: options.order ?? "asc",
+  }
+}
+
+export function bulkTelemetryHistoryQueryKey<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends readonly TelemetryPropertyToken<TObjectType>[],
+>(options: BulkTelemetryHistoryQueryOptions<TObjectType, TProperties>) {
+  return [...telemetryHistoryBaseKey, "bulk", bulkTelemetryHistoryBody(options)] as const
+}
+
+async function fetchBulkTelemetryHistory<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends readonly TelemetryPropertyToken<TObjectType>[],
+>(
+  options: BulkTelemetryHistoryQueryOptions<TObjectType, TProperties>,
+  signal?: AbortSignal
+): Promise<BulkTelemetryHistory<TProperties>> {
+  const body = bulkTelemetryHistoryBody(options)
+  const {
+    objectType: _objectType,
+    objectIds: _objectIds,
+    properties: _properties,
+    from: _from,
+    to: _to,
+    limit: _limit,
+    order: _order,
+    ...rest
+  } = options
+
+  const { data } = await getBulkTelemetryHistory({
+    ...rest,
+    body,
+    signal,
+    responseStyle: "fields",
+    throwOnError: true,
+  })
+
+  return data.series.map((series) => ({
+    objectTypeId: series.objectTypeId,
+    objectId: series.objectId,
+    propertyId: series.propertyId,
+    points: series.points.map((point) => ({
+      projectId: point.projectId,
+      objectTypeId: point.objectTypeId,
+      objectId: point.objectId,
+      propertyId: point.propertyId,
+      value: point.value as TelemetryHistoryValue<TProperties[number]>,
+      unit: point.unit,
+      at: point.at,
+    })),
+  }))
+}
+
 export function telemetryHistoryQueryOptions<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TProperty extends TelemetryPropertyToken<TObjectType>,
@@ -308,6 +415,16 @@ export function telemetryHistoryQueryOptions<
   return queryOptions({
     queryKey: telemetryHistoryQueryKey(options),
     queryFn: ({ signal }) => fetchTelemetryHistory(options, signal),
+  })
+}
+
+export function bulkTelemetryHistoryQueryOptions<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends readonly TelemetryPropertyToken<TObjectType>[],
+>(options: BulkTelemetryHistoryQueryOptions<TObjectType, TProperties>) {
+  return queryOptions({
+    queryKey: bulkTelemetryHistoryQueryKey(options),
+    queryFn: ({ signal }) => fetchBulkTelemetryHistory(options, signal),
   })
 }
 
@@ -345,6 +462,39 @@ export function useTelemetryHistoryQuery<
 
   return useQuery({
     ...telemetryHistoryQueryOptions(historyInput),
+    enabled,
+    staleTime,
+    gcTime,
+    refetchInterval,
+    refetchOnWindowFocus,
+    retry,
+  })
+}
+
+export function useBulkTelemetryHistoryQuery<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TProperties extends readonly TelemetryPropertyToken<TObjectType>[],
+>(
+  options: BulkTelemetryHistoryHookOptions<TObjectType, TProperties>
+): UseQueryResult<BulkTelemetryHistory<TProperties>, Error> {
+  const client = useContext(SixbClientContext)
+  const {
+    enabled,
+    staleTime,
+    gcTime,
+    refetchInterval,
+    refetchOnWindowFocus,
+    retry,
+    ...historyOptions
+  } = options
+
+  const historyInput: BulkTelemetryHistoryQueryOptions<TObjectType, TProperties> = {
+    ...historyOptions,
+    client: historyOptions.client ?? client,
+  }
+
+  return useQuery({
+    ...bulkTelemetryHistoryQueryOptions(historyInput),
     enabled,
     staleTime,
     gcTime,

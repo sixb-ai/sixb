@@ -211,7 +211,13 @@ export type {
   SyncRunStorage,
 } from "./sync-runs"
 export { InMemorySyncRunStorage, SyncRunError } from "./sync-runs"
-export type { TimeseriesPoint, TimeseriesStorage } from "./timeseries"
+export type {
+  TimeseriesHistoryBatchInput,
+  TimeseriesHistoryBatchResult,
+  TimeseriesHistorySeriesInput,
+  TimeseriesPoint,
+  TimeseriesStorage,
+} from "./timeseries"
 export { InMemoryTimeseriesStorage } from "./timeseries"
 export {
   assertTransactionActive,

@@ -25,6 +25,7 @@ import {
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthSession,
+  getBulkTelemetryHistory,
   getConnector,
   getDataset,
   getDatasetVersion,
@@ -130,6 +131,9 @@ import type {
   GetAuthInvitationOptionsResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
+  GetBulkTelemetryHistoryData,
+  GetBulkTelemetryHistoryError,
+  GetBulkTelemetryHistoryResponse,
   GetConnectorData,
   GetConnectorError,
   GetConnectorResponse,
@@ -2437,6 +2441,33 @@ export const appendTelemetryMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await appendTelemetry({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Get bulk telemetry history
+ */
+export const getBulkTelemetryHistoryMutation = (
+  options?: Partial<Options<GetBulkTelemetryHistoryData>>
+): UseMutationOptions<
+  GetBulkTelemetryHistoryResponse,
+  GetBulkTelemetryHistoryError,
+  Options<GetBulkTelemetryHistoryData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    GetBulkTelemetryHistoryResponse,
+    GetBulkTelemetryHistoryError,
+    Options<GetBulkTelemetryHistoryData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await getBulkTelemetryHistory({
         ...options,
         ...fnOptions,
         throwOnError: true,

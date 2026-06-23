@@ -4415,6 +4415,66 @@ export type AppendTelemetryResponses = {
 
 export type AppendTelemetryResponse = AppendTelemetryResponses[keyof AppendTelemetryResponses]
 
+export type GetBulkTelemetryHistoryData = {
+  body: {
+    series: Array<{
+      objectTypeId: string
+      objectId: string
+      propertyId: string
+    }>
+    from?: string
+    to?: string
+    limitPerSeries?: number
+    order?: "asc" | "desc"
+  }
+  path?: never
+  query?: never
+  url: "/api/telemetry/history"
+}
+
+export type GetBulkTelemetryHistoryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type GetBulkTelemetryHistoryError =
+  GetBulkTelemetryHistoryErrors[keyof GetBulkTelemetryHistoryErrors]
+
+export type GetBulkTelemetryHistoryResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    series: Array<{
+      objectTypeId: string
+      objectId: string
+      propertyId: string
+      points: Array<{
+        projectId: string
+        objectTypeId: string
+        objectId: string
+        propertyId: string
+        value?: unknown
+        unit?: string
+        at: string
+      }>
+    }>
+  }
+}
+
+export type GetBulkTelemetryHistoryResponse =
+  GetBulkTelemetryHistoryResponses[keyof GetBulkTelemetryHistoryResponses]
+
 export type GetTelemetryHistoryData = {
   body?: never
   path: {
@@ -4478,6 +4538,12 @@ export type GetLatestTelemetryData = {
 }
 
 export type GetLatestTelemetryErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
   /**
    * Response for status 404
    */
