@@ -1,18 +1,28 @@
 import type { RestClient } from "@sixb/connector-rest"
-import { createIssuesClient, type IssuesClient } from "./issues"
-import { createRepositoriesClient, type RepositoriesClient } from "./repos"
-import type { GitHubConnectorOptions } from "./types"
+import {
+  createAuthenticatedUserIssuesApi,
+  createOrganizationIssuesApi,
+  createRepositoryIssuesApi,
+} from "./resources/issues"
+import {
+  createAuthenticatedUserRepositoriesApi,
+  createOrganizationRepositoriesApi,
+  createRepositoryApi,
+} from "./resources/repos"
+import type { GitHubClient } from "./types/client"
 
-export type GitHubClient = RepositoriesClient & IssuesClient
-
-export function createGitHubClient(
-  http: RestClient,
-  options: GitHubConnectorOptions,
-  apiBaseUrl: URL
-): GitHubClient {
+export function createGitHubClient(http: RestClient, apiBaseUrl: URL): GitHubClient {
   const context = { http, apiBaseUrl }
   return {
-    ...createRepositoriesClient(context),
-    ...createIssuesClient(context, { owner: options.owner, repo: options.repo }),
+    repos: createAuthenticatedUserRepositoriesApi(context),
+    issues: createAuthenticatedUserIssuesApi(context),
+    repo: (target) => ({
+      ...createRepositoryApi(context, target),
+      issues: createRepositoryIssuesApi(context, target),
+    }),
+    org: (org) => ({
+      repos: createOrganizationRepositoriesApi(context, org),
+      issues: createOrganizationIssuesApi(context, org),
+    }),
   }
 }

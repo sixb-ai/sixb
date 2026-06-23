@@ -1,8 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto"
 import type { WebhookDefinition } from "@sixb/core"
 import { defineWebhook } from "@sixb/core"
-import type { GitHubClient } from "./client"
-import type { GitHubEventHandler, GitHubWebhookEvent } from "./types"
+import type { GitHubClient } from "./types/client"
+import type {
+  GitHubEventHandler,
+  GitHubWebhookEvent,
+  GitHubWebhookEventName,
+} from "./types/webhook"
 
 interface GitHubWebhookOptions {
   readonly secret?: string
@@ -44,11 +48,11 @@ function toEvent(name: string, request: Request, body: unknown): GitHubWebhookEv
     throw new Error("[SixbGitHub] Unexpected webhook payload.")
   }
   return {
-    name,
+    name: name as GitHubWebhookEventName,
     action: typeof body.action === "string" ? body.action : undefined,
     deliveryId: request.headers.get("x-github-delivery") ?? "",
     payload: body,
-  }
+  } as GitHubWebhookEvent
 }
 
 function verifySignature(secret: string, rawBody: Uint8Array, signature: string | null): void {

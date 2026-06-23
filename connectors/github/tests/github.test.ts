@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
-import type { GitHubEventContext } from "../src"
+import type { GitHubEventContext, GitHubEventHandler, GitHubIssueEvent } from "../src"
 import { github, githubEventsWebhook } from "../src"
 
 const CONTEXT = {
@@ -50,16 +50,16 @@ describe("github connector", () => {
       return Promise.resolve(json([]))
     })
 
-    const adapter = github({ token: "pat-123", owner: "acme", repo: "web" })
+    const adapter = github({ token: "pat-123" })
     const client = await adapter.connect(CONTEXT)
-    await client.listRepositoriesForAuthenticatedUser()
+    await client.repos.listForAuthenticatedUser()
 
     expect(adapter.type).toBe("github")
     expect(auth).toBe("Bearer pat-123")
     expect(version).toBe("2022-11-28")
   })
 
-  test("listRepositoriesForAuthenticatedUser fetches a page envelope with paging params", async () => {
+  test("repos.listForAuthenticatedUser fetches a page envelope with paging params", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -73,7 +73,7 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    const page = await client.listRepositoriesForAuthenticatedUser({ pageSize: 50 })
+    const page = await client.repos.listForAuthenticatedUser({ pageSize: 50 })
 
     const url = new URL(calls[0] ?? "")
     expect(url.searchParams.get("per_page")).toBe("50")
@@ -90,14 +90,14 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await client.listRepositoriesForAuthenticatedUser()
+    await client.repos.listForAuthenticatedUser()
 
     const url = new URL(requested)
     expect(url.searchParams.has("page")).toBe(false)
     expect(url.searchParams.has("per_page")).toBe(false)
   })
 
-  test("listRepositoriesForAuthenticatedUser follows a pageToken returned from the Link header", async () => {
+  test("repos.listForAuthenticatedUser follows a pageToken returned from the Link header", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -114,8 +114,8 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    const first = await client.listRepositoriesForAuthenticatedUser({ pageSize: 1 })
-    const second = await client.listRepositoriesForAuthenticatedUser({
+    const first = await client.repos.listForAuthenticatedUser({ pageSize: 1 })
+    const second = await client.repos.listForAuthenticatedUser({
       pageToken: first.nextPageToken,
     })
 
@@ -124,7 +124,7 @@ describe("github connector", () => {
     expect(second.hasMore).toBe(false)
   })
 
-  test("listRepositoriesForAuthenticatedUser maps authenticated user repository filters", async () => {
+  test("repos.listForAuthenticatedUser maps authenticated user repository filters", async () => {
     let requested = ""
     mockFetch((input) => {
       requested = String(input)
@@ -132,7 +132,7 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await client.listRepositoriesForAuthenticatedUser({
+    await client.repos.listForAuthenticatedUser({
       visibility: "private",
       affiliation: ["owner", "collaborator"],
       sort: "updated",
@@ -151,7 +151,7 @@ describe("github connector", () => {
     expect(url.searchParams.get("before")).toBe("2026-02-01T00:00:00Z")
   })
 
-  test("listOrganizationRepositories maps organization repository filters", async () => {
+  test("org().repos.list maps organization repository filters", async () => {
     let requested = ""
     mockFetch((input) => {
       requested = String(input)
@@ -159,8 +159,7 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await client.listOrganizationRepositories({
-      org: "acme",
+    await client.org("acme").repos.list({
       type: "sources",
       sort: "full_name",
       direction: "asc",
@@ -175,6 +174,20 @@ describe("github connector", () => {
     expect(url.searchParams.has("affiliation")).toBe(false)
   })
 
+  test("repo().get fetches the scoped repository", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json({ id: 1, name: "web" }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const repo = await client.repo({ owner: "acme", repo: "web" }).get()
+
+    expect(new URL(requested).pathname).toBe("/repos/acme/web")
+    expect(repo.name).toBe("web")
+  })
+
   test("rejects caller-provided pageTokens that decode to absolute URLs", async () => {
     let called = false
     mockFetch(() => {
@@ -184,7 +197,7 @@ describe("github connector", () => {
 
     const client = await github({ token: "t" }).connect(CONTEXT)
     await expect(
-      client.listRepositoriesForAuthenticatedUser({
+      client.repos.listForAuthenticatedUser({
         pageToken: pageToken("https://evil.example/repos?page=2"),
       })
     ).rejects.toThrow("Invalid pageToken")
@@ -206,7 +219,7 @@ describe("github connector", () => {
     })
 
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await expect(client.listRepositoriesForAuthenticatedUser()).rejects.toThrow(
+    await expect(client.repos.listForAuthenticatedUser()).rejects.toThrow(
       "Refusing pagination URL outside the configured API base"
     )
 
@@ -234,13 +247,77 @@ describe("github connector", () => {
       token: "t",
       baseUrl: "https://ghe.example.com/api/v3/",
     }).connect(CONTEXT)
-    const first = await client.listRepositoriesForAuthenticatedUser()
-    await client.listRepositoriesForAuthenticatedUser({ pageToken: first.nextPageToken })
+    const first = await client.repos.listForAuthenticatedUser()
+    await client.repos.listForAuthenticatedUser({ pageToken: first.nextPageToken })
 
     expect(new URL(calls[1] ?? "").pathname).toBe("/api/v3/user/repos")
   })
 
-  test("listRepositoryIssues preserves pull requests returned by GitHub", async () => {
+  test("issues.listForAuthenticatedUser maps authenticated user issue filters", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.issues.listForAuthenticatedUser({
+      filter: "created",
+      state: "all",
+      labels: ["bug", "ui"],
+      sort: "updated",
+      direction: "asc",
+      since: "2026-01-01T00:00:00Z",
+      collab: true,
+      orgs: false,
+      owned: true,
+      pulls: false,
+    })
+
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/issues")
+    expect(url.searchParams.get("filter")).toBe("created")
+    expect(url.searchParams.get("state")).toBe("all")
+    expect(url.searchParams.get("labels")).toBe("bug,ui")
+    expect(url.searchParams.get("sort")).toBe("updated")
+    expect(url.searchParams.get("direction")).toBe("asc")
+    expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
+    expect(url.searchParams.get("collab")).toBe("true")
+    expect(url.searchParams.get("orgs")).toBe("false")
+    expect(url.searchParams.get("owned")).toBe("true")
+    expect(url.searchParams.get("pulls")).toBe("false")
+  })
+
+  test("org().issues.listForAuthenticatedUser maps organization issue filters", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json([]))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.org("acme").issues.listForAuthenticatedUser({
+      filter: "mentioned",
+      state: "open",
+      labels: ["bug"],
+      type: "Incident",
+      sort: "comments",
+      direction: "desc",
+      since: "2026-01-01T00:00:00Z",
+    })
+
+    const url = new URL(requested)
+    expect(url.pathname).toBe("/orgs/acme/issues")
+    expect(url.searchParams.get("filter")).toBe("mentioned")
+    expect(url.searchParams.get("state")).toBe("open")
+    expect(url.searchParams.get("labels")).toBe("bug")
+    expect(url.searchParams.get("type")).toBe("Incident")
+    expect(url.searchParams.get("sort")).toBe("comments")
+    expect(url.searchParams.get("direction")).toBe("desc")
+    expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
+  })
+
+  test("repo().issues.list preserves pull requests returned by GitHub", async () => {
     mockFetch(() =>
       Promise.resolve(
         json([
@@ -250,24 +327,29 @@ describe("github connector", () => {
       )
     )
 
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const page = await client.listRepositoryIssues()
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const page = await client.repo({ owner: "acme", repo: "web" }).issues.list()
 
     expect(page.items.map((issue) => issue.number)).toEqual([1, 2])
   })
 
-  test("listRepositoryIssues maps documented repository issue filters", async () => {
+  test("repo().issues.list maps documented repository issue filters", async () => {
     let requested = ""
     mockFetch((input) => {
       requested = String(input)
       return Promise.resolve(json([]))
     })
 
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    await client.listRepositoryIssues({
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.repo({ owner: "acme", repo: "web" }).issues.list({
+      milestone: "none",
       state: "all",
-      labels: ["bug", "ui"],
       assignee: "octocat",
+      type: "Incident",
+      creator: "mona",
+      mentioned: "hubot",
+      issueFieldValues: "priority:Urgent,severity:High",
+      labels: ["bug", "ui"],
       sort: "comments",
       direction: "asc",
       since: "2026-01-01T00:00:00Z",
@@ -275,15 +357,20 @@ describe("github connector", () => {
 
     const url = new URL(requested)
     expect(url.pathname).toBe("/repos/acme/web/issues")
+    expect(url.searchParams.get("milestone")).toBe("none")
     expect(url.searchParams.get("state")).toBe("all")
-    expect(url.searchParams.get("labels")).toBe("bug,ui")
     expect(url.searchParams.get("assignee")).toBe("octocat")
+    expect(url.searchParams.get("type")).toBe("Incident")
+    expect(url.searchParams.get("creator")).toBe("mona")
+    expect(url.searchParams.get("mentioned")).toBe("hubot")
+    expect(url.searchParams.get("issue_field_values")).toBe("priority:Urgent,severity:High")
+    expect(url.searchParams.get("labels")).toBe("bug,ui")
     expect(url.searchParams.get("sort")).toBe("comments")
     expect(url.searchParams.get("direction")).toBe("asc")
     expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
   })
 
-  test("listRepositoryIssues follows next page tokens", async () => {
+  test("repo().issues.list follows next page tokens", async () => {
     const calls: string[] = []
     mockFetch((input) => {
       calls.push(String(input))
@@ -299,16 +386,31 @@ describe("github connector", () => {
       )
     })
 
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const first = await client.listRepositoryIssues({ state: "all" })
-    const second = await client.listRepositoryIssues({ pageToken: first.nextPageToken })
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const issues = client.repo({ owner: "acme", repo: "web" }).issues
+    const first = await issues.list({ state: "all" })
+    const second = await issues.list({ pageToken: first.nextPageToken })
 
     expect(calls).toHaveLength(2)
     expect(first.items.map((issue) => issue.number)).toEqual([1])
     expect(second.items.map((issue) => issue.number)).toEqual([2])
   })
 
-  test("createIssue posts to the repo issues endpoint", async () => {
+  test("repo().issues.get fetches a single issue", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json({ id: 10, number: 7, title: "Bug" }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const issue = await client.repo({ owner: "acme", repo: "web" }).issues.get(7)
+
+    expect(new URL(requested).pathname).toBe("/repos/acme/web/issues/7")
+    expect(issue.number).toBe(7)
+  })
+
+  test("repo().issues.create posts to the repo issues endpoint", async () => {
     let path = ""
     let payload: Record<string, unknown> = {}
     mockFetch((input, init) => {
@@ -317,41 +419,204 @@ describe("github connector", () => {
       return Promise.resolve(json({ id: 10, number: 7, title: "Bug" }, { status: 201 }))
     })
 
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    const issue = await client.createIssue({ title: "Bug", labels: ["triage"] })
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const issue = await client.repo({ owner: "acme", repo: "web" }).issues.create({
+      title: "Bug",
+      labels: ["triage"],
+      issueFieldValues: [{ fieldId: 42, value: ["High"] }],
+      type: "Incident",
+    })
 
     expect(path).toBe("/repos/acme/web/issues")
     expect(payload.title).toBe("Bug")
     expect(payload.labels).toEqual(["triage"])
+    expect(payload.issue_field_values).toEqual([{ field_id: 42, value: ["High"] }])
+    expect(payload.type).toBe("Incident")
     expect(issue.number).toBe(7)
   })
 
-  test("updateIssue sends a PATCH with mapped fields", async () => {
+  test("repo().issues.update sends a PATCH with mapped fields", async () => {
     let method = ""
+    let path = ""
     let payload: Record<string, unknown> = {}
-    mockFetch((_, init) => {
+    mockFetch((input, init) => {
+      path = new URL(String(input)).pathname
       method = init?.method ?? ""
       payload = JSON.parse(String(init?.body))
       return Promise.resolve(json({ id: 1, number: 7, state: "open", title: "Renamed" }))
     })
 
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    await client.updateIssue(7, { title: "Renamed", stateReason: "reopened" })
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.repo({ owner: "acme", repo: "web" }).issues.update(7, {
+      title: "Renamed",
+      stateReason: "reopened",
+    })
 
+    expect(path).toBe("/repos/acme/web/issues/7")
     expect(method).toBe("PATCH")
     expect(payload.title).toBe("Renamed")
     expect(payload.state_reason).toBe("reopened")
   })
 
-  test("requires owner and repo for issue operations", async () => {
+  test("repo().issues.comments.list fetches issue comments with paging params", async () => {
+    const calls: string[] = []
+    mockFetch((input) => {
+      calls.push(String(input))
+      return Promise.resolve(
+        json([{ id: 1, body: "first" }], {
+          headers: {
+            link: '<https://api.github.com/repos/acme/web/issues/7/comments?per_page=50&page=2>; rel="next"',
+          },
+        })
+      )
+    })
+
     const client = await github({ token: "t" }).connect(CONTEXT)
-    await expect(client.listRepositoryIssues()).rejects.toThrow("owner and repo are required")
+    const page = await client.repo({ owner: "acme", repo: "web" }).issues.comments.list(7, {
+      pageSize: 50,
+      since: "2026-01-01T00:00:00Z",
+    })
+
+    const url = new URL(calls[0] ?? "")
+    expect(url.pathname).toBe("/repos/acme/web/issues/7/comments")
+    expect(url.searchParams.get("per_page")).toBe("50")
+    expect(url.searchParams.get("since")).toBe("2026-01-01T00:00:00Z")
+    expect(page.items.map((comment) => comment.id)).toEqual([1])
+    expect(page.nextPageToken).toBeTruthy()
+  })
+
+  test("repo().issues.comments.list follows next page tokens", async () => {
+    const calls: string[] = []
+    mockFetch((input) => {
+      calls.push(String(input))
+      return Promise.resolve(
+        json([{ id: calls.length, body: `comment-${calls.length}` }], {
+          headers:
+            calls.length === 1
+              ? {
+                  link: '<https://api.github.com/repos/acme/web/issues/7/comments?page=2>; rel="next"',
+                }
+              : undefined,
+        })
+      )
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const comments = client.repo({ owner: "acme", repo: "web" }).issues.comments
+    const first = await comments.list(7)
+    const second = await comments.list(7, { pageToken: first.nextPageToken })
+
+    expect(new URL(calls[1] ?? "").searchParams.get("page")).toBe("2")
+    expect(second.items.map((comment) => comment.id)).toEqual([2])
+  })
+
+  test("repo().issues.comments.create posts to the issue comments endpoint", async () => {
+    let path = ""
+    let payload: Record<string, unknown> = {}
+    mockFetch((input, init) => {
+      path = new URL(String(input)).pathname
+      payload = JSON.parse(String(init?.body))
+      return Promise.resolve(json({ id: 10, body: "Me too" }, { status: 201 }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const comment = await client
+      .repo({ owner: "acme", repo: "web" })
+      .issues.comments.create(7, { body: "Me too" })
+
+    expect(path).toBe("/repos/acme/web/issues/7/comments")
+    expect(payload.body).toBe("Me too")
+    expect(comment.id).toBe(10)
+  })
+
+  test("repo().issues.comments.get fetches a single issue comment", async () => {
+    let requested = ""
+    mockFetch((input) => {
+      requested = String(input)
+      return Promise.resolve(json({ id: 99, body: "Me too" }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const comment = await client.repo({ owner: "acme", repo: "web" }).issues.comments.get(99)
+
+    expect(new URL(requested).pathname).toBe("/repos/acme/web/issues/comments/99")
+    expect(comment.id).toBe(99)
+  })
+
+  test("repo().issues.comments.update sends a PATCH with body", async () => {
+    let method = ""
+    let path = ""
+    let payload: Record<string, unknown> = {}
+    mockFetch((input, init) => {
+      path = new URL(String(input)).pathname
+      method = init?.method ?? ""
+      payload = JSON.parse(String(init?.body))
+      return Promise.resolve(json({ id: 99, body: "Updated" }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.repo({ owner: "acme", repo: "web" }).issues.comments.update(99, {
+      body: "Updated",
+    })
+
+    expect(path).toBe("/repos/acme/web/issues/comments/99")
+    expect(method).toBe("PATCH")
+    expect(payload.body).toBe("Updated")
+  })
+
+  test("repo().issues.comments.delete sends DELETE to the issue comment endpoint", async () => {
+    let method = ""
+    let path = ""
+    mockFetch((input, init) => {
+      path = new URL(String(input)).pathname
+      method = init?.method ?? ""
+      return Promise.resolve(new Response(null, { status: 204 }))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await client.repo({ owner: "acme", repo: "web" }).issues.comments.delete(99)
+
+    expect(path).toBe("/repos/acme/web/issues/comments/99")
+    expect(method).toBe("DELETE")
+  })
+
+  test("repo().issues.comments methods reject invalid ids before requesting", async () => {
+    let called = false
+    mockFetch(() => {
+      called = true
+      return Promise.resolve(json({}))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    const comments = client.repo({ owner: "acme", repo: "web" }).issues.comments
+
+    await expect(comments.list(0)).rejects.toThrow("issueNumber must be a positive integer")
+    await expect(comments.get(0)).rejects.toThrow("commentId must be a positive integer")
+
+    expect(called).toBe(false)
+  })
+
+  test("repo().issues methods reject invalid issue numbers before requesting", async () => {
+    let called = false
+    mockFetch(() => {
+      called = true
+      return Promise.resolve(json({}))
+    })
+
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await expect(client.repo({ owner: "acme", repo: "web" }).issues.get(0)).rejects.toThrow(
+      "issueNumber must be a positive integer"
+    )
+
+    expect(called).toBe(false)
   })
 
   test("throws GitHubApiError on non-2xx responses", async () => {
     mockFetch(() => Promise.resolve(json({ message: "Not Found" }, { status: 404 })))
-    const client = await github({ token: "t", owner: "acme", repo: "web" }).connect(CONTEXT)
-    await expect(client.createIssue({ title: "x" })).rejects.toThrow("404")
+    const client = await github({ token: "t" }).connect(CONTEXT)
+    await expect(
+      client.repo({ owner: "acme", repo: "web" }).issues.create({ title: "x" })
+    ).rejects.toThrow("404")
   })
 
   describe("events webhook", () => {
@@ -361,6 +626,22 @@ describe("github connector", () => {
     test("registers only when onEvent is set", () => {
       expect(github({ token: "t" }).webhooks).toBeUndefined()
       expect(github({ token: "t", onEvent: () => {} }).webhooks).toHaveLength(1)
+    })
+
+    test("types payloads by narrowed webhook event name", () => {
+      const handler: GitHubEventHandler = ({ event }) => {
+        if (event.name !== "issues") {
+          return
+        }
+
+        const action: GitHubIssueEvent["action"] = event.action
+        const issueNumber: number = event.payload.issue.number
+
+        expect(typeof action).toBe("string")
+        expect(typeof issueNumber).toBe("number")
+      }
+
+      expect(handler).toBeDefined()
     })
 
     test("verifies the signature and forwards event + runtime to onEvent", async () => {

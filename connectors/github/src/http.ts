@@ -1,5 +1,5 @@
 import type { RestClient } from "@sixb/connector-rest"
-import type { GitHubPage } from "./types"
+import type { GitHubPage, GitHubRepositoryTarget } from "./types/common"
 
 export interface GitHubHttpContext {
   readonly http: RestClient
@@ -37,6 +37,12 @@ export async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T
 }
 
+export async function readNoContent(response: Response): Promise<void> {
+  if (!response.ok) {
+    throw new GitHubApiError(response.status, await response.text().catch(() => ""))
+  }
+}
+
 export async function readPage<T>(response: Response, apiBaseUrl: URL): Promise<GitHubPage<T>> {
   const items = await readJson<T[]>(response)
   const links = parseLinkHeader(response.headers.get("link"))
@@ -56,6 +62,22 @@ export function assertNonEmpty(value: string, field: string): void {
   if (!value?.trim()) {
     throw new Error(`[SixbGitHub] ${field} must not be empty.`)
   }
+}
+
+export function pathPart(value: string, field: string): string {
+  assertNonEmpty(value, field)
+  return encodeURIComponent(value)
+}
+
+export function pathId(value: number, field: string): string {
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`[SixbGitHub] ${field} must be a positive integer.`)
+  }
+  return String(value)
+}
+
+export function repositoryPath(target: GitHubRepositoryTarget): string {
+  return `/repos/${pathPart(target.owner, "owner")}/${pathPart(target.repo, "repo")}`
 }
 
 function parseLinkHeader(header: string | null): Record<string, string> {
