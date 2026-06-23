@@ -19,6 +19,7 @@
       "@sixb/client/hooks": ["./packages/client/src/hooks.ts"],
       "@sixb/client/models": ["./packages/client/src/models.ts"],
       "@sixb/client/query": ["./packages/client/src/query.ts"],
+      "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
