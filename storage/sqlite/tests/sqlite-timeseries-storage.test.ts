@@ -90,6 +90,81 @@ describe("SqliteTimeseriesStorage", () => {
     expect(history).toHaveLength(1)
   })
 
+  test("overwrites the point at the same instant (last write wins)", async () => {
+    const at = new Date("2024-01-01T00:00:00.000Z").toISOString()
+    await storage.applyTelemetryAppended(
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 22.5, at, "1")
+    )
+    await storage.applyTelemetryAppended(
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 23.5, at, "2")
+    )
+
+    const history = await storage.getHistory({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "temperature",
+    })
+    expect(history).toHaveLength(1)
+    expect(history[0]?.value).toBe(23.5)
+
+    const latest = await storage.getLatest({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "temperature",
+    })
+    expect(latest?.value).toBe(23.5)
+    expect(latest?.sourceEventId).toBe("event-2")
+  })
+
+  test("applyTelemetryAppendedBatch upserts same-instant points within one batch", async () => {
+    const at = new Date("2024-01-01T00:00:00.000Z").toISOString()
+    await storage.applyTelemetryAppendedBatch([
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 22.5, at, "1"),
+      createTelemetryEvent("project-a", "Room", "room:101", "temperature", 23.5, at, "2"),
+    ])
+
+    const history = await storage.getHistory({
+      projectId: "project-a",
+      objectTypeId: "Room",
+      objectId: "room:101",
+      propertyId: "temperature",
+    })
+    expect(history).toHaveLength(1)
+    expect(history[0]?.value).toBe(23.5)
+  })
+
+  test("rejects a non-canonical 'at' timestamp", async () => {
+    await expect(
+      storage.applyTelemetryAppended(
+        createTelemetryEvent(
+          "project-a",
+          "Room",
+          "room:101",
+          "temperature",
+          1,
+          "2024-01-01T00:00:00+05:00", // zone offset, not canonical UTC
+          "1"
+        )
+      )
+    ).rejects.toThrow("[SixbSqlite]")
+
+    await expect(
+      storage.applyTelemetryAppended(
+        createTelemetryEvent(
+          "project-a",
+          "Room",
+          "room:101",
+          "temperature",
+          1,
+          "2024-01-01 00:00:00", // zone-less
+          "2"
+        )
+      )
+    ).rejects.toThrow("canonical UTC ISO-8601")
+  })
+
   test("getHistory returns chronological data", async () => {
     const baseTime = new Date("2024-01-01T00:00:00Z")
 
