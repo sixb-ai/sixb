@@ -1,8 +1,9 @@
 import { rest } from "@sixb/connector-rest"
 import type { ConnectorAdapter } from "@sixb/core"
-import { createGitHubClient, type GitHubClient } from "./client"
+import { createGitHubClient } from "./client"
 import { assertNonEmpty } from "./http"
-import type { GitHubConnectorOptions } from "./types"
+import type { GitHubClient } from "./types/client"
+import type { GitHubConnectorOptions } from "./types/options"
 import { githubEventsWebhook } from "./webhook"
 
 const GITHUB_API_BASE = "https://api.github.com/"
@@ -22,8 +23,6 @@ export type GitHubConnector = ConnectorAdapter<"github", GitHubClient>
  * ```ts
  * export const githubConnector = defineConnector("github", github({
  *   token: process.env.GITHUB_TOKEN!,
- *   owner: "acme",
- *   repo: "web",
  * }))
  * ```
  */
@@ -47,7 +46,7 @@ export function github(options: GitHubConnectorOptions): GitHubConnector {
       ? [githubEventsWebhook({ secret: options.webhookSecret, onEvent: options.onEvent })]
       : undefined,
     async connect(context) {
-      return createGitHubClient(await http.connect(context), options, apiBaseUrl)
+      return createGitHubClient(await http.connect(context), apiBaseUrl)
     },
   }
 }

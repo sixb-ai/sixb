@@ -2,8 +2,8 @@
 
 A small GitHub connector for Sixb, built on `@sixb/connector-rest`.
 
-- **Repositories** — list, for a user or an org
-- **Issues** — list repository issues, create, update
+- **Repositories** — list authenticated-user/org repositories, get a repository
+- **Issues** — list authenticated-user/org/repository issues, get/create/update repository issues
 - **Webhooks** — receive GitHub events through one inbound route
 
 ## Register
@@ -18,8 +18,6 @@ export const githubConnector = defineConnector(
   "github",
   github({
     token: process.env.GITHUB_TOKEN!,
-    owner: "acme", // default owner for issue calls
-    repo: "web", // default repo
   })
 )
 ```
@@ -27,8 +25,6 @@ export const githubConnector = defineConnector(
 | Option          | Description                                                              |
 | --------------- | ------------------------------------------------------------------------ |
 | `token`         | **Required.** GitHub token — a fine-grained PAT is recommended.          |
-| `owner`         | Default repo owner (user or org) for issue calls.                        |
-| `repo`          | Default repo for issue calls.                                            |
 | `baseUrl`       | API base URL — override for GitHub Enterprise Server.                    |
 | `webhookSecret` | Secret used to verify inbound webhooks. See [Webhooks](#webhooks).       |
 | `onEvent`       | Handler for inbound webhook events. See [Webhooks](#webhooks).           |
@@ -41,44 +37,61 @@ export const githubConnector = defineConnector(
 const gh = await sixb.connector(githubConnector)
 ```
 
-| Method                                      | Description                                         |
-| ------------------------------------------- | --------------------------------------------------- |
-| `listRepositoriesForAuthenticatedUser(opts?)` | One page of the authenticated user's repositories. |
-| `listOrganizationRepositories(opts)`        | One page of an organization's repositories.         |
-| `listRepositoryIssues(opts?)`               | One page of a repository's issues.                  |
-| `createIssue(input)`                        | Create an issue (`title` required).                 |
-| `updateIssue(number, patch)`                | Update title, body, state, labels, or assignees.    |
+The client is scoped by GitHub resource:
+
+| API                                      | GitHub endpoint                               |
+| ---------------------------------------- | --------------------------------------------- |
+| `gh.repos.listForAuthenticatedUser()`    | `GET /user/repos`                             |
+| `gh.issues.listForAuthenticatedUser()`   | `GET /issues`                                 |
+| `gh.repo({ owner, repo }).get()`         | `GET /repos/{owner}/{repo}`                   |
+| `gh.repo({ owner, repo }).issues.list()` | `GET /repos/{owner}/{repo}/issues`            |
+| `gh.repo({ owner, repo }).issues.get()`  | `GET /repos/{owner}/{repo}/issues/{number}`   |
+| `gh.repo({ owner, repo }).issues.create()` | `POST /repos/{owner}/{repo}/issues`         |
+| `gh.repo({ owner, repo }).issues.update()` | `PATCH /repos/{owner}/{repo}/issues/{number}` |
+| `gh.repo({ owner, repo }).issues.comments.list()` | `GET /repos/{owner}/{repo}/issues/{number}/comments` |
+| `gh.repo({ owner, repo }).issues.comments.create()` | `POST /repos/{owner}/{repo}/issues/{number}/comments` |
+| `gh.repo({ owner, repo }).issues.comments.get()` | `GET /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.repo({ owner, repo }).issues.comments.update()` | `PATCH /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.repo({ owner, repo }).issues.comments.delete()` | `DELETE /repos/{owner}/{repo}/issues/comments/{id}` |
+| `gh.org(org).repos.list()`               | `GET /orgs/{org}/repos`                       |
+| `gh.org(org).issues.listForAuthenticatedUser()` | `GET /orgs/{org}/issues`              |
 
 ```ts
-const userRepos = await gh.listRepositoriesForAuthenticatedUser({
+const userRepos = await gh.repos.listForAuthenticatedUser({
   visibility: "private",
   affiliation: ["owner", "collaborator"],
   sort: "updated",
   direction: "desc",
 })
-const orgRepos = await gh.listOrganizationRepositories({
-  org: "acme",
+
+const orgRepos = await gh.org("acme").repos.list({
   type: "sources",
   pageSize: 100,
 })
-const issue = await gh.createIssue({ title: "Bug", labels: ["triage"] })
-await gh.updateIssue(issue.number, { body: "Updated", state: "closed" })
+
+const repo = gh.repo({ owner: "acme", repo: "web" })
+const issue = await repo.issues.create({ title: "Bug", labels: ["triage"] })
+const comment = await repo.issues.comments.create(issue.number, { body: "Investigating." })
+await repo.issues.comments.update(comment.id, { body: "Fixed." })
+await repo.issues.comments.delete(comment.id)
+await repo.issues.update(issue.number, { body: "Updated", state: "closed" })
 ```
 
 Repository list options follow GitHub's two endpoint shapes. Authenticated-user
 repository calls support `visibility`, `affiliation`, `type`, `sort`,
 `direction`, `since`, and `before`; `type` cannot be combined with `visibility`
-or `affiliation`. Organization repository calls use `{ org }` and support
-`type`, `sort`, and `direction`.
+or `affiliation`. Organization repository calls are scoped with `gh.org(org)`
+and support `type`, `sort`, and `direction`.
 
 The list methods return a **single page** envelope. Pass `pageSize`, then pass
 `nextPageToken` back to fetch the next page:
 
 ```ts
 let pageToken: string | undefined
+const repo = gh.repo({ owner: "acme", repo: "web" })
+
 do {
-  const page = await gh.listRepositoryIssues({
-    repo: "web",
+  const page = await repo.issues.list({
     state: "all",
     pageSize: 100,
     pageToken,
@@ -87,9 +100,6 @@ do {
   pageToken = page.nextPageToken
 } while (pageToken)
 ```
-
-Every issue method takes an optional `owner` / `repo` to override the connector
-defaults per call — so one connector can work across many repos.
 
 ## Webhooks
 
@@ -107,24 +117,28 @@ Set `onEvent`. GitHub sends every subscribed event to one route
 
 ```ts
 github({
-  // …token, owner, repo, webhookSecret…
+  // …token, webhookSecret…
   onEvent: async ({ event, sixb, client }) => {
     if (event.name !== "issues") return // "issues" | "push" | "ping" | …
-    const { action, issue } = event.payload as unknown as GitHubIssueEvent
+    const { issue, repository } = event.payload
 
     // `sixb` — the live runtime; write the event into your ontology
     await sixb.upsertObject(Issue.id, { id: String(issue.number), title: issue.title })
 
     // `client()` — lazily resolves the GitHub client to call back
-    if (action === "opened") {
-      await (await client()).updateIssue(issue.number, { labels: ["triage"] })
+    if (event.action === "opened") {
+      const gh = await client()
+      await gh
+        .repo({ owner: repository.owner.login, repo: repository.name })
+        .issues.update(issue.number, { labels: ["triage"] })
     }
   },
 })
 ```
 
-`event` is `{ name, action?, deliveryId, payload }`. GitHub's first `ping` arrives
-as `event.name === "ping"`.
+`event.name` is GitHub's webhook event-name union, and narrowing on it narrows
+`event.payload` to the matching GitHub payload type. GitHub's first `ping`
+arrives as `event.name === "ping"`.
 
 ### 2. Register it on GitHub
 
@@ -157,7 +171,7 @@ connector recomputes the HMAC over the raw body and rejects mismatches before
 
 ## Notes
 
-- **Closing issues.** Use `updateIssue(number, { state: "closed" })`, matching
-  GitHub's Update an issue REST endpoint.
+- **Closing issues.** Use `repo.issues.update(number, { state: "closed" })`,
+  matching GitHub's Update an issue REST endpoint.
 - **Pull requests.** GitHub's repository issues endpoint can return pull
   requests with a `pull_request` field; this connector returns them unchanged.

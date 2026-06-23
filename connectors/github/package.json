@@ -20,6 +20,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@octokit/webhooks-types": "^7.6.1",
     "@sixb/connector-rest": "workspace:*",
     "@sixb/core": "workspace:*"
   },
