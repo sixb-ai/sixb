@@ -111,6 +111,17 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/teamleader": {
+      "name": "@sixb/connector-teamleader",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "examples/acme-corp": {
       "name": "@sixb/example-acme-corp",
       "dependencies": {
@@ -855,6 +866,8 @@
     "@sixb/connector-sftp": ["@sixb/connector-sftp@workspace:connectors/sftp"],
 
     "@sixb/connector-sql": ["@sixb/connector-sql@workspace:connectors/sql"],
+
+    "@sixb/connector-teamleader": ["@sixb/connector-teamleader@workspace:connectors/teamleader"],
 
     "@sixb/core": ["@sixb/core@workspace:packages/core"],
 

@@ -23,6 +23,9 @@
       "path": "connectors/sql/tsconfig.build.json"
     },
     {
+      "path": "connectors/teamleader/tsconfig.build.json"
+    },
+    {
       "path": "packages/action-worker/tsconfig.build.json"
     },
     {
