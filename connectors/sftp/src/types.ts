@@ -11,6 +11,7 @@ export interface SftpClient {
   list(path: string): Promise<readonly SftpListEntry[]>
   stat(path: string): Promise<SftpStats>
   exists(path: string): Promise<boolean>
+  ensureDir(path: string): Promise<void>
   read(path: string): Promise<Buffer>
   write(path: string, data: SftpWriteData): Promise<void>
   rename(sourcePath: string, destinationPath: string): Promise<void>

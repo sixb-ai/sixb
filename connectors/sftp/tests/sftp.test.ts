@@ -102,6 +102,80 @@ describe("sftp connector", () => {
     }
   })
 
+  test("ensures deep directories", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      await client.ensureDir("/files/archive/2026/06/reports")
+
+      const stats = await client.stat("/files/archive/2026/06/reports")
+      expect(stats.isDirectory()).toBe(true)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("ensureDir is idempotent when directories already exist", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      await client.ensureDir("/files/archive/2026")
+      await client.ensureDir("/files/archive/2026")
+
+      const stats = await client.stat("/files/archive/2026")
+      expect(stats.isDirectory()).toBe(true)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("ensureDir fails when a parent segment is a file", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      await client.write("/files/archive", "not a directory")
+
+      await expect(client.ensureDir("/files/archive/2026")).rejects.toThrow(
+        "exists and is not a directory"
+      )
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
   test("closes the ssh connection on disconnect", async () => {
     const adapter = sftp({
       host: server.host,

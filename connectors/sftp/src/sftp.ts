@@ -1,15 +1,14 @@
-import type { Callback, SFTPWrapper } from "ssh2"
+import type { SFTPWrapper } from "ssh2"
 import { Client } from "ssh2"
-import type { SftpClient, SftpConnection, SftpConnector, SftpWriteData } from "./types"
+import { createSftpClient } from "./client"
+import type { SftpClient, SftpConnection, SftpConnector } from "./types"
 
-const CONNECTION = Symbol("SixbSftpConnection")
-
-type InternalSftpClient = SftpClient & {
-  [CONNECTION]: {
-    client: Client
-    closed: boolean
-  }
+type ConnectionState = {
+  client: Client
+  closed: boolean
 }
+
+const connections = new WeakMap<SftpClient, ConnectionState>()
 
 /**
  * Create an SFTP connector backed by ssh2.
@@ -27,17 +26,29 @@ export function sftp(connection: SftpConnection): SftpConnector {
         throw new Error("[SixbSftp] Connection aborted before it started.")
       }
 
-      const client = new Client()
-      const sftpClient = await connectSftpClient(client, connection, context.signal)
-      return createSftpClient(client, sftpClient)
+      const sshClient = new Client()
+      const sftpSession = await connectSftpClient(sshClient, connection, context.signal)
+      const sftpClient = createSftpClient(sftpSession)
+      const state = {
+        client: sshClient,
+        closed: false,
+      }
+
+      sshClient.once("close", () => {
+        state.closed = true
+      })
+
+      connections.set(sftpClient, state)
+      return sftpClient
     },
     async disconnect(client) {
-      const state = (client as InternalSftpClient)[CONNECTION]
+      const state = connections.get(client)
       if (!state || state.closed) {
         return
       }
 
       await closeClient(state)
+      connections.delete(client)
     },
   }
 }
@@ -105,93 +116,7 @@ async function connectSftpClient(
   })
 }
 
-function createSftpClient(client: Client, sftpClient: SFTPWrapper): SftpClient {
-  const state = {
-    client,
-    closed: false,
-  }
-
-  client.once("close", () => {
-    state.closed = true
-  })
-
-  const wrappedClient: InternalSftpClient = {
-    [CONNECTION]: state,
-    list(path) {
-      return callResult((callback) => sftpClient.readdir(path, callback))
-    },
-    stat(path) {
-      return callResult((callback) => sftpClient.stat(path, callback))
-    },
-    exists(path) {
-      return new Promise((resolve) => {
-        sftpClient.exists(path, (exists) => resolve(exists))
-      })
-    },
-    read(path) {
-      return callResult((callback) => sftpClient.readFile(path, callback))
-    },
-    write(path, data) {
-      return callVoid((callback) => sftpClient.writeFile(path, toBuffer(data), callback))
-    },
-    rename(sourcePath, destinationPath) {
-      return callVoid((callback) => sftpClient.rename(sourcePath, destinationPath, callback))
-    },
-    delete(path) {
-      return callVoid((callback) => sftpClient.unlink(path, callback))
-    },
-    mkdir(path) {
-      return callVoid((callback) => sftpClient.mkdir(path, callback))
-    },
-    rmdir(path) {
-      return callVoid((callback) => sftpClient.rmdir(path, callback))
-    },
-  }
-
-  return wrappedClient
-}
-
-function callVoid(method: (callback: Callback) => void): Promise<void> {
-  return new Promise((resolve, reject) => {
-    method((error) => {
-      if (error) {
-        reject(error)
-        return
-      }
-
-      resolve()
-    })
-  })
-}
-
-function callResult<T>(
-  method: (callback: (error: Error | undefined, result: T) => void) => void
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    method((error, result) => {
-      if (error) {
-        reject(error)
-        return
-      }
-
-      resolve(result)
-    })
-  })
-}
-
-function toBuffer(data: SftpWriteData): string | Buffer {
-  if (typeof data === "string" || Buffer.isBuffer(data)) {
-    return data
-  }
-
-  if (data instanceof ArrayBuffer) {
-    return Buffer.from(data)
-  }
-
-  return Buffer.from(data.buffer, data.byteOffset, data.byteLength)
-}
-
-async function closeClient(state: InternalSftpClient[typeof CONNECTION]): Promise<void> {
+async function closeClient(state: ConnectionState): Promise<void> {
   await new Promise<void>((resolve) => {
     const finish = () => {
       cleanup()
