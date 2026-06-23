@@ -1,4 +1,12 @@
-import { col, defineConnector, defineDataset, defineSync, type SyncDefinition } from "../src"
+import {
+  type BlobInfo,
+  col,
+  defineConnector,
+  defineDataset,
+  defineSync,
+  type FileRef,
+  type SyncDefinition,
+} from "../src"
 
 const erpDb = defineConnector("erpDb", {
   type: "sql",
@@ -22,6 +30,14 @@ const syncOrders = defineSync("sync-orders")
     const _projectId: string = context.projectId
     const _syncId: string = context.syncId
     const _signal: AbortSignal = context.signal
+    const _fileRef: FileRef = await context.blobs.put({
+      body: new Uint8Array([1, 2, 3]),
+      fileName: "orders.csv",
+      mediaType: "text/csv",
+      logicalPath: "erp/orders.csv",
+    })
+    const _blobInfo: BlobInfo | null = await context.blobs.stat(_fileRef.blobId)
+    const _stream: ReadableStream<Uint8Array> = await context.blobs.open(_fileRef.blobId)
 
     // @ts-expect-error connector client typing flows into sync read handlers
     db.nonexistent()
@@ -33,6 +49,9 @@ const syncOrders = defineSync("sync-orders")
 
     // @ts-expect-error sync read context should not expose the Sixb runtime
     context.sixb
+
+    // @ts-expect-error sync blob context exposes only put, stat, and open
+    context.blobs.delete(_fileRef.blobId)
 
     return [{ id: 1 }]
   })

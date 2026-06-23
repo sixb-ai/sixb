@@ -162,6 +162,7 @@ describe("defineSync", () => {
         projectId: "project-1",
         syncId: "sync-orders",
         signal: new AbortController().signal,
+        blobs: createTestRuntimeDeps().blobStorage,
         checkpoint: { cursor: "cursor-1" },
         setCheckpoint(next) {
           nextCheckpoint = next
@@ -193,6 +194,7 @@ describe("defineSync", () => {
         projectId: "project-1",
         syncId: "sync-orders",
         signal: new AbortController().signal,
+        blobs: createTestRuntimeDeps().blobStorage,
       }
     )
 

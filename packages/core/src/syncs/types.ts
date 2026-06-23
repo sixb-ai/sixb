@@ -1,3 +1,4 @@
+import type { BlobStorage } from "../blob-storage"
 import {
   type ConnectorAdapter,
   type ConnectorClient,
@@ -10,11 +11,15 @@ import type { ScheduleDefinition } from "../schedules"
 import type { RunTrigger } from "../triggers"
 import { isRunTrigger } from "../triggers"
 
+/** Blob operations available to sync read handlers. */
+export type SyncBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
+
 /** Context passed to a sync read handler. */
 export type SyncReadContext<TCheckpoint = never> = {
   readonly projectId: string
   readonly syncId: string
   readonly signal: AbortSignal
+  readonly blobs: SyncBlobContext
 } & ([TCheckpoint] extends [never]
   ? { readonly checkpoint?: undefined }
   : {
