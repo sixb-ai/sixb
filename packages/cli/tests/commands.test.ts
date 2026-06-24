@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { builtAtlasOutdir, resolveProductionPaths } from "../src/lib/production"
@@ -23,6 +23,29 @@ function runCli(args: readonly string[]): { exitCode: number; stdout: string; st
 }
 
 const tempDirs: string[] = []
+
+async function collectFiles(
+  directory: string,
+  predicate: (path: string) => boolean
+): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  const files: string[] = []
+
+  for (const entry of entries) {
+    const path = join(directory, entry.name)
+
+    if (entry.isDirectory()) {
+      files.push(...(await collectFiles(path, predicate)))
+      continue
+    }
+
+    if (entry.isFile() && predicate(path)) {
+      files.push(path)
+    }
+  }
+
+  return files.sort()
+}
 
 afterEach(async () => {
   while (tempDirs.length > 0) {
@@ -71,20 +94,25 @@ describe("sixb command dispatch", () => {
   })
 
   test("does not document removed production command shapes", async () => {
+    const staleCommands = [
+      "sixb start",
+      "sixb worker --worker",
+      "bun ../../packages/cli/src/index.tsx start",
+    ]
+
     const staleCommandFiles = [
-      "docs/concepts/pipeline.md",
-      "docs/concepts/workflows.md",
-      "examples/acme-corp/package.json",
-      "examples/panasonic-ac/package.json",
-      "examples/roku-tv/package.json",
+      join(repoRoot, "README.md"),
+      join(repoRoot, "packages/cli/README.md"),
+      ...(await collectFiles(join(repoRoot, "docs"), (file) => file.endsWith(".md"))),
+      ...(await collectFiles(join(repoRoot, "examples"), (file) => file.endsWith("package.json"))),
     ]
 
     for (const file of staleCommandFiles) {
-      const source = await readFile(join(repoRoot, file), "utf-8")
+      const source = await readFile(file, "utf-8")
 
-      expect(source).not.toContain("sixb start")
-      expect(source).not.toContain("sixb worker --worker")
-      expect(source).not.toContain("bun ../../packages/cli/src/index.tsx start")
+      for (const command of staleCommands) {
+        expect(source).not.toContain(command)
+      }
     }
   })
 })
