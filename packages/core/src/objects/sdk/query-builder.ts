@@ -147,7 +147,7 @@ class ObjectQueryBuilderImpl<
   }
 
   expand(
-    link: LinkToken<string, string, string>,
+    link: LinkToken<string, string, string | readonly string[]>,
     optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
     build?: NestedExpandBuild
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
@@ -311,7 +311,7 @@ class ObjectExpandBuilderImpl {
   constructor(readonly expansions: readonly ObjectExpansion[] = []) {}
 
   expand(
-    link: LinkToken<string, string, string>,
+    link: LinkToken<string, string, string | readonly string[]>,
     optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
     build?: NestedExpandBuild
   ): ObjectExpandBuilderImpl {
@@ -323,7 +323,7 @@ class ObjectExpandBuilderImpl {
 }
 
 function buildExpansion(
-  link: LinkToken<string, string, string>,
+  link: LinkToken<string, string, string | readonly string[]>,
   optionsOrBuild: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild | undefined,
   build: NestedExpandBuild | undefined
 ): ObjectExpansion {

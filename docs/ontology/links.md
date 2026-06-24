@@ -33,16 +33,45 @@ export const Project = defineObjectType({
 })
 ```
 
-## link() parameters
+## Link forms
 
 ```ts
-link(id, target?, options?)
+link(id, target, options?)
+link.ref(id, targetTypeId, options?)
+link.self(id, options?)
+link.any(id, options?)
 ```
+
+For links to object types you can import directly, use `link(...)`:
+
+```ts
+link("customer", Customer)
+link("relatedTo", [Project, Task])
+```
+
+For id references, self-links, or intentionally open links, use the explicit helpers:
+
+```ts
+link.ref("customer", "Customer")
+link.self("parent", { cardinality: "one" })
+link.any("relatedTo", { cardinality: "many" })
+```
+
+Use `link.ref(...)` when you want to reference another object type by id instead of importing it.
+Sixb's generated ontology type manifest lets typed client queries resolve those ids.
+
+Use `link.self(...)` for recursive relationships such as folders, org charts, or threaded
+comments. The target id is filled in from the object type that declares the link.
+
+Use `link.any(...)` only for wildcard relationships that can point to any object type. Prefer a
+specific target for relationships your app understands.
+
+## Link parameters
 
 | Parameter | Required | Expected |
 | --- | --- | --- |
 | `id` | Yes | A stable relationship key, unique within the source object type |
-| `target` | No | The object type(s) this link can point to. Defaults to `"*"` (wildcard) |
+| `target` | Depends on helper | The object type or object type id this link can point to |
 | `options` | No | Metadata and relationship behavior |
 
 `options` accepts:
@@ -56,24 +85,22 @@ link(id, target?, options?)
 
 ## Target forms
 
-`target` accepts an object type, an object type id string, an array of either, or nothing
-(wildcard).
+`link(...)` accepts an object type or an array of object types. `link.ref(...)` accepts an object
+type id string or an array of ids. `link.self(...)` points back to the declaring object type.
+`link.any(...)` creates a wildcard.
 
 | Form | Example | Points to |
 | --- | --- | --- |
 | Object type | `link("customer", Customer)` | One specific type |
-| Object type id | `link("customer", "Customer")` | One specific type, by id |
+| Object type id | `link.ref("customer", "Customer")` | One specific type, by id |
 | Array of types | `link("relatedTo", [Project, Task])` | Any of the listed types |
-| Array of ids | `link("relatedTo", ["Project", "Task"])` | Any of the listed types |
-| Wildcard (omitted) | `link("anything")` | Any object type |
-| Wildcard with options | `link("anything", { cardinality: "many" })` | Any object type |
+| Array of ids | `link.ref("relatedTo", ["Project", "Task"])` | Any of the listed types |
+| Self-link | `link.self("parent")` | The declaring object type |
+| Wildcard | `link.any("anything")` | Any object type |
+| Wildcard with options | `link.any("anything", { cardinality: "many" })` | Any object type |
 
-Passing an object type extracts its `.id` at build time, so `link("customer", Customer)` and
-`link("customer", "Customer")` produce the same result. Prefer the object-type form — it keeps the
-target type-checked and powers typed traversal.
-
-When the target is omitted or `"*"`, the link is a **wildcard** and can point to any object type.
-Prefer a specific target; reserve wildcards for genuinely polymorphic relationships.
+Passing an object type extracts its `.id` at build time. Prefer the object-type form when the
+target can be imported — it keeps the target type-checked and powers typed traversal.
 
 ## Cardinality
 

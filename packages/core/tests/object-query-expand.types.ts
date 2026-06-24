@@ -6,9 +6,10 @@
  * ("type instantiation is excessively deep"). The `@ts-expect-error` lines prove
  * links and `orderBy` properties are constrained to the resolved target type.
  *
- * Each `.expand(...)` widens the row's `.links` (cardinality `"one"` →
- * `Target | null`, `"many"` → `Target[]`, with optional `.linkProperties` and
- * nested `.links`).
+ * Slice 3 adds the row-typing section: each `.expand(...)` widens the row's
+ * `.links` (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, with
+ * optional `.linkProperties` and nested `.links`). Direct ObjectType links are
+ * precise without a generated registry; id-only refs still use the registry.
  */
 import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
 
@@ -53,7 +54,7 @@ const Folder = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
   ],
-  links: [link("parent", "Folder", { cardinality: "one" })],
+  links: [link.self("parent", { cardinality: "one" })],
 })
 
 const ProjectFolder = defineObjectType({
@@ -91,6 +92,8 @@ type AppRegistry =
 // Server path: `objects(T)` binds the full registry, so nested targets resolve.
 declare const projects: ObjectQueryBuilder<typeof Project, AppRegistry, []>
 declare const folders: ObjectQueryBuilder<typeof Folder, AppRegistry, []>
+// Client path with no full registry. Direct ObjectType links still resolve.
+declare const startTypeOnly: ObjectQueryBuilder<typeof Project, typeof Project, []>
 
 function authoring(): void {
   // 2-hop, precise: Project -> opportunity -> { company, contact }.
@@ -126,6 +129,13 @@ function authoring(): void {
 
   // @ts-expect-error — `name` is a Project property, not on the Opportunity target.
   projects.expand(Project.l.opportunity, { orderBy: [{ property: Project.p.name }] })
+
+  startTypeOnly.expand(Project.l.opportunity, (o) =>
+    o.expand(
+      // @ts-expect-error — direct target metadata resolves Opportunity without a registry.
+      Folder.l.parent
+    )
+  )
 }
 
 void authoring
@@ -213,3 +223,12 @@ function folderRowAssertions(row: FolderRow): void {
   void [_p1Id, _p2Id]
 }
 void folderRowAssertions
+
+// Client path with direct ObjectType targets: no generated registry is needed.
+const builtDirectClient = startTypeOnly.expand(Project.l.opportunity)
+type DirectClientRow = RowOf<typeof builtDirectClient>
+function directClientRowAssertions(row: DirectClientRow): void {
+  const _id: "Opportunity" = row.links.opportunity!.objectTypeId
+  void _id
+}
+void directClientRowAssertions

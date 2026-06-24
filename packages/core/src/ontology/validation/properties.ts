@@ -27,7 +27,7 @@ export function assertPropertyTokenBelongsToObjectType(
 
 export function assertLinkTokenBelongsToObjectType(
   objectType: ObjectTypeWithPropertyTokens,
-  link: LinkToken<string, string, string, ObjectLink>
+  link: LinkToken<string, string, string | readonly string[], ObjectLink>
 ): void {
   if (link.objectTypeId !== objectType.id) {
     throw new OntologyValidationError(

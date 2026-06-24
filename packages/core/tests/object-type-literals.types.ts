@@ -1,4 +1,11 @@
-import { defineObjectType, integerEnum, link, prop, stringEnum } from "../src"
+import {
+  defineObjectType,
+  integerEnum,
+  link,
+  type ObjectLinkTargetType,
+  prop,
+  stringEnum,
+} from "../src"
 
 /**
  * Compile-time contract tests for builder literal inference.
@@ -53,7 +60,7 @@ const thermostat = defineObjectType({
     prop("mode", stringEnum(["off", "heat", "cool", "auto"]), { required: true }),
     prop("fanSpeed", integerEnum([1, 2, 3, 4])),
   ],
-  links: [link("locatedIn", "room", { cardinality: "one" })],
+  links: [link.ref("locatedIn", "room", { cardinality: "one" })],
   search: {
     title: "externalId",
     defaultText: ["externalId"],
@@ -90,12 +97,18 @@ type _modeEnumUnion = Expect<
 
 // ── link() overload type tests ─────────────────────────────
 
-// Wildcard: no target → "*"
-const wildcardLink = link("anything")
+// Ambiguous legacy forms are intentionally rejected.
+// @ts-expect-error — id references must use link.ref(...).
+link("locatedIn", "space")
+// @ts-expect-error — wildcard links must use link.any(...).
+link("anything")
+
+// Wildcard target → "*"
+const wildcardLink = link.any("anything")
 type _wildcardTarget = Expect<Equal<typeof wildcardLink.targetObjectTypeId, "*">>
 
 // Wildcard with options
-const wildcardWithOptions = link("anything", { cardinality: "many" })
+const wildcardWithOptions = link.any("anything", { cardinality: "many" })
 type _wildcardOptsTarget = Expect<Equal<typeof wildcardWithOptions.targetObjectTypeId, "*">>
 type _wildcardOptsCardinality = Expect<Equal<typeof wildcardWithOptions.cardinality, "many">>
 
@@ -107,6 +120,7 @@ const _Room = defineObjectType({
 })
 const objectTypeLink = link("locatedIn", _Room)
 type _otLinkTarget = Expect<Equal<typeof objectTypeLink.targetObjectTypeId, "room">>
+type _otLinkTargetType = Expect<Equal<ObjectLinkTargetType<typeof objectTypeLink>["id"], "room">>
 
 // ObjectType target + options
 const objectTypeLinkWithOpts = link("locatedIn", _Room, { cardinality: "one" })
@@ -123,17 +137,29 @@ const objectTypeArrayLink = link("locatedIn", [_Room, _Floor])
 type _otArrayTarget = Expect<
   Equal<typeof objectTypeArrayLink.targetObjectTypeId, ("room" | "floor")[]>
 >
-
-// String target (backward compat)
-const stringLink = link("locatedIn", "space")
-type _stringTarget = Expect<Equal<typeof stringLink.targetObjectTypeId, "space">>
-
-// String array target (backward compat)
-const stringArrayLink = link("controls", ["a", "b"] as const)
-type _stringArrayTarget = Expect<
-  Equal<typeof stringArrayLink.targetObjectTypeId, readonly ["a", "b"]>
+type _otArrayTargetType = Expect<
+  Equal<ObjectLinkTargetType<typeof objectTypeArrayLink>["id"], "room" | "floor">
 >
 
-// Explicit wildcard string (backward compat)
-const explicitWildcard = link("anything", "*")
-type _explicitWildcardTarget = Expect<Equal<typeof explicitWildcard.targetObjectTypeId, "*">>
+// Explicit id reference target
+const refLink = link.ref("locatedIn", "space")
+type _refTarget = Expect<Equal<typeof refLink.targetObjectTypeId, "space">>
+type _refTargetType = Expect<Equal<ObjectLinkTargetType<typeof refLink>, never>>
+
+const refLinkWithOpts = link.ref("locatedIn", "space", { cardinality: "one" })
+type _refTargetWithOpts = Expect<Equal<typeof refLinkWithOpts.targetObjectTypeId, "space">>
+type _refCardinalityWithOpts = Expect<Equal<typeof refLinkWithOpts.cardinality, "one">>
+
+// Explicit id reference array target
+const refArrayLink = link.ref("controls", ["a", "b"] as const)
+type _refArrayTarget = Expect<Equal<typeof refArrayLink.targetObjectTypeId, readonly ["a", "b"]>>
+
+// Self target normalizes to the source object type id inside defineObjectType.
+const _Folder = defineObjectType({
+  id: "folder",
+  name: "Folder",
+  properties: [prop("id", "string", { required: true, primary: true })],
+  links: [link.self("parent", { cardinality: "one" })],
+})
+type _selfLinkTarget = Expect<Equal<typeof _Folder.l.parent.targetObjectTypeId, "folder">>
+type _selfLinkCardinality = Expect<Equal<typeof _Folder.l.parent.link.cardinality, "one">>

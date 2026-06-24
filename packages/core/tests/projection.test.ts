@@ -37,7 +37,7 @@ const Room = defineObjectType({
   ],
   links: [
     link("inBuilding", Building, { cardinality: "one" }),
-    link("hasSensors", "sensor", { cardinality: "many" }),
+    link.ref("hasSensors", "sensor", { cardinality: "many" }),
   ],
 })
 
@@ -78,7 +78,7 @@ const TypeWithWildcardLink = defineObjectType({
   id: "wild",
   name: "Wild",
   properties: [prop("id", "string", { required: true, primary: true }), prop("ref", "string")],
-  links: [link("anything")],
+  links: [link.any("anything")],
 })
 
 // ── defineProjection ─────────────────────────────────────────

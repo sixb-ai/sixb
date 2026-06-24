@@ -29,6 +29,8 @@ export type {
   MapSchema,
   ObjectFieldSchema,
   ObjectLink,
+  ObjectLinkTargetMetadata,
+  ObjectLinkTargetType,
   ObjectSchema,
   ObjectType,
   ObjectTypeSearchMetadata,
@@ -54,6 +56,7 @@ export { OntologyValidationError } from "./errors"
 
 // ── Helpers ─────────────────────────────────────────────────
 
+export type { DirectLinkResult, DirectLinkTarget } from "./builders"
 export {
   defineInterface,
   defineObjectType,

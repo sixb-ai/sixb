@@ -13,7 +13,7 @@ const Equipment = defineObjectType({
     prop("name", "string", { required: true }),
     prop("manufacturer", "string"),
   ],
-  links: [link("locatedIn", "Location", { cardinality: "one" })],
+  links: [link.ref("locatedIn", "Location", { cardinality: "one" })],
 })
 
 const HVACEquipment = defineObjectType({
@@ -21,7 +21,7 @@ const HVACEquipment = defineObjectType({
   id: "HVACEquipment",
   name: "HVAC Equipment",
   properties: [prop("capacity", "double")],
-  links: [link("feeds", "Equipment", { cardinality: "many" })],
+  links: [link.ref("feeds", "Equipment", { cardinality: "many" })],
 })
 
 const AHU = defineObjectType({
@@ -115,7 +115,7 @@ describe("defineObjectType with string extends (pre-flattened)", () => {
     name: "Pre-Flattened Type",
     extends: "brick:Equipment",
     properties: [prop("inheritedProp", "string"), prop("ownProp", "double", { required: true })],
-    links: [link("hasLocation", "brick:Location")],
+    links: [link.ref("hasLocation", "brick:Location")],
   })
 
   test(".extends stores the string directly", () => {
@@ -573,7 +573,7 @@ describe("link target validation", () => {
       id: "Source",
       name: "Source",
       properties: [prop("id", "string", { required: true, primary: true })],
-      links: [link("rel", ["TypeA", "TypeB"])],
+      links: [link.ref("rel", ["TypeA", "TypeB"])],
     })
 
     const sixb = new Sixb({
@@ -605,7 +605,7 @@ describe("link target validation", () => {
       id: "Src",
       name: "Src",
       properties: [prop("id", "string", { required: true, primary: true })],
-      links: [link("rel", ["Equipment"])],
+      links: [link.ref("rel", ["Equipment"])],
     })
 
     const sixb = new Sixb({
@@ -630,7 +630,7 @@ describe("link target validation", () => {
       id: "WildSrc",
       name: "WildSrc",
       properties: [prop("id", "string", { required: true, primary: true })],
-      links: [link("anything", "*")],
+      links: [link.any("anything")],
     })
 
     const sixb = new Sixb({

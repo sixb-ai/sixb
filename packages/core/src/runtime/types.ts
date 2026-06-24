@@ -35,7 +35,7 @@ import type {
   ObjectQuerySortDirection,
   ValidatedObjectQuery,
 } from "../objects/query"
-import type { ObjectRef, ObjectType, Property, ValueType } from "../ontology"
+import type { ObjectLinkTargetType, ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type {
   InferObjectProperties,
   InferPropertyUnit,
@@ -464,19 +464,26 @@ type ObjectTypeForId<
   ? ObjectTypeWithPropertyTokens
   : Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>
 
+type DirectObjectTypeForLink<TLinkToken> =
+  TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue, infer TLink>
+    ? Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
+    : never
+
 type ObjectTypeForLinkTarget<
   TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TLinkToken,
-> = ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>
+> = [DirectObjectTypeForLink<TLinkToken>] extends [never]
+  ? ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>
+  : DirectObjectTypeForLink<TLinkToken>
 
 /**
  * True when the target type is a concrete ontology type rather than the degraded
- * generic base. When a link's target is not in the registry (the client path
- * until a registry is generated), `ObjectTypeForId` falls back to the base type,
- * whose property ids are `string`; instantiating the typed token map over the
- * broad `Property` union there overflows TypeScript (the same reason
- * `UntypedPropertyPredicate` exists). The expand option/sort types degrade to a
- * loose shape in that case so the client path stays shallow instead of failing.
+ * generic base. Direct ObjectType links resolve before this point; unresolved
+ * id-only refs fall back to the base type, whose property ids are `string`.
+ * Instantiating the typed token map over the broad `Property` union there
+ * overflows TypeScript (the same reason `UntypedPropertyPredicate` exists). The
+ * expand option/sort types degrade to a loose shape in that case so unresolved
+ * client paths stay shallow instead of failing.
  */
 type HasKnownObjectType<TObjectType extends ObjectTypeWithPropertyTokens> =
   string extends TObjectType["id"] ? false : true
@@ -503,8 +510,9 @@ export type ObjectExpandOptions<TObjectType extends ObjectTypeWithPropertyTokens
 // via {@link ObjectQueryRow}. The discipline that keeps this within TypeScript's
 // recursion limits (proven on the real ADN graph): recursion lives ONLY in the
 // lazily-evaluated row types below, never in constraints (which are eager); the
-// builders are type aliases; targets resolve by id against the registry; and the
-// row is read through a direct conditional `infer` (see `BuiltRow`).
+// builders are type aliases; targets resolve through direct metadata first and
+// the id registry second; and the row is read through a direct conditional
+// `infer` (see `BuiltRow`).
 
 /**
  * Cardinality declared on a link token's underlying link; absent cardinality is
@@ -530,14 +538,15 @@ type ObjectLinkCardinality<TLink> = TLink extends { cardinality: infer TCardinal
   ? TCardinality
   : "many"
 
-type ObjectLinkTarget<
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TLink,
-> = TLink extends {
-  targetObjectTypeId: infer TTargetObjectTypeId extends LinkTargetObjectTypeIdValue
-}
-  ? ObjectTypeForId<TRegisteredObjectTypes, ResolveTargetTypeId<TTargetObjectTypeId>>
-  : ObjectTypeWithPropertyTokens
+type ObjectLinkTarget<TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens, TLink> = [
+  Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>,
+] extends [never]
+  ? TLink extends {
+      targetObjectTypeId: infer TTargetObjectTypeId extends LinkTargetObjectTypeIdValue
+    }
+    ? ObjectTypeForId<TRegisteredObjectTypes, ResolveTargetTypeId<TTargetObjectTypeId>>
+    : ObjectTypeWithPropertyTokens
+  : Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
 
 type ObjectLinkById<
   TObjectType extends Pick<ObjectType, "links">,
@@ -698,21 +707,20 @@ export type ObjectQueryRow<
 
 /**
  * Builder passed to the nested `.expand(..., (e) => …)` callback. Exposes only
- * `expand`, resolving the next target type by id against the registry so deeper
- * hops stay typed and accumulating `TAccumulated` so the nested `.links` shape is
- * recovered from the callback's return.
+ * `expand`, resolving the next target type from direct metadata or the id
+ * registry so deeper hops stay typed and accumulating `TAccumulated` so the
+ * nested `.links` shape is recovered from the callback's return.
  *
  * A type alias (not an interface) so relating two instantiations stays
  * structural — the same discipline `TwinObject` follows to avoid TS2589
  * (see the note above `TwinObject`). The only recursion is in the lazily
  * evaluated return/callback positions.
  *
- * When the target type is the degraded base (an unregistered link target, i.e.
- * the client path until a registry is generated), the builder collapses to the
- * untyped, non-generic {@link UntypedExpandBuilder}: nested expansion still
- * works, just without target-specific link/property checking, and — crucially —
- * without the self-referential generic instantiation over the broad base type
- * that would otherwise overflow TypeScript.
+ * When the target type is the degraded base (an unresolved id-only target), the
+ * builder collapses to the untyped, non-generic {@link UntypedExpandBuilder}:
+ * nested expansion still works, just without target-specific link/property
+ * checking, and — crucially — without the self-referential generic instantiation
+ * over the broad base type that would otherwise overflow TypeScript.
  */
 export type ObjectExpandBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
@@ -857,8 +865,8 @@ export interface ObjectQueryBuilder<
    * Each call widens `TLinks`, so `list`/`first` rows gain a typed `.links` entry
    * for this link (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`,
    * each carrying optional `linkProperties` and its own nested `.links`). Nested
-   * targets stay precise on the server path (full registry) and degrade to the
-   * loose base on the client until the generated registry sharpens them.
+   * targets stay precise when the link uses direct object targets or when the id
+   * target resolves through the registry, and otherwise degrade to the loose base.
    */
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,

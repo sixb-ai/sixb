@@ -63,7 +63,7 @@ const Space = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
   ],
-  links: [link("contains", "device", { cardinality: "many" })],
+  links: [link.ref("contains", "device", { cardinality: "many" })],
 })
 
 const Device = defineObjectType({
