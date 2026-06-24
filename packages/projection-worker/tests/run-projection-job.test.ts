@@ -241,6 +241,9 @@ function createFinishFailingProjectionRunStorage(
     list(input) {
       return delegate.list(input)
     },
+    listLatestByProjectionIds(input) {
+      return delegate.listLatestByProjectionIds(input)
+    },
   }
 }
 

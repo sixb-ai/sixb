@@ -43,7 +43,38 @@ export function zeroProjectionRunCounters(): ProjectionRunCounters {
   return counters
 }
 
-export interface ProjectionRunRecord extends ProjectionRunCounters {
+// The object type id(s) the projection materializes are stored on the run so
+// visibility can be decided from the run alone (`object.view`), matching how
+// action runs carry their subject's object type. Object/telemetry runs set
+// `objectTypeId`; link runs set both `sourceObjectTypeId` and
+// `targetObjectTypeId`. All are optional so rows written before this column
+// existed (and unresolvable projections) stay representable.
+export interface ProjectionRunObjectTypes {
+  readonly objectTypeId?: string
+  readonly sourceObjectTypeId?: string
+  readonly targetObjectTypeId?: string
+}
+
+/**
+ * A run is visible iff every object type it targets passes `canView`. The
+ * single rule shared by storage filtering (`canView` = set membership) and
+ * authorization (`canView` = `object.view` grant), so the two never drift. A
+ * run with no recorded object types (legacy/unresolved) is never visible to a
+ * scoped principal.
+ */
+export function projectionRunObjectTypesVisible(
+  run: ProjectionRunObjectTypes,
+  canView: (objectTypeId: string) => boolean
+): boolean {
+  return run.objectTypeId !== undefined
+    ? canView(run.objectTypeId)
+    : run.sourceObjectTypeId !== undefined &&
+        run.targetObjectTypeId !== undefined &&
+        canView(run.sourceObjectTypeId) &&
+        canView(run.targetObjectTypeId)
+}
+
+export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRunObjectTypes {
   readonly id: string
   readonly projectId: string
   readonly projectionId: string
@@ -56,7 +87,7 @@ export interface ProjectionRunRecord extends ProjectionRunCounters {
   readonly errorMessage?: string
 }
 
-export interface StartProjectionRunInput {
+export interface StartProjectionRunInput extends ProjectionRunObjectTypes {
   readonly id: string
   readonly projectId: string
   readonly projectionId: string
@@ -91,6 +122,10 @@ export interface ListProjectionRunsInput {
   readonly projectionKind?: ProjectionKind
   readonly datasetId?: string
   readonly datasetVersionId?: string
+  // The viewable object type ids (a principal's `object.view` grants). A run is
+  // included only if every object type it targets is in this set. Omit for
+  // privileged callers (no filter); an empty set matches no runs.
+  readonly objectTypeIds?: readonly string[]
   readonly statuses?: readonly ProjectionRunStatus[]
   readonly startedAfter?: Date
   readonly startedBefore?: Date
@@ -105,10 +140,22 @@ export interface ListProjectionRunsResult {
   readonly total: number
 }
 
+export interface ListLatestProjectionRunsInput {
+  readonly projectId: string
+  readonly projectionIds: readonly string[]
+}
+
+export interface ListLatestProjectionRunsResult {
+  readonly runs: readonly ProjectionRunRecord[]
+}
+
 export interface ProjectionRunStorage {
   start(input: StartProjectionRunInput): Promise<ProjectionRunRecord>
   update(input: UpdateProjectionRunInput): Promise<ProjectionRunRecord>
   finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord>
   getById(params: { projectId: string; id: string }): Promise<ProjectionRunRecord | null>
   list(input: ListProjectionRunsInput): Promise<ListProjectionRunsResult>
+  listLatestByProjectionIds(
+    input: ListLatestProjectionRunsInput
+  ): Promise<ListLatestProjectionRunsResult>
 }

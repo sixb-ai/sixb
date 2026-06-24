@@ -1,4 +1,6 @@
 // ── Builders ─────────────────────────────────────────────────
+
+export type { ProjectionObjectTypeIds } from "./builders"
 export {
   categorizeProjections,
   defineLinkProjection,
@@ -10,6 +12,7 @@ export {
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
   projectionKindOf,
+  projectionObjectTypeIds,
 } from "./builders"
 // ── Errors ──────────────────────────────────────────────────
 export { ProjectionValidationError } from "./errors"

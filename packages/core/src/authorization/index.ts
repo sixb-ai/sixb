@@ -7,6 +7,8 @@ export { resolveAuthorizationContext, resolveRoleGrants } from "./resolve"
 export {
   canViewActionRun,
   canViewPipelineRun,
+  canViewProjection,
+  canViewProjectionRun,
   canViewWorkflowIntervention,
   canViewWorkflowRun,
 } from "./run-visibility"

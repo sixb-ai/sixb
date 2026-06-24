@@ -4739,6 +4739,28 @@ export type ListProjectionsResponses = {
           targetObjectTypeId: string
         }
       }
+      latestRun: {
+        id: string
+        projectId: string
+        projectionId: string
+        projectionKind: "object" | "link" | "telemetry"
+        datasetId: string
+        datasetVersionId: string
+        objectTypeId?: string
+        sourceObjectTypeId?: string
+        targetObjectTypeId?: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        rowsProcessed: number
+        rowsSkipped: number
+        objectsUpserted: number
+        linksUpserted: number
+        telemetryPointsAppended: number
+        telemetryPointsSkipped: number
+        telemetryRowsFailed: number
+      } | null
     }>
     linkProjections: Array<{
       _tag: "LinkProjectionDefinition"
@@ -4749,6 +4771,28 @@ export type ListProjectionsResponses = {
       datasetId: string
       sourceField: string
       targetField: string
+      latestRun: {
+        id: string
+        projectId: string
+        projectionId: string
+        projectionKind: "object" | "link" | "telemetry"
+        datasetId: string
+        datasetVersionId: string
+        objectTypeId?: string
+        sourceObjectTypeId?: string
+        targetObjectTypeId?: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        rowsProcessed: number
+        rowsSkipped: number
+        objectsUpserted: number
+        linksUpserted: number
+        telemetryPointsAppended: number
+        telemetryPointsSkipped: number
+        telemetryRowsFailed: number
+      } | null
     }>
     telemetryProjections: Array<{
       _tag: "TelemetryProjectionDefinition"
@@ -4760,6 +4804,28 @@ export type ListProjectionsResponses = {
       atField: string
       valueField: string
       unitField?: string
+      latestRun: {
+        id: string
+        projectId: string
+        projectionId: string
+        projectionKind: "object" | "link" | "telemetry"
+        datasetId: string
+        datasetVersionId: string
+        objectTypeId?: string
+        sourceObjectTypeId?: string
+        targetObjectTypeId?: string
+        status: "running" | "succeeded" | "failed" | "cancelled"
+        startedAt: string
+        finishedAt?: string
+        errorMessage?: string
+        rowsProcessed: number
+        rowsSkipped: number
+        objectsUpserted: number
+        linksUpserted: number
+        telemetryPointsAppended: number
+        telemetryPointsSkipped: number
+        telemetryRowsFailed: number
+      } | null
     }>
   }
 }
@@ -4807,6 +4873,28 @@ export type GetProjectionResponses = {
             targetObjectTypeId: string
           }
         }
+        latestRun: {
+          id: string
+          projectId: string
+          projectionId: string
+          projectionKind: "object" | "link" | "telemetry"
+          datasetId: string
+          datasetVersionId: string
+          objectTypeId?: string
+          sourceObjectTypeId?: string
+          targetObjectTypeId?: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          rowsProcessed: number
+          rowsSkipped: number
+          objectsUpserted: number
+          linksUpserted: number
+          telemetryPointsAppended: number
+          telemetryPointsSkipped: number
+          telemetryRowsFailed: number
+        } | null
       }
     | {
         _tag: "LinkProjectionDefinition"
@@ -4817,6 +4905,28 @@ export type GetProjectionResponses = {
         datasetId: string
         sourceField: string
         targetField: string
+        latestRun: {
+          id: string
+          projectId: string
+          projectionId: string
+          projectionKind: "object" | "link" | "telemetry"
+          datasetId: string
+          datasetVersionId: string
+          objectTypeId?: string
+          sourceObjectTypeId?: string
+          targetObjectTypeId?: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          rowsProcessed: number
+          rowsSkipped: number
+          objectsUpserted: number
+          linksUpserted: number
+          telemetryPointsAppended: number
+          telemetryPointsSkipped: number
+          telemetryRowsFailed: number
+        } | null
       }
     | {
         _tag: "TelemetryProjectionDefinition"
@@ -4828,10 +4938,152 @@ export type GetProjectionResponses = {
         atField: string
         valueField: string
         unitField?: string
+        latestRun: {
+          id: string
+          projectId: string
+          projectionId: string
+          projectionKind: "object" | "link" | "telemetry"
+          datasetId: string
+          datasetVersionId: string
+          objectTypeId?: string
+          sourceObjectTypeId?: string
+          targetObjectTypeId?: string
+          status: "running" | "succeeded" | "failed" | "cancelled"
+          startedAt: string
+          finishedAt?: string
+          errorMessage?: string
+          rowsProcessed: number
+          rowsSkipped: number
+          objectsUpserted: number
+          linksUpserted: number
+          telemetryPointsAppended: number
+          telemetryPointsSkipped: number
+          telemetryRowsFailed: number
+        } | null
       }
 }
 
 export type GetProjectionResponse = GetProjectionResponses[keyof GetProjectionResponses]
+
+export type ListProjectionRunsData = {
+  body?: never
+  path?: never
+  query?: {
+    projectionId?: string
+    projectionKind?: "object" | "link" | "telemetry"
+    datasetId?: string
+    datasetVersionId?: string
+    status?: "running" | "succeeded" | "failed" | "cancelled"
+    startedAfter?: string
+    startedBefore?: string
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/projection-runs"
+}
+
+export type ListProjectionRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListProjectionRunsError = ListProjectionRunsErrors[keyof ListProjectionRunsErrors]
+
+export type ListProjectionRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      projectionId: string
+      projectionKind: "object" | "link" | "telemetry"
+      datasetId: string
+      datasetVersionId: string
+      objectTypeId?: string
+      sourceObjectTypeId?: string
+      targetObjectTypeId?: string
+      status: "running" | "succeeded" | "failed" | "cancelled"
+      startedAt: string
+      finishedAt?: string
+      errorMessage?: string
+      rowsProcessed: number
+      rowsSkipped: number
+      objectsUpserted: number
+      linksUpserted: number
+      telemetryPointsAppended: number
+      telemetryPointsSkipped: number
+      telemetryRowsFailed: number
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListProjectionRunsResponse =
+  ListProjectionRunsResponses[keyof ListProjectionRunsResponses]
+
+export type GetProjectionRunData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/projection-runs/{runId}"
+}
+
+export type GetProjectionRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetProjectionRunError = GetProjectionRunErrors[keyof GetProjectionRunErrors]
+
+export type GetProjectionRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    projectId: string
+    projectionId: string
+    projectionKind: "object" | "link" | "telemetry"
+    datasetId: string
+    datasetVersionId: string
+    objectTypeId?: string
+    sourceObjectTypeId?: string
+    targetObjectTypeId?: string
+    status: "running" | "succeeded" | "failed" | "cancelled"
+    startedAt: string
+    finishedAt?: string
+    errorMessage?: string
+    rowsProcessed: number
+    rowsSkipped: number
+    objectsUpserted: number
+    linksUpserted: number
+    telemetryPointsAppended: number
+    telemetryPointsSkipped: number
+    telemetryRowsFailed: number
+  }
+}
+
+export type GetProjectionRunResponse = GetProjectionRunResponses[keyof GetProjectionRunResponses]
 
 export type ListWebhookRunsData = {
   body?: never

@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS projection_runs (
   projection_kind TEXT NOT NULL CHECK (projection_kind IN ('object', 'link', 'telemetry')),
   dataset_id TEXT NOT NULL,
   dataset_version_id TEXT NOT NULL,
+  object_type_id TEXT,
+  source_object_type_id TEXT,
+  target_object_type_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
   started_at TEXT NOT NULL,
   finished_at TEXT,
@@ -112,6 +115,8 @@ CREATE INDEX IF NOT EXISTS idx_projection_runs_project_version_started
   ON projection_runs(project_id, dataset_version_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_projection_runs_project_status_started
   ON projection_runs(project_id, status, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projection_runs_project_object_type_started
+  ON projection_runs(project_id, object_type_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS pipeline_runs (
   project_id TEXT NOT NULL,

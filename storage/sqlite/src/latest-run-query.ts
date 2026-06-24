@@ -3,6 +3,7 @@ import type { SqliteValue } from "./run-list-query"
 
 type SqliteLatestRunTarget =
   | { readonly tableName: "pipeline_runs"; readonly ownerColumn: "pipeline_id" }
+  | { readonly tableName: "projection_runs"; readonly ownerColumn: "projection_id" }
   | { readonly tableName: "sync_runs"; readonly ownerColumn: "sync_id" }
   | { readonly tableName: "workflow_runs"; readonly ownerColumn: "workflow_id" }
 

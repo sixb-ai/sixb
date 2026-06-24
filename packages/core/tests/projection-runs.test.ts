@@ -211,6 +211,86 @@ describe("InMemoryProjectionRunStorage", () => {
     ).rejects.toBeInstanceOf(ProjectionRunError)
   })
 
+  test("records object type ids and filters by the viewable set", async () => {
+    const storage = new InMemoryProjectionRunStorage()
+    const at = (minute: number) => new Date(`2026-05-04T09:0${minute}:00.000Z`)
+
+    await storage.start({
+      id: "object-run",
+      projectId: "my-app",
+      projectionId: "rooms-projection",
+      projectionKind: "object",
+      datasetId: "canonical.rooms",
+      datasetVersionId: "ver_1",
+      objectTypeId: "room",
+      startedAt: at(0),
+    })
+    await storage.start({
+      id: "link-run",
+      projectId: "my-app",
+      projectionId: "room-sensors",
+      projectionKind: "link",
+      datasetId: "canonical.room-sensors",
+      datasetVersionId: "ver_1",
+      sourceObjectTypeId: "room",
+      targetObjectTypeId: "sensor",
+      startedAt: at(1),
+    })
+
+    // Link runs require both ends viewable.
+    const roomsOnly = await storage.list({ projectId: "my-app", objectTypeIds: ["room"] })
+    expect(roomsOnly.runs.map((run) => run.id)).toEqual(["object-run"])
+
+    const bothTypes = await storage.list({
+      projectId: "my-app",
+      objectTypeIds: ["room", "sensor"],
+    })
+    expect(bothTypes.runs.map((run) => run.id)).toEqual(["link-run", "object-run"])
+
+    // An empty viewable set matches nothing.
+    const none = await storage.list({ projectId: "my-app", objectTypeIds: [] })
+    expect(none).toMatchObject({ runs: [], total: 0, hasMore: false })
+  })
+
+  test("lists the latest run per projection id", async () => {
+    const storage = new InMemoryProjectionRunStorage()
+    const at = (minute: number) => new Date(`2026-05-04T09:0${minute}:00.000Z`)
+
+    for (const [id, projectionId, minute] of [
+      ["a1", "alpha", 0],
+      ["a2", "alpha", 2],
+      ["b1", "beta", 1],
+    ] as const) {
+      await storage.start({
+        id,
+        projectId: "my-app",
+        projectionId,
+        projectionKind: "object",
+        datasetId: "ds",
+        datasetVersionId: "v",
+        objectTypeId: "room",
+        startedAt: at(minute),
+      })
+    }
+    // Another project must not leak in.
+    await storage.start({
+      id: "other",
+      projectId: "other-app",
+      projectionId: "alpha",
+      projectionKind: "object",
+      datasetId: "ds",
+      datasetVersionId: "v",
+      startedAt: at(5),
+    })
+
+    const latest = await storage.listLatestByProjectionIds({
+      projectId: "my-app",
+      projectionIds: ["alpha", "beta", "missing"],
+    })
+
+    expect(latest.runs.map((run) => run.id)).toEqual(["a2", "b1"])
+  })
+
   test("rejects invalid counters", async () => {
     const storage = new InMemoryProjectionRunStorage()
 

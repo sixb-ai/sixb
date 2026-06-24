@@ -122,6 +122,59 @@ describe("SqliteProjectionRunStorage", () => {
     expect(failed?.rowsSkipped).toBe(1)
   })
 
+  test("records object type ids, filters by viewable set, and lists latest per projection", async () => {
+    await storage.start({
+      id: "object-run",
+      projectId: "my-app",
+      projectionId: "rooms",
+      projectionKind: "object",
+      datasetId: "ds.rooms",
+      datasetVersionId: "ver_1",
+      objectTypeId: "room",
+      startedAt: new Date("2026-04-06T15:00:00.000Z"),
+    })
+    await storage.start({
+      id: "rooms-run-2",
+      projectId: "my-app",
+      projectionId: "rooms",
+      projectionKind: "object",
+      datasetId: "ds.rooms",
+      datasetVersionId: "ver_2",
+      objectTypeId: "room",
+      startedAt: new Date("2026-04-06T16:00:00.000Z"),
+    })
+    await storage.start({
+      id: "link-run",
+      projectId: "my-app",
+      projectionId: "room-sensors",
+      projectionKind: "link",
+      datasetId: "ds.room-sensors",
+      datasetVersionId: "ver_1",
+      sourceObjectTypeId: "room",
+      targetObjectTypeId: "sensor",
+      startedAt: new Date("2026-04-06T17:00:00.000Z"),
+    })
+
+    const stored = await storage.getById({ projectId: "my-app", id: "link-run" })
+    expect(stored).toMatchObject({ sourceObjectTypeId: "room", targetObjectTypeId: "sensor" })
+
+    // Link runs need both ends; "room" alone excludes them.
+    const roomsOnly = await storage.list({ projectId: "my-app", objectTypeIds: ["room"] })
+    expect(roomsOnly.runs.map((run) => run.id)).toEqual(["rooms-run-2", "object-run"])
+
+    const both = await storage.list({ projectId: "my-app", objectTypeIds: ["room", "sensor"] })
+    expect(both.total).toBe(3)
+
+    const none = await storage.list({ projectId: "my-app", objectTypeIds: [] })
+    expect(none).toMatchObject({ runs: [], total: 0, hasMore: false })
+
+    const latest = await storage.listLatestByProjectionIds({
+      projectId: "my-app",
+      projectionIds: ["rooms", "room-sensors", "missing"],
+    })
+    expect(latest.runs.map((run) => run.id)).toEqual(["rooms-run-2", "link-run"])
+  })
+
   test("rejects duplicates, missing runs, terminal updates, and invalid counters", async () => {
     await storage.start({
       id: "run-1",

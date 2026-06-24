@@ -79,6 +79,9 @@ import type {
   GetProjectionData,
   GetProjectionErrors,
   GetProjectionResponses,
+  GetProjectionRunData,
+  GetProjectionRunErrors,
+  GetProjectionRunResponses,
   GetRuleData,
   GetRuleErrors,
   GetRuleResponses,
@@ -146,6 +149,9 @@ import type {
   ListPipelineRunsResponses,
   ListPipelinesData,
   ListPipelinesResponses,
+  ListProjectionRunsData,
+  ListProjectionRunsErrors,
+  ListProjectionRunsResponses,
   ListProjectionsData,
   ListProjectionsResponses,
   ListRuleStatesData,
@@ -1259,6 +1265,29 @@ export const getProjection = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetProjectionResponses, GetProjectionErrors, ThrowOnError>({
     url: "/api/projections/{projectionId}",
+    ...options,
+  })
+
+/**
+ * List projection run history
+ */
+export const listProjectionRuns = <ThrowOnError extends boolean = false>(
+  options?: Options<ListProjectionRunsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    ListProjectionRunsResponses,
+    ListProjectionRunsErrors,
+    ThrowOnError
+  >({ url: "/api/projection-runs", ...options })
+
+/**
+ * Get a projection run by id
+ */
+export const getProjectionRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetProjectionRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetProjectionRunResponses, GetProjectionRunErrors, ThrowOnError>({
+    url: "/api/projection-runs/{runId}",
     ...options,
   })
 

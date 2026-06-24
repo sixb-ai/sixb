@@ -175,10 +175,13 @@ export type {
 export { InMemoryPipelineRunStorage, PipelineRunError } from "./pipeline-runs"
 export type {
   FinishProjectionRunInput,
+  ListLatestProjectionRunsInput,
+  ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
   ProjectionKind,
   ProjectionRunCounters,
+  ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
@@ -189,6 +192,7 @@ export {
   InMemoryProjectionRunStorage,
   PROJECTION_COUNTER_KEYS,
   ProjectionRunError,
+  projectionRunObjectTypesVisible,
   zeroProjectionRunCounters,
 } from "./projection-runs"
 export type {
