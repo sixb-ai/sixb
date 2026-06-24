@@ -1,9 +1,13 @@
 import {
   canViewProjection,
   canViewProjectionRun,
+  type LinkProjectionDefinition,
+  type ObjectProjectionDefinition,
   type OntologySource,
+  type ProjectionDefinition,
   type ProjectionRunRecord,
   type Sixb,
+  type TelemetryProjectionDefinition,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
@@ -28,6 +32,13 @@ function serializeProjectionRun(run: ProjectionRunRecord) {
 }
 
 type SerializedProjectionRun = ReturnType<typeof serializeProjectionRun>
+type RequestAuthorization = ReturnType<typeof requestAuthState>["authz"]
+
+interface ViewableProjectionCatalog {
+  readonly objectProjections: readonly ObjectProjectionDefinition[]
+  readonly linkProjections: readonly LinkProjectionDefinition[]
+  readonly telemetryProjections: readonly TelemetryProjectionDefinition[]
+}
 
 async function getLatestProjectionRuns(
   sixb: Sixb<readonly OntologySource[]>,
@@ -42,34 +53,67 @@ async function getLatestProjectionRuns(
   return new Map(result.runs.map((run) => [run.projectionId, serializeProjectionRun(run)]))
 }
 
+function listViewableProjections(
+  sixb: Sixb<readonly OntologySource[]>,
+  authz: RequestAuthorization
+): ViewableProjectionCatalog {
+  return {
+    objectProjections: sixb
+      .getObjectProjections()
+      .filter((projection) => canViewProjection(authz, projection)),
+    linkProjections: sixb
+      .getLinkProjections()
+      .filter((projection) => canViewProjection(authz, projection)),
+    telemetryProjections: sixb
+      .getTelemetryProjections()
+      .filter((projection) => canViewProjection(authz, projection)),
+  }
+}
+
+function projectionCatalogIds(catalog: ViewableProjectionCatalog): string[] {
+  return [
+    ...catalog.objectProjections,
+    ...catalog.linkProjections,
+    ...catalog.telemetryProjections,
+  ].map((projection) => projection.id)
+}
+
+function serializeProjection<TProjection extends ProjectionDefinition>(
+  projection: TProjection,
+  latestRuns: ReadonlyMap<string, SerializedProjectionRun>
+): TProjection & { latestRun: SerializedProjectionRun | null } {
+  return {
+    ...projection,
+    latestRun: latestRuns.get(projection.id) ?? null,
+  }
+}
+
+function serializeProjectionCatalog(
+  catalog: ViewableProjectionCatalog,
+  latestRuns: ReadonlyMap<string, SerializedProjectionRun>
+) {
+  return {
+    objectProjections: catalog.objectProjections.map((projection) =>
+      serializeProjection(projection, latestRuns)
+    ),
+    linkProjections: catalog.linkProjections.map((projection) =>
+      serializeProjection(projection, latestRuns)
+    ),
+    telemetryProjections: catalog.telemetryProjections.map((projection) =>
+      serializeProjection(projection, latestRuns)
+    ),
+  }
+}
+
 export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
     .get(
       "/api/projections",
       async (context) => {
         const { authz } = requestAuthState(context)
-        const objectProjections = sixb
-          .getObjectProjections()
-          .filter((p) => canViewProjection(authz, p))
-        const linkProjections = sixb.getLinkProjections().filter((p) => canViewProjection(authz, p))
-        const telemetryProjections = sixb
-          .getTelemetryProjections()
-          .filter((p) => canViewProjection(authz, p))
-
-        const ids = [...objectProjections, ...linkProjections, ...telemetryProjections].map(
-          (p) => p.id
-        )
-        const latestRuns = await getLatestProjectionRuns(sixb, ids)
-        const withLatestRun = <T extends { id: string }>(projection: T) => ({
-          ...projection,
-          latestRun: latestRuns.get(projection.id) ?? null,
-        })
-
-        return {
-          objectProjections: objectProjections.map(withLatestRun),
-          linkProjections: linkProjections.map(withLatestRun),
-          telemetryProjections: telemetryProjections.map(withLatestRun),
-        }
+        const catalog = listViewableProjections(sixb, authz)
+        const latestRuns = await getLatestProjectionRuns(sixb, projectionCatalogIds(catalog))
+        return serializeProjectionCatalog(catalog, latestRuns)
       },
       {
         response: { 200: ProjectionListResponseSchema },
@@ -92,7 +136,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         }
 
         const latestRuns = await getLatestProjectionRuns(sixb, [found.id])
-        return { ...found, latestRun: latestRuns.get(found.id) ?? null }
+        return serializeProjection(found, latestRuns)
       },
       {
         params: ProjectionParamsSchema,

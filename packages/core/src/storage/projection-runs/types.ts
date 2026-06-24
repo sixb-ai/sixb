@@ -66,12 +66,15 @@ export function projectionRunObjectTypesVisible(
   run: ProjectionRunObjectTypes,
   canView: (objectTypeId: string) => boolean
 ): boolean {
-  return run.objectTypeId !== undefined
-    ? canView(run.objectTypeId)
-    : run.sourceObjectTypeId !== undefined &&
-        run.targetObjectTypeId !== undefined &&
-        canView(run.sourceObjectTypeId) &&
-        canView(run.targetObjectTypeId)
+  if (run.objectTypeId !== undefined) {
+    return canView(run.objectTypeId)
+  }
+
+  if (run.sourceObjectTypeId !== undefined && run.targetObjectTypeId !== undefined) {
+    return canView(run.sourceObjectTypeId) && canView(run.targetObjectTypeId)
+  }
+
+  return false
 }
 
 export interface ProjectionRunRecord extends ProjectionRunCounters, ProjectionRunObjectTypes {
