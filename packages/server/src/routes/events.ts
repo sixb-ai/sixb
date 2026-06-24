@@ -1,7 +1,7 @@
 import { AuthorizationError, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import { SIXB_BEARER_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import { EventsQuerySchema, EventsResponseSchema } from "../schemas/events"
 import { parseOptionalInt } from "../utils/http"
@@ -48,7 +48,7 @@ export function registerEventRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         summary: "Read domain events",
         tags: ["Events"],
         operationId: "listEvents",
-        security: SIXB_BEARER_SECURITY_REQUIREMENT,
+        security: bearerSecurityRequirement("listEvents"),
       },
     }
   )

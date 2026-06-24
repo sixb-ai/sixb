@@ -53,7 +53,7 @@ export class InMemoryAuthServiceAccountStore implements AuthServiceAccountStore 
         input.name === undefined
           ? existing.name
           : assertNonEmpty(input.name, "Service account name"),
-      description: input.description,
+      description: input.description === undefined ? existing.description : input.description,
       status: input.status ?? existing.status,
       updatedAt: input.updatedAt ? cloneDate(input.updatedAt) : new Date(),
     }

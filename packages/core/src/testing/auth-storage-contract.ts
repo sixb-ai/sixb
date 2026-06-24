@@ -653,6 +653,251 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("round-trips the creator principal for service accounts and access tokens", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage, { id: "usr_creator", email: "creator@acme.com" })
+        await storage.serviceAccounts.create({
+          id: "svc_creator",
+          projectId,
+          name: "Creator service account",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+        })
+        await storage.sessions.create({
+          id: "ses_creator",
+          projectId,
+          userId: "usr_creator",
+          strategyId: "magic-link",
+          audience: "atlas",
+          tokenHash: "hash-creator",
+          createdAt: at("2026-05-14T10:00:30.000Z"),
+          expiresAt: at("2026-05-21T10:00:30.000Z"),
+        })
+
+        const principals = [
+          { type: "user", id: "usr_creator" },
+          { type: "serviceAccount", id: "svc_creator" },
+          { type: "system", id: "scheduler" },
+        ] as const
+
+        for (const [index, principal] of principals.entries()) {
+          const accountId = `svc_by_${principal.type}`
+          const createdAccount = await storage.serviceAccounts.create({
+            id: accountId,
+            projectId,
+            name: `Service account by ${principal.type}`,
+            createdByPrincipal: principal,
+            createdBySessionId: "ses_creator",
+            createdAt: at(`2026-05-14T10:1${index}:00.000Z`),
+          })
+          expect(createdAccount.createdByPrincipal).toEqual(principal)
+          expect(createdAccount.createdBySessionId).toBe("ses_creator")
+          await expect(
+            storage.serviceAccounts.getById({ projectId, id: accountId })
+          ).resolves.toMatchObject({
+            createdByPrincipal: principal,
+            createdBySessionId: "ses_creator",
+          })
+
+          const tokenId = `tok_by_${principal.type}`
+          const createdToken = await storage.accessTokens.create({
+            id: tokenId,
+            projectId,
+            name: `Token by ${principal.type}`,
+            kind: "personal",
+            subjectType: "user",
+            subjectId: "usr_creator",
+            tokenHash: `hash-${tokenId}`,
+            createdByPrincipal: principal,
+            createdBySessionId: "ses_creator",
+            createdAt: at(`2026-05-14T10:2${index}:00.000Z`),
+            expiresAt: at(`2026-05-21T10:2${index}:00.000Z`),
+          })
+          expect(createdToken.createdByPrincipal).toEqual(principal)
+          expect(createdToken.createdBySessionId).toBe("ses_creator")
+          await expect(
+            storage.accessTokens.getById({ projectId, id: tokenId })
+          ).resolves.toMatchObject({
+            createdByPrincipal: principal,
+            createdBySessionId: "ses_creator",
+          })
+        }
+
+        // Omitting the creator round-trips as undefined on every backend.
+        const anonymous = await storage.serviceAccounts.create({
+          id: "svc_anonymous",
+          projectId,
+          name: "Anonymous service account",
+          createdAt: at("2026-05-14T10:30:00.000Z"),
+        })
+        expect(anonymous.createdByPrincipal).toBeUndefined()
+        expect(anonymous.createdBySessionId).toBeUndefined()
+        await expect(
+          storage.serviceAccounts.getById({ projectId, id: "svc_anonymous" })
+        ).resolves.toMatchObject({ id: "svc_anonymous" })
+      })
+    })
+
+    test("touch preserves prior access-token metadata when omitted", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.accessTokens.create({
+          id: "tok_touch",
+          projectId,
+          name: "Touch token",
+          kind: "personal",
+          subjectType: "user",
+          subjectId: "usr_1",
+          tokenHash: "hash-touch",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+          expiresAt: at("2026-05-21T10:00:00.000Z"),
+        })
+
+        const first = await storage.accessTokens.touch({
+          projectId,
+          id: "tok_touch",
+          lastUsedAt: at("2026-05-14T10:01:00.000Z"),
+          userAgent: "sixb-cli/0.1",
+          ipAddress: "203.0.113.10",
+        })
+        expect(first.lastUsedUserAgent).toBe("sixb-cli/0.1")
+        expect(first.lastUsedIpAddress).toBe("203.0.113.10")
+
+        // A later touch without metadata advances lastUsedAt but keeps the
+        // previously captured user agent and IP address.
+        const second = await storage.accessTokens.touch({
+          projectId,
+          id: "tok_touch",
+          lastUsedAt: at("2026-05-14T10:05:00.000Z"),
+        })
+        expect(second.lastUsedAt?.toISOString()).toBe("2026-05-14T10:05:00.000Z")
+        expect(second.lastUsedUserAgent).toBe("sixb-cli/0.1")
+        expect(second.lastUsedIpAddress).toBe("203.0.113.10")
+        await expect(
+          storage.accessTokens.getById({ projectId, id: "tok_touch" })
+        ).resolves.toMatchObject({
+          lastUsedUserAgent: "sixb-cli/0.1",
+          lastUsedIpAddress: "203.0.113.10",
+        })
+      })
+    })
+
+    test("lists access tokens with revoked, order, and pagination parity", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        const ids = ["tok_a", "tok_b", "tok_c", "tok_d"]
+        for (const [index, id] of ids.entries()) {
+          await storage.accessTokens.create({
+            id,
+            projectId,
+            name: `Token ${id}`,
+            kind: "personal",
+            subjectType: "user",
+            subjectId: "usr_1",
+            tokenHash: `hash-${id}`,
+            createdAt: at(`2026-05-14T10:0${index}:00.000Z`),
+            expiresAt: at(`2026-05-21T10:0${index}:00.000Z`),
+          })
+        }
+        await storage.accessTokens.revoke({
+          projectId,
+          id: "tok_b",
+          revokedAt: at("2026-05-14T11:00:00.000Z"),
+        })
+
+        // includeRevoked defaults to false: the revoked token is hidden.
+        const active = await storage.accessTokens.list({ projectId })
+        expect(active.accessTokens.map((token) => token.id)).toEqual(["tok_a", "tok_c", "tok_d"])
+        expect(active.total).toBe(3)
+        expect(active.hasMore).toBe(false)
+
+        // includeRevoked: true surfaces it again, default order is ascending.
+        const all = await storage.accessTokens.list({ projectId, includeRevoked: true })
+        expect(all.accessTokens.map((token) => token.id)).toEqual([
+          "tok_a",
+          "tok_b",
+          "tok_c",
+          "tok_d",
+        ])
+        expect(all.total).toBe(4)
+
+        // order: "desc" reverses by createdAt.
+        const descending = await storage.accessTokens.list({
+          projectId,
+          includeRevoked: true,
+          order: "desc",
+        })
+        expect(descending.accessTokens.map((token) => token.id)).toEqual([
+          "tok_d",
+          "tok_c",
+          "tok_b",
+          "tok_a",
+        ])
+
+        // First page reports hasMore at the page boundary.
+        const firstPage = await storage.accessTokens.list({
+          projectId,
+          includeRevoked: true,
+          limit: 2,
+        })
+        expect(firstPage.accessTokens.map((token) => token.id)).toEqual(["tok_a", "tok_b"])
+        expect(firstPage.total).toBe(4)
+        expect(firstPage.hasMore).toBe(true)
+
+        // Second page exhausts the result set.
+        const secondPage = await storage.accessTokens.list({
+          projectId,
+          includeRevoked: true,
+          limit: 2,
+          offset: 2,
+        })
+        expect(secondPage.accessTokens.map((token) => token.id)).toEqual(["tok_c", "tok_d"])
+        expect(secondPage.hasMore).toBe(false)
+
+        // A page that exactly consumes the remainder reports no more.
+        const exactBoundary = await storage.accessTokens.list({
+          projectId,
+          includeRevoked: true,
+          limit: 4,
+        })
+        expect(exactBoundary.accessTokens.map((token) => token.id)).toEqual(ids)
+        expect(exactBoundary.hasMore).toBe(false)
+      })
+    })
+
+    test("lists service accounts with pagination parity", async () => {
+      await withStorage(async (storage) => {
+        const ids = ["svc_a", "svc_b", "svc_c"]
+        for (const [index, id] of ids.entries()) {
+          await storage.serviceAccounts.create({
+            id,
+            projectId,
+            name: `Service account ${id}`,
+            createdAt: at(`2026-05-14T10:0${index}:00.000Z`),
+          })
+        }
+
+        // Default order is ascending by createdAt across every backend.
+        const all = await storage.serviceAccounts.list({ projectId })
+        expect(all.serviceAccounts.map((account) => account.id)).toEqual(ids)
+        expect(all.total).toBe(3)
+        expect(all.hasMore).toBe(false)
+
+        const firstPage = await storage.serviceAccounts.list({ projectId, limit: 2 })
+        expect(firstPage.serviceAccounts.map((account) => account.id)).toEqual(["svc_a", "svc_b"])
+        expect(firstPage.total).toBe(3)
+        expect(firstPage.hasMore).toBe(true)
+
+        const secondPage = await storage.serviceAccounts.list({
+          projectId,
+          limit: 2,
+          offset: 2,
+        })
+        expect(secondPage.serviceAccounts.map((account) => account.id)).toEqual(["svc_c"])
+        expect(secondPage.hasMore).toBe(false)
+      })
+    })
+
     test("rejects invalid access token subjects", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

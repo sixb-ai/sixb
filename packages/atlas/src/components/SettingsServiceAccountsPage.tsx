@@ -113,6 +113,8 @@ export function SettingsServiceAccountsPage() {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null)
   const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const optionsQuery = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const serviceAccountsQuery = useQuery({
@@ -183,7 +185,13 @@ export function SettingsServiceAccountsPage() {
   const disableAccount = useMutation({
     ...disableAuthServiceAccountMutation(),
     onSuccess: async () => {
+      setError(null)
+      setMessage("Service account disabled.")
       await queryClient.invalidateQueries({ queryKey: listAuthServiceAccountsQueryKey() })
+    },
+    onError: (mutationError) => {
+      setMessage(null)
+      setError(apiErrorMessage(mutationError, "Could not disable the service account."))
     },
   })
 
@@ -198,16 +206,25 @@ export function SettingsServiceAccountsPage() {
   const revokeToken = useMutation({
     ...revokeAuthServiceAccountAccessTokenMutation(),
     onSuccess: async () => {
+      setError(null)
+      setMessage("Token revoked.")
       if (selectedAccountId) await invalidateAccountTokens(selectedAccountId)
+    },
+    onError: (mutationError) => {
+      setMessage(null)
+      setError(apiErrorMessage(mutationError, "Could not revoke the token."))
     },
   })
 
   const handleTokenDialogChange = (open: boolean) => {
     setTokenDialogOpen(open)
-    // Reset only on open so the reveal stays visible through the exit animation.
     if (open) {
       createToken.reset()
       setCreatedToken(null)
+    } else {
+      // Clear the revealed secret once the dialog has closed, but only after
+      // the exit animation so the form never flashes back into view.
+      window.setTimeout(() => setCreatedToken(null), 200)
     }
   }
 
@@ -215,10 +232,20 @@ export function SettingsServiceAccountsPage() {
     setSelectedAccountId(null)
     setTokenDialogOpen(false)
     setCreatedToken(null)
+    setMessage(null)
+    setError(null)
+  }
+
+  const openAccount = (accountId: string) => {
+    setMessage(null)
+    setError(null)
+    setSelectedAccountId(accountId)
   }
 
   const revoke = (tokenId: string) => {
     if (!selectedAccountId) return
+    setMessage(null)
+    setError(null)
     setRevokingTokenId(tokenId)
     revokeToken.mutate(
       { path: { serviceAccountId: selectedAccountId, tokenId } },
@@ -312,7 +339,7 @@ export function SettingsServiceAccountsPage() {
               <li key={account.id}>
                 <button
                   type="button"
-                  onClick={() => setSelectedAccountId(account.id)}
+                  onClick={() => openAccount(account.id)}
                   className="group flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30"
                 >
                   <ServiceAccountAvatar name={account.name} size="sm" />
@@ -407,6 +434,19 @@ export function SettingsServiceAccountsPage() {
                   </p>
                 ) : null}
 
+                {(message || error) && (
+                  <p
+                    className={cn(
+                      "mb-3 rounded-lg px-3 py-2 text-sm",
+                      error
+                        ? "border border-destructive/30 bg-destructive/10 text-destructive"
+                        : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    )}
+                  >
+                    {error ?? message}
+                  </p>
+                )}
+
                 <div className="overflow-hidden rounded-xl border border-border/60">
                   {selectedTokensState?.isLoading ? (
                     <div className="flex min-h-40 items-center justify-center">
@@ -458,11 +498,13 @@ export function SettingsServiceAccountsPage() {
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction
                             className="bg-destructive text-white hover:bg-destructive/90"
-                            onClick={() =>
+                            onClick={() => {
+                              setMessage(null)
+                              setError(null)
                               disableAccount.mutate({
                                 path: { serviceAccountId: selectedAccount.id },
                               })
-                            }
+                            }}
                           >
                             Disable account
                           </AlertDialogAction>

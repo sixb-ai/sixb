@@ -372,22 +372,12 @@ export function registerAuthRoutes(
             return jsonResponse({ error: "Authentication required" }, 401)
           }
 
-          const result = await requireAuthStorage(sixb).accessTokens.list({
-            projectId: sixb.id,
-            kind: "personal",
-            subjectType: "user",
-            subjectId: session.user.id,
-            includeRevoked: true,
-            order: "desc",
-            limit: 100,
-          })
+          const { accessTokens } = await sixb.auth.listPersonalAccessTokens(request, authOptions)
 
           return jsonResponse(
             {
-              accessTokens: result.accessTokens.map((accessToken) =>
-                serializeAccessToken(accessToken, {
-                  subjectLabel: session.user.email,
-                })
+              accessTokens: accessTokens.map((accessToken) =>
+                serializeAccessToken(accessToken, { subjectLabel: session.user.email })
               ),
             },
             200
@@ -423,13 +413,7 @@ export function registerAuthRoutes(
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
           const result = await sixb.auth.createPersonalAccessToken(
             request,
-            {
-              name: parsed.name,
-              expiresAt,
-              groupIds: constrainRequestedGroupIds(parsed.groupIds, session.groupIds, {
-                subject: "personal access token",
-              }),
-            },
+            { name: parsed.name, expiresAt, groupIds: parsed.groupIds },
             authOptions
           )
 
@@ -476,20 +460,11 @@ export function registerAuthRoutes(
           }
 
           const { tokenId } = RevokeAuthAccessTokenParamsSchema.parse(params)
-          const storage = requireAuthStorage(sixb)
-          const target = await storage.accessTokens.getById({ projectId: sixb.id, id: tokenId })
-          // Personal-token management is self-service only. Returning 404 for a
-          // foreign token avoids making token ids probeable from Atlas.
-          if (
-            !target ||
-            target.kind !== "personal" ||
-            target.subjectType !== "user" ||
-            target.subjectId !== session.user.id
-          ) {
-            return jsonResponse({ error: "Access token not found" }, 404)
-          }
-
-          const result = await sixb.auth.revokeAccessToken(request, { tokenId }, authOptions)
+          const result = await sixb.auth.revokePersonalAccessToken(
+            request,
+            { tokenId },
+            authOptions
+          )
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
@@ -529,9 +504,7 @@ export function registerAuthRoutes(
             return jsonResponse({ error: "Authentication required" }, 401)
           }
 
-          const serviceAccounts = await listServiceAccountsWithGroups(requireAuthStorage(sixb), {
-            projectId: sixb.id,
-          })
+          const { serviceAccounts } = await sixb.auth.listServiceAccounts(request, authOptions)
 
           return jsonResponse(
             {
@@ -575,9 +548,7 @@ export function registerAuthRoutes(
               id: parsed.id,
               name: parsed.name,
               description: optionalTrimmed(parsed.description),
-              groupIds: constrainRequestedGroupIds(parsed.groupIds, session.groupIds, {
-                subject: "service account",
-              }),
+              groupIds: parsed.groupIds,
             },
             authOptions
           )
@@ -623,29 +594,15 @@ export function registerAuthRoutes(
           }
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
-          const storage = requireAuthStorage(sixb)
-          const existing = await storage.serviceAccounts.getById({
-            projectId: sixb.id,
-            id: serviceAccountId,
-          })
-          if (!existing) {
-            return jsonResponse({ error: "Service account not found" }, 404)
-          }
-
-          const serviceAccount = await storage.serviceAccounts.update({
-            projectId: sixb.id,
-            id: serviceAccountId,
-            status: "suspended",
-            updatedAt: new Date(),
-          })
-          const groupIds = await listServiceAccountGroupIds(storage, {
-            projectId: sixb.id,
-            serviceAccountId,
-          })
+          const result = await sixb.auth.disableServiceAccount(
+            request,
+            { serviceAccountId },
+            authOptions
+          )
 
           return jsonResponse(
             {
-              serviceAccount: serializeServiceAccount(serviceAccount, groupIds),
+              serviceAccount: serializeServiceAccount(result.serviceAccount, result.groupIds),
             },
             200
           )
@@ -681,31 +638,16 @@ export function registerAuthRoutes(
           }
 
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
-          const storage = requireAuthStorage(sixb)
-          const serviceAccount = await storage.serviceAccounts.getById({
-            projectId: sixb.id,
-            id: serviceAccountId,
-          })
-          if (!serviceAccount) {
-            return jsonResponse({ error: "Service account not found" }, 404)
-          }
-
-          const result = await storage.accessTokens.list({
-            projectId: sixb.id,
-            kind: "serviceAccount",
-            subjectType: "serviceAccount",
-            subjectId: serviceAccountId,
-            includeRevoked: true,
-            order: "desc",
-            limit: 100,
-          })
+          const { serviceAccount, accessTokens } = await sixb.auth.listServiceAccountAccessTokens(
+            request,
+            { serviceAccountId },
+            authOptions
+          )
 
           return jsonResponse(
             {
-              accessTokens: result.accessTokens.map((accessToken) =>
-                serializeAccessToken(accessToken, {
-                  subjectLabel: serviceAccount.name,
-                })
+              accessTokens: accessTokens.map((accessToken) =>
+                serializeAccessToken(accessToken, { subjectLabel: serviceAccount.name })
               ),
             },
             200
@@ -741,19 +683,6 @@ export function registerAuthRoutes(
             return jsonResponse({ error: "Authentication required" }, 401)
           }
 
-          const storage = requireAuthStorage(sixb)
-          const serviceAccount = await storage.serviceAccounts.getById({
-            projectId: sixb.id,
-            id: parsedParams.serviceAccountId,
-          })
-          if (!serviceAccount) {
-            return jsonResponse({ error: "Service account not found" }, 404)
-          }
-
-          const serviceAccountGroupIds = await listServiceAccountGroupIds(storage, {
-            projectId: sixb.id,
-            serviceAccountId: parsedParams.serviceAccountId,
-          })
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
           const result = await sixb.auth.createServiceAccountAccessToken(
             request,
@@ -761,9 +690,7 @@ export function registerAuthRoutes(
               serviceAccountId: parsedParams.serviceAccountId,
               name: parsed.name,
               expiresAt,
-              groupIds: constrainRequestedGroupIds(parsed.groupIds, serviceAccountGroupIds, {
-                subject: "service account token",
-              }),
+              groupIds: parsed.groupIds,
             },
             authOptions
           )
@@ -771,7 +698,7 @@ export function registerAuthRoutes(
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
-                subjectLabel: serviceAccount.name,
+                subjectLabel: result.serviceAccount.name,
               }),
               tokenValue: result.tokenValue,
             },
@@ -811,40 +738,16 @@ export function registerAuthRoutes(
             return jsonResponse({ error: "Authentication required" }, 401)
           }
 
-          const storage = requireAuthStorage(sixb)
-          const serviceAccount = await storage.serviceAccounts.getById({
-            projectId: sixb.id,
-            id: parsed.serviceAccountId,
-          })
-          if (!serviceAccount) {
-            return jsonResponse({ error: "Service account not found" }, 404)
-          }
-
-          const target = await storage.accessTokens.getById({
-            projectId: sixb.id,
-            id: parsed.tokenId,
-          })
-          // Token ids are not enough to revoke from this nested route: the
-          // token must belong to the selected service account.
-          if (
-            !target ||
-            target.kind !== "serviceAccount" ||
-            target.subjectType !== "serviceAccount" ||
-            target.subjectId !== parsed.serviceAccountId
-          ) {
-            return jsonResponse({ error: "Access token not found" }, 404)
-          }
-
-          const result = await sixb.auth.revokeAccessToken(
+          const result = await sixb.auth.revokeServiceAccountAccessToken(
             request,
-            { tokenId: parsed.tokenId },
+            { serviceAccountId: parsed.serviceAccountId, tokenId: parsed.tokenId },
             authOptions
           )
 
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
-                subjectLabel: serviceAccount.name,
+                subjectLabel: result.serviceAccount.name,
               }),
             },
             200
@@ -1624,40 +1527,6 @@ function serializeServiceAccount(
   }
 }
 
-async function listServiceAccountsWithGroups(
-  storage: AuthStorage,
-  params: { readonly projectId: string }
-): Promise<
-  readonly {
-    readonly serviceAccount: ServiceAccountRecord
-    readonly groupIds: readonly string[]
-  }[]
-> {
-  const result = await storage.serviceAccounts.list({
-    projectId: params.projectId,
-    order: "desc",
-    limit: 100,
-  })
-
-  return Promise.all(
-    result.serviceAccounts.map(async (serviceAccount) => ({
-      serviceAccount,
-      groupIds: await listServiceAccountGroupIds(storage, {
-        projectId: params.projectId,
-        serviceAccountId: serviceAccount.id,
-      }),
-    }))
-  )
-}
-
-async function listServiceAccountGroupIds(
-  storage: AuthStorage,
-  params: { readonly projectId: string; readonly serviceAccountId: string }
-): Promise<readonly string[]> {
-  const memberships = await storage.serviceAccountGroupMemberships.listForServiceAccount(params)
-  return memberships.map((membership) => membership.groupId)
-}
-
 function parseRequiredFutureDate(value: string): Date {
   const date = parseDate(value)
   if (!date) {
@@ -1674,53 +1543,6 @@ function parseRequiredFutureDate(value: string): Date {
 function optionalTrimmed(value: string | undefined): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
-}
-
-function constrainRequestedGroupIds(
-  input: readonly string[] | undefined,
-  allowedGroupIds: readonly string[],
-  options: { readonly subject: string }
-): readonly string[] | undefined {
-  const groupIds = normalizeRequestedGroupIds(input)
-  if (!groupIds) {
-    return undefined
-  }
-
-  const allowed = new Set(allowedGroupIds)
-  for (const groupId of groupIds) {
-    if (!allowed.has(groupId)) {
-      throw new AuthRuntimeError(
-        "authorization_denied",
-        `[Sixb] Group '${groupId}' cannot be assigned to this ${options.subject}.`
-      )
-    }
-  }
-
-  return groupIds
-}
-
-function normalizeRequestedGroupIds(
-  input: readonly string[] | undefined
-): readonly string[] | null {
-  if (input === undefined) {
-    return null
-  }
-
-  const groupIds: string[] = []
-  for (const raw of input) {
-    const groupId = raw.trim()
-    if (!groupId) {
-      throw new AuthRuntimeError(
-        "invalid_auth_input",
-        "[Sixb] Group ids cannot be empty when creating auth credentials."
-      )
-    }
-    if (!groupIds.includes(groupId)) {
-      groupIds.push(groupId)
-    }
-  }
-
-  return groupIds
 }
 
 function serializeInvitation(invitation: InvitationRecord) {

@@ -103,7 +103,7 @@ export class SqliteAuthServiceAccountStore implements AuthServiceAccountStore {
     const updatedAt = dateOrNow(input.updatedAt)
     const name =
       input.name === undefined ? existing.name : assertNonEmpty(input.name, "Service account name")
-    const description = input.description
+    const description = input.description === undefined ? existing.description : input.description
     const status = input.status ?? existing.status
     this.db
       .query(
@@ -141,7 +141,7 @@ export class SqliteAuthServiceAccountStore implements AuthServiceAccountStore {
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
+    const order = input.order === "desc" ? "DESC" : "ASC"
     const totalRow = this.db
       .query(`SELECT COUNT(*) AS count FROM auth_service_accounts ${where}`)
       .get(...args) as { readonly count: number }

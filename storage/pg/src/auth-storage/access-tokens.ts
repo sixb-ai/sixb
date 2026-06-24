@@ -112,7 +112,7 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
+    const order = input.order === "desc" ? "DESC" : "ASC"
     const [totalRow] = await this.sql.unsafe<{ readonly count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM auth_access_tokens ${where}`,
       [...params]
@@ -191,8 +191,8 @@ export class PgAuthAccessTokenStore implements AuthAccessTokenStore {
     const [row] = await this.sql<PgAuthAccessTokenRow[]>`
       UPDATE auth_access_tokens
       SET last_used_at = ${params.lastUsedAt},
-          last_used_user_agent = ${params.userAgent ?? null},
-          last_used_ip_address = ${params.ipAddress ?? null}
+          last_used_user_agent = COALESCE(${params.userAgent ?? null}, last_used_user_agent),
+          last_used_ip_address = COALESCE(${params.ipAddress ?? null}, last_used_ip_address)
       WHERE project_id = ${params.projectId}
         AND id = ${params.id}
       RETURNING *

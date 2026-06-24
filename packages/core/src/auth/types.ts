@@ -262,11 +262,56 @@ export interface CreateAccessTokenResult {
   readonly tokenValue: string
 }
 
-export interface RevokeAccessTokenInput {
+export interface CreateServiceAccountAccessTokenResult extends CreateAccessTokenResult {
+  readonly serviceAccount: ServiceAccountRecord
+}
+
+export interface ServiceAccountWithGroups {
+  readonly serviceAccount: ServiceAccountRecord
+  readonly groupIds: readonly string[]
+}
+
+export interface ListServiceAccountsResult {
+  readonly serviceAccounts: readonly ServiceAccountWithGroups[]
+}
+
+export interface ListPersonalAccessTokensResult {
+  readonly accessTokens: readonly AccessTokenRecord[]
+}
+
+export interface ListServiceAccountAccessTokensInput {
+  readonly serviceAccountId: string
+}
+
+export interface ListServiceAccountAccessTokensResult {
+  readonly serviceAccount: ServiceAccountRecord
+  readonly accessTokens: readonly AccessTokenRecord[]
+}
+
+export interface DisableServiceAccountInput {
+  readonly serviceAccountId: string
+}
+
+export interface DisableServiceAccountResult {
+  readonly serviceAccount: ServiceAccountRecord
+  readonly groupIds: readonly string[]
+}
+
+export interface RevokePersonalAccessTokenInput {
+  readonly tokenId: string
+}
+
+export interface RevokeServiceAccountAccessTokenInput {
+  readonly serviceAccountId: string
   readonly tokenId: string
 }
 
 export interface RevokeAccessTokenResult {
+  readonly accessToken: AccessTokenRecord
+}
+
+export interface RevokeServiceAccountAccessTokenResult {
+  readonly serviceAccount: ServiceAccountRecord
   readonly accessToken: AccessTokenRecord
 }
 

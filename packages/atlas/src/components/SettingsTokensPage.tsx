@@ -36,6 +36,8 @@ export function SettingsTokensPage() {
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const optionsQuery = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const tokensQuery = useQuery({
@@ -81,21 +83,31 @@ export function SettingsTokensPage() {
   const revokeToken = useMutation({
     ...revokeAuthAccessTokenMutation(),
     onSuccess: async () => {
+      setError(null)
+      setMessage("Token revoked.")
       await refresh()
+    },
+    onError: (mutationError) => {
+      setMessage(null)
+      setError(apiErrorMessage(mutationError, "Could not revoke the token."))
     },
   })
 
   const handleDialogChange = (open: boolean) => {
     setDialogOpen(open)
-    // Reset only on open; keeping the reveal mounted on close avoids a flash
-    // back to the form during the dialog's exit animation.
     if (open) {
       createToken.reset()
       setCreated(null)
+    } else {
+      // Clear the revealed secret once the dialog has closed, but only after
+      // the exit animation so the form never flashes back into view.
+      window.setTimeout(() => setCreated(null), 200)
     }
   }
 
   const revoke = (tokenId: string) => {
+    setMessage(null)
+    setError(null)
     setRevokingTokenId(tokenId)
     revokeToken.mutate({ path: { tokenId } }, { onSettled: () => setRevokingTokenId(null) })
   }
@@ -198,6 +210,19 @@ export function SettingsTokensPage() {
             {tokens.length} {tokens.length === 1 ? "token" : "tokens"}
           </span>
         </div>
+
+        {(message || error) && (
+          <p
+            className={cn(
+              "mx-4 mt-4 rounded-lg px-3 py-2 text-sm",
+              error
+                ? "border border-destructive/30 bg-destructive/10 text-destructive"
+                : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+            )}
+          >
+            {error ?? message}
+          </p>
+        )}
 
         {tokensQuery.isLoading ? (
           <div className="flex min-h-50 items-center justify-center">

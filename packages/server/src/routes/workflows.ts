@@ -9,12 +9,9 @@ import type {
 } from "@sixb/core"
 import { snapshotWorkflowInterventionResponse } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import {
-  SIXB_BEARER_SECURITY_REQUIREMENT,
-  SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
-  SIXB_CSRF_SECURITY_REQUIREMENT,
-} from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   CancelWorkflowInterventionBodySchema,
@@ -308,7 +305,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "List registered workflows",
           tags: ["Workflows"],
           operationId: "listWorkflows",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("listWorkflows"),
         },
       }
     )
@@ -336,7 +333,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Get workflow metadata",
           tags: ["Workflows"],
           operationId: "getWorkflow",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("getWorkflow"),
         },
       }
     )
@@ -754,7 +751,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Request a workflow run",
           tags: ["Workflows"],
           operationId: "requestWorkflowRun",
-          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("requestWorkflowRun"),
         },
       }
     )

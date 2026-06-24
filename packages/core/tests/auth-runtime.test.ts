@@ -313,6 +313,14 @@ describe("Sixb auth runtime", () => {
       projectId: sixb.id,
       email: "ava@acme.com",
     })
+    // The caller must belong to a group to place a service account in it and to
+    // manage that account's tokens afterwards.
+    await deps.storage.auth.groupMemberships.upsert({
+      projectId: sixb.id,
+      userId: "usr_1",
+      groupId: "commercial",
+      source: "manual",
+    })
     await deps.storage.auth.sessions.create({
       id: sessionCredential.sessionId,
       projectId: sixb.id,
@@ -363,7 +371,10 @@ describe("Sixb auth runtime", () => {
       subjectId: "svc_agent",
     })
 
-    await sixb.auth.revokeAccessToken(request, { tokenId: serviceToken.accessToken.id })
+    await sixb.auth.revokeServiceAccountAccessToken(request, {
+      serviceAccountId: "svc_agent",
+      tokenId: serviceToken.accessToken.id,
+    })
     await expect(
       deps.storage.auth.accessTokens.findValidByTokenHash({
         projectId: sixb.id,
@@ -373,6 +384,86 @@ describe("Sixb auth runtime", () => {
         now: new Date("2026-05-16T10:01:00.000Z"),
       })
     ).resolves.toBeNull()
+  })
+
+  test("confines service account management to the caller's own groups", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new Sixb({
+      ontology: [],
+      ...deps,
+      auth: authStrategy,
+    })
+    const sessionCredential = createSessionCredential("ses_low")
+
+    await deps.storage.auth.users.create({
+      id: "usr_low",
+      projectId: sixb.id,
+      email: "low@acme.com",
+    })
+    await deps.storage.auth.groupMemberships.upsert({
+      projectId: sixb.id,
+      userId: "usr_low",
+      groupId: "commercial",
+      source: "manual",
+    })
+    await deps.storage.auth.sessions.create({
+      id: sessionCredential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_low",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: sessionCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    // A privileged service account in a group the caller does not belong to.
+    await deps.storage.auth.serviceAccounts.create({
+      id: "svc_priv",
+      projectId: sixb.id,
+      name: "Privileged worker",
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+    })
+    await deps.storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId: sixb.id,
+      serviceAccountId: "svc_priv",
+      groupId: "finance",
+      source: "manual",
+    })
+    const request = new Request("http://localhost/api/project", {
+      headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
+    })
+
+    // Cannot escalate a personal token or a new service account beyond the
+    // caller's own groups.
+    await expect(
+      sixb.auth.createPersonalAccessToken(request, {
+        name: "Escalated",
+        groupIds: ["finance"],
+        expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+      })
+    ).rejects.toThrow("cannot be assigned")
+    await expect(
+      sixb.auth.createServiceAccount(request, { name: "Nope", groupIds: ["finance"] })
+    ).rejects.toThrow("cannot be assigned")
+
+    // Cannot mint, list, disable, or revoke tokens for a service account whose
+    // groups it does not fully hold — reported as "not found" to avoid probing.
+    await expect(
+      sixb.auth.createServiceAccountAccessToken(request, {
+        serviceAccountId: "svc_priv",
+        name: "Stolen",
+        expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+      })
+    ).rejects.toThrow("not found")
+    await expect(
+      sixb.auth.listServiceAccountAccessTokens(request, { serviceAccountId: "svc_priv" })
+    ).rejects.toThrow("not found")
+    await expect(
+      sixb.auth.disableServiceAccount(request, { serviceAccountId: "svc_priv" })
+    ).rejects.toThrow("not found")
+
+    // Listing hides the unmanageable account entirely.
+    await expect(sixb.auth.listServiceAccounts(request)).resolves.toEqual({ serviceAccounts: [] })
   })
 
   test("resolves sessions and cookie names by audience", async () => {

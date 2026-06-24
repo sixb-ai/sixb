@@ -13,12 +13,9 @@ import {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { ZodError } from "zod"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import {
-  SIXB_BEARER_SECURITY_REQUIREMENT,
-  SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
-  SIXB_CSRF_SECURITY_REQUIREMENT,
-} from "../openapi/security"
+import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ObjectListResponseSchema,
@@ -180,7 +177,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "List objects",
           tags: ["Objects"],
           operationId: "listObjects",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("listObjects"),
         },
       }
     )
@@ -222,7 +219,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Query objects",
           tags: ["Objects"],
           operationId: "queryObjects",
-          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("queryObjects"),
           requestBody: {
             required: true,
             content: {
@@ -301,7 +298,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Count objects",
           tags: ["Objects"],
           operationId: "countObjects",
-          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("countObjects"),
           requestBody: {
             required: true,
             content: {
@@ -380,7 +377,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Check object existence",
           tags: ["Objects"],
           operationId: "existsObjects",
-          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("existsObjects"),
           requestBody: {
             required: true,
             content: {
@@ -461,7 +458,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Facet objects",
           tags: ["Objects"],
           operationId: "facetObjects",
-          security: SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("facetObjects"),
           requestBody: {
             required: true,
             content: {
@@ -538,7 +535,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           summary: "Get object by id",
           tags: ["Objects"],
           operationId: "getObject",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("getObject"),
         },
       }
     )

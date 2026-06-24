@@ -6,10 +6,12 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  isCsrfExemptMethod,
   type OntologySource,
   prop,
   Sixb,
 } from "@sixb/core"
+import { ACCESS_TOKEN_ROUTES } from "../src/auth/access-token-boundary"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -94,35 +96,33 @@ describe("OpenAPI docs", () => {
       expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbCsrf: [] }])
     }
 
-    const bearerOnlyRoutes = [
-      ["get", "/api/project"],
-      ["get", "/api/object-types"],
-      ["get", "/api/object-types/{objectTypeId}"],
-      ["get", "/api/objects"],
-      ["get", "/api/objects/{objectTypeId}/{objectId}"],
-      ["get", "/api/actions"],
-      ["get", "/api/actions/{actionId}"],
-      ["get", "/api/workflows"],
-      ["get", "/api/workflows/{workflowId}"],
-      ["get", "/api/events"],
-    ] as const
-
-    for (const [method, path] of bearerOnlyRoutes) {
-      expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbBearer: [] }])
+    // The bearer boundary is the single source of truth. Every route in
+    // ACCESS_TOKEN_ROUTES must document the matching scheme (bearer-only for
+    // CSRF-exempt reads, CSRF-or-bearer for mutations), and no other operation
+    // may advertise bearer auth. This fails loudly if the enforced boundary and
+    // the documented contract ever drift apart.
+    const toOpenApiPath = (path: string) => path.replace(/:([^/]+)/g, "{$1}")
+    const expectedBearer = new Set<string>()
+    for (const route of ACCESS_TOKEN_ROUTES) {
+      const method = route.method.toLowerCase()
+      const path = toOpenApiPath(route.path)
+      expectedBearer.add(`${method} ${path}`)
+      const expected = isCsrfExemptMethod(route.method)
+        ? [{ sixbBearer: [] }]
+        : [{ sixbCsrf: [] }, { sixbBearer: [] }]
+      expect(spec.paths?.[path]?.[method]?.security, `${method} ${path}`).toEqual(expected)
     }
 
-    const csrfOrBearerRoutes = [
-      ["post", "/api/actions/{actionId}"],
-      ["post", "/api/workflows/{workflowId}/runs"],
-      ["post", "/api/objects/query"],
-      ["post", "/api/objects/query/count"],
-      ["post", "/api/objects/query/exists"],
-      ["post", "/api/objects/query/facets"],
-    ] as const
-
-    for (const [method, path] of csrfOrBearerRoutes) {
-      expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbCsrf: [] }, { sixbBearer: [] }])
+    const documentedBearer = new Set<string>()
+    for (const [path, operations] of Object.entries(spec.paths ?? {})) {
+      for (const [method, operation] of Object.entries(operations)) {
+        const requirements = (operation.security ?? []) as { readonly [scheme: string]: unknown }[]
+        if (requirements.some((requirement) => "sixbBearer" in requirement)) {
+          documentedBearer.add(`${method} ${path}`)
+        }
+      }
     }
+    expect([...documentedBearer].sort()).toEqual([...expectedBearer].sort())
 
     expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()
   })

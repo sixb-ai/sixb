@@ -1,41 +1,72 @@
+import { isCsrfExemptMethod } from "@sixb/core"
+import {
+  SIXB_BEARER_SECURITY_REQUIREMENT,
+  SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+} from "../openapi/security"
 import type { RouteAccess } from "./public-routes"
 
 export type AuthCredentialSource = "session" | "accessToken"
 
-interface AccessTokenRoutePattern {
+export interface AccessTokenRoute {
+  readonly operationId: string
   readonly method: string
   readonly path: string
 }
 
-// Bearer tokens should only reach routes that already enforce scoped authz.
-// Raw storage, admin, browser, webhook, and websocket routes stay session-only
+// The single source of truth for which routes accept bearer access tokens.
+// `isAccessTokenRoute` enforces this list at request time and
+// `bearerSecurityRequirement` derives each route's OpenAPI security entry from
+// it, so the enforced boundary and the documented contract cannot drift apart.
+//
+// Bearer tokens should only reach routes that already enforce scoped authz. Raw
+// storage, admin, browser, webhook, and websocket routes stay session-only
 // until each has an intentional scoped API surface.
-const ACCESS_TOKEN_ROUTE_PATTERNS: readonly AccessTokenRoutePattern[] = [
-  { method: "GET", path: "/api/project" },
-  { method: "GET", path: "/api/object-types" },
-  { method: "GET", path: "/api/object-types/:objectTypeId" },
-  { method: "GET", path: "/api/objects" },
-  { method: "POST", path: "/api/objects/query" },
-  { method: "POST", path: "/api/objects/query/count" },
-  { method: "POST", path: "/api/objects/query/exists" },
-  { method: "POST", path: "/api/objects/query/facets" },
-  { method: "GET", path: "/api/objects/:objectTypeId/:objectId" },
-  { method: "GET", path: "/api/actions" },
-  { method: "GET", path: "/api/actions/:actionId" },
-  { method: "POST", path: "/api/actions/:actionId" },
-  { method: "GET", path: "/api/workflows" },
-  { method: "GET", path: "/api/workflows/:workflowId" },
-  { method: "POST", path: "/api/workflows/:workflowId/runs" },
-  { method: "GET", path: "/api/events" },
+export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = [
+  { operationId: "getProjectInfo", method: "GET", path: "/api/project" },
+  { operationId: "listObjectTypes", method: "GET", path: "/api/object-types" },
+  { operationId: "getObjectType", method: "GET", path: "/api/object-types/:objectTypeId" },
+  { operationId: "listObjects", method: "GET", path: "/api/objects" },
+  { operationId: "queryObjects", method: "POST", path: "/api/objects/query" },
+  { operationId: "countObjects", method: "POST", path: "/api/objects/query/count" },
+  { operationId: "existsObjects", method: "POST", path: "/api/objects/query/exists" },
+  { operationId: "facetObjects", method: "POST", path: "/api/objects/query/facets" },
+  { operationId: "getObject", method: "GET", path: "/api/objects/:objectTypeId/:objectId" },
+  { operationId: "listActions", method: "GET", path: "/api/actions" },
+  { operationId: "getAction", method: "GET", path: "/api/actions/:actionId" },
+  { operationId: "requestAction", method: "POST", path: "/api/actions/:actionId" },
+  { operationId: "listWorkflows", method: "GET", path: "/api/workflows" },
+  { operationId: "getWorkflow", method: "GET", path: "/api/workflows/:workflowId" },
+  { operationId: "requestWorkflowRun", method: "POST", path: "/api/workflows/:workflowId/runs" },
+  { operationId: "listEvents", method: "GET", path: "/api/events" },
 ]
+
+/**
+ * OpenAPI security requirement for a bearer-capable route, derived from the
+ * canonical table. Reads (CSRF-exempt methods) accept a bearer token only;
+ * mutations accept either a CSRF token (cookie sessions) or a bearer token.
+ * Throws when the operation is not a registered bearer route, so a route can
+ * never claim bearer access without being added to the boundary.
+ */
+export function bearerSecurityRequirement(operationId: string) {
+  const route = ACCESS_TOKEN_ROUTES.find((candidate) => candidate.operationId === operationId)
+  if (!route) {
+    throw new Error(
+      `[SixbServer] '${operationId}' is not a registered bearer route. Add it to ACCESS_TOKEN_ROUTES.`
+    )
+  }
+
+  return isCsrfExemptMethod(route.method)
+    ? SIXB_BEARER_SECURITY_REQUIREMENT
+    : SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT
+}
 
 export function isAccessTokenRoute(request: Request): boolean {
   const url = new URL(request.url)
   const method = request.method.toUpperCase()
   const pathname = normalizePath(url.pathname)
 
-  return ACCESS_TOKEN_ROUTE_PATTERNS.some(
-    (pattern) => pattern.method === method && matchesPathPattern(pathname, pattern.path)
+  return ACCESS_TOKEN_ROUTES.some(
+    (route) => route.method === method && matchesPathPattern(pathname, route.path)
   )
 }
 
