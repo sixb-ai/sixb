@@ -13,6 +13,8 @@ const docs = await Promise.all(
     return {
       title: doc.title,
       section: doc.section,
+      sectionIndex: doc.sectionIndex,
+      isOverview: doc.isOverview,
       routePath: doc.routePath,
       markdownPath: doc.markdownPath,
       summary: rendered.summary,

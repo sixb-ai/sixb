@@ -66,9 +66,9 @@ CI currently runs:
 
 - Define ontology types with `defineObjectType`, `prop`, `link`, `action`, and `defineValueType`.
 - Most runtimes start with `createSixb()`.
-- `createSixb()` auto-discovers `ontology/`, `datasets/`, `functions/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, and `connectors/`.
+- `createSixb()` auto-discovers `ontology/`, `actions/`, `functions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, and `security/{groups,roles,invite-policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
 - `sixb.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
-- Functions are defined with `defineFunction(id)` and chained with `.interval(...)`, `.cron(...)`, `.broker(...)`, or `.onAction(...)`.
+- Functions are defined with `defineFunction(id)` and scheduled with `.interval(ms)` or `.cron(expr)`, then given a handler with `.run(...)`. There is no `.broker(...)` or `.onAction(...)`; domain events are not function triggers.
 - Important domain events include `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested`.
 - Convention-based discovery is the normal registration model.
 - Generated client files live in `packages/client/src/generated/`.

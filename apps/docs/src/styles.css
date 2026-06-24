@@ -2,6 +2,19 @@
 
 @source "./**/*.{ts,tsx}";
 
+/* Pure-white page background in light mode; dark mode keeps the UI theme. */
+:root:not(.dark) {
+  --background: #ffffff;
+}
+
+/* Single docs accent (Sixb brand blue, from the v2 slide-deck theme). Adjust here. */
+:root {
+  --docs-accent: oklch(0.6028 0.2177 257.42);
+}
+.dark {
+  --docs-accent: oklch(0.7287 0.1289 260.8);
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -136,37 +149,98 @@ body {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--muted);
+  background: var(--background);
 }
 
 .prose .code-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 10px 7px 14px;
+  padding: 6px 8px 6px 12px;
+  background: var(--muted);
   border-bottom: 1px solid var(--border);
 }
 
-.prose .code-lang {
+.prose .code-bar-left {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.prose .code-badge {
+  display: inline-flex;
+  height: 18px;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--foreground);
+  color: var(--background);
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--muted-foreground);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.prose .code-file {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .prose .code-copy {
+  position: relative;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--muted-foreground);
-  font-family: var(--font-sans);
-  font-size: 12px;
-  padding: 3px 8px;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.prose .code-block:hover .code-copy,
+.prose .code-copy:focus-visible {
+  opacity: 1;
 }
 
 .prose .code-copy:hover {
   background: var(--accent);
   color: var(--foreground);
+  opacity: 1;
+}
+
+.prose .code-copy svg {
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.prose .code-copy-check {
+  color: var(--docs-accent);
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+.prose .code-copy.is-copied .code-copy-copy {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+.prose .code-copy.is-copied .code-copy-check {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .prose .code-block pre.shiki {
@@ -178,6 +252,15 @@ body {
   padding: 16px;
   font-size: 13.5px;
   line-height: 1.6;
+}
+
+/* Landing hero code panel: flush and a touch smaller so lines fit. */
+.prose.hero-code .code-block {
+  margin: 0;
+}
+
+.prose.hero-code .code-block pre.shiki {
+  font-size: 12.5px;
 }
 
 .prose .code-block pre.shiki code {
@@ -205,15 +288,26 @@ body {
 
 .prose th,
 .prose td {
-  border: 1px solid var(--border);
-  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
   text-align: left;
   vertical-align: top;
 }
 
+.prose th:first-child,
+.prose td:first-child {
+  padding-left: 0;
+}
+
+.prose th:last-child,
+.prose td:last-child {
+  padding-right: 0;
+}
+
 .prose th {
-  background: var(--muted);
   font-weight: 650;
+  color: var(--foreground);
 }
 
 .prose img {

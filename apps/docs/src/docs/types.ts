@@ -7,6 +7,8 @@ export interface DocHeading {
 export interface DocEntry {
   readonly title: string
   readonly section: string
+  readonly sectionIndex: number
+  readonly isOverview: boolean
   readonly routePath: string
   readonly markdownPath: string
   readonly summary: string

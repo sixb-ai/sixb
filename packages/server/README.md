@@ -12,11 +12,10 @@ bun add @sixb/server
 ## Usage
 
 ```typescript
-import { Sixb } from "@sixb/core"
+import { createSixb } from "@sixb/core"
 import { createSixbServer } from "@sixb/server"
 
-const sixb = new Sixb({ /* ... */ })
-await sixb.init()
+const sixb = await createSixb({ /* providers, ontology, ... */ })
 
 const server = createSixbServer({
   sixb,

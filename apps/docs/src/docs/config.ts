@@ -1,29 +1,36 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { join } from "node:path"
+import { basename, join } from "node:path"
+import { sections } from "./sections"
 
 const repoRoot = join(import.meta.dir, "..", "..", "..", "..")
 const docsRoot = join(repoRoot, "docs")
-const rootReadmePath = join(docsRoot, "README.md")
 
 const readmeDoc = "README.md"
-const rootMarkdownPath = "/get-started.md"
-const rootRoutePath = "/get-started"
+const overviewDoc = "overview.md"
+const getStartedRoutePath = "/get-started"
+// The root README keeps its natural markdown path so relative `../README.md`
+// links from any page resolve to it; only its route is the friendly /get-started.
+const rootReadmeMarkdownPath = "/README.md"
 
 export interface DocConfig {
   readonly title: string
   readonly section: string
+  readonly sectionIndex: number
+  readonly folder: string
+  readonly isOverview: boolean
   readonly routePath: string
   readonly markdownPath: string
   readonly sourcePath: string
 }
 
+const orderCache = new Map<string, ReadonlyMap<string, number>>()
+
 export const docsConfig: readonly DocConfig[] = buildDocsConfig()
 
 function buildDocsConfig(): DocConfig[] {
-  const order = readDocsOrder()
   return readMarkdownFiles(docsRoot)
     .map((sourcePath) => toDocConfig(sourcePath))
-    .sort((left, right) => compareDocs(left, right, order))
+    .sort(compareDocs)
 }
 
 function readMarkdownFiles(directory: string): string[] {
@@ -44,60 +51,91 @@ function readMarkdownFiles(directory: string): string[] {
 
 function toDocConfig(sourcePath: string): DocConfig {
   const relativePath = normalizeRelativePath(sourcePath)
+  const folder = folderForPath(relativePath)
+  const name = basename(relativePath)
+  const isRootReadme = relativePath === readmeDoc
+  const isOverview = isRootReadme || name === overviewDoc
   const markdown = readFileSync(sourcePath, "utf-8")
-  const markdownPath = relativePath === readmeDoc ? rootMarkdownPath : `/${relativePath}`
-  const routePath =
-    relativePath === readmeDoc ? rootRoutePath : `/${relativePath.replace(/\.md$/, "")}`
 
   return {
     title: extractTitle(markdown, sourcePath),
-    section: sectionForPath(relativePath),
-    routePath,
-    markdownPath,
+    section: sectionForFolder(folder),
+    sectionIndex: sectionIndexForFolder(folder),
+    folder,
+    isOverview,
+    routePath: routePathFor(relativePath, folder, isRootReadme, isOverview),
+    markdownPath: isRootReadme ? rootReadmeMarkdownPath : `/${relativePath}`,
     sourcePath,
   }
 }
 
-function readDocsOrder(): ReadonlyMap<string, number> {
-  const order = new Map<string, number>([[readmeDoc, 0]])
+function routePathFor(
+  relativePath: string,
+  folder: string,
+  isRootReadme: boolean,
+  isOverview: boolean
+): string {
+  if (isRootReadme) return getStartedRoutePath
+  if (isOverview && folder) return `/${folder}`
+  return `/${relativePath.replace(/\.md$/, "")}`
+}
 
-  if (!existsSync(rootReadmePath) || !statSync(rootReadmePath).isFile()) {
-    return order
-  }
+function folderForPath(relativePath: string): string {
+  const segments = relativePath.split("/")
+  return segments.length > 1 ? (segments[0] ?? "") : ""
+}
 
-  const markdown = readFileSync(rootReadmePath, "utf-8")
-  let index = 1
+function sectionForFolder(folder: string): string {
+  const def = sections.find((section) => section.folder === folder)
+  return def ? def.title : titleize(folder || "Docs")
+}
 
-  for (const match of markdown.matchAll(/\[[^\]]+]\(([^)]+\.md)\)/g)) {
-    const relativePath = normalizeRelativePath(join(docsRoot, match[1] ?? ""))
-    if (!order.has(relativePath)) {
-      order.set(relativePath, index)
-      index += 1
+function sectionIndexForFolder(folder: string): number {
+  const index = sections.findIndex((section) => section.folder === folder)
+  return index === -1 ? sections.length : index
+}
+
+function sectionPageOrder(folder: string): ReadonlyMap<string, number> {
+  const cached = orderCache.get(folder)
+  if (cached) return cached
+
+  const order = new Map<string, number>()
+  const metaPath = join(docsRoot, folder, "_meta.json")
+
+  if (existsSync(metaPath) && statSync(metaPath).isFile()) {
+    try {
+      const parsed = JSON.parse(readFileSync(metaPath, "utf-8")) as unknown
+      if (Array.isArray(parsed)) {
+        parsed.forEach((entry, index) => {
+          if (typeof entry === "string") order.set(entry, index)
+        })
+      }
+    } catch {
+      // Malformed _meta.json falls back to overview-first then alphabetical.
     }
   }
 
+  orderCache.set(folder, order)
   return order
 }
 
-function compareDocs(
-  left: DocConfig,
-  right: DocConfig,
-  order: ReadonlyMap<string, number>
-): number {
-  const leftOrder = order.get(relativeMarkdownPath(left))
-  const rightOrder = order.get(relativeMarkdownPath(right))
-
-  if (leftOrder !== undefined && rightOrder !== undefined) {
-    return leftOrder - rightOrder
+function compareDocs(left: DocConfig, right: DocConfig): number {
+  if (left.sectionIndex !== right.sectionIndex) {
+    return left.sectionIndex - right.sectionIndex
   }
 
-  if (leftOrder !== undefined) return -1
-  if (rightOrder !== undefined) return 1
-
-  const section = left.section.localeCompare(right.section)
-  if (section !== 0) return section
+  const order = sectionPageOrder(left.folder)
+  const leftRank = pageRank(left, order)
+  const rightRank = pageRank(right, order)
+  if (leftRank !== rightRank) return leftRank - rightRank
 
   return left.title.localeCompare(right.title)
+}
+
+function pageRank(doc: DocConfig, order: ReadonlyMap<string, number>): number {
+  if (doc.isOverview) return -1
+  const rank = order.get(basename(normalizeRelativePath(doc.sourcePath)))
+  return rank ?? Number.MAX_SAFE_INTEGER
 }
 
 function extractTitle(markdown: string, sourcePath: string): string {
@@ -106,17 +144,6 @@ function extractTitle(markdown: string, sourcePath: string): string {
     throw new Error(`[SixbDocs] Missing top-level heading in ${sourcePath}.`)
   }
   return match[1].trim()
-}
-
-function sectionForPath(relativePath: string): string {
-  if (relativePath === readmeDoc) return "Get started"
-  const [section] = relativePath.split("/")
-  if (section === "concepts") return "Core concepts"
-  return titleize(section ?? "Docs")
-}
-
-function relativeMarkdownPath(doc: DocConfig): string {
-  return normalizeRelativePath(doc.sourcePath)
 }
 
 function normalizeRelativePath(path: string): string {

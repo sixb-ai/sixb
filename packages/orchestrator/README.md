@@ -42,8 +42,9 @@ await worker.stop()
 
 ## Standalone deployment
 
-Standalone deployment (running the orchestrator as a separate process) is **not supported in V1**.
-The orchestrator is designed to be co-hosted within `sixb dev` alongside the scheduler and workers.
+In production the orchestrator runs as its own process via `sixb orchestrator` (the event-to-queue
+dispatcher role) pointed at shared durable providers. In local development it is co-hosted within
+`sixb dev` alongside the scheduler and workers, so no manual wiring is needed there.
 
 ## Limitations (V1)
 
