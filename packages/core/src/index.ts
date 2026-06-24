@@ -914,7 +914,8 @@ export {
 
 // ── Object Operations ───────────────────────────────────────
 
-export { objectService } from "./objects"
+export type { TelemetryHistoryOptions } from "./objects"
+export { getTelemetryHistoryBatch, objectService } from "./objects"
 export type {
   ExecuteObjectCountInput,
   ExecuteObjectCountResult,
