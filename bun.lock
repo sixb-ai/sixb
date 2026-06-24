@@ -6,6 +6,7 @@
       "name": "sixb",
       "devDependencies": {
         "@biomejs/biome": "2.4.6",
+        "@types/bun": "latest",
         "typescript": "^5.7.0",
       },
     },
@@ -875,6 +876,7 @@
     "@sixb/client": ["@sixb/client@workspace:packages/client"],
 
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
+    "@sixb/connector-github": ["@sixb/connector-github@workspace:connectors/github"],
 
     "@sixb/connector-rest": ["@sixb/connector-rest@workspace:connectors/rest"],
 
