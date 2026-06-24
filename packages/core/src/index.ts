@@ -461,6 +461,8 @@ export {
   canViewActionRun,
   canViewEvent,
   canViewPipelineRun,
+  canViewProjection,
+  canViewProjectionRun,
   canViewWorkflowIntervention,
   canViewWorkflowRun,
   evaluate,
@@ -593,6 +595,8 @@ export type {
   ListAuthUsersResult,
   ListLatestPipelineRunsInput,
   ListLatestPipelineRunsResult,
+  ListLatestProjectionRunsInput,
+  ListLatestProjectionRunsResult,
   ListLatestSyncRunsInput,
   ListLatestSyncRunsResult,
   ListLatestWorkflowRunsInput,
@@ -639,6 +643,7 @@ export type {
   PipelineStepRunRecord,
   ProjectionKind,
   ProjectionRunCounters,
+  ProjectionRunObjectTypes,
   ProjectionRunRecord,
   ProjectionRunStatus,
   ProjectionRunStorage,
@@ -746,6 +751,7 @@ export {
   PROJECTION_COUNTER_KEYS,
   ProjectionRunError,
   planMigrationSet,
+  projectionRunObjectTypesVisible,
   runMigrationSet,
   StorageTransactionError,
   SyncRunError,
@@ -1176,6 +1182,7 @@ export type {
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
   ProjectionDefinition,
+  ProjectionObjectTypeIds,
   TelemetryProjectionDefinition,
 } from "./projections"
 
@@ -1189,5 +1196,6 @@ export {
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
   projectionKindOf,
+  projectionObjectTypeIds,
   validateTelemetryProjectionFieldMapping,
 } from "./projections"

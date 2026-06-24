@@ -30,6 +30,7 @@ import {
   getPipelineRun,
   getProjectInfo,
   getProjection,
+  getProjectionRun,
   getRule,
   getStatus,
   getSync,
@@ -51,6 +52,7 @@ import {
   listObjectTypes,
   listPipelineRuns,
   listPipelines,
+  listProjectionRuns,
   listProjections,
   listRuleStates,
   listRules,
@@ -134,6 +136,9 @@ import type {
   GetProjectionData,
   GetProjectionError,
   GetProjectionResponse,
+  GetProjectionRunData,
+  GetProjectionRunError,
+  GetProjectionRunResponse,
   GetRuleData,
   GetRuleError,
   GetRuleResponse,
@@ -192,6 +197,9 @@ import type {
   ListPipelineRunsResponse,
   ListPipelinesData,
   ListPipelinesResponse,
+  ListProjectionRunsData,
+  ListProjectionRunsError,
+  ListProjectionRunsResponse,
   ListProjectionsData,
   ListProjectionsResponse,
   ListRuleStatesData,
@@ -2262,6 +2270,100 @@ export const getProjectionOptions = (options: Options<GetProjectionData>) =>
       return data
     },
     queryKey: getProjectionQueryKey(options),
+  })
+
+export const listProjectionRunsQueryKey = (options?: Options<ListProjectionRunsData>) =>
+  createQueryKey("listProjectionRuns", options)
+
+/**
+ * List projection run history
+ */
+export const listProjectionRunsOptions = (options?: Options<ListProjectionRunsData>) =>
+  queryOptions<
+    ListProjectionRunsResponse,
+    ListProjectionRunsError,
+    ListProjectionRunsResponse,
+    ReturnType<typeof listProjectionRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listProjectionRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listProjectionRunsQueryKey(options),
+  })
+
+export const listProjectionRunsInfiniteQueryKey = (
+  options?: Options<ListProjectionRunsData>
+): QueryKey<Options<ListProjectionRunsData>> => createQueryKey("listProjectionRuns", options, true)
+
+/**
+ * List projection run history
+ */
+export const listProjectionRunsInfiniteOptions = (options?: Options<ListProjectionRunsData>) =>
+  infiniteQueryOptions<
+    ListProjectionRunsResponse,
+    ListProjectionRunsError,
+    InfiniteData<ListProjectionRunsResponse>,
+    QueryKey<Options<ListProjectionRunsData>>,
+    | string
+    | Pick<QueryKey<Options<ListProjectionRunsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListProjectionRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listProjectionRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listProjectionRunsInfiniteQueryKey(options),
+    }
+  )
+
+export const getProjectionRunQueryKey = (options: Options<GetProjectionRunData>) =>
+  createQueryKey("getProjectionRun", options)
+
+/**
+ * Get a projection run by id
+ */
+export const getProjectionRunOptions = (options: Options<GetProjectionRunData>) =>
+  queryOptions<
+    GetProjectionRunResponse,
+    GetProjectionRunError,
+    GetProjectionRunResponse,
+    ReturnType<typeof getProjectionRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getProjectionRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getProjectionRunQueryKey(options),
   })
 
 export const listWebhookRunsQueryKey = (options?: Options<ListWebhookRunsData>) =>

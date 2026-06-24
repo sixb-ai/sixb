@@ -1,5 +1,7 @@
 import type {
   FinishProjectionRunInput,
+  ListLatestProjectionRunsInput,
+  ListLatestProjectionRunsResult,
   ListProjectionRunsInput,
   ListProjectionRunsResult,
   ProjectionKind,
@@ -11,6 +13,7 @@ import type {
   UpdateProjectionRunInput,
 } from "@sixb/core"
 import { PROJECTION_COUNTER_KEYS, ProjectionRunError } from "@sixb/core"
+import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SQLClient, SqlParameter } from "./pg-client"
 import { isUniqueViolation } from "./storage-errors"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
@@ -34,6 +37,9 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           projection_kind,
           dataset_id,
           dataset_version_id,
+          object_type_id,
+          source_object_type_id,
+          target_object_type_id,
           status,
           started_at,
           rows_processed,
@@ -50,6 +56,9 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           ${input.projectionKind},
           ${input.datasetId},
           ${input.datasetVersionId},
+          ${input.objectTypeId ?? null},
+          ${input.sourceObjectTypeId ?? null},
+          ${input.targetObjectTypeId ?? null},
           ${"running"},
           ${input.startedAt ?? new Date()},
           ${0},
@@ -168,6 +177,25 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       params.push(input.datasetVersionId)
     }
 
+    if (input.objectTypeIds) {
+      // A run is visible when every object type it targets is viewable: the
+      // single object type for object/telemetry runs, or both ends for links.
+      // An empty viewable set matches no runs.
+      if (input.objectTypeIds.length === 0) {
+        return { runs: [], hasMore: false, total: 0 }
+      }
+      const placeholders = input.objectTypeIds.map(() => `$${index++}`)
+      const list = placeholders.join(", ")
+      const sourceList = input.objectTypeIds.map(() => `$${index++}`).join(", ")
+      const targetList = input.objectTypeIds.map(() => `$${index++}`).join(", ")
+      whereClauses.push(
+        `(object_type_id IN (${list})` +
+          ` OR (source_object_type_id IN (${sourceList})` +
+          ` AND target_object_type_id IN (${targetList})))`
+      )
+      params.push(...input.objectTypeIds, ...input.objectTypeIds, ...input.objectTypeIds)
+    }
+
     if (input.statuses) {
       const placeholders = input.statuses.map(() => `$${index++}`)
       whereClauses.push(`status IN (${placeholders.join(", ")})`)
@@ -219,6 +247,21 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       hasMore: offset + runs.length < total,
       total,
     }
+  }
+
+  async listLatestByProjectionIds(
+    input: ListLatestProjectionRunsInput
+  ): Promise<ListLatestProjectionRunsResult> {
+    const rows = await queryLatestRunsByOwnerId<DatabaseRow>({
+      sql: this.sql,
+      tableName: "projection_runs",
+      ownerColumn: "projection_id",
+      ownerIds: input.projectionIds,
+      projectId: input.projectId,
+      ownerIdFor: (row) => row.projection_id,
+    })
+
+    return { runs: rows.map(rowToProjectionRunRecord) }
   }
 }
 
@@ -279,6 +322,9 @@ function rowToProjectionRunRecord(row: DatabaseRow): ProjectionRunRecord {
     projectionKind: row.projection_kind,
     datasetId: row.dataset_id,
     datasetVersionId: row.dataset_version_id,
+    objectTypeId: row.object_type_id ?? undefined,
+    sourceObjectTypeId: row.source_object_type_id ?? undefined,
+    targetObjectTypeId: row.target_object_type_id ?? undefined,
     status: row.status,
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
@@ -320,6 +366,9 @@ interface DatabaseRow {
   projection_kind: ProjectionKind
   dataset_id: string
   dataset_version_id: string
+  object_type_id: string | null
+  source_object_type_id: string | null
+  target_object_type_id: string | null
   status: ProjectionRunStatus
   started_at: Date | string
   finished_at: Date | string | null

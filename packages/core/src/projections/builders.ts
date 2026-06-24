@@ -696,6 +696,27 @@ export function projectionKindOf(
   return "telemetry"
 }
 
+/** The object type id(s) a projection materializes. */
+export interface ProjectionObjectTypeIds {
+  readonly objectTypeId?: string
+  readonly sourceObjectTypeId?: string
+  readonly targetObjectTypeId?: string
+}
+
+/**
+ * Extracts the object type id(s) a projection targets, used to authorize run
+ * visibility (`object.view`). Link projections require both ends; object and
+ * telemetry projections target a single type.
+ */
+export function projectionObjectTypeIds(projection: ProjectionDefinition): ProjectionObjectTypeIds {
+  return projection._tag === "LinkProjectionDefinition"
+    ? {
+        sourceObjectTypeId: projection.sourceObjectTypeId,
+        targetObjectTypeId: projection.targetObjectTypeId,
+      }
+    : { objectTypeId: projection.objectTypeId }
+}
+
 // ── Categorization ──────────────────────────────────────────
 
 /** Splits a mixed list of projection definitions into typed arrays by tag. */

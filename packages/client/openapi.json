@@ -11525,6 +11525,92 @@
                               "required": ["linkId", "targetObjectTypeId"],
                               "additionalProperties": false
                             }
+                          },
+                          "latestRun": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "projectionKind": {
+                                "type": "string",
+                                "enum": ["object", "link", "telemetry"]
+                              },
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "datasetVersionId": {
+                                "type": "string"
+                              },
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "sourceObjectTypeId": {
+                                "type": "string"
+                              },
+                              "targetObjectTypeId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "rowsProcessed": {
+                                "type": "number"
+                              },
+                              "rowsSkipped": {
+                                "type": "number"
+                              },
+                              "objectsUpserted": {
+                                "type": "number"
+                              },
+                              "linksUpserted": {
+                                "type": "number"
+                              },
+                              "telemetryPointsAppended": {
+                                "type": "number"
+                              },
+                              "telemetryPointsSkipped": {
+                                "type": "number"
+                              },
+                              "telemetryRowsFailed": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "projectionId",
+                              "projectionKind",
+                              "datasetId",
+                              "datasetVersionId",
+                              "status",
+                              "startedAt",
+                              "rowsProcessed",
+                              "rowsSkipped",
+                              "objectsUpserted",
+                              "linksUpserted",
+                              "telemetryPointsAppended",
+                              "telemetryPointsSkipped",
+                              "telemetryRowsFailed"
+                            ],
+                            "additionalProperties": false,
+                            "nullable": true
                           }
                         },
                         "required": [
@@ -11533,7 +11619,8 @@
                           "objectTypeId",
                           "datasetId",
                           "properties",
-                          "links"
+                          "links",
+                          "latestRun"
                         ],
                         "additionalProperties": false
                       }
@@ -11567,6 +11654,92 @@
                           },
                           "targetField": {
                             "type": "string"
+                          },
+                          "latestRun": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "projectionKind": {
+                                "type": "string",
+                                "enum": ["object", "link", "telemetry"]
+                              },
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "datasetVersionId": {
+                                "type": "string"
+                              },
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "sourceObjectTypeId": {
+                                "type": "string"
+                              },
+                              "targetObjectTypeId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "rowsProcessed": {
+                                "type": "number"
+                              },
+                              "rowsSkipped": {
+                                "type": "number"
+                              },
+                              "objectsUpserted": {
+                                "type": "number"
+                              },
+                              "linksUpserted": {
+                                "type": "number"
+                              },
+                              "telemetryPointsAppended": {
+                                "type": "number"
+                              },
+                              "telemetryPointsSkipped": {
+                                "type": "number"
+                              },
+                              "telemetryRowsFailed": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "projectionId",
+                              "projectionKind",
+                              "datasetId",
+                              "datasetVersionId",
+                              "status",
+                              "startedAt",
+                              "rowsProcessed",
+                              "rowsSkipped",
+                              "objectsUpserted",
+                              "linksUpserted",
+                              "telemetryPointsAppended",
+                              "telemetryPointsSkipped",
+                              "telemetryRowsFailed"
+                            ],
+                            "additionalProperties": false,
+                            "nullable": true
                           }
                         },
                         "required": [
@@ -11577,7 +11750,8 @@
                           "targetObjectTypeId",
                           "datasetId",
                           "sourceField",
-                          "targetField"
+                          "targetField",
+                          "latestRun"
                         ],
                         "additionalProperties": false
                       }
@@ -11614,6 +11788,92 @@
                           },
                           "unitField": {
                             "type": "string"
+                          },
+                          "latestRun": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "projectId": {
+                                "type": "string"
+                              },
+                              "projectionId": {
+                                "type": "string"
+                              },
+                              "projectionKind": {
+                                "type": "string",
+                                "enum": ["object", "link", "telemetry"]
+                              },
+                              "datasetId": {
+                                "type": "string"
+                              },
+                              "datasetVersionId": {
+                                "type": "string"
+                              },
+                              "objectTypeId": {
+                                "type": "string"
+                              },
+                              "sourceObjectTypeId": {
+                                "type": "string"
+                              },
+                              "targetObjectTypeId": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["running", "succeeded", "failed", "cancelled"]
+                              },
+                              "startedAt": {
+                                "type": "string"
+                              },
+                              "finishedAt": {
+                                "type": "string"
+                              },
+                              "errorMessage": {
+                                "type": "string"
+                              },
+                              "rowsProcessed": {
+                                "type": "number"
+                              },
+                              "rowsSkipped": {
+                                "type": "number"
+                              },
+                              "objectsUpserted": {
+                                "type": "number"
+                              },
+                              "linksUpserted": {
+                                "type": "number"
+                              },
+                              "telemetryPointsAppended": {
+                                "type": "number"
+                              },
+                              "telemetryPointsSkipped": {
+                                "type": "number"
+                              },
+                              "telemetryRowsFailed": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "projectId",
+                              "projectionId",
+                              "projectionKind",
+                              "datasetId",
+                              "datasetVersionId",
+                              "status",
+                              "startedAt",
+                              "rowsProcessed",
+                              "rowsSkipped",
+                              "objectsUpserted",
+                              "linksUpserted",
+                              "telemetryPointsAppended",
+                              "telemetryPointsSkipped",
+                              "telemetryRowsFailed"
+                            ],
+                            "additionalProperties": false,
+                            "nullable": true
                           }
                         },
                         "required": [
@@ -11624,7 +11884,8 @@
                           "datasetId",
                           "objectIdField",
                           "atField",
-                          "valueField"
+                          "valueField",
+                          "latestRun"
                         ],
                         "additionalProperties": false
                       }
@@ -11705,6 +11966,92 @@
                             "required": ["linkId", "targetObjectTypeId"],
                             "additionalProperties": false
                           }
+                        },
+                        "latestRun": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "projectId": {
+                              "type": "string"
+                            },
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["object", "link", "telemetry"]
+                            },
+                            "datasetId": {
+                              "type": "string"
+                            },
+                            "datasetVersionId": {
+                              "type": "string"
+                            },
+                            "objectTypeId": {
+                              "type": "string"
+                            },
+                            "sourceObjectTypeId": {
+                              "type": "string"
+                            },
+                            "targetObjectTypeId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["running", "succeeded", "failed", "cancelled"]
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "finishedAt": {
+                              "type": "string"
+                            },
+                            "errorMessage": {
+                              "type": "string"
+                            },
+                            "rowsProcessed": {
+                              "type": "number"
+                            },
+                            "rowsSkipped": {
+                              "type": "number"
+                            },
+                            "objectsUpserted": {
+                              "type": "number"
+                            },
+                            "linksUpserted": {
+                              "type": "number"
+                            },
+                            "telemetryPointsAppended": {
+                              "type": "number"
+                            },
+                            "telemetryPointsSkipped": {
+                              "type": "number"
+                            },
+                            "telemetryRowsFailed": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "projectId",
+                            "projectionId",
+                            "projectionKind",
+                            "datasetId",
+                            "datasetVersionId",
+                            "status",
+                            "startedAt",
+                            "rowsProcessed",
+                            "rowsSkipped",
+                            "objectsUpserted",
+                            "linksUpserted",
+                            "telemetryPointsAppended",
+                            "telemetryPointsSkipped",
+                            "telemetryRowsFailed"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -11713,7 +12060,8 @@
                         "objectTypeId",
                         "datasetId",
                         "properties",
-                        "links"
+                        "links",
+                        "latestRun"
                       ],
                       "additionalProperties": false
                     },
@@ -11744,6 +12092,92 @@
                         },
                         "targetField": {
                           "type": "string"
+                        },
+                        "latestRun": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "projectId": {
+                              "type": "string"
+                            },
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["object", "link", "telemetry"]
+                            },
+                            "datasetId": {
+                              "type": "string"
+                            },
+                            "datasetVersionId": {
+                              "type": "string"
+                            },
+                            "objectTypeId": {
+                              "type": "string"
+                            },
+                            "sourceObjectTypeId": {
+                              "type": "string"
+                            },
+                            "targetObjectTypeId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["running", "succeeded", "failed", "cancelled"]
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "finishedAt": {
+                              "type": "string"
+                            },
+                            "errorMessage": {
+                              "type": "string"
+                            },
+                            "rowsProcessed": {
+                              "type": "number"
+                            },
+                            "rowsSkipped": {
+                              "type": "number"
+                            },
+                            "objectsUpserted": {
+                              "type": "number"
+                            },
+                            "linksUpserted": {
+                              "type": "number"
+                            },
+                            "telemetryPointsAppended": {
+                              "type": "number"
+                            },
+                            "telemetryPointsSkipped": {
+                              "type": "number"
+                            },
+                            "telemetryRowsFailed": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "projectId",
+                            "projectionId",
+                            "projectionKind",
+                            "datasetId",
+                            "datasetVersionId",
+                            "status",
+                            "startedAt",
+                            "rowsProcessed",
+                            "rowsSkipped",
+                            "objectsUpserted",
+                            "linksUpserted",
+                            "telemetryPointsAppended",
+                            "telemetryPointsSkipped",
+                            "telemetryRowsFailed"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -11754,7 +12188,8 @@
                         "targetObjectTypeId",
                         "datasetId",
                         "sourceField",
-                        "targetField"
+                        "targetField",
+                        "latestRun"
                       ],
                       "additionalProperties": false
                     },
@@ -11788,6 +12223,92 @@
                         },
                         "unitField": {
                           "type": "string"
+                        },
+                        "latestRun": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "projectId": {
+                              "type": "string"
+                            },
+                            "projectionId": {
+                              "type": "string"
+                            },
+                            "projectionKind": {
+                              "type": "string",
+                              "enum": ["object", "link", "telemetry"]
+                            },
+                            "datasetId": {
+                              "type": "string"
+                            },
+                            "datasetVersionId": {
+                              "type": "string"
+                            },
+                            "objectTypeId": {
+                              "type": "string"
+                            },
+                            "sourceObjectTypeId": {
+                              "type": "string"
+                            },
+                            "targetObjectTypeId": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["running", "succeeded", "failed", "cancelled"]
+                            },
+                            "startedAt": {
+                              "type": "string"
+                            },
+                            "finishedAt": {
+                              "type": "string"
+                            },
+                            "errorMessage": {
+                              "type": "string"
+                            },
+                            "rowsProcessed": {
+                              "type": "number"
+                            },
+                            "rowsSkipped": {
+                              "type": "number"
+                            },
+                            "objectsUpserted": {
+                              "type": "number"
+                            },
+                            "linksUpserted": {
+                              "type": "number"
+                            },
+                            "telemetryPointsAppended": {
+                              "type": "number"
+                            },
+                            "telemetryPointsSkipped": {
+                              "type": "number"
+                            },
+                            "telemetryRowsFailed": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "projectId",
+                            "projectionId",
+                            "projectionKind",
+                            "datasetId",
+                            "datasetVersionId",
+                            "status",
+                            "startedAt",
+                            "rowsProcessed",
+                            "rowsSkipped",
+                            "objectsUpserted",
+                            "linksUpserted",
+                            "telemetryPointsAppended",
+                            "telemetryPointsSkipped",
+                            "telemetryRowsFailed"
+                          ],
+                          "additionalProperties": false,
+                          "nullable": true
                         }
                       },
                       "required": [
@@ -11798,11 +12319,377 @@
                         "datasetId",
                         "objectIdField",
                         "atField",
-                        "valueField"
+                        "valueField",
+                        "latestRun"
                       ],
                       "additionalProperties": false
                     }
                   ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projection-runs": {
+      "get": {
+        "summary": "List projection run history",
+        "tags": ["Projections"],
+        "operationId": "listProjectionRuns",
+        "parameters": [
+          {
+            "name": "projectionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "projectionKind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["object", "link", "telemetry"]
+            }
+          },
+          {
+            "name": "datasetId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "datasetVersionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["running", "succeeded", "failed", "cancelled"]
+            }
+          },
+          {
+            "name": "startedAfter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "startedBefore",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "projectionId": {
+                            "type": "string"
+                          },
+                          "projectionKind": {
+                            "type": "string",
+                            "enum": ["object", "link", "telemetry"]
+                          },
+                          "datasetId": {
+                            "type": "string"
+                          },
+                          "datasetVersionId": {
+                            "type": "string"
+                          },
+                          "objectTypeId": {
+                            "type": "string"
+                          },
+                          "sourceObjectTypeId": {
+                            "type": "string"
+                          },
+                          "targetObjectTypeId": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["running", "succeeded", "failed", "cancelled"]
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "finishedAt": {
+                            "type": "string"
+                          },
+                          "errorMessage": {
+                            "type": "string"
+                          },
+                          "rowsProcessed": {
+                            "type": "number"
+                          },
+                          "rowsSkipped": {
+                            "type": "number"
+                          },
+                          "objectsUpserted": {
+                            "type": "number"
+                          },
+                          "linksUpserted": {
+                            "type": "number"
+                          },
+                          "telemetryPointsAppended": {
+                            "type": "number"
+                          },
+                          "telemetryPointsSkipped": {
+                            "type": "number"
+                          },
+                          "telemetryRowsFailed": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "projectionId",
+                          "projectionKind",
+                          "datasetId",
+                          "datasetVersionId",
+                          "status",
+                          "startedAt",
+                          "rowsProcessed",
+                          "rowsSkipped",
+                          "objectsUpserted",
+                          "linksUpserted",
+                          "telemetryPointsAppended",
+                          "telemetryPointsSkipped",
+                          "telemetryRowsFailed"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["runs", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projection-runs/{runId}": {
+      "get": {
+        "summary": "Get a projection run by id",
+        "tags": ["Projections"],
+        "operationId": "getProjectionRun",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "projectionId": {
+                      "type": "string"
+                    },
+                    "projectionKind": {
+                      "type": "string",
+                      "enum": ["object", "link", "telemetry"]
+                    },
+                    "datasetId": {
+                      "type": "string"
+                    },
+                    "datasetVersionId": {
+                      "type": "string"
+                    },
+                    "objectTypeId": {
+                      "type": "string"
+                    },
+                    "sourceObjectTypeId": {
+                      "type": "string"
+                    },
+                    "targetObjectTypeId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["running", "succeeded", "failed", "cancelled"]
+                    },
+                    "startedAt": {
+                      "type": "string"
+                    },
+                    "finishedAt": {
+                      "type": "string"
+                    },
+                    "errorMessage": {
+                      "type": "string"
+                    },
+                    "rowsProcessed": {
+                      "type": "number"
+                    },
+                    "rowsSkipped": {
+                      "type": "number"
+                    },
+                    "objectsUpserted": {
+                      "type": "number"
+                    },
+                    "linksUpserted": {
+                      "type": "number"
+                    },
+                    "telemetryPointsAppended": {
+                      "type": "number"
+                    },
+                    "telemetryPointsSkipped": {
+                      "type": "number"
+                    },
+                    "telemetryRowsFailed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "projectionId",
+                    "projectionKind",
+                    "datasetId",
+                    "datasetVersionId",
+                    "status",
+                    "startedAt",
+                    "rowsProcessed",
+                    "rowsSkipped",
+                    "objectsUpserted",
+                    "linksUpserted",
+                    "telemetryPointsAppended",
+                    "telemetryPointsSkipped",
+                    "telemetryRowsFailed"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
                 }
               }
             }

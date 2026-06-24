@@ -5,7 +5,7 @@ import type {
   ProjectionRunCounters,
   ProjectionRunRecord,
 } from "@sixb/core"
-import { PROJECTION_COUNTER_KEYS, projectionKindOf } from "@sixb/core"
+import { PROJECTION_COUNTER_KEYS, projectionKindOf, projectionObjectTypeIds } from "@sixb/core"
 import { ProjectionWorkerError } from "./errors"
 import { runLinkProjection } from "./run-link-projection"
 import { runObjectProjection } from "./run-object-projection"
@@ -42,6 +42,11 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   let materialized = false
 
   try {
+    // Resolve up front so the run records the object type(s) it targets (used
+    // for authorization). Resolution still happens before validation, so an
+    // unknown projection is recorded as a started run and then fails below.
+    const resolvedProjection = runtime.getProjectionById(job.projectionId)
+
     await runtime.projectionRunsStorage.start({
       projectId,
       id: job.id,
@@ -49,12 +54,13 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
       projectionKind: job.projectionKind,
       datasetId: job.datasetId,
       datasetVersionId: job.versionId,
+      ...(resolvedProjection ? projectionObjectTypeIds(resolvedProjection) : {}),
     })
     started = true
 
     throwIfAborted(signal)
 
-    const projection = requireProjection(runtime.getProjectionById(job.projectionId), job)
+    const projection = requireProjection(resolvedProjection, job)
     const dataset = requireRegisteredDataset(runtime.getDatasetById(job.datasetId), job)
     await assertLakeDatasetExists(runtime.lakeStorage, job)
     const version = await requireDatasetVersion(runtime.lakeStorage, job)

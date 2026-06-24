@@ -640,7 +640,7 @@ describe("authorized adjacent read routes", () => {
     ).toEqual(["invoice", "contract"])
   })
 
-  test("projection reads inherit dataset visibility", async () => {
+  test("projection reads inherit object visibility", async () => {
     const { app, storage } = await createApp()
     const operator = await seedSession(storage, ["commercial"], "usr_op")
     const runner = await seedSession(storage, ["operations"], "usr_run")
@@ -656,9 +656,7 @@ describe("authorized adjacent read routes", () => {
     expect(operatorProjections.objectProjections.map((projection) => projection.id)).toEqual([
       "orders-contracts",
     ])
-    expect(operatorProjections.linkProjections.map((projection) => projection.id)).toEqual([
-      "orders-contract-invoices",
-    ])
+    expect(operatorProjections.linkProjections.map((projection) => projection.id)).toEqual([])
 
     const hiddenDetail = await app.fetch(
       new Request("http://localhost/api/projections/customers-invoices", {

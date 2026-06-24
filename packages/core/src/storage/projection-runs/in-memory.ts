@@ -1,12 +1,16 @@
+import { latestStartedAtByOwnerId } from "../run-listing"
 import { ProjectionRunError } from "./errors"
 import {
   type FinishProjectionRunInput,
+  type ListLatestProjectionRunsInput,
+  type ListLatestProjectionRunsResult,
   type ListProjectionRunsInput,
   type ListProjectionRunsResult,
   PROJECTION_COUNTER_KEYS,
   type ProjectionRunCounters,
   type ProjectionRunRecord,
   type ProjectionRunStorage,
+  projectionRunObjectTypesVisible,
   type StartProjectionRunInput,
   type UpdateProjectionRunInput,
   zeroProjectionRunCounters,
@@ -107,6 +111,9 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       projectionKind: input.projectionKind,
       datasetId: input.datasetId,
       datasetVersionId: input.datasetVersionId,
+      objectTypeId: input.objectTypeId,
+      sourceObjectTypeId: input.sourceObjectTypeId,
+      targetObjectTypeId: input.targetObjectTypeId,
       status: "running",
       startedAt: new Date(input.startedAt ?? new Date()),
       ...zeroProjectionRunCounters(),
@@ -160,6 +167,7 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     const offset = input.offset ?? 0
     const limit = input.limit ?? this.rows.size
     const statuses = input.statuses ? new Set(input.statuses) : null
+    const objectTypeIds = input.objectTypeIds ? new Set(input.objectTypeIds) : null
 
     const filtered = [...this.rows.values()]
       .filter((record) => record.projectId === input.projectId)
@@ -170,6 +178,11 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       .filter((record) => (input.datasetId ? record.datasetId === input.datasetId : true))
       .filter((record) =>
         input.datasetVersionId ? record.datasetVersionId === input.datasetVersionId : true
+      )
+      .filter((record) =>
+        objectTypeIds
+          ? projectionRunObjectTypesVisible(record, (id) => objectTypeIds.has(id))
+          : true
       )
       .filter((record) => (statuses ? statuses.has(record.status) : true))
       .filter((record) => (input.startedAfter ? record.startedAt >= input.startedAfter : true))
@@ -184,6 +197,18 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       hasMore: offset + runs.length < total,
       total,
     }
+  }
+
+  async listLatestByProjectionIds(
+    input: ListLatestProjectionRunsInput
+  ): Promise<ListLatestProjectionRunsResult> {
+    const runs = latestStartedAtByOwnerId(
+      [...this.rows.values()].filter((record) => record.projectId === input.projectId),
+      input.projectionIds,
+      (record) => record.projectionId
+    )
+
+    return { runs: runs.map(cloneProjectionRunRecord) }
   }
 
   private requireRunning(projectId: string, id: string): ProjectionRunRecord {
