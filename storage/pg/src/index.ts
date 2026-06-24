@@ -12,6 +12,7 @@ import {
   type StorageTransactionOptions,
   throwNestedStorageTransaction,
 } from "@sixb/core"
+import { PgAgentStorage } from "./agents"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAuthStorage } from "./pg-auth-storage"
@@ -113,6 +114,7 @@ export interface PostgresStorageOptions {
 export class PostgresStorage implements MigrationCapableStorage {
   readonly objects: PgObjectStorage
   readonly auth: PgAuthStorage
+  readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -172,6 +174,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     const stores = createPostgresStores(this.sql)
     this.objects = stores.objects
     this.auth = stores.auth
+    this.agents = stores.agents
     this.actionRuns = stores.actionRuns
     this.pipelineRuns = stores.pipelineRuns
     this.workflowRuns = stores.workflowRuns
@@ -251,6 +254,7 @@ function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
   return {
     objects: new PgObjectStorage(sql),
     auth: new PgAuthStorage({ sql }),
+    agents: new PgAgentStorage({ sql }),
     actionRuns: new PgActionRunStorage(sql),
     pipelineRuns: new PgPipelineRunStorage(sql),
     workflowRuns: new PgWorkflowRunStorage(sql),
@@ -267,6 +271,7 @@ function createPostgresStores(sql: PgStoreClient): PostgresStoreSet {
 interface PostgresStoreSet {
   readonly objects: PgObjectStorage
   readonly auth: PgAuthStorage
+  readonly agents: PgAgentStorage
   readonly actionRuns: PgActionRunStorage
   readonly pipelineRuns: PgPipelineRunStorage
   readonly workflowRuns: PgWorkflowRunStorage
@@ -291,6 +296,13 @@ function resolveTimeoutMillis(value: number | undefined, label: string): number 
   return Math.trunc(value)
 }
 
+export type { PgAgentStorageOptions } from "./agents"
+export {
+  PgAgentMessageStore,
+  PgAgentRunStore,
+  PgAgentStorage,
+  PgAgentThreadStore,
+} from "./agents"
 export type { PostgresMigrationContext } from "./migrations"
 export {
   createPostgresMigrator,

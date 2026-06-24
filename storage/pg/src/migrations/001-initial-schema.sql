@@ -734,3 +734,91 @@ CREATE INDEX IF NOT EXISTS idx_auth_oidc_attempts_active
     id DESC
   )
   WHERE consumed_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS agent_threads (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  owner_principal_type TEXT NOT NULL,
+  owner_principal_id TEXT NOT NULL,
+  title TEXT,
+  status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
+  active_run_id TEXT,
+  last_message_at TIMESTAMPTZ,
+  message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_threads_project_activity
+  ON agent_threads (project_id, (COALESCE(last_message_at, created_at)) DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_threads_project_agent_activity
+  ON agent_threads (project_id, agent_id, (COALESCE(last_message_at, created_at)) DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_threads_project_status_activity
+  ON agent_threads (project_id, status, (COALESCE(last_message_at, created_at)) DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_threads_project_owner_activity
+  ON agent_threads (
+    project_id,
+    owner_principal_type,
+    owner_principal_id,
+    (COALESCE(last_message_at, created_at)) DESC,
+    id DESC
+  );
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  trigger_message_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
+  model_id TEXT,
+  finish_reason TEXT,
+  usage_input_tokens INTEGER CHECK (usage_input_tokens IS NULL OR usage_input_tokens >= 0),
+  usage_output_tokens INTEGER CHECK (usage_output_tokens IS NULL OR usage_output_tokens >= 0),
+  usage_total_tokens INTEGER CHECK (usage_total_tokens IS NULL OR usage_total_tokens >= 0),
+  usage_reasoning_tokens INTEGER CHECK (
+    usage_reasoning_tokens IS NULL OR usage_reasoning_tokens >= 0
+  ),
+  usage_cached_input_tokens INTEGER CHECK (
+    usage_cached_input_tokens IS NULL OR usage_cached_input_tokens >= 0
+  ),
+  error TEXT,
+  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+  lease_id TEXT,
+  lease_expires_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL,
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_project_started
+  ON agent_runs (project_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_project_thread_started
+  ON agent_runs (project_id, thread_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_project_agent_started
+  ON agent_runs (project_id, agent_id, started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_project_status_started
+  ON agent_runs (project_id, status, started_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS agent_messages (
+  project_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  thread_id TEXT NOT NULL,
+  run_id TEXT,
+  role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+  seq INTEGER NOT NULL CHECK (seq >= 1),
+  parts JSONB NOT NULL,
+  metadata JSONB,
+  content_version INTEGER NOT NULL CHECK (content_version >= 1),
+  created_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (project_id, id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_messages_thread_seq
+  ON agent_messages (project_id, thread_id, seq);
+CREATE INDEX IF NOT EXISTS idx_agent_messages_project_thread_role
+  ON agent_messages (project_id, thread_id, role, seq);

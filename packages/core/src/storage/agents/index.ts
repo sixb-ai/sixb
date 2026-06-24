@@ -3,8 +3,6 @@ export { AgentStorageError } from "./errors"
 export type { InMemoryAgentStorageSnapshot } from "./in-memory"
 export { InMemoryAgentStorage } from "./in-memory"
 export type {
-  AgentMessagePartRecord,
-  AgentMessagePartToolState,
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,
@@ -20,7 +18,6 @@ export type {
   AppendAgentMessageInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
-  ListAgentMessagePartsInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,

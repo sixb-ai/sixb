@@ -12,6 +12,7 @@ import {
   throwNestedStorageTransaction,
 } from "@sixb/core"
 import { SqliteActionRunStorage } from "./action-run-storage"
+import { SqliteAgentStorage } from "./agents"
 import { SqliteAuthStorage } from "./auth-storage"
 import {
   createSqliteStorageMigrators,
@@ -59,6 +60,7 @@ export interface SqliteStorageOptions {
 export class SqliteStorage implements MigrationCapableStorage {
   readonly objects: SqliteObjectStorage
   readonly auth: SqliteAuthStorage
+  readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
@@ -86,6 +88,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     const stores = createSqliteStores(this.connection)
     this.objects = stores.objects
     this.auth = stores.auth
+    this.agents = stores.agents
     this.actionRuns = stores.actionRuns
     this.pipelineRuns = stores.pipelineRuns
     this.timeseries = stores.timeseries
@@ -166,6 +169,7 @@ function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
   return {
     objects: new SqliteObjectStorage({ connection }),
     auth: new SqliteAuthStorage({ connection }),
+    agents: new SqliteAgentStorage({ connection }),
     actionRuns: new SqliteActionRunStorage({ connection }),
     pipelineRuns: new SqlitePipelineRunStorage({ connection }),
     timeseries: new SqliteTimeseriesStorage({ connection }),
@@ -182,6 +186,7 @@ function createSqliteStores(connection: SqliteStoreConnection): SqliteStoreSet {
 interface SqliteStoreSet {
   readonly objects: SqliteObjectStorage
   readonly auth: SqliteAuthStorage
+  readonly agents: SqliteAgentStorage
   readonly actionRuns: SqliteActionRunStorage
   readonly pipelineRuns: SqlitePipelineRunStorage
   readonly syncRuns: SqliteSyncRunStorage
@@ -196,6 +201,13 @@ interface SqliteStoreSet {
 
 export type { SqliteActionRunStorageOptions } from "./action-run-storage"
 export { SqliteActionRunStorage } from "./action-run-storage"
+export type { SqliteAgentStorageOptions } from "./agents"
+export {
+  SqliteAgentMessageStore,
+  SqliteAgentRunStore,
+  SqliteAgentStorage,
+  SqliteAgentThreadStore,
+} from "./agents"
 export type { SqliteAuthStorageOptions } from "./auth-storage"
 export { SqliteAuthStorage } from "./auth-storage"
 export {

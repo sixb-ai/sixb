@@ -42,8 +42,6 @@ export {
   normalizeActionRunCommitDiff,
 } from "./action-runs"
 export type {
-  AgentMessagePartRecord,
-  AgentMessagePartToolState,
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,
@@ -60,7 +58,6 @@ export type {
   AppendAgentMessageInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
-  ListAgentMessagePartsInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,

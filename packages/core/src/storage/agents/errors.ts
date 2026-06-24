@@ -6,7 +6,6 @@ export type AgentStorageErrorCode =
   | "lease_lost"
   | "lease_not_expired"
   | "duplicate_id"
-  | "message_not_found"
 
 /**
  * Error for agent-storage invariants and invalid state transitions (single-flight, lease ownership,

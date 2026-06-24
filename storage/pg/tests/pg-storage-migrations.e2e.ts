@@ -130,6 +130,28 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("migrations install agent storage tables", async () => {
+    await withStorage(false, async (storage, schemaName) => {
+      await migrateStorage(storage)
+
+      await storage.agents.threads.create({
+        id: "thr_1",
+        projectId: "project-a",
+        agentId: "sales",
+        ownerPrincipal: { type: "user", id: "usr_1" },
+        createdAt: new Date("2026-06-23T10:00:00.000Z"),
+      })
+
+      const thread = await storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
+      const tableNames = await readTableNames(schemaName)
+
+      expect(thread).toMatchObject({ id: "thr_1", agentId: "sales", messageCount: 0 })
+      expect(tableNames).toEqual(
+        expect.arrayContaining(["agent_threads", "agent_runs", "agent_messages"])
+      )
+    })
+  })
+
   test("dirty migration history blocks storage migrations", async () => {
     await withStorage(false, async (storage, schemaName) => {
       await storage.migrators[0]!.plan()

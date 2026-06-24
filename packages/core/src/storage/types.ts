@@ -27,7 +27,6 @@ export type {
 } from "./action-runs"
 export { ActionRunError } from "./action-runs"
 export type {
-  AgentMessagePartRecord,
   AgentMessageRecord,
   AgentRunRecord,
   AgentStorage,

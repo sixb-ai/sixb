@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite"
 export type SqliteValue = string | number | null
 
 type SqliteRunListTable =
+  | "agent_runs"
   | "pipeline_runs"
   | "pipeline_step_runs"
   | "sync_runs"

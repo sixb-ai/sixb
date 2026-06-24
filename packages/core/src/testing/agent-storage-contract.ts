@@ -65,7 +65,7 @@ function reserveInput(overrides: Partial<ReserveAgentRunInput> = {}): ReserveAge
  *
  * This is the storage-independent specification for Sixb agent persistence: thread lifecycle and
  * project isolation, single-flight run reservation, lease renewal / reclaim, run finalization with
- * execution metadata, and message append with part projection + thread-stats bookkeeping.
+ * execution metadata, and message append with thread-stats bookkeeping.
  */
 export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
   label: string,
@@ -467,7 +467,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       })
     })
 
-    // ── messages + parts ──────────────────────────────────────────────────────────────────────
+    // ── messages ──────────────────────────────────────────────────────────────────────────────
 
     test("appends messages, assigns seq, and bumps thread stats", async () => {
       await withStorage(async (storage) => {
@@ -511,37 +511,21 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         expect(thread).toMatchObject({ messageCount: 2 })
         expect(thread?.lastMessageAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
 
-        await expect(
-          storage.messages.getById({ projectId, id: "msg_asst_1" })
-        ).resolves.toMatchObject({ seq: 2 })
-
-        // Parts are projected for indexable audit.
-        const parts = await storage.messages.listParts({ projectId, messageId: "msg_asst_1" })
-        expect(parts.map((part) => part.kind)).toEqual(["reasoning", "tool-call", "text"])
-        expect(parts.map((part) => part.ordinal)).toEqual([0, 1, 2])
-        const toolPart = parts.find((part) => part.kind === "tool-call")
-        expect(toolPart).toMatchObject({
-          toolName: "bash",
-          toolCallId: "call_1",
-          toolState: "output-available",
-        })
-        const reasoningPart = parts.find((part) => part.kind === "reasoning")
-        expect(reasoningPart?.textPreview).toBe("thinking about it")
-
-        // listParts by kind across the thread, ordered by message seq then ordinal.
-        const textParts = await storage.messages.listParts({
-          projectId,
-          threadId: "thr_1",
-          kinds: ["text"],
-        })
-        expect(textParts.map((part) => part.messageId)).toEqual(["msg_user_1", "msg_asst_1"])
-
-        const toolParts = await storage.messages.listParts({
-          projectId,
-          threadId: "thr_1",
-          toolName: "bash",
-        })
-        expect(toolParts).toHaveLength(1)
+        // The message's `parts` are the canonical content and round-trip verbatim through storage.
+        const stored = await storage.messages.getById({ projectId, id: "msg_asst_1" })
+        expect(stored?.seq).toBe(2)
+        expect(stored?.parts).toEqual([
+          { type: "reasoning", text: "thinking about it" },
+          {
+            type: "tool-call",
+            toolCallId: "call_1",
+            toolName: "bash",
+            input: { cmd: "ls" },
+            state: "output-available",
+            output: "file.txt",
+          },
+          { type: "text", text: "Here is the result" },
+        ])
       })
     })
 

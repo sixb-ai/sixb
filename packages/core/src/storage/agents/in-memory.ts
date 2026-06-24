@@ -2,7 +2,6 @@ import { SIXB_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import type { Principal } from "../../auth"
 import { AgentStorageError } from "./errors"
 import type {
-  AgentMessagePartRecord,
   AgentMessageRecord,
   AgentMessageStore,
   AgentRunRecord,
@@ -13,7 +12,6 @@ import type {
   AppendAgentMessageInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
-  ListAgentMessagePartsInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -25,14 +23,8 @@ import type {
   ReserveAgentRunInput,
 } from "./types"
 
-const TEXT_PREVIEW_MAX = 200
-
 function key(projectId: string, id: string): string {
   return `${projectId}:${id}`
-}
-
-function partKey(projectId: string, messageId: string, ordinal: number): string {
-  return `${projectId}:${messageId}:${ordinal}`
 }
 
 function clone<T>(value: T): T {
@@ -41,10 +33,6 @@ function clone<T>(value: T): T {
 
 function principalsEqual(a: Principal, b: Principal): boolean {
   return a.type === b.type && a.id === b.id
-}
-
-function truncate(text: string): string {
-  return text.length > TEXT_PREVIEW_MAX ? text.slice(0, TEXT_PREVIEW_MAX) : text
 }
 
 function compareByDate(
@@ -87,14 +75,12 @@ interface AgentStoreState {
   readonly threads: Map<string, AgentThreadRecord>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
-  readonly parts: Map<string, AgentMessagePartRecord>
 }
 
 export interface InMemoryAgentStorageSnapshot {
   readonly threads: Map<string, AgentThreadRecord>
   readonly runs: Map<string, AgentRunRecord>
   readonly messages: Map<string, AgentMessageRecord>
-  readonly parts: Map<string, AgentMessagePartRecord>
 }
 
 // ── threads ───────────────────────────────────────────────────────────────────────────────────
@@ -339,7 +325,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
   }
 }
 
-// ── messages + parts ──────────────────────────────────────────────────────────────────────────
+// ── messages ──────────────────────────────────────────────────────────────────────────────────
 
 class InMemoryAgentMessageStore implements AgentMessageStore {
   constructor(private readonly state: AgentStoreState) {}
@@ -371,7 +357,6 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
 
     const createdAt = new Date(input.createdAt ?? new Date())
     const seq = this.nextSeq(input.projectId, input.threadId)
-    const parts = clone(input.parts)
     const message: AgentMessageRecord = {
       id: input.id,
       projectId: input.projectId,
@@ -379,30 +364,13 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       runId: input.runId,
       role: input.role,
       seq,
-      parts,
+      parts: clone(input.parts),
       ...(input.metadata === undefined ? {} : { metadata: clone(input.metadata) }),
       contentVersion: SIXB_MESSAGE_CONTENT_VERSION,
       createdAt,
       ...(input.completedAt === undefined ? {} : { completedAt: new Date(input.completedAt) }),
     }
     this.state.messages.set(messageKey, clone(message))
-
-    parts.forEach((part, ordinal) => {
-      const record: AgentMessagePartRecord = {
-        projectId: input.projectId,
-        messageId: input.id,
-        threadId: input.threadId,
-        ordinal,
-        kind: part.type,
-        ...(part.type === "tool-call"
-          ? { toolName: part.toolName, toolCallId: part.toolCallId, toolState: part.state }
-          : {}),
-        ...(part.type === "text" || part.type === "reasoning"
-          ? { textPreview: truncate(part.text) }
-          : {}),
-      }
-      this.state.parts.set(partKey(input.projectId, input.id, ordinal), clone(record))
-    })
 
     this.state.threads.set(
       threadKey,
@@ -436,28 +404,6 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     return { messages: page.map(clone), hasMore, total }
   }
 
-  async listParts(input: ListAgentMessagePartsInput): Promise<readonly AgentMessagePartRecord[]> {
-    if (input.messageId === undefined && input.threadId === undefined) {
-      throw new AgentStorageError(
-        "invalid_state",
-        "[Sixb] listParts requires either a messageId or a threadId."
-      )
-    }
-    const kinds = input.kinds ? new Set(input.kinds) : null
-
-    const filtered = [...this.state.parts.values()]
-      .filter((part) => part.projectId === input.projectId)
-      .filter((part) => (input.messageId ? part.messageId === input.messageId : true))
-      .filter((part) => (input.threadId ? part.threadId === input.threadId : true))
-      .filter((part) => (kinds ? kinds.has(part.kind) : true))
-      .filter((part) => (input.toolName ? part.toolName === input.toolName : true))
-      // Order a thread's parts by message seq then ordinal — a tuple compare (not a packed key), so
-      // no ceiling on parts-per-message is assumed.
-      .sort((a, b) => this.seqOf(a) - this.seqOf(b) || a.ordinal - b.ordinal)
-
-    return filtered.map(clone)
-  }
-
   private nextSeq(projectId: string, threadId: string): number {
     let max = 0
     for (const message of this.state.messages.values()) {
@@ -467,10 +413,6 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
     }
     return max + 1
   }
-
-  private seqOf(part: AgentMessagePartRecord): number {
-    return this.state.messages.get(key(part.projectId, part.messageId))?.seq ?? 0
-  }
 }
 
 export class InMemoryAgentStorage implements AgentStorage {
@@ -478,7 +420,6 @@ export class InMemoryAgentStorage implements AgentStorage {
     threads: new Map(),
     runs: new Map(),
     messages: new Map(),
-    parts: new Map(),
   }
 
   readonly threads = new InMemoryAgentThreadStore(this.state)
@@ -490,7 +431,6 @@ export class InMemoryAgentStorage implements AgentStorage {
       threads: structuredClone(this.state.threads),
       runs: structuredClone(this.state.runs),
       messages: structuredClone(this.state.messages),
-      parts: structuredClone(this.state.parts),
     }
   }
 
@@ -498,7 +438,6 @@ export class InMemoryAgentStorage implements AgentStorage {
     replace(this.state.threads, snapshot.threads)
     replace(this.state.runs, snapshot.runs)
     replace(this.state.messages, snapshot.messages)
-    replace(this.state.parts, snapshot.parts)
   }
 }
 

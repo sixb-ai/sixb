@@ -1,9 +1,4 @@
-import type {
-  SixbMessage,
-  SixbMessagePart,
-  SixbMessagePartType,
-  SixbMessageRole,
-} from "../../agents/message"
+import type { SixbMessage, SixbMessagePart, SixbMessageRole } from "../../agents/message"
 import type { Principal } from "../../auth"
 import type { JsonValue } from "../../json"
 
@@ -208,33 +203,6 @@ export interface ListAgentMessagesResult {
   readonly total: number
 }
 
-// ── agent_message_parts — indexable projection of a message's parts ─────────────────────────────
-
-export type AgentMessagePartToolState = "output-available" | "output-error"
-
-export interface AgentMessagePartRecord {
-  readonly projectId: string
-  readonly messageId: string
-  readonly threadId: string
-  readonly ordinal: number
-  readonly kind: SixbMessagePartType
-  readonly toolName?: string
-  readonly toolCallId?: string
-  readonly toolState?: AgentMessagePartToolState
-  /** Truncated text for `text`/`reasoning` parts (audit/search preview). */
-  readonly textPreview?: string
-}
-
-export interface ListAgentMessagePartsInput {
-  readonly projectId: string
-  /** Parts of a single message. */
-  readonly messageId?: string
-  /** All parts in a thread, ordered by message seq then ordinal. */
-  readonly threadId?: string
-  readonly kinds?: readonly SixbMessagePartType[]
-  readonly toolName?: string
-}
-
 // ── Store ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface AgentThreadStore {
@@ -257,11 +225,10 @@ export interface AgentRunStore {
 }
 
 export interface AgentMessageStore {
-  /** Insert a message, project its parts, and bump thread stats (seq, count, lastMessageAt). */
+  /** Insert a message (its `parts` are the canonical content) and bump thread stats. */
   append(input: AppendAgentMessageInput): Promise<AgentMessageRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentMessageRecord | null>
   list(input: ListAgentMessagesInput): Promise<ListAgentMessagesResult>
-  listParts(input: ListAgentMessagePartsInput): Promise<readonly AgentMessagePartRecord[]>
 }
 
 export interface AgentStorage {
