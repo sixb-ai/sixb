@@ -5,6 +5,7 @@ import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedSixb, loadSixbFromEntry } from "../lib/loadSixb"
 import { runUntilSignal, startSixbRuntime, stopQuietly } from "../lib/runtime"
+import { generateProjectTypes } from "../lib/typegen"
 import { DevView, ErrorView, LoadingView, renderPersistent, renderStatic } from "../ui"
 
 export interface DevOptions {
@@ -35,6 +36,7 @@ export async function runDev(options: DevOptions = {}) {
   let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
 
   try {
+    await generateProjectTypes({ entry })
     sixb = await loadSixbFromEntry(entry)
     const projectRoot = dirname(resolve(entry))
 

@@ -15,6 +15,7 @@
     "lib/**/*.ts",
     "ontology/**/*.ts",
     "pipelines/**/*.ts",
-    "sixb.config.ts"
+    "sixb.config.ts",
+    ".sixb/types/**/*.d.ts"
   ]
 }

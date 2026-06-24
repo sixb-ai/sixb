@@ -18,6 +18,7 @@ import {
 import { SixbServer } from "@sixb/server"
 import { SqliteStorage } from "@sixb/sqlite"
 import { Customer } from "../ontology/customer"
+import { Department } from "../ontology/department"
 import { Employee } from "../ontology/employee"
 import { Invoice } from "../ontology/invoice"
 import { Project } from "../ontology/project"
@@ -55,7 +56,7 @@ const storage = new SqliteStorage()
 
 const sixb = createSixbInstance({
   id: "acme-client-query-e2e",
-  ontology: [Project, Customer, Employee, Invoice] as const,
+  ontology: [Project, Customer, Employee, Invoice, Department] as const,
   broker: new InMemoryBroker(),
   storage,
   lakeStorage: new InMemoryLakeStorage(),
@@ -67,6 +68,53 @@ let server: SixbServer
 let previousBaseUrl: string | undefined
 
 beforeAll(async () => {
+  await sixb.objects(Department).upsert({
+    properties: { id: "dept-delivery", name: "Delivery", code: "DEL" },
+  })
+  await sixb.objects(Department).upsert({
+    properties: { id: "dept-success", name: "Customer Success", code: "CS" },
+  })
+
+  const employees = [
+    {
+      id: "emp-account",
+      name: "Ada Account",
+      email: "ada@acme.test",
+      role: "Account Manager",
+      department: "dept-success",
+    },
+    {
+      id: "emp-lead",
+      name: "Lena Lead",
+      email: "lena@acme.test",
+      role: "Project Lead",
+      department: "dept-delivery",
+    },
+    {
+      id: "emp-builder",
+      name: "Ben Builder",
+      email: "ben@acme.test",
+      role: "Engineer",
+      department: "dept-delivery",
+    },
+  ] as const
+  for (const employee of employees) {
+    await sixb.objects(Employee).upsert({
+      properties: {
+        id: employee.id,
+        name: employee.name,
+        email: employee.email,
+        role: employee.role,
+      },
+    })
+    await sixb.objects(Employee).upsertLink({
+      sourceId: employee.id,
+      linkId: "department",
+      targetTypeId: Department.id,
+      targetId: employee.department,
+    })
+  }
+
   await sixb.objects(Customer).upsert({
     properties: {
       id: "cust-001",
@@ -75,6 +123,12 @@ beforeAll(async () => {
       company: "Globex",
       tier: "gold",
     },
+  })
+  await sixb.objects(Customer).upsertLink({
+    sourceId: "cust-001",
+    linkId: "accountManager",
+    targetTypeId: Employee.id,
+    targetId: "emp-account",
   })
 
   const projects = [
@@ -109,6 +163,20 @@ beforeAll(async () => {
       linkId: "customer",
       targetTypeId: Customer.id,
       targetId: "cust-001",
+    })
+  }
+  await sixb.objects(Project).upsertLink({
+    sourceId: "proj-001",
+    linkId: "lead",
+    targetTypeId: Employee.id,
+    targetId: "emp-lead",
+  })
+  for (const employeeId of ["emp-lead", "emp-builder"]) {
+    await sixb.objects(Project).upsertLink({
+      sourceId: "proj-001",
+      linkId: "members",
+      targetTypeId: Employee.id,
+      targetId: employeeId,
     })
   }
 
@@ -185,6 +253,30 @@ describe("client object queries against a live server", () => {
     expect(primaryIds(viaHttp.objects)).toEqual(primaryIds(viaRuntime.objects))
     expect(viaHttp.objects[0]?.properties.name).toBe("Energy Dashboard")
     expect(viaHttp.objects[0]?.createdAt).toBeInstanceOf(Date)
+  })
+
+  test("expands the real projects page graph", async () => {
+    const project = await objects(Project)
+      .query()
+      .where((project) => project.p.id.eq("proj-001"))
+      .expand(Project.l.customer, (customer) => customer.expand(Customer.l.accountManager))
+      .expand(Project.l.lead, (lead) => lead.expand(Employee.l.department))
+      .expand(Project.l.members, {
+        limit: 2,
+        orderBy: [{ property: Employee.p.name, direction: "asc" }],
+      })
+      .first()
+
+    expect(project?.links.customer?.properties.company).toBe("Globex")
+    expect(project?.links.customer?.links.accountManager?.properties.name).toBe("Ada Account")
+    expect(project?.links.lead?.properties.name).toBe("Lena Lead")
+    expect(project?.links.lead?.links.department?.properties.name).toBe("Delivery")
+
+    const memberNames: string[] = []
+    for (const member of project?.links.members ?? []) {
+      memberNames.push(member.properties.name)
+    }
+    expect(memberNames).toEqual(["Ben Builder", "Lena Lead"])
   })
 
   test("Date predicate values survive the JSON wire format", async () => {

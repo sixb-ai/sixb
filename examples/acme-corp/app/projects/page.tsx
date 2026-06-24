@@ -1,13 +1,24 @@
 import { useObjectsFacets, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import type { TwinObject } from "@sixb/core/query"
 import { useState } from "react"
+import { Customer } from "../../ontology/customer"
+import { Employee } from "../../ontology/employee"
 import { Project } from "../../ontology/project"
 
-type ProjectRow = TwinObject<typeof Project, readonly []>
 type ProjectStatus = "draft" | "active" | "paused" | "completed" | "cancelled"
+type QueryRow<TQuery> = TQuery extends { first(): Promise<infer TRow> } ? NonNullable<TRow> : never
 
-const allProjects = objects(Project).query().orderBy(Project.p.deadline, "asc")
+const allProjects = objects(Project)
+  .query()
+  .expand(Project.l.customer, (customer) => customer.expand(Customer.l.accountManager))
+  .expand(Project.l.lead, (lead) => lead.expand(Employee.l.department))
+  .expand(Project.l.members, {
+    limit: 4,
+    orderBy: [{ property: Employee.p.name, direction: "asc" }],
+  })
+  .orderBy(Project.p.deadline, "asc")
+
+type ProjectRow = QueryRow<typeof allProjects>
 
 function formatBudget(value: unknown): string {
   return typeof value === "number"
@@ -24,7 +35,20 @@ function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
+function memberSummary(members: ProjectRow["links"]["members"]): string {
+  if (members.length === 0) return "No assigned members"
+  const names = members.map((member) => member.properties.name)
+  return names.length < 4
+    ? names.join(", ")
+    : `${names.slice(0, 3).join(", ")} +${names.length - 3}`
+}
+
 function ProjectCard({ project }: { project: ProjectRow }) {
+  const customer = project.links.customer
+  const accountManager = customer?.links.accountManager
+  const lead = project.links.lead
+  const department = lead?.links.department
+
   return (
     <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg border bg-card p-4 shadow-sm transition hover:-translate-y-px hover:border-primary max-md:grid-cols-1">
       <div>
@@ -35,6 +59,24 @@ function ProjectCard({ project }: { project: ProjectRow }) {
         <p className="mt-2 max-w-3xl leading-snug text-muted-foreground">
           {project.properties.description ?? "No description."}
         </p>
+        <dl className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
+          <div>
+            <dt className="text-xs font-bold tracking-wide text-foreground uppercase">Customer</dt>
+            <dd className="mt-1 text-foreground">{customer?.properties.company ?? "Unassigned"}</dd>
+            <dd className="text-xs">
+              {accountManager ? `AM: ${accountManager.properties.name}` : "No account manager"}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-bold tracking-wide text-foreground uppercase">Lead</dt>
+            <dd className="mt-1 text-foreground">{lead?.properties.name ?? "Unassigned"}</dd>
+            <dd className="text-xs">{department?.properties.name ?? "No department"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-bold tracking-wide text-foreground uppercase">Team</dt>
+            <dd className="mt-1 text-foreground">{memberSummary(project.links.members)}</dd>
+          </div>
+        </dl>
       </div>
       <div className="grid min-w-44 content-center gap-1.5 text-right text-sm text-muted-foreground max-md:min-w-0 max-md:text-left">
         <span>{formatBudget(project.properties.budget)}</span>

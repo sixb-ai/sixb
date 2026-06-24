@@ -8,7 +8,7 @@
     "check": "bun ../../packages/cli/src/index.tsx check",
     "sync:erp": "bun scripts/sync-erp.ts",
     "webhooks:demo": "bun scripts/send-webhooks.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit"
   },
   "dependencies": {
     "@sixb/app": "workspace:*",

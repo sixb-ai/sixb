@@ -67,7 +67,7 @@ describe("sixb init", () => {
     }
 
     expect(packageJson.name).toBe("starter")
-    expect(packageJson.scripts.typecheck).toBe("tsc --noEmit")
+    expect(packageJson.scripts.typecheck).toBe("sixb typegen && tsc --noEmit")
     expect(packageJson.dependencies["@sixb/client"]).toBe("latest")
     expect(packageJson.dependencies.react).toBe("^19.0.0")
     expect(packageJson.dependencies["react-router-dom"]).toBe("^7.13.0")

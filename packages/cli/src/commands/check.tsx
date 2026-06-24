@@ -1,5 +1,6 @@
 import { resolve } from "node:path"
 import { loadSixbFromEntry } from "../lib/loadSixb"
+import { generateProjectTypes } from "../lib/typegen"
 import { CheckView, renderStatic } from "../ui"
 
 export interface CheckOptions {
@@ -8,6 +9,7 @@ export interface CheckOptions {
 
 export async function runCheck(options: CheckOptions = {}) {
   const entry = resolve(options.entry ?? "sixb.config.ts")
+  await generateProjectTypes({ entry })
   const sixb = await loadSixbFromEntry(entry)
   const objectTypes = sixb.listObjectTypes()
 

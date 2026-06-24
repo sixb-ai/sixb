@@ -180,6 +180,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
             value: "Co-host multiple queue workers in one process (constrained resources)",
           },
           { label: "check", value: "Validate project configuration and health" },
+          { label: "typegen", value: "Generate ontology types for client query inference" },
           { label: "build", value: "Build runtime and production UI/app assets" },
           { label: "db migrate", value: "Run adapter-owned database migrations" },
           { label: "lake check", value: "Check lake dataset definitions for drift" },
@@ -228,6 +229,7 @@ export function HelpView({ errorMessage }: { errorMessage?: string }) {
           "sixb worker-group sync pipeline projection",
           "sixb dev --entry examples/mac-os/sixb.config.ts --port 8080",
           "sixb check",
+          "sixb typegen",
           "sixb db migrate",
           "sixb lake check",
           "sixb lake cleanup --dry-run",
@@ -587,6 +589,33 @@ export function BuildView({ entry, outdir }: { entry: string; outdir: string }) 
         items={[
           { label: "Entry", value: entry },
           { label: "Output", value: outdir },
+        ]}
+      />
+    </Box>
+  )
+}
+
+export function TypegenView({
+  path,
+  objectTypes,
+  skipped,
+  written,
+}: {
+  path: string
+  objectTypes: number
+  skipped: boolean
+  written: boolean
+}) {
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        Ontology types {skipped ? "skipped" : written ? "generated" : "current"}
+      </Text>
+      <Spacer />
+      <KeyValueList
+        items={[
+          { label: "Output", value: path },
+          { label: "Object types", value: String(objectTypes) },
         ]}
       />
     </Box>

@@ -4,13 +4,11 @@
  * The file compiling at all is the core assertion: the expand builder types
  * resolve the 2-hop ADN graph AND the `Folder.parent` self-cycle with NO TS2589
  * ("type instantiation is excessively deep"). The `@ts-expect-error` lines prove
- * links and `orderBy` properties are constrained to the resolved target type on
- * the full-registry (server) path.
+ * links and `orderBy` properties are constrained to the resolved target type.
  *
- * Slice 3 adds the row-typing section: each `.expand(...)` widens the row's
- * `.links` (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, with
- * optional `.linkProperties` and nested `.links`), precise on the server path and
- * degraded-but-compiling on the client path until the generated registry lands.
+ * Each `.expand(...)` widens the row's `.links` (cardinality `"one"` →
+ * `Target | null`, `"many"` → `Target[]`, with optional `.linkProperties` and
+ * nested `.links`).
  */
 import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
 
@@ -93,8 +91,6 @@ type AppRegistry =
 // Server path: `objects(T)` binds the full registry, so nested targets resolve.
 declare const projects: ObjectQueryBuilder<typeof Project, AppRegistry, []>
 declare const folders: ObjectQueryBuilder<typeof Folder, AppRegistry, []>
-// Client path today: only the start type is registered, so nested targets degrade.
-declare const startTypeOnly: ObjectQueryBuilder<typeof Project, typeof Project, []>
 
 function authoring(): void {
   // 2-hop, precise: Project -> opportunity -> { company, contact }.
@@ -130,10 +126,6 @@ function authoring(): void {
 
   // @ts-expect-error — `name` is a Project property, not on the Opportunity target.
   projects.expand(Project.l.opportunity, { orderBy: [{ property: Project.p.name }] })
-
-  // Without a full registry the nested target degrades to the base type, so even
-  // an unrelated link compiles — the gap a generated client registry closes.
-  startTypeOnly.expand(Project.l.opportunity, (o) => o.expand(Folder.l.parent))
 }
 
 void authoring
@@ -169,6 +161,9 @@ function projectRowAssertions(row: ProjectRow): void {
 
   // "many" cardinality → array (not nullable).
   const _firstContactId: "Contact" | undefined = row.links.contacts[0]?.objectTypeId
+  const _contactNames: string[] = row.links.contacts.map(
+    (contact) => contact.properties.displayName
+  )
 
   // Edge metadata is optional (the executor attaches it only when present).
   const _edge: Record<string, unknown> | undefined = row.links.opportunity!.linkProperties
@@ -183,7 +178,19 @@ function projectRowAssertions(row: ProjectRow): void {
   // @ts-expect-error — projectFolder resolves to "ProjectFolder", not "Opportunity".
   const _wrong: "Opportunity" = row.links.projectFolder!.objectTypeId
 
-  void [_rootId, _name, _pfId, _nas, _firstContactId, _edge, _coId, _coName, _ctId, _wrong]
+  void [
+    _rootId,
+    _name,
+    _pfId,
+    _nas,
+    _firstContactId,
+    _contactNames,
+    _edge,
+    _coId,
+    _coName,
+    _ctId,
+    _wrong,
+  ]
 }
 void projectRowAssertions
 
@@ -206,15 +213,3 @@ function folderRowAssertions(row: FolderRow): void {
   void [_p1Id, _p2Id]
 }
 void folderRowAssertions
-
-// Client path: the nested target degrades to the base type, so `objectTypeId`
-// widens to `string` — but the row still compiles (no TS2589). The gap the
-// generated client registry closes.
-const builtDegraded = startTypeOnly.expand(Project.l.opportunity)
-type DegradedRow = RowOf<typeof builtDegraded>
-function degradedRowAssertions(row: DegradedRow): void {
-  // @ts-expect-error — no registry: the target is not resolved to "Opportunity".
-  const _id: "Opportunity" = row.links.opportunity!.objectTypeId
-  void _id
-}
-void degradedRowAssertions

@@ -29,6 +29,7 @@ export type {
   PropertyTokenMap,
   Schema,
   SchemaOrRef,
+  SixbObjectTypeMap,
   ValueType,
   ValueTypeRefSchema,
 } from "./ontology"
@@ -49,6 +50,16 @@ export {
   validateSchemaOrRefValue,
   valueTypeRef,
 } from "./ontology"
+
+// ── Bootstrap / Codegen ─────────────────────────────────────
+
+export type {
+  GenerateOntologyTypeManifestOptions,
+  GenerateOntologyTypeManifestResult,
+  OntologyTypeManifestDiscovery,
+  OntologyTypeManifestEntry,
+} from "./bootstrap"
+export { discoverOntologyTypeManifest, generateOntologyTypeManifest } from "./bootstrap"
 
 // ── Edits ───────────────────────────────────────────────────
 

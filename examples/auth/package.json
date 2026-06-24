@@ -7,7 +7,7 @@
     "build": "bun ../../packages/cli/src/index.tsx build",
     "start": "bun ../../packages/cli/src/index.tsx start",
     "check": "bun ../../packages/cli/src/index.tsx check",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit"
   },
   "dependencies": {
     "@sixb/auth-magic-link": "workspace:*",
