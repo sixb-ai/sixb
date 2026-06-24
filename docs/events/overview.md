@@ -1,22 +1,22 @@
 # Events & Webhooks
 
-Sixb has two distinct event surfaces:
+Sixb has two event surfaces. Reach for **domain events** to read, stream, or audit what
+happened inside a project. Reach for **webhooks** to receive deliveries from an external
+provider.
 
-- **Domain events** — an internal, append-only log of everything that happens inside a
-  project (objects upserted, telemetry appended, runs started and finished, and so on).
-  Read or subscribe to them through `sixb.events`.
-- **Webhooks** — inbound HTTP endpoints owned by [connectors](../data/connectors.md) that
-  receive deliveries from external providers and run a handler.
+- **Domain events** — an append-only log of everything the runtime does (objects upserted,
+  telemetry appended, runs started and finished, and so on). Access them through `sixb.events`.
+- **Webhooks** — inbound HTTP endpoints owned by a [connector](../data/connectors.md) that
+  receive provider deliveries and run a handler.
 
-> Domain events are an **observability log**, not a trigger. Appending a domain event does
-> **not** run any [rule](../rules/overview.md) or
-> [workflow](../workflows/overview.md) on its own. They are emitted as a side effect
-> of the runtime's work and exist so you can read, stream, and audit it.
+> Domain events are an **observability log, not a trigger**. Appending an event does **not**
+> run any [rule](../rules/overview.md) or [workflow](../workflows/overview.md). They are
+> emitted as a side effect of the runtime's work so you can read, stream, and audit it.
 
 ## Domain events
 
-Every domain event shares a common envelope and carries a typed `payload`. The full type
-set comes from the core event registry.
+Every event shares a common envelope and carries a typed `payload`. The full set comes from
+the core event registry.
 
 ### Event catalog
 
@@ -31,35 +31,20 @@ set comes from the core event registry.
 | `action.completed` | `actions` | `actionId`, `runId`, `subject`, `finishedAt` |
 | `action.failed` | `actions` | `actionId`, `runId`, `subject`, `error`, `finishedAt` |
 | `schedule.triggered` | `schedules` | `scheduleId` |
-| `rule.triggered` | `rules` | `ruleId`, `subject` |
-| `rule.resolved` | `rules` | `ruleId`, `subject` |
-| `sync.run.started` | `syncs` | `syncId`, `runId` |
-| `sync.run.finished` | `syncs` | `syncId`, `runId` |
-| `pipeline.run.started` | `pipelines` | `pipelineId`, `runId` |
-| `pipeline.run.step.started` | `pipelines` | `pipelineId`, `runId` |
-| `pipeline.run.step.finished` | `pipelines` | `pipelineId`, `runId` |
-| `pipeline.run.finished` | `pipelines` | `pipelineId`, `runId` |
-| `workflow.run.queued` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.started` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.node.started` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.waiting` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.node.waiting` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.node.finished` | `workflows` | `workflowId`, `runId` |
-| `workflow.run.finished` | `workflows` | `workflowId`, `runId` |
-| `workflow.intervention.requested` | `workflows` | `workflowId`, `runId` |
-| `workflow.intervention.submitted` | `workflows` | `workflowId`, `runId` |
-| `workflow.intervention.cancelled` | `workflows` | `workflowId`, `runId` |
-| `workflow.intervention.expired` | `workflows` | `workflowId`, `runId` |
+| `rule.triggered` / `rule.resolved` | `rules` | `ruleId`, `subject` |
+| `sync.run.started` / `sync.run.finished` | `syncs` | `syncId`, `runId` |
+| `pipeline.run.*` (started, step.started, step.finished, finished) | `pipelines` | `pipelineId`, `runId` |
+| `workflow.run.*` (queued, started, node.started, waiting, node.waiting, node.finished, finished) | `workflows` | `workflowId`, `runId` |
+| `workflow.intervention.*` (requested, submitted, cancelled, expired) | `workflows` | `workflowId`, `runId` |
 | `dataset.version.committed` | `datasets` | `datasetId` |
 
-`EVENT_TYPES` and `EVENT_TOPICS` are exported from `@sixb/core` if you need the canonical
-lists at runtime.
+`EVENT_TYPES` and `EVENT_TOPICS` are exported from `@sixb/core` for the canonical lists at
+runtime.
 
 ### Event envelope
 
 Every stored event is a `StoredDomainEvent`: the `EventEnvelope` fields below, plus the
-type's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor` (the only field
-`StoredDomainEvent` adds on top of the envelope and type).
+event's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor`.
 
 | Field | Type | Notes |
 | --- | --- | --- |
@@ -72,16 +57,15 @@ type's `type`, `topic`, `partitionKey`, `payload`, and a broker `cursor` (the on
 | `idempotencyKey` | `string?` | De-duplicates appends |
 | `actor` | `{ type, id }?` | `user`, `service`, or `system` |
 | `metadata` | `Record<string, JsonValue>?` | Free-form context |
-| `cursor` | `string` | Broker position (added by `StoredDomainEvent`); pass as `afterCursor` to page forward |
+| `cursor` | `string` | Broker position; pass as `afterCursor` to page forward |
 
-By default domain events are retained as a short recent log (the built-in events stream
-keeps the last two days), not as a permanent history. A custom broker stream can change
-the retention window.
+By default events are kept as a short recent log (the built-in stream retains the last two
+days), not a permanent history. A custom broker stream can change the retention window.
 
 ### Reading events
 
-`sixb.events.read(input)` returns stored events oldest-first, optionally filtered by
-`topics` and/or `types` and paged with `afterCursor`.
+`sixb.events.read(input)` returns stored events oldest-first, optionally filtered by `topics`
+and/or `types` and paged with `afterCursor`.
 
 ```ts
 const recent = await sixb.events.read({
@@ -103,16 +87,15 @@ for (const event of recent) {
 
 ### Subscribing to events
 
-`sixb.events.subscribe(input, handler)` streams new events as they are appended. It
-returns an unsubscribe function. Handler errors are swallowed to preserve
-fire-and-forget delivery.
+`sixb.events.subscribe(input, handler)` streams new events as they are appended and returns
+an unsubscribe function. Handler errors are swallowed to preserve fire-and-forget delivery.
 
 ```ts
 const unsubscribe = await sixb.events.subscribe(
   { types: ["action.completed", "action.failed"] },
   (events) => {
     for (const event of events) {
-      console.log("action finished", event.payload)
+      console.log("invoice action finished", event.payload)
     }
   }
 )
@@ -123,18 +106,18 @@ unsubscribe()
 
 ### Appending events
 
-`sixb.events.append(input)` writes one or more events. The runtime emits domain events
-for you; append manually only when you are modeling your own domain activity.
+`sixb.events.append(input)` writes one or more events. The runtime emits domain events for
+you — append manually only when you model your own domain activity.
 
 ```ts
 await sixb.events.append({
-  actor: { type: "service", id: "billing-sync" },
+  actor: { type: "service", id: "erp-sync" },
   events: [
     {
       type: "object.upserted",
       payload: {
         objectTypeId: "invoice",
-        primaryId: "INV-001",
+        primaryId: "INV-1042",
         properties: { status: "paid" },
       },
     },
@@ -159,34 +142,38 @@ curl "http://localhost:3000/api/events?type=object.upserted&limit=50"
 | `afterCursor` | Page forward from a cursor |
 | `limit` | Max events to return |
 
-The response is `{ count, events }`. Events filtered out by scope are simply omitted.
+The response is `{ count, events }`. Events filtered out by scope are simply omitted; a
+caller with no permission gets `403`.
 
 ## Webhooks
 
 A webhook is an inbound HTTP endpoint defined on a [connector](../data/connectors.md). The
 server owns route registration and dispatch; you own verification, parsing, and handling.
 
-Define one with `defineWebhook(id)` and attach it to a connector's `webhooks` array.
+Define one with `defineWebhook(id)` and attach it to the connector's `webhooks` array.
 
 ```ts
 import { defineConnector, defineWebhook } from "@sixb/core"
+import { createAcmeErpClient } from "../lib/acme-erp"
 
-export const acmeErp = defineConnector("acme-erp", {
+const WEBHOOK_SIGNATURE = "acme-local-secret"
+
+export const acmeErpConnector = defineConnector("acme-erp", {
   type: "acme-erp",
   webhooks: [
     defineWebhook("invoice-events")
       .post()
-      .json({ parse: parseInvoiceEvent })
+      .json({ parse: parseInvoiceWebhookEvent })
       .verify(({ request }) => {
-        if (request.headers.get("x-acme-signature") !== SECRET) {
-          throw new Error("Invalid signature")
+        if (request.headers.get("x-acme-signature") !== WEBHOOK_SIGNATURE) {
+          throw new Error("Invalid Acme webhook signature")
         }
       })
       .idempotencyKey(
         ({ body, request }) => request.headers.get("x-acme-delivery") ?? body.deliveryId
       )
       .handle(({ body }) => {
-        console.log("received", body.type)
+        console.log(`received ${body.type} for ${body.invoiceId}`)
       }),
   ],
   connect() {
@@ -202,12 +189,12 @@ steps:
 | --- | --- |
 | `.post()` | Method (webhooks are POST-only) |
 | `.json(schema?)` / `.text()` / `.raw()` | Body format and parser; `schema.parse(value)` validates and types the body |
-| `.verify(ctx)` | Optional; runs on raw bytes before parsing, throw to reject (401) |
+| `.verify(ctx)` | Optional; runs on raw bytes before parsing — throw to reject (`401`) |
 | `.idempotencyKey(ctx)` | Optional; returns a stable delivery id, or `null`/`undefined` to skip de-duplication |
 | `.handle(ctx)` | Required; runs the side effect, may return a `WebhookResponse` |
 
-The handler context carries the parsed `body`, the `request`, connector metadata, and a
-lazy `client()` that connects the outbound connector only if the handler needs it.
+The handler context carries the parsed `body`, the `request`, connector metadata, and a lazy
+`client()` that connects the outbound connector only if the handler needs it.
 
 ### Dispatch lifecycle
 
@@ -217,20 +204,19 @@ For each delivery the server runs these steps in order:
 2. **Parse** — decode by body format and run the parser. Failure returns `400`.
 3. **Claim** — resolve the idempotency key and claim the delivery. A `duplicate` or
    `in_progress` claim short-circuits to `202 Accepted` without re-running the handler.
-4. **Handle** — run `handle`. A throw marks the delivery failed (so the provider's next
-   retry can re-attempt) and returns `500`.
+4. **Handle** — run `handle`. A throw marks the delivery failed (so the provider's next retry
+   can re-attempt) and returns `500`.
 5. **Complete** — mark the delivery complete only after the handler succeeds.
 
-When the handler returns nothing, dispatch responds `202 Accepted`; otherwise it applies
-the returned `status`, `headers`, and `body`. Every delivery is also recorded as a webhook
-run for observability (visible in the UI under the connector). Claiming and completion
-require webhook delivery storage to be configured.
+When the handler returns nothing, dispatch responds `202 Accepted`; otherwise it applies the
+returned `status`, `headers`, and `body`. Every delivery is recorded as a webhook run for
+observability (visible in the UI under the connector). Claiming and completion require
+webhook delivery storage to be configured.
 
-## See also
+## Related
 
 - [Connectors](../data/connectors.md) — where webhooks live
-- [Schedules](../schedules/overview.md) — cron triggers for syncs, pipelines, and workflows
-- [Rules](../rules/overview.md) — declarative reactions to object state
-- [Workflows](../workflows/overview.md) — multi-step processes and human-in-the-loop
+- [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative
+  reactions to object state and multi-step processes
 - [Server](../server/overview.md) — the HTTP/WebSocket API
 - [Authorization](../auth/authorization.md) — how `/api/events` is scoped

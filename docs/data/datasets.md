@@ -1,58 +1,52 @@
 # Datasets
 
-A dataset is a typed table of rows.
+A dataset is a typed table of rows. Reach for one whenever you have table-shaped data: raw rows pulled from an external system, cleaned rows produced by a pipeline, or rows a projection turns into objects.
 
-Datasets are where sixb stores table-shaped data: raw rows from external systems, cleaned rows from pipelines, and rows that projections turn into app objects.
+A dataset is a contract: the table's name, its columns, each column's type, and which columns may be `null`. Define it once and [syncs](./syncs.md), [pipelines](./pipelines.md), [projections](./projections.md), and storage all point at the same shape.
 
-A dataset gives table data a stable contract: what the table is called, which columns exist, what type each column has, and which columns can be missing or `null`. Once a dataset is defined, [syncs](./syncs.md), [pipelines](./pipelines.md), [projections](./projections.md), and storage can all point at the same shape.
-
-If an [ontology](../ontology/overview.md) is your app's object model, a dataset is your table model.
-
-## Core terms
-
-| Concept | Meaning |
-| --- | --- |
-| Dataset | A named table contract |
-| Column | One typed field in each row |
-| Row | One record written to the dataset |
-| Schema | The ordered list of column definitions |
+If an [ontology](../ontology/overview.md) is your object model, a dataset is your table model.
 
 ## Define a dataset
 
-File: `datasets/orders.ts`
+A dataset has a stable id and a `schema` of columns. Build each column with `col(name, type)`.
 
 ```ts
 import { col, defineDataset } from "@sixb/core"
 
-export const rawOrdersDataset = defineDataset("raw.erp.orders", {
+export const rawInvoicesDataset = defineDataset("erp.invoices", {
   schema: [
-    col("order_id", "string"),
+    col("id", "string"),
+    col("number", "string"),
+    col("amount", "decimal"),
+    col("currency", "string"),
+    col("status", "string"),
+    col("issuedAt", "timestamp"),
+    col("dueDate", "date"),
     col("customer_id", "string"),
-    col("total", "decimal", { nullable: true }),
-    col("created_at", "timestamp"),
+    col("project_id", "string"),
   ],
-  description: "Raw order rows from the ERP.",
+  description: "Raw invoice rows from the ERP.",
 })
 ```
 
-The dataset id, `raw.erp.orders`, is the stable name other parts of the project reference.
+The id `erp.invoices` is the name every other part of the project references.
 
 ### `defineDataset` options
 
 | Option | Type | Description |
 | --- | --- | --- |
-| `schema` | `col(...)[]` | Required. The list of column definitions. |
+| `schema` | `col(...)[]` | Required. The ordered list of column definitions. |
 | `partitionBy` | `string[]` | Optional. Logical partition columns; each name must exist in `schema`. |
 | `description` | `string` | Optional. Human-readable description. |
 
 ### `col` options
 
 ```ts
-col(name, type)
-col(name, type, { nullable: true })
+col("amount", "decimal")
+col("project_id", "string", { nullable: true })
 ```
 
-Use `nullable: true` when a column may be missing or `null`. Use `json` when the source payload is intentionally unstructured:
+Pass `{ nullable: true }` when a column may be missing or `null`. Use the `json` type to keep an intentionally unstructured payload:
 
 ```ts
 col("raw", "json", { nullable: true })
@@ -72,68 +66,81 @@ col("raw", "json", { nullable: true })
 | `json` | any JSON value |
 | `fileRef` | a [file reference](../infrastructure/overview.md) |
 
-## Use a dataset from a sync
+## Use a dataset
 
-[Syncs](./syncs.md) read from a [connector](./connectors.md) and write into one dataset. The sync does not repeat the table shape; it references the dataset definition.
+A dataset on its own is just a shape. The pieces that produce and consume rows reference it.
+
+A [sync](./syncs.md) reads from a [connector](./connectors.md) and writes into one dataset. It does not repeat the schema; it points at the definition:
 
 ```ts
 import { defineSync } from "@sixb/core"
-import { erpDb } from "../connectors/erp-db"
-import { rawOrdersDataset } from "../datasets/orders"
+import { acmeErpConnector } from "../connectors/acme-erp"
+import { rawInvoicesDataset } from "../datasets/erp"
 
-export const syncOrders = defineSync("sync-orders")
-  .from(erpDb)
-  .read((db) => db`select * from orders`)
-  .intoDataset(rawOrdersDataset)
+export const syncErpInvoices = defineSync("sync-erp-invoices")
+  .from(acmeErpConnector)
+  .read((client) => client.listInvoices())
+  .intoDataset(rawInvoicesDataset)
 ```
 
-## Use a dataset from a pipeline
-
-[Pipelines](./pipelines.md) read datasets and write new datasets, keeping raw source data separate from cleaner app-ready data.
+A [pipeline](./pipelines.md) reads datasets and writes new ones, keeping raw source rows separate from clean, app-ready rows:
 
 ```ts
+import type { DatasetRow } from "@sixb/core"
 import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@sixb/core"
-import { rawOrdersDataset } from "../datasets/orders"
+import { rawInvoicesDataset } from "../datasets/erp"
 
-export const ordersDataset = defineDataset("orders", {
+export const paidInvoicesDataset = defineDataset("invoices.paid", {
   schema: [
     col("id", "string"),
+    col("amount", "decimal"),
+    col("currency", "string"),
     col("customer_id", "string"),
-    col("total", "decimal", { nullable: true }),
   ],
 })
 
-export const cleanOrdersStep = definePipelineStep("clean-orders")
-  .inputs({ rawOrders: rawOrdersDataset })
-  .output(ordersDataset)
-  .sql(({ rawOrders }) => `
-    select
-      order_id as id,
-      customer_id,
-      total
-    from ${rawOrders}
-  `)
+async function* paidInvoices(rows: AsyncIterable<DatasetRow>) {
+  for await (const row of rows) {
+    if (row.status === "paid") {
+      yield {
+        id: row.id,
+        amount: row.amount,
+        currency: row.currency,
+        customer_id: row.customer_id,
+      }
+    }
+  }
+}
 
-export const ordersPipeline = definePipeline("orders")
-  .when(datasetUpdated(rawOrdersDataset.id))
-  .then(cleanOrdersStep)
+export const paidInvoicesStep = definePipelineStep("paid-invoices")
+  .inputs({ invoices: rawInvoicesDataset })
+  .output(paidInvoicesDataset)
+  .run(async ({ inputs, output }) => {
+    await output.writeRows(paidInvoices(inputs.invoices.readRows()))
+  })
+
+export const paidInvoicesPipeline = definePipeline("paid-invoices")
+  .when(datasetUpdated(rawInvoicesDataset.id))
+  .then(paidInvoicesStep)
 ```
+
+Then a [projection](./projections.md) maps the clean rows onto `Invoice` objects.
 
 ## Derive a dataset
 
-Use `.derive(parent)` to copy a parent schema, then narrow it with `pick` or extend it with `add`.
+Use `.derive(parent)` to copy a parent's schema, then narrow it with `pick` or extend it with `add`.
 
 ```ts
 import { col, defineDataset } from "@sixb/core"
-import { rawOrdersDataset } from "./orders"
+import { rawInvoicesDataset } from "./erp"
 
 // Copy the full parent schema
-export const ordersCopy = defineDataset("orders.copy").derive(rawOrdersDataset)
+export const invoicesArchive = defineDataset("invoices.archive").derive(rawInvoicesDataset)
 
 // Narrow to a subset of columns and add new ones
-export const ordersSummary = defineDataset("orders.summary").derive(rawOrdersDataset, {
-  pick: ["order_id", "customer_id"],
-  add: [col("processed_at", "timestamp")],
+export const invoicesSummary = defineDataset("invoices.summary").derive(rawInvoicesDataset, {
+  pick: ["id", "amount", "currency", "customer_id"],
+  add: [col("settled_at", "timestamp")],
 })
 ```
 
@@ -150,64 +157,58 @@ Datasets and ontology types solve different problems.
 
 | Use | Choose |
 | --- | --- |
-| Raw source rows | Dataset |
-| Cleaned table rows | Dataset |
-| App objects users interact with | [Ontology](../ontology/overview.md) |
+| Raw source rows, cleaned table rows | Dataset |
+| Objects users interact with | [Ontology](../ontology/overview.md) |
 | Relationships between objects | [Ontology links](../ontology/links.md) |
 
-Usually source data lands in a raw dataset, pipelines shape it into a clean dataset, and [projections](./projections.md) turn it into ontology objects.
+The usual flow: source data lands in a raw dataset, pipelines shape it into a clean dataset, and projections turn it into ontology objects.
 
-## Registration
+## Register datasets
 
-Put dataset definitions in `datasets/` and export them.
+Export dataset definitions from `datasets/` and `createSixb()` discovers them automatically.
 
 ```txt
 your-project/
   datasets/
-    orders.ts
-    customers.ts
+    erp.ts
   syncs/
-    orders.ts
+    erp.ts
   pipelines/
-    orders.ts
+    invoices.ts
   sixb.config.ts
 ```
 
-`createSixb()` discovers exported dataset definitions from `datasets/` automatically. You can also register them explicitly:
+You can also register them explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { rawOrdersDataset } from "./datasets/orders"
+import { rawInvoicesDataset } from "./datasets/erp"
 
-export const sixb = createSixb({
-  datasets: [rawOrdersDataset],
+export const sixb = await createSixb({
+  datasets: [rawInvoicesDataset],
 })
 ```
 
-## How to model datasets
-
-Start with the source shape.
-
-1. Define a raw dataset for data coming from an external system.
-2. Keep source column names if that makes debugging easier.
-3. Mark uncertain fields as nullable.
-4. Add a `json` column only when you intentionally want to keep the raw payload.
-5. Create cleaner datasets later with pipelines.
-
-Good dataset names usually describe the layer and source:
-
-- `raw.erp.orders`
-- `raw.stripe.invoices`
-- `orders`
-- `customer_activity`
-
 ## Row validation
 
-Rows are validated against the schema:
+Every row written to a dataset is validated against its schema:
 
 - A row must be a plain object and may not contain unknown columns.
-- Each column value must match its declared type.
+- Each value must match its column's declared type.
 - A non-nullable column may not be missing, `undefined`, or `null`.
 - A nullable column may be omitted or set to `null`.
 
-The important first step is to define the table shape once and reuse that definition wherever the table appears.
+## Modeling tips
+
+- Start from the source shape. Keep source column names (`account_mgr_id`, `dept_id`) on raw datasets — it makes debugging easier.
+- Mark uncertain fields `nullable`. Reserve `json` for payloads you intentionally keep unstructured.
+- Name datasets by layer and source: `erp.invoices`, `erp.customers` for raw, `invoices.paid` for derived.
+- Model money as `amount` + `currency`, never as a unit type.
+- Shape clean datasets with pipelines rather than overloading the raw dataset.
+
+## Related
+
+- [Connectors](./connectors.md) — external systems datasets read from
+- [Syncs](./syncs.md) — pull rows into a dataset
+- [Pipelines](./pipelines.md) — transform one dataset into another
+- [Projections](./projections.md) — turn rows into ontology objects

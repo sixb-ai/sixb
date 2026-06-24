@@ -1,20 +1,21 @@
 # Data
 
 Sixb's data plane brings table-shaped data in from the outside world, cleans it, and turns it
-into app objects.
+into app objects. Reach for it when your objects originate in another system — an ERP, a
+database, an API — rather than being created in-app.
 
 Five pieces work together. Each has one job, and they chain in a fixed order:
 
 ```txt
-connector ──▶ sync ──▶ dataset ──▶ pipeline ──▶ projection
-  reach        pull      store       shape        publish
-external      rows       table       rows         objects +
-system        in        contract    into rows     telemetry
+connector ──▶ sync ──▶ dataset ──▶ pipeline ──▶ projection ──▶ objects
+  reach        pull      store       shape        publish        + links
+  external     rows      typed       rows into    rows into      + telemetry
+  system       in        table       rows         the ontology
 ```
 
 A [connector](./connectors.md) reaches an external system. A [sync](./syncs.md) reads from it and
-writes rows into a [dataset](./datasets.md). A [pipeline](./pipelines.md) transforms one or more
-datasets into cleaner datasets. A [projection](./projections.md) turns dataset rows into
+writes rows into a [dataset](./datasets.md). A [pipeline](./pipelines.md) transforms datasets into
+cleaner datasets. A [projection](./projections.md) maps dataset rows onto
 [ontology](../ontology/overview.md) objects, links, and telemetry.
 
 ## The pieces
@@ -22,51 +23,82 @@ datasets into cleaner datasets. A [projection](./projections.md) turns dataset r
 | Piece | One line | Page |
 | --- | --- | --- |
 | Connector | A reusable connection to an external system | [connectors.md](./connectors.md) |
-| Sync | Moves data from an external system into a dataset | [syncs.md](./syncs.md) |
+| Sync | Pulls rows from a connector into a dataset | [syncs.md](./syncs.md) |
 | Dataset | A named, typed table contract | [datasets.md](./datasets.md) |
 | Pipeline | Transforms datasets into other datasets | [pipelines.md](./pipelines.md) |
-| Projection | Turns dataset rows into objects, links, and telemetry | [projections.md](./projections.md) |
+| Projection | Maps dataset rows onto objects, links, and telemetry | [projections.md](./projections.md) |
 
-## How they connect
+## End-to-end example
 
-Each piece references the ones before it by their definitions, not by copying shape.
+This is the canonical Acme flow: pull invoices from the ERP, store them in a dataset, then
+project the rows onto `Invoice` objects. Each piece references the ones before it by definition,
+so the shape stays consistent.
 
 ```ts
-import { col, defineConnector, defineDataset, defineSync } from "@sixb/core"
-import { sql } from "@sixb/connector-sql"
+import { col, defineConnector, defineDataset, defineProjection, defineSync } from "@sixb/core"
+import { createAcmeErpClient } from "../lib/acme-erp"
+import { Customer } from "../ontology/customer"
+import { Invoice } from "../ontology/invoice"
 
 // connector: how to reach the external system
-export const erpDb = defineConnector("erp-db", sql(process.env.DATABASE_URL!))
+export const acmeErpConnector = defineConnector("acme-erp", {
+  type: "acme-erp",
+  connect() {
+    return createAcmeErpClient()
+  },
+})
 
-// dataset: the table contract
-export const rawOrdersDataset = defineDataset("raw.erp.orders", {
+// dataset: the table contract (raw ERP column names)
+export const erpInvoicesDataset = defineDataset("erp.invoices", {
   schema: [
-    col("order_id", "string"),
+    col("id", "string"),
+    col("number", "string"),
+    col("amount", "decimal"),
+    col("currency", "string"),
+    col("status", "string"),
+    col("issuedAt", "timestamp"),
+    col("dueDate", "date"),
     col("customer_id", "string"),
-    col("total", "decimal", { nullable: true }),
   ],
 })
 
 // sync: connector in, dataset out
-export const syncOrders = defineSync("sync-orders")
-  .from(erpDb)
-  .read((db) => db`select * from orders`)
-  .intoDataset(rawOrdersDataset)
+export const syncErpInvoices = defineSync("sync-erp-invoices")
+  .from(acmeErpConnector)
+  .read((client) => client.listInvoices())
+  .intoDataset(erpInvoicesDataset)
+
+// projection: dataset rows out, Invoice objects + links in
+export const invoiceProjection = defineProjection("invoice-proj", Invoice)
+  .fromDataset(erpInvoicesDataset)
+  .properties({
+    id: "id",
+    number: "number",
+    amount: "amount",
+    currency: "currency",
+    status: "status",
+    issuedAt: "issuedAt",
+    dueDate: "dueDate",
+  })
+  .withLinks({
+    customer: { link: Invoice.l.customer, sourceField: "customer_id", target: Customer },
+  })
 ```
 
-From there a [pipeline](./pipelines.md) cleans `rawOrdersDataset` into an app-ready dataset, and a
-[projection](./projections.md) maps that dataset's rows onto an ontology object type.
+Add a [pipeline](./pipelines.md) between the dataset and projection when you need to clean,
+filter, rename, or join rows before they become objects.
 
 ## Mental model
 
-- **Datasets are tables. Ontology types are objects.** The data plane's job is to get rows into
-  tables, and projections cross the gap from tables to objects.
-- **Each step has one input source and one output target.** A sync writes one dataset; a pipeline
-  step writes one dataset; a projection writes one object type, link, or telemetry property.
+- **Datasets are tables. Ontology types are objects.** The data plane gets rows into tables;
+  projections cross the gap from tables to objects, links, and telemetry.
+- **Each step has one source and one target.** A sync writes one dataset, a pipeline step writes
+  one dataset, and a projection writes one object type.
 - **Definitions are reused, not redeclared.** A dataset is defined once and referenced by syncs,
-  pipelines, and projections so the shape stays consistent.
-- **Steps are event-driven.** Pipelines and projections run when a dataset gets a new committed
-  version. See [events](../events/overview.md) for the triggers.
+  pipelines, and projections so the schema stays in sync.
+- **Steps are event-driven.** Use `.when(...)` to chain work: a sync can run on a
+  [schedule](../schedules/overview.md) or after another sync (`syncFinished`), and a pipeline runs
+  when a dataset gets a new committed version (`datasetUpdated`). See [events](../events/overview.md).
 
 ## When to use what
 
@@ -74,13 +106,13 @@ From there a [pipeline](./pipelines.md) cleans `rawOrdersDataset` into an app-re
 | --- | --- |
 | Talk to a database or API | [Connector](./connectors.md) |
 | Pull rows from a source into Sixb | [Sync](./syncs.md) |
-| Give table data a stable shape | [Dataset](./datasets.md) |
+| Give table data a stable, typed shape | [Dataset](./datasets.md) |
 | Clean, filter, rename, or join tables | [Pipeline](./pipelines.md) |
 | Make rows show up as app objects | [Projection](./projections.md) |
 
 ## Discovery
 
-`createSixb()` auto-discovers `connectors/`, `datasets/`, `syncs/`, `pipelines/`, and
-`projections/` directories. Export a definition from a file in the matching folder and the
-runtime registers it. See [runtime](../runtime/overview.md) and
+`createSixb()` auto-discovers the `connectors/`, `datasets/`, `syncs/`, `pipelines/`, and
+`projections/` directories. Export a definition from a file in the matching folder and the runtime
+registers it. See [runtime](../runtime/overview.md) and
 [project structure](../fundamentals/project-structure.md).

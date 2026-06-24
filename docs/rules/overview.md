@@ -1,61 +1,66 @@
 # Rules
 
-A rule watches an ontology object for a business condition.
+A rule watches one [object type](../ontology/object-types.md) for a business condition and signals
+when that condition starts or clears. Reach for rules to track health states like "this invoice is
+overdue" or "this project is at risk."
 
-Use rules for statements like "a posted transaction must have a document" or "a critical task
-should have an owner."
-
-A rule does not fetch data, transform rows, or run a process by itself. It names the condition,
-watches object and link changes, and signals when the condition starts or clears.
-
-## Why rules are useful
-
-Business software usually has conditions people care about:
-
-- invoices that are overdue
-- tasks that are critical and unassigned
-- customers that need an account manager
-- transactions that are missing a source document
-
-Rules give those conditions one typed place to live. Apps, alerts, and [workflows](../workflows/overview.md)
-can then react to the same definition.
-
-Write the rule as the state where the object needs attention.
+A rule does not fetch data, transform rows, or run a process. It names the condition, reacts to
+object and link changes, and emits a stable triggered/resolved signal that the rest of your app —
+alerts, attention badges, [workflows](../workflows/overview.md) — can react to.
 
 ## Define a rule
 
-File: `rules/transaction-requires-document.ts`
+Write a rule as the state where the object needs attention. Put each definition in `rules/` and
+export it.
 
-```ts
-import { defineRule } from "@sixb/core"
-import { Transaction } from "../ontology/transaction"
-
-export const transactionRequiresDocument = defineRule("transaction.requires-document")
-  .on(Transaction)
-  .where((tx) => tx.l.document.isMissing())
-```
-
-This rule matches when a `Transaction` does not have a `document` link.
-
-| Part | Meaning |
-| --- | --- |
-| `defineRule("transaction.requires-document")` | Names the rule with a unique id |
-| `.on(Transaction)` | The [object type](../ontology/object-types.md) the rule watches |
-| `.where(...)` | Describes when the rule matches |
-| `tx.l.document.isMissing()` | Checks that the `document` link does not exist |
-
-The `.where(...)` callback receives a typed subject built from the object type. Its `p` and `l`
-keys are the object type's property and [link](../ontology/links.md) ids.
-
-## Property conditions
-
-Use `p` for object [properties](../ontology/properties.md).
+File: `rules/business-health.ts`
 
 ```ts
 import { defineRule } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
-export const invoiceCollectionRisk = defineRule("invoice.collection-risk")
+export const overdueInvoices = defineRule("invoice.overdue")
+  .on(Invoice)
+  .where((invoice) => invoice.p.status.eq("overdue"))
+```
+
+This matches when an `Invoice` has `status` of `"overdue"`.
+
+| Part | Meaning |
+| --- | --- |
+| `defineRule("invoice.overdue")` | Names the rule with a unique id |
+| `.on(Invoice)` | The object type the rule watches |
+| `.where(...)` | Describes when the rule matches |
+
+The `.where(...)` callback receives a typed subject built from the object type. Use `p` for
+[properties](../ontology/properties.md) and `l` for [links](../ontology/links.md); both are keyed by
+the type's ids.
+
+## Compose conditions
+
+Combine smaller conditions with `all`, `any`, and `not`. This rule flags an at-risk project — one
+that is active, large, and missing a lead.
+
+```ts
+import { defineRule } from "@sixb/core"
+import { Project } from "../ontology/project"
+
+export const atRiskProjects = defineRule("project.at-risk")
+  .on(Project)
+  .where((project) =>
+    project.all(
+      project.p.status.eq("active"),
+      project.p.budget.gte(150000),
+      project.l.lead.isMissing()
+    )
+  )
+```
+
+Property predicates check values (`p`), link predicates check whether a relationship exists (`l`).
+You can nest groups — for example, flag invoices that are overdue or large-and-still-sent:
+
+```ts
+export const collectionRisk = defineRule("invoice.collection-risk")
   .on(Invoice)
   .where((invoice) =>
     invoice.any(
@@ -65,144 +70,79 @@ export const invoiceCollectionRisk = defineRule("invoice.collection-risk")
   )
 ```
 
-This rule matches when an invoice is overdue, or when a sent invoice has a large amount.
-
-## Link conditions
-
-Use `l` for ontology links.
-
-```ts
-import { defineRule } from "@sixb/core"
-import { Customer } from "../ontology/customer"
-
-export const customerNeedsOwner = defineRule("customer.needs-owner")
-  .on(Customer)
-  .where((customer) => customer.l.accountManager.isMissing())
-```
-
-This rule matches when a `Customer` does not have an `accountManager` link.
-
-## Compose conditions
-
-Use `all`, `any`, and `not` to combine smaller conditions.
-
-```ts
-import { defineRule } from "@sixb/core"
-import { Task } from "../ontology/task"
-
-export const taskCriticalUnassigned = defineRule("task.critical-unassigned")
-  .on(Task)
-  .where((task) =>
-    task.all(
-      task.p.priority.eq("critical"),
-      task.not(task.p.status.eq("done")),
-      task.l.assignee.isMissing()
-    )
-  )
-```
-
-This rule matches when a task is critical, not done, and missing an assignee.
-
 ## Predicates
 
-| Need | Use |
+| Need | Predicate |
 | --- | --- |
-| Equal or not equal | `eq(value)`, `notEq(value)` |
-| Compare numbers | `gt(value)`, `gte(value)`, `lt(value)`, `lte(value)` |
-| Check a property exists | `isPresent()`, `isMissing()` |
-| Check a link | `exists()`, `isMissing()` |
-| Combine conditions | `all(...)`, `any(...)`, `not(...)` |
+| Equal / not equal | `eq(value)`, `notEq(value)` |
+| Compare numbers | `gt(n)`, `gte(n)`, `lt(n)`, `lte(n)` |
+| Property is set | `isPresent()`, `isMissing()` |
+| Link is set | `exists()`, `isMissing()` |
+| Combine | `all(...)`, `any(...)`, `not(...)` |
 
-Predicate values can be strings, numbers, booleans, or `null`. The comparison predicates
-(`gt`, `gte`, `lt`, `lte`) take a number. Property `isPresent` / `isMissing` and the link
-predicates take no value.
+`eq` / `notEq` take a string, number, boolean, or `null`. The comparison predicates take a number.
+`isPresent` / `isMissing` / `exists` take no value.
 
-## Rule vs workflow
+## How matching works
 
-Rules and workflows solve different problems.
+Once registered, Sixb evaluates rules as objects and links change. When a rule starts matching an
+object, it is **triggered**; when the object stops matching, it is **resolved**. Active state is
+tracked so each object triggers once until it clears.
 
-| Need | Use |
-| --- | --- |
-| Know whether an object needs attention | Rule |
-| Emit a triggered or resolved signal | Rule |
-| Run a multi-step process | [Workflow](../workflows/overview.md) |
-| Fetch source data | [Sync](../data/syncs.md) |
-| Clean or join table data | [Pipeline](../data/pipelines.md) |
+Evaluation reacts to `object.upserted` for the watched type, plus `link.upserted` and `link.removed`
+for any links named in the predicate. See [Events](../events/overview.md) for the full domain-event
+list.
 
-A good split: rules decide if something is true; workflows decide what to do next.
+## Register rules
 
-## Convention
-
-Put rule definitions in `rules/` and export them.
+`createSixb()` discovers exported rule definitions from `rules/` automatically:
 
 ```txt
 your-project/
   ontology/
-    transaction.ts
+    invoice.ts
+    project.ts
   rules/
-    transaction-requires-document.ts
+    business-health.ts
   sixb.config.ts
 ```
 
-`createSixb()` discovers exported rule definitions from `rules/` automatically. See
-[Project structure](../fundamentals/project-structure.md) for the full convention layout.
-
-You can also register rules explicitly:
+To register rules explicitly instead, pass them to `createSixb()` (note: it is async):
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { Transaction } from "./ontology/transaction"
-import { transactionRequiresDocument } from "./rules/transaction-requires-document"
+import { Invoice } from "./ontology/invoice"
+import { Project } from "./ontology/project"
+import { overdueInvoices, atRiskProjects } from "./rules/business-health"
 
-export const sixb = createSixb({
-  ontology: [Transaction],
-  rules: [transactionRequiresDocument],
+const sixb = await createSixb({
+  ontologies: [Invoice, Project],
+  rules: [overdueInvoices, atRiskProjects],
 })
 ```
 
-## How to model rules
+Inspect registered rules at runtime with `sixb.getRuleDefinitions()` and
+`sixb.getRuleById(ruleId)`.
 
-Start with one plain sentence.
+## Rule vs workflow
 
-1. Pick the ontology object type the rule watches.
-2. Write the condition in normal language.
-3. Convert that condition into property and link predicates.
-4. Keep the first version small.
-5. Add `all`, `any`, or `not` only when the condition needs them.
+Rules decide *if* something is true; [workflows](../workflows/overview.md) decide *what to do next*.
 
-Good rule names describe the condition:
+| Need | Use |
+| --- | --- |
+| Know whether an object needs attention | Rule |
+| Emit a triggered / resolved signal | Rule |
+| Run a multi-step process | [Workflow](../workflows/overview.md) |
+| Fetch source data | [Sync](../data/syncs.md) |
+| Clean or join table data | [Pipeline](../data/pipelines.md) |
 
-- `transaction.requires-document`
-- `invoice.collection-risk`
-- `customer.needs-owner`
-- `task.critical-unassigned`
+## Notes
 
-## What happens when a rule matches
-
-Once registered, Sixb evaluates rules as ontology objects and links change.
-
-When a rule starts matching an object, it is triggered. When the object no longer matches, it is
-resolved.
-
-That gives the rest of your app a stable signal to show attention states, send notifications, or
-start follow-up [workflows](../workflows/overview.md).
-
-## Details
-
-- Rule ids must be unique.
-- Rules are scoped to one ontology object type.
-- Predicates are validated against the registered ontology at startup; unknown properties or
-  links and empty `all()` / `any()` groups are rejected.
-- The `.where(...)` callback produces serializable predicate data. The callback itself is not
-  stored.
-- Rule evaluation reacts to `object.upserted` for the subject type, plus `link.upserted` and
-  `link.removed` for any links referenced in the predicate.
-- Active rule state is stored in `storage.rules`, which prevents duplicate triggers.
-- Registered rules can be inspected at runtime with `sixb.getRuleDefinitions()` and
-  `sixb.getRuleById(ruleId)`.
-
-The important first step is to describe the business condition clearly before writing the
-predicate.
+- Rule ids must be unique, and each rule is scoped to one object type.
+- Predicates are validated against the resolved ontology at startup. Unknown properties or links,
+  and empty `all()` / `any()` groups, are rejected.
+- The `.where(...)` callback runs once at definition time and produces serializable predicate data;
+  the callback itself is not stored.
 
 ## Related
 

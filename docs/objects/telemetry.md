@@ -1,38 +1,36 @@
 # Telemetry
 
-Telemetry stores a property's value over time.
+Telemetry stores a property's value over time. Reach for it when history matters — a project's
+progress over its life, a department's headcount month to month, any reading or counter you want
+to keep the full series of, not just the current value.
 
-Use it for measurements, readings, and counters where history matters: a thermostat's
-temperature, a device's signal strength, a meter's running total. A telemetry property keeps the
-full series of readings, and the object record always reflects the latest one.
+A telemetry property keeps every point you append, and the object record always reflects the
+latest one.
 
-## Telemetry property mode
+## Declare a telemetry property
 
-A property becomes telemetry by setting `mode: "telemetry"` in the
-[ontology](../ontology/properties.md). Without it, a property is `"static"`: a single fact on the
-object record.
+Set `mode: "telemetry"` on a property in the [ontology](../ontology/properties.md). Without it, a
+property is `"static"`: a single fact on the object record.
 
 ```ts
-import { defineObjectType, prop } from "@sixb/core"
+import { defineObjectType, prop, stringEnum } from "@sixb/core/ontology"
 
-export const Thermostat = defineObjectType({
-  id: "Thermostat",
-  name: "Thermostat",
+export const Project = defineObjectType({
+  id: "Project",
+  name: "Project",
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
-    prop("temperature", "double", {
-      mode: "telemetry",
-      semanticType: "Temperature",
-    }),
+    prop("status", stringEnum(["draft", "active", "paused", "completed", "cancelled"])),
+    prop("progress", "integer", { mode: "telemetry" }),
   ],
 })
 ```
 
-`semanticType` declares the unit family for numeric readings. It is optional, but when present
-every appended point must carry a unit from that family. See
-[units and semantics](../ontology/units-and-semantics.md) for the registry of quantitative types
-and their unit ids.
+`progress` is a plain `integer` counter — no unit, no semantic type. If a reading represents a
+physical quantity (a temperature, a pressure), add a `semanticType` so every point carries a unit;
+see [units and semantics](../ontology/units-and-semantics.md). Money is never telemetry-with-units
+— model it as `amount` (double) plus a `currency` enum.
 
 Telemetry properties cannot use the `"fileRef"` schema.
 
@@ -42,11 +40,10 @@ Reach a single object with `.byId(id)`, select the telemetry property with the t
 `Type.p.<name>`, and call `.append(...)`.
 
 ```ts
-import { Thermostat } from "./ontology/thermostat"
+import { Project } from "./ontology/project"
 
-await sixb.objects(Thermostat).byId("therm-001").telemetry(Thermostat.p.temperature).append({
-  value: 21.5,
-  unit: "degreeCelsius",
+await sixb.objects(Project).byId("proj-001").telemetry(Project.p.progress).append({
+  value: 45,
   at: new Date(),
 })
 ```
@@ -56,41 +53,29 @@ await sixb.objects(Thermostat).byId("therm-001").telemetry(Thermostat.p.temperat
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `value` | Yes | The reading. Validated against the property schema. |
-| `unit` | When the property has a `semanticType` | A valid unit id for the property's quantitative type. |
 | `at` | Yes | The instant of the reading, as a `Date`. |
+| `unit` | When the property has a `semanticType` | A valid unit id for the property's quantitative type. |
 
-The object must already exist. Appending to a missing object throws. The property must be
-telemetry mode and the token must belong to the object type — both are checked before the write.
+The object must already exist — appending to a missing object throws. The property must be
+telemetry mode and the token must belong to the object type; both are checked before the write.
 
-### Units
-
-If a property declares a `semanticType`, a unit is required and must belong to that family.
-A `Temperature` property accepts `degreeCelsius`, `degreeFahrenheit`, or `kelvin`; an
-unrecognized unit is rejected:
-
-```ts
-// throws: [Sixb] Invalid unit 'millibar' for Thermostat.temperature (Temperature)
-.append({ value: 21.5, unit: "millibar", at: new Date() })
-```
-
-If a property has no `semanticType`, passing a unit is an error. If it has one, omitting the unit
-is an error. Unit ids and their families come from the
-[quantitative types registry](../ontology/units-and-semantics.md).
+A property with no `semanticType` rejects a `unit`. A property with one requires it, and the unit
+must belong to its family. See [units and semantics](../ontology/units-and-semantics.md).
 
 ## Append in batch
 
-`appendTelemetryBatch` writes many points across many objects of one type in a single call. Wrap
-a value as `{ value, unit }` when it carries a unit; otherwise pass the bare value.
+`appendTelemetryBatch` writes many points across many objects of one type in a single call. Pass
+the bare value, or wrap it as `{ value, unit }` when the property carries a unit.
 
 ```ts
-await sixb.objects(Thermostat).appendTelemetryBatch([
+await sixb.objects(Department).appendTelemetryBatch([
   {
-    id: "therm-001",
-    properties: { temperature: { value: 21.5, unit: "degreeCelsius" } },
+    id: "dept-eng",
+    properties: { headcount: 42 },
   },
   {
-    id: "therm-002",
-    properties: { temperature: { value: 19.0, unit: "degreeCelsius" } },
+    id: "dept-sales",
+    properties: { headcount: 17 },
     at: new Date("2026-06-23T12:00:00Z"),
   },
 ])
@@ -104,19 +89,17 @@ Each item accepts:
 | `properties` | Yes | Map of telemetry property id to a value, or `{ value, unit }`. |
 | `at` | No | Instant for every property in the item. Defaults to now. |
 
-Every value is validated and every required unit is checked before any point is written. To
-record readings from table data instead of code, use a
-[telemetry projection](../data/projections.md).
+Every value is validated and every required unit is checked before any point is written. To record
+points from table data instead of code, use a [telemetry projection](../data/projections.md).
 
 ## Identity: (series, at)
 
-A telemetry point is uniquely identified by its series and its instant. The series is the tuple
-`(objectType, object, property)`; the instant is `at`. Writing the same instant on the same
-series again is a last-write-wins upsert — it updates the value rather than adding a duplicate.
+A telemetry point is uniquely identified by its **series** — the tuple
+`(objectType, object, property)` — and its **instant**, `at`. Writing the same instant on the same
+series again is a last-write-wins upsert: it updates the value rather than adding a duplicate.
 
-This makes telemetry writes idempotent under replay: re-appending or re-projecting the same
-`(series, at)` never produces a second point. The same rule governs
-[telemetry projections](../data/projections.md).
+This makes telemetry writes idempotent under replay — re-appending or re-projecting the same
+`(series, at)` never produces a second point.
 
 ## Read history and latest
 
@@ -125,9 +108,9 @@ Reads go through the time-series store at `sixb.storage.timeseries`.
 ```ts
 const history = await sixb.storage.timeseries.getHistory({
   projectId: sixb.id,
-  objectTypeId: "Thermostat",
-  objectId: "therm-001",
-  propertyId: "temperature",
+  objectTypeId: "Project",
+  objectId: "proj-001",
+  propertyId: "progress",
   from: new Date("2026-06-01T00:00:00Z"),
   to: new Date("2026-06-23T00:00:00Z"),
   order: "desc",
@@ -136,9 +119,9 @@ const history = await sixb.storage.timeseries.getHistory({
 
 const latest = await sixb.storage.timeseries.getLatest({
   projectId: sixb.id,
-  objectTypeId: "Thermostat",
-  objectId: "therm-001",
-  propertyId: "temperature",
+  objectTypeId: "Project",
+  objectId: "proj-001",
+  propertyId: "progress",
 })
 ```
 
@@ -168,13 +151,12 @@ The server exposes the same operations as routes on an object:
 | `GET` | `/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/history` | Read history |
 | `GET` | `/api/objects/:objectTypeId/:objectId/telemetry/:propertyId/latest` | Read latest point |
 
-The append body is `{ value, unit?, at? }`. History accepts `from`, `to`, `order`, and `limit`
-as query parameters. See the [HTTP reference](./http-reference.md) for the full object API.
+The append body is `{ value, unit?, at? }`. History accepts `from`, `to`, `order`, and `limit` as
+query parameters. See the [HTTP reference](./http-reference.md) for the full object API.
 
 ## The telemetry.appended event
 
-Every appended point emits a `telemetry.appended` domain event before it lands in storage. Its
-payload is:
+Every appended point emits a `telemetry.appended` domain event. Its payload is:
 
 ```ts
 {
@@ -187,8 +169,9 @@ payload is:
 }
 ```
 
-Subscribe to it to react to new readings — drive rules, push live updates to the UI, or fan out
-to a broker. See [events](../events/overview.md) for how to consume domain events.
+Subscribe to it to react to new readings — drive [rules](../rules/overview.md), push live updates
+to the UI, or fan out to a broker. See [events](../events/overview.md) for how to consume domain
+events.
 
 ## Related
 

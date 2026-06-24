@@ -1,57 +1,56 @@
 # Syncs
 
-A sync moves data from an external system into a [dataset](./datasets.md).
+A sync pulls data from an external system into a [dataset](./datasets.md). Reach for one when you
+need to bring real-world data — ERP invoices, customer records, employee rosters — into Sixb on a
+schedule.
 
-It uses a [connector](./connectors.md) to read from the outside world and writes the result into
-one dataset. Syncs are usually the first step in bringing real data into sixb.
-
-A sync gives data movement a clear shape: one source connector, one read function, one target
-dataset, and one write mode. That keeps external access, table shape, and data movement separate.
-The connector knows how to talk to the external system, the dataset defines the table shape, and
-the sync connects the two.
+A sync wires three things together: a [connector](./connectors.md) that knows how to talk to the
+external system, a read handler that fetches rows, and one target dataset that defines the table
+shape. It is usually the first step in your data flow, before [pipelines](./pipelines.md) reshape
+raw rows and [projections](./projections.md) turn them into objects.
 
 ## Define a sync
 
-A sync chains a trigger, a source connector, a read handler, and a target dataset. The
-`.when(...)` trigger decides when the sync runs.
-
-File: `syncs/orders.ts`
+A sync chains a trigger (`.when`), a source connector (`.from`), a read handler (`.read`), and a
+target dataset (`.intoDataset`).
 
 ```ts
+// syncs/erp.ts
 import { defineSync } from "@sixb/core"
-import { hourly } from "../schedules/hourly"
-import { erpDb } from "../connectors/erp-db"
-import { rawOrdersDataset } from "../datasets/orders"
+import { acmeErpConnector } from "../connectors/acme-erp"
+import { erpInvoicesDataset } from "../datasets/erp"
+import { hourlyErpSync } from "../schedules/erp"
 
-export const syncOrders = defineSync("sync-orders")
-  .when(hourly)
-  .from(erpDb)
-  .read((db) => db`select * from orders`)
-  .intoDataset(rawOrdersDataset)
+export const syncErpInvoices = defineSync("sync-erp-invoices")
+  .when(hourlyErpSync)
+  .from(acmeErpConnector)
+  .read((erp) => erp.listInvoices())
+  .intoDataset(erpInvoicesDataset)
 ```
 
-This runs every hour, reads rows from `erpDb`, and writes them into `rawOrdersDataset`.
+This runs every hour, calls `listInvoices()` on the connector's client, and writes the rows into
+`erpInvoicesDataset`.
 
 ## Builder steps
 
 | Step | Meaning |
 | --- | --- |
-| `defineSync("sync-orders")` | Names the sync (and optionally sets `{ mode }`) |
-| `.when(trigger)` | Declares when the sync runs (schedule or run trigger) |
+| `defineSync("sync-erp-invoices", { mode })` | Names the sync; `mode` is `"snapshot"` (default) or `"append"` |
+| `.when(trigger)` | Declares when the sync runs; callable multiple times (OR semantics) |
 | `.checkpoint<T>()` | Opts into a typed incremental checkpoint (optional) |
-| `.from(erpDb)` | Chooses the source connector |
-| `.read((client, context) => ...)` | Reads records from the source |
-| `.intoDataset(rawOrdersDataset)` | Chooses the target dataset |
+| `.from(connector)` | Chooses the source connector |
+| `.read((client, context) => ...)` | Fetches rows from the connector's client |
+| `.intoDataset(dataset)` | Chooses the target dataset |
 
-The read handler receives the connected `client` returned by the connector and a `context`. It may
-return one row, an iterable, or an async iterable.
+The read handler receives the `client` returned by the connector's `connect()` and a `context`. It
+may return one row, an iterable, or an async iterable.
 
 ## Triggers
 
-Every sync declares when it runs with `.when(...)`. You can call `.when(...)` more than once;
-multiple triggers use OR semantics, so any matching trigger requests a run independently.
+Every sync declares when it runs with `.when(...)`. Call it more than once to add triggers — they
+use OR semantics, so any matching trigger requests a run independently.
 
-A trigger is either a [schedule](../schedules/overview.md) or a run trigger built from a helper:
+A trigger is either a [schedule](../schedules/overview.md) or a run trigger:
 
 | Trigger | Fires when |
 | --- | --- |
@@ -63,73 +62,62 @@ A trigger is either a [schedule](../schedules/overview.md) or a run trigger buil
 Schedule a sync by attaching a reusable schedule:
 
 ```ts
-import { defineSchedule, defineSync } from "@sixb/core"
+// schedules/erp.ts
+import { defineSchedule } from "@sixb/core"
 
-export const hourly = defineSchedule("hourly").cron("0 * * * *")
-
-export const syncOrders = defineSync("sync-orders")
-  .when(hourly)
-  .from(erpDb)
-  .read((db) => db`select * from orders`)
-  .intoDataset(rawOrdersDataset)
+export const hourlyErpSync = defineSchedule("hourly-erp-sync").cron("0 * * * *", {
+  timezone: "Europe/Paris",
+})
 ```
 
-Chain one sync after another so a run requests the next:
+Chain one sync after another so each run requests the next — useful when later rows reference
+earlier ones (invoices reference customers, customers reference employees):
 
 ```ts
 import { defineSync, syncFinished } from "@sixb/core"
+import { acmeErpConnector } from "../connectors/acme-erp"
+import { erpCustomersDataset } from "../datasets/erp"
 
-export const syncCustomers = defineSync("sync-customers")
-  .when(syncFinished(syncDepartments.id))
-  .from(erp)
-  .read((client) => client.listCustomers())
-  .intoDataset(customersDataset)
+export const syncErpCustomers = defineSync("sync-erp-customers")
+  .when(syncFinished(syncErpEmployees.id))
+  .from(acmeErpConnector)
+  .read((erp) => erp.listCustomers())
+  .intoDataset(erpCustomersDataset)
 ```
 
-## Snapshot syncs
+## Snapshot vs. append
 
-Snapshot is the default mode. Use it when each run should replace the target dataset with the
-current full view of the source.
+The sync mode controls how each run writes to the target dataset.
+
+| Mode | Behavior | Good for |
+| --- | --- | --- |
+| `"snapshot"` (default) | Replaces the dataset with the current full view | Current customers, open invoices, active projects |
+| `"append"` | Adds new rows to the dataset | Audit logs, webhook deliveries, invoice events |
+
+Snapshot is the default — omit `mode` for it. Use append when the source is event-like:
 
 ```ts
-export const syncOrders = defineSync("sync-orders")
-  .when(hourly)
-  .from(erpDb)
-  .read((db) => db`select * from orders`)
-  .intoDataset(rawOrdersDataset)
+export const syncErpInvoiceEvents = defineSync("sync-erp-invoice-events", { mode: "append" })
+  .when(hourlyErpSync)
+  .from(acmeErpConnector)
+  .read((erp) => erp.listInvoiceEvents())
+  .intoDataset(erpInvoiceEventsDataset)
 ```
-
-Good snapshot sources: current orders, active customers, inventory levels, devices currently known
-by an API.
-
-## Append syncs
-
-Use append mode when each run should add new rows instead of replacing the dataset.
-
-```ts
-export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
-  .when(hourly)
-  .from(erpDb)
-  .read((db) => db`select * from order_events`)
-  .intoDataset(rawOrderEventsDataset)
-```
-
-Good append sources: audit logs, webhook deliveries, order events, new files arriving over time.
 
 ## Incremental syncs with checkpoints
 
-For append sources you often want each run to read only what is new. Call `.checkpoint<T>()` to opt
-into a typed checkpoint. The read context then exposes the last `checkpoint` value and a
+For append sources you usually want each run to read only what is new. Call `.checkpoint<T>()` to
+opt into a typed checkpoint. The read context then exposes the last `checkpoint` value and a
 `setCheckpoint(next)` method to record progress for the next run.
 
 ```ts
-export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" })
-  .when(hourly)
+export const syncErpInvoiceEvents = defineSync("sync-erp-invoice-events", { mode: "append" })
+  .when(hourlyErpSync)
   .checkpoint<{ lastId: number }>()
-  .from(erpDb)
-  .read(async function* (db, context) {
+  .from(acmeErpConnector)
+  .read(async function* (erp, context) {
     const since = context.checkpoint?.lastId ?? 0
-    const rows = await db`select * from order_events where id > ${since} order by id`
+    const rows = await erp.listInvoiceEvents({ sinceId: since })
 
     let lastId = since
     for (const row of rows) {
@@ -139,7 +127,7 @@ export const syncOrderEvents = defineSync("sync-order-events", { mode: "append" 
 
     context.setCheckpoint({ lastId })
   })
-  .intoDataset(rawOrderEventsDataset)
+  .intoDataset(erpInvoiceEventsDataset)
 ```
 
 Without `.checkpoint<T>()`, `context.checkpoint` is `undefined` and there is no `setCheckpoint`.
@@ -157,111 +145,82 @@ The read handler signature is `(client, context)`.
 | `context.checkpoint` | Last checkpoint value (only with `.checkpoint<T>()`) |
 | `context.setCheckpoint(next)` | Records the next checkpoint (only with `.checkpoint<T>()`) |
 
-## Sync files and blobs
+### Ingesting files
 
-Datasets can include `fileRef` columns for blob-backed files. When a sync needs to ingest file
-bytes, use the blob facade on the read context.
+When a dataset has a `fileRef` column for blob-backed files, use `context.blobs` to store the bytes
+and write the returned `fileRef` into the row — for example, pulling the bytes for each ERP document
+into blob storage:
 
 ```ts
-import { col, defineDataset, defineSync } from "@sixb/core"
-import { hourly } from "../schedules/hourly"
-import { fileSource } from "../connectors/file-source"
-
-export const rawFiles = defineDataset("raw.files", {
-  schema: [
-    col("id", "string"),
-    col("name", "string"),
-    col("relativePath", "string"),
-    col("fileRef", "fileRef", { nullable: true }),
-  ],
-})
-
-export const syncFiles = defineSync("sync-files")
-  .when(hourly)
-  .from(fileSource)
-  .read(async function* (client, context) {
-    for await (const file of client.walk("/documents")) {
+export const syncErpDocuments = defineSync("sync-erp-documents")
+  .when(hourlyErpSync)
+  .from(acmeErpConnector)
+  .read(async function* (erp, context) {
+    for (const doc of await erp.listDocuments()) {
       const fileRef = await context.blobs.put({
-        body: await client.open(file.path),
-        fileName: file.name,
-        mediaType: file.mediaType,
-        logicalPath: file.relativePath,
+        body: await erp.fetchDocumentBytes(doc.id),
+        fileName: `${doc.title}.pdf`,
+        mediaType: "application/pdf",
       })
 
-      yield {
-        id: file.id,
-        name: file.name,
-        relativePath: file.relativePath,
-        fileRef,
-      }
+      yield { id: doc.id, title: doc.title, fileRef }
     }
   })
-  .intoDataset(rawFiles)
+  .intoDataset(erpDocumentsDataset)
 ```
 
-The connector reads the external source; `context.blobs` stores bytes in sixb and returns the
-`fileRef` to write into the row. The sync worker validates returned `fileRef` values before
-committing, including existence, digest, and size.
+`put()` also accepts an optional `logicalPath` to record a human-readable path alongside the stored
+bytes.
+
+The sync worker validates each returned `fileRef` — existence, digest, and size — before committing.
 
 ## Keep syncs small
 
-A sync can do light cleanup when it reads data, but it should not become your whole data pipeline.
-
-Good work for a sync: call the external system, return rows, flatten a response, drop obviously
-invalid records.
-
-Better left to a [pipeline](./pipelines.md): joins, heavy reshaping, business calculations, turning
-raw rows into canonical rows.
+A sync can do light cleanup as it reads — flatten a response, drop obviously invalid records — but
+it should not become your whole data pipeline. Leave joins, heavy reshaping, business calculations,
+and turning raw rows into canonical rows to a [pipeline](./pipelines.md).
 
 ## Convention
 
-Put sync definitions in `syncs/` and export them.
+Put sync definitions in `syncs/` and export them. `createSixb()` discovers them automatically.
 
 ```txt
 your-project/
   connectors/
-    erp-db.ts
+    acme-erp.ts
   datasets/
-    orders.ts
-    order-events.ts
-  syncs/
-    orders.ts
-    order-events.ts
+    erp.ts
   schedules/
-    hourly.ts
+    erp.ts
+  syncs/
+    erp.ts
   sixb.config.ts
 ```
 
-`createSixb()` discovers exported sync definitions from `syncs/` automatically. You can also
-register syncs explicitly:
+You can also register syncs explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { rawOrdersDataset } from "./datasets/orders"
-import { syncOrders } from "./syncs/orders"
+import { erpInvoicesDataset } from "./datasets/erp"
+import { syncErpInvoices } from "./syncs/erp"
 
-export const sixb = createSixb({
-  datasets: [rawOrdersDataset],
-  syncs: [syncOrders],
+export const sixb = await createSixb({
+  datasets: [erpInvoicesDataset],
+  syncs: [syncErpInvoices],
 })
 ```
 
-## How to model syncs
-
-Start with one sync per source shape.
-
-1. Define the [connector](./connectors.md) first.
-2. Define the raw [dataset](./datasets.md) shape.
-3. Create a sync that reads from the connector and writes that dataset.
-4. Use snapshot unless the source is event-like.
-5. Move cleanup and reshaping into [pipelines](./pipelines.md) as the project grows.
-
-Good sync names start with the action and source entity: `sync-orders`, `sync-order-events`,
-`sync-customers`, `sync-device-inventory`.
+Name syncs after the action and source entity: `sync-erp-invoices`, `sync-erp-customers`,
+`sync-erp-invoice-events`.
 
 ## Notes
 
-- Sync definitions are inert until a worker runs them.
-- `sixb dev` can co-host sync workers during local development.
-- See [datasets](./datasets.md), [connectors](./connectors.md), and [pipelines](./pipelines.md)
-  for the rest of the data flow.
+- Sync definitions are inert until a worker runs them. `sixb dev` can co-host sync workers locally.
+- Running a sync requires the `run:sync` [grant](../auth/authorization.md).
+
+## Related
+
+- [Connectors](./connectors.md) — how Sixb talks to external systems
+- [Datasets](./datasets.md) — the target table shape
+- [Pipelines](./pipelines.md) — reshape raw synced rows
+- [Projections](./projections.md) — turn raw rows into objects

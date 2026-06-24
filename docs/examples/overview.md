@@ -1,20 +1,17 @@
 # Examples
 
-The `examples/` folder holds runnable Sixb projects. Each is a complete app you can
-clone, run with `bun dev`, and read end to end. Use them as working references for how the
-concepts fit together in a real project.
+The `examples/` folder holds runnable Sixb projects. Clone one, run it with `bun dev`, and read
+it end to end. Use them as working references for how the pieces fit together in a real app.
 
-## Mental model
+Each example is a standard Sixb project: a `sixb.config.ts` that calls
+[`createSixb()`](../runtime/overview.md) plus convention folders (`ontology/`, `actions/`,
+`connectors/`, and so on) that are auto-discovered at startup. They differ in *which* capabilities
+they exercise, not in how they are wired.
 
-Every example is a standard Sixb project: a `sixb.config.ts` that calls
-[`createSixb()`](../runtime/overview.md), plus convention folders (`ontology/`, `actions/`,
-`connectors/`, and so on) that are auto-discovered at startup. The examples differ in
-*which* capabilities they exercise, not in how they are wired.
-
-| Example | Shows off | Storage / broker |
+| Example | What it shows | Storage / broker |
 | --- | --- | --- |
-| `acme-corp` | Full operations app: ontology, syncs, pipelines, projections, rules, workflows, actions, custom app, typed client | SQLite + in-memory broker |
-| `auth` | Authentication strategies, groups, roles, invite policies, scoped access | SQLite + in-memory broker |
+| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, actions, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
+| `auth` | Authentication strategies, groups, invite policies, and scoped roles | SQLite + in-memory broker |
 
 Run any example from its own folder:
 
@@ -23,25 +20,29 @@ cd examples/acme-corp
 bun dev
 ```
 
-## acme-corp — full operations app
+`acme-corp` is the reference these docs are built on. Every code sample across the documentation
+models the same domain — a company running its operations on Sixb: the `Customer`s it serves, the
+`Project`s it delivers, the `Employee`s who do the work, and the `Invoice`s it bills.
 
-A back-office app for an invoicing and project-management company. It is the broadest
-example and touches nearly every concept.
+## acme-corp — the business-OS reference
+
+A back-office app for a company that delivers projects and bills for them. It is the broadest
+example and touches nearly every concept in Sixb, so it is the one to read first.
 
 | Folder | Demonstrates |
 | --- | --- |
-| `ontology/` | Object types for `Customer`, `Department`, `Document`, `Employee`, `Invoice`, `Project`, `Task`, with links between them — see [Ontology](../ontology/overview.md) |
-| `connectors/`, `lib/` | A connector to a mock ERP system — see [Connectors](../data/connectors.md) |
-| `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
+| `ontology/` | Object types `Customer`, `Department`, `Document`, `Employee`, `Invoice`, `Project`, `Task`, with links between them — see [Ontology](../ontology/overview.md) |
+| `connectors/`, `lib/` | An `acme-erp` connector to a mock ERP exposing customers, invoices, employees, and departments — see [Connectors](../data/connectors.md) |
+| `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets like `erp.invoices` on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
 | `pipelines/` | `project-reporting` transforms dataset rows — see [Pipelines](../data/pipelines.md) |
-| `projections/` | Mapping datasets and pipeline output into ontology objects — see [Projections](../data/projections.md) |
+| `projections/` | Mapping dataset and pipeline rows into ontology objects — see [Projections](../data/projections.md) |
 | `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice` — see [Actions](../actions/overview.md) |
-| `functions/` | `check-overdue-invoices` runs on a schedule |
-| `rules/` | `business-health` evaluates object state — see [Rules](../rules/overview.md) |
-| `workflows/` | `invoice-reminder` drives a multi-step process — see [Workflows](../workflows/overview.md) |
+| `functions/` | `check-overdue-invoices` runs on a cron schedule — see [Schedules](../schedules/overview.md) |
+| `rules/` | Business-health rules like `invoice.collection-risk` and `project.large-active-engagement` — see [Rules](../rules/overview.md) |
+| `workflows/` | `invoice-reminder` drives a multi-step process with a human approval step — see [Workflows](../workflows/overview.md) |
 | `app/` | A custom React app with project, review, and intervention pages — see [Apps](../apps/overview.md) |
 
-Its `sixb.config.ts` uses local-first providers so it runs with no external services:
+Its `sixb.config.ts` uses local-first providers, so it runs with no external services:
 
 ```ts
 import { LocalBlobStorage } from "@sixb/blob-local"
@@ -59,20 +60,25 @@ export const sixb = createSixb({
 })
 ```
 
-It also ships demo scripts: `bun run sync:erp` and `bun run webhooks:demo`.
+Two demo scripts seed the system from the mock ERP and replay events:
+
+```bash
+bun run sync:erp       # pull ERP rows into datasets, then project them into objects
+bun run webhooks:demo  # send sample webhook events at the running app
+```
 
 ## auth — authentication and access control
 
-A tiny app focused entirely on [Authentication](../auth/authentication.md) and
-[Authorization](../auth/authorization.md). It supports two strategies, switched with the
-`SIXB_AUTH_MODE` environment variable.
+A small app focused entirely on [Authentication](../auth/authentication.md) and
+[Authorization](../auth/authorization.md). Auth state persists to local SQLite, so you stay
+signed in across restarts. Pick the strategy with the `SIXB_AUTH_MODE` environment variable.
 
 | Mode | Package | Setup |
 | --- | --- | --- |
 | `magic-link` (default) | `@sixb/auth-magic-link` | Zero setup; the sign-in link prints to the terminal |
 | `oidc` | `@sixb/auth-oidc` | Set `SIXB_GOOGLE_CLIENT_ID` and `SIXB_GOOGLE_CLIENT_SECRET` |
 
-The strategy is selected when building the runtime:
+The strategy is selected when you build the runtime:
 
 ```ts
 const runtime = await createSixb({
@@ -103,15 +109,15 @@ Beyond sign-in, the `security/` folder shows the full access-control model:
 
 | File | Demonstrates |
 | --- | --- |
-| `security/groups/` | `security-admins` and `team-members` groups |
+| `security/groups/` | The `security-admins` and `team-members` groups |
 | `security/invite-policies/` | Security admins can invite people into `team-members` |
-| `security/roles/` | Scoped grants per group — `team-members` get view on `Note`, view on one dataset, and apply on `acknowledge-note`; `security-admins` use wildcard grants |
+| `security/roles/` | Scoped grants per group — `team-members` get `can.view(Note)`, view on the team-notes dataset, and `can.apply(acknowledgeNote)`; `security-admins` get wildcard grants over all objects, datasets, actions, and workflows |
 
-Because grants are scoped, the same UI shows different objects, datasets, and actions
-depending on who is signed in. See [Authorization](../auth/authorization.md) for how grants
-and roles are defined.
+Because grants are scoped, the same UI shows different objects, datasets, and actions depending on
+who is signed in. See [Authorization](../auth/authorization.md) for how grants and roles are defined.
 
-## Related pages
+## Next
 
 - [Get Started](../README.md) — install Sixb and create a new project
 - [Project Structure](../fundamentals/project-structure.md) — the convention folders these examples use
+- [Ontology](../ontology/overview.md) — model the `acme-corp` domain yourself

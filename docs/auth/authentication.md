@@ -3,21 +3,21 @@
 Authentication establishes **who** a principal is. [Authorization](./authorization.md) is the
 separate layer that decides **what** that principal may do.
 
-Sixb builds authentication from a few small layers:
+Sixb assembles authentication from a few small pieces, all configured through the `auth` option on
+`createSixb()`:
 
 - **Strategy** — how a user proves who they are: a magic link, an OIDC provider, or none.
 - **Sessions** — the signed-in state carried in a cookie and resolved on every request.
-- **Allowed domains and bootstrap** — who may sign in, and who gets the first account.
-- **Invitations** — how the team grows after the first user is in.
+- **Allowed domains and bootstrap** — who may sign in, and who gets the very first account.
+- **Invitations** — how the team grows once the first user is in.
 
-Configure all of it through the `auth` option on `createSixb()`. The server ships the sign-in,
-callback, and sign-out endpoints, so you rarely write request handling yourself. See
-[Auth overview](./overview.md) for how authentication and authorization fit together.
+The server ships the sign-in, callback, and sign-out endpoints, so you rarely write request
+handling yourself. See [Auth overview](./overview.md) for how the two layers fit together.
 
 ## Pick a strategy
 
-A strategy is the value you pass to `auth`. Each lives in its own package and is constructed with
-a factory function.
+A strategy is the value you pass to `auth`. Each lives in its own package and is built with a
+factory function.
 
 **Magic link** — email a one-time sign-in link. No external identity provider to set up.
 
@@ -28,8 +28,8 @@ import { magicLink } from "@sixb/auth-magic-link"
 export const sixb = await createSixb({
   // ...storage, broker, and the rest of the runtime
   auth: magicLink({
-    allowedDomains: ["example.com"],
-    bootstrapUsers: ["admin@example.com"],
+    allowedDomains: ["acme-corp.com"],
+    bootstrapUsers: ["admin@acme-corp.com"],
     sendMagicLink: async (message) => {
       // In development, print it. In production, email it.
       console.log(`Sign-in link for ${message.email}: ${message.url}`)
@@ -47,8 +47,8 @@ auth: oidc({
   issuer: "https://accounts.google.com",
   clientId: process.env.SIXB_GOOGLE_CLIENT_ID ?? "",
   clientSecret: process.env.SIXB_GOOGLE_CLIENT_SECRET ?? "",
-  allowedDomains: ["yourcompany.com"],
-  bootstrapUsers: ["you@yourcompany.com"],
+  allowedDomains: ["acme-corp.com"],
+  bootstrapUsers: ["admin@acme-corp.com"],
 })
 ```
 
@@ -58,7 +58,7 @@ auth: oidc({
 
 | Option | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `allowedDomains` | `string[]` | — (required) | Email domains permitted to sign in; must contain at least one |
+| `allowedDomains` | `string[]` | — (required) | Email domains permitted to sign in; at least one |
 | `sendMagicLink` | `(message) => Promise<void>` | — (required) | Delivers the sign-in email |
 | `bootstrapUsers` | `string[]` | `[]` | Emails allowed to self-provision without an invitation |
 | `bootstrapGroups` | `(string \| GroupDefinition)[]` | `[]` | Groups bootstrap users are placed into on sign-in |
@@ -69,16 +69,16 @@ auth: oidc({
 | `from` | `string` | — | Sender address on the email |
 | `subject` | `string` | `"Sign in to Sixb"` | Email subject line |
 
-`sendMagicLink` receives a fully rendered message: `email`, `url`, `from?`, `subject`, `text`, and
-`html`. Deliver it however you like (in development, log `message.url`).
+`sendMagicLink` receives a fully rendered message — `email`, `url`, `from?`, `subject`, `text`, and
+`html` — so you deliver it however you like.
 
 ```ts
 import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 
 auth: magicLink({
-  allowedDomains: ["example.com"],
-  bootstrapUsers: ["admin@example.com"],
-  from: "auth@example.com",
+  allowedDomains: ["acme-corp.com"],
+  bootstrapUsers: ["admin@acme-corp.com"],
+  from: "auth@acme-corp.com",
   sendMagicLink: async (message: SendMagicLinkInput) => {
     await sendEmail({
       from: message.from,
@@ -111,14 +111,13 @@ auth: magicLink({
 | `from` | `string` | — | Sender address on invitation emails |
 | `subject` | `string` | `"You are invited to Sixb"` | Invitation email subject |
 
-Unlike magic link, OIDC has no `sendMagicLink` — sign-in happens at the provider. Provide
-`sendInvitation` (it receives the same message shape: `email`, `url`, `from?`, `subject`, `text`,
-`html`) if you want to invite teammates by email.
+OIDC has no `sendMagicLink` — sign-in happens at the provider. Set `sendInvitation` (same message
+shape: `email`, `url`, `from?`, `subject`, `text`, `html`) if you want to invite teammates by email.
 
 ## Auth needs storage
 
-Auth state — users, sessions, group memberships, and invitations — lives in the runtime's auth
-storage. Use a persistent adapter so people stay signed in across restarts.
+Auth state — users, sessions, group memberships, and invitations — lives in the runtime's storage.
+Use a persistent adapter so people stay signed in across restarts.
 
 ```ts
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
@@ -131,39 +130,38 @@ export const sixb = await createSixb({
 })
 ```
 
-Enabling auth without a storage adapter that provides auth storage is an error at startup. See
+Enabling auth without a storage adapter is an error at startup. See
 [Infrastructure](../infrastructure/overview.md) for adapter choices.
 
 ## Allowed domains and bootstrap
 
-`allowedDomains` is the gate: only emails on those domains can sign in. `bootstrapUsers` is the
-exception that solves the first-account problem — those specific emails may create an account
-without an invitation, and `bootstrapGroups` places them into groups on sign-in. Bootstrap groups
-are reconciled on every sign-in, not only the first one.
+`allowedDomains` is the gate: only emails on those domains can sign in. `bootstrapUsers` solves the
+first-account problem — those specific emails may create an account without an invitation, and
+`bootstrapGroups` places them into groups. Bootstrap groups are reconciled on **every** sign-in,
+not just the first.
 
 ```ts
 import { magicLink } from "@sixb/auth-magic-link"
-import { securityAdmins } from "./security/groups/security-admins"
+import { financeAdmins } from "./security/groups/finance-admins"
 
 auth: magicLink({
-  allowedDomains: ["example.com"],
-  bootstrapUsers: ["admin@example.com"],
-  bootstrapGroups: [securityAdmins],
+  allowedDomains: ["acme-corp.com"],
+  bootstrapUsers: ["admin@acme-corp.com"],
+  bootstrapGroups: [financeAdmins],
   sendMagicLink: async (message) => console.log(`${message.email}: ${message.url}`),
 })
 ```
 
-The first sign-in as `admin@example.com` lands in `security-admins`. That group's
-[role grants](./authorization.md) are what let it administer everything else — including inviting
-the rest of the team. `bootstrapGroups` must reference groups registered with the runtime, or
-startup fails. Groups are defined with `defineGroup` — see [Authorization](./authorization.md).
+The first sign-in as `admin@acme-corp.com` lands in `finance-admins`. That group's
+[role grants](./authorization.md) are what let it run invoice actions and invite the rest of the
+team. `bootstrapGroups` must reference groups registered with the runtime, or startup fails — define
+them with `defineGroup` (see [Authorization](./authorization.md)).
 
 ## Invitations
 
-After bootstrap, the team grows through invitations rather than more bootstrap users. Who can
-invite whom into which groups is governed by [invite policies](./authorization.md). The active
-strategy must support invitation delivery — magic link always does; OIDC does when `sendInvitation`
-is set.
+After bootstrap, the team grows through invitations rather than more bootstrap users. Who can invite
+whom into which groups is governed by [invite policies](./authorization.md). The active strategy
+must support invitation delivery — magic link always does; OIDC does when `sendInvitation` is set.
 
 The server exposes invitation management under `/api/auth/invitations`, and the built-in admin UI
 uses it, so you usually do not call it directly. Programmatically, the runtime exposes it on
@@ -171,7 +169,7 @@ uses it, so you usually do not call it directly. Programmatically, the runtime e
 
 ```ts
 const { invitation, delivery } = await sixb.auth.invite(request, {
-  email: "teammate@example.com",
+  email: "newhire@acme-corp.com",
   groups: [teamMembers],
 })
 ```
@@ -209,7 +207,7 @@ auth: {
 | `cookies` | `sameSite` | `"strict"` | Only `"strict"` is allowed |
 | `cookies` | `csrfHttpOnly` | `false` | Whether the CSRF cookie is HttpOnly |
 
-Sessions are cached in-process briefly to absorb request bursts; the defaults are sensible, so most
+Sessions are cached in-process briefly to absorb request bursts. The defaults are sensible, so most
 apps leave `session` and `cookies` unset.
 
 ## Sign-in endpoints
@@ -234,7 +232,7 @@ See [Server](../server/overview.md) for how routes are mounted.
 ## Development and production
 
 In development you can run without auth — omit `auth` entirely and every request is treated as
-privileged. The server refuses to do this in production: a deployed runtime must configure a real
+privileged. The server refuses this in production: a deployed runtime must configure a real
 strategy.
 
 To run a deployed runtime without auth on purpose, opt in explicitly:
@@ -248,18 +246,17 @@ This is deliberate — disabling auth in production should never happen by omiss
 ## From sign-in to authorization
 
 Once a principal is signed in, its identity and group memberships resolve into an authorization
-context. The server attaches that context to the request automatically, so grant checks apply
-without extra wiring. The resolved `Principal` is one of `user`, `serviceAccount`, or `system`.
+context that the server attaches to each request, so grant checks apply without extra wiring. The
+resolved `Principal` is one of `user`, `serviceAccount`, or `system`.
 
-## Notes
+A few things worth remembering:
 
-- The strategy is the value passed to `auth`; the object form `{ strategy, session, cookies }`
-  adds session and cookie tuning.
 - `allowedDomains` is enforced on both sign-in and invitations.
-- Sessions default to a 7-day lifetime; signing out everywhere revokes them across all devices.
+- Sessions default to a 7-day lifetime; `sign-out-all` revokes them across every device.
 - State-changing API routes are CSRF-protected with a double-submit token.
-- Authentication says who you are; [authorization](./authorization.md) says what you may do.
 
-The first step is to pick a strategy, set `allowedDomains` and `bootstrapUsers`, then let
-invitations and groups grow the team from there. See [Authorization](./authorization.md) for
-groups, roles, and grants.
+## Next
+
+- [Authorization](./authorization.md) — groups, roles, and the six grant kinds.
+- [Auth overview](./overview.md) — how authentication and authorization fit together.
+- [Server](../server/overview.md) — how the auth routes are mounted.

@@ -1,11 +1,11 @@
 # Links
 
-Links describe how objects relate to each other: a customer belongs to an organization, a task
-belongs to a project, an invoice is billed to a customer.
+Links describe how objects relate: a project is delivered for a customer, led by one employee, and
+staffed by many. Declare links on the source [object type](./object-types.md) with `link(...)`,
+then write and traverse them through the typed API.
 
-Links are declared on the source [object type](./object-types.md) with `link(...)`. Use links for
-relationships your app needs to navigate, query, or display. For values that live on a single
-object, use [properties](./properties.md) instead.
+Use links for relationships your app needs to navigate, query, or display. For values that live on
+a single object, use [properties](./properties.md) instead.
 
 ## Declare a link
 
@@ -13,20 +13,22 @@ Add a `links` array to `defineObjectType`. Each entry connects this object type 
 target object type.
 
 ```ts
-import { defineObjectType, link, prop } from "@sixb/core/ontology"
-import { Project } from "./project"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { Customer } from "./customer"
 import { Employee } from "./employee"
 
-export const Task = defineObjectType({
-  id: "Task",
-  name: "Task",
+export const Project = defineObjectType({
+  id: "Project",
+  name: "Project",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("title", "string", { required: true }),
+    prop("name", "string", { required: true }),
+    prop("status", stringEnum(["draft", "active", "paused", "completed", "cancelled"])),
   ],
   links: [
-    link("project", Project, { cardinality: "one" }),
-    link("assignee", Employee, { cardinality: "one" }),
+    link("customer", Customer, { cardinality: "one" }),
+    link("lead", Employee, { cardinality: "one" }),
+    link("members", Employee, { cardinality: "many" }),
   ],
 })
 ```
@@ -41,38 +43,37 @@ link(id, target?, options?)
 | --- | --- | --- |
 | `id` | Yes | A stable relationship key, unique within the source object type |
 | `target` | No | The object type(s) this link can point to. Defaults to `"*"` (wildcard) |
-| `options` | No | An object for metadata and relationship behavior |
+| `options` | No | Metadata and relationship behavior |
 
-`options` accepts these fields:
+`options` accepts:
 
-| Option | Expected | Meaning |
+| Option | Type | Meaning |
 | --- | --- | --- |
 | `name` | `string` | Display name. Defaults to the link `id`. |
 | `description` | `string` | Human-readable context for the relationship. |
-| `cardinality` | `"one"` or `"many"` | Whether each source links to one or many targets. |
+| `cardinality` | `"one"` \| `"many"` | Whether each source links to one or many targets. |
 | `properties` | `Property[]` | Metadata stored on each relationship instance. |
 
 ## Target forms
 
-The `target` accepts an object type, an object type id string, an array of either, or nothing
+`target` accepts an object type, an object type id string, an array of either, or nothing
 (wildcard).
 
 | Form | Example | Points to |
 | --- | --- | --- |
-| Object type | `link("project", Project)` | One specific type |
-| Object type id | `link("project", "Project")` | One specific type, by id |
+| Object type | `link("customer", Customer)` | One specific type |
+| Object type id | `link("customer", "Customer")` | One specific type, by id |
 | Array of types | `link("relatedTo", [Project, Task])` | Any of the listed types |
 | Array of ids | `link("relatedTo", ["Project", "Task"])` | Any of the listed types |
 | Wildcard (omitted) | `link("anything")` | Any object type |
 | Wildcard with options | `link("anything", { cardinality: "many" })` | Any object type |
 
-Passing an object type extracts its `.id` at build time, so `link("project", Project)` and
-`link("project", "Project")` produce the same result. Prefer the object-type form — it keeps the
-target type-checked and is the source for typed traversal.
+Passing an object type extracts its `.id` at build time, so `link("customer", Customer)` and
+`link("customer", "Customer")` produce the same result. Prefer the object-type form — it keeps the
+target type-checked and powers typed traversal.
 
-When the target is omitted or set to `"*"`, the link is a **wildcard** and can point to any object
-type. Prefer a specific target for relationships your app understands; reserve wildcards for
-genuinely polymorphic relationships.
+When the target is omitted or `"*"`, the link is a **wildcard** and can point to any object type.
+Prefer a specific target; reserve wildcards for genuinely polymorphic relationships.
 
 ## Cardinality
 
@@ -80,11 +81,11 @@ genuinely polymorphic relationships.
 
 | Value | Meaning |
 | --- | --- |
-| `"one"` | Each source links to at most one target, like one task belonging to one project. |
-| `"many"` | The source can link to multiple targets, like one project having many tasks. |
+| `"one"` | Each source links to at most one target — a project has one `lead`. |
+| `"many"` | The source can link to multiple targets — a project has many `members`. |
 
 ```ts
-link("project", Project, { cardinality: "one" })
+link("lead", Employee, { cardinality: "one" })
 link("members", Employee, { cardinality: "many" })
 ```
 
@@ -95,27 +96,27 @@ with `prop(...)`, exactly like object [properties](./properties.md).
 
 ```ts
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
-import { Thermostat } from "./thermostat"
+import { Employee } from "./employee"
 
-export const Room = defineObjectType({
-  id: "Room",
-  name: "Room",
+export const Project = defineObjectType({
+  id: "Project",
+  name: "Project",
   properties: [prop("id", "string", { required: true, primary: true })],
   links: [
-    link("hasThermostat", Thermostat, {
-      cardinality: "one",
+    link("members", Employee, {
+      cardinality: "many",
       properties: [
-        prop("installedBy", "string"),
-        prop("installedAt", "timestamp"),
+        prop("role", "string"),
+        prop("allocatedAt", "timestamp"),
       ],
     }),
   ],
 })
 ```
 
-Good link properties are facts about the connection: `installedBy`, `installedAt`,
-`commissionedBy`, or `confidence`. If a link does not declare `properties`, writing a link with
-properties is rejected with an `OntologyValidationError`.
+Good link properties are facts about the connection: a member's `role` on the project, when they
+were `allocatedAt`, or a `confidence` score. If a link does not declare `properties`, writing a
+link with properties is rejected with an `OntologyValidationError`.
 
 ## Create and remove links
 
@@ -123,30 +124,30 @@ Once a type is registered, write links through the typed API on a `byId(...)` ha
 token comes from the object type as `Type.l.<linkId>`.
 
 ```ts
-const rooms = sixb.objects(Room)
+const projects = sixb.objects(Project)
 
 // Link to a target by object reference
-await rooms.byId("room:101").link(Room.l.hasThermostat, {
-  objectTypeId: "Thermostat",
-  primaryId: "tstat-9",
+await projects.byId("proj-001").link(Project.l.members, {
+  objectTypeId: "Employee",
+  primaryId: "emp-014",
 })
 
 // With link properties
-await rooms.byId("room:101").link(
-  Room.l.hasThermostat,
-  { objectTypeId: "Thermostat", primaryId: "tstat-9" },
-  { properties: { installedBy: "tech-a", installedAt: new Date() } }
+await projects.byId("proj-001").link(
+  Project.l.members,
+  { objectTypeId: "Employee", primaryId: "emp-014" },
+  { properties: { role: "backend", allocatedAt: new Date() } }
 )
 
 // Remove a link
-await rooms.byId("room:101").unlink(Room.l.hasThermostat, {
-  objectTypeId: "Thermostat",
-  primaryId: "tstat-9",
+await projects.byId("proj-001").unlink(Project.l.members, {
+  objectTypeId: "Employee",
+  primaryId: "emp-014",
 })
 ```
 
-The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks the target type
-against the link's declared target, so linking `hasThermostat` to a `Room` is a compile error.
+The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks it against the
+link's declared target, so linking `members` to a `Customer` is a compile error.
 
 Writing a link emits a `link.upserted` [event](../events/overview.md); removing one emits
 `link.removed`.
@@ -156,14 +157,14 @@ Writing a link emits a `link.upserted` [event](../events/overview.md); removing 
 `listLinks(...)` returns the relationship rows for an object, optionally filtered to one link token.
 
 ```ts
-// All links from this room
-const all = await sixb.objects(Room).byId("room:101").listLinks()
+// All links from this project
+const all = await sixb.objects(Project).byId("proj-001").listLinks()
 
-// Only hasThermostat links
-const thermostats = await sixb
-  .objects(Room)
-  .byId("room:101")
-  .listLinks(Room.l.hasThermostat)
+// Only members links
+const members = await sixb
+  .objects(Project)
+  .byId("proj-001")
+  .listLinks(Project.l.members)
 ```
 
 ## Traverse links in queries
@@ -172,12 +173,12 @@ const thermostats = await sixb
 result type to the type on the other end of the link.
 
 ```ts
-// Outgoing: from a room to its thermostats
-const thermostats = await sixb
-  .objects(Room)
+// Outgoing: from a project to its members
+const members = await sixb
+  .objects(Project)
   .query()
-  .where((room) => room.p.id.eq("room:101"))
-  .traverse(Room.l.hasThermostat)
+  .where((project) => project.p.id.eq("proj-001"))
+  .traverse(Project.l.members)
   .list()
 ```
 
@@ -185,7 +186,7 @@ Pass `{ direction: "incoming" }` to walk a link backwards — from the link's ta
 source type:
 
 ```ts
-// Incoming: from a customer to the projects that link to it
+// Incoming: from a customer to the active projects that link to it
 const projects = await sixb
   .objects(Customer)
   .query()

@@ -1,42 +1,30 @@
 # Authorization
 
-Authorization decides what each signed-in principal is allowed to see and do.
+Authorization decides what each signed-in principal may see and do. Reach for it when "signed in
+or not" is not enough — finance admins run sensitive workflows, team members read invoices but
+can't refund them, and new teammates land in the right group.
 
-Sixb builds authorization from a few small layers:
+[Authentication](authentication.md) decides *who* a principal is; authorization decides what they
+may do. Sixb builds it from four small layers:
 
-- **Groups** place principals into named buckets.
-- **Roles** give capabilities to groups.
-- **Grants** are the capabilities a role gives — view objects and datasets, apply actions, run
-  workflows, syncs, and pipelines.
-- **Invite policies** decide who can invite new people into which groups.
+| Layer | Role |
+| --- | --- |
+| **Groups** | Named buckets that principals belong to |
+| **Roles** | Bundles of grants attached to groups |
+| **Grants** | The capabilities a role gives — view, apply, run |
+| **Invite policies** | Who can invite new people into which groups |
 
-At request time these definitions resolve into one set of grants per principal, and a scoped
-runtime enforces them.
-
-[Authentication](authentication.md) decides *who* a principal is; authorization decides what that
-principal may do.
-
-## Why it is useful
-
-Most operational software needs more than "signed in or not":
-
-- team members should see notes and a shared dataset, but not admin records
-- only security admins should run sensitive workflows, syncs, or pipelines
-- support staff should apply some actions, not all of them
-- new teammates should be invited into the right group, by the right people
-
-Grants give those rules one typed place to live. You describe access next to the ontology,
-datasets, actions, workflows, syncs, and pipelines it protects, and the runtime applies it the same
-way everywhere.
+At request time these resolve into one set of grants per principal, and a scoped runtime enforces
+them. You describe access next to the ontology, datasets, actions, workflows, syncs, and pipelines
+it protects, and the runtime applies it the same way everywhere.
 
 ## Define a group
 
 A group is a named bucket. Principals belong to groups; roles and invite policies are written
 against groups, never against individual users.
 
-Files: `security/groups/team-members.ts` and `security/groups/security-admins.ts`
-
 ```ts
+// security/groups/team-members.ts
 import { defineGroup } from "@sixb/core"
 
 export const teamMembers = defineGroup("team-members", {
@@ -45,10 +33,11 @@ export const teamMembers = defineGroup("team-members", {
 ```
 
 ```ts
+// security/groups/finance-admins.ts
 import { defineGroup } from "@sixb/core"
 
-export const securityAdmins = defineGroup("security-admins", {
-  label: "Security admins",
+export const financeAdmins = defineGroup("finance-admins", {
+  label: "Finance admins",
 })
 ```
 
@@ -57,53 +46,53 @@ export const securityAdmins = defineGroup("security-admins", {
 A role bundles grants and attaches them to one or more groups. Every member of a `grantedTo`
 group receives the role's grants.
 
-File: `security/roles/atlas-access.ts`
-
 ```ts
+// security/roles/billing-access.ts
 import { can, defineRole } from "@sixb/core"
-import { acknowledgeNote } from "../../actions/acknowledge-note"
-import { teamNotesDataset } from "../../datasets/auth-data"
-import { Note } from "../../ontology/note"
+import { sendReminder } from "../../actions/sendReminder"
+import { Customer } from "../../ontology/customer"
+import { Invoice } from "../../ontology/invoice"
 import { teamMembers } from "../groups/team-members"
 
-export const teamMemberAtlasAccess = defineRole("team-member.atlas-access", {
+export const teamMemberBillingAccess = defineRole("team-member.billing-access", {
   grantedTo: [teamMembers],
-  grants: [can.view(Note), can.view(teamNotesDataset), can.apply(acknowledgeNote)],
+  grants: [can.view([Customer, Invoice]), can.apply(sendReminder)],
 })
 ```
 
-This role lets every member of `team-members` view `Note` objects, view the `teamNotesDataset`
-dataset, and apply the `acknowledge-note` action — nothing else.
-
-### What each part does
+Every member of `team-members` can now view `Customer` and `Invoice` objects and apply the
+`sendReminder` action — nothing else.
 
 | Part | Meaning |
 | --- | --- |
-| `defineRole("team-member.atlas-access")` | Names the role |
+| `defineRole("team-member.billing-access")` | Names the role |
 | `grantedTo: [teamMembers]` | Groups whose members receive the role |
 | `grants: [...]` | The capabilities the role gives |
-| `can.view(Note)` | Allow viewing `Note` objects |
-| `can.view(teamNotesDataset)` | Allow viewing a dataset |
-| `can.apply(acknowledgeNote)` | Allow applying the `acknowledge-note` action |
+| `can.view([Customer, Invoice])` | Allow viewing those object types |
+| `can.apply(sendReminder)` | Allow applying the `sendReminder` action |
+
+A role needs at least one `grantedTo` group and at least one grant. A principal's effective grants
+are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. There are three capability builders —
-`can.view`, `can.apply`, and `can.run` — which resolve to **six grant kinds**, one per protected
-target family.
+A grant pairs a capability with the definitions it covers. Three capability builders —
+`can.view`, `can.apply`, and `can.run` — resolve to **six grant kinds**, one per protected target
+family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
-| `view:object` | `can.view(...)` | Read objects: `get`, `list`, `query`, telemetry, and related events | [Object types](../ontology/object-types.md) |
+| `view:object` | `can.view(...)` | Read objects: `get`, `list`, `query`, telemetry, related events | [Object types](../ontology/object-types.md) |
 | `view:dataset` | `can.view(...)` | Read datasets and their versions | [Datasets](../data/datasets.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
 
-`can.view` chooses between `view:object` and `view:dataset` from the definition you pass;
-`can.run` chooses between `run:workflow`, `run:sync`, and `run:pipeline` the same way. Each is
-type-checked, so mixing target families in one call does not compile.
+`can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
+picks between `run:workflow`, `run:sync`, and `run:pipeline` the same way. Each is type-checked, so
+mixing target families in one call does not compile. `can.view(Type)` also covers the type's
+subtypes.
 
 ### Selecting definitions
 
@@ -111,42 +100,32 @@ Each builder takes one definition, a list, or a breadth selector.
 
 | Want | Write |
 | --- | --- |
-| One definition | `can.view(Note)` |
-| Several definitions | `can.view([Note, Invoice])` |
+| One definition | `can.view(Invoice)` |
+| Several definitions | `can.view([Customer, Invoice])` |
 | Every object type | `can.view(ontology.objects())` |
 | Every dataset | `can.view(datasets())` |
 | Every action | `can.apply(actions())` |
 | Every workflow | `can.run(workflows())` |
 | Every sync | `can.run(syncs())` |
 | Every pipeline | `can.run(pipelines())` |
-| Everything but a few | `can.view(ontology.objects().except([AdminNote]))` |
+| Everything but a few | `can.view(ontology.objects().except([Customer]))` |
 
-The breadth selectors are exported from `@sixb/core`:
-
-| Selector | Target family |
-| --- | --- |
-| `ontology.objects()` | Object types |
-| `datasets()` | Datasets |
-| `actions()` | Actions |
-| `workflows()` | Workflows |
-| `syncs()` | Syncs |
-| `pipelines()` | Pipelines |
-
-Each selector picks its target family's whole registered universe. They are branded by target, so
-`can.view(actions())` does not compile.
+The breadth selectors are exported from `@sixb/core`: `ontology.objects()`, `datasets()`,
+`actions()`, `workflows()`, `syncs()`, and `pipelines()`. Each picks its target family's whole
+registered universe and is branded by target, so `can.view(actions())` does not compile.
 
 ## Broad grants
 
-Use breadth selectors for roles that should reach most of the system.
-
-File: `security/roles/atlas-access.ts`
+Use breadth selectors for roles that should reach most of the system. Add `.except([...])` to keep
+a selection broad while carving out a few definitions.
 
 ```ts
+// security/roles/billing-access.ts
 import { actions, can, datasets, defineRole, ontology, workflows } from "@sixb/core"
-import { securityAdmins } from "../groups/security-admins"
+import { financeAdmins } from "../groups/finance-admins"
 
-export const securityAdminFullAccess = defineRole("security-admin.full-access", {
-  grantedTo: [securityAdmins],
+export const financeAdminFullAccess = defineRole("finance-admin.full-access", {
+  grantedTo: [financeAdmins],
   grants: [
     can.view(ontology.objects()),
     can.view(datasets()),
@@ -156,33 +135,29 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
 })
 ```
 
-Add `.except([...])` to keep a selection broad while carving out a few definitions.
-
 ```ts
-can.view(ontology.objects().except([AdminNote]))
+// Grant every object type except Customer
+can.view(ontology.objects().except([Customer]))
 ```
-
-This grants every object type except `AdminNote`.
 
 ## Invite policies
 
 An invite policy says which groups can invite new people, and which groups they can place them
 into. Without a matching policy, a principal cannot send invitations.
 
-File: `security/invite-policies/default-invites.ts`
-
 ```ts
+// security/invite-policies/default-invites.ts
 import { defineInvitePolicy } from "@sixb/core"
-import { securityAdmins } from "../groups/security-admins"
+import { financeAdmins } from "../groups/finance-admins"
 import { teamMembers } from "../groups/team-members"
 
 export const defaultInvites = defineInvitePolicy("default-invites", {
-  grantedTo: [securityAdmins],
+  grantedTo: [financeAdmins],
   canInviteTo: [teamMembers],
 })
 ```
 
-Security admins can now invite people into `team-members`. A policy must declare `canInviteTo`
+Finance admins can now invite people into `team-members`. A policy must declare `canInviteTo`
 groups, set `canInviteWithoutGroups: true`, or both.
 
 | Option | Meaning |
@@ -202,16 +177,16 @@ Roles and invite policies act on group membership, so principals need a way into
 
 ```ts
 import { magicLink } from "@sixb/auth-magic-link"
-import { securityAdmins } from "./security/groups/security-admins"
+import { financeAdmins } from "./security/groups/finance-admins"
 
 auth: magicLink({
-  allowedDomains: ["example.com"],
-  bootstrapUsers: ["admin@example.com"],
-  bootstrapGroups: [securityAdmins],
+  allowedDomains: ["acme.com"],
+  bootstrapUsers: ["admin@acme.com"],
+  bootstrapGroups: [financeAdmins],
 })
 ```
 
-The first user to sign in as `admin@example.com` lands in `security-admins`, which (via the role
+The first user to sign in as `admin@acme.com` lands in `finance-admins`, which (via the role
 above) can then invite the rest of the team. See [Authentication](authentication.md) for how
 strategies and bootstrapping work.
 
@@ -226,7 +201,7 @@ To enforce a principal's grants, derive a scoped runtime with `sixb.as(context)`
 ```ts
 const scoped = sixb.as(authorizationContext)
 
-await scoped.objects(Note).list()       // only if view:object covers Note
+await scoped.objects(Invoice).list()   // only if view:object covers Invoice
 await scoped.requestAction(input)        // only if apply:action covers it
 await scoped.runWorkflow(input)          // only if run:workflow covers it
 await scoped.readEvents()                // events whose subject is visible
@@ -238,7 +213,8 @@ APIs return only the definitions the principal can reach.
 ### Scoped runtime surface
 
 The scoped runtime exposes only operations whose grants are enforceable end to end. Catalog and
-read methods are filtered to what the principal may reach.
+read methods are filtered to what the principal may reach. Writes, links, telemetry appends, and
+auth administration stay on the privileged runtime.
 
 | Method | Gated by |
 | --- | --- |
@@ -252,8 +228,6 @@ read methods are filtered to what the principal may reach.
 | `listPipelines`, `getPipelineById` | `run:pipeline` |
 | `readEvents` | subject visibility (see below) |
 
-Writes, links, telemetry appends, and auth administration stay on the privileged runtime.
-
 ### Event visibility
 
 There is no standalone "view events" capability. A principal sees a domain event only when it can
@@ -264,10 +238,12 @@ view, apply, or run the event's subject:
 | `objects`, `telemetry` | can view the object type |
 | `links` | can view both the source and target object types |
 | `actions` | can apply the action (and view its object subject, if any) |
+| `rules` | can view the object type the rule fired on |
 | `workflows` | can run the workflow |
 | `syncs` | can run the sync |
 | `pipelines` | can run the pipeline |
 | `datasets` | can view the dataset |
+| `schedules` | always visible to an authorized reader (no subject grant yet) |
 
 Event filtering is fail-closed: an unmodeled topic is hidden. See [Events](../events/overview.md)
 for the event model.
@@ -293,37 +269,35 @@ Put security definitions under `security/`, split by kind, and export them.
 ```txt
 your-project/
   ontology/
-    note.ts
-  datasets/
-    auth-data.ts
+    invoice.ts
+    customer.ts
   actions/
-    acknowledge-note.ts
+    sendReminder.ts
   security/
     groups/
       team-members.ts
-      security-admins.ts
+      finance-admins.ts
     roles/
-      atlas-access.ts
+      billing-access.ts
     invite-policies/
       default-invites.ts
   sixb.config.ts
 ```
 
 `createSixb()` discovers exported definitions from `security/groups/`, `security/roles/`, and
-`security/invite-policies/` automatically. See [Project structure](../fundamentals/project-structure.md).
-
-You can also register them explicitly:
+`security/invite-policies/` automatically. See
+[Project structure](../fundamentals/project-structure.md). You can also register them explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { defaultInvites } from "./security/invite-policies/default-invites"
-import { securityAdmins } from "./security/groups/security-admins"
+import { financeAdmins } from "./security/groups/finance-admins"
 import { teamMembers } from "./security/groups/team-members"
-import { securityAdminFullAccess, teamMemberAtlasAccess } from "./security/roles/atlas-access"
+import { defaultInvites } from "./security/invite-policies/default-invites"
+import { financeAdminFullAccess, teamMemberBillingAccess } from "./security/roles/billing-access"
 
-export const sixb = createSixb({
-  groups: [teamMembers, securityAdmins],
-  roles: [teamMemberAtlasAccess, securityAdminFullAccess],
+export const sixb = await createSixb({
+  groups: [teamMembers, financeAdmins],
+  roles: [teamMemberBillingAccess, financeAdminFullAccess],
   invitePolicies: [defaultInvites],
 })
 ```
@@ -339,22 +313,16 @@ Start from the people, not the permissions.
 4. Add an invite policy so the right group can grow the others.
 5. Set `bootstrapGroups` so the first sign-in can administer everything else.
 
-Good group and role names describe the people and their access:
+Name groups and roles after the people and their access: `team-members`, `finance-admins`,
+`team-member.billing-access`, `finance-admin.full-access`.
 
-- `team-members`, `security-admins`
-- `team-member.atlas-access`
-- `security-admin.full-access`
+Grants reference ontology, dataset, action, workflow, sync, and pipeline definitions by id and are
+validated against the registered runtime at startup, so a typo or unregistered definition fails
+fast.
 
-## Extra details
+## Related
 
-- Group, role, and invite policy ids must be unique.
-- A role must list at least one group in `grantedTo` and at least one grant.
-- Grants reference ontology, dataset, action, workflow, sync, and pipeline definitions by id and
-  are validated against the registered runtime at startup.
-- `can.view(Type)` also grants the type's subtypes.
-- A principal's grants are the union of every role whose `grantedTo` groups it belongs to.
-- The privileged runtime is the silent default — any authenticated route must run through
-  `sixb.as(context)` (the server does this for you) or it bypasses grant checks.
-
-The important first step is to name your groups clearly, then describe each group's access as one
-role.
+- [Authentication](authentication.md) — strategies, sessions, and bootstrapping
+- [Auth overview](overview.md) — how authentication and authorization fit together
+- [Server overview](../server/overview.md) — per-request enforcement
+- [Events](../events/overview.md) — the domain event model

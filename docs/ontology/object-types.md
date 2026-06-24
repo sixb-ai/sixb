@@ -1,18 +1,20 @@
 # Object Types
 
-An object type is one kind of thing in your domain, such as `Customer`, `Order`, or `Device`.
-It declares the [properties](./properties.md) the object has and the [links](./links.md) it can
-make to other object types.
+An object type is one kind of thing in your domain, such as `Customer`, `Invoice`, or
+`Project`. It declares the [properties](./properties.md) the object has and the
+[links](./links.md) it makes to other object types.
 
-Define object types with `defineObjectType`. For the wider model, see the
+Define object types with `defineObjectType`. Reach for them whenever you need a first-class,
+queryable entity with typed properties and relationships. For the wider model, see the
 [ontology overview](./overview.md).
 
 ## defineObjectType
 
-File: `ontology/customer.ts`
+Import builders from `@sixb/core/ontology`. Each object type lives in its own file under
+`ontology/`.
 
 ```ts
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
 import { Employee } from "./employee"
 
 export const Customer = defineObjectType({
@@ -22,7 +24,9 @@ export const Customer = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
-    prop("email", "string"),
+    prop("email", "string", { required: true }),
+    prop("company", "string", { required: true }),
+    prop("industry", "string"),
     prop("tier", stringEnum(["bronze", "silver", "gold", "platinum"])),
   ],
   links: [link("accountManager", Employee, { cardinality: "one" })],
@@ -38,12 +42,9 @@ export const Customer = defineObjectType({
 | `description` | No | Human-readable context for the type |
 | `properties` | No | An array of `prop(...)` definitions. Defaults to `[]`. |
 | `links` | No | An array of `link(...)` definitions. Defaults to `[]`. |
-| `search` | No | A search profile for this object type. See [search metadata](./search-metadata.md). |
+| `search` | No | A search profile for this type. See [search metadata](./search-metadata.md). |
 | `extends` | No | A parent object type (or its id) to inherit properties and links from |
 | `parents` | No | Additional parent type ids for multi-parent classification |
-| `implements` | No | Interface ids this type satisfies |
-| `quantityKind` | No | The physical quantity a sensor/point type measures |
-| `seeAlso` | No | External documentation or reference URLs |
 
 The return value carries typed token maps used elsewhere in the API:
 
@@ -54,8 +55,8 @@ The return value carries typed token maps used elsewhere in the API:
 
 ## The primary property rule
 
-Each object type must have exactly one primary property. It uniquely identifies each object
-instance within its type.
+Each object type must have **exactly one** primary property. It uniquely identifies each
+object instance within its type.
 
 Mark it with `{ required: true, primary: true }` on a `"string"` property:
 
@@ -63,53 +64,50 @@ Mark it with `{ required: true, primary: true }` on a `"string"` property:
 prop("id", "string", { required: true, primary: true })
 ```
 
-Only `primary: true` is accepted — there is no "explicitly not primary" value. See
-[properties](./properties.md) for the full `prop(...)` reference.
+There is no "explicitly not primary" value — non-primary properties simply omit the flag. See
+[properties](./properties.md) for the full `prop(...)` reference, including static vs. telemetry
+values, enums, and per-property `query` metadata.
 
-## Properties and links
+## Links
 
-`properties` describe what the object knows. `links` describe how it relates to other object
-types. Both are arrays built with the `prop(...)` and `link(...)` helpers.
+`links` describe how an object relates to other object types. Each `link(...)` names the
+relationship, points at a target type, and sets a `cardinality` of `"one"` or `"many"`.
 
 ```ts
-export const Customer = defineObjectType({
-  id: "Customer",
-  name: "Customer",
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { Customer } from "./customer"
+import { Employee } from "./employee"
+
+export const Project = defineObjectType({
+  id: "Project",
+  name: "Project",
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
-    prop("activeSeats", "integer", { mode: "telemetry" }),
+    prop("status", stringEnum(["draft", "active", "paused", "completed", "cancelled"])),
+    prop("budget", "double"),
+    prop("progress", "integer", { mode: "telemetry" }),
   ],
-  links: [link("accountManager", Employee, { cardinality: "one" })],
+  links: [
+    link("customer", Customer, { cardinality: "one" }),
+    link("lead", Employee, { cardinality: "one" }),
+    link("members", Employee, { cardinality: "many" }),
+  ],
 })
 ```
 
-- Properties are detailed in [properties](./properties.md), including static vs. telemetry
-  values and `semanticType`.
-- Links are detailed in [links](./links.md), including targets, cardinality, and link
-  properties.
+Targets, cardinality, and link properties are covered in full on the [links](./links.md) page.
 
 ## Search
 
 The optional `search` field declares which fields a global or type-scoped search uses.
 
 ```ts
-export const Customer = defineObjectType({
-  id: "Customer",
-  name: "Customer",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-    prop("company", "string", { required: true }),
-    prop("email", "string", { required: true }),
-    prop("industry", "string"),
-  ],
-  search: {
-    title: "company",
-    defaultText: ["company", "name", "industry"],
-    exact: ["id", "email", "company"],
-  },
-})
+search: {
+  title: "company",
+  defaultText: ["company", "name", "industry"],
+  exact: ["id", "email", "company"],
+}
 ```
 
 | Field | Expected | Meaning |
@@ -119,17 +117,17 @@ export const Customer = defineObjectType({
 | `exact` | `string[]` | Exact-match fields such as ids, slugs, or emails |
 | `vector` | `{ property, source }` | Vector-search configuration for semantic retrieval |
 
-Per-property indexing flags (`searchable`, `filterable`, `text`, and others) live on each
-property's `query` option. The full surface is documented in
+Per-property indexing flags (`searchable`, `filterable`, `exact`, `facet`, and others) live on
+each property's `query` option. The full surface is documented in
 [search metadata](./search-metadata.md).
 
 ## extends (inheritance)
 
 `extends` inherits all properties and links from a parent object type. The child adds its own
-fields on top; same-id properties or links from the child override the parent's.
+fields on top; a child property or link reusing a parent id overrides the parent's.
 
 ```ts
-import { defineObjectType, prop } from "@sixb/core"
+import { defineObjectType, prop } from "@sixb/core/ontology"
 import { Document } from "./document"
 
 export const Contract = defineObjectType({
@@ -145,48 +143,49 @@ export const Contract = defineObjectType({
 })
 ```
 
-`Contract` here has every `Document` property and link plus its own three properties.
-
-`extends` accepts either the parent object type (as above) or its id string. The parent id is
-recorded on `parents`; use `parents` directly to record additional parent types for
-multi-parent classification without merging their fields.
+`Contract` has every `Document` property and link plus its own three. `extends` accepts either
+the parent object type (as above) or its id string. The parent id is recorded on `parents`; use
+`parents` directly to record additional parent types for multi-parent classification without
+merging their fields.
 
 ## Registration
 
 ### By convention
 
-Put object types in `ontology/` and export them. `createSixb()` discovers exported object
-types automatically.
+Put each object type in `ontology/` and export it. `createSixb()` discovers exported object
+types automatically — this is the normal registration model.
 
 ```txt
 your-project/
   ontology/
     customer.ts
-    organization.ts
-    order.ts
+    employee.ts
+    invoice.ts
+    project.ts
   sixb.config.ts
 ```
 
 ### Explicit array
 
-You can also register object types explicitly:
+You can also register object types explicitly with the `ontologies` option:
 
 ```ts
 import { createSixb } from "@sixb/core"
 import { Customer } from "./ontology/customer"
-import { Organization } from "./ontology/organization"
+import { Invoice } from "./ontology/invoice"
 
-export const sixb = createSixb({
-  ontology: [Customer, Organization],
+export const sixb = await createSixb({
+  ontologies: [Customer, Invoice],
 })
 ```
 
-See the [runtime overview](../runtime/overview.md) for how discovery and `createSixb()` fit
-together.
+`createSixb()` is async — `await` it. See the [runtime overview](../runtime/overview.md) for how
+discovery and `createSixb()` fit together.
 
 ## Use the object type
 
-Once registered, access objects through the typed API with `sixb.objects(Type)`:
+Once registered, access objects through the typed API with `sixb.objects(Type)`. The primary id
+goes inside `properties` — there is no separate key field.
 
 ```ts
 import { Customer } from "./ontology/customer"
@@ -198,6 +197,7 @@ await customers.upsert({
     id: "cust-001",
     name: "Acme Corp",
     email: "team@acme.example",
+    company: "Acme Corp",
     tier: "gold",
   },
 })
@@ -205,5 +205,12 @@ await customers.upsert({
 const customer = await customers.get("cust-001")
 ```
 
-TypeScript understands the properties and links from your object type. For reads, writes,
-telemetry, and links, see [objects](../objects/overview.md).
+TypeScript infers the properties and links from your object type. For reads, writes, telemetry,
+and links, see [objects](../objects/overview.md).
+
+## Related
+
+- [Properties](./properties.md) — the `prop(...)` reference, telemetry, and query metadata
+- [Links](./links.md) — relationships, cardinality, and link properties
+- [Search metadata](./search-metadata.md) — per-property indexing and search profiles
+- [Objects](../objects/overview.md) — CRUD, querying, and telemetry on registered types
