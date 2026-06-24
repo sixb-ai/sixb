@@ -3,6 +3,8 @@
 export type {
   ArraySchema,
   ComplexSchema,
+  DirectLinkResult,
+  DirectLinkTarget,
   EnumSchema,
   InferSchemaOrRef,
   Interface,
@@ -12,6 +14,8 @@ export type {
   MapSchema,
   ObjectFieldSchema,
   ObjectLink,
+  ObjectLinkTargetMetadata,
+  ObjectLinkTargetType,
   ObjectRef,
   ObjectRefSchema,
   ObjectSchema,

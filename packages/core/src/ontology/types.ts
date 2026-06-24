@@ -317,6 +317,25 @@ export interface ObjectLink {
   properties?: Property[]
 }
 
+declare const objectLinkTargetTypeBrand: unique symbol
+
+/**
+ * Type-only metadata attached by `link("id", Target)`.
+ *
+ * The runtime ontology still stores only `targetObjectTypeId`; this brand exists
+ * only in TypeScript so query builders can resolve direct link targets without
+ * consulting a generated id-to-type map.
+ */
+export type ObjectLinkTargetMetadata<TTarget> = {
+  readonly [objectLinkTargetTypeBrand]?: TTarget
+}
+
+export type ObjectLinkTargetType<TLink> = typeof objectLinkTargetTypeBrand extends keyof TLink
+  ? TLink extends ObjectLinkTargetMetadata<infer TTarget>
+    ? TTarget
+    : never
+  : never
+
 /**
  * Reusable ontology contract of properties and links.
  *
@@ -392,7 +411,7 @@ export interface ObjectType {
 }
 
 /**
- * App-augmentable id-to-object-type map for client query typing.
+ * Ambient id-to-object-type index for app ontology definitions.
  *
  * Sixb generates a `.sixb/types/ontology.d.ts` module augmentation that adds
  * entries here, letting client-side query types resolve string link targets

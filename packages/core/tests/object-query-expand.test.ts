@@ -59,7 +59,7 @@ const Folder = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
   ],
-  links: [link("parent", "Folder", { cardinality: "one" })],
+  links: [link.self("parent", { cardinality: "one" })],
 })
 
 const ProjectFolder = defineObjectType({

@@ -83,7 +83,7 @@ const WildcardSource = defineObjectType({
   id: "WildcardSource",
   name: "Wildcard Source",
   properties: [prop("id", "string", { required: true, primary: true })],
-  links: [link("anything")],
+  links: [link.any("anything")],
 })
 
 const SearchProfileCustomer = defineObjectType({

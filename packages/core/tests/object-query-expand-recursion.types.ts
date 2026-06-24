@@ -26,7 +26,7 @@ const StressUser = defineObjectType({
     prop("email", "string", { required: true }),
   ],
   links: [
-    link("manager", "StressUser", { cardinality: "one" }),
+    link.self("manager", { cardinality: "one" }),
     link("department", StressDepartment, { cardinality: "one" }),
     link("skills", StressSkill, { cardinality: "many" }),
   ],
@@ -49,7 +49,7 @@ const StressProject = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
   ],
-  links: [link("owner", ["StressUser", "StressTeam"], { cardinality: "one" })],
+  links: [link.ref("owner", ["StressUser", "StressTeam"], { cardinality: "one" })],
 })
 
 const StressFolder = defineObjectType({
@@ -60,8 +60,8 @@ const StressFolder = defineObjectType({
     prop("name", "string", { required: true }),
   ],
   links: [
-    link("parent", "StressFolder", { cardinality: "one" }),
-    link("children", "StressFolder", { cardinality: "many" }),
+    link.self("parent", { cardinality: "one" }),
+    link.self("children", { cardinality: "many" }),
   ],
 })
 
