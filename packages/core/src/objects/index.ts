@@ -22,4 +22,5 @@ export { upsertObject, upsertObjectBatch } from "./object"
 export { createObjectSet } from "./sdk"
 // Service layer (resolve objectTypeId → delegate to leaf)
 export * as objectService from "./service"
-export { appendTelemetryBatch, writeTelemetryBatch } from "./telemetry"
+export type { TelemetryHistoryOptions } from "./telemetry"
+export { appendTelemetryBatch, getTelemetryHistoryBatch, writeTelemetryBatch } from "./telemetry"

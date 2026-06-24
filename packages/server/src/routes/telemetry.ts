@@ -1,4 +1,4 @@
-import { assertAuthorized, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
+import { getTelemetryHistoryBatch, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -12,11 +12,6 @@ import {
   TelemetryPointSchema,
 } from "../schemas/telemetry"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
-
-function assertCanReadTelemetry(context: unknown, objectTypeId: string): void {
-  const { authz } = requestAuthState(context)
-  assertAuthorized({ authorization: authz ?? undefined }, { kind: "object.view", objectTypeId })
-}
 
 function serializeTelemetryPoint(point: {
   projectId: string
@@ -78,23 +73,22 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
       "/api/telemetry/history",
       async (context) => {
         const { body, set } = context
+        const { authz } = requestAuthState(context)
         try {
           const parsedBody = BulkTelemetryHistoryBodySchema.parse(body)
-          for (const objectTypeId of new Set(
-            parsedBody.series.map((series) => series.objectTypeId)
-          )) {
-            assertCanReadTelemetry(context, objectTypeId)
-          }
           const from = parseDate(parsedBody.from)
           const to = parseDate(parsedBody.to)
-          const history = await sixb.storage.timeseries.getHistoryBatch({
-            projectId: sixb.id,
-            series: parsedBody.series,
-            from,
-            to,
-            limitPerSeries: parsedBody.limitPerSeries,
-            order: parsedBody.order,
-          })
+          const history = await getTelemetryHistoryBatch(
+            {
+              projectId: sixb.id,
+              series: parsedBody.series,
+              from,
+              to,
+              limitPerSeries: parsedBody.limitPerSeries,
+              order: parsedBody.order,
+            },
+            { storage: sixb.storage.timeseries, authorization: authz }
+          )
 
           return {
             series: history.map((series) => ({
