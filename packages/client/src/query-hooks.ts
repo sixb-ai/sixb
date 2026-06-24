@@ -179,7 +179,7 @@ type BuiltRow<TBuilt> = TBuilt extends { first(): Promise<infer TRow> }
         properties: TProperties
         createdAt: Date
         updatedAt: Date
-      }
+      } & (NonNullable<TRow> extends { links: infer TLinks } ? { links: TLinks } : unknown)
     : never
   : never
 

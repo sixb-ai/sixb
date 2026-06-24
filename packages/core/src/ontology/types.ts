@@ -392,6 +392,17 @@ export interface ObjectType {
 }
 
 /**
+ * App-augmentable id-to-object-type map for client query typing.
+ *
+ * Sixb generates a `.sixb/types/ontology.d.ts` module augmentation that adds
+ * entries here, letting client-side query types resolve string link targets
+ * like `"Customer"` to the exported `Customer` object type without changing the
+ * runtime ontology shape.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: App code augments this interface.
+export interface SixbObjectTypeMap {}
+
+/**
  * Root ontology document for object type modeling.
  *
  * Use this as the top-level container when you want to version and ship

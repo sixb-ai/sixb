@@ -6,7 +6,7 @@
     "dev": "sixb dev",
     "check": "sixb check",
     "build": "sixb build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "sixb typegen && tsc --noEmit"
   },
   "dependencies": {
     "@sixb/blob-local": "latest",

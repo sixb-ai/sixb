@@ -5,5 +5,5 @@
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
-  "include": ["ontology/**/*.ts", "security/**/*.ts", "sixb.config.ts"]
+  "include": ["ontology/**/*.ts", "security/**/*.ts", "sixb.config.ts", ".sixb/types/**/*.d.ts"]
 }
