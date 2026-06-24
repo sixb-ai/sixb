@@ -97,8 +97,8 @@ export function PageFrame({
   children: ReactNode
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 p-3 sm:p-4 lg:p-6">
-      <div className={cn("flex w-full flex-col gap-4", contentClassName)}>
+    <div className="mx-auto flex w-full max-w-7xl flex-col p-3 sm:p-4 lg:p-6">
+      <div className={cn("mx-auto flex w-full max-w-5xl flex-col gap-4", contentClassName)}>
         {backTo && backLabel ? (
           <Button
             variant="ghost"
