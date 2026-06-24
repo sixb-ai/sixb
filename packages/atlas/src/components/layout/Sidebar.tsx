@@ -23,6 +23,7 @@ import {
   Database,
   GitBranch,
   Globe,
+  Layers,
   LayoutGrid,
   ListChecks,
   RefreshCw,
@@ -35,6 +36,7 @@ export type ViewMode =
   | "datasets"
   | "connectors"
   | "syncs"
+  | "projections"
   | "pipelines"
   | "workflows"
   | "actions"
@@ -53,10 +55,11 @@ const projectNavItems: NavItem[] = [
   { id: "datasets", label: "Datasets", Icon: Database },
   { id: "syncs", label: "Syncs", Icon: RefreshCw },
   { id: "pipelines", label: "Pipelines", Icon: Workflow },
-  { id: "workflows", label: "Workflows", Icon: GitBranch },
-  { id: "actions", label: "Actions", Icon: Bolt },
+  { id: "projections", label: "Projections", Icon: Layers },
   { id: "ontology", label: "Ontology", Icon: LayoutGrid },
   { id: "home", label: "Objects", Icon: Box },
+  { id: "actions", label: "Actions", Icon: Bolt },
+  { id: "workflows", label: "Workflows", Icon: GitBranch },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
 ]
@@ -73,6 +76,7 @@ interface SidebarProps {
   connectorCount?: number
   syncCount?: number
   pipelineCount?: number
+  projectionCount?: number
   workflowCount?: number
   actionCount?: number
   ruleCount?: number
@@ -88,6 +92,7 @@ export function Sidebar({
   connectorCount,
   syncCount,
   pipelineCount,
+  projectionCount,
   workflowCount,
   actionCount,
   ruleCount,
@@ -99,6 +104,7 @@ export function Sidebar({
     if (id === "datasets") return datasetCount
     if (id === "connectors") return connectorCount
     if (id === "syncs") return syncCount
+    if (id === "projections") return projectionCount
     if (id === "pipelines") return pipelineCount
     if (id === "workflows") return workflowCount
     if (id === "actions") return actionCount

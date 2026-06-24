@@ -42,6 +42,7 @@ export function AppLayout() {
       datasetCount={sidebarData?.datasetCount}
       syncCount={sidebarData?.syncCount}
       pipelineCount={sidebarData?.pipelineCount}
+      projectionCount={sidebarData?.projectionCount}
       workflowCount={sidebarData?.workflowCount}
       actionCount={sidebarData?.actionCount}
       ruleCount={sidebarData?.ruleCount}

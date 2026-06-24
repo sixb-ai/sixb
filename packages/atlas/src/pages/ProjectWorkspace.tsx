@@ -7,6 +7,7 @@ import {
   listObjectsPageOptions,
   listObjectTypesOptions,
   listPipelinesOptions,
+  listProjectionsOptions,
   listRulesOptions,
   listSyncsOptions,
   listWorkflowsOptions,
@@ -52,6 +53,7 @@ import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbe
 import { ObjectTypeDetail } from "./ObjectTypeDetail"
 import { OntologyExplorer } from "./OntologyExplorer"
 import { PipelineDetailPage, PipelinesPage } from "./PipelinesPage"
+import { ProjectionDetailPage, ProjectionsPage } from "./ProjectionsPage"
 import { RuleDetailPage, RulesPage } from "./RulesPage"
 import { RunDetailPage } from "./RunDetailPage"
 import { SyncDetailPage, SyncsPage } from "./SyncsPage"
@@ -223,6 +225,16 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
+  const { data: projections } = useQuery({
+    ...listProjectionsOptions(),
+    enabled: !!projectInfo,
+  })
+  const projectionCount = projections
+    ? projections.objectProjections.length +
+      projections.linkProjections.length +
+      projections.telemetryProjections.length
+    : 0
+
   const { data: workflows = [] } = useQuery({
     ...listWorkflowsOptions(),
     enabled: !!projectInfo,
@@ -270,6 +282,7 @@ export function ProjectWorkspace() {
       connectorCount: connectors.length,
       syncCount: syncs.length,
       pipelineCount: pipelines.length,
+      projectionCount,
       workflowCount: workflows.length,
       actionCount: actions.length,
       ruleCount: rules.length,
@@ -282,6 +295,7 @@ export function ProjectWorkspace() {
     connectors.length,
     syncs.length,
     pipelines.length,
+    projectionCount,
     workflows.length,
     actions.length,
     rules.length,
@@ -356,6 +370,8 @@ export function ProjectWorkspace() {
   return (
     <Routes>
       <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
+      <Route path="actions" element={<ActionsPage />} />
+      <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
       <Route element={<WorkflowLiveUpdatesBoundary />}>
         <Route path="workflows" element={<WorkflowsPage />} />
         <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
@@ -396,9 +412,9 @@ export function ProjectWorkspace() {
             <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
             <Route path="syncs" element={<SyncsPage />} />
             <Route path="syncs/:syncId" element={<SyncDetailPage />} />
+            <Route path="projections" element={<ProjectionsPage />} />
+            <Route path="projections/:projectionId" element={<ProjectionDetailPage />} />
             <Route path="pipelines" element={<PipelinesPage />} />
-            <Route path="actions" element={<ActionsPage />} />
-            <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
             <Route path="rules" element={<RulesPage />} />
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
             <Route path="settings" element={<Navigate to="/settings/tokens" replace />} />

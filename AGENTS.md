@@ -10,7 +10,9 @@ Repo-wide agent instructions for `sixb`.
 ## Repo Map
 
 - `packages/core`: runtime, ontology builders, providers, validation, and functions
-- `packages/server`: Elysia HTTP/WebSocket API, OpenAPI generation, and built-in React UI under `packages/server/src/ui`
+- `packages/server`: Elysia HTTP/WebSocket API and OpenAPI generation
+- `packages/atlas`: built-in React UI (the Atlas app); pages live in `src/pages/`
+- `packages/ui`: shared React component library used by Atlas
 - `packages/client`: generated typed client artifacts
 - `packages/cli`: CLI entrypoints for `sixb` and `create-sixb`
 - `packages/app`: custom app integration
@@ -83,7 +85,7 @@ CI currently runs:
 - Validate inputs early and throw clear, actionable errors.
 - Package-prefixed error messages such as `[Sixb] ...`, `[SixbServer] ...`, or `[RokuTV] ...` are preferred.
 - Keep builders and definitions declarative; avoid unnecessary indirection around ontology setup.
-- Preserve the existing visual language in `packages/server/src/ui` and keep both desktop and mobile behavior working.
+- Preserve the existing visual language in `packages/atlas` (and `packages/ui`) and keep both desktop and mobile behavior working.
 
 ## Tests
 
@@ -128,4 +130,4 @@ CI currently runs:
 - `packages/core/src/functions/`: functions runtime
 - `packages/server/src/routes/`: server routes
 - `packages/client/src/generated/`: generated client output
-- `packages/server/src/ui/src/`: built-in UI
+- `packages/atlas/src/`: built-in UI (pages in `pages/`, shared components in `packages/ui/src/`)

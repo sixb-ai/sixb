@@ -5,6 +5,7 @@ export const KNOWN_VIEWS = new Set([
   "datasets",
   "connectors",
   "syncs",
+  "projections",
   "pipelines",
   "workflows",
   "actions",

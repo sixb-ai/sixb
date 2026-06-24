@@ -6,6 +6,7 @@ export interface ProjectSidebarData {
   connectorCount: number
   syncCount: number
   pipelineCount: number
+  projectionCount: number
   workflowCount: number
   actionCount: number
   ruleCount: number
