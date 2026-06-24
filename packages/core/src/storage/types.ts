@@ -1,4 +1,5 @@
 import type { ActionRunStorage } from "./action-runs"
+import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
 import type { ObjectStorage } from "./objects/types"
 import type { PipelineRunStorage } from "./pipeline-runs"
@@ -25,6 +26,26 @@ export type {
   StartActionRunInput,
 } from "./action-runs"
 export { ActionRunError } from "./action-runs"
+export type {
+  AgentMessagePartRecord,
+  AgentMessageRecord,
+  AgentRunRecord,
+  AgentStorage,
+  AgentThreadRecord,
+  AppendAgentMessageInput,
+  CreateAgentThreadInput,
+  FinishAgentRunInput,
+  ListAgentMessagesInput,
+  ListAgentMessagesResult,
+  ListAgentRunsInput,
+  ListAgentRunsResult,
+  ListAgentThreadsInput,
+  ListAgentThreadsResult,
+  ReclaimAgentRunInput,
+  RenewAgentRunLeaseInput,
+  ReserveAgentRunInput,
+} from "./agents"
+export { AgentStorageError } from "./agents"
 export type {
   AuthGroupMembershipStore,
   AuthInvitationStore,
@@ -198,6 +219,7 @@ export interface Storage {
   objects: ObjectStorage
   timeseries: TimeseriesStorage
   auth?: AuthStorage
+  agents?: AgentStorage
   actionRuns?: ActionRunStorage
   syncRuns?: SyncRunStorage
   pipelineRuns?: PipelineRunStorage
