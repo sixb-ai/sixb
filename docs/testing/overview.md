@@ -1,13 +1,9 @@
 # Testing
 
-sixb projects are tested with `bun:test` against real runtimes wired up from
-in-memory providers. There is no special test harness to learn: you construct a
-`Sixb` runtime (or a full `SixbServer`), drive it through the same typed APIs
-your app uses, and assert on the results.
-
-This page frames the testing model. Provider authors who need to certify a new
-storage, broker, or queue backend should read the
-[provider contract suites](#provider-contract-suites) section.
+You test a Sixb project with `bun:test` against a real runtime wired from
+in-memory providers. There is no special harness: construct a `Sixb` runtime (or
+a full `SixbServer`), drive it through the same typed APIs your app uses, and
+assert on the results.
 
 ## Test kinds
 
@@ -24,12 +20,12 @@ bun run test:e2e    # *.e2e.ts (package-scoped matrix)
 bun run test:all    # both
 ```
 
-Run targeted files first while iterating, then widen to the full suite when you
-touch shared behavior:
+Run targeted files first while iterating, then widen when you touch shared
+behavior:
 
 ```bash
 bun test examples/acme-corp/tests/client-query.test.ts
-bun test packages/core/tests/
+bun test examples/acme-corp/tests/
 ```
 
 ## In-memory providers as fixtures
@@ -46,9 +42,10 @@ deterministic.
 | Blob storage | `InMemoryBlobStorage` |
 | Queues | `InMemoryQueues` |
 
-Build a runtime the same way your app does. `createSixb` discovers your project
-folders; pass `projectRoot` so it resolves `ontology/`, `datasets/`, and the
-rest relative to the example, and override providers with the in-memory ones:
+Build the runtime the same way your app does. `createSixb` discovers your
+project folders, so pass `projectRoot` to resolve `ontology/`, `datasets/`, and
+the rest relative to the project, then override providers with the in-memory
+ones:
 
 ```ts
 import { resolve } from "node:path"
@@ -63,7 +60,7 @@ import {
 
 function createTestRuntime() {
   return createSixb({
-    id: "auth-example-test",
+    id: "acme-test",
     projectRoot: resolve(import.meta.dir, ".."),
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
@@ -74,14 +71,14 @@ function createTestRuntime() {
 }
 ```
 
-If you prefer to register ontology and definitions explicitly (no folder
-discovery), construct `Sixb` directly and pass them in:
+`createSixb` is async, so `await` it. To skip folder discovery and register
+ontology and definitions explicitly, construct `Sixb` directly:
 
 ```ts
 import { Sixb } from "@sixb/core"
 
 const sixb = new Sixb({
-  id: "acme-project-progress-test",
+  id: "acme-progress-test",
   ontology: [Project, Customer, Employee, Department],
   broker: new InMemoryBroker(),
   storage: new InMemoryStorage(),
@@ -91,6 +88,32 @@ const sixb = new Sixb({
   datasets: [erpProjectProgressDataset],
   projections: [projectProgressProjection],
 })
+```
+
+Seed objects through the typed API, then assert on queries:
+
+```ts
+await sixb.objects(Customer).upsert({
+  properties: {
+    id: "cust-001",
+    name: "Dana Smith",
+    email: "dana@globex.test",
+    company: "Globex",
+    tier: "gold",
+  },
+})
+
+await sixb.objects(Project).upsert({
+  properties: { id: "proj-001", name: "Energy Dashboard", status: "active", budget: 120_000 },
+})
+
+const active = await sixb
+  .objects(Project)
+  .query()
+  .where((project) => project.p.status.eq("active"))
+  .list()
+
+expect(active.objects.map((o) => o.primaryId)).toEqual(["proj-001"])
 ```
 
 ### Temp dirs and fixed timestamps
@@ -115,12 +138,12 @@ afterEach(async () => {
 root = await mkdtemp(join(tmpdir(), "sixb-test-"))
 ```
 
-Use fixed timestamps rather than `Date.now()` so assertions are stable. Pass
-explicit dates through your APIs and compare against the same literals:
+Use fixed timestamps rather than `Date.now()` so date assertions stay stable.
+Pass explicit dates through your APIs and compare against the same literals:
 
 ```ts
 await sixb.objects(Project).upsert({
-  properties: { id: "proj-001", deadline: "2026-09-30" },
+  properties: { id: "proj-002", name: "Warehouse Retrofit", deadline: "2026-03-31" },
 })
 
 const dueSoon = await sixb
@@ -128,19 +151,29 @@ const dueSoon = await sixb
   .query()
   .where((project) => project.p.deadline.lte(new Date("2026-06-30")))
   .list()
+
+expect(dueSoon.objects.map((o) => o.primaryId)).toEqual(["proj-002"])
 ```
 
 ## Authorization testing
 
 Authorization is enforced at the runtime boundary, so test it by running calls
 through an authorization context. Build one with `resolveAuthorizationContext`
-(from `@sixb/core`) and scope a runtime to it with `sixb.as(...)`. Every call on
-the returned handle is filtered by the principal's grants.
+and scope the runtime to a principal with `sixb.as(...)`. Every call on the
+returned handle is filtered by that principal's grants.
 
 ```ts
-import { resolveAuthorizationContext } from "@sixb/core"
+import {
+  resolveAuthorizationContext,
+  type OntologySource,
+  type Sixb,
+} from "@sixb/core"
 
-function atlasContext(sixb, groupIds, userId = "atlas-user") {
+function asUser(
+  sixb: Sixb<readonly OntologySource[]>,
+  groupIds: readonly string[],
+  userId = "user-1"
+) {
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,
@@ -148,44 +181,60 @@ function atlasContext(sixb, groupIds, userId = "atlas-user") {
   })
 }
 
-const teamMember = sixb.as(atlasContext(sixb, ["team-members"]))
-const admin = sixb.as(atlasContext(sixb, ["security-admins"]))
-const noGroups = sixb.as(atlasContext(sixb, []))
+const teamMember = sixb.as(asUser(sixb, ["team-members"]))
+const financeAdmin = sixb.as(asUser(sixb, ["finance-admins"]))
+const anonymous = sixb.as(asUser(sixb, []))
 ```
 
-Assert both what a principal *can* see and what it *cannot*. Denied operations
-reject with package-prefixed errors:
+Assert both what a principal *can* and *cannot* do. Listings are filtered to
+granted definitions, and denied operations reject with package-prefixed errors:
 
 ```ts
-// team members only see the object types their roles grant
-expect((await teamMember.list({})).objects.map((o) => o.objectTypeId)).toEqual(["note"])
-
-await expect(teamMember.getObject("admin-note", "admin-note")).rejects.toThrow(
-  "not allowed to view object type 'admin-note'"
+// team members can view Customer but not Invoice
+expect((await teamMember.list({})).objects.map((o) => o.objectTypeId)).toEqual(["Customer"])
+await expect(teamMember.getObject("Invoice", "inv-001")).rejects.toThrow(
+  "not allowed to view object type 'Invoice'"
 )
 
-// listings are filtered too
-expect(teamMember.listActions().map((a) => a.id)).toEqual(["acknowledge-note"])
-expect(teamMember.listDatasets().map((d) => d.id)).toEqual([teamNotesDataset.id])
+// action and dataset listings only include granted definitions
+expect(teamMember.listActions().map((a) => a.id)).not.toContain("markPaid")
+await expect(
+  teamMember.requestAction({
+    actionId: "markPaid",
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-001" },
+  })
+).rejects.toThrow("not allowed to apply action 'markPaid'")
+
+// finance admins can apply invoice actions
+await expect(
+  financeAdmin.requestAction({
+    actionId: "markPaid",
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-001" },
+  })
+).resolves.toMatchObject({ runId: expect.any(String) })
 
 // an ungranted principal sees nothing
-expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
+expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-See [authorization](../auth/authorization.md) for how roles, grants, and groups
-resolve. The full pattern lives in `examples/auth/tests/atlas-authorization.test.ts`.
+There are six grant kinds, each gated by its own scoped method: `view:object`
+(`list`/`getObject`), `view:dataset` (`listDatasets`), `apply:action`
+(`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, and
+`run:pipeline`. See [authorization](../auth/authorization.md) for how roles,
+grants, and groups resolve; the full pattern lives in
+`examples/auth/tests/atlas-authorization.test.ts`.
 
 ## Client/server e2e
 
 End-to-end tests start a real `SixbServer` over HTTP and drive it with the typed
 `@sixb/client` builders, proving the client and server agree on the wire format.
-Mirror `examples/acme-corp/tests/client-query.test.ts`:
+The shape mirrors `examples/acme-corp/tests/client-query.test.ts`:
 
 1. Build a `Sixb` runtime and seed data through `sixb.objects(...)`.
-2. Allocate a free port, start a `SixbServer` bound to it.
+2. Allocate a free port and start a `SixbServer` bound to it.
 3. Point the client at the server with `client.setConfig({ baseUrl })`.
 4. Run queries through `objects(...)` from `@sixb/client/query` and assert.
-5. Stop the server and close storage in `afterAll`.
+5. Stop the server in `afterAll`.
 
 ```ts
 import { afterAll, beforeAll, expect, test } from "bun:test"
@@ -196,7 +245,8 @@ import { SixbServer } from "@sixb/server"
 let server: SixbServer
 
 beforeAll(async () => {
-  // ...seed sixb...
+  // ...build and seed sixb, then pick a free port...
+  const baseUrl = `http://127.0.0.1:${port}`
   server = new SixbServer({
     sixb,
     host: "127.0.0.1",
@@ -233,8 +283,8 @@ test("list() returns the same objects as the server runtime", async () => {
 })
 ```
 
-A lighter check is to compare query IR without HTTP — the client and runtime
-builders must produce identical IR for the same query:
+For a lighter check that skips HTTP, compare query IR directly — the client and
+runtime builders must produce identical IR for the same query:
 
 ```ts
 expect(objects(Project).query().where((p) => p.p.status.eq("active")).ir).toEqual(
@@ -242,45 +292,15 @@ expect(objects(Project).query().where((p) => p.p.status.eq("active")).ir).toEqua
 )
 ```
 
-See [typed queries](../client/typed-queries.md) and [server](../server/overview.md).
-
 ## Provider contract suites
 
-If you author a backend (storage, broker, queue, lake, or sandbox provider),
-`@sixb/core/testing` exports conformance suites that assert your implementation
-satisfies the provider contract. Register a suite in a test file and it emits its
-own `describe`/`test` cases.
+If you author a backend provider (storage, broker, queue, or lake),
+`@sixb/core/testing` exports conformance suites — `runObjectQueryProviderContractSuite`,
+`runBrokerContractSuite`, `runQueueContractSuite`, `runLakeStorageContractSuite` —
+that assert your implementation satisfies the provider contract. This is only
+relevant when building an integration, not when testing an app.
 
-| Export | Certifies |
-| --- | --- |
-| `runObjectQueryProviderContractSuite` | Object query/storage providers |
-| `runAuthStorageContractSuite` | Authorization storage |
-| `runLakeStorageContractSuite` | Lake storage |
-| `runBrokerContractSuite` | Brokers |
-| `runQueueContractSuite` | Queues |
-| `runSandboxesContractSuite` | Sandbox factories |
-
-Each suite takes a name and options that create and tear down an instance:
-
-```ts
-import { runObjectQueryProviderContractSuite } from "@sixb/core/testing"
-import { SqliteObjectStorage } from "../src"
-
-runObjectQueryProviderContractSuite("SqliteObjectStorage object query provider contract", {
-  createStorage: () => new SqliteObjectStorage(),
-  teardown: (storage) => storage.close(),
-})
-```
-
-The object-query suite also exports `objectQueryContractOntology` and
-`seedObjectQueryContractData` if you need the same fixtures outside the suite.
-
-The sandbox surface (`Sandbox`, `SandboxFactory`, `CreateSandboxOptions`,
-`RunCommandOptions`, `CommandResult`) and its errors are exported from
-`@sixb/core/sandboxes` for sandbox-provider authors; certify a factory with
-`runSandboxesContractSuite`.
-
-## See also
+## Related
 
 - [Examples](../examples/overview.md) — runnable projects whose tests are the canonical patterns
 - [Authorization](../auth/authorization.md)

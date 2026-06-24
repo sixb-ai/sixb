@@ -1,21 +1,20 @@
 # Objects
 
 `sixb.objects(Type)` is the typed runtime API for reading and writing object
-instances: create/update, fetch by id, query the latest-state graph, follow
-links, append telemetry, and request actions. It is the main surface most
+instances: create and update, fetch by id, query the latest-state graph, follow
+links, append telemetry, and request actions. It is the main surface your
 application code uses to talk to your data.
 
-Object *types* are declared in the ontology (see [object types](../ontology/object-types.md)).
-This section covers the runtime API you use to operate on the *instances* of
-those types.
+Object *types* are declared in the ontology (see
+[object types](../ontology/object-types.md)). This page covers the runtime API
+you use to operate on the *instances* of those types.
 
-## Mental Model
+## Mental model
 
-An object is the current state of one business entity — one `Customer`, one
-`Invoice`, one `Device` — keyed by its primary property. Calling
-`sixb.objects(MyType)` returns an `ObjectSet`: a type-safe collection bound to
-that object type whose method signatures are inferred from the ontology
-definition.
+An object is the current state of one entity — one `Customer`, one `Invoice`,
+one `Project` — keyed by its primary property. `sixb.objects(Type)` returns an
+`ObjectSet`: a type-safe collection bound to that type, with signatures inferred
+from the ontology definition.
 
 From an `ObjectSet` you reach three things:
 
@@ -23,84 +22,75 @@ From an `ObjectSet` you reach three things:
 | --- | --- | --- |
 | collection methods | the set itself | `upsert`, `get`, `list`, batch telemetry, set-level link/action helpers |
 | `.query()` | a query builder | graph-aware reads: filter, search, sort, follow links, page |
-| `.byId(id)` | an object handle | operations bound to one instance: links, telemetry, actions |
+| `.byId(id)` | an object handle | operations on one instance: links, telemetry, actions |
 
 ```ts
-const customers = sixb.objects(Customer)
+const invoices = sixb.objects(Invoice)
 
-const customer = await customers.get("cust-001")
-const handle = customers.byId("cust-001")
+const invoice = await invoices.get("inv-001")
+const handle = invoices.byId("inv-001")
 ```
 
-## API Surface
+A fetched object is a `TwinObject`: read `.primaryId` and `.properties.<name>`.
 
-### Collection methods
+## Collection methods
 
-Called directly on `sixb.objects(Type)`.
+Called directly on `sixb.objects(Type)`. All methods are async — `await` them.
 
 | Method | Signature | Notes |
 | --- | --- | --- |
-| `upsert` | `upsert({ properties }) => TwinObject` | Create or replace by primary id. The primary property must be present in `properties`. |
+| `upsert` | `upsert({ properties }) => TwinObject` | Create or update by primary id — the given properties are merged over any existing ones. The primary property must be inside `properties`. |
 | `get` | `get(id) => TwinObject \| null` | Fetch one object by primary id. |
-| `list` | `list(input?) => { objects, hasMore, total }` | Storage browse by id prefix/suffix, timestamps, with `limit`/`offset`/`orderBy`/`order`. |
+| `list` | `list(input?) => { objects, hasMore, total }` | Browse by id prefix/suffix or timestamps, with `limit`/`offset`/`orderBy`/`order`. |
 | `query` | `query() => QueryBuilder` | Start a graph-aware query. See [querying](./querying.md). |
 | `byId` | `byId(id) => ObjectByIdHandle` | Bind operations to one instance. |
 | `appendTelemetryBatch` | `appendTelemetryBatch(items) => void` | Append telemetry across many objects in one call. See [telemetry](./telemetry.md). |
-| `upsertLink` | `upsertLink({ sourceId, linkId, targetTypeId, targetId, properties? }) => void` | Create/update a link by string ids. |
+| `upsertLink` | `upsertLink({ sourceId, linkId, targetTypeId, targetId, properties? }) => void` | Create or update a link by string ids. |
 | `removeLink` | `removeLink({ sourceId, linkId, targetTypeId, targetId }) => void` | Remove a link by string ids. |
-| `requestAction` | `requestAction({ id, action? \| actionId, params?, runId? }) => …` | Request an action against one object. |
-| `requestActionAndWait` | `requestActionAndWait({ id, action? \| actionId, params?, timeoutMs?, signal? }) => …` | Request and await the action run. |
+| `requestAction` | `requestAction({ id, actionId, params?, runId? }) => …` | Request an action against one object. |
+| `requestActionAndWait` | `requestActionAndWait({ id, actionId, params?, timeoutMs?, signal? }) => …` | Request and await the run. |
 
 ```ts
-const customers = sixb.objects(Customer)
+const invoices = sixb.objects(Invoice)
 
 // Create or update by primary id
-await customers.upsert({
-  properties: { id: "cust-001", name: "Acme Corp", tier: "business" },
+await invoices.upsert({
+  properties: { id: "inv-001", number: "2026-001", amount: 4200, currency: "EUR", status: "sent" },
 })
 
 // Read one
-const found = await customers.get("cust-001")
+const invoice = await invoices.get("inv-001")
 
-// Browse by type
-const page = await customers.list({ limit: 25, orderBy: "updatedAt", order: "desc" })
+// Browse the type
+const page = await invoices.list({ limit: 25, orderBy: "updatedAt", order: "desc" })
 ```
 
-### `.byId(id)` handle
+## `.byId(id)` handle
 
-`byId(id)` returns an `ObjectByIdHandle` whose operations are all scoped to that
-single object.
+`byId(id)` returns an `ObjectByIdHandle` scoped to a single object.
 
 | Method | Signature | Notes |
 | --- | --- | --- |
 | `get` | `get() => TwinObject \| null` | Fetch this object. |
-| `link` | `link(linkToken, target, options?) => void` | Add a link using a typed token (`Type.l.<name>`). |
-| `unlink` | `unlink(linkToken, target) => void` | Remove a link. |
-| `listLinks` | `listLinks(linkToken?) => links` | List this object's links, optionally for one link token. |
-| `telemetry` | `telemetry(propertyToken) => { append }` | Per-property telemetry appender with unit/value validation. |
-| `requestAction` | `requestAction({ action? \| actionId, params?, runId? }) => …` | Request an action on this object. |
-| `requestActionAndWait` | `requestActionAndWait({ action? \| actionId, params?, timeoutMs?, signal? }) => …` | Request and await the run. |
+| `link` | `link(token, target, options?) => void` | Add a link via a typed token (`Type.l.<name>`). |
+| `unlink` | `unlink(token, target) => void` | Remove a link. |
+| `listLinks` | `listLinks(token?) => links` | List this object's links, optionally for one token. |
+| `telemetry` | `telemetry(token) => { append }` | Per-property telemetry appender (`Type.p.<name>`). |
+| `requestAction` | `requestAction({ actionId, params?, runId? }) => …` | Request an action on this object. |
+| `requestActionAndWait` | `requestActionAndWait({ actionId, params?, timeoutMs?, signal? }) => …` | Request and await the run. |
 
 ```ts
-const handle = sixb.objects(Customer).byId("cust-001")
+const handle = sixb.objects(Invoice).byId("inv-001")
 
-// Link using a typed link token
-await handle.link(Customer.l.belongsTo, {
-  objectTypeId: "Organization",
-  primaryId: "org-1",
-})
-
-// Append telemetry for one property
-await handle.telemetry(Customer.p.temperature).append({
-  value: 21.5,
-  unit: "degreeCelsius",
+// Append telemetry to a project's progress series
+await sixb.objects(Project).byId("proj-001").telemetry(Project.p.progress).append({
+  value: 60,
   at: new Date(),
 })
 
-// Request an action
+// Request an action on the invoice
 await handle.requestAction({
-  actionId: "issueCredit",
-  params: { amount: 500 },
+  actionId: "sendReminder",
 })
 ```
 
@@ -112,77 +102,89 @@ runtime two ways:
 
 - **Typed tokens** via the handle: `byId(id).link(Type.l.<name>, target)`,
   `unlink(...)`, and `listLinks(...)`. The token is checked at compile time
-  against the source object type.
+  against the source type.
 - **String ids** via the set: `upsertLink({ ... })` and `removeLink({ ... })`
   when you only have raw ids.
 
 ```ts
-const customers = sixb.objects(Customer)
+const invoices = sixb.objects(Invoice)
 
 // Typed token form
-await customers.byId("cust-001").link(Customer.l.belongsTo, {
-  objectTypeId: "Organization",
-  primaryId: "org-1",
+await invoices.byId("inv-001").link(Invoice.l.customer, {
+  objectTypeId: "Customer",
+  primaryId: "cust-001",
 })
 
 // String-id form
-await customers.upsertLink({
-  sourceId: "cust-001",
-  linkId: "belongsTo",
-  targetTypeId: "Organization",
-  targetId: "org-1",
+await invoices.upsertLink({
+  sourceId: "inv-001",
+  linkId: "customer",
+  targetTypeId: "Customer",
+  targetId: "cust-001",
 })
 ```
 
-Query across links with the query builder (`.where(...)` over linked types,
-link traversal), and read link rows with `byId(id).listLinks(...)`. Links are
-also exposed over HTTP — see the [HTTP reference](./http-reference.md).
+Traverse links in reads with the [query builder](./querying.md), and read raw
+link rows with `byId(id).listLinks(...)`. Links are also exposed over HTTP — see
+the [HTTP reference](./http-reference.md).
+
+## End to end
+
+A scheduled function that flags sent invoices past their due date — read,
+inspect properties, write back:
+
+```ts
+export const checkOverdueInvoices = defineFunction("check-overdue-invoices")
+  .cron("0 8 * * *")
+  .run(async ({ sixb }) => {
+    const { objects } = await sixb.objects(Invoice).list({ limit: 500 })
+    const today = new Date().toISOString().slice(0, 10)
+
+    for (const invoice of objects) {
+      const { number, amount, status, dueDate } = invoice.properties
+      if (status !== "sent" || !dueDate || dueDate >= today) continue
+
+      await sixb.objects(Invoice).upsert({
+        properties: { id: invoice.primaryId, number, amount, status: "overdue" },
+      })
+    }
+  })
+```
 
 ## Footgun: runtime `objects()` vs action `objects()`
 
-Two different `objects(Type)` APIs exist and they look almost identical. Picking
-the wrong one is the most common mistake.
+Two `objects(Type)` APIs look almost identical. Picking the wrong one is the
+most common mistake.
 
 | | `sixb.objects(Type)` (runtime) | `objects(Type)` (action `.edits()`) |
 | --- | --- | --- |
 | Where | functions, syncs, schedules, app code | inside an action's `.edits(...)` handler |
-| Timing | **async, immediate** — writes apply now | **sync, staged** — recorded into an EditBatch, applied atomically on commit |
-| `await` | every method returns a promise | edit calls are synchronous, no `await` |
+| Timing | **async, immediate** — writes apply now | **sync, staged** — applied atomically on commit |
+| `await` | every method returns a promise | edit calls are synchronous |
 | Create | `upsert({ properties })` | `create(properties)` |
-| Update | `upsert(...)` (full replace) | `byId(id).update({ ... })` |
-| Reads | `get` / `query` / `list` | use `read.objects(Type)` for reads |
-
-Runtime — async and immediate:
+| Update | `upsert(...)` (merge over existing) | `byId(id).update({ ... })` |
+| Reads | `get` / `query` / `list` | `read.objects(Type)` |
 
 ```ts
-// in a function or sync
+// Runtime — async, immediate
 await sixb.objects(Invoice).upsert({
-  properties: { id: "inv-1", status: "sent" },
+  properties: { id: "inv-001", status: "paid" },
 })
+
+// Action .edits() — synchronous, staged, no await
+objects(Invoice).byId(subject.primaryId).update({ status: "paid" })
 ```
 
-Action `.edits()` — synchronous and staged:
+If you wrote `sixb.objects(...)` you are in the runtime API. If you destructured
+`objects` from an action handler argument, you are staging edits. See
+[actions](../actions/overview.md) for the EditBatch model.
 
-```ts
-// inside defineAction(...).edits(async ({ objects, read, subject }) => { … })
-const invoice = await read.objects(Invoice).get(subject.primaryId)
-
-objects(Invoice).byId(subject.primaryId).update({
-  status: "sent",
-})
-// no await: the update is staged and committed atomically after the handler returns
-```
-
-Rule of thumb: if you wrote `sixb.objects(...)` you are in the runtime API. If
-you destructured `objects` (and `read`) from an action handler argument, you are
-staging edits. See [actions](../actions/overview.md) for the EditBatch model.
-
-## In This Section
+## In this section
 
 - [CRUD](./crud.md) — create, read, update, delete with `upsert`/`get`/`list`.
 - [Querying](./querying.md) — filter, search, sort, follow links, and page.
 - [Telemetry](./telemetry.md) — append and read per-property timeseries.
-- [HTTP reference](./http-reference.md) — the REST/WebSocket surface for objects and links.
+- [HTTP reference](./http-reference.md) — the REST/WebSocket surface.
 
 ## Related
 

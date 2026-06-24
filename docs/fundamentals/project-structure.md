@@ -1,57 +1,57 @@
 # Project Structure
 
-A Sixb project is a collection of convention folders plus one entry file. When you call
-[`createSixb()`](../runtime/overview.md), it scans well-known directories relative to your
-project root, loads every module it finds, and registers the definitions you exported.
-There is no central manifest to keep in sync — you create the right kind of definition,
+A Sixb project is a set of convention folders plus one entry file. [`createSixb()`](../runtime/overview.md)
+scans well-known directories under your project root, loads every module it finds, and
+registers the definitions you export. There is no central manifest: you write a definition,
 export it from the matching folder, and it is wired in.
 
 ## Directory tree
 
 ```txt
-my-project/
+acme-corp/
 ├── sixb.config.ts
 ├── ontology/
-│   └── customer.ts
+│   ├── customer.ts
+│   └── invoice.ts
 ├── actions/
-│   └── send-reminder.ts
+│   └── markPaid.ts
 ├── functions/
-│   └── poll-devices.ts
+│   └── check-overdue-invoices.ts
 ├── datasets/
-│   └── orders.ts
-├── syncs/
-│   └── orders.ts
-├── projections/
-│   └── customer.ts
-├── connectors/
 │   └── erp.ts
+├── connectors/
+│   └── acme-erp.ts
+├── syncs/
+│   └── erp.ts
+├── projections/
+│   └── invoice-projection.ts
 ├── schedules/
-│   └── hourly.ts
+│   └── erp.ts
 ├── pipelines/
-│   └── reporting.ts
+│   └── project-reporting.ts
 ├── rules/
 │   └── business-health.ts
 ├── workflows/
 │   └── invoice-reminder.ts
 ├── security/
 │   ├── groups/
-│   │   └── team-members.ts
+│   │   └── finance-admins.ts
 │   ├── roles/
-│   │   └── atlas-access.ts
+│   │   └── finance-access.ts
 │   └── invite-policies/
 │       └── default-invites.ts
 └── app/                    # custom UI — served separately, not discovered
     └── page.tsx
 ```
 
-Every folder is optional. Missing folders are silently skipped — discovery returns an
-empty list rather than erroring. You can also pass any of these in-line to `createSixb()`
-instead of (or in addition to) using the folders.
+Every folder is optional — a missing folder is skipped, not an error. You can also pass any
+of these definitions in-line to `createSixb()` instead of (or alongside) the folders.
 
 ## Discovered folders
 
 `createSixb()` discovers exactly these folders. Each scan recurses into subdirectories and
-loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files.
+loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files. The folder selects the *kind*:
+a definition picked up depends on where it lives, not what the file is named.
 
 | Folder | Holds | Related page |
 | --- | --- | --- |
@@ -59,9 +59,9 @@ loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files.
 | `actions/` | Action definitions | [Actions](../actions/overview.md) |
 | `functions/` | Code that runs on an interval or cron | — |
 | `datasets/` | Dataset definitions | [Datasets](../data/datasets.md) |
+| `connectors/` | Connector definitions | [Connectors](../data/connectors.md) |
 | `syncs/` | Sync definitions | [Syncs](../data/syncs.md) |
 | `projections/` | Object, link, and telemetry projections | [Projections](../data/projections.md) |
-| `connectors/` | Connector definitions | [Connectors](../data/connectors.md) |
 | `schedules/` | Schedule definitions | [Schedules](../schedules/overview.md) |
 | `pipelines/` | Pipeline definitions | [Pipelines](../data/pipelines.md) |
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
@@ -70,45 +70,40 @@ loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files.
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
 | `security/invite-policies/` | Invite-policy definitions | [Authentication](../auth/authentication.md) |
 
-## Discovery matches exported values, not filenames
-
-Discovery does not care what your files are named or how many definitions live in one
-file. It imports every module in a folder, walks each export (recursing into arrays), and
-keeps the values that pass that kind's type guard. Anything that does not match is ignored.
-
-This means:
-
-- One file can export several definitions, and one definition can be split across files.
-- A `helpers.ts` next to your definitions is harmless — its exports just fail the guard.
-- An array export is flattened, so `export const all = [a, b, c]` registers all three.
-- The folder is what selects the *kind*. A function definition placed in `datasets/` will
-  not be picked up there.
+Discovery matches exported *values*, not filenames. One file can export several definitions,
+a definition can be split across files, and an array export is flattened — so
+`export const all = [Customer, Invoice]` registers both. A `helpers.ts` next to your
+definitions is harmless: its exports just fail the kind's type guard and are ignored.
 
 ```ts
-// ontology/customer.ts — file name is irrelevant; both exports are discovered
-import { defineObjectType, prop } from "@sixb/core/ontology"
+// ontology/customer.ts — both exports are discovered
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { Employee } from "./employee"
 
 export const Customer = defineObjectType({
   id: "Customer",
   name: "Customer",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("email", "string"),
+    prop("name", "string", { required: true }),
+    prop("email", "string", { required: true }),
+    prop("tier", stringEnum(["bronze", "silver", "gold", "platinum"])),
   ],
+  links: [link("accountManager", Employee, { cardinality: "one" })],
 })
 
-export const Lead = defineObjectType({
-  id: "Lead",
-  name: "Lead",
+export const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
   properties: [prop("id", "string", { required: true, primary: true })],
 })
 ```
 
 ## The entry file
 
-`sixb.config.ts` is the entry. It must export a runtime as a named `sixb` export (preferred)
-or as the `default` export. `createSixb()` runs the discovery passes and returns the
-runtime, so the common pattern is a single export:
+`sixb.config.ts` is the entry. It exports a runtime as a named `sixb` export (preferred) or
+as the `default` export. `createSixb()` runs discovery and returns the runtime, so the common
+shape is a single export:
 
 ```ts
 import { LocalBlobStorage } from "@sixb/blob-local"
@@ -126,45 +121,43 @@ export const sixb = createSixb({
 })
 ```
 
-The CLI loads the entry, then reads `sixb` (falling back to `default`). It accepts three
-shapes, so async setup is fine:
+`createSixb()` is async, so the export is a promise here — the CLI awaits it. It accepts
+three shapes, which lets you run async setup such as migrations or seeding before the runtime
+is returned:
 
 | Export shape | Example |
 | --- | --- |
-| A runtime instance | `export const sixb = createSixb({ ... })` |
+| A runtime promise | `export const sixb = createSixb({ ... })` |
 | A function returning a runtime (sync or async) | `export const sixb = () => createSixb({ ... })` |
-| A promise of a runtime | `export const sixb = createAndSeed()` where the function `await`s |
+| A resolved runtime instance | `export const sixb = await createSixb({ ... })` |
 
-If the export is none of these, the CLI throws:
+```ts
+// async entry: seed before returning the runtime
+export const sixb = bootstrap()
+
+async function bootstrap() {
+  const runtime = await createSixb({ id: "acme-corp" /* ...providers */ })
+  await seedCustomers(runtime)
+  return runtime
+}
+```
+
+If the export is none of these shapes, the CLI throws:
 
 ```txt
 Could not load Sixb runtime from entry. Export `sixb` (or default) as a Sixb instance or Promise<Sixb>.
-```
-
-```ts
-// async entry: migrate + seed before returning the runtime
-export const sixb = createAuthExampleSixb()
-
-async function createAuthExampleSixb() {
-  const runtime = await createSixb({
-    id: "auth-example",
-    // ...providers
-  })
-  await seed(runtime)
-  return runtime
-}
 ```
 
 See [Runtime](../runtime/overview.md) for the full `createSixb()` options and provider list.
 
 ## app/ is not discovered
 
-The `app/` folder holds your custom UI and is **not** part of `createSixb()` discovery. It
-is built and served separately by `@sixb/app` (`createCustomApp`), so nothing in `app/`
-is treated as an ontology, function, or other backend definition. Route conventions and
-data access for `app/` are documented under [Apps](../apps/overview.md).
+The `app/` folder holds your custom UI and is **not** part of `createSixb()` discovery.
+`@sixb/app` (`createCustomApp`) builds and serves it separately, so nothing in `app/` is
+treated as a backend definition. Route conventions and data access for `app/` are documented
+under [Apps](../apps/overview.md).
 
-## See also
+## Related
 
 - [Get started](../README.md) — scaffold and run a project end to end.
 - [Manual install](manual-install.md) — set up the folders by hand.

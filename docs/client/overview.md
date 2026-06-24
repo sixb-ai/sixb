@@ -1,6 +1,6 @@
 # Client SDK
 
-`@sixb/client` is the type-safe SDK for talking to a sixb server from the
+`@sixb/client` is the type-safe SDK for talking to a Sixb server from the
 browser (or any TypeScript runtime). It is generated from the server's OpenAPI
 schema, so every route, request body, and response is typed end to end.
 
@@ -10,25 +10,25 @@ hooks, a live WebSocket events hook, or the browser auth bootstrap.
 
 ## Mental model
 
-Every subpath ultimately calls the same shared transport: a single generated
-`client` instance (a [hey-api](https://heyapi.dev) fetch client). You configure
-it once — base URL, credentials, auth interceptors — and all SDK calls,
-query builders, hooks, and the events WebSocket inherit that configuration.
+Every subpath calls the same shared transport: a single generated `client`
+instance (a [hey-api](https://heyapi.dev) fetch client). You configure it once —
+base URL, credentials, auth interceptors — and all SDK calls, query builders,
+hooks, and the events WebSocket inherit that configuration.
 
 ```ts
 import { client } from "@sixb/client"
 
 client.setConfig({
-  baseUrl: "https://api.example.com",
+  baseUrl: "https://ops.acme.example",
   credentials: "include",
 })
 ```
 
-In a sixb-served app (`app/` directory), this is done for you: the runtime
-injects config via [`/browser`](#browser-auth-bootstrap) and wraps your pages
-in a `QueryClientProvider`. You write pages with the [`/hooks`](#hooks-tanstack-query)
-layer and never touch the transport directly. In a standalone app, you
-configure `client` yourself and optionally wrap your tree in `SixbProvider`.
+In a Sixb-served app (the `app/` directory), this is done for you: the runtime
+injects config via [`/browser`](#browser-auth-bootstrap) and wraps your pages in
+a `QueryClientProvider`. You write pages with the [`/hooks`](#hooks-tanstack-query)
+layer and never touch the transport directly. In a standalone app, configure
+`client` yourself and optionally wrap your tree in `SixbProvider`.
 
 ## Subpath map
 
@@ -39,7 +39,7 @@ configure `client` yourself and optionally wrap your tree in `SixbProvider`.
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
 | `@sixb/client/events` | `SixbEvent` types and the `isSixbEvent` guard |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
-| `@sixb/client/models` | `encode/decodeObjectId`, `executeAction`, UI shape mappers |
+| `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
 
 > `@sixb/client/hooks` re-exports `@sixb/client/events` and the typed-query
 > hooks, so a React app usually only imports from `/hooks`.
@@ -54,7 +54,7 @@ framework-agnostic way to call the API.
 import { listObjects, getObject } from "@sixb/client"
 
 const { data } = await listObjects({
-  query: { objectTypeId: "television", limit: "50" },
+  query: { objectTypeId: "Invoice", limit: "50" },
   throwOnError: true,
 })
 ```
@@ -72,11 +72,11 @@ carrying the validation `issues`.
 
 ```ts
 import { objects } from "@sixb/client/query"
-import { Television } from "./ontology/television"
+import { Invoice } from "./ontology/invoice"
 
-const result = await objects(Television)
+const result = await objects(Invoice)
   .query()
-  .where((tv) => tv.p.status.eq("online"))
+  .where((inv) => inv.p.status.eq("overdue"))
   .list()
 ```
 
@@ -97,9 +97,9 @@ This is the direct, hook-free path. For caching and React integration, the
 import { listObjectsOptions } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
 
-function Devices() {
+function Invoices() {
   const { data } = useQuery(
-    listObjectsOptions({ query: { objectTypeId: "television", limit: "200" } })
+    listObjectsOptions({ query: { objectTypeId: "Invoice", limit: "200" } })
   )
   return <ul>{data?.map((o) => <li key={o.id}>{o.name}</li>)}</ul>
 }
@@ -155,7 +155,7 @@ the auth session.
 
 The controller exposes `setCsrfToken`, `getCsrfToken`, and `dispose`. CSRF
 tokens are attached via the `x-sixb-csrf` header on non-`GET`/`HEAD`/`OPTIONS`
-requests. In a sixb-served app this runs automatically; reach for `/browser`
+requests. In a Sixb-served app this runs automatically; reach for `/browser`
 only when bootstrapping a standalone browser client. See
 [authentication](../auth/authentication.md).
 
@@ -174,9 +174,9 @@ shape mappers used by the built-in UI.
 ```ts
 import { encodeObjectId, executeAction } from "@sixb/client/models"
 
-const id = encodeObjectId("television", "tv-42")
+const id = encodeObjectId("Invoice", "inv-2042")
 const { data } = await executeAction({
-  path: { objectId: id, actionId: "powerOn" },
+  path: { objectId: id, actionId: "markPaid" },
   body: { params: {} },
 })
 ```
@@ -201,4 +201,4 @@ so they are safe to pass through URLs and route params.
 - [Querying data in apps](../apps/querying-data.md) — hooks in practice
 - [Events](../events/overview.md) — topics and event types
 - [Authentication](../auth/authentication.md) — sessions and CSRF
-- [Building apps](../apps/overview.md) — the sixb-served app model
+- [Building apps](../apps/overview.md) — the Sixb-served app model

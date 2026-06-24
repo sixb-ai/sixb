@@ -1,88 +1,115 @@
 # Search & Query Metadata
 
-Sixb validates queries against your ontology. Properties are not queryable just because they
-exist — you declare query metadata on the fields you want to filter, sort, or search, and a
-search profile on the object type. This page covers both. For the query API itself, see
-[Querying Objects](../objects/querying.md).
+Sixb validates every query against your ontology. A property is **not** queryable just because it
+exists — you opt each field into query surfaces with `query` metadata, and you set a `search`
+profile on the object type for keyword and vector search. This page covers both. For the query API
+itself, see [Querying Objects](../objects/querying.md).
 
 ## Property Query Metadata
 
-Set `query` on a property to opt it into query surfaces. `searchable` is the gate: every other
-flag requires `searchable: true` on the same property.
+Set `query` on a property to expose it to queries. `searchable` is the gate: every other flag
+(and `weight`) requires `searchable: true` on the same property, or `validate()` rejects the
+ontology.
 
 ```ts
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core"
+import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
 import { Customer } from "./customer"
+import { Project } from "./project"
 
-export const Project = defineObjectType({
-  id: "Project",
-  name: "Project",
+export const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
   properties: [
     prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", {
+    prop("number", "string", {
       required: true,
-      query: { searchable: true, text: true, exact: true, sortable: true, weight: 5 },
+      query: { searchable: true, filterable: true, exact: true, sortable: true },
     }),
-    prop("description", "string", {
-      query: { searchable: true, text: true },
-    }),
-    prop("status", stringEnum(["draft", "active", "paused", "completed"]), {
-      query: { searchable: true, filterable: true, exact: true, facet: true },
-    }),
-    prop("deadline", "date", {
+    prop("amount", "double", {
+      required: true,
       query: { searchable: true, filterable: true, sortable: true },
     }),
-    prop("budget", "double", {
+    prop("currency", stringEnum(["EUR", "USD", "GBP"]), {
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
+    prop("status", stringEnum(["draft", "sent", "paid", "overdue", "cancelled"]), {
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
+    prop("issuedAt", "timestamp", {
+      query: { searchable: true, filterable: true, sortable: true },
+    }),
+    prop("dueDate", "date", {
       query: { searchable: true, filterable: true, sortable: true },
     }),
   ],
   search: {
-    title: "name",
-    defaultText: ["name", "description"],
-    exact: ["id", "name"],
+    title: "number",
+    exact: ["id", "number"],
   },
-  links: [link("customer", Customer, { cardinality: "one" })],
+  links: [
+    link("customer", Customer, { cardinality: "one" }),
+    link("project", Project, { cardinality: "one" }),
+  ],
 })
 ```
 
 | Flag | Type | Enables |
 | --- | --- | --- |
-| `searchable` | `boolean` | Required gate. Must be `true` before any other flag applies. |
+| `searchable` | `boolean` | Required gate. Must be `true` before any other flag (or `weight`) applies. |
 | `filterable` | `boolean` | `where(...)` predicates: `eq`, `neq`, ranges, `in`, `exists`, `contains`. |
 | `sortable` | `boolean` | `orderBy(...)` on the property. |
-| `text` | `boolean` | `.search(...)` keyword search over the property. String-like schemas only. |
-| `exact` | `boolean` | Exact-match search profiles such as `search.exact`. Primary ids are exact-matchable by default. |
-| `facet` | `boolean` | `.facets(...)` bucket counts. Field must also be exact-matchable. |
-| `vector` | `boolean` | Vector search on numeric-array embedding fields when the provider supports it. |
-| `weight` | `number` | Relative text-search weight for ranking providers. Only meaningful with `text: true`. |
+| `text` | `boolean` | Keyword search over the property via `search(...)`. String-like schemas only. |
+| `exact` | `boolean` | Exact-match search profiles such as `search.exact`. |
+| `facet` | `boolean` | `facets(...)` bucket counts. Field must also be exact-matchable. |
+| `vector` | `boolean` | Vector search on numeric-array embedding fields, when the provider supports it. |
+| `weight` | `number` | Positive relative weight for text ranking. Only valid with `text: true`. |
 
-Predicate values are still checked against the property schema. Range predicates and sorting
-work on orderable schemas — strings, numbers, dates, timestamps, uuids, and enums. See
-[Properties](./properties.md) for schema types.
+### Which schemas support which flag
+
+Each flag is checked against the property's schema at validation time:
+
+| Flag | Allowed schemas |
+| --- | --- |
+| `filterable` | exact-matchable schemas, plus `array` and `map` |
+| `sortable` | `string`, `uuid`, `integer`, `double`, `decimal`, `date`, `timestamp`, enums |
+| `text` | `string` and string enums |
+| `exact` | any primitive schema except `fileRef` (so not `object`/`array`/`map`), plus enums |
+| `facet` | same as `exact` |
+| `vector` | numeric arrays (`integer`, `double`, or `decimal` items) |
+
+Predicate values are still type-checked against the property schema when the query runs. See
+[Properties](./properties.md) for the full schema list.
 
 ## Object-Type Search Profile
 
-The object-type `search` config decides which fields a global or type-scoped search uses.
+The `search` config picks which fields a global or type-scoped search uses.
 
 ```ts
 search: {
-  title: "name",
-  defaultText: ["name", "description"],
-  exact: ["id", "name"],
+  title: "company",
+  defaultText: ["company", "name", "industry"],
+  exact: ["id", "email", "company"],
 }
 ```
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `title` | `string` | Display/title property used in search results. |
-| `defaultText` | `string[]` | Default fields for `.search("...")` when no `fields` are given. |
-| `exact` | `string[]` | Exact-match fields such as external ids, slugs, or emails. |
-| `vector` | `{ property, source }` | Vector-search config: `property` stores the embedding, `source` lists the text properties used to produce it. |
+| `title` | `string` | Display/title property shown in search results. Must be string-like. |
+| `defaultText` | `string[]` | Default keyword-search fields when `search("...")` is called without `fields`. |
+| `exact` | `string[]` | Exact-match fields such as external ids, emails, or invoice numbers. |
+| `vector` | `{ property, source }` | Vector search: `property` stores the embedding, `source` lists the text fields used to produce it. |
 
-Fields referenced by the profile must carry the matching property flag — `defaultText` fields
-need `text: true`, `exact` fields need `exact: true`, the `vector.property` needs `vector: true`,
-and each `vector.source` field needs `text: true`. Primary ids remain exact-matchable even when
-omitted from `exact`.
+Every field a profile references must carry the matching property flag:
+
+- `defaultText` fields need `text: true`
+- `exact` fields need `exact: true` (the primary id is always exact-matchable, so it's exempt)
+- `vector.property` needs `vector: true`, and each `vector.source` field needs `text: true`
+
+Search profiles can only reference **static** properties — telemetry properties (such as
+`Project.progress`) are not object-query indexed and will fail validation here.
+
+For vector search, add an embedding property (a numeric array carrying `query.vector: true`) and
+point `search.vector` at it. The `source` fields must each carry `text: true`.
 
 ```ts
 search: {
@@ -92,20 +119,21 @@ search: {
 }
 ```
 
-## How It Drives Queries
+## How Metadata Drives Queries
 
 | Query call | Required metadata |
 | --- | --- |
-| `where((o) => o.p.x.eq(...))` | `x`: `searchable` + `filterable` |
-| `orderBy(Type.p.x, ...)` | `x`: `searchable` + `sortable` |
-| `search("...")` | `search.defaultText` fields with `searchable` + `text` |
-| `search("...", { fields: [Type.p.x] })` | `x`: `searchable` + `text` |
-| `facets([{ property: Type.p.x, limit }])` | `x`: `searchable` + `facet` (and exact-matchable) |
-| vector search | `x`: `searchable` + `vector`, plus `search.vector.property` |
+| `where((o) => o.p.status.eq(...))` | `status`: `searchable` + `filterable` |
+| `orderBy(Invoice.p.amount, "desc")` | `amount`: `searchable` + `sortable` |
+| `search("acme")` | `search.defaultText` fields with `searchable` + `text` |
+| `search("acme", { fields: [Customer.p.company] })` | `company`: `searchable` + `text` |
+| `facets([{ property: Invoice.p.status, limit }])` | `status`: `searchable` + `facet` (exact-matchable) |
+| vector search | embedding field: `searchable` + `vector`, plus `search.vector.property` |
 
-Missing metadata is caught at validation time — `validate()` reports unknown properties, wrong
-value types, missing query flags, invalid text fields, and unsupported traversals before the
-query runs. Provider capability gaps (vector search, relevance sorting) surface at execution.
+Missing or mismatched metadata is caught when you call `validate()` — it reports unknown
+properties, wrong value types, missing query flags, invalid text fields, and unsupported
+traversals before any query runs. Provider capability gaps (vector search, relevance sorting)
+surface at execution time.
 
 ## Related
 

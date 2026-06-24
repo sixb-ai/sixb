@@ -1,14 +1,12 @@
 # Projections
 
-A projection turns dataset rows into ontology objects, links, and telemetry points.
+A projection turns dataset rows into ontology objects, links, and telemetry points. Reach for one
+when you have clean tables — say invoices and customers pulled from your ERP — and want them to
+become the `Invoice` and `Customer` objects your app reads through
+[`sixb.objects(...)`](../objects/overview.md).
 
-Datasets are tables; ontology types are app objects. A projection connects the two worlds: it maps
-dataset columns to object properties, creates or updates objects from rows, builds links from
-foreign-key columns, and appends timestamped readings to telemetry properties. In a typical app,
-[syncs](syncs.md) and [pipelines](pipelines.md) prepare clean datasets before projections create
-the objects and links your app reads through [`sixb.objects(...)`](../objects/overview.md).
-
-There are three kinds of projection:
+[Syncs](syncs.md) and [pipelines](pipelines.md) prepare the rows; projections create the objects and
+links on top of them. There are three kinds:
 
 | Builder | Produces | One row becomes |
 | --- | --- | --- |
@@ -18,8 +16,8 @@ There are three kinds of projection:
 
 ## Object projection
 
-Each row in the dataset becomes one object. Map object properties to dataset columns with
-`.properties(...)`. The primary property (usually `id`) must be mapped.
+Each row becomes one object. Map object properties to dataset columns with `.properties(...)`. The
+primary property (usually `id`) must be mapped.
 
 ```ts
 import { defineProjection } from "@sixb/core"
@@ -32,6 +30,8 @@ export const customerProjection = defineProjection("customer-proj", Customer)
     id: "customer_id",
     name: "contact_name",
     email: "contact_email",
+    company: "company_name",
+    industry: "industry_sector",
     tier: "service_tier",
   })
 ```
@@ -42,47 +42,47 @@ export const customerProjection = defineProjection("customer-proj", Customer)
 | `.fromDataset(dataset)` | Chooses the source dataset |
 | `.properties({ prop: "column" })` | Maps object property ids to dataset column names |
 
-The object property `id` is read from column `customer_id`, `name` from `contact_name`, and so on.
+The object property `id` reads from column `customer_id`, `name` from `contact_name`, and so on.
 
-## Project links from foreign keys
+## Links from foreign keys
 
-When a dataset row carries a foreign key, a projection can turn it into an ontology link with
-`.withLinks(...)`. Each entry is keyed by the link id and describes where the target id comes from.
-
-The simplest form reads the foreign key straight from a dataset column. This is the inline
-`{ link, sourceField, target }` descriptor:
+When a row carries a foreign key, turn it into an ontology link with `.withLinks(...)`. Each entry is
+keyed by the link id and uses the inline `{ link, sourceField, target }` descriptor:
 
 ```ts
 import { defineProjection } from "@sixb/core"
-import { erpCustomersDataset } from "../datasets/erp"
+import { erpInvoicesDataset } from "../datasets/erp"
 import { Customer } from "../ontology/customer"
-import { Employee } from "../ontology/employee"
+import { Invoice } from "../ontology/invoice"
+import { Project } from "../ontology/project"
 
-export const customerProjection = defineProjection("customer-proj", Customer)
-  .fromDataset(erpCustomersDataset)
+export const invoiceProjection = defineProjection("invoice-proj", Invoice)
+  .fromDataset(erpInvoicesDataset)
   .properties({
-    id: "customer_id",
-    name: "contact_name",
-    email: "contact_email",
+    id: "id",
+    number: "number",
+    amount: "amount",
+    currency: "currency",
+    status: "status",
+    issuedAt: "issuedAt",
+    dueDate: "dueDate",
   })
   .withLinks({
-    accountManager: {
-      link: Customer.l.accountManager,
-      sourceField: "account_mgr_id",
-      target: Employee,
+    customer: {
+      link: Invoice.l.customer,
+      sourceField: "customer_id",
+      target: Customer,
+    },
+    project: {
+      link: Invoice.l.project,
+      sourceField: "project_id",
+      target: Project,
     },
   })
 ```
 
-The value in `account_mgr_id` equals the primary id of an `Employee`, so the projection creates the
-`Customer -> Employee` link. A single object projection can declare several links at once:
-
-```ts
-  .withLinks({
-    project: { link: Task.l.project, sourceField: "project_id", target: Project },
-    assignee: { link: Task.l.assignee, sourceField: "assignee_id", target: Employee },
-  })
-```
+The value in `customer_id` equals the primary id of a `Customer`, so the projection creates the
+`Invoice -> Customer` link; `project_id` creates `Invoice -> Project`.
 
 ### Descriptor fields
 
@@ -90,30 +90,15 @@ The value in `account_mgr_id` equals the primary id of an `Employee`, so the pro
 | --- | --- |
 | `link` | The link token from the source object type (`SourceType.l.<linkId>`) |
 | `sourceField` | Dataset column holding the target's primary id |
-| `sourceProperty` | Alternative to `sourceField`: a projected object property token (`SourceType.p.<propId>`) holding the target id |
-| `target` | The target object type (must be the link's declared target or a subtype) |
+| `sourceProperty` | Alternative to `sourceField`: a projected property token (`SourceType.p.<propId>`) holding the target id |
+| `target` | The target object type (must be the link's declared target or a subtype via `extends`) |
 
 `sourceField` and `sourceProperty` are mutually exclusive — provide exactly one. Use `sourceField`
-when the foreign key lives only in the dataset; use `sourceProperty` when you also map that column
-to an object property and want to reuse it.
+when the foreign key lives only in the dataset; use `sourceProperty` when you also map that column to
+an object property and want to reuse it.
 
-### `fromForeignKey()` helper
-
-The inline descriptor is sugar over `fromForeignKey()`. The two forms are equivalent — prefer the
-inline object form used above; reach for `fromForeignKey()` only when you want to build a descriptor
-separately:
-
-```ts
-import { defineProjection, fromForeignKey } from "@sixb/core"
-
-  .withLinks({
-    accountManager: fromForeignKey({
-      link: Customer.l.accountManager,
-      sourceField: "account_mgr_id",
-      target: Employee,
-    }),
-  })
-```
+The inline descriptor is sugar over the `fromForeignKey()` helper. The two are equivalent — prefer
+the inline form; reach for `fromForeignKey()` only to build a descriptor separately.
 
 ## Many-to-many link projection
 
@@ -144,7 +129,8 @@ Source and target fields must be string columns.
 A telemetry projection records timestamped readings onto a telemetry-mode property. Use it when a
 dataset has one row per measurement: a value, the object it belongs to, and when it was recorded.
 
-First mark the property as telemetry in the ontology (see [Properties](../ontology/properties.md)):
+First mark the property as telemetry in the ontology (see
+[Properties](../ontology/properties.md)):
 
 ```ts
 prop("progress", "integer", { mode: "telemetry" })
@@ -174,19 +160,19 @@ export const projectProgressProjection = defineTelemetryProjection(
 | `objectId` | Dataset column holding the target object's primary id |
 | `at` | Timestamp column for the reading |
 | `value` | Column holding the reading |
-| `unit` | Optional column holding the reading's unit (required for properties that carry a unit) |
+| `unit` | Optional column holding the reading's unit (required only for properties that carry a unit) |
 
-Each row appends one point to the `progress` series of the `Project` named by `project_id`. The most
-recent reading also materializes onto the object, so the property reflects the latest value while the
-full history stays queryable. Telemetry point identity (and how re-projecting the same instant
-behaves) is covered in [Telemetry](../objects/telemetry.md).
+Each row appends one point to the `progress` series of the `Project` named by `project_id`. The `at`
+column must be a string, date, or timestamp; values without a time zone (no trailing `Z` or numeric
+offset) are read as UTC.
 
-The `at` column must be a string, date, or timestamp. Values without a time zone (no trailing `Z` or
-numeric offset) are read as UTC.
+How point identity works — and what re-projecting the same instant does — is covered in
+[Telemetry](../objects/telemetry.md).
 
 ## Projection vs pipeline
 
-[Pipelines](pipelines.md) and projections solve different problems.
+[Pipelines](pipelines.md) and projections solve different problems: pipelines make better rows,
+projections make objects.
 
 | Need | Use |
 | --- | --- |
@@ -195,8 +181,6 @@ numeric offset) are read as UTC.
 | Create object relationships from foreign keys | Projection |
 | Record timestamped readings on a property | Projection |
 | Keep data as tables | Dataset or pipeline |
-
-A good rule: pipelines make better rows; projections make objects.
 
 ## Registration
 
@@ -209,26 +193,25 @@ your-project/
     erp.ts
   ontology/
     customer.ts
-    employee.ts
-    project.ts
+    invoice.ts
   projections/
     customer-projection.ts
-    project-members-projection.ts
+    invoice-projection.ts
   sixb.config.ts
 ```
 
-You can also register projections explicitly:
+You can also register them explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { erpCustomersDataset } from "./datasets/erp"
-import { Customer } from "./ontology/customer"
-import { customerProjection } from "./projections/customer-projection"
+import { erpInvoicesDataset } from "./datasets/erp"
+import { Invoice } from "./ontology/invoice"
+import { invoiceProjection } from "./projections/invoice-projection"
 
-export const sixb = createSixb({
-  datasets: [erpCustomersDataset],
-  ontology: [Customer],
-  projections: [customerProjection],
+export const sixb = await createSixb({
+  ontologies: [Invoice],
+  datasets: [erpInvoicesDataset],
+  projections: [invoiceProjection],
 })
 ```
 
@@ -236,8 +219,8 @@ See the [Runtime](../runtime/overview.md) overview for how discovery works.
 
 ## Running projections
 
-Projection execution is triggered by committed dataset versions. In local development, `sixb dev`
-co-hosts projection workers when projections are registered. For a separate worker process:
+A committed dataset version triggers projection execution. In local development, `sixb dev` co-hosts
+projection workers when projections are registered. For a separate worker process:
 
 ```bash
 sixb worker projection
@@ -245,10 +228,15 @@ sixb worker projection
 
 ## Behavior and validation
 
-- `.properties(...)` checks that mapped object properties and dataset columns exist, and that their
-  types are compatible.
-- The primary property must be mapped.
-- Projections are set-only in V1: missing rows do not delete existing objects or links.
+- `.properties(...)` checks that mapped properties and columns exist and that their types are
+  compatible. The primary property must be mapped.
+- Projections are set-only: missing rows do not delete existing objects or links.
 - Link projections require string source and target fields.
-- For the inline FK descriptor, `target` must be the link's declared target type or a subtype (via
+- For an FK descriptor, `target` must be the link's declared target type or a subtype (via
   `extends`).
+
+## Related
+
+- [Datasets](datasets.md) and [Pipelines](pipelines.md) — prepare the rows projections consume
+- [Objects](../objects/overview.md) and [Telemetry](../objects/telemetry.md) — what projections produce
+- [Links](../ontology/links.md) — the relationships FK and link projections build

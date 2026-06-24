@@ -1,8 +1,8 @@
 # Infrastructure
 
-A Sixb runtime is wired to five infrastructure providers. Every one is **required** and
-passed to [`createSixb()`](../runtime/overview.md). They split cleanly into three storage
-slots plus two messaging slots:
+Every Sixb runtime is wired to five infrastructure providers. All are **required** and
+passed to [`createSixb()`](../runtime/overview.md). They split into three storage slots and
+two messaging slots.
 
 | Slot | Option | Holds |
 | --- | --- | --- |
@@ -12,6 +12,8 @@ slots plus two messaging slots:
 | Broker | `broker` | The append-only [event log](../events/overview.md) |
 | Queues | `queues` | Background work lanes (actions, syncs, pipelines, projections, workflows) |
 
+A typical local setup uses durable on-disk storage and in-memory messaging:
+
 ```ts
 import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
 import { SqliteStorage } from "@sixb/sqlite"
@@ -19,7 +21,7 @@ import { LocalLakeStorage } from "@sixb/lake-local"
 import { LocalBlobStorage } from "@sixb/blob-local"
 
 export const sixb = await createSixb({
-  id: "my-app",
+  id: "acme-corp",
   storage: new SqliteStorage({ path: ".sixb" }),
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
@@ -28,38 +30,37 @@ export const sixb = await createSixb({
 })
 ```
 
-## The Three Storage Slots
+`createSixb()` is async — always `await` it.
 
-Sixb deliberately separates storage by access pattern. They are not interchangeable, and
-each takes its own provider.
+## The three storage slots
+
+Sixb separates storage by access pattern. The slots are not interchangeable, and each takes
+its own provider.
 
 - **`storage`** — the operational store. Objects and their properties, links, appended
-  telemetry (timeseries), and run-history tables for actions, syncs, pipelines,
-  projections, and workflows. This is the database behind `sixb.objects(...)` reads and
-  writes.
+  telemetry, and run-history tables for actions, syncs, pipelines, projections, and
+  workflows. This is the database behind `sixb.objects(...)` reads and writes.
 - **`lakeStorage`** — the versioned data lake. Holds [datasets](../data/datasets.md)
   produced by [syncs](../data/syncs.md), [pipelines](../data/pipelines.md), and
   [connectors](../data/connectors.md), with snapshots and version compatibility.
-- **`blobStorage`** — content-addressed binary blobs. When a dataset column or property is
-  a `fileRef`, the bytes live here and the lake/object stores keep only the reference.
+- **`blobStorage`** — content-addressed binary blobs. When a property or dataset column is a
+  `fileRef`, the bytes live here and the other stores keep only the reference.
 
-## Broker vs Queues
+## Broker vs queues
 
-These are the two messaging slots and they are **not** the same thing. Keep them distinct.
+The two messaging slots are **not** the same thing — keep them distinct.
 
 | | Broker | Queues |
 | --- | --- | --- |
 | Shape | Append-only event log | Lease-based work lanes |
 | Purpose | Records what happened, fans out to subscribers | Dispatches and retries background jobs |
 | Operations | `append`, `read`, `subscribe` | `enqueue`, `claim`, `complete`, `retry`, `fail`, `renewLease` |
-| Carries | Domain [events](../events/overview.md) (`object.upserted`, `telemetry.appended`, `link.upserted`, `action.requested`, …) | Run requests per lane |
+| Carries | Domain [events](../events/overview.md) (`object.upserted`, `telemetry.appended`, `link.upserted`, `action.requested`, …) | Run requests, one per lane |
 | Replayable | Yes — retained, ordered history | No — jobs are consumed |
 
-The broker is the source of truth for what has occurred; functions and projections
-subscribe to it. Queues are the execution layer that turns requested work into running
-work, with leases and retries.
-
-The `queues` slot exposes one lane per kind of background work:
+The broker is the source of truth for what occurred. Queues are the execution layer that
+turns requested work into running work, with leases and retries. The `queues` provider
+exposes one lane per kind of background work:
 
 ```ts
 sixb.queues.actions
@@ -69,10 +70,10 @@ sixb.queues.projections
 sixb.queues.workflows
 ```
 
-## Provider Matrix
+## Provider matrix
 
-Use the real provider class for each slot. `In*` providers come from `@sixb/core` and need
-no extra install.
+Pick a real provider class for each slot. `InMemory*` providers come from `@sixb/core` and
+need no extra install — they are for development and tests only, never production.
 
 | Slot | Provider | Package | Notes |
 | --- | --- | --- | --- |
@@ -88,14 +89,10 @@ no extra install.
 | `broker` | `InMemoryBroker` | `@sixb/core` | Dev/tests only |
 | `broker` | `NatsBroker` | `@sixb/broker-nats` | NATS JetStream; durable, multi-process |
 | `broker` | `RedisBroker` | `@sixb/broker-redis` | Redis Streams; durable, multi-process |
-| `queues` | `InMemoryQueues` | `@sixb/core` | **Dev only** — single-process, not durable |
+| `queues` | `InMemoryQueues` | `@sixb/core` | Dev/tests only; loses jobs on restart |
 | `queues` | `BullMqQueues` | `@sixb/queues-bullmq` | Redis/BullMQ; durable, multi-process |
 
-`InMemoryQueues` runs entirely in one process and loses jobs on restart. It is fine for
-local development and tests, but a production deployment must use a durable provider such
-as `BullMqQueues`.
-
-## Production Example
+## Production example
 
 A durable multi-process setup pairs PostgreSQL, DuckLake, S3 blobs, and Redis-backed
 messaging:
@@ -109,13 +106,13 @@ import { RedisBroker } from "@sixb/broker-redis"
 import { BullMqQueues } from "@sixb/queues-bullmq"
 
 export const sixb = await createSixb({
-  id: "my-app",
+  id: "acme-corp",
   storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL! }),
   lakeStorage: new DuckLakeStorage({
     catalog: { type: "postgres", host: "localhost", database: "lake", user: "sixb", password: "secret" },
-    dataPath: "s3://my-lake/data",
+    dataPath: "s3://acme-lake/data",
   }),
-  blobStorage: new S3BlobStorage({ bucket: "my-lake", region: "us-east-1", basePath: "sixb" }),
+  blobStorage: new S3BlobStorage({ bucket: "acme-lake", region: "us-east-1", basePath: "sixb" }),
   broker: new RedisBroker({ connection: { url: "redis://localhost:6379" } }),
   queues: new BullMqQueues({ connection: "redis://localhost:6379" }),
 })
@@ -126,13 +123,18 @@ See [Deployment](../deployment/overview.md) for running this in production.
 ## Migrations
 
 SQL-backed storage providers (`@sixb/pg`, `@sixb/sqlite`) own their schema and ship
-migrations. The CLI applies them:
+migrations. The CLI runs them automatically on startup, so you mainly need the explicit
+command for pre-deploy migration steps:
 
 ```bash
 sixb db:migrate
 ```
 
-This loads your runtime and runs `migrateStorage(sixb.storage)` against the configured
-`storage` provider. The CLI also runs migrations automatically on startup, so you mainly
-need `db:migrate` for explicit, pre-deploy migration steps. In-memory and file-lake
-providers have no schema and skip this step.
+This loads your runtime and applies pending migrations against the configured `storage`
+provider. In-memory and file-lake providers have no schema and skip this step.
+
+## Related
+
+- [Runtime](../runtime/overview.md) — `createSixb()` and convention-based discovery
+- [Events](../events/overview.md) — the domain events the broker carries
+- [Deployment](../deployment/overview.md) — running a durable setup in production

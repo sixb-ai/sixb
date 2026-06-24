@@ -1,94 +1,100 @@
 # Pipelines
 
-A pipeline transforms [datasets](./datasets.md). Use one after a [sync](./syncs.md) when raw
-source rows need to become cleaner, smaller, joined, or more useful table data.
+A pipeline transforms [datasets](./datasets.md). Reach for one after a [sync](./syncs.md) lands raw
+source rows that need to be cleaned, filtered, reshaped, joined, or made ready for a
+[projection](./projections.md).
 
-Syncs get data into Sixb. Pipelines shape it: clean rows, rename columns, filter records, join
-datasets, build app-ready tables, and prepare rows for [projections](./projections.md).
-
-A pipeline is made of steps. Each step reads one or more input datasets and writes one output
-dataset.
+A pipeline is a sequence of **steps**. Each step reads one or more input datasets and writes one
+output dataset. Steps are inert definitions — a step only runs when a pipeline references it with
+`.then(...)`.
 
 ## Define a pipeline
 
-File: `pipelines/orders.ts`
+Suppose a sync has populated `erpInvoicesDataset` with raw ERP rows. This pipeline keeps only
+billable invoices, then derives a finance summary table.
+
+File: `pipelines/invoice-reporting.ts`
 
 ```ts
 import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
-import { ordersDataset, rawOrdersDataset } from "../datasets/orders"
+import {
+  erpBillableInvoicesDataset,
+  erpInvoiceSummariesDataset,
+  erpInvoicesDataset,
+} from "../datasets/erp"
 
-export const cleanOrdersStep = definePipelineStep("clean-orders")
-  .inputs({ rawOrders: rawOrdersDataset })
-  .output(ordersDataset)
-  .sql(({ rawOrders }) => `
-    select
-      order_id as id,
-      customer_id,
-      total
-    from ${rawOrders}
-    where order_id is not null
+export const billableInvoicesStep = definePipelineStep("billable-invoices")
+  .inputs({ invoices: erpInvoicesDataset })
+  .output(erpBillableInvoicesDataset)
+  .sql(({ invoices }) => `
+    select *
+    from ${invoices}
+    where status in ('sent', 'paid', 'overdue')
   `)
 
-export const ordersPipeline = definePipeline("orders")
-  .when(datasetUpdated(rawOrdersDataset.id))
-  .then(cleanOrdersStep)
+export const invoiceSummariesStep = definePipelineStep("invoice-summaries")
+  .inputs({ invoices: erpBillableInvoicesDataset })
+  .output(erpInvoiceSummariesDataset)
+  .sql(({ invoices }) => `
+    select id, number, amount, currency, status, customer_id, project_id
+    from ${invoices}
+  `)
+
+export const invoiceReportingPipeline = definePipeline("invoice-reporting")
+  .when(datasetUpdated(erpInvoicesDataset.id))
+  .then(billableInvoicesStep)
+  .then(invoiceSummariesStep)
 ```
 
-This runs when `rawOrdersDataset` gets a new committed version. It reads raw order rows and
-writes cleaner order rows.
+This runs whenever `erpInvoicesDataset` commits a new version. The first step writes billable
+invoices; the second reads that output and writes a trimmed summary.
 
 | Part | Meaning |
 | --- | --- |
-| `definePipelineStep("clean-orders")` | Defines one transform step |
-| `.inputs({ rawOrders })` | Names the datasets the step reads |
-| `.output(ordersDataset)` | Chooses the dataset the step writes |
-| `.sql(...)` / `.run(...)` | Defines the transform |
-| `definePipeline("orders")` | Names the pipeline |
+| `definePipelineStep("billable-invoices")` | Defines one transform step |
+| `.inputs({ invoices })` | Names the datasets the step reads |
+| `.output(dataset)` | The dataset the step writes |
+| `.sql(...)` / `.run(...)` | The transform (terminal — pick one) |
+| `definePipeline("invoice-reporting")` | Names the pipeline |
 | `.when(datasetUpdated(...))` | Trigger that runs the pipeline |
-| `.then(cleanOrdersStep)` | Adds a step to the sequence |
-
-Steps are inert, reusable definitions. A step only runs when a pipeline references it with
-`.then(...)`.
+| `.then(step)` | Appends a step to the sequence |
 
 ## Step builder
 
 `definePipelineStep(id)` chains in a fixed order: `.inputs(...)`, then `.output(...)`, then a
-terminal `.sql(...)` or `.run(...)`. Input keys map to the names you read inside the executor.
+terminal `.sql(...)` or `.run(...)`. Input keys become the names you read inside the executor.
 
 | Method | Purpose |
 | --- | --- |
-| `.inputs(record)` | Named input datasets, e.g. `{ rawOrders: rawOrdersDataset }`. At least one required. |
+| `.inputs(record)` | Named input datasets, e.g. `{ invoices: erpInvoicesDataset }`. At least one required. |
 | `.output(dataset, options?)` | Output dataset and optional write mode. |
-| `.sql(fn)` | SQL transform. `fn` receives the input names as interpolatable refs. |
+| `.sql(fn)` | SQL transform. `fn` receives each input as an interpolatable ref. |
 | `.run(handler)` | TypeScript transform. `handler` receives a run context. |
 
-### Output options
+### Write mode
 
 ```ts
-.output(ordersDataset, { mode: "append" })
+.output(erpInvoiceSummariesDataset, { mode: "append" })
 ```
 
 | `mode` | Behavior |
 | --- | --- |
-| `"snapshot"` (default) | Step writes a full replacement version. |
-| `"append"` | Step appends rows to the output dataset. |
+| `"snapshot"` (default) | Writes a full replacement version. |
+| `"append"` | Appends rows to the output dataset. |
 
 ## SQL steps
 
-Use SQL when the transform can be written as a query — selecting, renaming, filtering, simple
-joins, and aggregations.
+Use SQL when the transform is a query — select, rename, filter, join, aggregate. Each input name
+interpolates into the query as a table reference.
 
 ```ts
-export const activeCustomersStep = definePipelineStep("active-customers")
-  .inputs({ customers: rawCustomersDataset })
-  .output(activeCustomersDataset)
-  .sql(({ customers }) => `
-    select
-      customer_id as id,
-      contact_name as name,
-      service_tier
-    from ${customers}
-    where status = 'active'
+export const overdueInvoicesStep = definePipelineStep("overdue-invoices")
+  .inputs({ invoices: erpInvoicesDataset })
+  .output(erpOverdueInvoicesDataset)
+  .sql(({ invoices }) => `
+    select id, number, amount, currency, customer_id
+    from ${invoices}
+    where status = 'overdue'
   `)
 ```
 
@@ -97,26 +103,25 @@ support. See [connectors](./connectors.md) for storage providers.
 
 ## TypeScript steps
 
-Use a TypeScript step (`.run(...)`) when the transform needs application logic, library calls, or
-row-by-row behavior that does not fit naturally in SQL. The handler receives a context with the
-named `inputs` and an `output`.
+Use `.run(...)` when the transform needs application logic, library calls, or row-by-row work that
+does not fit SQL. The handler receives a context with the named `inputs` and an `output`.
 
 ```ts
-export const cleanCustomersStep = definePipelineStep("clean-customers")
-  .inputs({ rawCustomers: rawCustomersDataset })
-  .output(customersDataset)
-  .run(async ({ inputs, output }) => {
-    async function* rows() {
-      for await (const customer of inputs.rawCustomers.readRows()) {
-        yield {
-          id: customer.customer_id,
-          name: String(customer.contact_name).trim(),
-          tier: customer.service_tier,
-        }
-      }
-    }
+import type { DatasetRow } from "@sixb/core"
 
-    await output.writeRows(rows())
+async function* billable(rows: AsyncIterable<DatasetRow>) {
+  for await (const row of rows) {
+    if (row.status === "sent" || row.status === "paid" || row.status === "overdue") {
+      yield row
+    }
+  }
+}
+
+export const billableInvoicesStep = definePipelineStep("billable-invoices")
+  .inputs({ invoices: erpInvoicesDataset })
+  .output(erpBillableInvoicesDataset)
+  .run(async ({ inputs, output }) => {
+    await output.writeRows(billable(inputs.invoices.readRows()))
   })
 ```
 
@@ -129,49 +134,48 @@ The run context exposes:
 | `projectId`, `pipelineId`, `stepId`, `runId` | `string` | Identifiers for the current run. |
 | `signal` | `AbortSignal` | Aborts when the run is cancelled. |
 
-`input.readRows(input?)` returns an `AsyncIterable` of rows; pass read options to scope the read.
-Start with SQL when you can; use TypeScript when the transform needs code.
+`readRows(input?)` returns an `AsyncIterable` of rows; pass read options to scope the read. Prefer
+SQL when the transform is a query; reach for TypeScript when it needs code.
 
 ## Compose steps
 
-Pipelines run their steps in order. Each step writes its output before the next step runs.
+Steps run in order, and each commits its output before the next runs. A later step can read a
+dataset an earlier step wrote, so chains build progressively richer tables.
 
 ```ts
-export const customerPipeline = definePipeline("customers")
-  .when(datasetUpdated(rawCustomersDataset.id))
-  .then(cleanCustomersStep)
-  .then(customerInsightsStep)
+export const invoiceReportingPipeline = definePipeline("invoice-reporting")
+  .when(datasetUpdated(erpInvoicesDataset.id))
+  .then(billableInvoicesStep)
+  .then(invoiceSummariesStep)
 ```
-
-A step can read a dataset that an earlier step wrote, so chains build progressively richer tables.
 
 ## Triggers
 
-Pass `.when(...)` a [trigger](../schedules/overview.md) or a schedule. Add more than one `.when(...)`
-to run on multiple triggers.
+Pass `.when(...)` a [trigger](../schedules/overview.md) or a [schedule](../schedules/overview.md).
+Add more than one `.when(...)` to run on multiple triggers.
 
 | Trigger | Runs when |
 | --- | --- |
 | `datasetUpdated(datasetId)` | A dataset commits a new version |
-| `syncFinished(syncId)` | A sync run finishes |
-| `pipelineFinished(pipelineId)` | Another pipeline finishes |
+| `syncFinished(syncId)` | A sync run finishes successfully |
+| `pipelineFinished(pipelineId)` | Another pipeline finishes successfully |
 | a [schedule](../schedules/overview.md) | The schedule fires |
 
 ```ts
 import { defineSchedule } from "@sixb/core"
 
-const nightly = defineSchedule("nightly-orders").cron("0 2 * * *")
+const nightly = defineSchedule("nightly-invoices").cron("0 2 * * *")
 
-export const nightlyOrders = definePipeline("orders")
+export const nightlyInvoices = definePipeline("invoice-reporting")
   .when(nightly)
-  .then(cleanOrdersStep)
+  .then(billableInvoicesStep)
 ```
 
 ## Pipeline vs sync
 
 | Need | Use |
 | --- | --- |
-| Read from an external system | [Sync](./syncs.md) |
+| Read from an external system (e.g. the ERP) | [Sync](./syncs.md) |
 | Write raw source rows | [Sync](./syncs.md) |
 | Clean or reshape rows | Pipeline |
 | Join datasets | Pipeline |
@@ -179,55 +183,41 @@ export const nightlyOrders = definePipeline("orders")
 
 A good rule: sync first, shape later.
 
-## Convention and registration
+## Registration
 
-Put pipeline definitions in `pipelines/` and export them.
+`createSixb()` discovers exported pipeline definitions from `pipelines/` automatically.
 
 ```txt
 your-project/
   datasets/
-    orders.ts
+    erp.ts
   syncs/
-    orders.ts
+    erp.ts
   pipelines/
-    orders.ts
+    invoice-reporting.ts
   projections/
-    orders.ts
+    invoices.ts
   sixb.config.ts
 ```
 
-`createSixb()` discovers exported pipeline definitions from `pipelines/` automatically. You can
-also register them explicitly:
+You can also register pipelines explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
-import { ordersDataset, rawOrdersDataset } from "./datasets/orders"
-import { ordersPipeline } from "./pipelines/orders"
+import { erpBillableInvoicesDataset, erpInvoicesDataset } from "./datasets/erp"
+import { invoiceReportingPipeline } from "./pipelines/invoice-reporting"
 
-export const sixb = createSixb({
-  datasets: [rawOrdersDataset, ordersDataset],
-  pipelines: [ordersPipeline],
+export const sixb = await createSixb({
+  datasets: [erpInvoicesDataset, erpBillableInvoicesDataset],
+  pipelines: [invoiceReportingPipeline],
 })
 ```
-
-See [the runtime](../runtime/overview.md) for how `createSixb()` wires everything together.
-
-## How to model pipelines
-
-1. Pick the raw dataset you want to clean.
-2. Define the output dataset.
-3. Create one step that writes that output.
-4. Trigger the pipeline with `datasetUpdated(inputDataset.id)`.
-5. Add more steps only when each step has a clear job.
-
-Good pipeline names describe the data they produce: `orders`, `customers`, `project-reporting`,
-`device-inventory`.
 
 ## Running pipelines
 
 In local development, `sixb dev` co-hosts pipeline workers when pipelines are registered.
 
-In production, start a dedicated pipeline worker process:
+In production, run a dedicated pipeline worker:
 
 ```bash
 sixb worker pipeline
@@ -243,9 +233,14 @@ See [deployment](../deployment/overview.md) for running workers in production.
 
 ## Notes
 
-- Pipeline steps write `snapshot` output by default; use `{ mode: "append" }` when needed.
-- V1 runs pipeline steps sequentially.
-- If a later step fails, earlier committed dataset versions remain durable.
+- Steps write `snapshot` output by default; use `{ mode: "append" }` when you mean to add rows.
+- Pipeline steps run sequentially.
+- If a later step fails, earlier committed dataset versions stay durable.
 
-The important first step is to keep each pipeline focused on turning one table shape into a
-better table shape.
+Keep each pipeline focused on turning one table shape into a better one.
+
+## Next
+
+- [Projections](./projections.md) — map pipeline output rows onto ontology objects
+- [Datasets](./datasets.md) — define the input and output tables
+- [Syncs](./syncs.md) — get raw source rows into Sixb

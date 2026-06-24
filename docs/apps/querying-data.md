@@ -1,56 +1,55 @@
 # Querying Data in Apps
 
 The recommended way to read objects in an app is the **typed query builder**. Import your
-ontology object types, build a query with `objects(Type).query()`, and feed it to a React
-hook from `@sixb/client/hooks`. Property names and predicate values are checked at compile
-time, and result rows are fully typed.
+ontology object types, build a query with `objects(Type).query()`, and feed it to a React hook
+from `@sixb/client/hooks`. Property names and predicate values are checked at compile time, and
+result rows are fully typed.
 
-For the full query language (predicates, search, traversal, facets, paging), see
-[Querying Objects](../objects/querying.md). For the client transport and provider setup, see
+For the full query language (predicates, search, traversal, facets, paging) see
+[Querying Objects](../objects/querying.md). For client transport and provider setup see
 [Client](../client/overview.md) and [Typed Queries](../client/typed-queries.md).
 
 ## Typed Queries With Hooks
 
-Build a query with `objects(Type).query()` from `@sixb/client/query`, then pass it to a
-hook. The query is a plain value, so you can declare it at module scope and refine it at the
-call site.
+Build a query with `objects(Type).query()` from `@sixb/client/query`, then pass it to a hook. The
+query is a plain value, so you can declare it at module scope and refine it at the call site.
 
 ```tsx
 import { useObjectsFacets, useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
 import type { TwinObject } from "@sixb/core/query"
 import { useState } from "react"
-import { Project } from "../../ontology/project"
+import { Invoice } from "../../ontology/invoice"
 
-type ProjectRow = TwinObject<typeof Project, readonly []>
-type ProjectStatus = "draft" | "active" | "paused" | "completed" | "cancelled"
+type InvoiceRow = TwinObject<typeof Invoice, readonly []>
+type InvoiceStatus = "draft" | "sent" | "paid" | "overdue" | "cancelled"
 
-const allProjects = objects(Project).query().orderBy(Project.p.deadline, "asc")
+const allInvoices = objects(Invoice).query().orderBy(Invoice.p.dueDate, "asc")
 
-export default function ProjectsPage() {
-  const [statusFilter, setStatusFilter] = useState<ProjectStatus | null>(null)
+export default function InvoicesPage() {
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | null>(null)
 
-  const projectsQuery = useObjectsQuery(
+  const invoicesQuery = useObjectsQuery(
     statusFilter
-      ? allProjects.where((project) => project.p.status.eq(statusFilter))
-      : allProjects.where((project) => project.p.status.in(["active", "paused"]))
+      ? allInvoices.where((invoice) => invoice.p.status.eq(statusFilter))
+      : allInvoices.where((invoice) => invoice.p.status.in(["sent", "overdue"]))
   )
 
-  const statusFacets = useObjectsFacets(objects(Project).query(), [
-    { property: Project.p.status, limit: 10 },
+  const statusFacets = useObjectsFacets(objects(Invoice).query(), [
+    { property: Invoice.p.status, limit: 10 },
   ])
 
-  const projects = projectsQuery.data?.objects ?? []
+  const invoices = invoicesQuery.data?.objects ?? []
   const buckets = statusFacets.data?.[0]?.buckets ?? []
 
-  if (projectsQuery.isLoading) return <p>Loading projects...</p>
-  if (projectsQuery.isError) return <p>Projects failed to load.</p>
+  if (invoicesQuery.isLoading) return <p>Loading invoices...</p>
+  if (invoicesQuery.isError) return <p>Invoices failed to load.</p>
 
   return (
     <main>
       <ul>
         {buckets.map((bucket) => {
-          const status = String(bucket.value) as ProjectStatus
+          const status = String(bucket.value) as InvoiceStatus
           return (
             <li key={status}>
               <button type="button" onClick={() => setStatusFilter(status)}>
@@ -60,10 +59,10 @@ export default function ProjectsPage() {
           )
         })}
       </ul>
-      {projects.map((project: ProjectRow) => (
-        <article key={project.primaryId}>
-          <h2>{project.properties.name}</h2>
-          <p>{project.properties.status}</p>
+      {invoices.map((invoice: InvoiceRow) => (
+        <article key={invoice.primaryId}>
+          <h2>{invoice.properties.number}</h2>
+          <p>{invoice.properties.status}</p>
         </article>
       ))}
     </main>
@@ -71,18 +70,19 @@ export default function ProjectsPage() {
 }
 ```
 
-Rows are `TwinObject` values: each has `primaryId`, `objectTypeId`, `properties`,
-`createdAt`, and `updatedAt`. The `properties` shape is inferred from the object type, so
-`project.properties.name` and `project.properties.status` are typed — no string keys, no
-casts.
+Rows are `TwinObject` values: each has `primaryId`, `objectTypeId`, `properties`, `createdAt`, and
+`updatedAt`. The `properties` shape is inferred from the object type, so `invoice.properties.number`
+and `invoice.properties.status` are typed — no string keys, no casts.
 
-Hooks key the cache on the normalized query IR, so identical queries share cache entries and
-inline builders are safe to construct on every render.
+Hooks key the cache on the normalized query IR, so identical queries share cache entries and inline
+builders are safe to construct on every render.
 
 ## App Hooks
 
-All hooks accept a built query (anything carrying a normalized `.ir`) and an optional second
-argument for common TanStack options such as `enabled`, `staleTime`, and `refetchInterval`.
+Each hook accepts a built query (anything carrying a normalized `.ir`). The list/count/exists/facets
+hooks take an optional second argument for common TanStack options such as `enabled`, `staleTime`,
+`gcTime`, and `refetchInterval`. `useObjectsInfinite` instead takes a required second argument
+carrying `pageSize` (those same TanStack options are also accepted there).
 
 | Hook | Returns | Use for |
 | --- | --- | --- |
@@ -92,53 +92,52 @@ argument for common TanStack options such as `enabled`, `staleTime`, and `refetc
 | `useObjectsFacets(query, facets, opts?)` | `ObjectQueryFacetResult[]` | Bucket counts grouped by a property. |
 | `useObjectsInfinite(query, { pageSize })` | TanStack infinite pages | Cursor-paged infinite scroll. |
 
-`useObjectsFacets` takes facet requests as `{ property: Project.p.status, limit: 10 }`. The
-property must declare `query.searchable: true` and `query.facet: true` in the ontology.
+`useObjectsFacets` takes facet requests as `{ property: Invoice.p.status, limit: 10 }`. The property
+must declare `query.facet: true` in the ontology (`Invoice.status` does; `Invoice.amount` does not).
 
 `useObjectsInfinite` pages through results with `nextPageToken` and skips the count query:
 
 ```tsx
 import { useObjectsInfinite } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Project } from "../../ontology/project"
+import { Invoice } from "../../ontology/invoice"
 
 const { data, fetchNextPage, hasNextPage } = useObjectsInfinite(
-  objects(Project).query().search("dashboard"),
+  objects(Invoice).query().search("ACME-2026"),
   { pageSize: 50 }
 )
 ```
 
-Shared queries live in a module and are refined per call site:
+Define shared queries in a module and refine them per call site:
 
 ```tsx
-// queries/projects.ts
-export const openProjects = objects(Project)
+// queries/invoices.ts
+export const openInvoices = objects(Invoice)
   .query()
-  .where((project) => project.p.status.in(["active", "paused"]))
-  .orderBy(Project.p.deadline, "asc")
+  .where((invoice) => invoice.p.status.in(["sent", "overdue"]))
+  .orderBy(Invoice.p.dueDate, "asc")
 
 // component
-const { data } = useObjectsQuery(openProjects.limit(50))
-const { data: openCount } = useObjectsCount(openProjects)
+const { data } = useObjectsQuery(openInvoices.limit(50))
+const { data: openCount } = useObjectsCount(openInvoices)
 ```
 
-For router loaders, prefetching, or full TanStack control, use the
-`objectQueryOptions`, `objectQueryCountOptions`, `objectQueryExistsOptions`,
-`objectQueryFacetsOptions`, and `objectQueryInfiniteOptions` factories with `useQuery` or
-`queryClient.prefetchQuery`.
+For router loaders, prefetching, or full TanStack control, use the `objectQueryOptions`,
+`objectQueryCountOptions`, `objectQueryExistsOptions`, `objectQueryFacetsOptions`, and
+`objectQueryInfiniteOptions` factories with `useQuery` or `queryClient.prefetchQuery`.
 
 ## Importing Ontology Types
 
-Ontology files that browser code imports must define their types via the browser-safe
-entrypoint `@sixb/core/ontology`, not the `@sixb/core` root — the root pulls server runtime
-modules into the bundle.
+Ontology files that browser code imports must define their types via the browser-safe entrypoint
+`@sixb/core/ontology`, not the `@sixb/core` root — the root pulls server runtime modules into the
+bundle.
 
 ```ts
-// ontology/project.ts
+// ontology/invoice.ts
 import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
 ```
 
-`TwinObject` and other query types come from `@sixb/core/query`, which is also browser-safe.
+`TwinObject` and the other query types come from `@sixb/core/query`, which is also browser-safe.
 
 ## Typed vs Untyped
 
@@ -155,8 +154,8 @@ Two read paths are available. Prefer the **typed** builder for app screens.
 | Paging | Offset-based | Cursor-based (`useObjectsInfinite`) |
 | Best for | Quick generic browsing | Real app screens |
 
-The untyped path is the documented escape hatch — useful when you only know an
-`objectTypeId` string and want a generic list, with no compile-time property typing:
+The untyped path is the documented escape hatch — useful when you only know an `objectTypeId`
+string and want a generic list, with no compile-time property typing:
 
 ```tsx
 import { listObjectsOptions } from "@sixb/client/hooks"
@@ -164,7 +163,7 @@ import { useQuery } from "@tanstack/react-query"
 
 const query = useQuery(
   listObjectsOptions({
-    query: { objectTypeId: "Project", limit: "50" },
+    query: { objectTypeId: "Invoice", limit: "50" },
   })
 )
 
@@ -172,8 +171,8 @@ const query = useQuery(
 query.data?.map((object) => object.primaryId)
 ```
 
-For everything else — filtering, search, facets, link traversal, paging, and typed rows —
-use the typed builder.
+For everything else — filtering, search, facets, link traversal, paging, and typed rows — use the
+typed builder.
 
 ## Related
 
