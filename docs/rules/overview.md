@@ -6,9 +6,9 @@ Use rules for statements like "a posted transaction must have a document" or "a 
 should have an owner."
 
 A rule does not fetch data, transform rows, or run a process by itself. It names the condition,
-watches object and link changes, and emits a transition when the condition starts or clears.
+watches object and link changes, and signals when the condition starts or clears.
 
-## Why it is useful
+## Why rules are useful
 
 Business software usually has conditions people care about:
 
@@ -17,8 +17,8 @@ Business software usually has conditions people care about:
 - customers that need an account manager
 - transactions that are missing a source document
 
-Rules give those conditions one typed place to live. Apps, alerts, and workflows can then react
-to the same definition.
+Rules give those conditions one typed place to live. Apps, alerts, and [workflows](../workflows/overview.md)
+can then react to the same definition.
 
 Write the rule as the state where the object needs attention.
 
@@ -35,20 +35,21 @@ export const transactionRequiresDocument = defineRule("transaction.requires-docu
   .where((tx) => tx.l.document.isMissing())
 ```
 
-This rule is triggered when a `Transaction` does not have a `document` link.
-
-## What each part does
+This rule matches when a `Transaction` does not have a `document` link.
 
 | Part | Meaning |
 | --- | --- |
-| `defineRule("transaction.requires-document")` | Names the rule |
-| `.on(Transaction)` | Chooses the object type the rule watches |
-| `.where(...)` | Describes when the rule should be triggered |
+| `defineRule("transaction.requires-document")` | Names the rule with a unique id |
+| `.on(Transaction)` | The [object type](../ontology/object-types.md) the rule watches |
+| `.where(...)` | Describes when the rule matches |
 | `tx.l.document.isMissing()` | Checks that the `document` link does not exist |
+
+The `.where(...)` callback receives a typed subject built from the object type. Its `p` and `l`
+keys are the object type's property and [link](../ontology/links.md) ids.
 
 ## Property conditions
 
-Use `p` for object properties.
+Use `p` for object [properties](../ontology/properties.md).
 
 ```ts
 import { defineRule } from "@sixb/core"
@@ -64,7 +65,7 @@ export const invoiceCollectionRisk = defineRule("invoice.collection-risk")
   )
 ```
 
-This rule is triggered when an invoice is overdue, or when a sent invoice has a large amount.
+This rule matches when an invoice is overdue, or when a sent invoice has a large amount.
 
 ## Link conditions
 
@@ -79,7 +80,7 @@ export const customerNeedsOwner = defineRule("customer.needs-owner")
   .where((customer) => customer.l.accountManager.isMissing())
 ```
 
-This rule is triggered when a `Customer` does not have an `accountManager` link.
+This rule matches when a `Customer` does not have an `accountManager` link.
 
 ## Compose conditions
 
@@ -100,7 +101,7 @@ export const taskCriticalUnassigned = defineRule("task.critical-unassigned")
   )
 ```
 
-This rule is triggered when a task is critical, not done, and missing an assignee.
+This rule matches when a task is critical, not done, and missing an assignee.
 
 ## Predicates
 
@@ -108,11 +109,13 @@ This rule is triggered when a task is critical, not done, and missing an assigne
 | --- | --- |
 | Equal or not equal | `eq(value)`, `notEq(value)` |
 | Compare numbers | `gt(value)`, `gte(value)`, `lt(value)`, `lte(value)` |
-| Check a property value | `isPresent()`, `isMissing()` |
+| Check a property exists | `isPresent()`, `isMissing()` |
 | Check a link | `exists()`, `isMissing()` |
 | Combine conditions | `all(...)`, `any(...)`, `not(...)` |
 
-Predicate values can be strings, numbers, booleans, or `null`.
+Predicate values can be strings, numbers, booleans, or `null`. The comparison predicates
+(`gt`, `gte`, `lt`, `lte`) take a number. Property `isPresent` / `isMissing` and the link
+predicates take no value.
 
 ## Rule vs workflow
 
@@ -122,11 +125,11 @@ Rules and workflows solve different problems.
 | --- | --- |
 | Know whether an object needs attention | Rule |
 | Emit a triggered or resolved signal | Rule |
-| Run a multi-step process | Workflow |
-| Fetch source data | Sync |
-| Clean or join table data | Pipeline |
+| Run a multi-step process | [Workflow](../workflows/overview.md) |
+| Fetch source data | [Sync](../data/syncs.md) |
+| Clean or join table data | [Pipeline](../data/pipelines.md) |
 
-A good rule: rules decide if something is true; workflows decide what to do next.
+A good split: rules decide if something is true; workflows decide what to do next.
 
 ## Convention
 
@@ -141,7 +144,8 @@ your-project/
   sixb.config.ts
 ```
 
-`createSixb()` discovers exported rule definitions from `rules/` automatically.
+`createSixb()` discovers exported rule definitions from `rules/` automatically. See
+[Project structure](../fundamentals/project-structure.md) for the full convention layout.
 
 You can also register rules explicitly:
 
@@ -181,18 +185,28 @@ When a rule starts matching an object, it is triggered. When the object no longe
 resolved.
 
 That gives the rest of your app a stable signal to show attention states, send notifications, or
-start follow-up work.
+start follow-up [workflows](../workflows/overview.md).
 
-## Extra details
+## Details
 
-- rule ids must be unique.
-- rules are scoped to one ontology object type.
-- predicates are validated against the registered ontology at startup.
-- empty `all()` and `any()` groups are rejected.
-- the `.where(...)` callback creates serializable rule data; the callback is not stored.
-- rule evaluation reacts to object and link changes after the worker starts.
-- active rule state is stored in `storage.rules`, which prevents duplicate triggers.
-- registered rules can be inspected with `sixb.getRuleDefinitions()` and `sixb.getRuleById(...)`.
+- Rule ids must be unique.
+- Rules are scoped to one ontology object type.
+- Predicates are validated against the registered ontology at startup; unknown properties or
+  links and empty `all()` / `any()` groups are rejected.
+- The `.where(...)` callback produces serializable predicate data. The callback itself is not
+  stored.
+- Rule evaluation reacts to `object.upserted` for the subject type, plus `link.upserted` and
+  `link.removed` for any links referenced in the predicate.
+- Active rule state is stored in `storage.rules`, which prevents duplicate triggers.
+- Registered rules can be inspected at runtime with `sixb.getRuleDefinitions()` and
+  `sixb.getRuleById(ruleId)`.
 
 The important first step is to describe the business condition clearly before writing the
 predicate.
+
+## Related
+
+- [Workflows](../workflows/overview.md) — run a multi-step process in response to a signal
+- [Interventions](../workflows/interventions.md) — human-in-the-loop steps
+- [Events](../events/overview.md) — the domain events rules react to
+- [Object types](../ontology/object-types.md) and [Links](../ontology/links.md)

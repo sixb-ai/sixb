@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate:docs": "bun ./src/docs/buildDocs.ts",
+    "generate:docs": "bun ./src/docs/buildDocs.ts && bun ./src/docs/buildSnippets.ts",
     "clean:dist": "bun ./src/docs/cleanDist.ts",
     "copy:docs": "bun ./src/docs/writeStaticDocs.ts",
+    "generate:ai": "bun ./src/docs/writeAiFiles.ts",
     "build:css": "bun ./src/buildCss.ts",
     "dev": "NODE_ENV=development bun run generate:docs && bun run build:css && bun ./src/dev.ts",
-    "build": "NODE_ENV=production bun run generate:docs && bun run clean:dist && bun run build:css && bun build ./index.html --outdir ./dist --target browser --public-path / --minify && bun run copy:docs",
+    "build": "NODE_ENV=production bun run generate:docs && bun run clean:dist && bun run build:css && bun build ./index.html --outdir ./dist --target browser --public-path / --minify && bun run copy:docs && bun run generate:ai",
     "typecheck": "bun run generate:docs && tsc --noEmit"
   },
   "dependencies": {

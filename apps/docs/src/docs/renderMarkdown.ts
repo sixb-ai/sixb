@@ -7,6 +7,47 @@ const localMarkdownLinkPattern = /href="([^"]+\.md)"/g
 const headingPattern = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h\1>/g
 const firstParagraphPattern = /<p>([\s\S]*?)<\/p>/
 
+// A single-file "File: `path`" paragraph immediately before a code block is
+// hoisted into that block's header bar (after the language badge).
+const fileLabelPattern =
+  /<p>Files?:\s*<code>([^<]+)<\/code><\/p>\s*(<figure class="code-block"><figcaption class="code-bar"><span class="code-bar-left"><span class="code-badge">[^<]*<\/span>)/g
+
+const langBadges: Record<string, string> = {
+  ts: "TS",
+  tsx: "TSX",
+  js: "JS",
+  jsx: "JSX",
+  json: "JSON",
+  bash: "BASH",
+  sh: "SH",
+  shell: "SH",
+  text: "TXT",
+  txt: "TXT",
+  css: "CSS",
+  html: "HTML",
+  md: "MD",
+  sql: "SQL",
+  yaml: "YAML",
+  yml: "YAML",
+}
+
+const copyIconMarkup =
+  '<svg class="code-copy-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>'
+
+const checkIconMarkup =
+  '<svg class="code-copy-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>'
+
+function badgeLabel(lang: string): string {
+  return langBadges[lang.toLowerCase()] ?? lang.toUpperCase().slice(0, 4)
+}
+
+function hoistFileLabels(html: string): string {
+  return html.replace(
+    fileLabelPattern,
+    (_match, file: string, barStart: string) => `${barStart}<span class="code-file">${file}</span>`
+  )
+}
+
 export interface RenderedDoc {
   readonly html: string
   readonly summary: string
@@ -33,7 +74,7 @@ export async function renderHighlightedMarkdown(
 ): Promise<RenderedDoc> {
   const linked = rewriteLocalMarkdownLinks(renderMarkdown(markdown), options)
   return {
-    html: await highlightCodeBlocks(linked),
+    html: hoistFileLabels(await highlightCodeBlocks(linked)),
     summary: extractSummary(linked),
     headings: extractHeadings(linked),
   }
@@ -52,7 +93,7 @@ async function highlightCodeBlocks(html: string): Promise<string> {
       themes: { light: "github-light", dark: "github-dark" },
     })
     parts.push(
-      `<figure class="code-block"><figcaption class="code-bar"><span class="code-lang">${lang}</span><button class="code-copy" type="button" data-copy aria-label="Copy code">Copy</button></figcaption>${code}</figure>`
+      `<figure class="code-block"><figcaption class="code-bar"><span class="code-bar-left"><span class="code-badge">${badgeLabel(lang)}</span></span><button class="code-copy" type="button" data-copy aria-label="Copy code">${copyIconMarkup}${checkIconMarkup}</button></figcaption>${code}</figure>`
     )
     lastIndex = index + match[0].length
   }

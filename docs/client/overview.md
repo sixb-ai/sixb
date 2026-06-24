@@ -1,0 +1,204 @@
+# Client SDK
+
+`@sixb/client` is the type-safe SDK for talking to a sixb server from the
+browser (or any TypeScript runtime). It is generated from the server's OpenAPI
+schema, so every route, request body, and response is typed end to end.
+
+The package ships as a set of focused subpaths. You import only the layer you
+need: the raw generated SDK, a typed object-query builder, TanStack Query
+hooks, a live WebSocket events hook, or the browser auth bootstrap.
+
+## Mental model
+
+Every subpath ultimately calls the same shared transport: a single generated
+`client` instance (a [hey-api](https://heyapi.dev) fetch client). You configure
+it once — base URL, credentials, auth interceptors — and all SDK calls,
+query builders, hooks, and the events WebSocket inherit that configuration.
+
+```ts
+import { client } from "@sixb/client"
+
+client.setConfig({
+  baseUrl: "https://api.example.com",
+  credentials: "include",
+})
+```
+
+In a sixb-served app (`app/` directory), this is done for you: the runtime
+injects config via [`/browser`](#browser-auth-bootstrap) and wraps your pages
+in a `QueryClientProvider`. You write pages with the [`/hooks`](#hooks-tanstack-query)
+layer and never touch the transport directly. In a standalone app, you
+configure `client` yourself and optionally wrap your tree in `SixbProvider`.
+
+## Subpath map
+
+| Import | What it gives you |
+| --- | --- |
+| `@sixb/client` | Generated per-route SDK functions, the shared `client`, and the UI models from `/models` |
+| `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
+| `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
+| `@sixb/client/events` | `SixbEvent` types and the `isSixbEvent` guard |
+| `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
+| `@sixb/client/models` | `encode/decodeObjectId`, `executeAction`, UI shape mappers |
+
+> `@sixb/client/hooks` re-exports `@sixb/client/events` and the typed-query
+> hooks, so a React app usually only imports from `/hooks`.
+
+## Root: generated SDK
+
+The root export is the generated SDK: one function per server route, each fully
+typed against its request and response schema. This is the lowest-level,
+framework-agnostic way to call the API.
+
+```ts
+import { listObjects, getObject } from "@sixb/client"
+
+const { data } = await listObjects({
+  query: { objectTypeId: "television", limit: "50" },
+  throwOnError: true,
+})
+```
+
+Every SDK function accepts the standard hey-api options (`path`, `query`,
+`body`, `throwOnError`, `responseStyle`, and a per-call `client` override). The
+shared `client` is also exported here for configuration.
+
+## /query: typed object queries
+
+`@sixb/client/query` exposes `objects(Type).query()` — the same fluent query
+builder the server runtime uses, wired to the object-query routes through the
+generated SDK. Queries are validated server-side; failures throw `SixbQueryError`
+carrying the validation `issues`.
+
+```ts
+import { objects } from "@sixb/client/query"
+import { Television } from "./ontology/television"
+
+const result = await objects(Television)
+  .query()
+  .where((tv) => tv.p.status.eq("online"))
+  .list()
+```
+
+This is the direct, hook-free path. For caching and React integration, the
+`/hooks` layer wraps the same builder. See
+[typed queries](typed-queries.md) for the full builder reference.
+
+## /hooks: TanStack Query
+
+`@sixb/client/hooks` is the React layer. It provides two kinds of API:
+
+- `*Options` factories (e.g. `listObjectsOptions`, `objectQueryOptions`) that
+  return TanStack Query option objects for prefetching, loaders, and SSR.
+- `use*` hooks (e.g. `useObjectsQuery`, `useObjectsInfinite`,
+  `useTelemetryHistoryQuery`) for components.
+
+```tsx
+import { listObjectsOptions } from "@sixb/client/hooks"
+import { useQuery } from "@tanstack/react-query"
+
+function Devices() {
+  const { data } = useQuery(
+    listObjectsOptions({ query: { objectTypeId: "television", limit: "200" } })
+  )
+  return <ul>{data?.map((o) => <li key={o.id}>{o.name}</li>)}</ul>
+}
+```
+
+`SixbProvider` binds a specific `client` to the React tree so hooks and query
+builders execute through it; without it, they fall back to the global `client`.
+
+```tsx
+import { SixbProvider } from "@sixb/client/hooks"
+
+<SixbProvider client={client}>{children}</SixbProvider>
+```
+
+For typed-query hooks (`useObjectsQuery` and friends), see
+[querying data](../apps/querying-data.md).
+
+## /events: live WebSocket
+
+`@sixb/client/events` carries the `SixbEvent` union types and the `isSixbEvent`
+guard. The `useSixbEvents` hook (re-exported from `/hooks`) opens a WebSocket to
+`/ws/events`, subscribes by `topic` and/or `types`, and reconnects on drop.
+
+```tsx
+import { useSixbEvents } from "@sixb/client/hooks"
+
+const { connected } = useSixbEvents({
+  topic: "telemetry",
+  types: ["telemetry.appended"],
+  onEvent(event) {
+    // event is narrowed to telemetry.appended
+  },
+})
+```
+
+The subscription type is narrowed from `topic` and `types`. See the
+[events](../events/overview.md) section for the full topic and type catalog.
+
+## /browser: auth bootstrap
+
+`@sixb/client/browser` wires the transport for browser use: it reads runtime
+config handed off via `window.__SIXB_RUNTIME__`, configures the shared `client`
+with `credentials: "include"`, installs a CSRF request interceptor, and resolves
+the auth session.
+
+| Function | Purpose |
+| --- | --- |
+| `readSixbBrowserRuntimeConfig(defaults)` | Read `__SIXB_RUNTIME__` (or defaults) into a config object |
+| `configureSixbBrowserClient(config)` | Set base URL + credentials, install the CSRF interceptor; returns a controller |
+| `requireSixbBrowserAuthSession(config, controller)` | Fetch the session, set the CSRF token, or redirect to sign-in |
+| `renderSixbBrowserRuntimeScript(config)` | Server-side: emit the `<script>window.__SIXB_RUNTIME__ = …</script>` handoff |
+| `createSixbSignInUrl(config, returnTo)` | Build the `/auth/sign-in` redirect URL |
+
+The controller exposes `setCsrfToken`, `getCsrfToken`, and `dispose`. CSRF
+tokens are attached via the `x-sixb-csrf` header on non-`GET`/`HEAD`/`OPTIONS`
+requests. In a sixb-served app this runs automatically; reach for `/browser`
+only when bootstrapping a standalone browser client. See
+[authentication](../auth/authentication.md).
+
+## /models: ids and actions
+
+`@sixb/client/models` holds object-id codecs, the action helper, and the UI
+shape mappers used by the built-in UI.
+
+| Export | Purpose |
+| --- | --- |
+| `encodeObjectId(typeId, primaryId)` | Encode a `typeId~primaryId` opaque object id |
+| `decodeObjectId(id)` | Decode it back to `{ objectTypeId, primaryId }` or `null` |
+| `executeAction({ path, body })` | Request an action on an object by encoded id |
+| `executeGlobalAction({ path, body })` | Request a project-level (non-object) action |
+
+```ts
+import { encodeObjectId, executeAction } from "@sixb/client/models"
+
+const id = encodeObjectId("television", "tv-42")
+const { data } = await executeAction({
+  path: { objectId: id, actionId: "powerOn" },
+  body: { params: {} },
+})
+```
+
+Object ids are encoded as `encodeURIComponent(typeId)~encodeURIComponent(primaryId)`,
+so they are safe to pass through URLs and route params.
+
+## Which subpath to use
+
+| Goal | Use |
+| --- | --- |
+| One-off API call, no React | root SDK function (`@sixb/client`) |
+| Typed object query, no React | `@sixb/client/query` |
+| React component reading data | `@sixb/client/hooks` |
+| Live updates in React | `useSixbEvents` (`@sixb/client/hooks`) |
+| Bootstrap a standalone browser client | `@sixb/client/browser` |
+| Encode/decode ids or fire actions | `@sixb/client/models` |
+
+## Related
+
+- [Typed queries](typed-queries.md) — the object-query builder reference
+- [Querying data in apps](../apps/querying-data.md) — hooks in practice
+- [Events](../events/overview.md) — topics and event types
+- [Authentication](../auth/authentication.md) — sessions and CSRF
+- [Building apps](../apps/overview.md) — the sixb-served app model
