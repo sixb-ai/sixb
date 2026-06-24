@@ -223,11 +223,67 @@ describe("access token management routes", () => {
       jsonRequest("/api/auth/service-accounts/svc_agents/disable", "POST", session.headers)
     )
     expect(disableResponse.status).toBe(200)
+    // Disabling preserves fields the request did not touch (e.g. description).
     await expect(disableResponse.json()).resolves.toMatchObject({
-      serviceAccount: { id: "svc_agents", status: "suspended" },
+      serviceAccount: { id: "svc_agents", status: "suspended", description: "Sandbox agents" },
     })
     await expect(
       storage.auth.serviceAccounts.getById({ projectId, id: "svc_agents" })
-    ).resolves.toMatchObject({ status: "suspended" })
+    ).resolves.toMatchObject({ status: "suspended", description: "Sandbox agents" })
+  })
+
+  test("hides and refuses management of service accounts the caller cannot fully govern", async () => {
+    const { app, storage } = createRuntime()
+    const session = await seedSession(storage)
+
+    // A privileged service account in a group the caller (usr_1 in "agents")
+    // does not belong to — e.g. one an admin created for privileged automation.
+    await storage.auth.serviceAccounts.create({
+      id: "svc_admin",
+      projectId,
+      name: "Admin worker",
+    })
+    await storage.auth.serviceAccountGroupMemberships.upsert({
+      projectId,
+      serviceAccountId: "svc_admin",
+      groupId: "admins",
+      source: "manual",
+    })
+
+    // The privileged account is invisible in the catalog.
+    const listResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts", "GET", session.headers)
+    )
+    expect(listResponse.status).toBe(200)
+    const listed = (await listResponse.json()) as {
+      serviceAccounts: readonly { readonly id: string }[]
+    }
+    expect(listed.serviceAccounts.map((account) => account.id)).not.toContain("svc_admin")
+
+    // Minting a token for it (the escalation vector) is refused as not-found.
+    const mintResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_admin/access-tokens", "POST", session.headers, {
+        name: "Escalated",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        groupIds: ["admins"],
+      })
+    )
+    expect(mintResponse.status).toBe(404)
+
+    // Listing its tokens and disabling it are likewise refused.
+    const listTokensResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_admin/access-tokens", "GET", session.headers)
+    )
+    expect(listTokensResponse.status).toBe(404)
+
+    const disableResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_admin/disable", "POST", session.headers)
+    )
+    expect(disableResponse.status).toBe(404)
+
+    // The privileged account remains active and untouched.
+    await expect(
+      storage.auth.serviceAccounts.getById({ projectId, id: "svc_admin" })
+    ).resolves.toMatchObject({ status: "active" })
   })
 })

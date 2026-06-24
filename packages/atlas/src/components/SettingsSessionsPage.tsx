@@ -8,49 +8,22 @@ import {
 import { Badge, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, Loader2, LogOut, MonitorSmartphone, RefreshCw } from "lucide-react"
+import { AlertCircle, LogOut, MonitorSmartphone, RefreshCw } from "lucide-react"
 import { useState } from "react"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
+import { apiErrorMessage, LoadingSpinner } from "./SettingsAccessControls"
 import { SettingsTabs } from "./SettingsTabs"
 
 type AuthSession = ListAuthSessionsResponse["sessions"][number]
 
-function LoadingSpinner({
-  className,
-  size = "md",
-  text,
-}: {
-  readonly className?: string
-  readonly size?: "sm" | "md"
-  readonly text?: string
-}) {
-  const spinner = (
-    <Loader2 className={cn(size === "sm" ? "h-4 w-4" : "h-5 w-5", "animate-spin", className)} />
-  )
-
-  if (!text) {
-    return spinner
-  }
-
-  return (
-    <div className="flex items-center gap-3 text-muted-foreground">
-      {spinner}
-      <span className="text-sm">{text}</span>
-    </div>
-  )
-}
-
-function apiErrorMessage(error: unknown, fallback: string): string {
-  if (error && typeof error === "object") {
-    if ("error" in error && typeof error.error === "string") return error.error
-    if ("message" in error && typeof error.message === "string") return error.message
-  }
-  return fallback
-}
-
 // Best-effort, human-readable label from a raw user-agent string. The stored
 // value is untrusted and only used for display.
+//
+// Distinct from the shared `describeClient`: that one identifies token clients
+// (CLIs, curl, CI) first and returns `undefined` for anything it can't place,
+// whereas auth sessions are always browsers, so this always yields a concrete
+// label and falls back to "Browser"/"Unknown OS" rather than nothing.
 function describeDevice(userAgent?: string): string {
   if (!userAgent) return "Unknown device"
   const browser = /Edg\//.test(userAgent)

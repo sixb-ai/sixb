@@ -13,6 +13,7 @@ import {
   AuthStorageError,
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
+  type ServiceAccountRecord,
 } from "../storage/auth"
 import { paginate } from "../storage/pagination"
 import {
@@ -39,8 +40,11 @@ import type {
   CreateAccessTokenResult,
   CreatePersonalAccessTokenInput,
   CreateServiceAccountAccessTokenInput,
+  CreateServiceAccountAccessTokenResult,
   CreateServiceAccountInput,
   CreateServiceAccountResult,
+  DisableServiceAccountInput,
+  DisableServiceAccountResult,
   GetInvitationOptionsResult,
   InvitationDeliveryAuthStrategy,
   InvitationRecipientStatus,
@@ -51,12 +55,18 @@ import type {
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
+  ListPersonalAccessTokensResult,
+  ListServiceAccountAccessTokensInput,
+  ListServiceAccountAccessTokensResult,
+  ListServiceAccountsResult,
   Principal,
   ResolvedAuthConfig,
-  RevokeAccessTokenInput,
   RevokeAccessTokenResult,
   RevokeInvitationInput,
   RevokeInvitationResult,
+  RevokePersonalAccessTokenInput,
+  RevokeServiceAccountAccessTokenInput,
+  RevokeServiceAccountAccessTokenResult,
   SecurityContext,
   SixbAuthConfig,
 } from "./types"
@@ -494,6 +504,25 @@ export class AuthRuntime {
     })
   }
 
+  async listPersonalAccessTokens(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<ListPersonalAccessTokensResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const result = await storage.accessTokens.list({
+      projectId: this.projectId,
+      kind: "personal",
+      subjectType: "user",
+      subjectId: session.user.id,
+      includeRevoked: true,
+      order: "desc",
+      limit: 100,
+    })
+
+    return { accessTokens: result.accessTokens }
+  }
+
   async createPersonalAccessToken(
     request: Request,
     input: CreatePersonalAccessTokenInput,
@@ -501,6 +530,10 @@ export class AuthRuntime {
   ): Promise<CreateAccessTokenResult> {
     const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
+    // A personal token can only carry groups the caller currently belongs to.
+    const groupIds = constrainRequestedGroupIds(input.groupIds, session.groupIds, {
+      subject: "personal access token",
+    })
     const credential = createAccessTokenCredential("personal")
     const accessToken = await storage.accessTokens.create({
       id: credential.tokenId,
@@ -510,7 +543,7 @@ export class AuthRuntime {
       subjectType: "user",
       subjectId: session.user.id,
       tokenHash: credential.tokenHash,
-      groupIds: input.groupIds,
+      groupIds,
       createdByPrincipal: session.principal,
       createdBySessionId: session.session.id,
       createdAt: new Date(),
@@ -520,6 +553,64 @@ export class AuthRuntime {
     return { accessToken, tokenValue: credential.tokenValue }
   }
 
+  async revokePersonalAccessToken(
+    request: Request,
+    input: RevokePersonalAccessTokenInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<RevokeAccessTokenResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const token = await storage.accessTokens.getById({
+      projectId: this.projectId,
+      id: input.tokenId,
+    })
+    // Personal tokens are self-service only. A foreign or missing token id is
+    // reported identically so callers cannot probe other principals' tokens.
+    if (
+      !token ||
+      token.kind !== "personal" ||
+      token.subjectType !== "user" ||
+      token.subjectId !== session.user.id
+    ) {
+      throw missingAccessTokenError(input.tokenId, this.projectId)
+    }
+
+    const accessToken = await storage.accessTokens.revoke({
+      projectId: this.projectId,
+      id: input.tokenId,
+      revokedAt: new Date(),
+    })
+
+    return { accessToken }
+  }
+
+  async listServiceAccounts(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<ListServiceAccountsResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const result = await storage.serviceAccounts.list({
+      projectId: this.projectId,
+      order: "desc",
+      limit: 100,
+    })
+    const withGroups = await Promise.all(
+      result.serviceAccounts.map(async (serviceAccount) => ({
+        serviceAccount,
+        groupIds: await this.listServiceAccountGroupIds(storage, serviceAccount.id),
+      }))
+    )
+
+    // A caller only sees the service accounts it is allowed to manage, so
+    // listing never leaks the groups of more-privileged accounts.
+    return {
+      serviceAccounts: withGroups.filter(({ groupIds }) =>
+        callerCanManageServiceAccount(session.groupIds, groupIds)
+      ),
+    }
+  }
+
   async createServiceAccount(
     request: Request,
     input: CreateServiceAccountInput,
@@ -527,6 +618,11 @@ export class AuthRuntime {
   ): Promise<CreateServiceAccountResult> {
     const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
+    // A caller can only place a service account in groups it itself belongs to.
+    const groupIds =
+      constrainRequestedGroupIds(input.groupIds, session.groupIds, {
+        subject: "service account",
+      }) ?? []
     const now = new Date()
     const serviceAccount = await storage.serviceAccounts.create({
       id: input.id ?? `svc_${randomUUID()}`,
@@ -539,7 +635,7 @@ export class AuthRuntime {
       updatedAt: now,
     })
     const groupMemberships: ServiceAccountGroupMembershipRecord[] = []
-    for (const groupId of input.groupIds ?? []) {
+    for (const groupId of groupIds) {
       groupMemberships.push(
         await storage.serviceAccountGroupMemberships.upsert({
           projectId: this.projectId,
@@ -554,24 +650,62 @@ export class AuthRuntime {
     return { serviceAccount, groupMemberships }
   }
 
+  async disableServiceAccount(
+    request: Request,
+    input: DisableServiceAccountInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<DisableServiceAccountResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const { serviceAccount, groupIds } = await this.requireManageableServiceAccount(
+      storage,
+      session.groupIds,
+      input.serviceAccountId
+    )
+    const updated = await storage.serviceAccounts.update({
+      projectId: this.projectId,
+      id: serviceAccount.id,
+      status: "suspended",
+      updatedAt: new Date(),
+    })
+
+    return { serviceAccount: updated, groupIds }
+  }
+
+  async listServiceAccountAccessTokens(
+    request: Request,
+    input: ListServiceAccountAccessTokensInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<ListServiceAccountAccessTokensResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const { serviceAccount } = await this.requireManageableServiceAccount(
+      storage,
+      session.groupIds,
+      input.serviceAccountId
+    )
+    const result = await storage.accessTokens.list({
+      projectId: this.projectId,
+      kind: "serviceAccount",
+      subjectType: "serviceAccount",
+      subjectId: serviceAccount.id,
+      includeRevoked: true,
+      order: "desc",
+      limit: 100,
+    })
+
+    return { serviceAccount, accessTokens: result.accessTokens }
+  }
+
   async createServiceAccountAccessToken(
     request: Request,
     input: CreateServiceAccountAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
-  ): Promise<CreateAccessTokenResult> {
+  ): Promise<CreateServiceAccountAccessTokenResult> {
     const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
-    const serviceAccount = await storage.serviceAccounts.getById({
-      projectId: this.projectId,
-      id: input.serviceAccountId,
-    })
-
-    if (!serviceAccount) {
-      throw new AuthStorageError(
-        "missing_service_account",
-        `[Sixb] Service account '${input.serviceAccountId}' not found for project '${this.projectId}'.`
-      )
-    }
+    const { serviceAccount, groupIds: serviceAccountGroupIds } =
+      await this.requireManageableServiceAccount(storage, session.groupIds, input.serviceAccountId)
 
     if (serviceAccount.status === "suspended") {
       throw new AuthStorageError(
@@ -580,6 +714,12 @@ export class AuthRuntime {
       )
     }
 
+    // The token can only carry groups the service account already holds; the
+    // manageability check above guarantees those are a subset of the caller's
+    // own groups, so the caller can never mint privileges it lacks.
+    const groupIds = constrainRequestedGroupIds(input.groupIds, serviceAccountGroupIds, {
+      subject: "service account token",
+    })
     const credential = createAccessTokenCredential("serviceAccount")
     const accessToken = await storage.accessTokens.create({
       id: credential.tokenId,
@@ -589,29 +729,96 @@ export class AuthRuntime {
       subjectType: "serviceAccount",
       subjectId: serviceAccount.id,
       tokenHash: credential.tokenHash,
-      groupIds: input.groupIds,
+      groupIds,
       createdByPrincipal: session.principal,
       createdBySessionId: session.session.id,
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     })
 
-    return { accessToken, tokenValue: credential.tokenValue }
+    return { accessToken, tokenValue: credential.tokenValue, serviceAccount }
   }
 
-  async revokeAccessToken(
+  async revokeServiceAccountAccessToken(
     request: Request,
-    input: RevokeAccessTokenInput,
+    input: RevokeServiceAccountAccessTokenInput,
     options: AuthSessionResolutionOptions = {}
-  ): Promise<RevokeAccessTokenResult> {
-    await this.requireUser(request, options)
-    const accessToken = await this.requireAuthStorage().accessTokens.revoke({
+  ): Promise<RevokeServiceAccountAccessTokenResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const { serviceAccount } = await this.requireManageableServiceAccount(
+      storage,
+      session.groupIds,
+      input.serviceAccountId
+    )
+    const token = await storage.accessTokens.getById({
+      projectId: this.projectId,
+      id: input.tokenId,
+    })
+    // The token must belong to the service account named in the request.
+    if (
+      !token ||
+      token.kind !== "serviceAccount" ||
+      token.subjectType !== "serviceAccount" ||
+      token.subjectId !== serviceAccount.id
+    ) {
+      throw missingAccessTokenError(input.tokenId, this.projectId)
+    }
+
+    const accessToken = await storage.accessTokens.revoke({
       projectId: this.projectId,
       id: input.tokenId,
       revokedAt: new Date(),
     })
 
-    return { accessToken }
+    return { serviceAccount, accessToken }
+  }
+
+  /**
+   * Resolve a service account the caller is allowed to manage.
+   *
+   * A caller may manage a service account only when it belongs to every group
+   * the account is in ("you can manage what you could have created"). This
+   * confines token minting, disabling, and revocation to privileges the caller
+   * already holds and prevents a service-account token from outliving the
+   * caller's own access. Missing and non-manageable accounts raise the same
+   * error so callers cannot probe which privileged accounts exist.
+   */
+  private async requireManageableServiceAccount(
+    storage: AuthStorage,
+    callerGroupIds: readonly string[],
+    serviceAccountId: string
+  ): Promise<{
+    readonly serviceAccount: ServiceAccountRecord
+    readonly groupIds: readonly string[]
+  }> {
+    const serviceAccount = await storage.serviceAccounts.getById({
+      projectId: this.projectId,
+      id: serviceAccountId,
+    })
+    const groupIds = serviceAccount
+      ? await this.listServiceAccountGroupIds(storage, serviceAccountId)
+      : []
+
+    if (!serviceAccount || !callerCanManageServiceAccount(callerGroupIds, groupIds)) {
+      throw new AuthStorageError(
+        "missing_service_account",
+        `[Sixb] Service account '${serviceAccountId}' not found for project '${this.projectId}'.`
+      )
+    }
+
+    return { serviceAccount, groupIds }
+  }
+
+  private async listServiceAccountGroupIds(
+    storage: AuthStorage,
+    serviceAccountId: string
+  ): Promise<readonly string[]> {
+    const memberships = await storage.serviceAccountGroupMemberships.listForServiceAccount({
+      projectId: this.projectId,
+      serviceAccountId,
+    })
+    return memberships.map((membership) => membership.groupId)
   }
 
   async getInvitationOptions(
@@ -925,6 +1132,76 @@ function constrainTokenGroupIds(
 
   const allowed = new Set(accessToken.groupIds)
   return principalGroupIds.filter((groupId) => allowed.has(groupId))
+}
+
+// A caller may manage a service account only when it belongs to every group the
+// account is in, so managing it can never grant more than the caller already
+// has. An account with no groups is powerless and therefore freely manageable.
+function callerCanManageServiceAccount(
+  callerGroupIds: readonly string[],
+  serviceAccountGroupIds: readonly string[]
+): boolean {
+  const callerGroups = new Set(callerGroupIds)
+  return serviceAccountGroupIds.every((groupId) => callerGroups.has(groupId))
+}
+
+function missingAccessTokenError(tokenId: string, projectId: string): AuthStorageError {
+  return new AuthStorageError(
+    "missing_access_token",
+    `[Sixb] Access token '${tokenId}' not found for project '${projectId}'.`
+  )
+}
+
+/**
+ * Restrict the groups requested for a credential to a set the caller is allowed
+ * to grant. Returns undefined when no groups were requested (an unconstrained
+ * credential) and throws when a requested group falls outside the allowed set.
+ */
+function constrainRequestedGroupIds(
+  input: readonly string[] | undefined,
+  allowedGroupIds: readonly string[],
+  options: { readonly subject: string }
+): readonly string[] | undefined {
+  const groupIds = normalizeRequestedGroupIds(input)
+  if (!groupIds) {
+    return undefined
+  }
+
+  const allowed = new Set(allowedGroupIds)
+  for (const groupId of groupIds) {
+    if (!allowed.has(groupId)) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        `[Sixb] Group '${groupId}' cannot be assigned to this ${options.subject}.`
+      )
+    }
+  }
+
+  return groupIds
+}
+
+function normalizeRequestedGroupIds(
+  input: readonly string[] | undefined
+): readonly string[] | null {
+  if (input === undefined) {
+    return null
+  }
+
+  const groupIds: string[] = []
+  for (const raw of input) {
+    const groupId = raw.trim()
+    if (!groupId) {
+      throw new AuthRuntimeError(
+        "invalid_auth_input",
+        "[Sixb] Group ids cannot be empty when creating auth credentials."
+      )
+    }
+    if (!groupIds.includes(groupId)) {
+      groupIds.push(groupId)
+    }
+  }
+
+  return groupIds
 }
 
 function createInvitationRecipientError(

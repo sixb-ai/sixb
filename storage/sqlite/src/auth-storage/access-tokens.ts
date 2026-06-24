@@ -16,7 +16,6 @@ import { rowToAccessTokenRecord, serializeOptionalStringArray } from "./rows"
 import {
   appendPagination,
   assertNonEmpty,
-  hasEmptyFilter,
   mapUniqueConstraintError,
   normalizeGroupIds,
   type SqliteValue,
@@ -101,10 +100,6 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
   }
 
   async list(input: ListAuthAccessTokensInput): Promise<ListAuthAccessTokensResult> {
-    if (hasEmptyFilter(input.kind ? [input.kind] : undefined)) {
-      return { accessTokens: [], hasMore: false, total: 0 }
-    }
-
     const whereClauses = ["project_id = ?"]
     const args: SqliteValue[] = [input.projectId]
     if (input.kind) {
@@ -124,7 +119,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
+    const order = input.order === "desc" ? "DESC" : "ASC"
     const totalRow = this.db
       .query(`SELECT COUNT(*) AS count FROM auth_access_tokens ${where}`)
       .get(...args) as { readonly count: number }
@@ -222,6 +217,9 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
       )
     }
 
+    const lastUsedUserAgent = params.userAgent ?? existing.lastUsedUserAgent
+    const lastUsedIpAddress = params.ipAddress ?? existing.lastUsedIpAddress
+
     this.db
       .query(
         `
@@ -235,8 +233,8 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
       )
       .run(
         toIso(params.lastUsedAt),
-        params.userAgent ?? null,
-        params.ipAddress ?? null,
+        lastUsedUserAgent ?? null,
+        lastUsedIpAddress ?? null,
         params.projectId,
         params.id
       )
@@ -244,8 +242,8 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
     return {
       ...existing,
       lastUsedAt: new Date(params.lastUsedAt),
-      lastUsedUserAgent: params.userAgent,
-      lastUsedIpAddress: params.ipAddress,
+      lastUsedUserAgent,
+      lastUsedIpAddress,
     }
   }
 

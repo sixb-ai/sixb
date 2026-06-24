@@ -114,8 +114,8 @@ export class InMemoryAuthAccessTokenStore implements AuthAccessTokenStore {
     const next: AccessTokenRecord = {
       ...existing,
       lastUsedAt: cloneDate(params.lastUsedAt),
-      lastUsedUserAgent: params.userAgent,
-      lastUsedIpAddress: params.ipAddress,
+      lastUsedUserAgent: params.userAgent ?? existing.lastUsedUserAgent,
+      lastUsedIpAddress: params.ipAddress ?? existing.lastUsedIpAddress,
     }
     this.state.accessTokens.set(key, cloneRecord(next))
     return cloneRecord(next)

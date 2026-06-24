@@ -1,7 +1,7 @@
 import { type AuthorizationContext, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import { SIXB_BEARER_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
@@ -102,7 +102,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "List registered object types",
           tags: ["Ontology"],
           operationId: "listObjectTypes",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("listObjectTypes"),
         },
       }
     )
@@ -129,7 +129,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Get object type definition",
           tags: ["Ontology"],
           operationId: "getObjectType",
-          security: SIXB_BEARER_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("getObjectType"),
         },
       }
     )

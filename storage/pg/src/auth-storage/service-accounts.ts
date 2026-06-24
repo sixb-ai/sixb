@@ -96,10 +96,11 @@ export class PgAuthServiceAccountStore implements AuthServiceAccountStore {
     const updatedAt = dateOrNow(input.updatedAt)
     const name =
       input.name === undefined ? existing.name : assertNonEmpty(input.name, "Service account name")
+    const description = input.description === undefined ? existing.description : input.description
     const [row] = await this.sql<PgAuthServiceAccountRow[]>`
       UPDATE auth_service_accounts
       SET name = ${name},
-          description = ${input.description ?? null},
+          description = ${description ?? null},
           status = ${input.status ?? existing.status},
           updated_at = ${updatedAt}
       WHERE project_id = ${input.projectId}
@@ -124,7 +125,7 @@ export class PgAuthServiceAccountStore implements AuthServiceAccountStore {
     }
 
     const where = `WHERE ${whereClauses.join(" AND ")}`
-    const order = input.order === "asc" ? "ASC" : "DESC"
+    const order = input.order === "desc" ? "DESC" : "ASC"
     const [totalRow] = await this.sql.unsafe<{ readonly count: string | number }[]>(
       `SELECT COUNT(*)::bigint AS count FROM auth_service_accounts ${where}`,
       [...params]
