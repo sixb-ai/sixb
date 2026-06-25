@@ -907,6 +907,7 @@ export {
 
 export type {
   ActionRunRequestedQueueJob,
+  AgentRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -1252,7 +1253,10 @@ export { defineFunction } from "./functions"
 export type {
   AgentDefinition,
   AgentLoopConfig,
+  AgentRequestErrorCode,
   DefineAgentConfig,
+  RequestAgentRunInput,
+  RequestAgentRunResult,
   SixbInboundUiMessage,
   SixbInboundUiMessagePart,
   SixbMessage,
@@ -1278,10 +1282,16 @@ export type {
 export {
   AgentDefinitionError,
   AgentMessageAdapterError,
+  AgentRequestError,
   AgentsRuntime,
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentRunLeaseId,
+  createAgentThreadId,
   defineAgent,
   fromAiSdk,
   isAgentDefinition,
+  requestAgentRun,
   SIXB_MESSAGE_CONTENT_VERSION,
   toModelMessages,
   toUiMessage,

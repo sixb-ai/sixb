@@ -299,7 +299,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       }
       agentIds.add(agent.id)
     }
-    this.agents = new AgentsRuntime(agents)
+    this.agents = new AgentsRuntime(this.runtimeContext, agents)
 
     const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
       options.projections ?? []

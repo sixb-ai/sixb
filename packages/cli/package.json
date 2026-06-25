@@ -18,6 +18,7 @@
   "dependencies": {
     "@sixb/app": "workspace:*",
     "@sixb/action-worker": "workspace:*",
+    "@sixb/agent-worker": "workspace:*",
     "@sixb/atlas": "workspace:*",
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
