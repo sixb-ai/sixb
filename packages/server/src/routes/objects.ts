@@ -1,6 +1,8 @@
 import {
   AuthorizationError,
   countObjects,
+  type ExpandedLinkValue,
+  type ExpandedObjectRow,
   executeObjectQuery,
   existsObjects,
   facetObjects,
@@ -8,6 +10,7 @@ import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
+  type ObjectRowLinks,
   type OntologySource,
   type Sixb,
 } from "@sixb/core"
@@ -44,6 +47,41 @@ function serializeObject(row: {
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
   }
+}
+
+type SerializedObject = ReturnType<typeof serializeObject>
+type SerializedLinkValue = SerializedExpandedObject | SerializedExpandedObject[] | null
+type SerializedExpandedObject = SerializedObject & {
+  links?: Record<string, SerializedLinkValue>
+  linkProperties?: Record<string, unknown>
+}
+
+/**
+ * Serialize a query row together with any `links` attached by an `expand` node.
+ * Recurses through nested expansions; `linkProperties` carries edge metadata on
+ * an expanded child. Only the query route hydrates links, so the plain list and
+ * identity routes keep using `serializeObject`.
+ */
+function serializeExpandedObject(row: ExpandedObjectRow): SerializedExpandedObject {
+  const serialized: SerializedExpandedObject = serializeObject(row)
+  if (row.links) serialized.links = serializeLinks(row.links)
+  if (row.linkProperties !== undefined) serialized.linkProperties = row.linkProperties
+  return serialized
+}
+
+function serializeLinks(links: ObjectRowLinks): Record<string, SerializedLinkValue> {
+  const result: Record<string, SerializedLinkValue> = {}
+  for (const [linkId, value] of Object.entries(links)) {
+    result[linkId] = serializeLinkValue(value)
+  }
+  return result
+}
+
+function serializeLinkValue(value: ExpandedLinkValue): SerializedLinkValue {
+  if (value === null) return null
+  if (Array.isArray(value)) return value.map(serializeExpandedObject)
+  // Array.isArray does not narrow a readonly[] away, so assert the scalar case.
+  return serializeExpandedObject(value as ExpandedObjectRow)
 }
 
 function serializePlan(plan: Awaited<ReturnType<typeof executeObjectQuery>>["plan"]) {
@@ -204,7 +242,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           )
 
           return {
-            objects: result.objects.map(serializeObject),
+            objects: result.objects.map(serializeExpandedObject),
             hasMore: result.hasMore,
             nextPageToken: result.nextPageToken,
             plan: serializePlan(result.plan),

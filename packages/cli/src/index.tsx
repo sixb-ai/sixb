@@ -280,6 +280,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "typegen": {
+      const { runTypegen } = await import("./commands/typegen")
+      await runTypegen({ entry: getFlag("entry") })
+      break
+    }
+
     case "build": {
       const { runBuild } = await import("./commands/build")
       await runBuild({ entry: getFlag("entry"), outdir: getFlag("outdir") })

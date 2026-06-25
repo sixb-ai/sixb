@@ -14,6 +14,7 @@
     "functions/**/*.ts",
     "lib/**/*.ts",
     "connectors/**/*.ts",
-    "sixb.config.ts"
+    "sixb.config.ts",
+    ".sixb/types/**/*.d.ts"
   ]
 }

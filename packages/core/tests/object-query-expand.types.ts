@@ -1,14 +1,15 @@
 /**
- * Type-level assertions for `.expand()` authoring (slice 1).
+ * Type-level assertions for `.expand()` authoring + the row `.links` type.
  *
  * The file compiling at all is the core assertion: the expand builder types
  * resolve the 2-hop ADN graph AND the `Folder.parent` self-cycle with NO TS2589
  * ("type instantiation is excessively deep"). The `@ts-expect-error` lines prove
- * links and `orderBy` properties are constrained to the resolved target type on
- * the full-registry (server) path.
+ * links and `orderBy` properties are constrained to the resolved target type.
  *
- * The `.links` row type and client-side registry precision arrive in later
- * slices; here `.expand(...)` returns the same builder type it was called on.
+ * Slice 3 adds the row-typing section: each `.expand(...)` widens the row's
+ * `.links` (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, with
+ * optional `.linkProperties` and nested `.links`). Direct ObjectType links are
+ * precise without a generated registry; id-only refs still use the registry.
  */
 import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
 
@@ -53,7 +54,7 @@ const Folder = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true }),
   ],
-  links: [link("parent", "Folder", { cardinality: "one" })],
+  links: [link.self("parent", { cardinality: "one" })],
 })
 
 const ProjectFolder = defineObjectType({
@@ -76,6 +77,7 @@ const Project = defineObjectType({
   links: [
     link("opportunity", Opportunity, { cardinality: "one" }),
     link("projectFolder", ProjectFolder, { cardinality: "one" }),
+    link("contacts", Contact, { cardinality: "many" }),
   ],
 })
 
@@ -90,7 +92,7 @@ type AppRegistry =
 // Server path: `objects(T)` binds the full registry, so nested targets resolve.
 declare const projects: ObjectQueryBuilder<typeof Project, AppRegistry, []>
 declare const folders: ObjectQueryBuilder<typeof Folder, AppRegistry, []>
-// Client path today: only the start type is registered, so nested targets degrade.
+// Client path with no full registry. Direct ObjectType links still resolve.
 declare const startTypeOnly: ObjectQueryBuilder<typeof Project, typeof Project, []>
 
 function authoring(): void {
@@ -110,8 +112,9 @@ function authoring(): void {
   // Self-cycle resolves by id against the registry — no infinite instantiation.
   folders.expand(Folder.l.parent, (p) => p.expand(Folder.l.parent))
 
-  // `.expand` is additive: it returns the same Project-typed builder, so a second
-  // expand still accepts a Project link (a changed result type would reject it).
+  // `.expand` is additive: the result type stays Project (only the accumulated
+  // `.links` shape widens), so a second expand still accepts a Project link (a
+  // changed result type would reject it).
   projects.expand(Project.l.projectFolder).expand(Project.l.opportunity)
 
   // @ts-expect-error — `company` is an Opportunity link, not an outgoing Project link.
@@ -127,9 +130,105 @@ function authoring(): void {
   // @ts-expect-error — `name` is a Project property, not on the Opportunity target.
   projects.expand(Project.l.opportunity, { orderBy: [{ property: Project.p.name }] })
 
-  // Without a full registry the nested target degrades to the base type, so even
-  // an unrelated link compiles — the gap a generated client registry closes.
-  startTypeOnly.expand(Project.l.opportunity, (o) => o.expand(Folder.l.parent))
+  startTypeOnly.expand(Project.l.opportunity, (o) =>
+    o.expand(
+      // @ts-expect-error — direct target metadata resolves Opportunity without a registry.
+      Folder.l.parent
+    )
+  )
 }
 
 void authoring
+
+// ── Row `.links` typing (slice 3) ──────────────────────────────────────────
+//
+// Extract the row from a built query the same way production reads it: a direct
+// conditional `infer` on the `first()` terminal (never `Awaited<ReturnType<…>>`,
+// which tips this over TS2589). `RowOf` mirrors the client `BuiltRow`. The build
+// thunks are never called — only their return type is read — so this file stays
+// execution-free like the authoring section above.
+type RowOf<TBuilt> = TBuilt extends { first(): Promise<infer TRow> } ? NonNullable<TRow> : never
+
+// Server path: a "one" link, a bounded "many" link, and a 2-hop. The builder is
+// referenced only by `typeof` (never executed — this file is typecheck-only,
+// like the spike).
+const builtProjects = projects
+  .expand(Project.l.projectFolder)
+  .expand(Project.l.contacts, { limit: 5 })
+  .expand(Project.l.opportunity, (o) =>
+    o.expand(Opportunity.l.company).expand(Opportunity.l.contact)
+  )
+type ProjectRow = RowOf<typeof builtProjects>
+
+function projectRowAssertions(row: ProjectRow): void {
+  // Root object stays precisely typed.
+  const _rootId: "Project" = row.objectTypeId
+  const _name: string = row.properties.name
+
+  // "one" cardinality → object | null; target resolves to the literal type.
+  const _pfId: "ProjectFolder" = row.links.projectFolder!.objectTypeId
+  const _nas: number | null | undefined = row.links.projectFolder!.properties.nasComplianceScore
+
+  // "many" cardinality → array (not nullable).
+  const _firstContactId: "Contact" | undefined = row.links.contacts[0]?.objectTypeId
+  const _contactNames: string[] = row.links.contacts.map(
+    (contact) => contact.properties.displayName
+  )
+
+  // Edge metadata is optional (the executor attaches it only when present).
+  const _edge: Record<string, unknown> | undefined = row.links.opportunity!.linkProperties
+
+  // 2-hop: opportunity → { company, contact }, the recursion-prone path.
+  const _coId: "Company" = row.links.opportunity!.links.company!.objectTypeId
+  const _coName: string = row.links.opportunity!.links.company!.properties.name
+  const _ctId: "Contact" = row.links.opportunity!.links.contact!.objectTypeId
+
+  // @ts-expect-error — projectFolder was not nested-expanded, so it has no `.links`.
+  void row.links.projectFolder!.links
+  // @ts-expect-error — projectFolder resolves to "ProjectFolder", not "Opportunity".
+  const _wrong: "Opportunity" = row.links.projectFolder!.objectTypeId
+
+  void [
+    _rootId,
+    _name,
+    _pfId,
+    _nas,
+    _firstContactId,
+    _contactNames,
+    _edge,
+    _coId,
+    _coName,
+    _ctId,
+    _wrong,
+  ]
+}
+void projectRowAssertions
+
+// A query with no `.expand(...)` returns the plain row — no `.links` field.
+type PlainRow = RowOf<typeof projects>
+function plainRowAssertions(row: PlainRow): void {
+  const _id: "Project" = row.objectTypeId
+  // @ts-expect-error — without an expand the row has no `.links`.
+  void row.links
+  void _id
+}
+void plainRowAssertions
+
+// Self-cycle: Folder.parent → Folder.parent resolves by id, no infinite depth.
+const builtFolders = folders.expand(Folder.l.parent, (p) => p.expand(Folder.l.parent))
+type FolderRow = RowOf<typeof builtFolders>
+function folderRowAssertions(row: FolderRow): void {
+  const _p1Id: "Folder" = row.links.parent!.objectTypeId
+  const _p2Id: "Folder" = row.links.parent!.links.parent!.objectTypeId
+  void [_p1Id, _p2Id]
+}
+void folderRowAssertions
+
+// Client path with direct ObjectType targets: no generated registry is needed.
+const builtDirectClient = startTypeOnly.expand(Project.l.opportunity)
+type DirectClientRow = RowOf<typeof builtDirectClient>
+function directClientRowAssertions(row: DirectClientRow): void {
+  const _id: "Opportunity" = row.links.opportunity!.objectTypeId
+  void _id
+}
+void directClientRowAssertions

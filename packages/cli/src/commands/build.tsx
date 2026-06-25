@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises"
 import { dirname, resolve } from "node:path"
 import { createCustomApp } from "@sixb/app"
 import { buildAtlasAssets } from "@sixb/atlas"
+import { generateProjectTypes } from "../lib/typegen"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
 export interface BuildOptions {
@@ -14,6 +15,7 @@ export async function runBuild(options: BuildOptions = {}) {
   const outdir = resolve(options.outdir ?? ".sixb/dist")
   const projectRoot = dirname(entry)
 
+  await generateProjectTypes({ entry })
   await mkdir(outdir, { recursive: true })
 
   // Build sixb.config.ts

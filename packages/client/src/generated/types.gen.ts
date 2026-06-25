@@ -16,7 +16,15 @@ export type ObjectQueryObject = {
   }
   createdAt: string
   updatedAt: string
+  links?: {
+    [key: string]: ObjectQueryLinkValue
+  }
+  linkProperties?: {
+    [key: string]: unknown
+  }
 }
+
+export type ObjectQueryLinkValue = ObjectQueryObject | Array<ObjectQueryObject> | null
 
 export type ObjectQueryIssue = {
   path: string
@@ -153,6 +161,20 @@ export type ObjectQuery =
       input: ObjectQuery
       properties?: Array<string>
     }
+  | {
+      kind: "expand"
+      input: ObjectQuery
+      expansions: Array<ObjectExpansion>
+    }
+
+export type ObjectExpansion = {
+  linkId: string
+  direction: "outgoing" | "incoming"
+  sourceObjectTypeId?: string
+  limit?: number
+  orderBy?: Array<ObjectQuerySortField>
+  expand?: Array<ObjectExpansion>
+}
 
 export type ObjectQueryPredicate =
   | {

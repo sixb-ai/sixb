@@ -16,6 +16,20 @@ export type ObjectQueryExecutorRow = {
   properties: Record<string, unknown>
   createdAt: Date
   updatedAt: Date
+  /** Linked objects attached by an `expand` node, keyed by link id. The builder
+   * types these precisely; this contract carries them through untyped. Recurses
+   * over the same light row shape so both executors (the server's full
+   * `ObjectRow` and the client's wire-reconstructed row) satisfy it. */
+  links?: ObjectQueryExecutorLinks
+}
+
+export type ObjectQueryExecutorLinks = Record<string, ObjectQueryExecutorLinkValue>
+export type ObjectQueryExecutorLinkValue =
+  | ObjectQueryExecutorExpandedRow
+  | readonly ObjectQueryExecutorExpandedRow[]
+  | null
+export type ObjectQueryExecutorExpandedRow = ObjectQueryExecutorRow & {
+  linkProperties?: Record<string, unknown>
 }
 
 export type ObjectQueryExecutorListResult = {

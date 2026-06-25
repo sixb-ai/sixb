@@ -5,17 +5,26 @@
  * uses, wired to the object query routes through the generated SDK. Queries
  * are validated server-side; failures surface as `SixbQueryError`.
  */
+
+import type { SixbObjectTypeMap } from "@sixb/core/ontology"
 import type {
   ObjectQuery,
   ObjectQueryBuilder,
   ObjectQueryExecutor,
+  ObjectQueryExecutorExpandedRow,
   ObjectQueryExecutorFacetRequest,
+  ObjectQueryExecutorLinkValue,
+  ObjectQueryExecutorRow,
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core/query"
 import { createObjectQueryBuilder } from "@sixb/core/query"
 import type { Client } from "./generated/client"
 import { countObjects, existsObjects, facetObjects, queryObjects } from "./generated/sdk.gen"
-import type { ObjectQueryIssue, ObjectQuery as WireObjectQuery } from "./generated/types.gen"
+import type {
+  ObjectQueryIssue,
+  ObjectQueryObject,
+  ObjectQuery as WireObjectQuery,
+} from "./generated/types.gen"
 
 export type { ObjectQueryIssue }
 
@@ -37,8 +46,12 @@ export interface SixbQueryClientOptions {
 // Value types are typed as "none registered": custom value-type refs resolve
 // like a runtime without them, and the empty tuple keeps property-value
 // inference shallow enough for TypeScript's recursion limits.
+type ClientRegisteredObjectTypes<TObjectType extends ObjectTypeWithPropertyTokens> =
+  | TObjectType
+  | Extract<SixbObjectTypeMap[keyof SixbObjectTypeMap], ObjectTypeWithPropertyTokens>
+
 export type ClientObjectQueryBuilder<TObjectType extends ObjectTypeWithPropertyTokens> =
-  ObjectQueryBuilder<TObjectType, TObjectType, readonly []>
+  ObjectQueryBuilder<TObjectType, ClientRegisteredObjectTypes<TObjectType>, readonly []>
 
 export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
@@ -46,7 +59,7 @@ export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
 ): { query: () => ClientObjectQueryBuilder<TObjectType> } {
   return {
     query: () =>
-      createObjectQueryBuilder<TObjectType, TObjectType, readonly []>({
+      createObjectQueryBuilder<TObjectType, ClientRegisteredObjectTypes<TObjectType>, readonly []>({
         query: { kind: "start", objectTypeId: objectType.id },
         executor: createHttpQueryExecutor(options?.client),
       }),
@@ -68,13 +81,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
       })
       if (error || !data) throw toSixbQueryError(error)
       return {
-        objects: data.objects.map((row) => ({
-          primaryId: row.primaryId,
-          objectTypeId: row.objectTypeId,
-          properties: row.properties,
-          createdAt: new Date(row.createdAt),
-          updatedAt: new Date(row.updatedAt),
-        })),
+        objects: data.objects.map(reviveQueryRow),
         hasMore: data.hasMore,
         total: data.total,
         nextPageToken: data.nextPageToken,
@@ -111,6 +118,41 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
       }))
     },
   }
+}
+
+// Revive a query row tree: parse ISO timestamps to Date at every hop and carry
+// the `links` attached by `expand` nodes (with edge `linkProperties`). The
+// builder types `links` precisely; here it flows through as runtime data.
+function reviveQueryRow(row: ObjectQueryObject): ObjectQueryExecutorRow {
+  const revived: ObjectQueryExecutorRow = {
+    primaryId: row.primaryId,
+    objectTypeId: row.objectTypeId,
+    properties: row.properties,
+    createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  }
+  if (row.links) {
+    const links: Record<string, ObjectQueryExecutorLinkValue> = {}
+    for (const [linkId, value] of Object.entries(row.links)) {
+      links[linkId] = reviveLinkValue(value)
+    }
+    revived.links = links
+  }
+  return revived
+}
+
+function reviveLinkValue(
+  value: ObjectQueryObject | ObjectQueryObject[] | null
+): ObjectQueryExecutorLinkValue {
+  if (value === null) return null
+  if (Array.isArray(value)) return value.map(reviveExpandedRow)
+  return reviveExpandedRow(value)
+}
+
+function reviveExpandedRow(row: ObjectQueryObject): ObjectQueryExecutorExpandedRow {
+  const revived: ObjectQueryExecutorExpandedRow = reviveQueryRow(row)
+  if (row.linkProperties !== undefined) revived.linkProperties = row.linkProperties
+  return revived
 }
 
 // The generated wire type mirrors the core IR JSON schema; they differ only in

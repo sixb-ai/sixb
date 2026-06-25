@@ -58,7 +58,7 @@ const _Room = defineObjectType({
   ],
   links: [
     link("inBuilding", _Building, { cardinality: "one" }),
-    link("hasSensors", "sensor", { cardinality: "many" }),
+    link.ref("hasSensors", "sensor", { cardinality: "many" }),
   ],
 })
 

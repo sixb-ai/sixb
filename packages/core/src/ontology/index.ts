@@ -29,6 +29,8 @@ export type {
   MapSchema,
   ObjectFieldSchema,
   ObjectLink,
+  ObjectLinkTargetMetadata,
+  ObjectLinkTargetType,
   ObjectSchema,
   ObjectType,
   ObjectTypeSearchMetadata,
@@ -38,6 +40,7 @@ export type {
   PropertyMode,
   PropertyQueryMetadata,
   Schema,
+  SixbObjectTypeMap,
   ValueType,
   ValueTypeRefSchema,
 } from "./types"
@@ -53,6 +56,7 @@ export { OntologyValidationError } from "./errors"
 
 // ── Helpers ─────────────────────────────────────────────────
 
+export type { DirectLinkResult, DirectLinkTarget } from "./builders"
 export {
   defineInterface,
   defineObjectType,
