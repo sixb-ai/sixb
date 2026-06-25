@@ -200,7 +200,12 @@ function compileObjectQueryInternal(
         query.fieldsByObjectType
       )
     case "vector":
-      throw new Error(`[SixbPg] PostgreSQL object storage does not support query node 'vector'`)
+    // `expand` (link hydration) has no provider pushdown yet; the planner gates
+    // it off via capabilities, so this is unreachable until a later slice.
+    case "expand":
+      throw new Error(
+        `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
+      )
   }
 }
 
@@ -568,6 +573,8 @@ function compileAggregateSource(projectId: string, query: ObjectQuery): Compiled
       return compileAggregateSet(projectId, query.op, query.inputs)
     case "sort":
     case "project":
+    // `expand` is output-shaping, like sort/project: aggregates ignore it.
+    case "expand":
       return compileAggregateSource(projectId, query.input)
     case "limit":
     case "page":

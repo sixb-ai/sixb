@@ -1,10 +1,24 @@
-import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySet, ObjectQuerySortField } from "./ir"
+import type {
+  ObjectExpansion,
+  ObjectQuery,
+  ObjectQueryPredicate,
+  ObjectQuerySet,
+  ObjectQuerySortField,
+} from "./ir"
 
 /**
  * Canonicalizes query trees before validation/planning so providers see a
  * stable shape regardless of how the typed builder assembled the query.
+ *
+ * `expand` is output-shaping, so it is hoisted to the outermost layer here: two
+ * queries that differ only in where `.expand(...)` was chained normalize to the
+ * same tree (and therefore the same cache key).
  */
 export function normalizeObjectQuery(query: ObjectQuery): ObjectQuery {
+  return hoistExpand(normalizeNode(query))
+}
+
+function normalizeNode(query: ObjectQuery): ObjectQuery {
   switch (query.kind) {
     case "start":
       return { ...query }
@@ -37,7 +51,90 @@ export function normalizeObjectQuery(query: ObjectQuery): ObjectQuery {
         input: normalizeObjectQuery(query.input),
         properties: query.properties ? uniqueStrings(query.properties) : undefined,
       }
+    case "expand":
+      return normalizeExpand(query.input, query.expansions)
   }
+}
+
+/**
+ * Keeps `expand` at the outermost layer. A single-input wrapper sitting above an
+ * `expand` is swapped so the `expand` wraps the (re-normalized) wrapper subtree;
+ * re-normalizing collapses any nodes that became adjacent, and a wrapper that
+ * lands above another `expand` is merged into one.
+ */
+function hoistExpand(query: ObjectQuery): ObjectQuery {
+  if (query.kind === "start" || query.kind === "set" || query.kind === "expand") return query
+  if (query.input.kind !== "expand") return query
+
+  const inner = query.input
+  const rebuilt = normalizeObjectQuery({ ...query, input: inner.input })
+  if (rebuilt.kind === "expand") {
+    return {
+      kind: "expand",
+      input: rebuilt.input,
+      expansions: normalizeExpansions([...inner.expansions, ...rebuilt.expansions]),
+    }
+  }
+  return { kind: "expand", input: rebuilt, expansions: inner.expansions }
+}
+
+function normalizeExpand(input: ObjectQuery, expansions: readonly ObjectExpansion[]): ObjectQuery {
+  const normalizedInput = normalizeObjectQuery(input)
+  const normalizedExpansions = normalizeExpansions(expansions)
+
+  // A directly-nested expand (`a.expand(X).expand(Y)` builds
+  // `expand(expand(start, [X]), [Y])`) collapses into one outermost expand.
+  if (normalizedInput.kind === "expand") {
+    return {
+      kind: "expand",
+      input: normalizedInput.input,
+      expansions: normalizeExpansions([...normalizedInput.expansions, ...normalizedExpansions]),
+    }
+  }
+
+  return { kind: "expand", input: normalizedInput, expansions: normalizedExpansions }
+}
+
+function normalizeExpansions(expansions: readonly ObjectExpansion[]): ObjectExpansion[] {
+  const byKey = new Map<string, ObjectExpansion>()
+  for (const expansion of expansions) {
+    const normalized = normalizeExpansion(expansion)
+    const key = expansionKey(normalized)
+    const existing = byKey.get(key)
+    byKey.set(key, existing ? mergeExpansion(existing, normalized) : normalized)
+  }
+
+  return [...byKey.values()].sort((a, b) => {
+    const left = expansionKey(a)
+    const right = expansionKey(b)
+    return left < right ? -1 : left > right ? 1 : 0
+  })
+}
+
+function normalizeExpansion(expansion: ObjectExpansion): ObjectExpansion {
+  const nested = expansion.expand ? normalizeExpansions(expansion.expand) : []
+  return {
+    linkId: expansion.linkId,
+    direction: expansion.direction,
+    ...(expansion.sourceObjectTypeId !== undefined
+      ? { sourceObjectTypeId: expansion.sourceObjectTypeId }
+      : {}),
+    ...(expansion.limit !== undefined ? { limit: expansion.limit } : {}),
+    ...(expansion.orderBy ? { orderBy: expansion.orderBy.map((field) => ({ ...field })) } : {}),
+    ...(nested.length > 0 ? { expand: nested } : {}),
+  }
+}
+
+// Two expansions of the same link in the same direction are one hydration; their
+// nested expansions merge so the normalized tree never double-hydrates a link.
+function mergeExpansion(a: ObjectExpansion, b: ObjectExpansion): ObjectExpansion {
+  const nested = normalizeExpansions([...(a.expand ?? []), ...(b.expand ?? [])])
+  const { expand: _existing, ...base } = a
+  return nested.length > 0 ? { ...base, expand: nested } : base
+}
+
+function expansionKey(expansion: ObjectExpansion): string {
+  return `${expansion.direction}\0${expansion.linkId}\0${expansion.sourceObjectTypeId ?? ""}`
 }
 
 export function normalizeObjectQueryPredicate(

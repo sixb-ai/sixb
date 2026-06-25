@@ -121,6 +121,9 @@ function compileObjectQueryInternal(
         query.fieldsByObjectType
       )
     case "vector":
+    // `expand` (link hydration) has no provider pushdown yet; the planner gates
+    // it off via capabilities, so this is unreachable until a later slice.
+    case "expand":
       throw new Error(`[Sixb] SQLite object storage does not support query node '${query.kind}'`)
   }
 }

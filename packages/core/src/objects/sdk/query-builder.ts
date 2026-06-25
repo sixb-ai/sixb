@@ -12,6 +12,8 @@ import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../
 import type {
   ListResult,
   ListResultWithoutTotal,
+  ObjectExpandBuilder,
+  ObjectExpandOptions,
   ObjectQueryBuilder,
   ObjectQueryFacetInput,
   ObjectQueryFacetResult,
@@ -21,7 +23,13 @@ import type {
   TwinObject,
 } from "../../runtime/types"
 import { formatObjectQueryExplanation } from "../query/explain-format"
-import type { ObjectQuery, ObjectQueryDirection, ObjectQuerySortDirection } from "../query/ir"
+import type {
+  ObjectExpansion,
+  ObjectQuery,
+  ObjectQueryDirection,
+  ObjectQuerySortDirection,
+  ObjectQuerySortField,
+} from "../query/ir"
 import { normalizeObjectQuery } from "../query/normalize"
 import type { ObjectQueryExecutor } from "./query-executor"
 import { resolveWhere } from "./where"
@@ -136,6 +144,18 @@ class ObjectQueryBuilderImpl<
       TRegisteredObjectTypes,
       TValueTypes
     >
+  }
+
+  expand(
+    link: LinkToken<string, string, string>,
+    optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
+    build?: NestedExpandBuild
+  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+    return this.withQuery({
+      kind: "expand",
+      input: this.ir,
+      expansions: [buildExpansion(link, optionsOrBuild, build)],
+    })
   }
 
   orderBy(
@@ -274,6 +294,64 @@ class ObjectQueryBuilderImpl<
       query,
     }) as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
   }
+}
+
+type AnyExpandBuilder = ObjectExpandBuilder<
+  ObjectTypeWithPropertyTokens,
+  ObjectTypeWithPropertyTokens
+>
+type NestedExpandBuild = (nested: AnyExpandBuilder) => AnyExpandBuilder
+
+/**
+ * Runtime backing for the nested `.expand(..., (e) => …)` callback. Immutable,
+ * mirroring the query builder: each `expand` returns a new instance so the
+ * accumulated expansions are never shared between branches.
+ */
+class ObjectExpandBuilderImpl {
+  constructor(readonly expansions: readonly ObjectExpansion[] = []) {}
+
+  expand(
+    link: LinkToken<string, string, string>,
+    optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
+    build?: NestedExpandBuild
+  ): ObjectExpandBuilderImpl {
+    return new ObjectExpandBuilderImpl([
+      ...this.expansions,
+      buildExpansion(link, optionsOrBuild, build),
+    ])
+  }
+}
+
+function buildExpansion(
+  link: LinkToken<string, string, string>,
+  optionsOrBuild: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild | undefined,
+  build: NestedExpandBuild | undefined
+): ObjectExpansion {
+  // `.expand(link, build)` and `.expand(link, options, build)` are both valid:
+  // a function in the second slot is the nested builder, otherwise it is options.
+  const options = typeof optionsOrBuild === "function" ? undefined : optionsOrBuild
+  const nestedBuild = typeof optionsOrBuild === "function" ? optionsOrBuild : build
+
+  let nested: readonly ObjectExpansion[] = []
+  if (nestedBuild) {
+    const result = nestedBuild(new ObjectExpandBuilderImpl() as unknown as AnyExpandBuilder)
+    nested = (result as unknown as ObjectExpandBuilderImpl).expansions
+  }
+
+  return {
+    linkId: link.id,
+    direction: "outgoing",
+    ...(options?.limit !== undefined ? { limit: options.limit } : {}),
+    ...(options?.orderBy ? { orderBy: options.orderBy.map(expansionSortToField) } : {}),
+    ...(nested.length > 0 ? { expand: nested } : {}),
+  }
+}
+
+function expansionSortToField(sort: {
+  property: PropertyToken
+  direction?: ObjectQuerySortDirection
+}): ObjectQuerySortField {
+  return { kind: "property", propertyId: sort.property.id, direction: sort.direction }
 }
 
 function appendSortField(

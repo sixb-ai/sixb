@@ -1,5 +1,6 @@
 import type { OntologyRegistry } from "../../ontology"
 import type {
+  ObjectExpansion,
   ObjectQuery,
   ObjectQueryPredicate,
   ObjectQueryResultShape,
@@ -170,7 +171,24 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
         details: { properties: query.properties },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
+    case "expand":
+      return {
+        path,
+        kind: query.kind,
+        summary: `expand ${query.expansions.map(summarizeExpansion).join(", ")}`,
+        details: { expansions: query.expansions },
+        children: [buildExplainNode(query.input, `${path}.input`)],
+      }
   }
+}
+
+function summarizeExpansion(expansion: ObjectExpansion): string {
+  const head = expansion.direction === "incoming" ? `<-${expansion.linkId}` : expansion.linkId
+  const nested =
+    expansion.expand && expansion.expand.length > 0
+      ? `(${expansion.expand.map(summarizeExpansion).join(", ")})`
+      : ""
+  return `${head}${nested}`
 }
 
 function summarizePredicate(predicate: ObjectQueryPredicate): string {

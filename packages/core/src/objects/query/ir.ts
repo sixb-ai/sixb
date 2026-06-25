@@ -20,6 +20,7 @@ export type ObjectQuery =
   | ObjectQueryLimit
   | ObjectQueryPage
   | ObjectQueryProject
+  | ObjectQueryExpand
 
 export interface ObjectQueryStart {
   kind: "start"
@@ -98,6 +99,34 @@ export interface ObjectQueryProject {
   kind: "project"
   input: ObjectQuery
   properties?: readonly string[]
+}
+
+/**
+ * Attaches linked objects to the result set without changing which objects
+ * match — the graph-read counterpart to `traverse` (which replaces the set).
+ *
+ * Like `project`, `expand` is output-shaping: it is normalized to the
+ * outermost layer, and `count`/`exists` ignore it. Each {@link ObjectExpansion}
+ * names a link to hydrate; nesting walks further hops.
+ */
+export interface ObjectQueryExpand {
+  kind: "expand"
+  input: ObjectQuery
+  expansions: readonly ObjectExpansion[]
+}
+
+export interface ObjectExpansion {
+  linkId: string
+  /** Defaults to "outgoing". Incoming reuses `sourceObjectTypeId` to disambiguate, like traverse. */
+  direction: ObjectQueryDirection
+  /** Constrains an incoming expansion to one source object type (see traverse). */
+  sourceObjectTypeId?: string
+  /** Bounds a "many" expansion to the top-N links per parent. */
+  limit?: number
+  /** Deterministic ordering for a bounded "many" expansion, against the target type. */
+  orderBy?: readonly ObjectQuerySortField[]
+  /** Nested expansions, hydrated from the target objects of this expansion. */
+  expand?: readonly ObjectExpansion[]
 }
 
 export type ObjectQueryPredicate =
