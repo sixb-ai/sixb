@@ -20,11 +20,18 @@ import {
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
 } from "./errors"
-import type { ObjectExpansion, ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
+import type {
+  ObjectExpansion,
+  ObjectQuery,
+  ObjectQueryPredicate,
+  ObjectQueryResultShape,
+  ObjectQuerySortField,
+} from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
 import {
   type ObjectQueryValidationIssue,
+  resolveObjectQueryResultShape,
   type ValidatedObjectQuery,
   validateObjectQuery,
 } from "./validate"
@@ -149,15 +156,21 @@ export async function executeObjectQuery(
   const hasCountObjects = typeof options.storage.countObjects === "function"
   const hasExistsObjects = typeof options.storage.existsObjects === "function"
   const hasFacetObjects = typeof options.storage.facetObjects === "function"
-  const plannedQuery = expandPushdownQuery(validated.query, options.ontology, capabilities, {
-    hasQueryObjects,
-    hasCountObjects,
-    hasExistsObjects,
-    hasFacetObjects,
-    allowFallback: options.allowFallback,
-    maxFallbackRows: options.maxFallbackRows,
-    requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
-  })
+  const plannedQuery = expandPushdownQuery(
+    validated.query,
+    options.ontology,
+    capabilities,
+    {
+      hasQueryObjects,
+      hasCountObjects,
+      hasExistsObjects,
+      hasFacetObjects,
+      allowFallback: options.allowFallback,
+      maxFallbackRows: options.maxFallbackRows,
+      requiresExplicitFallbackBound: options.requiresExplicitFallbackBound,
+    },
+    options.maxExpansionFanout
+  )
   const plan = planObjectQuery(plannedQuery, {
     capabilities,
     hasQueryObjects,
@@ -393,17 +406,154 @@ function assertQueryViewable(
   )
 }
 
+interface ExpansionResolutionContext {
+  ontology: OntologyRegistry
+  maxExpansionFanout: number | undefined
+}
+
 function expandPushdownQuery(
   query: ObjectQuery,
   ontology: OntologyRegistry,
   capabilities: ObjectQueryCapabilities,
-  planning: Omit<ObjectQueryPlanningOptions, "capabilities">
+  planning: Omit<ObjectQueryPlanningOptions, "capabilities">,
+  maxExpansionFanout?: number
 ): ObjectQuery {
-  const expanded = expandIncludeSubtypes(query, ontology)
-  if (expanded === query) return query
+  // Resolve each expansion's cardinality and effective per-parent limit from the
+  // ontology so a provider can push the graph read down without one. The planner
+  // only admits expand pushdown once every expansion carries a cardinality, so a
+  // mixed/unresolved expansion (e.g. a polymorphic parent whose branches
+  // disagree) cleanly stays on the fallback.
+  const ctx: ExpansionResolutionContext = { ontology, maxExpansionFanout }
+  const annotated = resolveExpansions(query, ctx)
+  const expanded = expandIncludeSubtypes(annotated, ontology)
+  if (expanded === annotated) return annotated
 
   const plan = planObjectQuery(expanded, { ...planning, capabilities, allowFallback: false })
-  return plan.mode === "pushdown" ? expanded : query
+  return plan.mode === "pushdown" ? expanded : annotated
+}
+
+// Walk to the (normalized, outermost) expand node and annotate every expansion
+// with its resolved cardinality and bounded limit. Output-shaping only — never
+// changes which objects match — so it composes with `expandIncludeSubtypes`.
+function resolveExpansions(query: ObjectQuery, ctx: ExpansionResolutionContext): ObjectQuery {
+  switch (query.kind) {
+    case "expand": {
+      const parentShape = safeResultShape(query.input, ctx.ontology)
+      return {
+        ...query,
+        input: resolveExpansions(query.input, ctx),
+        expansions: query.expansions.map((expansion) =>
+          annotateExpansion(expansion, parentShape, ctx)
+        ),
+      }
+    }
+    case "start":
+      return query
+    case "set":
+      return {
+        ...query,
+        inputs: query.inputs.map((input) => resolveExpansions(input, ctx)),
+      }
+    case "filter":
+    case "text":
+    case "vector":
+    case "traverse":
+    case "sort":
+    case "limit":
+    case "page":
+    case "project":
+      return { ...query, input: resolveExpansions(query.input, ctx) }
+  }
+}
+
+function annotateExpansion(
+  expansion: ObjectExpansion,
+  parentShape: ObjectQueryResultShape,
+  ctx: ExpansionResolutionContext
+): ObjectExpansion {
+  const cardinality = resolveUniformCardinality(expansion, parentShape, ctx.ontology)
+  // Bake the per-parent top-N the provider must apply: the authored limit clamped
+  // by the fanout backstop (the fallback computes the same via
+  // `effectiveExpansionFanout`). Always defined afterwards, so the compiler need
+  // not re-derive the cap.
+  const limit = effectiveExpansionFanout(expansion.limit, ctx.maxExpansionFanout)
+  const base: ObjectExpansion = cardinality
+    ? { ...expansion, cardinality, limit }
+    : { ...expansion, limit }
+
+  if (!expansion.expand || expansion.expand.length === 0) return base
+
+  const targetShape = resolveExpansionTargetShape(expansion, parentShape, ctx.ontology)
+  return {
+    ...base,
+    expand: expansion.expand.map((nested) => annotateExpansion(nested, targetShape, ctx)),
+  }
+}
+
+// The attached value shape is uniform only when every parent type resolves the
+// link to the same cardinality. A non-declaring parent type contributes "many"
+// (matching the fallback's `link?.cardinality ?? "many"`); incoming is always
+// many-to-one. A mixed result returns undefined, keeping the query on fallback.
+function resolveUniformCardinality(
+  expansion: ObjectExpansion,
+  parentShape: ObjectQueryResultShape,
+  ontology: OntologyRegistry
+): "one" | "many" | undefined {
+  if (expansion.direction === "incoming") return "many"
+  if (parentShape.objectTypeIds.length === 0) return undefined
+
+  const cardinalities = new Set<"one" | "many">()
+  for (const objectTypeId of parentShape.objectTypeIds) {
+    const objectType = ontology.getObjectTypeById(objectTypeId)
+    const link = objectType?.links.find((candidate) => candidate.id === expansion.linkId)
+    cardinalities.add(link?.cardinality ?? "many")
+  }
+  return cardinalities.size === 1 ? [...cardinalities][0] : undefined
+}
+
+// The objects reached by an expansion are exactly the result of the equivalent
+// traverse, so reuse the shared shape resolver instead of re-deriving link
+// targets. Used to carry the parent context into nested expansions.
+function resolveExpansionTargetShape(
+  expansion: ObjectExpansion,
+  parentShape: ObjectQueryResultShape,
+  ontology: OntologyRegistry
+): ObjectQueryResultShape {
+  if (parentShape.objectTypeIds.length === 0) return { objectTypeIds: [] }
+
+  const input: ObjectQuery =
+    parentShape.objectTypeIds.length === 1
+      ? { kind: "start", objectTypeId: parentShape.objectTypeIds[0] }
+      : {
+          kind: "set",
+          op: "union",
+          inputs: parentShape.objectTypeIds.map((objectTypeId) => ({
+            kind: "start",
+            objectTypeId,
+          })),
+        }
+  const traverse: ObjectQuery = {
+    kind: "traverse",
+    input,
+    linkId: expansion.linkId,
+    direction: expansion.direction,
+    ...(expansion.sourceObjectTypeId === undefined
+      ? {}
+      : { sourceObjectTypeId: expansion.sourceObjectTypeId }),
+  }
+  return safeResultShape(traverse, ontology)
+}
+
+// Cardinality resolution is a pushdown optimization, never a correctness
+// requirement: any failure to resolve a shape (the resolver throws on a query it
+// considers invalid) must degrade to "unresolved", which the planner reads as
+// "keep this on the fallback" rather than surfacing an error.
+function safeResultShape(query: ObjectQuery, ontology: OntologyRegistry): ObjectQueryResultShape {
+  try {
+    return resolveObjectQueryResultShape(query, { ontology })
+  } catch {
+    return { objectTypeIds: [] }
+  }
 }
 
 function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): ObjectQuery {

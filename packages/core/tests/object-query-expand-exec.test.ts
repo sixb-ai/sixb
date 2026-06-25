@@ -36,6 +36,7 @@ const Company = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("name", "string", { required: true, query: sortable }),
   ],
+  links: [link.self("parent", { cardinality: "one" })],
 })
 
 const Opportunity = defineObjectType({
@@ -137,6 +138,11 @@ async function seed(storage: InMemoryObjectStorage): Promise<void> {
   )
 
   await storage.applyObjectUpserted(objectEvent("Company", "acme", { id: "acme", name: "Acme" }))
+  await storage.applyObjectUpserted(
+    objectEvent("Company", "globex", { id: "globex", name: "Globex" })
+  )
+  // acme rolls up to globex — the third hop for the deep-expansion fixture.
+  await storage.applyLinkUpserted(linkEvent("Company", "acme", "parent", "Company", "globex"))
 
   await storage.applyObjectUpserted(
     objectEvent("Opportunity", "opp-1", { id: "opp-1", title: "Deal A" })
@@ -256,6 +262,37 @@ describe("object query expand — execution", () => {
     const opportunity = single(byId(result.objects, "proj-1").links?.opportunity)
     const company = single(opportunity.links?.company)
     expect(company.properties.name).toBe("Acme")
+  })
+
+  test("hydrates a three-hop expansion end to end", async () => {
+    const result = await executeObjectQuery(
+      {
+        projectId: PROJECT,
+        query: expandProjects([
+          {
+            linkId: "opportunity",
+            direction: "outgoing",
+            expand: [
+              {
+                linkId: "company",
+                direction: "outgoing",
+                expand: [{ linkId: "parent", direction: "outgoing" }],
+              },
+            ],
+          },
+        ]),
+      },
+      { ontology, storage }
+    )
+
+    // proj-1 → opp-1 → acme → globex, asserting identity + a property at each hop.
+    const opportunity = single(byId(result.objects, "proj-1").links?.opportunity)
+    expect(opportunity.properties.title).toBe("Deal A")
+    const company = single(opportunity.links?.company)
+    expect(company.primaryId).toBe("acme")
+    const parent = single(company.links?.parent)
+    expect(parent.primaryId).toBe("globex")
+    expect(parent.properties.name).toBe("Globex")
   })
 
   test("fetches a target shared across parents exactly once", async () => {

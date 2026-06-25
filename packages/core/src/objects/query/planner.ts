@@ -1,6 +1,6 @@
 import type { ObjectQueryCapabilities } from "../../storage"
 import type { ObjectQueryPlanningIssue } from "./errors"
-import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
+import type { ObjectExpansion, ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 
 export type ObjectQueryPlanMode = "pushdown" | "fallback" | "rejected"
 export type ObjectQueryProviderOperation =
@@ -248,7 +248,35 @@ function collectNodeProviderIssues(
       })
       collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
       return
+    case "expand":
+      query.expansions.forEach((expansion, index) => {
+        collectExpansionProviderIssues(expansion, `${path}.expansions[${index}]`, issues)
+      })
+      collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
+      return
   }
+}
+
+// An expansion only pushes down once core has resolved its cardinality; an
+// unresolved one (e.g. a polymorphic parent whose branches disagree) keeps the
+// whole query on the bounded fallback, which re-derives cardinality per row.
+function collectExpansionProviderIssues(
+  expansion: ObjectExpansion,
+  path: string,
+  issues: ObjectQueryPlanningIssue[]
+): void {
+  if (expansion.cardinality === undefined) {
+    addIssue(
+      issues,
+      path,
+      "expand_cardinality_unresolved",
+      `Provider cannot push down expansion '${expansion.linkId}' without a resolved cardinality`
+    )
+  }
+
+  expansion.expand?.forEach((nested, index) => {
+    collectExpansionProviderIssues(nested, `${path}.expand[${index}]`, issues)
+  })
 }
 
 function collectPredicateProviderIssues(

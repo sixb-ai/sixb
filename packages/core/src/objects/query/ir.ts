@@ -127,6 +127,17 @@ export interface ObjectExpansion {
   orderBy?: readonly ObjectQuerySortField[]
   /** Nested expansions, hydrated from the target objects of this expansion. */
   expand?: readonly ObjectExpansion[]
+  /**
+   * Resolved link cardinality, driving the attached value shape: `"one"` yields a
+   * single object (or `null`), `"many"` yields an array.
+   *
+   * Core-resolved, never authored: the core executor fills this from the ontology
+   * before provider pushdown (like {@link ObjectQueryText.fieldsByObjectType}), so
+   * a storage provider can shape the result without an ontology. The bounded
+   * fallback re-derives cardinality per parent row and ignores this field. The
+   * planner only pushes an expansion down once it is set.
+   */
+  cardinality?: "one" | "many"
 }
 
 export type ObjectQueryPredicate =
