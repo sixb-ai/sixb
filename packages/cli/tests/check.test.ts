@@ -24,6 +24,33 @@ function runCheckFixture(fixtureName: string): {
   }
 }
 
+async function spawnCheckWithTimeout(
+  fixtureName: string,
+  timeoutMs: number
+): Promise<{ exitCode: number | null; timedOut: boolean }> {
+  const repoRoot = resolve(import.meta.dir, "..", "..", "..")
+  const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
+  const fixtureEntry = resolve(import.meta.dir, "fixtures", fixtureName, "sixb.config.ts")
+
+  const proc = Bun.spawn({
+    cmd: ["bun", cliEntry, "check", "--entry", fixtureEntry],
+    cwd: repoRoot,
+    stdout: "ignore",
+    stderr: "ignore",
+  })
+
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    proc.kill("SIGKILL")
+  }, timeoutMs)
+
+  const exitCode = await proc.exited
+  clearTimeout(timer)
+
+  return { exitCode, timedOut }
+}
+
 describe("sixb check", () => {
   test("passes for a valid project", () => {
     const result = runCheckFixture("valid-project")
@@ -34,4 +61,14 @@ describe("sixb check", () => {
     expect(result.stdout).not.toContain("validation error(s)")
     expect(result.stderr).toBe("")
   })
+
+  test("exits instead of hanging when a provider holds the event loop open", async () => {
+    // Without provider teardown, a ref'd handle (redis/pg connection, here a
+    // setInterval) keeps the process alive forever after rendering. A timeout
+    // here means that regressed.
+    const result = await spawnCheckWithTimeout("lingering-handle-project", 15_000)
+
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode).toBe(0)
+  }, 30_000)
 })
