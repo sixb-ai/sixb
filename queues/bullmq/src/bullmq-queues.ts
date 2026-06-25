@@ -1,5 +1,6 @@
 import type {
   ActionRunRequestedQueueJob,
+  AgentRunRequestedQueueJob,
   PipelineRunRequestedQueueJob,
   ProjectionRunRequestedQueueJob,
   Queues,
@@ -73,6 +74,7 @@ export class BullMqQueues implements Queues {
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob>
   readonly workflows: BullMqQueue<WorkflowQueueJob>
   readonly actions: BullMqQueue<ActionRunRequestedQueueJob>
+  readonly agents: BullMqQueue<AgentRunRequestedQueueJob>
 
   private readonly connections: BullMqConnections
 
@@ -94,6 +96,7 @@ export class BullMqQueues implements Queues {
     this.projections = new BullMqQueue<ProjectionRunRequestedQueueJob>(shared, "projection.runs")
     this.workflows = new BullMqQueue<WorkflowQueueJob>(shared, "workflow.runs")
     this.actions = new BullMqQueue<ActionRunRequestedQueueJob>(shared, "action.runs")
+    this.agents = new BullMqQueue<AgentRunRequestedQueueJob>(shared, "agent.runs")
   }
 
   async close(): Promise<void> {
@@ -103,6 +106,7 @@ export class BullMqQueues implements Queues {
       this.projections.close(),
       this.workflows.close(),
       this.actions.close(),
+      this.agents.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

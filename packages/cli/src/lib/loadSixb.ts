@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url"
 import type {
   ActionDefinition,
+  AgentsRuntime,
   AuthRuntime,
   ConnectorAdapter,
   ConnectorClient,
@@ -32,6 +33,7 @@ export interface LoadedSixb extends SixbRuntimeContext {
   getPipelineById(pipelineId: string): PipelineDefinition | null
   getScheduleDefinitions(): readonly ScheduleDefinition[]
   readonly workflows: WorkflowsRuntime
+  readonly agents: AgentsRuntime
   getObjectProjections(): readonly ObjectProjectionDefinition[]
   getLinkProjections(): readonly LinkProjectionDefinition[]
   getTelemetryProjections(): readonly TelemetryProjectionDefinition[]

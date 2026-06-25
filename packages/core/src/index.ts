@@ -909,6 +909,7 @@ export {
 
 export type {
   ActionRunRequestedQueueJob,
+  AgentRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -1268,6 +1269,7 @@ export type {
   AgentModelToolOutput,
   AgentModelToolResultPart,
   AgentReasoningPart,
+  AgentRequestErrorCode,
   AgentStepStartPart,
   AgentTextPart,
   AgentToolCallPart,
@@ -1276,15 +1278,23 @@ export type {
   AgentUiMessagePart,
   AgentUiToolPart,
   DefineAgentConfig,
+  RequestAgentRunInput,
+  RequestAgentRunResult,
 } from "./agents"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   AgentDefinitionError,
   AgentMessageAdapterError,
+  AgentRequestError,
   AgentsRuntime,
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentRunLeaseId,
+  createAgentThreadId,
   defineAgent,
   fromAiSdk,
   isAgentDefinition,
+  requestAgentRun,
   toModelMessages,
   toUiMessage,
 } from "./agents"

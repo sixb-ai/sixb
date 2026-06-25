@@ -15,3 +15,25 @@ export class AgentDefinitionError extends Error {
 export class AgentMessageAdapterError extends Error {
   readonly name = "AgentMessageAdapterError"
 }
+
+export type AgentRequestErrorCode =
+  | "agent_not_found"
+  | "thread_not_found"
+  | "thread_agent_mismatch"
+  | "active_run_exists"
+  | "storage_unavailable"
+
+/**
+ * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text
+ * — e.g. the HTTP layer maps `active_run_exists` to 409 and `agent_not_found` to 404.
+ */
+export class AgentRequestError extends Error {
+  readonly name = "AgentRequestError"
+
+  constructor(
+    readonly code: AgentRequestErrorCode,
+    message: string
+  ) {
+    super(message)
+  }
+}

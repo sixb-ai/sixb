@@ -1,18 +1,23 @@
+import type { SixbRuntimeContext } from "../runtime/types"
+import { AgentRequestError } from "./errors"
+import { type RequestAgentRunInput, type RequestAgentRunResult, requestAgentRun } from "./request"
 import type { AgentDefinition } from "./types"
 
 /**
- * Holds the agent definitions registered with a Sixb instance and exposes lookup.
+ * Holds the agent definitions registered with a Sixb instance and exposes lookup + the run trigger.
  *
- * The PR1 surface is definition-only (`list` / `getById`). Runtime behaviour
- * (starting a run, streaming) lands in later slices on this same `sixb.agents`
- * namespace, mirroring `sixb.workflows` / `sixb.actions`.
+ * Definition lookup (`list` / `getById`) is what the worker uses to resolve a run's model (the model
+ * is a non-serialisable `LanguageModelV3`, so it is never sent over the wire). `request(...)` is the
+ * trigger surface, mirroring `sixb.actions.request`.
  *
  * Duplicate ids are rejected by the `Sixb` constructor before this is built.
  */
 export class AgentsRuntime {
+  private readonly runtime: SixbRuntimeContext
   private readonly agentsById: ReadonlyMap<string, AgentDefinition>
 
-  constructor(agents: readonly AgentDefinition[]) {
+  constructor(runtime: SixbRuntimeContext, agents: readonly AgentDefinition[]) {
+    this.runtime = runtime
     this.agentsById = new Map(agents.map((agent) => [agent.id, agent]))
   }
 
@@ -24,5 +29,14 @@ export class AgentsRuntime {
   /** Look up a registered agent definition by id. */
   getById(agentId: string): AgentDefinition | null {
     return this.agentsById.get(agentId) ?? null
+  }
+
+  /** Trigger an agent turn: persist the user message and enqueue the run intent. */
+  request(input: RequestAgentRunInput): Promise<RequestAgentRunResult> {
+    const agent = this.getById(input.agentId)
+    if (!agent) {
+      throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
+    }
+    return requestAgentRun(this.runtime, agent, input)
   }
 }

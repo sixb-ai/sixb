@@ -4,6 +4,7 @@
     "noEmit": true,
     "paths": {
       "@sixb/action-worker": ["./packages/action-worker/src/index.ts"],
+      "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
       "@sixb/atlas": ["./packages/atlas/src/index.ts"],
       "@sixb/auth-magic-link": ["./auth/magic-link/src/index.ts"],

@@ -14,7 +14,18 @@ export type {
 } from "./adapters"
 export { fromAiSdk, toModelMessages, toUiMessage } from "./adapters"
 export { defineAgent } from "./builders"
-export { AgentDefinitionError, AgentMessageAdapterError } from "./errors"
+export {
+  AgentDefinitionError,
+  AgentMessageAdapterError,
+  AgentRequestError,
+  type AgentRequestErrorCode,
+} from "./errors"
+export {
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentRunLeaseId,
+  createAgentThreadId,
+} from "./ids"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentMessage,
@@ -27,6 +38,11 @@ export {
   type AgentToolCallPart,
   type AgentToolCallState,
 } from "./message"
+export {
+  type RequestAgentRunInput,
+  type RequestAgentRunResult,
+  requestAgentRun,
+} from "./request"
 export { AgentsRuntime } from "./runtime"
 export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./types"
 export { isAgentDefinition } from "./validation"

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { QueueError } from "./errors"
 import type {
   ActionRunRequestedQueueJob,
+  AgentRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -348,4 +349,5 @@ export class InMemoryQueues implements Queues {
   )
   readonly workflows = new InMemoryQueue<WorkflowQueueJob>(this.store, "workflow.runs")
   readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob>(this.store, "action.runs")
+  readonly agents = new InMemoryQueue<AgentRunRequestedQueueJob>(this.store, "agent.runs")
 }
