@@ -31,3 +31,38 @@ export class AgentLeaseLostError extends Error {
     super(`[SixbAgentWorker] Lost the lease on agent run '${runId}'; another worker owns it.`)
   }
 }
+
+/**
+ * Recording a run's terminal state failed on a non-terminal (infra) error that persisted across
+ * in-place retries. The run is still `running` and its thread is still locked, so the worker must
+ * **not** acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize the
+ * run once storage recovers. Distinct from {@link AgentLeaseLostError} (run no longer ours → ack).
+ */
+export class AgentFinalizationError extends Error {
+  readonly name = "AgentFinalizationError"
+  constructor(
+    readonly runId: string,
+    options?: ErrorOptions
+  ) {
+    super(
+      `[SixbAgentWorker] Could not finalize agent run '${runId}'; storage is unavailable.`,
+      options
+    )
+  }
+}
+
+/**
+ * A turn exceeded its wall-clock budget. Unlike a shutdown abort, this is a run-level failure: the
+ * run is recorded `failed` and the thread released (a slow-but-alive model must not hold a thread
+ * forever). The name is intentionally **not** `AbortError`, so it routes through the normal failure
+ * path rather than the worker's shutdown-abort path.
+ */
+export class AgentTurnTimeoutError extends Error {
+  readonly name = "AgentTurnTimeoutError"
+  constructor(
+    readonly runId: string,
+    readonly timeoutMs: number
+  ) {
+    super(`[SixbAgentWorker] Agent run '${runId}' exceeded its ${timeoutMs}ms turn budget.`)
+  }
+}

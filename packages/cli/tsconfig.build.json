@@ -15,6 +15,9 @@
       "path": "../action-worker/tsconfig.build.json"
     },
     {
+      "path": "../agent-worker/tsconfig.build.json"
+    },
+    {
       "path": "../app/tsconfig.build.json"
     },
     {

@@ -6,13 +6,33 @@ import type {
   ClaimedQueueJob,
   QueueWorkerFailureDecision,
 } from "@sixb/core"
-import { AgentStorageError, createAgentRunId, createAgentRunLeaseId, QueueWorker } from "@sixb/core"
-import { AgentLeaseHeldError, AgentLeaseLostError, AgentWorkerError } from "./errors"
+import {
+  AgentStorageError,
+  createAgentRunId,
+  createAgentRunLeaseId,
+  isAbortError,
+  QueueWorker,
+} from "@sixb/core"
+import {
+  AgentFinalizationError,
+  AgentLeaseHeldError,
+  AgentLeaseLostError,
+  AgentWorkerError,
+} from "./errors"
+import { finishRunOrThrow } from "./finalize"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import type { AgentWorkerContext, AgentWorkerOptions, AgentWorkerSixb, StreamSink } from "./types"
 
 const DEFAULT_AGENT_LEASE_MS = 60_000
+const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
 const SHORT_BACKOFF_MS = 250
+/** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
+const FINALIZE_RETRY_BACKOFF_MS = 5_000
+/**
+ * Cap on redeliveries for a run we cannot finalize. Beyond it the job dead-letters (visibly) instead
+ * of churning forever; the still-`running` run awaits storage recovery + a reaper (a later slice).
+ */
+const MAX_FINALIZE_ATTEMPTS = 10
 const NOOP_SINK: StreamSink = { onPart() {} }
 
 /** Outcome of trying to own a run for a claimed job. */
@@ -27,8 +47,10 @@ type Reservation =
  * Liveness is two-layered: the queue lane delivers (and redelivers on lease expiry), while the
  * `agent_runs` lease is the sole authority on who may execute and finalize a run. The worker
  * reserves the run at claim time, owns its lease, heartbeats it during the turn, and fences every
- * write on the lease id. A run's terminal fate lives on its record (like the action worker), so
- * model/tool failures still acknowledge the job — only infra failures fail the job.
+ * write on the lease id. A run's terminal fate lives on its record (like the action worker), so a
+ * model/tool failure that we successfully record still acknowledges the job. The job is only left
+ * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
+ * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
  */
 export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   private readonly sixb: AgentWorkerSixb
@@ -93,39 +115,63 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       )
     }
     const run = reservation.run
+    const leaseId = run.lease?.id
 
     try {
       await runAgentTurn({ context, agent, run, signal })
     } catch (error) {
+      // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
       if (error instanceof AgentLeaseLostError) {
-        // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
         return
       }
-      const leaseId = run.lease?.id
-      if (signal.aborted || isAbortError(error)) {
-        if (leaseId) {
-          await this.finishQuietly(context, run.id, leaseId, "cancelled", error)
-        }
+      // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
+      // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
+      if (error instanceof AgentFinalizationError) {
         throw error
       }
-      // Run-level failure: record it on the run and ack the job — the fate lives on the record.
-      if (leaseId) {
-        await this.finishQuietly(context, run.id, leaseId, "failed", error)
+      if (!leaseId) {
+        throw error
+      }
+      // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
+      // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
+      // is redelivered rather than acked with the thread left silently locked.
+      const aborted = signal.aborted || isAbortError(error)
+      await this.recordFate(context, run.id, leaseId, aborted ? "cancelled" : "failed", error)
+      // Shutdown abort: rethrow so `onAbortError` fails the job (the run is already `cancelled`).
+      // Model/tool failure or turn timeout: fate is on the record, so we ack by returning.
+      if (aborted) {
+        throw error
       }
     }
   }
 
   protected override onExecutionError(
-    _claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
+    claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
     error: unknown
   ): QueueWorkerFailureDecision {
     if (error instanceof AgentLeaseHeldError) {
       return { kind: "retry", availableAt: error.availableAt }
     }
+    // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
+    // fate — but cap the redeliveries so a persistent failure dead-letters instead of churning.
+    if (error instanceof AgentFinalizationError) {
+      if (claimed.job.attempt < MAX_FINALIZE_ATTEMPTS) {
+        return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
+      }
+      return { kind: "fail" }
+    }
     return { kind: "fail" }
   }
 
-  protected override onAbortError(): QueueWorkerFailureDecision {
+  protected override onAbortError(
+    _claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
+    error: unknown
+  ): QueueWorkerFailureDecision {
+    // Shutdown reached us before we could record the run's fate: redeliver so another process
+    // finalizes it. Otherwise the run is already terminal, so fail (no redelivery needed).
+    if (error instanceof AgentFinalizationError) {
+      return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
+    }
     return { kind: "fail" }
   }
 
@@ -203,7 +249,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     }
   }
 
-  private async finishQuietly(
+  private async recordFate(
     context: AgentWorkerContext,
     runId: string,
     leaseId: string,
@@ -211,15 +257,18 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     error: unknown
   ): Promise<void> {
     try {
-      await context.storage.runs.finish({
-        projectId: context.id,
-        id: runId,
-        leaseId,
-        status,
-        error: toErrorMessage(error),
-      })
-    } catch {
-      // Lease already lost or run already terminal — nothing to finalize.
+      await finishRunOrThrow(
+        context.storage,
+        { projectId: context.id, id: runId, leaseId, status, error: toErrorMessage(error) },
+        runId
+      )
+    } catch (finalizeError) {
+      // Lease already lost / run already terminal — nothing more to record, the delivery is acked.
+      if (finalizeError instanceof AgentLeaseLostError) {
+        return
+      }
+      // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
+      throw finalizeError
     }
   }
 }
@@ -241,6 +290,7 @@ function buildAgentContext(
     leaseMs,
     heartbeatMs: options.heartbeatMs ?? Math.max(1, Math.floor(leaseMs / 3)),
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
+    turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
   }
 }
 
@@ -250,10 +300,6 @@ function freshLease(leaseMs: number): AgentRunLease {
 
 function backoff(ms: number): string {
   return new Date(Date.now() + ms).toISOString()
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError"
 }
 
 function toErrorMessage(error: unknown): string {

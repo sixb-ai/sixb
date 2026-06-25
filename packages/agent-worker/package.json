@@ -19,11 +19,11 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.10",
     "@sixb/core": "workspace:*",
     "ai": "^6.0.0"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "^3.0.10",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },

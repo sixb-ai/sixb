@@ -34,6 +34,7 @@ export interface AgentWorkerContext {
   readonly leaseMs: number
   readonly heartbeatMs: number
   readonly defaultMaxSteps: number
+  readonly turnTimeoutMs: number
 }
 
 /**
@@ -62,4 +63,10 @@ export interface AgentWorkerOptions {
   readonly streamSink?: StreamSink
   /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 8. */
   readonly defaultMaxSteps?: number
+  /**
+   * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded
+   * `failed`, releasing the thread — a slow-but-alive model cannot hold a thread indefinitely.
+   * Defaults to 5 minutes.
+   */
+  readonly turnTimeoutMs?: number
 }

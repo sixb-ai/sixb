@@ -5,9 +5,10 @@ import type {
   AgentStorage,
   SixbMessage,
 } from "@sixb/core"
-import { AgentStorageError, createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
+import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
 import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
-import { AgentLeaseLostError, AgentWorkerError } from "./errors"
+import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
+import { finishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
 import type { AgentWorkerContext, StreamSink } from "./types"
 
 export const DEFAULT_MAX_STEPS = 8
@@ -44,6 +45,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     leaseMs,
     heartbeatMs,
     defaultMaxSteps,
+    turnTimeoutMs,
   } = context
   const runId = run.id
   const leaseId = run.lease?.id
@@ -60,9 +62,16 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
 
-  // The model call is aborted either by worker shutdown or by the heartbeat detecting a lost lease.
+  // The model call is aborted by worker shutdown, by the heartbeat detecting a lost lease, or by the
+  // turn exceeding its wall-clock budget (a slow-but-alive model must not hold the thread forever).
   const heartbeatAbort = new AbortController()
-  const abortSignal = AbortSignal.any([signal, heartbeatAbort.signal])
+  const timeoutAbort = new AbortController()
+  let timedOut = false
+  const timeoutTimer = setTimeout(() => {
+    timedOut = true
+    timeoutAbort.abort()
+  }, turnTimeoutMs)
+  const abortSignal = AbortSignal.any([signal, heartbeatAbort.signal, timeoutAbort.signal])
 
   const result = streamText({
     model: agent.model,
@@ -105,10 +114,16 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     drainError = error
   } finally {
     heartbeat.stop()
+    clearTimeout(timeoutTimer)
   }
 
   if (leaseLost) {
     throw new AgentLeaseLostError(runId)
+  }
+  // A timeout aborts the stream, surfacing as `drainError`; check our flag first so a timed-out turn
+  // throws the typed (non-abort) error and is recorded `failed` rather than treated as a shutdown.
+  if (timedOut) {
+    throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
   }
   if (drainError !== undefined) {
     throw drainError
@@ -140,15 +155,22 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const usage = mapUsage(await result.totalUsage)
   const finishReason = await result.finishReason
 
-  return storage.runs.finish({
-    projectId,
-    id: runId,
-    leaseId,
-    status: "succeeded",
-    modelId: agent.model.modelId,
-    finishReason,
-    ...(usage === undefined ? {} : { usage }),
-  })
+  // `finishRunOrThrow` retries transient blips in place; if the lease is gone it raises
+  // `AgentLeaseLostError` (ack), and a persistent infra failure raises `AgentFinalizationError`
+  // (redeliver) — so a finalize that cannot complete never leaves the thread silently locked.
+  return finishRunOrThrow(
+    storage,
+    {
+      projectId,
+      id: runId,
+      leaseId,
+      status: "succeeded",
+      modelId: agent.model.modelId,
+      finishReason,
+      ...(usage === undefined ? {} : { usage }),
+    },
+    runId
+  )
 }
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider
@@ -182,7 +204,7 @@ function startLeaseHeartbeat(input: LeaseHeartbeatInput): { stop(): void } {
         expiresAt: new Date(Date.now() + input.leaseMs),
       })
     } catch (error) {
-      if (isLeaseGone(error)) {
+      if (isTerminalOrLeaseGone(error)) {
         input.onLost()
         return
       }
@@ -224,20 +246,11 @@ async function renewOrLost(input: {
       expiresAt: new Date(Date.now() + input.leaseMs),
     })
   } catch (error) {
-    if (isLeaseGone(error)) {
+    if (isTerminalOrLeaseGone(error)) {
       throw new AgentLeaseLostError(input.runId)
     }
     throw error
   }
-}
-
-function isLeaseGone(error: unknown): boolean {
-  return (
-    error instanceof AgentStorageError &&
-    (error.code === "lease_lost" ||
-      error.code === "invalid_state" ||
-      error.code === "run_not_found")
-  )
 }
 
 async function emitPart(sink: StreamSink, part: SixbMessage["parts"][number]): Promise<void> {
