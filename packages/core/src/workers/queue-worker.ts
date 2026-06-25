@@ -143,7 +143,8 @@ function toQueueJobError(error: unknown): QueueJobError {
   return { message: String(error) }
 }
 
-function isAbortError(error: unknown): boolean {
+/** True for a standard abort (`AbortController`/`AbortSignal.timeout`) error. */
+export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError"
 }
 

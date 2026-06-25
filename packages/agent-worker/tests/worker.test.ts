@@ -7,6 +7,7 @@ import type {
 import {
   AgentRequestError,
   type AgentStorage,
+  AgentStorageError,
   type AgentsRuntime,
   createAgentRunId,
   createAgentRunLeaseId,
@@ -24,7 +25,8 @@ import {
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { MockLanguageModelV3, simulateReadableStream } from "ai/test"
-import { AgentLeaseLostError } from "../src/errors"
+import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
+import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { AgentWorker } from "../src/worker"
 import { waitFor } from "./helpers"
@@ -138,6 +140,50 @@ function agentStorageOf(sixb: TestSixb): AgentStorage {
 async function listMessages(storage: AgentStorage, threadId: string) {
   const result = await storage.messages.list({ projectId: PROJECT_ID, threadId, order: "asc" })
   return result.messages
+}
+
+/**
+ * Wrap an {@link AgentStorage} so `runs.finish` fails with a non-terminal (infra) error its first
+ * `failTimes` calls, then delegates. Method delegation is explicit (not spread) to preserve the
+ * underlying store's `this` binding.
+ */
+function withFlakyFinish(storage: AgentStorage, failTimes: number): AgentStorage {
+  let fails = 0
+  const runs: AgentStorage["runs"] = {
+    reserve: (input) => storage.runs.reserve(input),
+    renewLease: (input) => storage.runs.renewLease(input),
+    reclaim: (input) => storage.runs.reclaim(input),
+    getById: (params) => storage.runs.getById(params),
+    list: (input) => storage.runs.list(input),
+    finish: (input) => {
+      if (fails < failTimes) {
+        fails += 1
+        return Promise.reject(new Error("storage blip"))
+      }
+      return storage.runs.finish(input)
+    },
+  }
+  return { threads: storage.threads, runs, messages: storage.messages }
+}
+
+/** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
+function hangingModel(): MockLanguageModelV3 {
+  return new MockLanguageModelV3({
+    modelId: "mock-model",
+    doStream: async (options) => ({
+      stream: new ReadableStream<LanguageModelV3StreamPart>({
+        start(controller) {
+          controller.enqueue({ type: "stream-start", warnings: [] })
+          const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+          if (options.abortSignal?.aborted) {
+            abort()
+          } else {
+            options.abortSignal?.addEventListener("abort", abort, { once: true })
+          }
+        },
+      }),
+    }),
+  })
 }
 
 describe("AgentWorker", () => {
@@ -317,6 +363,7 @@ describe("AgentWorker", () => {
         leaseMs: 60_000,
         heartbeatMs: 20_000,
         defaultMaxSteps: 4,
+        turnTimeoutMs: 60_000,
       },
       agent: sixb.agents.getById("assistant")!,
       run: staleRun,
@@ -409,5 +456,154 @@ describe("AgentWorker", () => {
     expect(list.runs[0]?.status).toBe("cancelled")
     const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
     expect(thread?.activeRunId).toBeNull()
+  })
+
+  test("absorbs a transient finalize blip in place: one run, one message, no lock", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    // The worker sees a storage whose `finish` fails twice before succeeding; the trigger keeps using
+    // the real storage (both delegate to the same underlying state).
+    const workerSixb = {
+      id: sixb.id,
+      events: sixb.events,
+      storage: { agents: withFlakyFinish(storage, 2) } as unknown as Storage,
+      queues: sixb.queues,
+      agents: sixb.agents,
+    }
+
+    const worker = new AgentWorker(workerSixb, { tools: echoTool })
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run finalized after blip" }
+      )
+
+      // The in-place retry recovered: the run succeeded on this delivery, with exactly one assistant
+      // message (no redelivery, so no duplicate turn), and the thread is released (no silent lock).
+      expect(run.status).toBe("succeeded")
+      expect(run.attempt).toBe(1)
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
+      expect(thread?.activeRunId).toBeNull()
+      const assistants = (await listMessages(storage, threadId)).filter(
+        (m) => m.role === "assistant"
+      )
+      expect(assistants).toHaveLength(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails the run and releases the thread when a turn exceeds its wall-clock budget", async () => {
+    const sixb = buildSixb(hangingModel())
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, { turnTimeoutMs: 50 })
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "hang" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run timed out" }
+      )
+
+      expect(run.status).toBe("failed")
+      expect(run.error).toContain("turn budget")
+      // Thread released so a later message can run, and no assistant message was persisted.
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
+      expect(thread?.activeRunId).toBeNull()
+      const messages = await listMessages(storage, threadId)
+      expect(messages.every((m) => m.role !== "assistant")).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("holds a different turn behind a live active run without stealing it (single-flight, worker layer)", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+
+    // A live run (valid, far-future lease) owns the thread, triggered by message "A".
+    const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "first" })
+    const activeRunId = createAgentRunId()
+    await storage.runs.reserve({
+      id: activeRunId,
+      projectId: PROJECT_ID,
+      threadId,
+      agentId: "assistant",
+      triggerMessageId: "trigger-A",
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 300_000) },
+    })
+
+    // A redelivered job for a *different* trigger lands while that run is live. The worker must hold
+    // it (single-flight), never reclaiming the still-leased run.
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          type: "agent.run.requested",
+          payload: { agentId: "assistant", threadId, triggerMessageId: "trigger-B" },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, { tools: echoTool })
+    await worker.start()
+    try {
+      // Let the worker claim + hold the job (held jobs are rescheduled a full lease out, so B will
+      // not run again inside the test window). The active run must be untouched: not reclaimed, no
+      // second run created, and no assistant message written.
+      await Bun.sleep(150)
+
+      const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+      expect(list.runs).toHaveLength(1)
+      expect(list.runs[0]?.id).toBe(activeRunId)
+      expect(list.runs[0]?.status).toBe("running")
+      expect(list.runs[0]?.attempt).toBe(1)
+      const assistants = (await listMessages(storage, threadId)).filter(
+        (m) => m.role === "assistant"
+      )
+      expect(assistants).toHaveLength(0)
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+describe("finishRunOrThrow", () => {
+  function finishingStorage(finish: AgentStorage["runs"]["finish"]): AgentStorage {
+    return { runs: { finish } } as unknown as AgentStorage
+  }
+
+  const succeededInput = {
+    projectId: PROJECT_ID,
+    id: "agt_run_x",
+    leaseId: "agt_lease_x",
+    status: "succeeded",
+  } as const
+
+  test("raises AgentFinalizationError when an infra error persists across retries", async () => {
+    const storage = finishingStorage(() => Promise.reject(new Error("db down")))
+    await expect(finishRunOrThrow(storage, succeededInput, "agt_run_x")).rejects.toBeInstanceOf(
+      AgentFinalizationError
+    )
+  })
+
+  test("raises AgentLeaseLostError when the run is no longer ours (terminal storage error)", async () => {
+    const storage = finishingStorage(() =>
+      Promise.reject(new AgentStorageError("lease_lost", "gone"))
+    )
+    await expect(finishRunOrThrow(storage, succeededInput, "agt_run_x")).rejects.toBeInstanceOf(
+      AgentLeaseLostError
+    )
   })
 })

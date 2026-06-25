@@ -929,7 +929,7 @@ export { InMemoryQueues, QueueError } from "./queues"
 // ── Workers ────────────────────────────────────────────────
 
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./workers"
-export { QueueWorker, Worker, WorkerAbortError } from "./workers"
+export { isAbortError, QueueWorker, Worker, WorkerAbortError } from "./workers"
 
 // ── Sandboxes ──────────────────────────────────────────────
 
