@@ -28,9 +28,9 @@ const HookUser = defineObjectType({
   name: "User",
   properties: [prop("email", "string", { required: true })],
   links: [
-    link("manager", "HookUser", { cardinality: "one" }),
-    link("department", "HookDepartment", { cardinality: "one" }),
-    link("skills", "HookSkill", { cardinality: "many" }),
+    link.self("manager", { cardinality: "one" }),
+    link.ref("department", "HookDepartment", { cardinality: "one" }),
+    link.ref("skills", "HookSkill", { cardinality: "many" }),
   ],
 })
 
@@ -38,14 +38,14 @@ const HookTeam = defineObjectType({
   id: "HookTeam",
   name: "Team",
   properties: [prop("slug", "string", { required: true })],
-  links: [link("members", "HookUser", { cardinality: "many" })],
+  links: [link.ref("members", "HookUser", { cardinality: "many" })],
 })
 
 const HookProject = defineObjectType({
   id: "HookProject",
   name: "Project",
   properties: [prop("name", "string", { required: true })],
-  links: [link("owner", ["HookUser", "HookTeam"], { cardinality: "one" })],
+  links: [link.ref("owner", ["HookUser", "HookTeam"], { cardinality: "one" })],
 })
 
 const HookFolder = defineObjectType({
@@ -53,8 +53,8 @@ const HookFolder = defineObjectType({
   name: "Folder",
   properties: [prop("name", "string", { required: true })],
   links: [
-    link("parent", "HookFolder", { cardinality: "one" }),
-    link("children", "HookFolder", { cardinality: "many" }),
+    link.self("parent", { cardinality: "one" }),
+    link.self("children", { cardinality: "many" }),
   ],
 })
 
