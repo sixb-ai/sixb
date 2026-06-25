@@ -11,14 +11,14 @@ const Customer = defineObjectType({
   id: "ManifestCustomer",
   name: "Customer",
   properties: [prop("name", "string", { required: true })],
-  links: [link("region", "ManifestRegion", { cardinality: "one" })],
+  links: [link.ref("region", "ManifestRegion", { cardinality: "one" })],
 })
 
 const Project = defineObjectType({
   id: "ManifestProject",
   name: "Project",
   properties: [prop("name", "string", { required: true })],
-  links: [link("customer", "ManifestCustomer", { cardinality: "one" })],
+  links: [link.ref("customer", "ManifestCustomer", { cardinality: "one" })],
 })
 
 declare module "@sixb/core/ontology" {

@@ -27,7 +27,7 @@ const Device = defineObjectType({
     prop("name", "string", { required: true }),
     prop("status", "string"),
   ],
-  links: [link("sensor", "Sensor", { cardinality: "one" })],
+  links: [link.ref("sensor", "Sensor", { cardinality: "one" })],
 })
 
 const Sensor = defineObjectType({

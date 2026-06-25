@@ -625,10 +625,10 @@ describe("validateLinkProperties", () => {
     name: "Room",
     properties: [prop("id", "string", { required: true, primary: true })],
     links: [
-      link("hasDevice", "Device", {
+      link.ref("hasDevice", "Device", {
         properties: [prop("installedBy", "string", { required: true }), prop("notes", "string")],
       }),
-      link("hasNeighbor", "Room"),
+      link.ref("hasNeighbor", "Room"),
     ],
   })
 

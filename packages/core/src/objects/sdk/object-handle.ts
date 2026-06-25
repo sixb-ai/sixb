@@ -19,6 +19,7 @@ import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../l
 import { createTelemetryAppender } from "./telemetry-appender"
 
 type ObjectRefInput = ObjectRef
+type AnyLinkToken = LinkToken<string, string, string | readonly string[], ObjectLink>
 
 export function createObjectByIdHandle<
   TObjectType extends ObjectTypeWithPropertyTokens,
@@ -35,7 +36,7 @@ export function createObjectByIdHandle<
       return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
     },
 
-    listLinks: async (linkToken?: LinkToken<string, string, string, ObjectLink>) => {
+    listLinks: async (linkToken?: AnyLinkToken) => {
       // Link rows reveal target types; no link grant semantics exist yet.
       assertPrivileged(ctx, "listLinks")
       if (linkToken) {
@@ -50,7 +51,7 @@ export function createObjectByIdHandle<
     },
 
     link: async (
-      linkToken: LinkToken<string, string, string, ObjectLink>,
+      linkToken: AnyLinkToken,
       target: ObjectRefInput,
       options?: { properties?: Record<string, unknown> }
     ) => {
@@ -66,10 +67,7 @@ export function createObjectByIdHandle<
       })
     },
 
-    unlink: async (
-      linkToken: LinkToken<string, string, string, ObjectLink>,
-      target: ObjectRefInput
-    ) => {
+    unlink: async (linkToken: AnyLinkToken, target: ObjectRefInput) => {
       assertLinkTokenBelongsToObjectType(ctx.objectType, linkToken)
 
       const linkCtx: ResolvedLinkContext = { ...ctx, linkDefinition: linkToken.link }

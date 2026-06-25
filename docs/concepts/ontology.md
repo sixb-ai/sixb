@@ -164,24 +164,37 @@ export const Customer = defineObjectType({
 })
 ```
 
-`link(...)` takes these parameters:
+For links to object types you can import directly, use `link(...)`:
+
+```ts
+link("belongsTo", Organization)
+link("relatedTo", [Organization, Customer])
+```
+
+For id references, self-links, or intentionally open links, use the explicit helpers:
+
+```ts
+link.ref("belongsTo", "Organization")
+link.self("parent", { cardinality: "one" })
+link.any("relatedTo", { cardinality: "many" })
+```
+
+Use `link.ref(...)` when you want to reference another object type by id instead of importing it.
+Sixb's generated ontology type manifest lets typed client queries resolve those ids.
+
+Use `link.self(...)` for recursive relationships such as folders, org charts, or threaded
+comments. The target id is filled in from the object type that declares the link.
+
+Use `link.any(...)` only for wildcard relationships that can point to any object type. Prefer a
+specific target for relationships your app understands.
+
+All link forms take these parameters:
 
 | Parameter | Required | Expected |
 | --- | --- | --- |
 | `id` | Yes | A stable relationship key, unique within the source object type |
-| `target` | No | The object type this link can point to |
+| `target` | Depends on helper | The object type or object type id this link can point to |
 | `options` | No | An object for metadata and relationship behavior |
-
-The `target` can be an object type, an object type id, or an array of allowed object types or ids:
-
-```ts
-link("belongsTo", Organization)
-link("belongsTo", "Organization")
-link("relatedTo", [Organization, Customer])
-```
-
-When the target is omitted or set to `"*"`, the link is a wildcard link and can point to any
-object type. Prefer a specific target for relationships your app understands.
 
 `options` accepts these fields:
 

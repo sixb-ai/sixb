@@ -20,19 +20,20 @@
  *     prop("mode", stringEnum(["off", "heat", "cool", "auto"])),
  *   ],
  *   links: [
- *     link("controls", "hvacZone", { cardinality: "one" }),
+ *     link.ref("controls", "hvacZone", { cardinality: "one" }),
  *   ],
  * })
  * ```
  */
 
-import type { ObjectTypeWithTokens } from "./tokens"
+import type { ObjectTypeWithPropertyTokens, ObjectTypeWithTokens, PropertyTokenMap } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type {
   EnumSchema,
   Interface,
   LinkCardinality,
   ObjectLink,
+  ObjectLinkTargetMetadata,
   ObjectType,
   Ontology,
   Property,
@@ -62,6 +63,19 @@ type FieldFromOptions<TOptions, TKey extends string, TFallback> =
     ? { [K in TKey]: TValue }
     : { [K in TKey]?: TFallback }
 
+const selfLinkTargetObjectTypeId = "__sixb.self__"
+type SelfLinkTargetObjectTypeId = typeof selfLinkTargetObjectTypeId
+
+type NormalizeSelfLink<TObjectTypeId extends string, TLink> = TLink extends {
+  targetObjectTypeId: SelfLinkTargetObjectTypeId
+}
+  ? Omit<TLink, "targetObjectTypeId"> & { targetObjectTypeId: TObjectTypeId }
+  : TLink
+
+type NormalizeSelfLinks<TObjectTypeId extends string, TLinks extends readonly ObjectLink[]> = {
+  -readonly [K in keyof TLinks]: NormalizeSelfLink<TObjectTypeId, TLinks[K]>
+}
+
 // ── Extends type utilities ───────────────────────────────────
 
 /**
@@ -78,6 +92,12 @@ type MergedCollection<
  */
 type OwnCollection<TInput, TKey extends string, TItem> =
   TInput extends Record<TKey, infer T extends readonly TItem[]> ? [...T] : []
+
+type OwnLinks<TInput> = TInput extends { id: infer TObjectTypeId extends string }
+  ? TInput extends Record<"links", infer TLinks extends readonly ObjectLink[]>
+    ? NormalizeSelfLinks<TObjectTypeId, TLinks>
+    : []
+  : []
 
 /**
  * Merge two arrays by id: parent items first, child items override by id.
@@ -138,19 +158,19 @@ type DefineObjectTypeResult<TInput extends DefineObjectTypeInput> = Omit<
           TParent["properties"],
           OwnCollection<TInput, "properties", Property>
         >
-        links: MergedCollection<TParent["links"], OwnCollection<TInput, "links", ObjectLink>>
+        links: MergedCollection<TParent["links"], OwnLinks<TInput>>
       }
     : TInput extends { extends: infer TParentId extends string }
       ? {
           extends: TParentId
           parents: string[]
           properties: OwnCollection<TInput, "properties", Property>
-          links: OwnCollection<TInput, "links", ObjectLink>
+          links: OwnLinks<TInput>
         }
       : NormalizeParents<TInput> & {
           extends: undefined
           properties: OwnCollection<TInput, "properties", Property>
-          links: OwnCollection<TInput, "links", ObjectLink>
+          links: OwnLinks<TInput>
         })
 
 type DefineObjectTypeWithTokensResult<TInput extends DefineObjectTypeInput> = ObjectTypeWithTokens<
@@ -170,7 +190,9 @@ export function defineObjectType(input: DefineObjectTypeInput): ObjectTypeWithTo
   const ext = input.extends
 
   const ownProperties = input.properties ? [...input.properties] : []
-  const ownLinks = input.links ? [...input.links] : []
+  const ownLinks = input.links
+    ? input.links.map((link) => normalizeSelfLinkTarget(input.id, link))
+    : []
 
   let extendsId: string | undefined
   let parentIds: string[] | undefined
@@ -215,6 +237,17 @@ export function defineObjectType(input: DefineObjectTypeInput): ObjectTypeWithTo
     ...objectType,
     l: createLinkTokenMap(objectType),
     p: createPropertyTokenMap(objectType),
+  }
+}
+
+function normalizeSelfLinkTarget(objectTypeId: string, link: ObjectLink): ObjectLink {
+  if (link.targetObjectTypeId !== selfLinkTargetObjectTypeId) {
+    return link
+  }
+
+  return {
+    ...link,
+    targetObjectTypeId: objectTypeId,
   }
 }
 
@@ -405,68 +438,137 @@ type LinkResult<
   FieldFromOptions<TOptions, "cardinality", LinkCardinality> &
   FieldFromOptions<TOptions, "properties", Property[]>
 
+export type DirectLinkResult<
+  TId extends string,
+  TTargetObjectTypeId,
+  TOptions extends LinkOptions | undefined,
+  TTarget,
+> = LinkResult<TId, TTargetObjectTypeId, TOptions> & ObjectLinkTargetMetadata<TTarget>
+
+type ObjectTypeIdArray<TTargets extends readonly ObjectType[]> = Array<TTargets[number]["id"]>
+export type DirectLinkTarget<
+  TId extends string,
+  TName extends string,
+  TProperties extends Property[],
+> = {
+  id: TId
+  name: TName
+  properties: TProperties
+  links: ObjectLink[]
+  readonly p: PropertyTokenMap<{
+    id: TId
+    name: TName
+    properties: TProperties
+    links: ObjectLink[]
+  }>
+}
+
+type DirectLinkTargetFor<TTarget extends ObjectType> = TTarget extends ObjectTypeWithPropertyTokens
+  ? DirectLinkTarget<TTarget["id"], TTarget["name"], TTarget["properties"]>
+  : TTarget
+
 /**
  * Shorthand for creating an {@link ObjectLink}.
  *
- * `name` defaults to `id`. `targetObjectTypeId` defaults to `"*"` when omitted.
+ * `link(...)` accepts direct ObjectType targets and preserves their type for
+ * query authoring. Use `link.ref(...)` for id-only references, `link.self(...)`
+ * for recursive links, and `link.any(...)` for wildcard links.
  *
  * ```ts
- * // String target
- * link("controls", "hvacZone", { cardinality: "one" })
- *
- * // ObjectType target — extracts .id at build time
+ * // ObjectType target — extracts .id at runtime and preserves the target type
  * link("controls", HVACZone, { cardinality: "one" })
+ *
+ * // Id target — resolved by the generated ontology type manifest
+ * link.ref("controls", "hvacZone", { cardinality: "one" })
+ *
+ * // Self target — normalized to the source object type id by defineObjectType()
+ * link.self("parent", { cardinality: "one" })
  *
  * // Multiple targets
  * link("rel", [TypeA, TypeB])
  *
  * // Wildcard — accepts any target type
- * link("anything")
- * link("anything", { cardinality: "many" })
+ * link.any("anything")
+ * link.any("anything", { cardinality: "many" })
  * ```
  */
+interface LinkCallable {
+  <const TId extends string, const TTarget extends ObjectType>(
+    id: TId,
+    target: TTarget
+  ): DirectLinkResult<TId, TTarget["id"], undefined, DirectLinkTargetFor<TTarget>>
 
-// 1. Wildcard: no target → "*"
-export function link<const TId extends string>(id: TId): LinkResult<TId, "*", undefined>
+  <const TId extends string, const TTarget extends ObjectType, const TOptions extends LinkOptions>(
+    id: TId,
+    target: TTarget,
+    options: TOptions
+  ): DirectLinkResult<TId, TTarget["id"], TOptions, DirectLinkTargetFor<TTarget>>
 
-// 2. Single ObjectType target
-export function link<const TId extends string, const TTarget extends ObjectType>(
-  id: TId,
-  target: TTarget
-): LinkResult<TId, TTarget["id"], undefined>
+  <const TId extends string, const TTargets extends readonly ObjectType[]>(
+    id: TId,
+    targets: TTargets
+  ): DirectLinkResult<
+    TId,
+    ObjectTypeIdArray<TTargets>,
+    undefined,
+    DirectLinkTargetFor<TTargets[number]>
+  >
 
-// 3. Single ObjectType target + options
-export function link<
-  const TId extends string,
-  const TTarget extends ObjectType,
-  const TOptions extends LinkOptions,
->(id: TId, target: TTarget, options: TOptions): LinkResult<TId, TTarget["id"], TOptions>
+  <
+    const TId extends string,
+    const TTargets extends readonly ObjectType[],
+    const TOptions extends LinkOptions,
+  >(
+    id: TId,
+    targets: TTargets,
+    options: TOptions
+  ): DirectLinkResult<
+    TId,
+    ObjectTypeIdArray<TTargets>,
+    TOptions,
+    DirectLinkTargetFor<TTargets[number]>
+  >
+}
 
-// 4. ObjectType array target
-export function link<const TId extends string, const TTargetId extends string>(
-  id: TId,
-  targets: readonly (ObjectType & { id: TTargetId })[]
-): LinkResult<TId, TTargetId[], undefined>
+interface LinkBuilder extends LinkCallable {
+  ref: typeof linkRef
+  self: typeof linkSelf
+  any: typeof linkAny
+}
 
-// 5. ObjectType array target + options
-export function link<
-  const TId extends string,
-  const TTargetId extends string,
-  const TOptions extends LinkOptions,
->(
-  id: TId,
-  targets: readonly (ObjectType & { id: TTargetId })[],
-  options: TOptions
-): { id: TId; name: NameFromOptions<TId, TOptions>; targetObjectTypeId: TTargetId[] } & TOptions
+const linkImpl = ((
+  id: string,
+  targetOrTargets: ObjectType | readonly ObjectType[],
+  options?: LinkOptions
+): ObjectLink => {
+  if (Array.isArray(targetOrTargets)) {
+    return {
+      id,
+      name: options?.name ?? id,
+      targetObjectTypeId: targetOrTargets.map((target) => target.id),
+      ...options,
+    }
+  }
 
-// 6. String or string-array target (existing)
-export function link<
+  if (isObjectTypeLike(targetOrTargets)) {
+    return {
+      id,
+      name: options?.name ?? id,
+      targetObjectTypeId: targetOrTargets.id,
+      ...options,
+    }
+  }
+
+  throw new Error(
+    `[Sixb] link("${id}", ...) requires an ObjectType target. Use link.ref(...) for id references, link.self(...) for self-links, or link.any(...) for wildcard links.`
+  )
+}) as LinkCallable
+
+function linkRef<
   const TId extends string,
   const TTargetObjectTypeId extends string | readonly string[],
 >(id: TId, targetObjectTypeId: TTargetObjectTypeId): LinkResult<TId, TTargetObjectTypeId, undefined>
-
-// 7. String or string-array target + options (existing)
-export function link<
+function linkRef<
   const TId extends string,
   const TTargetObjectTypeId extends string | readonly string[],
   const TOptions extends LinkOptions,
@@ -475,68 +577,49 @@ export function link<
   targetObjectTypeId: TTargetObjectTypeId,
   options: TOptions
 ): LinkResult<TId, TTargetObjectTypeId, TOptions>
-
-// 8. Wildcard with options — MUST be LAST (ObjectType satisfies LinkOptions structurally)
-export function link<const TId extends string, const TOptions extends LinkOptions>(
-  id: TId,
-  options: TOptions
-): { id: TId; name: NameFromOptions<TId, TOptions>; targetObjectTypeId: "*" } & TOptions
-
-// Implementation
-export function link(
+function linkRef(
   id: string,
-  targetOrOptions?: string | readonly string[] | ObjectType | readonly ObjectType[] | LinkOptions,
+  targetObjectTypeId: string | readonly string[],
   options?: LinkOptions
 ): ObjectLink {
-  // No second argument → wildcard
-  if (targetOrOptions === undefined) {
-    return { id, name: id, targetObjectTypeId: "*" }
-  }
-
-  // String → string target
-  if (typeof targetOrOptions === "string") {
-    return {
-      id,
-      name: options?.name ?? id,
-      targetObjectTypeId: targetOrOptions,
-      ...options,
-    }
-  }
-
-  // Array → determine element type
-  if (Array.isArray(targetOrOptions)) {
-    const first = targetOrOptions[0]
-    const ids =
-      first !== undefined && isObjectTypeLike(first)
-        ? (targetOrOptions as readonly ObjectType[]).map((ot) => ot.id)
-        : (targetOrOptions as string[])
-    return {
-      id,
-      name: options?.name ?? id,
-      targetObjectTypeId: ids,
-      ...options,
-    }
-  }
-
-  // Object with properties + links → ObjectType
-  if (isObjectTypeLike(targetOrOptions)) {
-    return {
-      id,
-      name: options?.name ?? id,
-      targetObjectTypeId: (targetOrOptions as ObjectType).id,
-      ...options,
-    }
-  }
-
-  // Otherwise → LinkOptions (wildcard with options)
-  const linkOptions = targetOrOptions as LinkOptions
   return {
     id,
-    name: linkOptions.name ?? id,
-    targetObjectTypeId: "*",
-    ...linkOptions,
+    name: options?.name ?? id,
+    targetObjectTypeId:
+      typeof targetObjectTypeId === "string" ? targetObjectTypeId : [...targetObjectTypeId],
+    ...options,
   }
 }
+
+function linkSelf<
+  const TId extends string,
+  const TOptions extends LinkOptions | undefined = undefined,
+>(id: TId, options?: TOptions): LinkResult<TId, SelfLinkTargetObjectTypeId, TOptions> {
+  return {
+    id,
+    name: options?.name ?? id,
+    targetObjectTypeId: selfLinkTargetObjectTypeId,
+    ...options,
+  } as LinkResult<TId, SelfLinkTargetObjectTypeId, TOptions>
+}
+
+function linkAny<
+  const TId extends string,
+  const TOptions extends LinkOptions | undefined = undefined,
+>(id: TId, options?: TOptions): LinkResult<TId, "*", TOptions> {
+  return {
+    id,
+    name: options?.name ?? id,
+    targetObjectTypeId: "*",
+    ...options,
+  } as LinkResult<TId, "*", TOptions>
+}
+
+export const link: LinkBuilder = Object.assign(linkImpl, {
+  ref: linkRef,
+  self: linkSelf,
+  any: linkAny,
+})
 
 // ── ValueType ref shorthand ─────────────────────────────────
 

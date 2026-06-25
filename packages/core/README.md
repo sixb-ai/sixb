@@ -65,7 +65,7 @@ const Room = defineObjectType({
       semanticType: "Temperature",
     }),
   ],
-  links: [link("hasThermostat", "Thermostat", { cardinality: "one" })],
+  links: [link.ref("hasThermostat", "Thermostat", { cardinality: "one" })],
 })
 
 const Thermostat = defineObjectType({
@@ -393,7 +393,10 @@ src/
 | `defineValueType(input)` | Define a reusable value type |
 | `defineInterface(input)` | Define a reusable interface contract |
 | `prop(id, schema, options?)` | Shorthand for creating a property |
-| `link(id, targetTypeId, options?)` | Shorthand for creating a link |
+| `link(id, target, options?)` | Create a link to direct ObjectType target(s) |
+| `link.ref(id, targetTypeId, options?)` | Create an id-only link reference |
+| `link.self(id, options?)` | Create a self-link |
+| `link.any(id, options?)` | Create a wildcard link |
 | `stringEnum(values)` | Create a string enum schema |
 | `integerEnum(values)` | Create an integer enum schema |
 | `valueTypeRef(valueType)` | Reference a value type in a property schema |

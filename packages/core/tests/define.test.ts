@@ -29,7 +29,7 @@ describe("defineObjectType", () => {
       id: "thermostat",
       name: "Thermostat",
       properties: [prop("id", "string", { required: true, primary: true }), prop("mode", "string")],
-      links: [link("controls", "hvacZone")],
+      links: [link.ref("controls", "hvacZone")],
     })
     expect(ot.properties).toHaveLength(2)
     expect(ot.links).toHaveLength(1)
@@ -149,42 +149,62 @@ describe("prop", () => {
 // ── link ────────────────────────────────────────────────────
 
 describe("link", () => {
-  test("uses id as default name", () => {
-    const l = link("locatedIn", "space")
+  test("ref target uses id as default name", () => {
+    const l = link.ref("locatedIn", "space")
     expect(l.id).toBe("locatedIn")
     expect(l.name).toBe("locatedIn")
     expect(l.targetObjectTypeId).toBe("space")
   })
 
-  test("accepts cardinality and other options", () => {
-    const l = link("contains", "room", {
+  test("ref target accepts options", () => {
+    const l = link.ref("contains", "room", {
       name: "Contains",
       cardinality: "many",
       description: "Rooms in this building",
     })
     expect(l.name).toBe("Contains")
+    expect(l.targetObjectTypeId).toBe("room")
     expect(l.cardinality).toBe("many")
     expect(l.description).toBe("Rooms in this building")
   })
 
+  test("ref target accepts id arrays", () => {
+    const l = link.ref("controls", ["thermostat", "valve"])
+    expect(l.targetObjectTypeId).toEqual(["thermostat", "valve"])
+  })
+
+  // ── Self target ─────────────────────────────────────────────
+
+  test("self target resolves to the defining object type id", () => {
+    const Folder = defineObjectType({
+      id: "Folder",
+      name: "Folder",
+      properties: [prop("id", "string", { required: true, primary: true })],
+      links: [link.self("parent", { cardinality: "one" })],
+    })
+
+    expect(Folder.links[0]?.targetObjectTypeId).toBe("Folder")
+    expect(Folder.l.parent.targetObjectTypeId).toBe("Folder")
+  })
+
   // ── Wildcard ────────────────────────────────────────────────
 
-  test("wildcard: no target defaults to '*'", () => {
-    const l = link("assignedTo")
+  test("wildcard target stores '*'", () => {
+    const l = link.any("assignedTo")
     expect(l.id).toBe("assignedTo")
     expect(l.name).toBe("assignedTo")
     expect(l.targetObjectTypeId).toBe("*")
   })
 
   test("wildcard with options", () => {
-    const l = link("assignedTo", { cardinality: "one", description: "Assigned entity" })
+    const l = link.any("assignedTo", { cardinality: "one", description: "Assigned entity" })
     expect(l.targetObjectTypeId).toBe("*")
     expect(l.cardinality).toBe("one")
     expect(l.description).toBe("Assigned entity")
   })
 
   test("wildcard with name override", () => {
-    const l = link("assignedTo", { name: "Assigned To" })
+    const l = link.any("assignedTo", { name: "Assigned To" })
     expect(l.targetObjectTypeId).toBe("*")
     expect(l.name).toBe("Assigned To")
   })
@@ -201,6 +221,12 @@ describe("link", () => {
     expect(l.id).toBe("locatedIn")
     expect(l.targetObjectTypeId).toBe("room")
     expect(l.name).toBe("locatedIn")
+    expect(Object.getOwnPropertySymbols(l)).toEqual([])
+    expect(l).toEqual({
+      id: "locatedIn",
+      name: "locatedIn",
+      targetObjectTypeId: "room",
+    })
   })
 
   test("single ObjectType target with options", () => {
@@ -212,6 +238,7 @@ describe("link", () => {
     const l = link("locatedIn", Room, { cardinality: "one" })
     expect(l.targetObjectTypeId).toBe("room")
     expect(l.cardinality).toBe("one")
+    expect(Object.getOwnPropertySymbols(l)).toEqual([])
   })
 
   test("ObjectType array target extracts ids", () => {
@@ -227,6 +254,7 @@ describe("link", () => {
     })
     const l = link("locatedIn", [Room, Floor])
     expect(l.targetObjectTypeId).toEqual(["room", "floor"])
+    expect(Object.getOwnPropertySymbols(l)).toEqual([])
   })
 
   test("ObjectType array target with options", () => {
@@ -243,29 +271,6 @@ describe("link", () => {
     const l = link("locatedIn", [Room, Floor], { cardinality: "many" })
     expect(l.targetObjectTypeId).toEqual(["room", "floor"])
     expect(l.cardinality).toBe("many")
-  })
-
-  // ── Backward compatibility ─────────────────────────────────
-
-  test("backward compat: string target", () => {
-    const l = link("locatedIn", "space")
-    expect(l.targetObjectTypeId).toBe("space")
-  })
-
-  test("backward compat: string target with options", () => {
-    const l = link("locatedIn", "space", { cardinality: "one" })
-    expect(l.targetObjectTypeId).toBe("space")
-    expect(l.cardinality).toBe("one")
-  })
-
-  test("backward compat: string array target", () => {
-    const l = link("controls", ["thermostat", "valve"])
-    expect(l.targetObjectTypeId).toEqual(["thermostat", "valve"])
-  })
-
-  test("backward compat: explicit wildcard string", () => {
-    const l = link("anything", "*")
-    expect(l.targetObjectTypeId).toBe("*")
   })
 })
 
@@ -390,7 +395,7 @@ describe("nested object schemas", () => {
 
 describe("links with properties", () => {
   test("link carries metadata properties", () => {
-    const l = link("installedIn", "room", {
+    const l = link.ref("installedIn", "room", {
       name: "Installed In",
       cardinality: "one",
       properties: [
@@ -424,7 +429,7 @@ describe("interface composition", () => {
         prop("serialNumber", "string"),
         prop("firmwareVersion", "string", { nullable: true }),
       ],
-      links: [link("locatedIn", "space", { cardinality: "one" })],
+      links: [link.ref("locatedIn", "space", { cardinality: "one" })],
     })
     expect(sensor.properties).toHaveLength(4)
     expect(sensor.links).toHaveLength(1)
@@ -491,7 +496,7 @@ describe("realistic ontology", () => {
         prop("floorCount", "integer"),
         prop("totalArea", "double", { semanticType: "Area" }),
       ],
-      links: [link("contains", "floor", { cardinality: "many" })],
+      links: [link.ref("contains", "floor", { cardinality: "many" })],
     })
 
     const floor = defineObjectType({
@@ -503,8 +508,8 @@ describe("realistic ontology", () => {
         prop("area", "double", { semanticType: "Area" }),
       ],
       links: [
-        link("contains", "room", { cardinality: "many" }),
-        link("partOf", "building", { cardinality: "one" }),
+        link.ref("contains", "room", { cardinality: "many" }),
+        link.ref("partOf", "building", { cardinality: "one" }),
       ],
     })
 
@@ -519,8 +524,8 @@ describe("realistic ontology", () => {
         prop("occupancy", "boolean"),
       ],
       links: [
-        link("partOf", "floor", { cardinality: "one" }),
-        link("hasThermostat", "thermostat", { cardinality: "one" }),
+        link.ref("partOf", "floor", { cardinality: "one" }),
+        link.ref("hasThermostat", "thermostat", { cardinality: "one" }),
       ],
     })
 
@@ -544,7 +549,7 @@ describe("realistic ontology", () => {
         prop("fanSpeed", integerEnum([0, 1, 2, 3]), { name: "Fan Speed" }),
         prop("humidity", "double", { semanticType: "RelativeHumidity" }),
       ],
-      links: [link("controls", "room", { cardinality: "one" })],
+      links: [link.ref("controls", "room", { cardinality: "one" })],
     })
 
     // Verify the full graph
@@ -662,7 +667,7 @@ describe("realistic ontology", () => {
         prop("temperature", "double", { semanticType: "Temperature", required: true }),
         prop("accuracy", "double", { semanticType: "Temperature" }),
       ],
-      links: [link("locatedIn", "room", { cardinality: "one" })],
+      links: [link.ref("locatedIn", "room", { cardinality: "one" })],
     })
 
     const co2Sensor = defineObjectType({
@@ -674,7 +679,7 @@ describe("realistic ontology", () => {
         ...measurable.properties,
         prop("concentration", "double", { semanticType: "Concentration", required: true }),
       ],
-      links: [link("locatedIn", "room", { cardinality: "one" })],
+      links: [link.ref("locatedIn", "room", { cardinality: "one" })],
     })
 
     // Both implement measurable

@@ -38,7 +38,7 @@ const Room = defineObjectType({
     }),
     prop("currentTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
   ],
-  links: [link("hasThermostat", "Thermostat", { cardinality: "one" })],
+  links: [link.ref("hasThermostat", "Thermostat", { cardinality: "one" })],
 })
 
 const Thermostat = defineObjectType({

@@ -19,7 +19,7 @@ const Equipment = defineObjectType({
     prop("name", "string", { required: true }),
     prop("manufacturer", "string"),
   ],
-  links: [link("locatedIn", "location", { cardinality: "one" })],
+  links: [link.ref("locatedIn", "location", { cardinality: "one" })],
 })
 
 const HVACEquipment = defineObjectType({
@@ -27,7 +27,7 @@ const HVACEquipment = defineObjectType({
   id: "hvac",
   name: "HVAC Equipment",
   properties: [prop("capacity", "double")],
-  links: [link("feeds", "hvac", { cardinality: "many" })],
+  links: [link.ref("feeds", "hvac", { cardinality: "many" })],
 })
 
 // ── extends stores parent id as string ──────────────────────
@@ -83,7 +83,7 @@ const Entity = defineObjectType({
     prop("id", "string", { required: true, primary: true }),
     prop("entityName", "string", { required: true }),
   ],
-  links: [link("partOf", "entity", { cardinality: "one" })],
+  links: [link.ref("partOf", "entity", { cardinality: "one" })],
 })
 
 const Equipment2 = defineObjectType({
@@ -91,7 +91,7 @@ const Equipment2 = defineObjectType({
   id: "equipment2",
   name: "Equipment",
   properties: [prop("serialNumber", "string")],
-  links: [link("serves", "entity", { cardinality: "many" })],
+  links: [link.ref("serves", "entity", { cardinality: "many" })],
 })
 
 const HVACEquipment2 = defineObjectType({
