@@ -14,7 +14,7 @@ const Order = defineObjectType({
   id: "DegradeOrder",
   name: "Order",
   properties: [prop("ref", "string", { required: true })],
-  links: [link("ghost", "DegradeGhost", { cardinality: "one" })],
+  links: [link.ref("ghost", "DegradeGhost", { cardinality: "one" })],
 })
 
 declare module "@sixb/core/ontology" {
