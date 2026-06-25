@@ -3,11 +3,15 @@ import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
   ExistsObjectsResult,
+  ExpandedLinkValue,
+  ExpandedObjectRow,
   FacetObjectsResult,
   ObjectFacetRequest,
   ObjectFacetResult,
+  ObjectLinkRow,
   ObjectQueryCapabilities,
   ObjectRow,
+  ObjectRowLinks,
   ObjectStorage,
   QueryObjectsResult,
 } from "../../storage"
@@ -16,7 +20,7 @@ import {
   ObjectQueryPlanningError,
   ObjectQueryValidationError,
 } from "./errors"
-import type { ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
+import type { ObjectExpansion, ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
 import {
@@ -40,6 +44,12 @@ export interface QueryExecutorOptions
   maxLimit?: number
   maxPageSize?: number
   maxFacetLimit?: number
+  /**
+   * Per-parent cap on how many links a single `expand` hydrates, applied as a
+   * top-N trim after `orderBy` (mirrors `maxLimit` for the result set). An
+   * expansion's own `limit` narrows this further; the cap is the backstop.
+   */
+  maxExpansionFanout?: number
   /** When present, every object type the query touches must be viewable. */
   authorization?: AuthorizationContext
 }
@@ -96,6 +106,7 @@ type FallbackEvaluation = {
 
 const DEFAULT_MAX_FALLBACK_ROWS = 1_000
 const DEFAULT_MAX_FACET_LIMIT = 1_000
+const DEFAULT_MAX_EXPANSION_FANOUT = 1_000
 
 // Fallback page tokens are local to the core executor. Provider page tokens are
 // opaque and should only be interpreted by the provider that returned them.
@@ -497,19 +508,317 @@ async function evaluateFallbackQuery(
         })),
       }
     }
+    case "expand": {
+      // `expand` is output-shaping and normalized to the outermost layer: the
+      // input produces the bounded parent set, then we attach hydrated links
+      // without changing which objects match.
+      const input = await evaluateFallbackQuery(projectId, query.input, options, maxRows)
+      const enriched = await hydrateExpansions(
+        projectId,
+        input.entries.map((entry) => entry.row),
+        query.expansions,
+        options
+      )
+      return {
+        ...input,
+        entries: input.entries.map((entry, index) => ({ ...entry, row: enriched[index] })),
+      }
+    }
     case "text":
     case "vector":
     case "traverse":
     case "set":
-    // `expand` is gated off by the planner in this slice (not in the fallback
-    // node set); link hydration arrives in a later slice. This guards against
-    // planner drift in the meantime.
-    case "expand":
       throw new ObjectQueryExecutionError(
         "fallback_node_not_supported",
         `Fallback execution does not support query node '${query.kind}'`
       )
   }
+}
+
+/**
+ * A candidate neighbour for one parent under a single expansion: the object to
+ * hydrate plus the metadata carried on the link edge. For outgoing expansions
+ * the neighbour is the link target; for incoming it is the link source.
+ */
+type ExpansionEdge = {
+  neighborTypeId: string
+  neighborId: string
+  edgeProperties?: Record<string, unknown>
+}
+
+// Attach `links` to each parent row by hydrating every expansion over the batch
+// storage primitives. Returns fresh rows — stored rows are read by reference, so
+// we never mutate them in place.
+async function hydrateExpansions(
+  projectId: string,
+  parents: readonly ObjectRow[],
+  expansions: readonly ObjectExpansion[],
+  options: QueryExecutorOptions
+): Promise<ObjectRow[]> {
+  if (expansions.length === 0) {
+    return parents.map((parent) => ({ ...parent }))
+  }
+
+  const linksByParent: ObjectRowLinks[] = parents.map(() => ({}))
+  for (const expansion of expansions) {
+    const values = await hydrateExpansion(projectId, parents, expansion, options)
+    values.forEach((value, index) => {
+      // Keyed by link id, matching the `row.links.<linkId>` authoring surface.
+      // Same-id expansions in opposing directions would collide here, but
+      // normalization keeps them distinct and that pairing is not yet exposed.
+      linksByParent[index][expansion.linkId] = value
+    })
+  }
+
+  return parents.map((parent, index) => ({ ...parent, links: linksByParent[index] }))
+}
+
+// Resolve one expansion for every parent, returning a value aligned to `parents`.
+async function hydrateExpansion(
+  projectId: string,
+  parents: readonly ObjectRow[],
+  expansion: ObjectExpansion,
+  options: QueryExecutorOptions
+): Promise<ExpandedLinkValue[]> {
+  const edgesByParent =
+    expansion.direction === "incoming"
+      ? await collectIncomingEdges(projectId, parents, expansion, options)
+      : await collectOutgoingEdges(projectId, parents, expansion, options)
+
+  // Ordering is against target properties, so the target rows must be loaded
+  // before the per-parent top-N trim can run.
+  const baseTargets = await fetchExpansionTargets(projectId, edgesByParent, options)
+  const trimmedByParent = edgesByParent.map((edges) =>
+    trimExpansionEdges(edges, expansion, baseTargets, options)
+  )
+
+  const enrichedByKey = await enrichExpansionTargets(
+    projectId,
+    trimmedByParent,
+    baseTargets,
+    expansion,
+    options
+  )
+
+  return parents.map((parent, index) => {
+    const expanded: ExpandedObjectRow[] = []
+    for (const edge of trimmedByParent[index]) {
+      const target = enrichedByKey.get(targetKey(edge.neighborTypeId, edge.neighborId))
+      // A dangling link (target removed) hydrates to nothing.
+      if (!target) continue
+      expanded.push(
+        edge.edgeProperties && Object.keys(edge.edgeProperties).length > 0
+          ? { ...target, linkProperties: edge.edgeProperties }
+          : { ...target }
+      )
+    }
+    return toLinkValue(expanded, expansionCardinality(parent, expansion, options))
+  })
+}
+
+async function collectOutgoingEdges(
+  projectId: string,
+  parents: readonly ObjectRow[],
+  expansion: ObjectExpansion,
+  options: QueryExecutorOptions
+): Promise<ExpansionEdge[][]> {
+  const linksByKey = await options.storage.listLinksBatch({
+    projectId,
+    items: parents.map((parent) => ({
+      objectTypeId: parent.objectTypeId,
+      objectId: parent.primaryId,
+      linkId: expansion.linkId,
+    })),
+  })
+
+  return parents.map((parent) => {
+    const links = linksByKey.get(`${parent.objectTypeId}:${parent.primaryId}:${expansion.linkId}`)
+    if (!links) return []
+    return links.map((link) => ({
+      neighborTypeId: link.targetTypeId,
+      neighborId: link.targetId,
+      edgeProperties: link.properties,
+    }))
+  })
+}
+
+async function collectIncomingEdges(
+  projectId: string,
+  parents: readonly ObjectRow[],
+  expansion: ObjectExpansion,
+  options: QueryExecutorOptions
+): Promise<ExpansionEdge[][]> {
+  const incident = await options.storage.listIncidentLinksBatch({
+    projectId,
+    items: parents.map((parent) => ({
+      objectTypeId: parent.objectTypeId,
+      objectId: parent.primaryId,
+    })),
+  })
+
+  // Index links that point AT a parent (incoming) by that parent. The incident
+  // batch also returns outgoing links, so filter on the parent being the target.
+  const byTarget = new Map<string, ObjectLinkRow[]>()
+  for (const link of incident) {
+    if (link.linkId !== expansion.linkId) continue
+    if (expansion.sourceObjectTypeId && link.sourceTypeId !== expansion.sourceObjectTypeId) continue
+    const key = targetKey(link.targetTypeId, link.targetId)
+    const bucket = byTarget.get(key)
+    if (bucket) bucket.push(link)
+    else byTarget.set(key, [link])
+  }
+
+  return parents.map((parent) => {
+    const links = byTarget.get(targetKey(parent.objectTypeId, parent.primaryId))
+    if (!links) return []
+    // For an incoming expansion the hydrated object is the link's source.
+    return links.map((link) => ({
+      neighborTypeId: link.sourceTypeId,
+      neighborId: link.sourceId,
+      edgeProperties: link.properties,
+    }))
+  })
+}
+
+async function fetchExpansionTargets(
+  projectId: string,
+  edgesByParent: readonly ExpansionEdge[][],
+  options: QueryExecutorOptions
+): Promise<Map<string, ObjectRow>> {
+  const seen = new Set<string>()
+  const items: { objectTypeId: string; primaryId: string }[] = []
+  for (const edges of edgesByParent) {
+    for (const edge of edges) {
+      const key = targetKey(edge.neighborTypeId, edge.neighborId)
+      if (seen.has(key)) continue
+      seen.add(key)
+      items.push({ objectTypeId: edge.neighborTypeId, primaryId: edge.neighborId })
+    }
+  }
+  if (items.length === 0) return new Map()
+  return options.storage.getByPrimaryIdBatch({ projectId, items })
+}
+
+// Recurse nested expansions over the unique retained targets so each target is
+// hydrated once even when shared across parents, then key them for lookup.
+async function enrichExpansionTargets(
+  projectId: string,
+  trimmedByParent: readonly ExpansionEdge[][],
+  baseTargets: Map<string, ObjectRow>,
+  expansion: ObjectExpansion,
+  options: QueryExecutorOptions
+): Promise<Map<string, ObjectRow>> {
+  if (!expansion.expand || expansion.expand.length === 0) {
+    return baseTargets
+  }
+
+  const uniqueTargets: ObjectRow[] = []
+  const seen = new Set<string>()
+  for (const edges of trimmedByParent) {
+    for (const edge of edges) {
+      const key = targetKey(edge.neighborTypeId, edge.neighborId)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const base = baseTargets.get(key)
+      if (base) uniqueTargets.push(base)
+    }
+  }
+
+  const enriched = await hydrateExpansions(projectId, uniqueTargets, expansion.expand, options)
+  const enrichedByKey = new Map<string, ObjectRow>()
+  for (const row of enriched) {
+    enrichedByKey.set(targetKey(row.objectTypeId, row.primaryId), row)
+  }
+  return enrichedByKey
+}
+
+function trimExpansionEdges(
+  edges: readonly ExpansionEdge[],
+  expansion: ObjectExpansion,
+  baseTargets: Map<string, ObjectRow>,
+  options: QueryExecutorOptions
+): ExpansionEdge[] {
+  let ordered = edges
+  if (expansion.orderBy && expansion.orderBy.length > 0) {
+    const fields = expansion.orderBy
+    ordered = [...edges].sort((left, right) =>
+      compareExpansionEdges(left, right, fields, baseTargets)
+    )
+  }
+
+  const limit = effectiveExpansionFanout(expansion.limit, options.maxExpansionFanout)
+  return ordered.length > limit ? ordered.slice(0, limit) : [...ordered]
+}
+
+function effectiveExpansionFanout(
+  limit: number | undefined,
+  maxExpansionFanout: number | undefined
+): number {
+  const cap = maxExpansionFanout !== undefined ? maxExpansionFanout : DEFAULT_MAX_EXPANSION_FANOUT
+  return limit !== undefined ? Math.min(limit, cap) : cap
+}
+
+function compareExpansionEdges(
+  left: ExpansionEdge,
+  right: ExpansionEdge,
+  fields: readonly ObjectQuerySortField[],
+  baseTargets: Map<string, ObjectRow>
+): number {
+  const leftRow = baseTargets.get(targetKey(left.neighborTypeId, left.neighborId))
+  const rightRow = baseTargets.get(targetKey(right.neighborTypeId, right.neighborId))
+  for (const field of fields) {
+    const comparison = compareRowsBySortField(leftRow, rightRow, field)
+    if (comparison !== 0) return comparison
+  }
+  // Identity tiebreak keeps the trim deterministic for equal sort keys.
+  return targetKey(left.neighborTypeId, left.neighborId).localeCompare(
+    targetKey(right.neighborTypeId, right.neighborId)
+  )
+}
+
+function compareRowsBySortField(
+  left: ObjectRow | undefined,
+  right: ObjectRow | undefined,
+  field: ObjectQuerySortField
+): number {
+  if (field.kind === "relevance") return 0
+
+  const leftValue = left?.properties[field.propertyId]
+  const rightValue = right?.properties[field.propertyId]
+  const leftMissing = leftValue === undefined || leftValue === null
+  const rightMissing = rightValue === undefined || rightValue === null
+  if (leftMissing && rightMissing) return 0
+  if (leftMissing) return 1
+  if (rightMissing) return -1
+
+  const comparison = comparePropertyValues(leftValue, rightValue)
+  if (Number.isNaN(comparison)) return 0
+  return field.direction === "desc" ? -comparison : comparison
+}
+
+// Outgoing cardinality comes from the parent type's link; incoming is inherently
+// many-to-one, so an incoming expansion always yields an array.
+function expansionCardinality(
+  parent: ObjectRow,
+  expansion: ObjectExpansion,
+  options: QueryExecutorOptions
+): "one" | "many" {
+  if (expansion.direction === "incoming") return "many"
+  const objectType = options.ontology.getObjectTypeById(parent.objectTypeId)
+  const link = objectType?.links.find((candidate) => candidate.id === expansion.linkId)
+  return link?.cardinality ?? "many"
+}
+
+function toLinkValue(
+  rows: readonly ExpandedObjectRow[],
+  cardinality: "one" | "many"
+): ExpandedLinkValue {
+  if (cardinality === "one") return rows[0] ?? null
+  return rows
+}
+
+function targetKey(objectTypeId: string, id: string): string {
+  return `${objectTypeId}:${id}`
 }
 
 async function evaluateFallbackStart(

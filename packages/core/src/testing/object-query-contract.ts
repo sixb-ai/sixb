@@ -776,6 +776,60 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
       })
     })
 
+    test("hydrates expand links through bounded fallback", async () => {
+      await withStorage(async (storage) => {
+        await seedObjectQueryContractData(storage)
+
+        const outgoing = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "expand",
+              expansions: [{ linkId: "hasDevice", direction: "outgoing" }],
+              input: {
+                kind: "limit",
+                limit: 10,
+                input: {
+                  kind: "filter",
+                  predicate: { op: "eq", propertyId: "status", value: "active" },
+                  input: { kind: "start", objectTypeId: Room.id },
+                },
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        // No provider declares expand pushdown yet, so it routes through fallback.
+        expect(outgoing.plan.mode).toBe("fallback")
+        expect(expandedIds(outgoing, "room-alpha", "hasDevice")).toEqual(["device-projector"])
+        expect(expandedIds(outgoing, "room-beta", "hasDevice")).toEqual(["device-sensor"])
+
+        const incoming = await executeObjectQuery(
+          {
+            projectId,
+            query: {
+              kind: "expand",
+              expansions: [{ linkId: "hasDevice", direction: "incoming" }],
+              input: {
+                kind: "limit",
+                limit: 10,
+                input: { kind: "start", objectTypeId: Device.id },
+              },
+            },
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+
+        // device-projector is linked from both a Room and a Zone.
+        expect(expandedIds(incoming, "device-projector", "hasDevice")).toEqual([
+          "room-alpha",
+          "zone-one",
+        ])
+        expect(expandedIds(incoming, "device-sensor", "hasDevice")).toEqual(["room-beta"])
+      })
+    })
+
     test("expands includeSubtypes outside storage when the expanded query can push down", async () => {
       await withStorage(async (storage) => {
         await seedObjectQueryContractData(storage)
@@ -1126,6 +1180,15 @@ function linkEvent(
 
 function ids(result: QueryObjectsResult): string[] {
   return result.objects.map((row) => row.primaryId)
+}
+
+// Sorted primaryIds of the objects hydrated under `linkId` on the parent row.
+function expandedIds(result: QueryObjectsResult, parentId: string, linkId: string): string[] {
+  const parent = result.objects.find((row) => row.primaryId === parentId)
+  if (!parent) throw new Error(`parent row '${parentId}' not found`)
+  const value = parent.links?.[linkId]
+  if (!Array.isArray(value)) throw new Error(`expected an array of links under '${linkId}'`)
+  return value.map((linked) => linked.primaryId).sort()
 }
 
 function sortedIds(result: QueryObjectsResult): string[] {

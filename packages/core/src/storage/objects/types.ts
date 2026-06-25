@@ -26,6 +26,31 @@ export interface ObjectRow {
   updatedAt: Date
   version: number
   sourceEventId?: string
+  /**
+   * Linked objects attached by an `expand` query node, keyed by link id.
+   *
+   * Populated by the core executor during graph-aware reads; storage providers
+   * never read or write it. The wire response schema and the client `TwinObject`
+   * `.links` typing are layered on top of this runtime shape in a later slice.
+   */
+  links?: ObjectRowLinks
+}
+
+/** Per-link expansion result keyed by link id (see {@link ObjectQueryExpand}). */
+export type ObjectRowLinks = Record<string, ExpandedLinkValue>
+
+/**
+ * The value attached under one expanded link.
+ *
+ * Cardinality drives the shape: a `"one"` link yields a single object (or
+ * `null` when the link is absent), a `"many"` link yields an array.
+ */
+export type ExpandedLinkValue = ExpandedObjectRow | readonly ExpandedObjectRow[] | null
+
+/** A hydrated linked object, plus any properties carried on the link edge itself. */
+export interface ExpandedObjectRow extends ObjectRow {
+  /** Relationship metadata stored on the link instance, when present. */
+  linkProperties?: Record<string, unknown>
 }
 
 export interface ObjectLinkRow {

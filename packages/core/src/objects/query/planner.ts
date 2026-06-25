@@ -45,6 +45,7 @@ const fallbackNodeKinds = new Set<ObjectQuery["kind"]>([
   "limit",
   "page",
   "project",
+  "expand",
 ])
 
 export class QueryPlanner {
@@ -400,6 +401,7 @@ function collectFallbackNodeIssues(
     case "limit":
     case "page":
     case "project":
+    case "expand":
       collectFallbackNodeIssues(query.input, `${path}.input`, issues)
       return
     case "sort":
