@@ -776,7 +776,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
       })
     })
 
-    test("hydrates expand links through bounded fallback", async () => {
+    test("hydrates expand links identically via pushdown or bounded fallback", async () => {
       await withStorage(async (storage) => {
         await seedObjectQueryContractData(storage)
 
@@ -800,8 +800,11 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
           { ontology: objectQueryContractOntology, storage }
         )
 
-        // No provider declares expand pushdown yet, so it routes through fallback.
-        expect(outgoing.plan.mode).toBe("fallback")
+        // A provider that declares expand pushdown hydrates links in-database;
+        // otherwise the same links come back through the bounded fallback. Either
+        // path must produce identical results.
+        const expandMode = storage.queryCapabilities().nodes?.expand ? "pushdown" : "fallback"
+        expect(outgoing.plan.mode).toBe(expandMode)
         expect(expandedIds(outgoing, "room-alpha", "hasDevice")).toEqual(["device-projector"])
         expect(expandedIds(outgoing, "room-beta", "hasDevice")).toEqual(["device-sensor"])
 
@@ -822,6 +825,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends ObjectStora
         )
 
         // device-projector is linked from both a Room and a Zone.
+        expect(incoming.plan.mode).toBe(expandMode)
         expect(expandedIds(incoming, "device-projector", "hasDevice")).toEqual([
           "room-alpha",
           "zone-one",

@@ -4,6 +4,8 @@ import type {
   EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
+  ExpandedLinkValue,
+  ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
   LinkDirection,
@@ -11,6 +13,7 @@ import type {
   ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
+  ObjectRowLinks,
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
@@ -51,6 +54,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     traverse: true,
     set: true,
     project: true,
+    expand: true,
   },
   predicateOps: {
     and: true,
@@ -83,7 +87,8 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     stablePageTokens: true,
   },
   notes: [
-    "PostgreSQL object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project over JSONB properties and object links.",
+    "PostgreSQL object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSONB properties and object links.",
+    "expand hydrates linked objects in-database (top-N per parent via LATERAL + jsonb_agg); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }
@@ -175,7 +180,7 @@ export class PgObjectStorage implements ObjectStorage {
         : compiled.hasMore(rawRows.length, total)
 
     return {
-      objects: rows.map((row) => rowToObject(row)),
+      objects: rows.map((row) => queryRowToObject(row)),
       hasMore,
       nextPageToken: compiled.nextPageToken(rows, rawRows.length),
       ...(total === undefined ? {} : { total }),
@@ -1223,6 +1228,59 @@ function rowToObject(row: ObjectDatabaseRow): ObjectRow {
   }
 }
 
+// Map a query row, attaching `links` when an `expand` pushdown produced them. The
+// base columns map as usual; `_expand` (a `jsonb_build_object`) is revived into
+// the runtime link shape the core executor's fallback also produces.
+function queryRowToObject(row: ObjectQueryDatabaseRow): ObjectRow {
+  const base = rowToObject(row)
+  const links = reviveExpandedLinks(row._expand)
+  return links ? { ...base, links } : base
+}
+
+function reviveExpandedLinks(value: unknown): ObjectRowLinks | undefined {
+  if (!isPlainRecord(value)) return undefined
+  const links: ObjectRowLinks = {}
+  for (const [linkId, raw] of Object.entries(value)) {
+    links[linkId] = reviveExpandedLinkValue(raw)
+  }
+  return links
+}
+
+// A "one" expansion arrives as a single object or null; a "many" expansion as an
+// array (already ordered and trimmed in the database).
+function reviveExpandedLinkValue(value: unknown): ExpandedLinkValue {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) return value.map(reviveExpandedRow)
+  return reviveExpandedRow(value)
+}
+
+// Revive one hydrated neighbour from `compileExpansionChildJson`: JSONB timestamp
+// strings back to `Date`, empty link properties dropped (matching the fallback),
+// and nested links recursed.
+function reviveExpandedRow(value: unknown): ExpandedObjectRow {
+  const row = isPlainRecord(value) ? value : {}
+  const expanded: ExpandedObjectRow = {
+    projectId: String(row.projectId),
+    objectTypeId: String(row.objectTypeId),
+    primaryId: String(row.primaryId),
+    properties: isPlainRecord(row.properties) ? row.properties : {},
+    createdAt: new Date(row.createdAt as string),
+    updatedAt: new Date(row.updatedAt as string),
+    version: Number(row.version),
+  }
+  if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
+  if (isPlainRecord(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
+    expanded.linkProperties = row.linkProperties
+  }
+  const links = reviveExpandedLinks(row.links)
+  if (links) expanded.links = links
+  return expanded
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
   return {
     projectId: row.project_id,
@@ -1251,6 +1309,8 @@ interface ObjectDatabaseRow {
 
 interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
   _cursor_properties?: unknown
+  /** `jsonb_build_object(linkId, value, ...)` from an `expand` pushdown; absent otherwise. */
+  _expand?: unknown
 }
 
 interface FacetDatabaseRow {

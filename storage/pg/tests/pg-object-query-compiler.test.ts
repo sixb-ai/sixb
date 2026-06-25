@@ -99,3 +99,119 @@ test("incoming traversal SQL filters by source object type when constrained", ()
   expect(constrainedCount.sql).toContain("AND edge.source_type_id = $4")
   expect(constrainedCount.args).toEqual(["project-a", "Customer", "customer", "Project"])
 })
+
+test("expand SQL hydrates an outgoing many link as an ordered jsonb array", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Room" } },
+    expansions: [{ linkId: "hasDevice", direction: "outgoing", cardinality: "many", limit: 50 }],
+  })
+
+  // Output-shaping: the input row set rides through under `_expand`.
+  expect(compiled.sql).toContain("SELECT input.*,")
+  expect(compiled.sql).toContain("AS _expand")
+  // Top-N per parent pushed into the DB, then aggregated in rank order.
+  expect(compiled.sql).toContain("row_number() OVER (ORDER BY")
+  expect(compiled.sql).toContain("jsonb_agg(ranked_0.elem ORDER BY ranked_0._ord)")
+  expect(compiled.sql).toContain("WHERE ranked_0._ord <= $3")
+  expect(compiled.sql).toContain("'[]'::jsonb")
+  // Outgoing: parent on the link source, neighbour hydrated from the target.
+  expect(compiled.sql).toContain("edge_0.source_type_id = input.object_type_id")
+  expect(compiled.sql).toContain("tgt_0.object_type_id = edge_0.target_type_id")
+  expect(compiled.sql).toContain("'linkProperties', edge_0.properties")
+  expect(compiled.sql).toContain("edge_0.link_id = $2::text")
+  // Link id rides as a param twice (the json key and the edge filter); then the
+  // baked fanout, then the input's own params.
+  expect(compiled.args).toEqual(["hasDevice", "hasDevice", 50, "project-a", "Room", 10])
+})
+
+test("expand SQL takes the first ranked element for a one link", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 5, input: { kind: "start", objectTypeId: "User" } },
+    expansions: [{ linkId: "manager", direction: "outgoing", cardinality: "one", limit: 1000 }],
+  })
+
+  expect(compiled.sql).toContain("WHERE ranked_0._ord = 1")
+  expect(compiled.sql).not.toContain("jsonb_agg")
+  expect(compiled.sql).not.toContain("_ord <=")
+  // No fanout param for a "one" link — it always takes a single element.
+  expect(compiled.args).toEqual(["manager", "manager", "project-a", "User", 5])
+})
+
+test("expand SQL flips parent/neighbour columns and filters source type for incoming", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 5, input: { kind: "start", objectTypeId: "Device" } },
+    expansions: [
+      {
+        linkId: "hasDevice",
+        direction: "incoming",
+        sourceObjectTypeId: "Room",
+        cardinality: "many",
+        limit: 1000,
+      },
+    ],
+  })
+
+  // Incoming: parent on the link target, neighbour hydrated from the source.
+  expect(compiled.sql).toContain("edge_0.target_type_id = input.object_type_id")
+  expect(compiled.sql).toContain("edge_0.target_id = input.primary_id")
+  expect(compiled.sql).toContain("tgt_0.object_type_id = edge_0.source_type_id")
+  expect(compiled.sql).toContain("edge_0.source_type_id = $3::text")
+  expect(compiled.args).toEqual(["hasDevice", "hasDevice", "Room", 1000, "project-a", "Device", 5])
+})
+
+test("expand SQL orders a bounded many link by target properties, nulls last", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Room" } },
+    expansions: [
+      {
+        linkId: "hasDevice",
+        direction: "outgoing",
+        cardinality: "many",
+        limit: 5,
+        orderBy: [{ kind: "property", propertyId: "name", direction: "desc" }],
+      },
+    ],
+  })
+
+  // Null-rank first (always ASC so nulls sort last), then the value descending,
+  // against the neighbour's JSONB properties — mirroring the fallback comparator.
+  expect(compiled.sql).toContain("jsonb_typeof(tgt_0.properties -> ($2::text))")
+  expect(compiled.sql).toContain("tgt_0.properties -> ($4::text) DESC")
+  expect(compiled.args).toEqual([
+    "hasDevice",
+    "name",
+    "name",
+    "name",
+    "hasDevice",
+    5,
+    "project-a",
+    "Room",
+    10,
+  ])
+})
+
+test("expand SQL nests a child expansion correlated on the parent neighbour", () => {
+  const compiled = compilePgObjectQuery("project-a", {
+    kind: "expand",
+    input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Project" } },
+    expansions: [
+      {
+        linkId: "owner",
+        direction: "outgoing",
+        cardinality: "one",
+        limit: 1000,
+        expand: [{ linkId: "members", direction: "outgoing", cardinality: "many", limit: 1000 }],
+      },
+    ],
+  })
+
+  // The nested expansion uses its own aliases and correlates on the parent's
+  // hydrated neighbour (tgt_0), under a `links` key in the child object.
+  expect(compiled.sql).toContain("'links', jsonb_build_object(")
+  expect(compiled.sql).toContain("edge_0_0.source_id = tgt_0.primary_id")
+  expect(compiled.sql).toContain("jsonb_agg(ranked_0_0.elem")
+})

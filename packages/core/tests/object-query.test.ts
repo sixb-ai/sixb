@@ -753,6 +753,83 @@ describe("object query planner and executor", () => {
     expect(result.objects[0].properties).toEqual({ id: "cust-3", name: "Acme Co" })
   })
 
+  test("plans expand pushdown only when every expansion has a resolved cardinality", () => {
+    const capabilities: ObjectQueryCapabilities = {
+      queryObjects: true,
+      nodes: { start: true, limit: true, expand: true },
+    }
+    const resolved: ObjectQuery = {
+      kind: "expand",
+      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
+      expansions: [{ linkId: "orders", direction: "outgoing", cardinality: "many" }],
+    }
+    expect(planObjectQuery(resolved, { capabilities, hasQueryObjects: true }).mode).toBe("pushdown")
+
+    // An unresolved cardinality (e.g. a polymorphic parent whose branches
+    // disagree) keeps the query on the bounded fallback.
+    const unresolved: ObjectQuery = {
+      kind: "expand",
+      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
+      expansions: [{ linkId: "orders", direction: "outgoing" }],
+    }
+    const plan = planObjectQuery(unresolved, {
+      capabilities,
+      hasQueryObjects: true,
+      maxFallbackRows: 10,
+    })
+    expect(plan.mode).toBe("fallback")
+    expect(plan.providerIssues.map((issue) => issue.code)).toContain(
+      "expand_cardinality_unresolved"
+    )
+  })
+
+  test("keeps expand on the fallback when the provider lacks the capability", () => {
+    const capabilities: ObjectQueryCapabilities = {
+      queryObjects: true,
+      nodes: { start: true, limit: true },
+    }
+    const query: ObjectQuery = {
+      kind: "expand",
+      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
+      expansions: [{ linkId: "orders", direction: "outgoing", cardinality: "many" }],
+    }
+    const plan = planObjectQuery(query, {
+      capabilities,
+      hasQueryObjects: true,
+      maxFallbackRows: 10,
+    })
+    expect(plan.mode).toBe("fallback")
+    expect(plan.providerIssues.map((issue) => issue.code)).toContain("query_node_not_supported")
+  })
+
+  test("requires a resolved cardinality on nested expansions too", () => {
+    const capabilities: ObjectQueryCapabilities = {
+      queryObjects: true,
+      nodes: { start: true, limit: true, expand: true },
+    }
+    const query: ObjectQuery = {
+      kind: "expand",
+      input: { kind: "limit", limit: 10, input: { kind: "start", objectTypeId: "Customer" } },
+      expansions: [
+        {
+          linkId: "orders",
+          direction: "outgoing",
+          cardinality: "many",
+          expand: [{ linkId: "items", direction: "outgoing" }],
+        },
+      ],
+    }
+    const plan = planObjectQuery(query, {
+      capabilities,
+      hasQueryObjects: true,
+      maxFallbackRows: 10,
+    })
+    expect(plan.mode).toBe("fallback")
+    expect(plan.providerIssues.map((issue) => issue.code)).toContain(
+      "expand_cardinality_unresolved"
+    )
+  })
+
   test("counts through provider pushdown without materializing rows", async () => {
     const storage = new CountingQueryStorage()
     await seedCustomers(storage)

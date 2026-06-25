@@ -1,4 +1,5 @@
 import {
+  type ObjectExpansion,
   type ObjectQuery,
   ObjectQueryExecutionError,
   type ObjectQueryPredicate,
@@ -87,6 +88,9 @@ interface EncodedCursorValue {
 
 const PAGE_TOKEN_PREFIX = "keyset:"
 const exactContext: CompileContext = { probeLimit: false }
+// Per-parent fanout the core executor bakes into every pushed-down expansion;
+// this default only guards a malformed (un-baked) IR and mirrors the core cap.
+const DEFAULT_EXPANSION_FANOUT = 1_000
 
 export function compilePgObjectQuery(
   projectId: string,
@@ -199,10 +203,9 @@ function compileObjectQueryInternal(
         query.fields,
         query.fieldsByObjectType
       )
-    case "vector":
-    // `expand` (link hydration) has no provider pushdown yet; the planner gates
-    // it off via capabilities, so this is unreachable until a later slice.
     case "expand":
+      return compileExpand(projectId, query.input, query.expansions)
+    case "vector":
       throw new Error(
         `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
       )
@@ -455,6 +458,198 @@ function compileTraversal(
     trimRows: identityRows,
     nextPageToken: () => undefined,
   }
+}
+
+/** Correlation handle for an expansion: the parent row's identity columns. */
+interface ExpansionParent {
+  project: string
+  type: string
+  id: string
+}
+
+// `expand` attaches linked objects to each result row without changing which
+// objects match (unlike `traverse`, which pivots to the targets). Each expansion
+// becomes a correlated subquery that hydrates its links into a JSONB value, and
+// all expansions are folded into one `_expand` object column the row mapper reads
+// back. The input set is otherwise untouched, so pagination/order pass through.
+function compileExpand(
+  projectId: string,
+  inputQuery: ObjectQuery,
+  expansions: readonly ObjectExpansion[]
+): CompiledPgObjectQuery {
+  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext)
+  const expand = compileExpansionsObject(
+    expansions,
+    { project: "input.project_id", type: "input.object_type_id", id: "input.primary_id" },
+    ""
+  )
+  const inputOrder = compileOrder(input.order.fields, "input", "input._cursor_properties")
+  const sql = `
+    SELECT input.*, ${expand.sql} AS _expand
+    FROM (${input.sql}) AS input
+    ORDER BY ${inputOrder.sql}
+  `
+
+  return {
+    sql,
+    args: [...expand.args, ...input.args, ...inputOrder.args],
+    totalSql: input.totalSql,
+    totalArgs: input.totalArgs,
+    order: input.order,
+    hasMoreProbe: input.hasMoreProbe,
+    hasMore: input.hasMore,
+    trimRows: input.trimRows,
+    nextPageToken: input.nextPageToken,
+  }
+}
+
+// `jsonb_build_object(linkId, value, ...)` over a set of expansions sharing one
+// parent. Link ids are user data, so they ride as parameters. Used both for the
+// outer `_expand` column and for each child's nested `links`.
+function compileExpansionsObject(
+  expansions: readonly ObjectExpansion[],
+  parent: ExpansionParent,
+  pathPrefix: string
+): CompiledPredicate {
+  const parts: string[] = []
+  const args: unknown[] = []
+  expansions.forEach((expansion, index) => {
+    const path = pathPrefix === "" ? `${index}` : `${pathPrefix}_${index}`
+    const value = compileExpansionValue(expansion, parent, path)
+    parts.push("?::text", value.sql)
+    args.push(expansion.linkId, ...value.args)
+  })
+  return { sql: `jsonb_build_object(${parts.join(", ")})`, args }
+}
+
+// One expansion's hydrated value. `row_number()` numbers a parent's links by the
+// order from `compileExpansionOrder` (the expansion's `orderBy` against the target
+// object's properties, then an identity tiebreak); `WHERE _ord <= N` keeps the
+// top-N per parent in-DB; each retained neighbour becomes a JSONB object; and the
+// value is an ordered array ("many") or the first element or null ("one"). The
+// cardinality is core-resolved before pushdown.
+function compileExpansionValue(
+  expansion: ObjectExpansion,
+  parent: ExpansionParent,
+  path: string
+): CompiledPredicate {
+  const edge = `edge_${path}`
+  const target = `tgt_${path}`
+  const ranked = `ranked_${path}`
+  const incoming = expansion.direction === "incoming"
+  // The hydrated neighbour is the link target (outgoing) or source (incoming);
+  // the parent sits on the opposite end, mirroring `compileTraversal`.
+  const neighborType = incoming ? `${edge}.source_type_id` : `${edge}.target_type_id`
+  const neighborId = incoming ? `${edge}.source_id` : `${edge}.target_id`
+  const parentType = incoming ? `${edge}.target_type_id` : `${edge}.source_type_id`
+  const parentId = incoming ? `${edge}.target_id` : `${edge}.source_id`
+
+  const child = compileExpansionChildJson(expansion, edge, target, path)
+  const order = compileExpansionOrder(expansion, target, neighborType, neighborId)
+
+  const whereParts = [
+    `${edge}.project_id = ${parent.project}`,
+    `${parentType} = ${parent.type}`,
+    `${parentId} = ${parent.id}`,
+    `${edge}.link_id = ?::text`,
+  ]
+  const whereArgs: unknown[] = [expansion.linkId]
+  if (incoming && expansion.sourceObjectTypeId !== undefined) {
+    whereParts.push(`${edge}.source_type_id = ?::text`)
+    whereArgs.push(expansion.sourceObjectTypeId)
+  }
+
+  const inner = `
+    SELECT ${child.sql} AS elem, row_number() OVER (ORDER BY ${order.sql}) AS _ord
+    FROM links AS ${edge}
+    JOIN objects AS ${target}
+      ON ${target}.project_id = ${edge}.project_id
+     AND ${target}.object_type_id = ${neighborType}
+     AND ${target}.primary_id = ${neighborId}
+    WHERE ${whereParts.join(" AND ")}
+  `
+  const innerArgs = [...child.args, ...order.args, ...whereArgs]
+
+  if (expansion.cardinality === "one") {
+    return {
+      sql: `(SELECT ${ranked}.elem FROM (${inner}) AS ${ranked} WHERE ${ranked}._ord = 1)`,
+      args: innerArgs,
+    }
+  }
+
+  // The fanout cap is baked into `limit` by the core executor before pushdown.
+  const limit = expansion.limit ?? DEFAULT_EXPANSION_FANOUT
+  return {
+    sql: `COALESCE((SELECT jsonb_agg(${ranked}.elem ORDER BY ${ranked}._ord) FROM (${inner}) AS ${ranked} WHERE ${ranked}._ord <= ?), '[]'::jsonb)`,
+    args: [...innerArgs, limit],
+  }
+}
+
+// Build one hydrated neighbour as an `ExpandedObjectRow`-shaped JSONB object.
+// `linkProperties` always rides along (the mapper drops it when empty), and
+// nested expansions recurse under `links`, correlated on this neighbour.
+function compileExpansionChildJson(
+  expansion: ObjectExpansion,
+  edge: string,
+  target: string,
+  path: string
+): CompiledPredicate {
+  const fields = [
+    `'projectId', ${target}.project_id`,
+    `'objectTypeId', ${target}.object_type_id`,
+    `'primaryId', ${target}.primary_id`,
+    `'properties', ${target}.properties`,
+    `'createdAt', ${target}.created_at`,
+    `'updatedAt', ${target}.updated_at`,
+    `'version', ${target}.version`,
+    `'sourceEventId', ${target}.source_event_id`,
+    `'linkProperties', ${edge}.properties`,
+  ]
+  const args: unknown[] = []
+
+  if (expansion.expand && expansion.expand.length > 0) {
+    const nested = compileExpansionsObject(
+      expansion.expand,
+      {
+        project: `${target}.project_id`,
+        type: `${target}.object_type_id`,
+        id: `${target}.primary_id`,
+      },
+      path
+    )
+    fields.push(`'links', ${nested.sql}`)
+    args.push(...nested.args)
+  }
+
+  return { sql: `jsonb_build_object(${fields.join(", ")})`, args }
+}
+
+// Order a parent's links the way the fallback's per-parent trim does: each
+// property sorts nulls last with the requested direction (against the neighbour's
+// JSONB properties), then a deterministic identity tiebreak on the neighbour.
+function compileExpansionOrder(
+  expansion: ObjectExpansion,
+  target: string,
+  neighborType: string,
+  neighborId: string
+): CompiledPredicate {
+  const propertyColumn = `${target}.properties`
+  const clauses: string[] = []
+  const args: unknown[] = []
+
+  for (const field of expansion.orderBy ?? []) {
+    // Relevance is a no-op in the fallback comparator; mirror that by skipping it.
+    if (field.kind !== "property") continue
+    const direction = field.direction === "desc" ? "DESC" : "ASC"
+    clauses.push(
+      `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END ASC`,
+      `${jsonValueExpression(propertyColumn)} ${direction}`
+    )
+    args.push(field.propertyId, field.propertyId, field.propertyId)
+  }
+
+  clauses.push(`${neighborType} ASC`, `${neighborId} ASC`)
+  return { sql: clauses.join(", "), args }
 }
 
 function compileSet(
