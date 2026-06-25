@@ -13,6 +13,7 @@ import type {
   InferActionParams,
   RequestActionResult,
 } from "../actions"
+import type { AgentsRuntime } from "../agents"
 import type { AuthRuntime } from "../auth"
 import type { AuthorizationContext } from "../authorization"
 import type { BlobStorage } from "../blob-storage"
@@ -638,6 +639,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly auth: AuthRuntime
   readonly actions: ActionsRuntime
   readonly workflows: WorkflowsRuntime
+  readonly agents: AgentsRuntime
 
   /** Create a principal-scoped runtime surface that enforces authorization grants. */
   as(context: AuthorizationContext): ScopedSixb<_>

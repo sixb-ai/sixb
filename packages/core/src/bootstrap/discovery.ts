@@ -11,6 +11,8 @@ import { join, relative } from "node:path"
 import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
 import type { ActionDefinition } from "../actions/types"
+import type { AgentDefinition } from "../agents"
+import { isAgentDefinition } from "../agents"
 import { isConnectorDefinition } from "../connectors"
 import type { ConnectorDefinition } from "../connectors/types"
 import { isDatasetDefinition } from "../datasets"
@@ -344,6 +346,25 @@ export async function discoverWorkflows(
   return workflows
 }
 
+export async function discoverAgents(projectRoot: string): Promise<readonly AgentDefinition[]> {
+  const agentsDir = join(projectRoot, "agents")
+  const modulePaths = await listModuleFiles(agentsDir)
+  const exportedCandidates = await loadModuleExports({
+    modulePaths,
+    projectRoot,
+    kind: "agent",
+  })
+
+  const agents: AgentDefinition[] = []
+  for (const candidate of exportedCandidates) {
+    if (isAgentDefinition(candidate)) {
+      agents.push(candidate)
+    }
+  }
+
+  return agents
+}
+
 // ── Internal helpers ────────────────────────────────────────
 
 async function loadModuleExports(options: {
@@ -351,6 +372,7 @@ async function loadModuleExports(options: {
   projectRoot: string
   kind:
     | "action"
+    | "agent"
     | "ontology"
     | "dataset"
     | "function"

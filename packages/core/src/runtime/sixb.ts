@@ -8,6 +8,8 @@
 
 import { ActionRegistry, ActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
+import type { AgentDefinition } from "../agents"
+import { AgentsRuntime } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -95,6 +97,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   projections?: readonly ProjectionDefinition[]
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
+  agents?: readonly AgentDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   invitePolicies?: readonly InvitePolicyDefinition[]
@@ -124,6 +127,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly actionRegistry: ActionRegistry
   readonly actions: ActionsRuntime
   readonly workflows: WorkflowsRuntime
+  readonly agents: AgentsRuntime
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -286,6 +290,16 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     }
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
+
+    const agents = options.agents ?? []
+    const agentIds = new Set<string>()
+    for (const agent of agents) {
+      if (agentIds.has(agent.id)) {
+        throw new RuntimeError(`Duplicate agent id: ${agent.id}`)
+      }
+      agentIds.add(agent.id)
+    }
+    this.agents = new AgentsRuntime(agents)
 
     const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(
       options.projections ?? []
