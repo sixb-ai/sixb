@@ -607,14 +607,14 @@ type ExpansionLinksForSource<TLinks, TObjectType extends Pick<ObjectType, "id" |
 type ExpandedLinkType<TNode, TValueTypes extends readonly ValueType[]> =
   TNode extends ExpansionNode<
     unknown,
-    ObjectTypeWithPropertyTokens,
+    infer TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
     infer TTarget,
     infer TCardinality,
     infer TChildren
   >
     ? TCardinality extends "one"
-      ? ExpandedRowType<TTarget, TChildren, TValueTypes> | null
-      : ExpandedRowType<TTarget, TChildren, TValueTypes>[]
+      ? ExpandedRowType<TTarget, TChildren, TValueTypes, TRegisteredObjectTypes> | null
+      : ExpandedRowType<TTarget, TChildren, TValueTypes, TRegisteredObjectTypes>[]
     : never
 
 /**
@@ -623,14 +623,49 @@ type ExpandedLinkType<TNode, TValueTypes extends readonly ValueType[]> =
  * nested `links` (present only when the child was itself expanded). The recursion
  * is confined to this lazily-evaluated position.
  */
-type ExpandedRowType<TTarget, TChildren, TValueTypes extends readonly ValueType[]> =
+/**
+ * Loud row substituted for a `.expand()` whose target type is MISSING from an
+ * otherwise-present ontology manifest (a stale manifest, or a wrong link target
+ * id). Reading a real property is then a compile error pointing at the fix,
+ * instead of the old silent `Record<string, unknown>`. The no-manifest loose
+ * default stays graceful — this only fires when the registry is concrete yet the
+ * target id is absent, i.e. precision was expected but lost.
+ */
+type UnresolvedExpansionRow = {
+  primaryId: string
+  objectTypeId: string
+  properties: {
+    readonly sixb_unresolvedExpansionTarget: "This expansion target is not in the generated ontology manifest. Run `sixb build` / `dev` / `check` to regenerate types, or fix the link's target id."
+  }
+  createdAt: Date
+  updatedAt: Date
+}
+
+type ExpandedRowType<
+  TTarget,
+  TChildren,
+  TValueTypes extends readonly ValueType[],
+  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
+> =
   TTarget extends Pick<ObjectType, "id" | "properties" | "links">
-    ? ExpandedRowForSource<
-        TTarget,
-        TValueTypes,
-        ExpansionLinksForSource<TChildren, TTarget>,
-        { linkProperties?: Record<string, unknown> }
-      >
+    ? string extends TTarget["id"]
+      ? // Target degraded to the loose base. Distinguish the two causes:
+        string extends TRegisteredObjectTypes["id"]
+        ? // No manifest at all → graceful loose default (unchanged, non-breaking).
+          ExpandedRowForSource<
+            TTarget,
+            TValueTypes,
+            ExpansionLinksForSource<TChildren, TTarget>,
+            { linkProperties?: Record<string, unknown> }
+          >
+        : // Manifest present but this target id is absent → loud (was silent).
+          UnresolvedExpansionRow
+      : ExpandedRowForSource<
+          TTarget,
+          TValueTypes,
+          ExpansionLinksForSource<TChildren, TTarget>,
+          { linkProperties?: Record<string, unknown> }
+        >
     : never
 
 type ExpandedRowForSource<
