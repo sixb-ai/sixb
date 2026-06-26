@@ -1,0 +1,39 @@
+{
+  "name": "@sixb/connector-meta",
+  "version": "0.1.0",
+  "description": "Meta connector for Sixb — Instagram & Facebook Page reads via the Graph API",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepack": "bun run build"
+  },
+  "dependencies": {
+    "@sixb/connector-rest": "workspace:*",
+    "@sixb/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ]
+}
