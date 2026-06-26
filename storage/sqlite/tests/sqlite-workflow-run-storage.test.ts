@@ -480,6 +480,7 @@ describe("SqliteWorkflowRunStorage", () => {
 function closeSqliteStorage(storage: SqliteStorage): void {
   storage.objects.close()
   storage.auth.close()
+  storage.agents.close()
   storage.actionRuns.close()
   storage.pipelineRuns.close()
   storage.projectionRuns.close()

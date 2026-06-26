@@ -1,4 +1,8 @@
 export {
+  type AgentStorageContractSuiteOptions,
+  runAgentStorageContractSuite,
+} from "./agent-storage-contract"
+export {
   type AuthStorageContractSuiteOptions,
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"

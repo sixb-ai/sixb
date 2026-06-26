@@ -1,6 +1,7 @@
 import type { SQLClient, SqlParameter } from "./pg-client"
 
 type PgRunListTable =
+  | "agent_runs"
   | "pipeline_runs"
   | "pipeline_step_runs"
   | "sync_runs"

@@ -90,6 +90,32 @@ describe("SQLite storage migrations", () => {
     expect(sessionColumns).toContain("ip_address")
   })
 
+  test("migrations install agent storage tables", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-agent-migrations-"))
+    tempDirs.push(tempDir)
+
+    const storage = new SqliteStorage({ path: tempDir })
+    await migrateStorage(storage)
+
+    await storage.agents.threads.create({
+      id: "thr_1",
+      projectId: "project-a",
+      agentId: "sales",
+      ownerPrincipal: { type: "user", id: "usr_1" },
+      createdAt: new Date("2026-06-23T10:00:00.000Z"),
+    })
+    await expect(
+      storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
+    ).resolves.toMatchObject({ id: "thr_1", agentId: "sales", messageCount: 0 })
+
+    closeStorage(storage)
+
+    const tables = readTableNames(sqliteStoragePath(tempDir))
+    expect(tables).toContain("agent_threads")
+    expect(tables).toContain("agent_runs")
+    expect(tables).toContain("agent_messages")
+  })
+
   test("migrations preserve existing store rows", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-legacy-"))
     tempDirs.push(tempDir)
@@ -475,6 +501,7 @@ async function seedExistingStoreRows(basePath: string): Promise<void> {
 function closeStorage(storage: SqliteStorage): void {
   storage.objects.close()
   storage.auth.close()
+  storage.agents.close()
   storage.actionRuns.close()
   storage.pipelineRuns.close()
   storage.projectionRuns.close()

@@ -42,6 +42,40 @@ export {
   normalizeActionRunCommitDiff,
 } from "./action-runs"
 export type {
+  AgentMessageRecord,
+  AgentMessageRole,
+  AgentMessageStore,
+  AgentRunFinishReason,
+  AgentRunLease,
+  AgentRunRecord,
+  AgentRunStatus,
+  AgentRunStore,
+  AgentRunUsage,
+  AgentStorage,
+  AgentStorageErrorCode,
+  AgentThreadRecord,
+  AgentThreadStatus,
+  AgentThreadStore,
+  AppendAgentMessageInput,
+  CreateAgentThreadInput,
+  FinishAgentRunInput,
+  ListAgentMessagesInput,
+  ListAgentMessagesResult,
+  ListAgentRunsInput,
+  ListAgentRunsResult,
+  ListAgentThreadsInput,
+  ListAgentThreadsResult,
+  ReclaimAgentRunInput,
+  RenewAgentRunLeaseInput,
+  ReserveAgentRunInput,
+} from "./agents"
+export {
+  AGENT_RUN_FINISH_REASONS,
+  AgentStorageError,
+  coerceAgentRunFinishReason,
+  InMemoryAgentStorage,
+} from "./agents"
+export type {
   AccessTokenRecord,
   AccessTokenSubjectType,
   AuthAccessTokenStore,
@@ -300,6 +334,7 @@ export {
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "./action-runs"
+import { InMemoryAgentStorage } from "./agents"
 import { InMemoryAuthStorage } from "./auth"
 import { StorageTransactionError } from "./errors"
 import { InMemoryObjectStorage } from "./objects"
@@ -319,6 +354,7 @@ export class InMemoryStorage implements Storage {
   readonly objects = new InMemoryObjectStorage()
   readonly timeseries = new InMemoryTimeseriesStorage()
   readonly auth = new InMemoryAuthStorage()
+  readonly agents = new InMemoryAgentStorage()
   readonly actionRuns = new InMemoryActionRunStorage()
   readonly syncRuns = new InMemorySyncRunStorage()
   readonly pipelineRuns = new InMemoryPipelineRunStorage()
@@ -399,6 +435,7 @@ export class InMemoryStorage implements Storage {
       objects: this.objects.snapshot(),
       timeseries: this.timeseries.snapshot(),
       auth: this.auth.snapshot(),
+      agents: this.agents.snapshot(),
       actionRuns: this.actionRuns.snapshot(),
       syncRuns: this.syncRuns.snapshot(),
       pipelineRuns: this.pipelineRuns.snapshot(),
@@ -415,6 +452,7 @@ export class InMemoryStorage implements Storage {
     this.objects.restore(snapshot.objects)
     this.timeseries.restore(snapshot.timeseries)
     this.auth.restore(snapshot.auth)
+    this.agents.restore(snapshot.agents)
     this.actionRuns.restore(snapshot.actionRuns)
     this.syncRuns.restore(snapshot.syncRuns)
     this.pipelineRuns.restore(snapshot.pipelineRuns)
@@ -431,6 +469,7 @@ interface InMemoryStorageSnapshot {
   readonly objects: ReturnType<InMemoryObjectStorage["snapshot"]>
   readonly timeseries: ReturnType<InMemoryTimeseriesStorage["snapshot"]>
   readonly auth: ReturnType<InMemoryAuthStorage["snapshot"]>
+  readonly agents: ReturnType<InMemoryAgentStorage["snapshot"]>
   readonly actionRuns: ReturnType<InMemoryActionRunStorage["snapshot"]>
   readonly syncRuns: ReturnType<InMemorySyncRunStorage["snapshot"]>
   readonly pipelineRuns: ReturnType<InMemoryPipelineRunStorage["snapshot"]>
