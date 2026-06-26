@@ -1,9 +1,9 @@
 import type {
+  AgentMessagePart,
   AgentStorage,
   AgentsRuntime,
   EventsRuntime,
   Queues,
-  SixbMessagePart,
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
@@ -44,7 +44,7 @@ export interface AgentWorkerContext {
  * A sink failure is isolated by the loop: it never blocks the turn or the lease heartbeat.
  */
 export interface StreamSink {
-  onPart(part: SixbMessagePart): void | Promise<void>
+  onPart(part: AgentMessagePart): void | Promise<void>
 }
 
 export interface AgentWorkerOptions {

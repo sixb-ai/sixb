@@ -1,9 +1,9 @@
 import type {
   AgentDefinition,
+  AgentMessage,
   AgentRunRecord,
   AgentRunUsage,
   AgentStorage,
-  SixbMessage,
 } from "@sixb/core"
 import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
 import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
@@ -82,7 +82,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     abortSignal,
   })
 
-  let responseMessage: SixbInboundLike | undefined
+  let responseMessage: AgentInboundLike | undefined
   const uiStream = result.toUIMessageStream({
     onFinish: (event) => {
       responseMessage = event.responseMessage
@@ -132,7 +132,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
   }
 
-  const assistant: SixbMessage = fromAiSdk(responseMessage)
+  const assistant: AgentMessage = fromAiSdk(responseMessage)
 
   // One last renew right before we write: a successful renew proves we still hold the lease, and it
   // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
@@ -175,7 +175,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider
 // inbound shape. We keep the parameter loose here and let `fromAiSdk` narrow/validate at runtime.
-type SixbInboundLike = Parameters<typeof fromAiSdk>[0]
+type AgentInboundLike = Parameters<typeof fromAiSdk>[0]
 
 interface LeaseHeartbeatInput {
   readonly storage: AgentStorage
@@ -253,7 +253,7 @@ async function renewOrLost(input: {
   }
 }
 
-async function emitPart(sink: StreamSink, part: SixbMessage["parts"][number]): Promise<void> {
+async function emitPart(sink: StreamSink, part: AgentMessage["parts"][number]): Promise<void> {
   try {
     await sink.onPart(part)
   } catch (error) {

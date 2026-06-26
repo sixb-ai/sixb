@@ -5,6 +5,7 @@ import type {
   LanguageModelV3Usage,
 } from "@ai-sdk/provider"
 import {
+  type AgentMessagePart,
   AgentRequestError,
   type AgentStorage,
   AgentStorageError,
@@ -20,7 +21,6 @@ import {
   InMemoryStorage,
   type Queues,
   Sixb,
-  type SixbMessagePart,
   type Storage,
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
@@ -211,7 +211,7 @@ describe("AgentWorker", () => {
   test("runs a full multi-step turn: reserves, persists the assistant message, finalizes with usage", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
-    const streamed: SixbMessagePart[] = []
+    const streamed: AgentMessagePart[] = []
 
     const worker = new AgentWorker(sixb, {
       tools: echoTool,
