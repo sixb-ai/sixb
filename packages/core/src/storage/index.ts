@@ -45,6 +45,7 @@ export type {
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,
+  AgentRunFinishReason,
   AgentRunLease,
   AgentRunRecord,
   AgentRunStatus,
@@ -68,7 +69,12 @@ export type {
   RenewAgentRunLeaseInput,
   ReserveAgentRunInput,
 } from "./agents"
-export { AgentStorageError, InMemoryAgentStorage } from "./agents"
+export {
+  AGENT_RUN_FINISH_REASONS,
+  AgentStorageError,
+  coerceAgentRunFinishReason,
+  InMemoryAgentStorage,
+} from "./agents"
 export type {
   AccessTokenRecord,
   AccessTokenSubjectType,

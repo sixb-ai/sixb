@@ -1,4 +1,4 @@
-import type { SixbMessage, SixbMessagePart, SixbMessageRole } from "../../agents/message"
+import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "../../agents/message"
 import type { Principal } from "../../auth"
 import type { JsonValue } from "../../json"
 
@@ -53,6 +53,38 @@ export interface ListAgentThreadsResult {
 
 export type AgentRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
+/**
+ * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK v6 unified finish
+ * reasons), so reads are typed and exhaustive without core depending on `ai`. `other`/`unknown` are
+ * catch-alls: a provider value we don't recognise still records *that* the run ended.
+ */
+export const AGENT_RUN_FINISH_REASONS = [
+  "stop",
+  "length",
+  "content-filter",
+  "tool-calls",
+  "error",
+  "other",
+  "unknown",
+] as const
+
+export type AgentRunFinishReason = (typeof AGENT_RUN_FINISH_REASONS)[number]
+
+/**
+ * Coerce an external finish-reason string — a DB column or an SDK value — to {@link
+ * AgentRunFinishReason}. An unrecognised value becomes `"unknown"` rather than being dropped.
+ */
+export function coerceAgentRunFinishReason(
+  value: string | null | undefined
+): AgentRunFinishReason | undefined {
+  if (value === null || value === undefined) {
+    return undefined
+  }
+  return (AGENT_RUN_FINISH_REASONS as readonly string[]).includes(value)
+    ? (value as AgentRunFinishReason)
+    : "unknown"
+}
+
 export interface AgentRunUsage {
   readonly inputTokens?: number
   readonly outputTokens?: number
@@ -75,8 +107,8 @@ export interface AgentRunRecord {
   readonly triggerMessageId: string
   readonly status: AgentRunStatus
   readonly modelId?: string
-  /** AI SDK `FinishReason`, stored as an opaque string (core does not depend on `ai`). */
-  readonly finishReason?: string
+  /** Why the run ended (our own SDK-independent enum). */
+  readonly finishReason?: AgentRunFinishReason
   readonly usage?: AgentRunUsage
   /** Failure message when the run did not succeed. */
   readonly error?: string
@@ -121,7 +153,7 @@ export type FinishAgentRunInput =
       readonly leaseId: string
       readonly status: "succeeded"
       readonly modelId?: string
-      readonly finishReason?: string
+      readonly finishReason?: AgentRunFinishReason
       readonly usage?: AgentRunUsage
       readonly completedAt?: Date
     }
@@ -131,7 +163,7 @@ export type FinishAgentRunInput =
       readonly leaseId: string
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
-      readonly finishReason?: string
+      readonly finishReason?: AgentRunFinishReason
       readonly usage?: AgentRunUsage
       readonly error?: string
       readonly completedAt?: Date
@@ -157,7 +189,7 @@ export interface ListAgentRunsResult {
 
 // ── agent_messages — one message (assistant messages inserted only once finalized) ─────────────
 
-export type AgentMessageRole = SixbMessageRole
+export type { AgentMessageRole }
 
 export interface AgentMessageRecord {
   readonly id: string
@@ -169,17 +201,17 @@ export interface AgentMessageRecord {
   /** Monotonic per thread, assigned by the store. */
   readonly seq: number
   /** Structured message content — text / reasoning / step boundaries / tool calls. */
-  readonly parts: readonly SixbMessagePart[]
+  readonly parts: readonly AgentMessagePart[]
   /** Message-level metadata (mirrors `UIMessage.metadata`). */
   readonly metadata?: JsonValue
-  /** Versions the `parts` shape so it can be migrated; stamped from `SIXB_MESSAGE_CONTENT_VERSION`. */
+  /** Versions the `parts` shape so it can be migrated; stamped from `AGENT_MESSAGE_CONTENT_VERSION`. */
   readonly contentVersion: number
   readonly createdAt: Date
   readonly completedAt?: Date
 }
 
-/** Append a message: a {@link SixbMessage} (role + parts + metadata) plus its storage identity. */
-export interface AppendAgentMessageInput extends SixbMessage {
+/** Append a message: a {@link AgentMessage} (role + parts + metadata) plus its storage identity. */
+export interface AppendAgentMessageInput extends AgentMessage {
   readonly id: string
   readonly projectId: string
   readonly threadId: string

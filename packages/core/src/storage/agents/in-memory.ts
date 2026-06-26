@@ -1,4 +1,4 @@
-import { SIXB_MESSAGE_CONTENT_VERSION } from "../../agents/message"
+import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import type { Principal } from "../../auth"
 import { AgentStorageError } from "./errors"
 import type {
@@ -366,7 +366,7 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       seq,
       parts: clone(input.parts),
       ...(input.metadata === undefined ? {} : { metadata: clone(input.metadata) }),
-      contentVersion: SIXB_MESSAGE_CONTENT_VERSION,
+      contentVersion: AGENT_MESSAGE_CONTENT_VERSION,
       createdAt,
       ...(input.completedAt === undefined ? {} : { completedAt: new Date(input.completedAt) }),
     }

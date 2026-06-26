@@ -1,22 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentInboundUiMessage,
+  type AgentMessage,
   AgentMessageAdapterError,
+  type AgentMessagePart,
+  type AgentMessageRole,
   fromAiSdk,
-  type SixbInboundUiMessage,
-  type SixbMessage,
-  type SixbMessagePart,
-  type SixbMessageRole,
   toModelMessages,
   toUiMessage,
 } from "../src"
 
-function sixbMessage(role: SixbMessageRole, parts: SixbMessagePart[]): SixbMessage {
+function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }
 }
 
 describe("fromAiSdk", () => {
   test("maps text, reasoning, and step-start parts", () => {
-    const message: SixbInboundUiMessage = {
+    const message: AgentInboundUiMessage = {
       role: "assistant",
       metadata: { traceId: "t1" },
       parts: [
@@ -45,7 +45,7 @@ describe("fromAiSdk", () => {
   })
 
   test("normalizes static and dynamic tool calls into a single tool-call part", () => {
-    const message: SixbInboundUiMessage = {
+    const message: AgentInboundUiMessage = {
       role: "assistant",
       parts: [
         {
@@ -92,7 +92,7 @@ describe("fromAiSdk", () => {
     const message = {
       role: "assistant",
       parts: [{ type: "file", url: "https://x", mediaType: "image/png" }],
-    } as unknown as SixbInboundUiMessage
+    } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
   })
 
@@ -100,24 +100,24 @@ describe("fromAiSdk", () => {
     const streamingText = {
       role: "assistant",
       parts: [{ type: "text", text: "partial", state: "streaming" }],
-    } as unknown as SixbInboundUiMessage
+    } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(streamingText)).toThrow(AgentMessageAdapterError)
 
     const transientTool = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "input-available", input: {} }],
-    } as unknown as SixbInboundUiMessage
+    } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(transientTool)).toThrow(AgentMessageAdapterError)
 
     const approval = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "approval-requested", input: {} }],
-    } as unknown as SixbInboundUiMessage
+    } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(approval)).toThrow(AgentMessageAdapterError)
   })
 
   test("throws on an unsupported role", () => {
-    const message = { role: "tool", parts: [] } as unknown as SixbInboundUiMessage
+    const message = { role: "tool", parts: [] } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
   })
 
@@ -133,13 +133,13 @@ describe("fromAiSdk", () => {
           output: "ok",
         },
       ],
-    } as unknown as SixbInboundUiMessage
+    } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
   })
 })
 
 describe("envelope round-trip (fromAiSdk ∘ toUiMessage)", () => {
-  const cases: Record<string, SixbMessage> = {
+  const cases: Record<string, AgentMessage> = {
     text: sixbMessage("user", [{ type: "text", text: "hi" }]),
     "with message metadata": {
       role: "assistant",

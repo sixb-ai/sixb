@@ -1,10 +1,11 @@
-import type {
-  AgentMessageRecord,
-  AgentRunRecord,
-  AgentRunUsage,
-  AgentThreadRecord,
-  Principal,
-  SixbMessagePart,
+import {
+  type AgentMessagePart,
+  type AgentMessageRecord,
+  type AgentRunRecord,
+  type AgentRunUsage,
+  type AgentThreadRecord,
+  coerceAgentRunFinishReason,
+  type Principal,
 } from "@sixb/core"
 import type { SQLClient, SqlParameter } from "../pg-client"
 
@@ -56,7 +57,7 @@ export interface AgentMessageRow {
   run_id: string | null
   role: AgentMessageRecord["role"]
   seq: number | string
-  parts: SixbMessagePart[] | string
+  parts: AgentMessagePart[] | string
   metadata: unknown
   content_version: number | string
   created_at: Date | string
@@ -90,7 +91,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     triggerMessageId: row.trigger_message_id,
     status: row.status,
     modelId: row.model_id ?? undefined,
-    finishReason: row.finish_reason ?? undefined,
+    finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
     error: row.error ?? undefined,
     attempt: Number(row.attempt),
@@ -112,7 +113,8 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     runId: row.run_id,
     role: row.role,
     seq: Number(row.seq),
-    parts: typeof row.parts === "string" ? (JSON.parse(row.parts) as SixbMessagePart[]) : row.parts,
+    parts:
+      typeof row.parts === "string" ? (JSON.parse(row.parts) as AgentMessagePart[]) : row.parts,
     // A null/absent column and an explicit JSON `null` both mean "no metadata" — jsonb cannot tell
     // SQL NULL from a json null on read, so both backends normalise to `undefined` for parity.
     metadata: normalizeMetadata(row.metadata),

@@ -1,11 +1,11 @@
 import {
+  AGENT_MESSAGE_CONTENT_VERSION,
   type AgentMessageRecord,
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
-  SIXB_MESSAGE_CONTENT_VERSION,
 } from "@sixb/core"
 import type { SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
@@ -73,7 +73,7 @@ export class PgAgentMessageStore implements AgentMessageStore {
             ${Number(seqRow.next)},
             ${JSON.stringify(input.parts)}::text::jsonb,
             ${input.metadata === undefined ? null : JSON.stringify(input.metadata)}::text::jsonb,
-            ${SIXB_MESSAGE_CONTENT_VERSION},
+            ${AGENT_MESSAGE_CONTENT_VERSION},
             ${createdAt},
             ${input.completedAt ?? null}
           )

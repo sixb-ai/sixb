@@ -1,12 +1,12 @@
 import type { Database } from "bun:sqlite"
 import {
+  AGENT_MESSAGE_CONTENT_VERSION,
   type AgentMessageRecord,
   type AgentMessageStore,
   AgentStorageError,
   type AppendAgentMessageInput,
   type ListAgentMessagesInput,
   type ListAgentMessagesResult,
-  SIXB_MESSAGE_CONTENT_VERSION,
 } from "@sixb/core"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
@@ -77,7 +77,7 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
             seqRow.next,
             JSON.stringify(input.parts),
             input.metadata === undefined ? null : JSON.stringify(input.metadata),
-            SIXB_MESSAGE_CONTENT_VERSION,
+            AGENT_MESSAGE_CONTENT_VERSION,
             createdAt.toISOString(),
             input.completedAt ? input.completedAt.toISOString() : null
           )

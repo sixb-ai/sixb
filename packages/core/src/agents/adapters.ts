@@ -1,6 +1,6 @@
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { AgentMessageAdapterError } from "./errors"
-import type { SixbMessage, SixbMessagePart, SixbMessageRole } from "./message"
+import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
 
 // ── Inbound (write) — deliberately WIDE ────────────────────────────────────────────────────────
 //
@@ -9,7 +9,7 @@ import type { SixbMessage, SixbMessagePart, SixbMessageRole } from "./message"
 // structural supertype of the AI SDK's `UIMessage`, so a real SDK message can be passed without a
 // cast (verified by a compat test in the consumer package, where `ai` lives — core stays SDK-free).
 
-export interface SixbInboundUiMessagePart {
+export interface AgentInboundUiMessagePart {
   readonly type: string
   readonly text?: string
   readonly state?: string
@@ -27,23 +27,23 @@ export interface SixbInboundUiMessagePart {
   readonly callProviderMetadata?: JsonValue
 }
 
-export interface SixbInboundUiMessage {
+export interface AgentInboundUiMessage {
   readonly role: string
   readonly id?: string
   readonly metadata?: unknown
-  readonly parts: readonly SixbInboundUiMessagePart[]
+  readonly parts: readonly AgentInboundUiMessagePart[]
 }
 
 // ── Outbound (read) — PRECISE, aligned with AI SDK v6 ───────────────────────────────────────────
 
-interface SixbUiToolPartBody {
+interface AgentUiToolPartBody {
   readonly toolCallId: string
   readonly providerExecuted?: boolean
   readonly callProviderMetadata?: JsonValue
 }
 
-export type SixbUiToolPart =
-  | ({ readonly type: `tool-${string}` } & SixbUiToolPartBody &
+export type AgentUiToolPart =
+  | ({ readonly type: `tool-${string}` } & AgentUiToolPartBody &
       (
         | {
             readonly state: "output-available"
@@ -52,7 +52,7 @@ export type SixbUiToolPart =
           }
         | { readonly state: "output-error"; readonly input: JsonValue; readonly errorText: string }
       ))
-  | ({ readonly type: "dynamic-tool"; readonly toolName: string } & SixbUiToolPartBody &
+  | ({ readonly type: "dynamic-tool"; readonly toolName: string } & AgentUiToolPartBody &
       (
         | {
             readonly state: "output-available"
@@ -62,36 +62,36 @@ export type SixbUiToolPart =
         | { readonly state: "output-error"; readonly input: JsonValue; readonly errorText: string }
       ))
 
-export type SixbUiMessagePart =
+export type AgentUiMessagePart =
   | { readonly type: "text"; readonly text: string; readonly providerMetadata?: JsonValue }
   | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonValue }
   | { readonly type: "step-start" }
-  | SixbUiToolPart
+  | AgentUiToolPart
 
-export interface SixbUiMessage {
-  readonly role: SixbMessageRole
+export interface AgentUiMessage {
+  readonly role: AgentMessageRole
   readonly id?: string
   readonly metadata?: JsonValue
-  readonly parts: readonly SixbUiMessagePart[]
+  readonly parts: readonly AgentUiMessagePart[]
 }
 
-export type SixbModelToolOutput =
+export type AgentModelToolOutput =
   | { readonly type: "text"; readonly value: string }
   | { readonly type: "json"; readonly value: JsonValue }
   | { readonly type: "error-text"; readonly value: string }
   | { readonly type: "error-json"; readonly value: JsonValue }
 
-export interface SixbModelTextPart {
+export interface AgentModelTextPart {
   readonly type: "text"
   readonly text: string
   readonly providerOptions?: JsonValue
 }
-export interface SixbModelReasoningPart {
+export interface AgentModelReasoningPart {
   readonly type: "reasoning"
   readonly text: string
   readonly providerOptions?: JsonValue
 }
-export interface SixbModelToolCallPart {
+export interface AgentModelToolCallPart {
   readonly type: "tool-call"
   readonly toolCallId: string
   readonly toolName: string
@@ -99,25 +99,25 @@ export interface SixbModelToolCallPart {
   readonly providerExecuted?: boolean
   readonly providerOptions?: JsonValue
 }
-export interface SixbModelToolResultPart {
+export interface AgentModelToolResultPart {
   readonly type: "tool-result"
   readonly toolCallId: string
   readonly toolName: string
-  readonly output: SixbModelToolOutput
+  readonly output: AgentModelToolOutput
   readonly providerOptions?: JsonValue
 }
 
-export type SixbModelAssistantPart =
-  | SixbModelTextPart
-  | SixbModelReasoningPart
-  | SixbModelToolCallPart
-  | SixbModelToolResultPart
+export type AgentModelAssistantPart =
+  | AgentModelTextPart
+  | AgentModelReasoningPart
+  | AgentModelToolCallPart
+  | AgentModelToolResultPart
 
-export type SixbModelMessage =
+export type AgentModelMessage =
   | { readonly role: "system"; readonly content: string; readonly providerOptions?: JsonValue }
-  | { readonly role: "user"; readonly content: readonly SixbModelTextPart[] }
-  | { readonly role: "assistant"; readonly content: readonly SixbModelAssistantPart[] }
-  | { readonly role: "tool"; readonly content: readonly SixbModelToolResultPart[] }
+  | { readonly role: "user"; readonly content: readonly AgentModelTextPart[] }
+  | { readonly role: "assistant"; readonly content: readonly AgentModelAssistantPart[] }
+  | { readonly role: "tool"; readonly content: readonly AgentModelToolResultPart[] }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -148,7 +148,7 @@ function isToolType(type: string): boolean {
   return type === "dynamic-tool" || type.startsWith(TOOL_TYPE_PREFIX)
 }
 
-function toolNameFromInbound(part: SixbInboundUiMessagePart): string {
+function toolNameFromInbound(part: AgentInboundUiMessagePart): string {
   if (part.type === "dynamic-tool") {
     assertAdapter(
       typeof part.toolName === "string" && part.toolName.length > 0,
@@ -164,19 +164,19 @@ function toolNameFromInbound(part: SixbInboundUiMessagePart): string {
 // ── fromAiSdk (write) ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Convert an SDK-shaped UI message into a durable {@link SixbMessage}. Total: throws
+ * Convert an SDK-shaped UI message into a durable {@link AgentMessage}. Total: throws
  * {@link AgentMessageAdapterError} on any part kind, tool state, or text/reasoning state that V1 does
  * not model, and on a role outside `system | user | assistant`. Transient states are rejected
  * because messages are only ever persisted once a run has finished.
  */
-export function fromAiSdk(message: SixbInboundUiMessage): SixbMessage {
+export function fromAiSdk(message: AgentInboundUiMessage): AgentMessage {
   const { role } = message
   assertAdapter(
     role === "system" || role === "user" || role === "assistant",
     `unsupported message role '${role}'`
   )
 
-  const parts: SixbMessagePart[] = message.parts.map((part) => fromAiSdkPart(part))
+  const parts: AgentMessagePart[] = message.parts.map((part) => fromAiSdkPart(part))
   const metadata = optionalJson(message.metadata, "metadata")
 
   return {
@@ -186,7 +186,7 @@ export function fromAiSdk(message: SixbInboundUiMessage): SixbMessage {
   }
 }
 
-function fromAiSdkPart(part: SixbInboundUiMessagePart): SixbMessagePart {
+function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
   switch (part.type) {
     case "text":
     case "reasoning": {
@@ -214,7 +214,7 @@ function fromAiSdkPart(part: SixbInboundUiMessagePart): SixbMessagePart {
   }
 }
 
-function fromAiSdkToolPart(part: SixbInboundUiMessagePart): SixbToolCallPartResult {
+function fromAiSdkToolPart(part: AgentInboundUiMessagePart): AgentToolCallPartResult {
   const dynamic = part.type === "dynamic-tool"
   const toolName = toolNameFromInbound(part)
   assertAdapter(
@@ -250,12 +250,12 @@ function fromAiSdkToolPart(part: SixbInboundUiMessagePart): SixbToolCallPartResu
   return { ...base, state: "output-error", errorText: part.errorText }
 }
 
-type SixbToolCallPartResult = Extract<SixbMessagePart, { type: "tool-call" }>
+type AgentToolCallPartResult = Extract<AgentMessagePart, { type: "tool-call" }>
 
 // ── toUiMessage (read) ────────────────────────────────────────────────────────────────────────
 
 /** Reconstruct an SDK-shaped UI message from a stored message. Exact inverse of {@link fromAiSdk}. */
-export function toUiMessage(message: SixbMessage): SixbUiMessage {
+export function toUiMessage(message: AgentMessage): AgentUiMessage {
   return {
     role: message.role,
     parts: message.parts.map((part) => toUiPart(part)),
@@ -263,7 +263,7 @@ export function toUiMessage(message: SixbMessage): SixbUiMessage {
   }
 }
 
-function toUiPart(part: SixbMessagePart): SixbUiMessagePart {
+function toUiPart(part: AgentMessagePart): AgentUiMessagePart {
   switch (part.type) {
     case "text":
     case "reasoning":
@@ -279,7 +279,7 @@ function toUiPart(part: SixbMessagePart): SixbUiMessagePart {
   }
 }
 
-function toUiToolPart(part: SixbToolCallPartResult): SixbUiToolPart {
+function toUiToolPart(part: AgentToolCallPartResult): AgentUiToolPart {
   const body = {
     toolCallId: part.toolCallId,
     ...(part.providerExecuted === undefined ? {} : { providerExecuted: part.providerExecuted }),
@@ -307,8 +307,8 @@ function toUiToolPart(part: SixbToolCallPartResult): SixbUiToolPart {
  * else to `json`; this is the documented V1 fidelity scope (a tool's custom `toModelOutput` is not
  * reproduced).
  */
-export function toModelMessages(messages: readonly SixbMessage[]): SixbModelMessage[] {
-  const result: SixbModelMessage[] = []
+export function toModelMessages(messages: readonly AgentMessage[]): AgentModelMessage[] {
+  const result: AgentModelMessage[] = []
   for (const message of messages) {
     switch (message.role) {
       case "system":
@@ -325,7 +325,7 @@ export function toModelMessages(messages: readonly SixbMessage[]): SixbModelMess
   return result
 }
 
-function systemModelMessage(message: SixbMessage): SixbModelMessage {
+function systemModelMessage(message: AgentMessage): AgentModelMessage {
   const textParts = message.parts.filter(isTextPart)
   // Mirror convertToModelMessages: merge providerMetadata across all system text parts (carries e.g.
   // a provider's prompt-cache directive) and forward it as providerOptions when non-empty.
@@ -338,7 +338,7 @@ function systemModelMessage(message: SixbMessage): SixbModelMessage {
 }
 
 function mergeProviderMetadata(
-  parts: readonly Extract<SixbMessagePart, { type: "text" }>[]
+  parts: readonly Extract<AgentMessagePart, { type: "text" }>[]
 ): JsonValue | undefined {
   let merged: Record<string, JsonValue> | undefined
   for (const part of parts) {
@@ -350,9 +350,9 @@ function mergeProviderMetadata(
   return merged
 }
 
-function userModelMessage(message: SixbMessage): SixbModelMessage {
+function userModelMessage(message: AgentMessage): AgentModelMessage {
   const content = message.parts.filter(isTextPart).map(
-    (part): SixbModelTextPart => ({
+    (part): AgentModelTextPart => ({
       type: "text",
       text: part.text,
       ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
@@ -361,8 +361,8 @@ function userModelMessage(message: SixbMessage): SixbModelMessage {
   return { role: "user", content }
 }
 
-function appendAssistantModelMessages(result: SixbModelMessage[], message: SixbMessage): void {
-  let block: SixbMessagePart[] = []
+function appendAssistantModelMessages(result: AgentModelMessage[], message: AgentMessage): void {
+  let block: AgentMessagePart[] = []
   const flush = (): void => {
     if (block.length === 0) {
       return
@@ -370,7 +370,7 @@ function appendAssistantModelMessages(result: SixbModelMessage[], message: SixbM
     const current = block
     block = []
 
-    const content: SixbModelAssistantPart[] = []
+    const content: AgentModelAssistantPart[] = []
     for (const part of current) {
       if (part.type === "text") {
         content.push({
@@ -416,7 +416,7 @@ function appendAssistantModelMessages(result: SixbModelMessage[], message: SixbM
   flush()
 }
 
-function toolCallModelPart(part: SixbToolCallPartResult): SixbModelToolCallPart {
+function toolCallModelPart(part: AgentToolCallPartResult): AgentModelToolCallPart {
   return {
     type: "tool-call",
     toolCallId: part.toolCallId,
@@ -428,9 +428,9 @@ function toolCallModelPart(part: SixbToolCallPartResult): SixbModelToolCallPart 
 }
 
 function toolResultModelPart(
-  part: SixbToolCallPartResult,
+  part: AgentToolCallPartResult,
   errorMode: "text" | "json"
-): SixbModelToolResultPart {
+): AgentModelToolResultPart {
   return {
     type: "tool-result",
     toolCallId: part.toolCallId,
@@ -441,9 +441,9 @@ function toolResultModelPart(
 }
 
 function toolResultOutput(
-  part: SixbToolCallPartResult,
+  part: AgentToolCallPartResult,
   errorMode: "text" | "json"
-): SixbModelToolOutput {
+): AgentModelToolOutput {
   if (part.state === "output-error") {
     return errorMode === "json"
       ? { type: "error-json", value: part.errorText }
@@ -454,10 +454,10 @@ function toolResultOutput(
     : { type: "json", value: part.output }
 }
 
-function isTextPart(part: SixbMessagePart): part is Extract<SixbMessagePart, { type: "text" }> {
+function isTextPart(part: AgentMessagePart): part is Extract<AgentMessagePart, { type: "text" }> {
   return part.type === "text"
 }
 
-function isToolCallPart(part: SixbMessagePart): part is SixbToolCallPartResult {
+function isToolCallPart(part: AgentMessagePart): part is AgentToolCallPartResult {
   return part.type === "tool-call"
 }

@@ -1,11 +1,12 @@
 import type { Database } from "bun:sqlite"
-import type {
-  AgentMessageRecord,
-  AgentRunRecord,
-  AgentRunUsage,
-  AgentThreadRecord,
-  Principal,
-  SixbMessagePart,
+import {
+  type AgentMessagePart,
+  type AgentMessageRecord,
+  type AgentRunRecord,
+  type AgentRunUsage,
+  type AgentThreadRecord,
+  coerceAgentRunFinishReason,
+  type Principal,
 } from "@sixb/core"
 import type { SqliteValue } from "../run-list-query"
 
@@ -90,7 +91,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     triggerMessageId: row.trigger_message_id,
     status: row.status,
     modelId: row.model_id ?? undefined,
-    finishReason: row.finish_reason ?? undefined,
+    finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
     error: row.error ?? undefined,
     attempt: row.attempt,
@@ -112,7 +113,7 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     runId: row.run_id,
     role: row.role,
     seq: row.seq,
-    parts: JSON.parse(row.parts) as SixbMessagePart[],
+    parts: JSON.parse(row.parts) as AgentMessagePart[],
     // A null/absent column and an explicit JSON `null` both mean "no metadata" (jsonb cannot tell
     // SQL NULL from a json null on read, so both backends normalise to `undefined` for parity).
     metadata: row.metadata === null ? undefined : (JSON.parse(row.metadata) ?? undefined),

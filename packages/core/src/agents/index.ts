@@ -1,31 +1,31 @@
 export type {
-  SixbInboundUiMessage,
-  SixbInboundUiMessagePart,
-  SixbModelAssistantPart,
-  SixbModelMessage,
-  SixbModelReasoningPart,
-  SixbModelTextPart,
-  SixbModelToolCallPart,
-  SixbModelToolOutput,
-  SixbModelToolResultPart,
-  SixbUiMessage,
-  SixbUiMessagePart,
-  SixbUiToolPart,
+  AgentInboundUiMessage,
+  AgentInboundUiMessagePart,
+  AgentModelAssistantPart,
+  AgentModelMessage,
+  AgentModelReasoningPart,
+  AgentModelTextPart,
+  AgentModelToolCallPart,
+  AgentModelToolOutput,
+  AgentModelToolResultPart,
+  AgentUiMessage,
+  AgentUiMessagePart,
+  AgentUiToolPart,
 } from "./adapters"
 export { fromAiSdk, toModelMessages, toUiMessage } from "./adapters"
 export { defineAgent } from "./builders"
 export { AgentDefinitionError, AgentMessageAdapterError } from "./errors"
 export {
-  SIXB_MESSAGE_CONTENT_VERSION,
-  type SixbMessage,
-  type SixbMessagePart,
-  type SixbMessagePartType,
-  type SixbMessageRole,
-  type SixbReasoningPart,
-  type SixbStepStartPart,
-  type SixbTextPart,
-  type SixbToolCallPart,
-  type SixbToolCallState,
+  AGENT_MESSAGE_CONTENT_VERSION,
+  type AgentMessage,
+  type AgentMessagePart,
+  type AgentMessagePartType,
+  type AgentMessageRole,
+  type AgentReasoningPart,
+  type AgentStepStartPart,
+  type AgentTextPart,
+  type AgentToolCallPart,
+  type AgentToolCallState,
 } from "./message"
 export { AgentsRuntime } from "./runtime"
 export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./types"
