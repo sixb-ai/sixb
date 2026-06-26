@@ -17,6 +17,12 @@
       "path": "connectors/companycam/tsconfig.build.json"
     },
     {
+      "path": "connectors/github/tsconfig.build.json"
+    },
+    {
+      "path": "connectors/meta/tsconfig.build.json"
+    },
+    {
       "path": "connectors/rest/tsconfig.build.json"
     },
     {

@@ -22,6 +22,7 @@
       "@sixb/client/query": ["./packages/client/src/query.ts"],
       "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
+      "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
