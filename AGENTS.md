@@ -53,16 +53,20 @@ bun test packages/core/tests/create-sixb.test.ts
 bun test packages/server/tests/
 ```
 
-CI currently runs:
+CI runs these as independent parallel jobs (each does `bun install --frozen-lockfile` first):
 
-- `bun install --frozen-lockfile`
-- `bun run generate:client`
-- `git diff --exit-code`
-- `bun run typecheck`
-- `bun run build`
-- `bun run test`
-- package-scoped e2e matrix jobs for packages with `test:e2e`
-- `bun run check`
+- `typecheck`: `bun run typecheck`
+- `build`: `bun run build`, then `bun run test:publish`
+- `client`: `bun run generate:client`, then `git diff --exit-code`
+- `test`: `bun run test`
+- `lint`: `bun run check`
+- `e2e`: package-scoped matrix jobs for packages with `test:e2e`
+
+`typecheck` uses the TypeScript project-reference graph: `bun run build:types` (`tsc -b
+tsconfig.build.json`) checks every package's `src` exactly once, `tsconfig.tests.json` checks
+test files against the emitted `.d.ts`, and the example/docs/sandbox apps keep their own
+`typegen && tsc` typecheck (`typecheck:examples`). The old per-package `tsc --noEmit` re-checked
+shared source (notably `@sixb/core`) once per dependent, which made the step the CI bottleneck.
 
 ## Architecture
 

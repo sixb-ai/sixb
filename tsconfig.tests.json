@@ -1,0 +1,36 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "useDefineForClassFields": true,
+    "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuild/tsconfig.tests.tsbuildinfo"
+  },
+  "include": [
+    "packages/action-worker/tests/**/*.ts",
+    "packages/agent-worker/tests/**/*.ts",
+    "packages/client/tests/**/*.ts",
+    "packages/core/tests/**/*.ts",
+    "packages/orchestrator/tests/**/*.ts",
+    "packages/pipeline-worker/tests/**/*.ts",
+    "packages/projection-worker/tests/**/*.ts",
+    "packages/rules-worker/tests/**/*.ts",
+    "packages/sync-worker/tests/**/*.ts",
+    "packages/workflow-worker/tests/**/*.ts",
+    "connectors/sftp/tests/**/*.ts",
+    "storage/blob-local/tests/**/*.ts",
+    "storage/blob-s3/tests/**/*.ts",
+    "storage/ducklake/tests/**/*.ts",
+    "storage/lake-local/tests/**/*.ts",
+    "storage/pg/tests/**/*.ts",
+    "storage/sqlite/tests/**/*.ts",
+    "broker/nats/tests/**/*.ts",
+    "broker/redis/tests/**/*.ts",
+    "queues/bullmq/tests/**/*.ts",
+    "auth/magic-link/tests/**/*.ts",
+    "auth/oidc/tests/**/*.ts"
+  ]
+}
