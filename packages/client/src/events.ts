@@ -48,3 +48,8 @@ export function isSixbEvent(value: unknown): value is SixbEvent {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
+
+// The fluent builder, its React-free transport, and the shared telemetry model.
+export * from "./events-builder"
+export * from "./events-transport"
+export * from "./telemetry-events"

@@ -1,4 +1,4 @@
-import type { ObjectSummary } from "@sixb/client"
+import type { ObjectSummary, TelemetryUpdate } from "@sixb/client"
 import {
   Button,
   Card,
@@ -43,7 +43,6 @@ import {
   type QueryProperty,
   type QuerySort,
 } from "../lib/objects/objectQuery"
-import type { TelemetryUpdate } from "../lib/telemetryEvents"
 import { formatRelativeTime } from "../lib/time"
 import {
   getObjectViewStyle,

@@ -1,7 +1,6 @@
 import { executeAction } from "@sixb/client"
-import { listObjectsOptions, useSixbEvents } from "@sixb/client/hooks"
+import { events, listObjectsOptions, useInvalidateOnEvent } from "@sixb/client/hooks"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { startTransition } from "react"
 
 const counterQueryOptions = listObjectsOptions({
   query: {
@@ -29,15 +28,7 @@ export default function HomePage() {
   const currentValue = counter?.telemetry.value?.currentValue ?? counter?.properties.value ?? 0
   const counterValue = formatCounterValue(currentValue)
 
-  useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent() {
-      startTransition(() => {
-        void queryClient.invalidateQueries({ queryKey: counterQueryOptions.queryKey })
-      })
-    },
-  })
+  useInvalidateOnEvent(events.telemetry(), () => [counterQueryOptions.queryKey])
 
   const resetCounter = useMutation({
     mutationFn: async () => {

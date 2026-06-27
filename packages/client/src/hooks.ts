@@ -19,6 +19,7 @@ import {
 } from "./models"
 
 export * from "./events"
+export * from "./events-hooks"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./query-hooks"
 export {

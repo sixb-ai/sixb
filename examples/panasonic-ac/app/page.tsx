@@ -1,8 +1,8 @@
-import { listObjectsOptions, useSixbEvents } from "@sixb/client/hooks"
+import { events, listObjectsOptions, useLatestByObject } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
-import { useCallback, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { acUnitObjectTypeId, acUnitProps, MODE_NAMES } from "../lib/acUnitConstants"
-import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
+import { PanasonicAcUnit } from "../ontology/acUnit"
 
 function modeClass(mode: number): string {
   const map: Record<number, string> = {
@@ -56,29 +56,7 @@ export default function DevicePicker() {
   )
   const objects = objectsQuery.data ?? []
 
-  console.log("Queried objects:", objects)
-  const [liveState, setLiveState] = useState<Record<string, Record<string, TelemetryUpdate>>>({})
-
-  const handleUpdate = useCallback((update: TelemetryUpdate) => {
-    if (update.objectTypeId !== acUnitObjectTypeId) return
-
-    setLiveState((prev) => ({
-      ...prev,
-      [update.objectId]: {
-        ...(prev[update.objectId] ?? {}),
-        [update.propertyId]: update,
-      },
-    }))
-  }, [])
-
-  const { connected } = useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent(event) {
-      const update = telemetryUpdateFromEvent(event)
-      if (update) handleUpdate(update)
-    },
-  })
+  const { byObject: liveState, connected } = useLatestByObject(events(PanasonicAcUnit).telemetry())
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

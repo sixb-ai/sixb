@@ -4,8 +4,9 @@ import type {
   RelationshipEdge,
   TelemetryHistory,
   TelemetryProperty,
+  TelemetryUpdate,
 } from "@sixb/client"
-import { decodeObjectId, encodeObjectId } from "@sixb/client"
+import { decodeObjectId, encodeObjectId, objectIdAliases, telemetryUpdateKey } from "@sixb/client"
 import {
   type GetTelemetryHistoryOptions,
   getObjectOptions,
@@ -37,7 +38,6 @@ import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
-import { objectIdAliases, type TelemetryUpdate, telemetryUpdateKey } from "../lib/telemetryEvents"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { formatRelativeTime } from "../lib/time"
 

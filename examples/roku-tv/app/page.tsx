@@ -1,8 +1,8 @@
-import { listObjectsOptions, useSixbEvents } from "@sixb/client/hooks"
+import { events, listObjectsOptions, useLatestByObject } from "@sixb/client/hooks"
 import { useQuery } from "@tanstack/react-query"
-import { useCallback, useMemo, useState } from "react"
-import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../lib/telemetryEvents"
+import { useMemo } from "react"
 import { televisionObjectTypeId, televisionTwinProps } from "../lib/televisionTwin"
+import { Television } from "../ontology/television"
 
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null
@@ -20,30 +20,7 @@ export default function DevicePicker() {
     })
   )
   const objects = objectsQuery.data ?? []
-  const [liveState, setLiveState] = useState<Record<string, Record<string, TelemetryUpdate>>>({})
-
-  const handleUpdate = useCallback((update: TelemetryUpdate) => {
-    if (update.objectTypeId !== televisionObjectTypeId) {
-      return
-    }
-
-    setLiveState((prev) => ({
-      ...prev,
-      [update.objectId]: {
-        ...(prev[update.objectId] ?? {}),
-        [update.propertyId]: update,
-      },
-    }))
-  }, [])
-
-  const { connected } = useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent(event) {
-      const update = telemetryUpdateFromEvent(event)
-      if (update) handleUpdate(update)
-    },
-  })
+  const { byObject: liveState, connected } = useLatestByObject(events(Television).telemetry())
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

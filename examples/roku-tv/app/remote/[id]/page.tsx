@@ -1,15 +1,16 @@
 import {
+  events,
   getObjectOptions,
   getObjectTypeOptions,
   requestActionMutation,
-  useSixbEvents,
+  useLatest,
 } from "@sixb/client/hooks"
 import { encodeObjectId } from "@sixb/client/models"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
-import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../../../lib/telemetryEvents"
 import { televisionObjectTypeId, televisionTwinProps } from "../../../lib/televisionTwin"
+import { Television } from "../../../ontology/television"
 
 const KEYS = {
   dpad: ["Up", "Down", "Left", "Right", "Select"],
@@ -115,26 +116,11 @@ export default function RemoteControl() {
     })
   )
 
-  const [liveState, setLiveState] = useState<Record<string, TelemetryUpdate>>({})
-
-  const handleUpdate = useCallback(
-    (update: TelemetryUpdate) => {
-      if (update.objectTypeId !== televisionObjectTypeId || update.objectId !== objectKey) {
-        return
-      }
-      setLiveState((prev) => ({ ...prev, [update.propertyId]: update }))
-    },
-    [objectKey]
+  const { values: liveState, connected } = useLatest(
+    events(Television)
+      .object(objectKey ?? "")
+      .telemetry()
   )
-
-  const { connected } = useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent(event) {
-      const update = telemetryUpdateFromEvent(event)
-      if (update) handleUpdate(update)
-    },
-  })
 
   const { mutate: sendAction } = useMutation(requestActionMutation())
   const [lastPressedKey, setLastPressedKey] = useState<RokuKey | null>(null)

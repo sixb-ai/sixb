@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from "react"
-import {
-  isSixbEvent,
-  type SixbEvent,
-  type SixbEventForSubscription,
-  type SixbEventTopic,
-  type SixbEventType,
-} from "./events"
-import { client } from "./generated/client.gen"
+import type { SixbEventForSubscription, SixbEventTopic, SixbEventType } from "./events"
+import { createEventSocket, eventTypesFromKey } from "./events-transport"
+
+// Re-exported for back-compat: the URL helper now lives with the transport.
+export { createSixbEventsWebSocketUrl } from "./events-transport"
 
 export interface UseSixbEventsOptions<
   TTopic extends SixbEventTopic | undefined = undefined,
@@ -29,14 +26,14 @@ export interface UseSixbEventsResult {
   readonly error: string | null
 }
 
-type EventStreamServerMessage =
-  | { readonly type: "connected" | "subscribed" | "unsubscribed" }
-  | { readonly type: "error"; readonly message: string }
-  | { readonly type: "event"; readonly event: SixbEvent }
-
-const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
-const DEFAULT_RECONNECT_DELAY_MS = 1000
-
+/**
+ * Subscribe to the live event stream, keyed by `topic`/`types`.
+ *
+ * Thin React wrapper over `createEventSocket`: it keeps `onEvent`/`onError` in
+ * refs so handler identity never tears down the socket, mirrors the transport's
+ * connection status into component state, and re-subscribes only when the
+ * subscription shape changes.
+ */
 export function useSixbEvents<
   const TTopic extends SixbEventTopic | undefined = undefined,
   const TTypes extends readonly SixbEventType[] | undefined = undefined,
@@ -48,12 +45,15 @@ export function useSixbEvents<
     limit,
     enabled = true,
     reconnect = true,
-    reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
+    reconnectDelayMs,
   } = options
   const onEventRef = useRef(options.onEvent)
   const onErrorRef = useRef(options.onError)
-  const latestCursorRef = useRef(afterCursor)
-  const wsRef = useRef<WebSocket | null>(null)
+  // `afterCursor` is read once at connect and then advanced internally by the
+  // socket, so it is tracked through a ref and kept out of the dependency list
+  // to avoid reconnect churn.
+  const afterCursorRef = useRef(afterCursor)
+  afterCursorRef.current = afterCursor
   const [state, setState] = useState<UseSixbEventsResult>({
     connected: false,
     reconnecting: false,
@@ -70,171 +70,25 @@ export function useSixbEvents<
   }, [options.onError])
 
   useEffect(() => {
-    latestCursorRef.current = afterCursor
-  }, [afterCursor])
-
-  useEffect(() => {
     if (!enabled) {
-      wsRef.current?.close()
-      wsRef.current = null
       setState({ connected: false, reconnecting: false, error: null })
       return
     }
 
-    const subscribedTypes = eventTypesFromKey(typesKey)
-    let stopped = false
-    let openedOnce = false
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    const socket = createEventSocket({
+      topic,
+      types: eventTypesFromKey(typesKey),
+      afterCursor: afterCursorRef.current,
+      limit,
+      reconnect,
+      reconnectDelayMs,
+      onEvent: (event) => onEventRef.current(event as SixbEventForSubscription<TTopic, TTypes>),
+      onError: (message) => onErrorRef.current?.(message),
+      onStateChange: setState,
+    })
 
-    const connect = () => {
-      if (stopped) return
-
-      const ws = new WebSocket(createSixbEventsWebSocketUrl())
-      wsRef.current = ws
-      setState((current) => ({
-        connected: false,
-        reconnecting: openedOnce || current.reconnecting,
-        error: null,
-      }))
-
-      ws.onopen = () => {
-        if (stopped) return
-
-        openedOnce = true
-        setState({ connected: true, reconnecting: false, error: null })
-        ws.send(
-          JSON.stringify({
-            type: "subscribe",
-            ...(topic ? { topic } : {}),
-            ...(subscribedTypes ? { types: subscribedTypes } : {}),
-            ...(latestCursorRef.current ? { afterCursor: latestCursorRef.current } : {}),
-            ...(limit ? { limit } : {}),
-          })
-        )
-      }
-
-      ws.onmessage = (messageEvent) => {
-        const message = parseEventStreamMessage(messageEvent.data)
-        if (!message) return
-
-        if (message.type === "event") {
-          latestCursorRef.current = message.event.cursor
-          if (matchesSubscription(message.event, topic, subscribedTypes)) {
-            onEventRef.current(message.event as SixbEventForSubscription<TTopic, TTypes>)
-          }
-          return
-        }
-
-        if (message.type === "error") {
-          onErrorRef.current?.(message.message)
-          setState((current) => ({ ...current, error: message.message }))
-        }
-      }
-
-      ws.onerror = () => {
-        const message = "Event websocket connection failed."
-        onErrorRef.current?.(message)
-        setState((current) => ({ ...current, error: message }))
-      }
-
-      ws.onclose = () => {
-        if (wsRef.current === ws) {
-          wsRef.current = null
-        }
-
-        if (stopped) return
-
-        setState((current) => ({
-          connected: false,
-          reconnecting: reconnect,
-          error: current.error,
-        }))
-
-        if (reconnect) {
-          reconnectTimer = setTimeout(connect, reconnectDelayMs)
-        }
-      }
-    }
-
-    connect()
-
-    return () => {
-      stopped = true
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-      }
-      wsRef.current?.close()
-      wsRef.current = null
-    }
+    return () => socket.close()
   }, [enabled, topic, typesKey, limit, reconnect, reconnectDelayMs])
 
   return state
-}
-
-export function createSixbEventsWebSocketUrl(baseUrl?: string): string {
-  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.pathname = "/ws/events"
-  url.search = ""
-  url.hash = ""
-  return url.toString()
-}
-
-function parseEventStreamMessage(value: unknown): EventStreamServerMessage | null {
-  if (typeof value !== "string") {
-    return null
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(value)
-  } catch {
-    return null
-  }
-
-  if (!isRecord(parsed) || typeof parsed.type !== "string") {
-    return null
-  }
-
-  if (parsed.type === "event" && isSixbEvent(parsed.event)) {
-    return { type: "event", event: parsed.event }
-  }
-
-  if (parsed.type === "error") {
-    return { type: "error", message: String(parsed.message ?? "Event stream error.") }
-  }
-
-  if (
-    parsed.type === "connected" ||
-    parsed.type === "subscribed" ||
-    parsed.type === "unsubscribed"
-  ) {
-    return { type: parsed.type }
-  }
-
-  return null
-}
-
-function eventTypesFromKey(typesKey: string): readonly SixbEventType[] | undefined {
-  return typesKey ? (typesKey.split("\0") as SixbEventType[]) : undefined
-}
-
-function matchesSubscription(
-  event: SixbEvent,
-  topic: SixbEventTopic | undefined,
-  types: readonly SixbEventType[] | undefined
-): boolean {
-  if (topic && event.topic !== topic) {
-    return false
-  }
-
-  if (types && types.length > 0 && !types.includes(event.type)) {
-    return false
-  }
-
-  return true
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }

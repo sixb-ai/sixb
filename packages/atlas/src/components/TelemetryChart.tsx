@@ -1,4 +1,4 @@
-import type { TelemetryHistory } from "@sixb/client"
+import { objectIdAliases, type TelemetryHistory, type TelemetryUpdate } from "@sixb/client"
 import { type GetTelemetryHistoryOptions, getTelemetryHistoryOptions } from "@sixb/client/hooks"
 import { Button, Card } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
@@ -14,7 +14,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts/lib/index.js"
-import { objectIdAliases, type TelemetryUpdate } from "../lib/telemetryEvents"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { TelemetryValue } from "./TelemetryValue"
 

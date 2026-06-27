@@ -1,4 +1,13 @@
-import type { SixbEventOfType } from "@sixb/client"
+/**
+ * Telemetry overlay model (`@sixb/client/events`).
+ *
+ * A normalized "latest value" shape derived from a `telemetry.appended` event,
+ * shared by `useLatest`/`useLatestByObject` and the apps that render live
+ * telemetry. Previously copy-pasted byte-for-byte across every app's
+ * `lib/telemetryEvents.ts`; it lives here once.
+ */
+import type { SixbEventOfType } from "./events"
+import { decodeObjectId, encodeObjectId } from "./models"
 
 export interface TelemetryUpdate {
   readonly type: "telemetryUpdate"
@@ -28,6 +37,21 @@ export function telemetryUpdateFromEvent(
     quality: "good",
     unit: event.payload.unit,
   }
+}
+
+export function objectIdAliases(objectId: string): readonly string[] {
+  const parsed = decodeObjectId(objectId)
+  if (!parsed) return [objectId]
+
+  return [objectId, parsed.primaryId, encodeObjectId(parsed.objectTypeId, parsed.primaryId)]
+}
+
+export function telemetryUpdateKey(
+  projectId: string,
+  objectId: string,
+  propertyId: string
+): string {
+  return `${projectId}:${objectId}:${propertyId}`
 }
 
 function normalizeTelemetryValue(value: unknown): number | string | boolean {

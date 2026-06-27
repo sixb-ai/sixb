@@ -1,4 +1,4 @@
-import { defineObjectType, prop } from "@sixb/core"
+import { defineObjectType, prop } from "@sixb/core/ontology"
 
 export function acUnitKeyFromName(name: string): string {
   const normalized = name
