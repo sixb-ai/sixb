@@ -11,10 +11,108 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    name: Bun checks
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Incremental tsc -b state: both the buildinfo AND the emitted .d.ts in
+      # dist must be cached, otherwise tsc -b treats outputs as missing and
+      # rebuilds every project from cold.
+      - name: Cache tsc build graph
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tsbuild
+            packages/*/.tsbuild
+            connectors/*/.tsbuild
+            storage/*/.tsbuild
+            broker/*/.tsbuild
+            queues/*/.tsbuild
+            auth/*/.tsbuild
+            packages/*/dist
+            connectors/*/dist
+            storage/*/dist
+            broker/*/dist
+            queues/*/dist
+            auth/*/dist
+          key: tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuild-typecheck-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+
+      - name: Typecheck
+        run: bun run typecheck
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Cache tsc build graph
+        uses: actions/cache@v4
+        with:
+          path: |
+            .tsbuild
+            packages/*/.tsbuild
+            connectors/*/.tsbuild
+            storage/*/.tsbuild
+            broker/*/.tsbuild
+            queues/*/.tsbuild
+            auth/*/.tsbuild
+            packages/*/dist
+            connectors/*/dist
+            storage/*/dist
+            broker/*/dist
+            queues/*/dist
+            auth/*/dist
+          key: tsbuild-build-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            tsbuild-build-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+
+      - name: Build
+        run: bun run build
+
+      - name: Publish package smoke
+        run: bun run test:publish
+
+  client:
+    name: Generated client
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,25 +137,52 @@ jobs:
       - name: Verify generated client is committed
         run: git diff --exit-code
 
-      - name: Cache typecheck (incremental)
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun install
         uses: actions/cache@v4
         with:
-          path: "**/.tsbuild/tsconfig.tsbuildinfo"
-          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: |
-            tsbuildinfo-${{ runner.os }}-${{ hashFiles('bun.lock') }}-
+            bun-${{ runner.os }}-
 
-      - name: Typecheck
-        run: bun run typecheck
-
-      - name: Build
-        run: bun run build
-
-      - name: Publish package smoke
-        run: bun run test:publish
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Unit tests
         run: bun run test
+
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Cache Bun install
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
 
       - name: Lint and format
         run: bun run check
