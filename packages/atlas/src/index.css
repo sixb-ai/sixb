@@ -1,4 +1,5 @@
 @import "@sixb/ui/globals.css";
+@import "@sixb/agent-ui/globals.css";
 @import "@xyflow/react/dist/style.css";
 
 @source "./App.tsx";

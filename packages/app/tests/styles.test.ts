@@ -179,13 +179,21 @@ describe("custom app Tailwind build (e2e)", () => {
       "react-dom",
       "react-router-dom",
       "@tanstack/react-query",
+      "@sixb/app",
       "@sixb/client",
+      "@sixb/agent-ui",
+      "@sixb/ui",
     ])
     const appDir = join(tempRoot, "app")
     await mkdir(appDir, { recursive: true })
     await writeFile(
       join(appDir, "globals.css"),
-      ['@import "tailwindcss";', '@source "./**/*.tsx";', ""].join("\n")
+      [
+        '@import "@sixb/ui/globals.css";',
+        '@source "./**/*.tsx";',
+        ":root { --background: #123456; }",
+        "",
+      ].join("\n")
     )
     await writeFile(
       join(appDir, "page.tsx"),
@@ -234,6 +242,15 @@ describe("custom app Tailwind build (e2e)", () => {
     // The compiled stylesheet lands under .sixb/generated, not app/.
     const generatedCss = await readFile(join(tempRoot, ".sixb", "generated", "app.css"), "utf-8")
     expect(generatedCss).toContain("line-through")
+    expect(generatedCss).toContain("max-h-52")
+    expect(generatedCss).toContain("h-dvh")
+    expect(generatedCss.lastIndexOf("--background: #123456")).toBeGreaterThan(
+      generatedCss.lastIndexOf("--background: #fafafa")
+    )
+
+    const generatedMain = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
+    expect(generatedMain).toContain('import "./app.css"')
+    expect(generatedMain).not.toContain('import "./agent-ui.css"')
 
     // The bundled output ships the compiled utility, proving the generated
     // entry imported the compiled CSS rather than the raw Tailwind source.

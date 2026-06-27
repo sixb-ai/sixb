@@ -1,8 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "jsx": "react-jsx",
+    "target": "ES2022",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "types": ["bun"],
     "composite": true,
     "noEmit": false,
@@ -14,7 +15,10 @@
   "include": ["src/**/*"],
   "references": [
     {
-      "path": "../agent-ui/tsconfig.build.json"
+      "path": "../client/tsconfig.build.json"
+    },
+    {
+      "path": "../ui/tsconfig.build.json"
     }
   ]
 }

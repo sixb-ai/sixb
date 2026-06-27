@@ -50,13 +50,13 @@ function ProjectCard({ project }: { project: ProjectRow }) {
   const department = lead?.links.department
 
   return (
-    <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-4 rounded-lg border bg-card p-4 shadow-sm transition hover:-translate-y-px hover:border-primary max-md:grid-cols-1">
+    <article className="grid grid-cols-[minmax(0,1fr)_auto] gap-5 rounded-lg border border-border/80 bg-card px-4 py-4 shadow-sm transition hover:-translate-y-px hover:border-primary/50 hover:bg-accent/20 max-md:grid-cols-1">
       <div>
-        <span className="inline-flex min-h-7 items-center rounded-full border bg-accent px-3 text-xs font-bold text-accent-foreground capitalize">
+        <span className="inline-flex min-h-7 items-center rounded-full border border-primary/10 bg-accent px-3 text-xs font-bold text-accent-foreground capitalize">
           {project.properties.status}
         </span>
-        <h2 className="mt-2.5 text-lg font-semibold text-foreground">{project.properties.name}</h2>
-        <p className="mt-2 max-w-3xl leading-snug text-muted-foreground">
+        <h2 className="mt-3 text-base font-semibold text-foreground">{project.properties.name}</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
           {project.properties.description ?? "No description."}
         </p>
         <dl className="mt-4 grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
@@ -86,6 +86,17 @@ function ProjectCard({ project }: { project: ProjectRow }) {
   )
 }
 
+function HeaderLink({ href, children }: { href: string; children: string }) {
+  return (
+    <a
+      className="inline-flex h-10 items-center justify-center rounded-lg border border-border/80 bg-card px-4 text-sm font-semibold text-foreground no-underline shadow-sm transition hover:-translate-y-px hover:border-primary/50 hover:text-primary"
+      href={href}
+    >
+      {children}
+    </a>
+  )
+}
+
 export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | null>(null)
 
@@ -104,26 +115,28 @@ export default function ProjectsPage() {
   const scopeLabel = statusFilter ?? "open"
 
   return (
-    <main className="mx-auto min-h-dvh w-full max-w-5xl px-5 pt-7 pb-11">
-      <header className="mb-5 flex items-center justify-between gap-4 max-md:flex-col max-md:items-stretch">
-        <div>
-          <p className="text-xs font-bold tracking-[0.12em] text-accent-foreground uppercase">
+    <main className="mx-auto min-h-dvh w-full max-w-6xl px-5 pt-12 pb-12 max-md:pt-7">
+      <header className="mb-7 grid gap-6 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <div className="max-w-3xl">
+          <p className="text-xs font-bold tracking-[0.18em] text-primary uppercase">
             Acme Projects
           </p>
-          <h1 className="mt-1 text-4xl leading-tight font-semibold max-md:text-2xl">
+          <h1 className="mt-2 text-4xl leading-tight font-semibold tracking-normal text-foreground max-md:text-3xl">
             {statusFilter ? `${titleCase(statusFilter)} projects` : "Open projects"}
           </h1>
+          <p className="mt-3 max-w-2xl text-base leading-7 text-muted-foreground">
+            Track customer work, owners, deadlines, and active delivery status.
+          </p>
         </div>
-        <div className="flex items-center gap-3 max-md:self-start">
-          <a
-            className="inline-flex min-h-10 items-center rounded-lg border bg-card px-4 text-sm font-bold text-foreground no-underline transition hover:border-primary hover:text-primary"
-            href="/"
-          >
-            ← Review desk
-          </a>
-          <div className="flex min-h-14 min-w-19 flex-col items-center justify-center rounded-full border bg-accent font-bold text-accent-foreground">
-            <span className="text-xl">{projectsQuery.data?.total ?? 0}</span>
-            <small className="text-xs text-muted-foreground">{scopeLabel}</small>
+        <div className="flex items-center gap-3 max-md:flex-wrap">
+          <HeaderLink href="/">Review desk</HeaderLink>
+          <div className="grid h-16 min-w-20 place-items-center rounded-lg border border-primary/15 bg-accent px-4 text-center shadow-sm">
+            <span className="text-2xl leading-none font-semibold text-accent-foreground">
+              {projectsQuery.data?.total ?? 0}
+            </span>
+            <small className="mt-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">
+              {scopeLabel}
+            </small>
           </div>
         </div>
       </header>
@@ -140,7 +153,7 @@ export default function ProjectsPage() {
               className={
                 selected
                   ? "inline-flex min-h-7 items-center rounded-full border border-primary bg-primary px-3 text-xs font-bold text-primary-foreground capitalize transition"
-                  : "inline-flex min-h-7 items-center rounded-full border bg-secondary px-3 text-xs font-bold text-muted-foreground capitalize transition hover:border-primary hover:text-primary"
+                  : "inline-flex min-h-7 items-center rounded-full border border-border/80 bg-secondary px-3 text-xs font-bold text-muted-foreground capitalize transition hover:border-primary/50 hover:text-primary"
               }
               onClick={() => setStatusFilter(selected ? null : status)}
             >
@@ -151,17 +164,17 @@ export default function ProjectsPage() {
       </section>
 
       {projectsQuery.isLoading ? (
-        <section className="rounded-lg border bg-card px-5 py-12 text-center shadow-sm">
+        <section className="rounded-lg border border-border/80 bg-card px-5 py-14 text-center shadow-sm">
           <p>Loading projects...</p>
         </section>
       ) : projectsQuery.isError ? (
-        <section className="rounded-lg border border-destructive/30 bg-destructive/10 px-5 py-12 text-center text-destructive shadow-sm">
+        <section className="rounded-lg border border-destructive/30 bg-destructive/10 px-5 py-14 text-center text-destructive shadow-sm">
           <p>Projects failed to load.</p>
         </section>
       ) : projects.length === 0 ? (
-        <section className="rounded-lg border bg-card px-5 py-12 text-center shadow-sm">
-          <h2 className="text-lg font-semibold">No {scopeLabel} projects</h2>
-          <p className="mt-2 text-muted-foreground">
+        <section className="rounded-lg border border-border/80 bg-card px-6 py-16 text-center shadow-sm">
+          <h2 className="text-lg font-semibold text-foreground">No {scopeLabel} projects</h2>
+          <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
             {statusFilter
               ? "Select the pill again to clear the filter."
               : "Active and paused projects will appear here."}

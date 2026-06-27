@@ -3,6 +3,16 @@ import { join, relative, resolve } from "node:path"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
+export interface BuiltInRouteManifestEntry {
+  readonly path: string
+  readonly moduleSpecifier: string
+  readonly exportName?: string
+}
+
+export interface GenerateRouteManifestOptions {
+  readonly builtInRoutes?: readonly BuiltInRouteManifestEntry[]
+}
+
 /**
  * Generates `.sixb/generated/routes.ts` with static route imports. Pages are
  * eager on purpose: project-specific apps bundle small, and a single bundle
@@ -11,7 +21,8 @@ import type { PageRoute } from "./scanner"
  */
 export async function generateRouteManifest(
   routes: PageRoute[],
-  generatedDir: string
+  generatedDir: string,
+  options: GenerateRouteManifestOptions = {}
 ): Promise<string> {
   await mkdir(generatedDir, { recursive: true })
 
@@ -21,15 +32,32 @@ export async function generateRouteManifest(
       return `import Page${index} from ${JSON.stringify(rel)}`
     })
     .join("\n")
+  const builtInRoutes = options.builtInRoutes ?? []
+  const builtInImports = builtInRoutes
+    .map((route, index) => {
+      if (route.exportName) {
+        return `import { ${route.exportName} as BuiltInPage${index} } from ${JSON.stringify(route.moduleSpecifier)}`
+      }
+
+      return `import BuiltInPage${index} from ${JSON.stringify(route.moduleSpecifier)}`
+    })
+    .join("\n")
 
   const entries = routes
     .map((route, index) => `  { path: ${JSON.stringify(route.path)}, component: Page${index} },`)
     .join("\n")
+  const builtInEntries = builtInRoutes
+    .map(
+      (route, index) => `  { path: ${JSON.stringify(route.path)}, component: BuiltInPage${index} },`
+    )
+    .join("\n")
+  const routeEntries = [entries, builtInEntries].filter(Boolean).join("\n")
+  const importEntries = [imports, builtInImports].filter(Boolean).join("\n")
 
-  const content = `${imports}
+  const content = `${importEntries}
 
 export const routes = [
-${entries}
+${routeEntries}
 ]
 `
 
@@ -57,6 +85,8 @@ export async function generateAppEntry(
      * the import; a path imports that file (e.g. compiled Tailwind output).
      */
     stylesheetPath?: string | null
+    /** Framework-owned stylesheets imported before the app stylesheet. */
+    frameworkStylesheetPaths?: readonly string[]
   } = {}
 ): Promise<{ htmlPath: string; mainPath: string }> {
   await mkdir(generatedDir, { recursive: true })
@@ -72,9 +102,13 @@ export async function generateAppEntry(
       : (await fileExists(globalsCssPath))
         ? globalsCssPath
         : null
-  const globalsCssImport = stylesheetPath
-    ? `import ${JSON.stringify(relativeTo(generatedDir, stylesheetPath))}\n`
-    : ""
+  const stylesheetPaths = [
+    ...(options.frameworkStylesheetPaths ?? []),
+    ...(stylesheetPath ? [stylesheetPath] : []),
+  ]
+  const globalsCssImport = stylesheetPaths
+    .map((path) => `import ${JSON.stringify(relativeTo(generatedDir, path))}`)
+    .join("\n")
   const layoutImport = hasLayout
     ? `import RootLayout, { metadata } from ${JSON.stringify(layoutRel)}\n`
     : ""

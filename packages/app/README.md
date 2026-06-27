@@ -34,6 +34,20 @@ The generated entry also intercepts plain same-origin `<a href="/...">` clicks a
 
 If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`) that is applied to the document at runtime. An `app/globals.css` file is imported automatically when present.
 
+### Built-in Agent Routes
+
+Custom apps automatically receive the shared Sixb agent chat UI at:
+
+```
+/agents
+/agents/new/:agentId
+/agents/:threadId
+```
+
+These routes are generated only when the project has at least one `app/` page, so projects without a custom app are not turned into an app server just for agents. Project-authored pages win by exact path: define `app/agents/page.tsx` to replace the gallery, `app/agents/new/[agentId]/page.tsx` to replace the blank chat route, and `app/agents/[threadId]/page.tsx` to replace the thread route.
+
+The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
+
 ### Styling and Tailwind
 
 `app/globals.css` is treated as source:
@@ -113,6 +127,7 @@ In dev mode the Bun server serves them directly; in production they are copied i
 | `scanPages(appDir)` | Scan `app/` for page files and return `PageRoute[]` |
 | `generateRouteManifest(routes, generatedDir)` | Write `routes.ts` with static (eager) route imports |
 | `generateAppEntry(projectRoot, generatedDir, options)` | Write `index.html` and `main.tsx` entry points |
+| `@sixb/app/agents` | Default mounted agent chat page used by generated custom app routes |
 | `buildApp(options)` | Bundle the generated entry point for production |
 | `resolveCustomAppStylesheet(input)` | Decide whether `app/globals.css` is plain CSS or Tailwind source |
 | `createTailwindCssCompiler(options)` | Shared Tailwind v4 build pipeline (also used by Atlas) |
