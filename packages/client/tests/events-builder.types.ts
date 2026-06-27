@@ -128,6 +128,15 @@ events.telemetry().subscribe((event) => {
   void propertyId
 })
 
+// Topic builders can scope to a single instance without importing the type.
+events
+  .telemetry()
+  .object("sensor-1")
+  .subscribe((event) => {
+    const value: unknown = event.payload.value
+    void value
+  })
+
 events
   .workflows()
   .run("run-1")

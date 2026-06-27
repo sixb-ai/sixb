@@ -2,7 +2,6 @@ import { events, listObjectsOptions, useLatestByObject } from "@sixb/client/hook
 import { useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { acUnitObjectTypeId, acUnitProps, MODE_NAMES } from "../lib/acUnitConstants"
-import { PanasonicAcUnit } from "../ontology/acUnit"
 
 function modeClass(mode: number): string {
   const map: Record<number, string> = {
@@ -56,7 +55,7 @@ export default function DevicePicker() {
   )
   const objects = objectsQuery.data ?? []
 
-  const { byObject: liveState, connected } = useLatestByObject(events(PanasonicAcUnit).telemetry())
+  const { byObject: liveState, connected } = useLatestByObject(events.telemetry())
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

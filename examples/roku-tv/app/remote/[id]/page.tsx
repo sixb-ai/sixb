@@ -10,7 +10,6 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { televisionObjectTypeId, televisionTwinProps } from "../../../lib/televisionTwin"
-import { Television } from "../../../ontology/television"
 
 const KEYS = {
   dpad: ["Up", "Down", "Left", "Right", "Select"],
@@ -116,11 +115,7 @@ export default function RemoteControl() {
     })
   )
 
-  const { values: liveState, connected } = useLatest(
-    events(Television)
-      .object(objectKey ?? "")
-      .telemetry()
-  )
+  const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
 
   const { mutate: sendAction } = useMutation(requestActionMutation())
   const [lastPressedKey, setLastPressedKey] = useState<RokuKey | null>(null)

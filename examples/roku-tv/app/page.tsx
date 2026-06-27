@@ -2,7 +2,6 @@ import { events, listObjectsOptions, useLatestByObject } from "@sixb/client/hook
 import { useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { televisionObjectTypeId, televisionTwinProps } from "../lib/televisionTwin"
-import { Television } from "../ontology/television"
 
 function asString(value: unknown): string | null {
   return typeof value === "string" ? value : null
@@ -20,7 +19,7 @@ export default function DevicePicker() {
     })
   )
   const objects = objectsQuery.data ?? []
-  const { byObject: liveState, connected } = useLatestByObject(events(Television).telemetry())
+  const { byObject: liveState, connected } = useLatestByObject(events.telemetry())
 
   const deviceCount = objects.length
   const sortedObjects = useMemo(() => objects, [objects])

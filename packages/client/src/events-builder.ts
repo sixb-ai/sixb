@@ -10,7 +10,8 @@
  * the live stream. The builder is browser-safe and React-free — hooks live in
  * `@sixb/client/hooks`.
  */
-import { type InferObjectProperties, type InferPropertyValue, scopeKeysForEvent } from "@sixb/core"
+import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
+import { scopeKeysForEvent } from "@sixb/core/events/scope"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
 import type {
   SixbEvent,
@@ -127,13 +128,13 @@ export interface EventsBuilder<
 }
 
 /** Topic-scoped builder: `events.telemetry()`, `events.all()`, … */
-export interface EventsTopicBuilder<TEvent extends SixbEvent> {
-  readonly ir: EventsFilterIR
-  subscribe(handler: (event: TEvent) => void, options?: EventSubscribeOptions): () => void
+export interface EventsTopicBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
+  /** Scope to a single object instance (objects / telemetry / links topics). */
+  object(primaryId: string): EventsTopicBuilder<TEvent>
 }
 
 /** Run-scoped topic builder: `events.workflows()`, `events.pipelines()`, `events.syncs()`. */
-export interface EventsRunBuilder<TEvent extends SixbEvent> extends EventsTopicBuilder<TEvent> {
+export interface EventsRunBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
   /** Scope to a single run id. */
   run(runId: string): EventsRunBuilder<TEvent>
 }

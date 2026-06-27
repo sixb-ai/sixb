@@ -23,6 +23,12 @@
       "import": "./dist/query.js",
       "default": "./dist/query.js"
     },
+    "./events/scope": {
+      "types": "./dist/events/scope.d.ts",
+      "bun": "./src/events/scope.ts",
+      "import": "./dist/events/scope.js",
+      "default": "./dist/events/scope.js"
+    },
     "./actions/worker": {
       "types": "./dist/actions/worker.d.ts",
       "bun": "./src/actions/worker.ts",

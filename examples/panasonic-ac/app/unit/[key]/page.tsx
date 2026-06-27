@@ -9,7 +9,6 @@ import {
   FAN_SPEED_NAMES,
   MODE_NAMES,
 } from "../../../lib/acUnitConstants"
-import { PanasonicAcUnit } from "../../../ontology/acUnit"
 
 function decodeKey(input: string | undefined): string | null {
   if (!input) return null
@@ -329,11 +328,7 @@ export default function UnitDetail() {
   })
   const object = objectQuery.data
 
-  const { values: liveState, connected } = useLatest(
-    events(PanasonicAcUnit)
-      .object(objectKey ?? "")
-      .telemetry()
-  )
+  const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
   const { mutate: sendAction } = useMutation(requestActionMutation())
 
   function val(propId: string): unknown {
