@@ -35,6 +35,12 @@
       "import": "./dist/actions/worker.js",
       "default": "./dist/actions/worker.js"
     },
+    "./agents/streams": {
+      "types": "./dist/agents/streams.d.ts",
+      "bun": "./src/agents/streams.ts",
+      "import": "./dist/agents/streams.js",
+      "default": "./dist/agents/streams.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "bun": "./src/testing/index.ts",

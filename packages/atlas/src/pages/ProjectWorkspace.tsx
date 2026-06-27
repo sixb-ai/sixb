@@ -3,6 +3,7 @@ import {
   events,
   getProjectInfoOptions,
   listActionsOptions,
+  listAgentsOptions,
   listConnectorsOptions,
   listDatasetsOptions,
   listObjectsPageOptions,
@@ -42,6 +43,7 @@ import {
 } from "../lib/userPreferences"
 import { ActionRunDetailPage } from "./ActionRunDetailPage"
 import { ActionsPage } from "./ActionsPage"
+import { AgentsPage } from "./AgentsPage"
 import { ConnectorDetailPage, ConnectorsPage } from "./ConnectorsPage"
 import { DatasetDetailPage, DatasetsPage } from "./DatasetsPage"
 import { ObjectDetailPage } from "./ObjectDetailPage"
@@ -240,6 +242,11 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
+  const { data: agents = [] } = useQuery({
+    ...listAgentsOptions(),
+    enabled: !!projectInfo,
+  })
+
   const { byObject: latestByObject } = useLatestByObject(events.telemetry(), {
     enabled: Boolean(resolvedProjectName),
   })
@@ -269,6 +276,7 @@ export function ProjectWorkspace() {
       projectionCount,
       workflowCount: workflows.length,
       actionCount: actions.length,
+      agentCount: agents.length,
       ruleCount: rules.length,
       ontologyCount: objectTypes.length,
     })
@@ -282,6 +290,7 @@ export function ProjectWorkspace() {
     projectionCount,
     workflows.length,
     actions.length,
+    agents.length,
     rules.length,
     objectTypes.length,
     setSidebarData,
@@ -357,6 +366,8 @@ export function ProjectWorkspace() {
       <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
       <Route path="actions" element={<ActionsPage />} />
       <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
+      <Route path="agents" element={<AgentsPage />} />
+      <Route path="agents/:threadId" element={<AgentsPage />} />
       <Route element={<WorkflowLiveUpdatesBoundary />}>
         <Route path="workflows" element={<WorkflowsPage />} />
         <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />

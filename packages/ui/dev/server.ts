@@ -1,7 +1,13 @@
 import app from "./index.html"
 
+const port = Number.parseInt(Bun.env.PORT ?? "3010", 10)
+
+if (!Number.isFinite(port)) {
+  throw new Error("[SixbUI] PORT must be a number")
+}
+
 const server = Bun.serve({
-  port: 3010,
+  port,
   routes: {
     "/": app,
     "/*": app,

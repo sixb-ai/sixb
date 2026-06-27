@@ -10,6 +10,7 @@ export const KNOWN_VIEWS = new Set([
   "workflows",
   "actions",
   "runs",
+  "agents",
   "rules",
   "ontology",
   "settings",

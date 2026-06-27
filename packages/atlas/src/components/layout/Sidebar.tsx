@@ -18,6 +18,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query"
 import {
   Bolt,
+  Bot,
   Box,
   Cable,
   Database,
@@ -40,6 +41,7 @@ export type ViewMode =
   | "pipelines"
   | "workflows"
   | "actions"
+  | "agents"
   | "rules"
   | "ontology"
   | "settings"
@@ -60,6 +62,7 @@ const projectNavItems: NavItem[] = [
   { id: "home", label: "Objects", Icon: Box },
   { id: "actions", label: "Actions", Icon: Bolt },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
+  { id: "agents", label: "Agents", Icon: Bot },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
 ]
@@ -79,6 +82,7 @@ interface SidebarProps {
   projectionCount?: number
   workflowCount?: number
   actionCount?: number
+  agentCount?: number
   ruleCount?: number
   ontologyCount?: number
   objectCount?: number
@@ -95,6 +99,7 @@ export function Sidebar({
   projectionCount,
   workflowCount,
   actionCount,
+  agentCount,
   ruleCount,
   ontologyCount,
   objectCount,
@@ -108,6 +113,7 @@ export function Sidebar({
     if (id === "pipelines") return pipelineCount
     if (id === "workflows") return workflowCount
     if (id === "actions") return actionCount
+    if (id === "agents") return agentCount
     if (id === "rules") return ruleCount
     if (id === "ontology") return ontologyCount
     return undefined
