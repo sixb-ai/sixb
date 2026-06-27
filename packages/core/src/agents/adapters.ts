@@ -13,10 +13,11 @@ export interface AgentInboundUiMessagePart {
   readonly type: string
   readonly text?: string
   readonly state?: string
-  // v6 types provider metadata as `Record<string, JSONObject>`, so we constrain it to JSON. `input`,
-  // `output` and `rawInput` stay `unknown` — they are the tool's generic schema types, which we
-  // cannot know at this boundary (no tool registry), and which fromAiSdk validates to JSON anyway.
-  readonly providerMetadata?: JsonValue
+  // Provider metadata stays `unknown` here, exactly like `input` / `output` / `rawInput`: the SDK
+  // types it as `SharedV3ProviderMetadata` (a nested record), which is not structurally a Sixb
+  // `JsonValue`, so constraining it would break the "real SDK message assigns without a cast"
+  // contract (locked by the consumer's compat test). `fromAiSdk` validates it to JSON at runtime.
+  readonly providerMetadata?: unknown
   readonly toolName?: string
   readonly toolCallId?: string
   readonly providerExecuted?: boolean
@@ -24,7 +25,7 @@ export interface AgentInboundUiMessagePart {
   readonly rawInput?: unknown
   readonly output?: unknown
   readonly errorText?: string
-  readonly callProviderMetadata?: JsonValue
+  readonly callProviderMetadata?: unknown
 }
 
 export interface AgentInboundUiMessage {

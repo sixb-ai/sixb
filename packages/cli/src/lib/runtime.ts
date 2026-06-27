@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@sixb/action-worker"
+import { AgentWorker } from "@sixb/agent-worker"
 import { assertLakeDatasetDefinitionsCompatible, migrateStorage } from "@sixb/core"
 import {
   type CompileRoutesDiagnostic,
@@ -28,6 +29,7 @@ export interface RunningSixbRuntime {
   readonly rulesWorker: RulesWorker | null
   readonly syncWorker: SyncWorker | null
   readonly actionWorker: ActionWorker | null
+  readonly agentWorker: AgentWorker | null
   readonly projectionWorker: ProjectionWorker | null
   readonly pipelineWorker: PipelineWorker | null
   readonly workflowWorker: WorkflowWorker | null
@@ -157,12 +159,13 @@ export async function startOrchestratorRuntime(
  *   1. RulesWorker (subscribes to ontology events)
  *   2. Functions
  *   3. ActionWorker (subscribes to events)
- *   4. ProjectionWorker (claims from queues)
- *   5. PipelineWorker (claims from queues)
- *   6. WorkflowWorker (claims from queues)
- *   7. SyncWorker (claims from queues)
- *   8. Orchestrator (subscribes to events and enqueues jobs)
- *   9. Scheduler (emits schedule.triggered)
+ *   4. AgentWorker (claims from queues)
+ *   5. ProjectionWorker (claims from queues)
+ *   6. PipelineWorker (claims from queues)
+ *   7. WorkflowWorker (claims from queues)
+ *   8. SyncWorker (claims from queues)
+ *   9. Orchestrator (subscribes to events and enqueues jobs)
+ *   10. Scheduler (emits schedule.triggered)
  *
  * Shutdown order (producers before consumers):
  *   1. Scheduler
@@ -171,10 +174,11 @@ export async function startOrchestratorRuntime(
  *   4. WorkflowWorker
  *   5. PipelineWorker
  *   6. ProjectionWorker
- *   7. ActionWorker
- *   8. Functions
- *   9. RulesWorker (drains pending evaluations)
- *   10. Runtime providers (connectors, broker)
+ *   7. AgentWorker
+ *   8. ActionWorker
+ *   9. Functions
+ *   10. RulesWorker (drains pending evaluations)
+ *   11. Runtime providers (connectors, broker)
  */
 export async function startSixbRuntime(
   sixb: LoadedSixb,
@@ -190,6 +194,7 @@ export async function startSixbRuntime(
   let rulesWorker: RulesWorker | null = null
   let syncWorker: SyncWorker | null = null
   let actionWorker: ActionWorker | null = null
+  let agentWorker: AgentWorker | null = null
   let pipelineWorker: PipelineWorker | null = null
   let workflowWorker: WorkflowWorker | null = null
   let orchestratorWorker: OrchestratorWorker | null = null
@@ -203,6 +208,7 @@ export async function startSixbRuntime(
     await stopQuietly(() => workflowWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => pipelineWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => projectionWorker?.stop() ?? Promise.resolve())
+    await stopQuietly(() => agentWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => actionWorker?.stop() ?? Promise.resolve())
     await stopQuietly(() => functionsRuntime?.stop() ?? Promise.resolve())
     await stopQuietly(() => rulesRuntime?.stop() ?? Promise.resolve())
@@ -219,6 +225,11 @@ export async function startSixbRuntime(
       if (sixb.getActionDefinitions().length > 0) {
         actionWorker = new ActionWorker(sixb)
         await actionWorker.start()
+      }
+
+      if (sixb.agents.list().length > 0 && sixb.storage.agents) {
+        agentWorker = new AgentWorker(sixb)
+        await agentWorker.start()
       }
 
       const projectionCount =
@@ -260,6 +271,7 @@ export async function startSixbRuntime(
     rulesWorker,
     syncWorker,
     actionWorker,
+    agentWorker,
     projectionWorker,
     pipelineWorker,
     workflowWorker,

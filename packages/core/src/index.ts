@@ -927,6 +927,7 @@ export {
 
 export type {
   ActionRunRequestedQueueJob,
+  AgentRunRequestedQueueJob,
   ClaimedQueueJob,
   NewQueueJob,
   PipelineRunRequestedQueueJob,
@@ -946,7 +947,7 @@ export { InMemoryQueues, QueueError } from "./queues"
 // ── Workers ────────────────────────────────────────────────
 
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./workers"
-export { QueueWorker, Worker, WorkerAbortError } from "./workers"
+export { isAbortError, QueueWorker, Worker, WorkerAbortError } from "./workers"
 
 // ── Sandboxes ──────────────────────────────────────────────
 
@@ -1292,6 +1293,7 @@ export type {
   AgentModelToolOutput,
   AgentModelToolResultPart,
   AgentReasoningPart,
+  AgentRequestErrorCode,
   AgentStepStartPart,
   AgentTextPart,
   AgentToolCallPart,
@@ -1300,15 +1302,23 @@ export type {
   AgentUiMessagePart,
   AgentUiToolPart,
   DefineAgentConfig,
+  RequestAgentRunInput,
+  RequestAgentRunResult,
 } from "./agents"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   AgentDefinitionError,
   AgentMessageAdapterError,
+  AgentRequestError,
   AgentsRuntime,
+  createAgentMessageId,
+  createAgentRunId,
+  createAgentRunLeaseId,
+  createAgentThreadId,
   defineAgent,
   fromAiSdk,
   isAgentDefinition,
+  requestAgentRun,
   toModelMessages,
   toUiMessage,
 } from "./agents"

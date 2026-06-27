@@ -159,10 +159,26 @@ export interface ActionRunRequestedQueueJob
     }
   > {}
 
+/**
+ * An agent turn is requested for a thread. The payload carries only the *intent* — the worker
+ * generates the run id and reserves the run at claim time (reserve-at-claim), so it owns the
+ * `agent_runs` lease from birth and there is never an orphan run between request and pickup.
+ */
+export interface AgentRunRequestedQueueJob
+  extends QueueJob<
+    "agent.run.requested",
+    {
+      readonly agentId: string
+      readonly threadId: string
+      readonly triggerMessageId: string
+    }
+  > {}
+
 export interface Queues {
   readonly syncRuns: Queue<SyncRunRequestedQueueJob>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob>
   readonly projections: Queue<ProjectionRunRequestedQueueJob>
   readonly workflows: Queue<WorkflowQueueJob>
   readonly actions: Queue<ActionRunRequestedQueueJob>
+  readonly agents: Queue<AgentRunRequestedQueueJob>
 }

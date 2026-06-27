@@ -32,6 +32,9 @@
       "path": "packages/action-worker/tsconfig.build.json"
     },
     {
+      "path": "packages/agent-worker/tsconfig.build.json"
+    },
+    {
       "path": "packages/app/tsconfig.build.json"
     },
     {
