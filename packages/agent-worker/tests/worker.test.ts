@@ -13,6 +13,7 @@ import {
   createAgentRunId,
   createAgentRunLeaseId,
   defineAgent,
+  defineGroup,
   type EventsRuntime,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -33,6 +34,7 @@ import { waitFor } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
+const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
 
 const USAGE: LanguageModelV3Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -116,12 +118,14 @@ function buildSixb(model: LanguageModelV3): TestSixb {
     name: "Assistant",
     model,
     instructions: "You are a helpful test assistant.",
+    groups: [AGENT_RUNTIME_GROUP],
     loop: { stopWhen: { maxSteps: 4 } },
   })
   return new SixbCtor({
     id: PROJECT_ID,
     ontology: [],
     agents: [agent],
+    groups: [AGENT_RUNTIME_GROUP],
     broker: new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -138,9 +142,20 @@ function agentStorageOf(sixb: TestSixb): AgentStorage {
   return storage
 }
 
+function authStorageOf(sixb: TestSixb) {
+  const storage = sixb.storage.auth
+  if (!storage) {
+    throw new Error("expected auth storage")
+  }
+  return storage
+}
+
 function workerStorageOf(storage: Storage): AgentWorkerStorage {
   if (!storage.agents) {
     throw new Error("expected agent storage")
+  }
+  if (!storage.auth) {
+    throw new Error("expected auth storage")
   }
   return storage as AgentWorkerStorage
 }
@@ -274,6 +289,7 @@ describe("AgentWorker", () => {
   test("runs a full multi-step turn: reserves, persists the assistant message, finalizes with usage", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
+    const auth = authStorageOf(sixb)
     const streamed: AgentMessagePart[] = []
 
     const worker = new AgentWorker(sixb, {
@@ -303,6 +319,10 @@ describe("AgentWorker", () => {
       expect(run.modelId).toBe("mock-model")
       expect(run.usage?.outputTokens).toBeGreaterThan(0)
       expect(run.usage?.inputTokens).toBeGreaterThan(0)
+      expect(run.executionPrincipal).toEqual({
+        type: "serviceAccount",
+        id: "svc_agent_assistant",
+      })
 
       // Thread released after finalization (single-flight pointer cleared).
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
@@ -312,6 +332,10 @@ describe("AgentWorker", () => {
       const assistant = messages.find((message) => message.role === "assistant")
       expect(assistant).toBeDefined()
       expect(assistant?.runId).toBe(run.id)
+      expect(assistant?.authorPrincipal).toEqual({
+        type: "serviceAccount",
+        id: "svc_agent_assistant",
+      })
 
       const parts = assistant?.parts ?? []
       expect(parts.some((part) => part.type === "reasoning")).toBe(true)
@@ -330,6 +354,45 @@ describe("AgentWorker", () => {
 
       // The stream seam saw exactly the persisted parts, in order.
       expect(streamed).toEqual([...parts])
+
+      await expect(
+        auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
+      ).resolves.toMatchObject({
+        id: "svc_agent_assistant",
+        name: "Assistant",
+        status: "active",
+      })
+      const memberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
+        projectId: PROJECT_ID,
+        serviceAccountId: "svc_agent_assistant",
+      })
+      expect(memberships.map((membership) => [membership.groupId, membership.source])).toEqual([
+        ["agent-runtime", "agent"],
+      ])
+
+      const token = await waitFor(
+        async () => {
+          const tokens = await auth.accessTokens.list({
+            projectId: PROJECT_ID,
+            kind: "serviceAccount",
+            subjectType: "serviceAccount",
+            subjectId: "svc_agent_assistant",
+            includeRevoked: true,
+          })
+          return tokens.accessTokens.find(
+            (accessToken) => accessToken.name === `Agent run ${runId}`
+          )
+        },
+        { label: "agent run token persisted" }
+      )
+      expect(token.groupIds).toEqual(["agent-runtime"])
+      await waitFor(
+        async () => {
+          const refreshed = await auth.accessTokens.getById({ projectId: PROJECT_ID, id: token.id })
+          return refreshed?.revokedAt ? refreshed : null
+        },
+        { label: "agent run token revoked" }
+      )
     } finally {
       await worker.stop()
     }

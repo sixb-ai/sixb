@@ -562,6 +562,56 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("reconciles agent-managed service account memberships", async () => {
+      await withStorage(async (storage) => {
+        await storage.serviceAccounts.create({
+          id: "svc_agent_ops",
+          projectId,
+          name: "Ops agent",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+        })
+        await storage.serviceAccountGroupMemberships.upsert({
+          projectId,
+          serviceAccountId: "svc_agent_ops",
+          groupId: "manual-extra",
+          source: "manual",
+          createdAt: at("2026-05-14T10:01:00.000Z"),
+        })
+        await storage.serviceAccountGroupMemberships.upsert({
+          projectId,
+          serviceAccountId: "svc_agent_ops",
+          groupId: "stale-agent",
+          source: "agent",
+          createdAt: at("2026-05-14T10:02:00.000Z"),
+        })
+
+        const first = await storage.serviceAccountGroupMemberships.reconcileForServiceAccount({
+          projectId,
+          serviceAccountId: "svc_agent_ops",
+          groupIds: ["agent-runtime", "agent-runtime", "ops"],
+          source: "agent",
+          updatedAt: at("2026-05-14T10:03:00.000Z"),
+        })
+        expect(first.map((membership) => [membership.groupId, membership.source])).toEqual([
+          ["agent-runtime", "agent"],
+          ["manual-extra", "manual"],
+          ["ops", "agent"],
+        ])
+
+        const second = await storage.serviceAccountGroupMemberships.reconcileForServiceAccount({
+          projectId,
+          serviceAccountId: "svc_agent_ops",
+          groupIds: ["ops"],
+          source: "agent",
+          updatedAt: at("2026-05-14T10:04:00.000Z"),
+        })
+        expect(second.map((membership) => [membership.groupId, membership.source])).toEqual([
+          ["manual-extra", "manual"],
+          ["ops", "agent"],
+        ])
+      })
+    })
+
     test("creates, resolves, touches, lists, and revokes access tokens", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)

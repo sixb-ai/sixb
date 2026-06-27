@@ -45,4 +45,4 @@ export {
 } from "./request"
 export { AgentsRuntime } from "./runtime"
 export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./types"
-export { isAgentDefinition } from "./validation"
+export { isAgentDefinition, validateAgentGroupReferences } from "./validation"

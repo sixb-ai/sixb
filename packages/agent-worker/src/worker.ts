@@ -15,6 +15,13 @@ import {
   AgentWorkerError,
 } from "./errors"
 import { finishRunOrThrow } from "./finalize"
+import {
+  type AgentRunAccessToken,
+  mintAgentRunAccessToken,
+  reconcileAgentExecutionIdentities,
+  reconcileAgentExecutionIdentity,
+  revokeAgentRunAccessToken,
+} from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import type {
   AgentWorkerContext,
@@ -85,6 +92,11 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
   protected override async run(signal: AbortSignal): Promise<void> {
     if (!this.idleWithoutAgents) {
+      await reconcileAgentExecutionIdentities(
+        this.requireContext().storage,
+        this.sixb.id,
+        this.sixb.agents.list()
+      )
       await super.run(signal)
       return
     }
@@ -112,6 +124,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     if (!agent) {
       throw new AgentWorkerError(`Unknown agent '${agentId}'.`)
     }
+    const identity = await reconcileAgentExecutionIdentity(context.storage, context.id, agent)
 
     const reservation = await this.reserveOrReclaim(context, {
       agent,
@@ -119,6 +132,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       runId,
       triggerMessageId,
       requestedByPrincipal: job.payload.requestedByPrincipal ?? SYSTEM_PRINCIPAL,
+      executionPrincipal: identity.principal,
     })
     if (reservation.kind === "skip") {
       return
@@ -131,8 +145,16 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     }
     const run = reservation.run
     const leaseId = run.lease?.id
+    let runToken: AgentRunAccessToken | null = null
 
     try {
+      runToken = await mintAgentRunAccessToken({
+        storage: context.storage,
+        projectId: context.id,
+        agent,
+        run,
+        turnTimeoutMs: context.turnTimeoutMs,
+      })
       await runAgentTurn({ context, agent, run, signal })
     } catch (error) {
       // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
@@ -156,6 +178,16 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       // Model/tool failure or turn timeout: fate is on the record, so we ack by returning.
       if (aborted) {
         throw error
+      }
+    } finally {
+      if (runToken) {
+        await revokeAgentRunAccessToken({
+          storage: context.storage,
+          projectId: context.id,
+          tokenId: runToken.accessToken.id,
+        }).catch((error) => {
+          console.error("[SixbAgentWorker] Could not revoke agent run token:", error)
+        })
       }
     }
   }
@@ -205,6 +237,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       runId: string
       triggerMessageId: string
       requestedByPrincipal: Principal
+      executionPrincipal: Extract<Principal, { readonly type: "serviceAccount" }>
     }
   ): Promise<Reservation> {
     try {
@@ -215,6 +248,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         agentId: input.agent.id,
         triggerMessageId: input.triggerMessageId,
         requestedByPrincipal: input.requestedByPrincipal,
+        executionPrincipal: input.executionPrincipal,
         modelId: input.agent.model.modelId,
         lease: freshLease(context.leaseMs),
       })
@@ -320,6 +354,9 @@ function buildAgentContext(
   const storage = sixb.storage
   if (!storage.agents) {
     throw new AgentWorkerError("Agent workers require storage.agents support.")
+  }
+  if (!storage.auth) {
+    throw new AgentWorkerError("Agent workers require storage.auth support.")
   }
   return {
     id: sixb.id,

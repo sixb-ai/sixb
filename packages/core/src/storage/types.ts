@@ -74,6 +74,7 @@ export type {
   ListAuthUsersResult,
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
+  ReconcileAuthServiceAccountGroupMembershipsInput,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
   UpdateAuthUserProfileInput,

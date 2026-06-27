@@ -115,6 +115,7 @@ export type {
   ListAuthUsersResult,
   MagicLinkRecord,
   OidcAuthorizationAttemptRecord,
+  ReconcileAuthServiceAccountGroupMembershipsInput,
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
   ServiceAccountStatus,
