@@ -5,6 +5,8 @@ import type {
   EditCommitPlan,
   ExistsObjectsInput,
   ExistsObjectsResult,
+  ExpandedLinkValue,
+  ExpandedObjectRow,
   FacetObjectsInput,
   FacetObjectsResult,
   LinkDirection,
@@ -13,6 +15,7 @@ import type {
   ObjectQuery,
   ObjectQueryCapabilities,
   ObjectRow,
+  ObjectRowLinks,
   ObjectStorage,
   QueryObjectsInput,
   QueryObjectsResult,
@@ -57,6 +60,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     traverse: true,
     set: true,
     project: true,
+    expand: true,
   },
   predicateOps: {
     and: true,
@@ -89,7 +93,8 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     stablePageTokens: true,
   },
   notes: [
-    "SQLite object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project over JSON properties and object links.",
+    "SQLite object query pushdown supports start/filter/text/sort/limit/page/traverse/set/project/expand over JSON properties and object links.",
+    "expand hydrates linked objects in-database (top-N per parent via row_number() + json_group_array); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }
@@ -122,8 +127,8 @@ export class SqliteObjectStorage implements ObjectStorage {
       includeTotal: params.includeTotal,
     })
     const total = params.includeTotal === false ? undefined : readTotal(this.db, compiled)
-    const rawRows = this.db.query(compiled.sql).all(...compiled.args) as DatabaseRow[]
-    const rows = compiled.trimRows(rawRows) as readonly DatabaseRow[]
+    const rawRows = this.db.query(compiled.sql).all(...compiled.args) as ObjectQueryDatabaseRow[]
+    const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
     const hasMore =
       total === undefined && compiled.hasMoreProbe
         ? compiled.hasMoreProbe.hasMore(
@@ -132,7 +137,7 @@ export class SqliteObjectStorage implements ObjectStorage {
         : compiled.hasMore(rawRows.length, total)
 
     return {
-      objects: rows.map((row) => this.rowToObject(row)),
+      objects: rows.map((row) => this.queryRowToObject(row)),
       hasMore,
       nextPageToken: compiled.nextPageToken(rows, rawRows.length),
       ...(total === undefined ? {} : { total }),
@@ -894,6 +899,16 @@ export class SqliteObjectStorage implements ObjectStorage {
     }
   }
 
+  // Map a query row, attaching `links` when an `expand` pushdown produced them.
+  // The base columns map as usual; `_expand` (a `json_object` serialized to TEXT)
+  // is parsed and revived into the runtime link shape the core executor's
+  // fallback also produces.
+  private queryRowToObject(row: ObjectQueryDatabaseRow): ObjectRow {
+    const base = this.rowToObject(row)
+    const links = reviveExpandedLinks(parseExpandColumn(row._expand))
+    return links ? { ...base, links } : base
+  }
+
   private rowToLink(row: LinkDatabaseRow): ObjectLinkRow {
     return {
       projectId: row.project_id,
@@ -961,6 +976,57 @@ function sqliteFacetValue(valueType: string | null, value: unknown): unknown {
   return value
 }
 
+// The `_expand` column comes back from SQLite as a JSON string (or null/absent
+// when the query carried no expansion); parse it before reviving.
+function parseExpandColumn(value: unknown): unknown {
+  if (typeof value !== "string") return value ?? undefined
+  return JSON.parse(value)
+}
+
+function reviveExpandedLinks(value: unknown): ObjectRowLinks | undefined {
+  if (!isPlainObject(value)) return undefined
+  const links: ObjectRowLinks = {}
+  for (const [linkId, raw] of Object.entries(value)) {
+    links[linkId] = reviveExpandedLinkValue(raw)
+  }
+  return links
+}
+
+// A "one" expansion arrives as a single object or null; a "many" expansion as an
+// array (already ordered and trimmed in the database).
+function reviveExpandedLinkValue(value: unknown): ExpandedLinkValue {
+  if (value === null || value === undefined) return null
+  if (Array.isArray(value)) return value.map(reviveExpandedRow)
+  return reviveExpandedRow(value)
+}
+
+// Revive one hydrated neighbour from `compileExpansionChildJson`: timestamp
+// strings back to `Date`, null/empty link properties dropped (matching the
+// fallback), and nested links recursed.
+function reviveExpandedRow(value: unknown): ExpandedObjectRow {
+  const row = isPlainObject(value) ? value : {}
+  const expanded: ExpandedObjectRow = {
+    projectId: String(row.projectId),
+    objectTypeId: String(row.objectTypeId),
+    primaryId: String(row.primaryId),
+    properties: isPlainObject(row.properties) ? row.properties : {},
+    createdAt: new Date(row.createdAt as string),
+    updatedAt: new Date(row.updatedAt as string),
+    version: Number(row.version),
+  }
+  if (row.sourceEventId != null) expanded.sourceEventId = String(row.sourceEventId)
+  if (isPlainObject(row.linkProperties) && Object.keys(row.linkProperties).length > 0) {
+    expanded.linkProperties = row.linkProperties
+  }
+  const links = reviveExpandedLinks(row.links)
+  if (links) expanded.links = links
+  return expanded
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 function existsProbeQuery(query: ObjectQuery): ObjectQuery {
   return { kind: "limit", limit: 1, input: stripOuterRowShape(query) }
 }
@@ -986,6 +1052,12 @@ interface DatabaseRow {
   updated_at: string
   version: number
   source_event_id: string | null
+}
+
+interface ObjectQueryDatabaseRow extends DatabaseRow {
+  _cursor_properties?: string
+  /** `json_object(linkId, value, ...)` serialized text from an `expand` pushdown; absent otherwise. */
+  _expand?: string | null
 }
 
 interface FacetDatabaseRow {
