@@ -8,6 +8,7 @@
   },
   "include": [
     "actions/**/*.ts",
+    "agents/**/*.ts",
     "app/**/*.ts",
     "app/**/*.tsx",
     "connectors/**/*.ts",

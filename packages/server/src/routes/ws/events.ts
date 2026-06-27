@@ -6,9 +6,9 @@ import {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { EVENT_TOPICS, EVENT_TYPES } from "../schemas/events"
-import type { SixbServer } from "../server"
-import { decodeWsMessage, safeSend } from "../utils/ws"
+import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
+import type { SixbServer } from "../../server"
+import { decodeWsMessage, safeSend } from "../../utils/ws"
 
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
@@ -80,7 +80,7 @@ function createDefaultState(): EventSubscriptionState {
   }
 }
 
-export function registerWsRoutes(app: Elysia, server: SixbServer) {
+export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
   const states = new WeakMap<object, EventSubscriptionState>()
 
   const stopPolling = (ws: object) => {

@@ -12,6 +12,9 @@ import type {
   CountObjectsData,
   CountObjectsErrors,
   CountObjectsResponses,
+  CreateAgentThreadData,
+  CreateAgentThreadErrors,
+  CreateAgentThreadResponses,
   CreateAuthInvitationData,
   CreateAuthInvitationErrors,
   CreateAuthInvitationResponses,
@@ -39,6 +42,15 @@ import type {
   GetActionRunData,
   GetActionRunErrors,
   GetActionRunResponses,
+  GetAgentData,
+  GetAgentErrors,
+  GetAgentResponses,
+  GetAgentRunData,
+  GetAgentRunErrors,
+  GetAgentRunResponses,
+  GetAgentThreadData,
+  GetAgentThreadErrors,
+  GetAgentThreadResponses,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsErrors,
   GetAuthAccessManagementOptionsResponses,
@@ -107,6 +119,14 @@ import type {
   ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
+  ListAgentsData,
+  ListAgentsResponses,
+  ListAgentThreadMessagesData,
+  ListAgentThreadMessagesErrors,
+  ListAgentThreadMessagesResponses,
+  ListAgentThreadsData,
+  ListAgentThreadsErrors,
+  ListAgentThreadsResponses,
   ListAuthAccessTokensData,
   ListAuthAccessTokensErrors,
   ListAuthAccessTokensResponses,
@@ -175,6 +195,9 @@ import type {
   ListWorkflowRunsResponses,
   ListWorkflowsData,
   ListWorkflowsResponses,
+  PostAgentThreadMessageData,
+  PostAgentThreadMessageErrors,
+  PostAgentThreadMessageResponses,
   QueryObjectsData,
   QueryObjectsErrors,
   QueryObjectsResponses,
@@ -1128,6 +1151,113 @@ export const getActionRun = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
     url: "/api/action-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * List registered agents
+ */
+export const listAgents = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAgentsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListAgentsResponses, unknown, ThrowOnError>({
+    url: "/api/agents",
+    ...options,
+  })
+
+/**
+ * Get agent metadata
+ */
+export const getAgent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetAgentResponses, GetAgentErrors, ThrowOnError>({
+    url: "/api/agents/{agentId}",
+    ...options,
+  })
+
+/**
+ * List agent threads
+ */
+export const listAgentThreads = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAgentThreadsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListAgentThreadsResponses, ListAgentThreadsErrors, ThrowOnError>({
+    url: "/api/agent-threads",
+    ...options,
+  })
+
+/**
+ * Create an agent thread
+ */
+export const createAgentThread = <ThrowOnError extends boolean = false>(
+  options: Options<CreateAgentThreadData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    CreateAgentThreadResponses,
+    CreateAgentThreadErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/agent-threads",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get agent thread
+ */
+export const getAgentThread = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentThreadData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetAgentThreadResponses, GetAgentThreadErrors, ThrowOnError>({
+    url: "/api/agent-threads/{threadId}",
+    ...options,
+  })
+
+/**
+ * List agent thread messages
+ */
+export const listAgentThreadMessages = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadMessagesData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadMessagesResponses,
+    ListAgentThreadMessagesErrors,
+    ThrowOnError
+  >({ url: "/api/agent-threads/{threadId}/messages", ...options })
+
+/**
+ * Post an agent thread message
+ */
+export const postAgentThreadMessage = <ThrowOnError extends boolean = false>(
+  options: Options<PostAgentThreadMessageData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    PostAgentThreadMessageResponses,
+    PostAgentThreadMessageErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/agent-threads/{threadId}/messages",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Get agent run
+ */
+export const getAgentRun = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentRunData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
+    url: "/api/agent-runs/{runId}",
     ...options,
   })
 

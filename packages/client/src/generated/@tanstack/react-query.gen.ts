@@ -13,6 +13,7 @@ import {
   appendTelemetry,
   cancelWorkflowIntervention,
   countObjects,
+  createAgentThread,
   createAuthInvitation,
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
@@ -22,6 +23,9 @@ import {
   facetObjects,
   getAction,
   getActionRun,
+  getAgent,
+  getAgentRun,
+  getAgentThread,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
   getAuthSession,
@@ -46,6 +50,9 @@ import {
   getWorkflowRun,
   listActionRuns,
   listActions,
+  listAgents,
+  listAgentThreadMessages,
+  listAgentThreads,
   listAuthAccessTokens,
   listAuthInvitations,
   listAuthServiceAccountAccessTokens,
@@ -72,6 +79,7 @@ import {
   listWorkflowRuns,
   listWorkflows,
   type Options,
+  postAgentThreadMessage,
   queryObjects,
   removeObjectLink,
   requestAction,
@@ -98,6 +106,9 @@ import type {
   CountObjectsData,
   CountObjectsError,
   CountObjectsResponse,
+  CreateAgentThreadData,
+  CreateAgentThreadError,
+  CreateAgentThreadResponse,
   CreateAuthInvitationData,
   CreateAuthInvitationError,
   CreateAuthInvitationResponse,
@@ -125,6 +136,15 @@ import type {
   GetActionRunData,
   GetActionRunError,
   GetActionRunResponse,
+  GetAgentData,
+  GetAgentError,
+  GetAgentResponse,
+  GetAgentRunData,
+  GetAgentRunError,
+  GetAgentRunResponse,
+  GetAgentThreadData,
+  GetAgentThreadError,
+  GetAgentThreadResponse,
   GetAuthAccessManagementOptionsData,
   GetAuthAccessManagementOptionsError,
   GetAuthAccessManagementOptionsResponse,
@@ -193,6 +213,14 @@ import type {
   ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
+  ListAgentsData,
+  ListAgentsResponse,
+  ListAgentThreadMessagesData,
+  ListAgentThreadMessagesError,
+  ListAgentThreadMessagesResponse,
+  ListAgentThreadsData,
+  ListAgentThreadsError,
+  ListAgentThreadsResponse,
   ListAuthAccessTokensData,
   ListAuthAccessTokensError,
   ListAuthAccessTokensResponse,
@@ -261,6 +289,9 @@ import type {
   ListWorkflowRunsResponse,
   ListWorkflowsData,
   ListWorkflowsResponse,
+  PostAgentThreadMessageData,
+  PostAgentThreadMessageError,
+  PostAgentThreadMessageResponse,
   QueryObjectsData,
   QueryObjectsError,
   QueryObjectsResponse,
@@ -2351,6 +2382,300 @@ export const getActionRunOptions = (options: Options<GetActionRunData>) =>
       return data
     },
     queryKey: getActionRunQueryKey(options),
+  })
+
+export const listAgentsQueryKey = (options?: Options<ListAgentsData>) =>
+  createQueryKey("listAgents", options)
+
+/**
+ * List registered agents
+ */
+export const listAgentsOptions = (options?: Options<ListAgentsData>) =>
+  queryOptions<
+    ListAgentsResponse,
+    DefaultError,
+    ListAgentsResponse,
+    ReturnType<typeof listAgentsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgents({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentsQueryKey(options),
+  })
+
+export const getAgentQueryKey = (options: Options<GetAgentData>) =>
+  createQueryKey("getAgent", options)
+
+/**
+ * Get agent metadata
+ */
+export const getAgentOptions = (options: Options<GetAgentData>) =>
+  queryOptions<
+    GetAgentResponse,
+    GetAgentError,
+    GetAgentResponse,
+    ReturnType<typeof getAgentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentQueryKey(options),
+  })
+
+export const listAgentThreadsQueryKey = (options?: Options<ListAgentThreadsData>) =>
+  createQueryKey("listAgentThreads", options)
+
+/**
+ * List agent threads
+ */
+export const listAgentThreadsOptions = (options?: Options<ListAgentThreadsData>) =>
+  queryOptions<
+    ListAgentThreadsResponse,
+    ListAgentThreadsError,
+    ListAgentThreadsResponse,
+    ReturnType<typeof listAgentThreadsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreads({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadsQueryKey(options),
+  })
+
+export const listAgentThreadsInfiniteQueryKey = (
+  options?: Options<ListAgentThreadsData>
+): QueryKey<Options<ListAgentThreadsData>> => createQueryKey("listAgentThreads", options, true)
+
+/**
+ * List agent threads
+ */
+export const listAgentThreadsInfiniteOptions = (options?: Options<ListAgentThreadsData>) =>
+  infiniteQueryOptions<
+    ListAgentThreadsResponse,
+    ListAgentThreadsError,
+    InfiniteData<ListAgentThreadsResponse>,
+    QueryKey<Options<ListAgentThreadsData>>,
+    string | Pick<QueryKey<Options<ListAgentThreadsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentThreadsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentThreads({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentThreadsInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Create an agent thread
+ */
+export const createAgentThreadMutation = (
+  options?: Partial<Options<CreateAgentThreadData>>
+): UseMutationOptions<
+  CreateAgentThreadResponse,
+  CreateAgentThreadError,
+  Options<CreateAgentThreadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateAgentThreadResponse,
+    CreateAgentThreadError,
+    Options<CreateAgentThreadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createAgentThread({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAgentThreadQueryKey = (options: Options<GetAgentThreadData>) =>
+  createQueryKey("getAgentThread", options)
+
+/**
+ * Get agent thread
+ */
+export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
+  queryOptions<
+    GetAgentThreadResponse,
+    GetAgentThreadError,
+    GetAgentThreadResponse,
+    ReturnType<typeof getAgentThreadQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentThread({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentThreadQueryKey(options),
+  })
+
+export const listAgentThreadMessagesQueryKey = (options: Options<ListAgentThreadMessagesData>) =>
+  createQueryKey("listAgentThreadMessages", options)
+
+/**
+ * List agent thread messages
+ */
+export const listAgentThreadMessagesOptions = (options: Options<ListAgentThreadMessagesData>) =>
+  queryOptions<
+    ListAgentThreadMessagesResponse,
+    ListAgentThreadMessagesError,
+    ListAgentThreadMessagesResponse,
+    ReturnType<typeof listAgentThreadMessagesQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreadMessages({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadMessagesQueryKey(options),
+  })
+
+export const listAgentThreadMessagesInfiniteQueryKey = (
+  options: Options<ListAgentThreadMessagesData>
+): QueryKey<Options<ListAgentThreadMessagesData>> =>
+  createQueryKey("listAgentThreadMessages", options, true)
+
+/**
+ * List agent thread messages
+ */
+export const listAgentThreadMessagesInfiniteOptions = (
+  options: Options<ListAgentThreadMessagesData>
+) =>
+  infiniteQueryOptions<
+    ListAgentThreadMessagesResponse,
+    ListAgentThreadMessagesError,
+    InfiniteData<ListAgentThreadMessagesResponse>,
+    QueryKey<Options<ListAgentThreadMessagesData>>,
+    | string
+    | Pick<QueryKey<Options<ListAgentThreadMessagesData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentThreadMessagesData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentThreadMessages({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentThreadMessagesInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Post an agent thread message
+ */
+export const postAgentThreadMessageMutation = (
+  options?: Partial<Options<PostAgentThreadMessageData>>
+): UseMutationOptions<
+  PostAgentThreadMessageResponse,
+  PostAgentThreadMessageError,
+  Options<PostAgentThreadMessageData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    PostAgentThreadMessageResponse,
+    PostAgentThreadMessageError,
+    Options<PostAgentThreadMessageData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await postAgentThreadMessage({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAgentRunQueryKey = (options: Options<GetAgentRunData>) =>
+  createQueryKey("getAgentRun", options)
+
+/**
+ * Get agent run
+ */
+export const getAgentRunOptions = (options: Options<GetAgentRunData>) =>
+  queryOptions<
+    GetAgentRunResponse,
+    GetAgentRunError,
+    GetAgentRunResponse,
+    ReturnType<typeof getAgentRunQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentRun({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentRunQueryKey(options),
   })
 
 export const listObjectLinksQueryKey = (options: Options<ListObjectLinksData>) =>
