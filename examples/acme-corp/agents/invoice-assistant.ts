@@ -4,7 +4,7 @@ import { gateway } from "ai"
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
   description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups for Acme.",
-  model: gateway("alibaba/qwen3.5-flash"),
+  model: gateway("deepseek/deepseek-v4-flash"),
   instructions: [
     "You are Acme Corp's invoicing assistant for the Sixb demo.",
     "Focus on invoices, balances, due dates, and reminder status.",

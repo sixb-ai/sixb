@@ -44,6 +44,9 @@
       "path": "packages/agent-worker/tsconfig.build.json"
     },
     {
+      "path": "packages/agent-ui/tsconfig.build.json"
+    },
+    {
       "path": "packages/app/tsconfig.build.json"
     },
     {

@@ -259,6 +259,58 @@ describe("createCustomApp.dev", () => {
     expect(manifest).not.toContain("lazy(")
   })
 
+  test("route manifest can append framework-owned routes", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const manifestPath = await generateRouteManifest(
+      [
+        {
+          path: "/",
+          filePath: join(tempRoot, "app", "page.tsx"),
+          relativePath: "page.tsx",
+        },
+      ],
+      generatedDir,
+      {
+        builtInRoutes: [
+          { path: "/agents", moduleSpecifier: "@sixb/app/agents" },
+          { path: "/agents/new/:agentId", moduleSpecifier: "@sixb/app/agents" },
+          { path: "/agents/:threadId", moduleSpecifier: "@sixb/app/agents" },
+        ],
+      }
+    )
+    const manifest = await readFile(manifestPath, "utf-8")
+
+    expect(manifest).toContain('import Page0 from "../../app/page.tsx"')
+    expect(manifest).toContain('import BuiltInPage0 from "@sixb/app/agents"')
+    expect(manifest).toContain('import BuiltInPage1 from "@sixb/app/agents"')
+    expect(manifest).toContain('import BuiltInPage2 from "@sixb/app/agents"')
+    expect(manifest).toContain('{ path: "/", component: Page0 },')
+    expect(manifest).toContain('{ path: "/agents", component: BuiltInPage0 },')
+    expect(manifest).toContain('{ path: "/agents/new/:agentId", component: BuiltInPage1 },')
+    expect(manifest).toContain('{ path: "/agents/:threadId", component: BuiltInPage2 },')
+  })
+
+  test("generated entry imports framework styles before app styles", async () => {
+    const generatedDir = join(tempRoot, ".sixb", "generated")
+    const appCssPath = join(tempRoot, "app", "globals.css")
+    const frameworkCssPath = join(generatedDir, "agent-ui.css")
+    await mkdir(generatedDir, { recursive: true })
+    await writeFile(appCssPath, "body { margin: 0; }\n")
+    await writeFile(frameworkCssPath, "body { color: black; }\n")
+
+    const { mainPath } = await generateAppEntry(tempRoot, generatedDir, {
+      stylesheetPath: appCssPath,
+      frameworkStylesheetPaths: [frameworkCssPath],
+    })
+    const main = await readFile(mainPath, "utf-8")
+
+    expect(main.indexOf('import "./agent-ui.css"')).toBeGreaterThan(-1)
+    expect(main.indexOf('import "../../app/globals.css"')).toBeGreaterThan(-1)
+    expect(main.indexOf('import "./agent-ui.css"')).toBeLessThan(
+      main.indexOf('import "../../app/globals.css"')
+    )
+  })
+
   test("leaves generated entry files untouched when content is unchanged", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")
     const routes = [
@@ -322,4 +374,67 @@ describe("createCustomApp.dev", () => {
     expect(html).not.toContain("#0b1222")
     expect(html).not.toContain("radial-gradient")
   })
+
+  test("custom apps get default agent routes without changing scanRoutes output", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      authEnabled: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      expect((await app.scanRoutes()).map((route) => route.path)).toEqual(["/"])
+
+      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      expect(manifest).toContain('{ path: "/", component: Page0 },')
+      expect(manifest).toContain('{ path: "/agents", component: BuiltInPage0 },')
+      expect(manifest).toContain('{ path: "/agents/new/:agentId", component: BuiltInPage1 },')
+      expect(manifest).toContain('{ path: "/agents/:threadId", component: BuiltInPage2 },')
+
+      const main = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
+      expect(main).toContain('import "./agent-ui.css"')
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
+
+  test("project-owned agent pages override the default agent routes", async () => {
+    await mkdir(join(tempRoot, "app", "agents", "new", "[agentId]"), { recursive: true })
+    await mkdir(join(tempRoot, "app", "agents", "[threadId]"), { recursive: true })
+    await writeFile(
+      join(tempRoot, "app", "agents", "page.tsx"),
+      "export default function Agents() { return null }\n"
+    )
+    await writeFile(
+      join(tempRoot, "app", "agents", "new", "[agentId]", "page.tsx"),
+      "export default function NewAgentChat() { return null }\n"
+    )
+    await writeFile(
+      join(tempRoot, "app", "agents", "[threadId]", "page.tsx"),
+      "export default function AgentThread() { return null }\n"
+    )
+
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      authEnabled: false,
+    })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      const manifest = await readFile(join(tempRoot, ".sixb", "generated", "routes.ts"), "utf-8")
+      expect(manifest).toContain('{ path: "/agents", component: Page')
+      expect(manifest).toContain('{ path: "/agents/new/:agentId", component: Page')
+      expect(manifest).toContain('{ path: "/agents/:threadId", component: Page')
+      expect(manifest).not.toContain("@sixb/app/agents")
+      expect(await Bun.file(join(tempRoot, ".sixb", "generated", "agent-ui.css")).exists()).toBe(
+        false
+      )
+    } finally {
+      await server.stop()
+    }
+  }, 30_000)
 })

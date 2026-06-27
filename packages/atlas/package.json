@@ -19,6 +19,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
+    "@sixb/agent-ui": "workspace:*",
     "@sixb/app": "workspace:*",
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",

@@ -1,8 +1,8 @@
 import { watch } from "node:fs"
-import { access, cp } from "node:fs/promises"
-import { isAbsolute, join, normalize, relative, resolve } from "node:path"
+import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { type BuildAppResult, buildApp } from "./build"
-import { generateAppEntry, generateRouteManifest } from "./codegen"
+import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, scanPages } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
@@ -16,6 +16,7 @@ export interface CreateCustomAppOptions {
   apiBaseUrl?: string
   audience?: string
   authEnabled?: boolean
+  agentRoutes?: boolean
 }
 
 export interface CustomAppDevOptions {
@@ -53,6 +54,10 @@ export interface CustomAppInstance {
 
 type BunServeRoutes = NonNullable<Parameters<typeof Bun.serve>[0]["routes"]>
 type BunServeRoute = BunServeRoutes[string]
+const packageRoot = resolve(import.meta.dir, "..")
+const builtInAgentRouteModule = "@sixb/app/agents"
+const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:threadId"] as const
+const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
 
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
@@ -64,6 +69,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   const apiBaseUrl = options.apiBaseUrl
   const audience = options.audience ?? "app"
   const authEnabled = options.authEnabled ?? true
+  const agentRoutesEnabled = options.agentRoutes ?? true
 
   async function scanRoutes(): Promise<PageRoute[]> {
     if (!(await pathExists(appDir))) {
@@ -74,27 +80,127 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   }
 
   let tailwindCompiler: TailwindCssCompiler | null = null
+  let tailwindCompilerKey: string | null = null
+  let builtInAgentCssCompiler: TailwindCssCompiler | null = null
 
   // `app/globals.css` is source. When it uses Tailwind, compile it to
   // `.sixb/generated/app.css` and bundle that; plain CSS bundles as-is. This
   // runs in both dev and build, so `sixb build` alone always produces fresh CSS.
-  async function prepareStylesheet(): Promise<CustomAppStylesheet> {
-    const stylesheet = await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
+  async function prepareStylesheet(stylesheet?: CustomAppStylesheet): Promise<CustomAppStylesheet> {
+    stylesheet ??= await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
     if (stylesheet.kind !== "tailwind") {
       return stylesheet
     }
 
-    tailwindCompiler ??= createTailwindCssCompiler({
-      inputPath: stylesheet.sourcePath,
-      outputPath: stylesheet.outputPath,
-      // Scope Tailwind's automatic source detection to app/ so it never walks
-      // vendor/ or unrelated trees; resolve the CLI from the project's deps.
-      cwd: appDir,
-      resolveFrom: rootDir,
+    await compileAppTailwindStylesheet(stylesheet.sourcePath, stylesheet.outputPath)
+    return stylesheet
+  }
+
+  async function compileAppTailwindStylesheet(
+    inputPath: string,
+    outputPath: string
+  ): Promise<void> {
+    const key = `${inputPath}\0${outputPath}`
+    if (tailwindCompilerKey !== key) {
+      await tailwindCompiler?.stop()
+      tailwindCompiler = createTailwindCssCompiler({
+        inputPath,
+        outputPath,
+        // Scope Tailwind's automatic source detection to app/ so it never walks
+        // vendor/ or unrelated trees; resolve the CLI from the project's deps.
+        cwd: appDir,
+        resolveFrom: rootDir,
+        label: "[SixbCustomApp]",
+      })
+      tailwindCompilerKey = key
+    }
+
+    const compiler = tailwindCompiler
+    if (!compiler) {
+      throw new Error("[SixbCustomApp] Tailwind CSS compiler was not initialized")
+    }
+
+    await compiler.compile()
+  }
+
+  async function prepareCombinedBuiltInAgentStylesheet(
+    stylesheet: Extract<CustomAppStylesheet, { kind: "tailwind" }>
+  ): Promise<string> {
+    const inputPath = join(generatedDir, "app.input.css")
+    const uiGlobalsPath = Bun.resolveSync("@sixb/ui/globals.css", packageRoot)
+    const agentUiGlobalsPath = Bun.resolveSync("@sixb/agent-ui/globals.css", packageRoot)
+    await writeFileIfChanged(
+      inputPath,
+      [
+        `@import ${JSON.stringify(uiGlobalsPath)};`,
+        `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
+        `@import ${JSON.stringify(stylesheet.sourcePath)};`,
+        `@import ${JSON.stringify(agentUiGlobalsPath)};`,
+        "",
+      ].join("\n")
+    )
+
+    await compileAppTailwindStylesheet(inputPath, stylesheet.outputPath)
+    return stylesheet.outputPath
+  }
+
+  async function prepareStylesheets(builtInRoutes: readonly BuiltInRouteManifestEntry[]): Promise<{
+    stylesheetPath: string | null
+    frameworkStylesheetPaths: readonly string[]
+  }> {
+    const stylesheet = await resolveCustomAppStylesheet({ appDir, generatedDir, rootDir })
+
+    if (stylesheet.kind === "tailwind" && builtInRoutes.length > 0) {
+      return {
+        stylesheetPath: await prepareCombinedBuiltInAgentStylesheet(stylesheet),
+        frameworkStylesheetPaths: [],
+      }
+    }
+
+    const preparedStylesheet = await prepareStylesheet(stylesheet)
+    const builtInAgentStylesheetPath = await prepareBuiltInAgentStylesheet(builtInRoutes)
+
+    return {
+      frameworkStylesheetPaths: builtInAgentStylesheetPath ? [builtInAgentStylesheetPath] : [],
+      stylesheetPath:
+        preparedStylesheet.kind === "none"
+          ? null
+          : preparedStylesheet.kind === "static"
+            ? preparedStylesheet.path
+            : preparedStylesheet.outputPath,
+    }
+  }
+
+  async function prepareBuiltInAgentStylesheet(
+    builtInRoutes: readonly BuiltInRouteManifestEntry[]
+  ): Promise<string | null> {
+    if (builtInRoutes.length === 0) {
+      return null
+    }
+
+    const inputPath = join(generatedDir, "agent-ui.input.css")
+    const outputPath = join(generatedDir, "agent-ui.css")
+    const uiGlobalsPath = Bun.resolveSync("@sixb/ui/globals.css", packageRoot)
+    const agentUiGlobalsPath = Bun.resolveSync("@sixb/agent-ui/globals.css", packageRoot)
+    await writeFileIfChanged(
+      inputPath,
+      [
+        `@import ${JSON.stringify(uiGlobalsPath)};`,
+        `@source ${JSON.stringify(builtInAgentRouteSourcePath)};`,
+        `@import ${JSON.stringify(agentUiGlobalsPath)};`,
+        "",
+      ].join("\n")
+    )
+
+    builtInAgentCssCompiler ??= createTailwindCssCompiler({
+      inputPath,
+      outputPath,
+      cwd: packageRoot,
+      resolveFrom: packageRoot,
       label: "[SixbCustomApp]",
     })
-    await tailwindCompiler.compile()
-    return stylesheet
+    await builtInAgentCssCompiler.compile()
+    return outputPath
   }
 
   async function prepareGeneratedApp(): Promise<{ htmlPath: string; routes: PageRoute[] }> {
@@ -103,19 +209,16 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
     }
 
-    const stylesheet = await prepareStylesheet()
-    await generateRouteManifest(routes, generatedDir)
+    const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
+    const stylesheets = await prepareStylesheets(builtInRoutes)
+    await generateRouteManifest(routes, generatedDir, { builtInRoutes })
     const { htmlPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
       authEnabled,
       appDir,
-      stylesheetPath:
-        stylesheet.kind === "none"
-          ? null
-          : stylesheet.kind === "static"
-            ? stylesheet.path
-            : stylesheet.outputPath,
+      frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
+      stylesheetPath: stylesheets.stylesheetPath,
     })
     return { htmlPath, routes }
   }
@@ -134,19 +237,21 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath } = await prepareGeneratedApp()
-      const htmlModule = await import(htmlPath)
+      let htmlBundle = await importHtmlBundle(htmlPath)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
-      const server = Bun.serve({
-        port,
-        hostname: host,
-        development: true,
-        routes: {
-          ...publicRoutes,
-          ...reservedSixbRoutes(),
-          "/": htmlBundleRoute(htmlModule.default),
-          "/*": htmlBundleRoute(htmlModule.default),
-        },
-      } as Parameters<typeof Bun.serve>[0])
+      const serveOptions = (bundle: Bun.HTMLBundle) =>
+        ({
+          port,
+          hostname: host,
+          development: true,
+          routes: {
+            ...publicRoutes,
+            ...reservedSixbRoutes(),
+            "/": htmlBundleRoute(bundle),
+            "/*": htmlBundleRoute(bundle),
+          },
+        }) as Parameters<typeof Bun.serve>[0]
+      const server = Bun.serve(serveOptions(htmlBundle))
 
       // .ts/.tsx edits can change Tailwind's scanned classes and .css edits
       // change the stylesheet source, so both regenerate the entry and
@@ -161,7 +266,11 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         }
         rebuildTimer = setTimeout(() => {
           rebuildTimer = null
-          prepareGeneratedApp().catch((error) => {
+          void (async () => {
+            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            htmlBundle = await importHtmlBundle(nextHtmlPath)
+            server.reload(serveOptions(htmlBundle))
+          })().catch((error) => {
             // Keep serving the last good build, but tell the user why styles
             // or routes are stale instead of failing silently.
             const message = error instanceof Error ? error.message : String(error)
@@ -183,6 +292,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           }
           watcher.close()
           await tailwindCompiler?.stop()
+          await builtInAgentCssCompiler?.stop()
           server.stop(true)
         },
       }
@@ -288,6 +398,40 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+function builtInAgentRoutesFor(routes: readonly PageRoute[]): BuiltInRouteManifestEntry[] {
+  const projectRoutePaths = new Set(routes.map((route) => route.path))
+
+  return builtInAgentRoutePaths
+    .filter((path) => !projectRoutePaths.has(path))
+    .map((path) => ({
+      path,
+      moduleSpecifier: builtInAgentRouteModule,
+    }))
+}
+
+async function writeFileIfChanged(path: string, content: string): Promise<void> {
+  try {
+    if ((await readFile(path, "utf-8")) === content) {
+      return
+    }
+  } catch (error) {
+    if (!isFileNotFoundError(error)) {
+      throw error
+    }
+  }
+
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, content, "utf-8")
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as Error & { readonly code?: unknown }).code === "ENOENT"
+  )
 }
 
 async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
@@ -502,6 +646,11 @@ function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute
     DELETE: handler,
     OPTIONS: handler,
   } as unknown as BunServeRoute
+}
+
+async function importHtmlBundle(htmlPath: string): Promise<Bun.HTMLBundle> {
+  const htmlModule = (await import(htmlPath)) as { default: Bun.HTMLBundle }
+  return htmlModule.default
 }
 
 function htmlBundleRoute(bundle: Bun.HTMLBundle): BunServeRoute {

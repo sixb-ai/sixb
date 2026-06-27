@@ -16,6 +16,9 @@
   "include": ["src/**/*"],
   "references": [
     {
+      "path": "../agent-ui/tsconfig.build.json"
+    },
+    {
       "path": "../app/tsconfig.build.json"
     },
     {

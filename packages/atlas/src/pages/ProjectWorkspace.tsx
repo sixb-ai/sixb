@@ -367,6 +367,7 @@ export function ProjectWorkspace() {
       <Route path="actions" element={<ActionsPage />} />
       <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
       <Route path="agents" element={<AgentsPage />} />
+      <Route path="agents/new/:agentId" element={<AgentsPage />} />
       <Route path="agents/:threadId" element={<AgentsPage />} />
       <Route element={<WorkflowLiveUpdatesBoundary />}>
         <Route path="workflows" element={<WorkflowsPage />} />

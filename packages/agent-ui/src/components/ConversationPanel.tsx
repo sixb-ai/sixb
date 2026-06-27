@@ -6,10 +6,10 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
+  Spinner,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronLeft, History, SquarePen } from "lucide-react"
-import { LoadingInline } from "../../../components/common"
 import { formatRelativeTime } from "../format"
 import type { LiveRunState } from "../liveRun"
 import type { Agent, AgentMessage, AgentThread } from "../types"
@@ -220,6 +220,15 @@ function Welcome({ agent }: { agent: Agent | undefined }) {
           <p className="mx-auto max-w-md text-sm text-muted-foreground">{agent.description}</p>
         ) : null}
       </div>
+    </div>
+  )
+}
+
+function LoadingInline({ label }: { label: string }) {
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <Spinner className="size-4" />
+      <span className="text-sm">{label}</span>
     </div>
   )
 }

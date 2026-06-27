@@ -1,6 +1,7 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertTriangle, ChevronRight, Wrench } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
 import type { LivePart } from "../liveRun"
 import type { AgentMessagePart } from "../types"
 
@@ -107,7 +108,7 @@ export function AssistantBody({ parts }: { parts: readonly NormalizedPart[] }) {
   })
   flushText("text-final")
 
-  return <div className="flex flex-col gap-2">{blocks}</div>
+  return <div className="flex flex-col gap-3">{blocks}</div>
 }
 
 function TextBlock({ text }: { text: string }) {
@@ -115,18 +116,76 @@ function TextBlock({ text }: { text: string }) {
 }
 
 function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
+  const [open, setOpen] = useState(streaming)
+  const wasStreamingRef = useRef(streaming)
+
+  useEffect(() => {
+    if (streaming && !wasStreamingRef.current) {
+      setOpen(true)
+    } else if (!streaming && wasStreamingRef.current) {
+      setOpen(false)
+    }
+
+    wasStreamingRef.current = streaming
+  }, [streaming])
+
   return (
-    <Collapsible defaultOpen={streaming} className="w-fit max-w-full">
-      <CollapsibleTrigger className="group flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-        <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+    <Collapsible open={open} onOpenChange={setOpen} className="w-fit max-w-full">
+      <CollapsibleTrigger className="group mb-1 flex items-center gap-1.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground">
         <span className={cn(streaming && "shimmer")}>{streaming ? "Reasoning…" : "Reasoning"}</span>
+        <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1.5 ml-1.5 whitespace-pre-wrap border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
-          {text}
-        </div>
+        <ReasoningPreview text={text} streaming={streaming} />
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+function ReasoningPreview({ text, streaming }: { text: string; streaming: boolean }) {
+  const viewportRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
+  const [showTopFade, setShowTopFade] = useState(false)
+  const textLength = text.length
+
+  useEffect(() => {
+    if (textLength === 0) {
+      setShowTopFade(false)
+      return
+    }
+
+    const viewport = viewportRef.current
+    if (!viewport || !streaming || !stickToBottomRef.current) {
+      return
+    }
+
+    const frame = requestAnimationFrame(() => {
+      viewport.scrollTop = viewport.scrollHeight
+      setShowTopFade(viewport.scrollTop > 4)
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [streaming, textLength])
+
+  return (
+    <div className="relative mt-1.5 ml-1.5 max-w-full border-l-2 border-border pl-3">
+      {showTopFade ? (
+        <div className="pointer-events-none absolute top-0 right-0 left-3 z-10 h-7 bg-gradient-to-b from-background via-background/85 to-transparent" />
+      ) : null}
+      <div
+        ref={viewportRef}
+        className="scrollbar-thin max-h-52 overflow-y-auto pr-3 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground overscroll-contain sm:max-h-64"
+        onScroll={(event) => {
+          const viewport = event.currentTarget
+          const distanceFromBottom =
+            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
+          stickToBottomRef.current = distanceFromBottom < 24
+          setShowTopFade(viewport.scrollTop > 4)
+        }}
+      >
+        {text}
+      </div>
+    </div>
   )
 }
 

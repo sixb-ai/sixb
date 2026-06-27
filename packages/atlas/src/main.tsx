@@ -16,33 +16,6 @@ import "../.sixb/ui.css"
 let canRenderApp = false
 let browserClient: ReturnType<typeof configureSixbBrowserClient> | null = null
 
-// The streaming agent transcript (and Radix/cmdk popovers) drive ResizeObserver in a way that
-// surfaces the benign "ResizeObserver loop completed with undelivered notifications" message. It is
-// not a real error, but the dev overlay still shows it. Defer observer callbacks to the next frame
-// so the synchronous resize→layout→resize loop never forms — fixing it at the source rather than
-// masking errors after the fact.
-const NativeResizeObserver = globalThis.ResizeObserver
-if (typeof NativeResizeObserver === "function") {
-  globalThis.ResizeObserver = class extends NativeResizeObserver {
-    constructor(callback: ResizeObserverCallback) {
-      let frame = 0
-      super((entries, observer) => {
-        globalThis.cancelAnimationFrame(frame)
-        frame = globalThis.requestAnimationFrame(() => callback(entries, observer))
-      })
-    }
-  }
-}
-
-// Belt-and-suspenders: if a ResizeObserver loop notification still slips through, keep it off the
-// console/overlay since it is benign.
-window.addEventListener("error", (event) => {
-  if (event.message.startsWith("ResizeObserver loop")) {
-    event.stopImmediatePropagation()
-    event.preventDefault()
-  }
-})
-
 interface BuiltInUiHotData {
   root?: Root
   queryClient?: QueryClient
