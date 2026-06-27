@@ -1,4 +1,9 @@
-import { type AuthorizationContext, canViewEvent, type DomainEvent } from "@sixb/core"
+import {
+  type AuthorizationContext,
+  canViewEvent,
+  type DomainEvent,
+  scopeKeysForEvent,
+} from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../schemas/events"
@@ -215,11 +220,9 @@ function wsAuthz(ws: object): AuthorizationContext | null {
 }
 
 /**
- * Narrow an event to an optional object scope. The scope keys are topic-aware:
- * objects/telemetry carry `objectTypeId`, links carry it on the source side;
- * the instance id is `primaryId` (objects), `objectId` (telemetry) or
- * `sourceId` (links). Events without those keys (e.g. workflows) never match a
- * scoped subscription, mirroring the client-side predicate.
+ * Narrow an event to an optional object scope. Scope keys are resolved by core's
+ * `scopeKeysForEvent` (the same extraction the client predicate uses), so events
+ * without those keys (e.g. workflows) never match a scoped subscription.
  */
 function eventMatchesScope(
   event: DomainEvent,
@@ -230,19 +233,11 @@ function eventMatchesScope(
     return true
   }
 
-  const payload = event.payload as Record<string, unknown>
-  const eventObjectTypeId = event.topic === "links" ? payload.sourceTypeId : payload.objectTypeId
-  if (objectTypeId !== undefined && eventObjectTypeId !== objectTypeId) {
+  const scope = scopeKeysForEvent(event)
+  if (objectTypeId !== undefined && scope.objectTypeId !== objectTypeId) {
     return false
   }
-
-  const eventPrimaryId =
-    event.topic === "telemetry"
-      ? payload.objectId
-      : event.topic === "links"
-        ? payload.sourceId
-        : payload.primaryId
-  if (primaryId !== undefined && eventPrimaryId !== primaryId) {
+  if (primaryId !== undefined && scope.primaryId !== primaryId) {
     return false
   }
 

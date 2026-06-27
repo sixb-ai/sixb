@@ -27,9 +27,9 @@ export interface UseEventsOptions {
 }
 
 /**
- * Subscribe to a builder's events. Replaces `useSixbEvents`: `onEvent` is kept
- * in a ref so changing the handler never tears down the socket, and the
- * subscription is rebuilt only when the filter IR (or transport options) change.
+ * Subscribe to a builder's events. `onEvent` is kept in a ref so changing the
+ * handler never tears down the socket, and the subscription is rebuilt only when
+ * the filter IR (or transport options) change.
  */
 export function useEvents<TEvent extends SixbEvent>(
   builder: SubscribableEvents<TEvent>,
@@ -99,6 +99,15 @@ export function useLatest(
   options?: UseEventsOptions
 ): { values: Record<string, TelemetryUpdate>; connected: boolean } {
   const [values, setValues] = useState<Record<string, TelemetryUpdate>>({})
+  const irKey = JSON.stringify(builder.ir)
+  const enabled = options?.enabled ?? true
+
+  // Drop the accumulator when the scope changes or the hook is disabled, so a
+  // re-scoped builder never shows stale "live" values from the previous scope.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: irKey is the reactive proxy for builder.ir
+  useEffect(() => {
+    setValues({})
+  }, [irKey, enabled])
 
   const { connected } = useEvents(
     builder,
@@ -118,6 +127,15 @@ export function useLatestByObject(
   options?: UseEventsOptions
 ): { byObject: Record<string, Record<string, TelemetryUpdate>>; connected: boolean } {
   const [byObject, setByObject] = useState<Record<string, Record<string, TelemetryUpdate>>>({})
+  const irKey = JSON.stringify(builder.ir)
+  const enabled = options?.enabled ?? true
+
+  // Drop the accumulator when the scope changes or the hook is disabled; without
+  // this `byObject` grows unbounded across navigation and keeps stale objects.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: irKey is the reactive proxy for builder.ir
+  useEffect(() => {
+    setByObject({})
+  }, [irKey, enabled])
 
   const { connected } = useEvents(
     builder,
@@ -175,6 +193,8 @@ export function useInvalidateOnEvent<TEvent extends SixbEvent>(
       }
     })
   }, [queryClient])
+  const flushRef = useRef(flush)
+  flushRef.current = flush
 
   const state = useEvents(
     builder,
@@ -191,10 +211,10 @@ export function useInvalidateOnEvent<TEvent extends SixbEvent>(
     options
   )
 
+  // Flush the pending batch on unmount so an in-flight debounce window does not
+  // silently drop its last invalidations (`flush` also clears the timer).
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
+    return () => flushRef.current()
   }, [])
 
   return state

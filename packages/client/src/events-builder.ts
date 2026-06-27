@@ -10,7 +10,7 @@
  * the live stream. The builder is browser-safe and React-free — hooks live in
  * `@sixb/client/hooks`.
  */
-import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
+import { type InferObjectProperties, type InferPropertyValue, scopeKeysForEvent } from "@sixb/core"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
 import type {
   SixbEvent,
@@ -112,10 +112,12 @@ export interface EventsBuilder<
   /** Object deletions. */
   deleted(): EventsBuilder<TObjectType, SixbEventOfType<"object.deleted">>
 
-  /** Outgoing link changes, optionally narrowed to one link. */
-  linked<TToken extends LinkToken<TObjectType["id"]> | undefined = undefined>(
-    link?: TToken
-  ): EventsBuilder<TObjectType, SixbEventOfTopic<"links">>
+  /**
+   * Outgoing link changes, optionally scoped to one link. The token validates
+   * the call against the object type's links; it does not narrow the payload
+   * (every link event carries the same shape).
+   */
+  linked(link?: LinkToken<TObjectType["id"]>): EventsBuilder<TObjectType, SixbEventOfTopic<"links">>
 
   /** Scope to a single object instance (orthogonal to the channel). */
   object(primaryId: string): EventsBuilder<TObjectType, TEvent>
@@ -170,9 +172,9 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
       const socket = createEventSocket({
         topic: filter.topic,
         types: filter.types,
-        // Server-side scope (slice B); the client predicate still refines on
-        // propertyId/linkId/runId and is the fallback when the server ignores
-        // these fields.
+        // Coarse object scope is filtered server-side; the client predicate
+        // still refines on propertyId/linkId/runId and is the fallback when the
+        // server ignores these fields.
         objectTypeId: filter.objectTypeId,
         primaryId: filter.primaryId,
         afterCursor: subscribeOptions?.afterCursor,
@@ -192,42 +194,27 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
 }
 
 /**
- * Pure predicate that narrows the live stream to the builder's IR. Reads the
- * topic-specific payload keys directly: objects use `primaryId`, telemetry uses
- * `objectId`, links use the source side.
+ * Pure predicate that narrows the live stream to the builder's IR. Scope keys
+ * are resolved by core's `scopeKeysForEvent` — the same extraction the server
+ * poll loop uses — so client and server can never drift on what a topic's
+ * identity fields are.
  */
 export function buildEventPredicate(filter: EventsFilterIR): (event: SixbEvent) => boolean {
   return (event) => {
     if (filter.topic && event.topic !== filter.topic) return false
     if (filter.types && filter.types.length > 0 && !filter.types.includes(event.type)) return false
 
-    const payload = event.payload as Record<string, unknown>
+    const scope = scopeKeysForEvent(event)
 
-    if (
-      filter.objectTypeId !== undefined &&
-      eventObjectTypeId(event, payload) !== filter.objectTypeId
-    ) {
+    if (filter.objectTypeId !== undefined && scope.objectTypeId !== filter.objectTypeId)
       return false
-    }
-    if (filter.primaryId !== undefined && eventPrimaryId(event, payload) !== filter.primaryId) {
-      return false
-    }
-    if (filter.propertyId !== undefined && payload.propertyId !== filter.propertyId) return false
-    if (filter.linkId !== undefined && payload.linkId !== filter.linkId) return false
-    if (filter.runId !== undefined && payload.runId !== filter.runId) return false
+    if (filter.primaryId !== undefined && scope.primaryId !== filter.primaryId) return false
+    if (filter.propertyId !== undefined && scope.propertyId !== filter.propertyId) return false
+    if (filter.linkId !== undefined && scope.linkId !== filter.linkId) return false
+    if (filter.runId !== undefined && scope.runId !== filter.runId) return false
 
     return true
   }
-}
-
-function eventObjectTypeId(event: SixbEvent, payload: Record<string, unknown>): unknown {
-  return event.topic === "links" ? payload.sourceTypeId : payload.objectTypeId
-}
-
-function eventPrimaryId(event: SixbEvent, payload: Record<string, unknown>): unknown {
-  if (event.topic === "telemetry") return payload.objectId
-  if (event.topic === "links") return payload.sourceId
-  return payload.primaryId
 }
 
 // ── Runtime backing ───────────────────────────────────────────────────────────
@@ -315,7 +302,7 @@ export interface SixbEventsApi {
     options?: SixbEventsClientOptions
   ): EventsBuilder<TObjectType>
 
-  /** Every event (the `useSixbEvents()` default). */
+  /** Every event (the unscoped catch-all stream). */
   all(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEvent>
   objects(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"objects">>
   telemetry(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"telemetry">>

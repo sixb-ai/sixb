@@ -73,7 +73,9 @@ events(Sensor)
     void primaryId
   })
 
-// `.linked(token)` → link payload typed.
+// `.linked(token)` validates the token against the type's links and yields the
+// links event. The token does NOT narrow the payload — every link event shares
+// the same shape — so this asserts the event type, not a per-link payload.
 events(Sensor)
   .linked(Sensor.l.zone)
   .subscribe((event) => {
@@ -81,6 +83,9 @@ events(Sensor)
     const sourceId: string = event.payload.sourceId
     void [linkId, sourceId]
   })
+
+// @ts-expect-error — `.linked` requires a link token, not a property token.
+events(Sensor).linked(Sensor.p.indoorTemperature)
 
 // `.object(key)` is orthogonal — it preserves the channel's event type, in
 // either order.

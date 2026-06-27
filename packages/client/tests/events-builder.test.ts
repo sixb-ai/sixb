@@ -228,7 +228,7 @@ describe("builder subscribe over the transport", () => {
     expect(subscribeMessage).toMatchObject({
       type: "subscribe",
       topic: "telemetry",
-      // Object scope is pushed to the server (slice B).
+      // Object scope is pushed to the server.
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
     })

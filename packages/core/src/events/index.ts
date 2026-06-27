@@ -27,6 +27,8 @@ export {
   type EventsRuntimeOptions,
   type EventsSubscribeInput,
 } from "./runtime"
+export type { EventScopeKeys } from "./scope"
+export { scopeKeysForEvent } from "./scope"
 export { toStoredEvent } from "./toStoredEvent"
 export type {
   ActionCompletedEvent,

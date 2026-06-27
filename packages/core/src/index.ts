@@ -282,6 +282,7 @@ export type {
   EventDefinitionGroup,
   EventDefinitionMap,
   EventEnvelope,
+  EventScopeKeys,
   EventsAppendInput,
   EventsReadInput,
   EventsRuntimeOptions,
@@ -349,6 +350,7 @@ export {
   getEventTopic,
   isDomainEventType,
   resolveEventStorage,
+  scopeKeysForEvent,
   toStoredEvent,
 } from "./events"
 

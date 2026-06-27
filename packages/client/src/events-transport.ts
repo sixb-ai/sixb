@@ -1,8 +1,8 @@
 /**
  * React-free event stream transport (`@sixb/client/events`).
  *
- * `createEventSocket` owns the WebSocket lifecycle the `useSixbEvents` hook used
- * to inline: connect, subscribe, advance the cursor, reconnect, and tear down.
+ * `createEventSocket` owns the full WebSocket lifecycle: connect, subscribe,
+ * advance the cursor, reconnect, and tear down.
  * It surfaces connection status through an `onStateChange` callback instead of
  * React state, so the same transport backs the builder's `.subscribe()` terminal
  * and the hooks alike. React is an optional peer of `@sixb/client`; nothing here
@@ -200,10 +200,6 @@ export function parseEventStreamMessage(value: unknown): EventStreamServerMessag
   }
 
   return null
-}
-
-export function eventTypesFromKey(typesKey: string): readonly SixbEventType[] | undefined {
-  return typesKey ? (typesKey.split("\0") as SixbEventType[]) : undefined
 }
 
 export function matchesSubscription(

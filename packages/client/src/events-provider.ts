@@ -15,6 +15,13 @@ import { createEventSocket, type EventSocket, type EventSocketState } from "./ev
 
 const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, error: null }
 
+/**
+ * How long to keep an idle shared socket alive after the last subscriber leaves.
+ * A quick unmount→remount (route change, StrictMode double-invoke) reuses the
+ * live socket instead of dropping and reopening it.
+ */
+const DEFAULT_CLOSE_DELAY_MS = 3000
+
 export interface EventsRegistrationOptions {
   readonly onError?: (error: string) => void
   readonly onStateChange?: (state: EventSocketState) => void
@@ -44,18 +51,48 @@ export interface ManagedRegistry extends EventsRegistry {
  * Build a registry backed by one lazily-opened socket. The socket subscribes
  * broadly (no topic/type/scope) so adding or removing a subscriber never forces
  * a re-subscribe — which would otherwise drop events across the reconnect — and
- * each subscriber's predicate narrows the shared stream.
+ * each subscriber's predicate narrows the shared stream client-side.
+ *
+ * Trade-off: a broad subscription means the server-side object-scope filtering
+ * (by `objectTypeId`/`primaryId`) is bypassed under the provider — the socket
+ * receives the full authorized stream and filters in the browser. Per-event
+ * visibility is still enforced server-side (`canViewEvent`); only the
+ * coarse-scope narrowing moves client-side. The standalone path (no provider)
+ * still pushes object scope to the server. Per-subscription server-side scoping
+ * on the shared socket is not implemented.
  */
-export function createEventsRegistry(options: { baseUrl?: string } = {}): ManagedRegistry {
+export function createEventsRegistry(
+  options: { baseUrl?: string; closeDelayMs?: number } = {}
+): ManagedRegistry {
   const subscribers = new Set<Subscriber>()
+  const closeDelayMs = options.closeDelayMs ?? DEFAULT_CLOSE_DELAY_MS
   let socket: EventSocket | null = null
   let state: EventSocketState = DISCONNECTED
+  // Carried across a true close→reopen so the new socket resumes after the last
+  // event seen instead of restarting from "now" and losing the gap.
+  let latestCursor: string | undefined
+  let closeTimer: ReturnType<typeof setTimeout> | null = null
+
+  const cancelPendingClose = () => {
+    if (closeTimer) {
+      clearTimeout(closeTimer)
+      closeTimer = null
+    }
+  }
+
+  const teardown = () => {
+    socket?.close()
+    socket = null
+    state = DISCONNECTED
+  }
 
   const open = () => {
     if (socket) return
     socket = createEventSocket({
       baseUrl: options.baseUrl,
+      afterCursor: latestCursor,
       onEvent: (event) => {
+        latestCursor = event.cursor
         for (const subscriber of subscribers) {
           if (subscriber.matches(event)) subscriber.handler(event)
         }
@@ -72,6 +109,7 @@ export function createEventsRegistry(options: { baseUrl?: string } = {}): Manage
 
   return {
     register(filter, handler, registrationOptions) {
+      cancelPendingClose()
       const subscriber: Subscriber = {
         matches: buildEventPredicate(filter),
         handler,
@@ -84,18 +122,20 @@ export function createEventsRegistry(options: { baseUrl?: string } = {}): Manage
 
       return () => {
         subscribers.delete(subscriber)
-        if (subscribers.size === 0 && socket) {
-          socket.close()
-          socket = null
-          state = DISCONNECTED
+        if (subscribers.size === 0) {
+          // Defer teardown: a quick unmount→remount reuses the live socket.
+          cancelPendingClose()
+          closeTimer = setTimeout(() => {
+            closeTimer = null
+            teardown()
+          }, closeDelayMs)
         }
       }
     },
     close() {
-      socket?.close()
-      socket = null
-      state = DISCONNECTED
+      cancelPendingClose()
       subscribers.clear()
+      teardown()
     },
   }
 }
