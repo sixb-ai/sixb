@@ -8,6 +8,7 @@ import {
   AgentDefinitionError,
   createSixb,
   defineAgent,
+  defineGroup,
   defineObjectType,
   isAgentDefinition,
   prop,
@@ -20,6 +21,7 @@ const tempRoots = new Set<string>()
 
 // PR1 never reads the model, so a stub conforming to the type is enough.
 const model = {} as LanguageModelV3
+const agentRuntime = defineGroup("agent-runtime", { label: "Agent runtime" })
 
 const Room = defineObjectType({
   id: "Room",
@@ -75,20 +77,23 @@ describe("defineAgent", () => {
     expect(agent.id).toBe("sales")
     expect(agent.name).toBe("Sales Assistant")
     expect(agent.instructions).toBe("Assist.")
+    expect(agent.groupIds).toEqual([])
     expect(agent.description).toBeUndefined()
     expect(agent.loop).toBeUndefined()
   })
 
-  test("keeps description and loop when provided", () => {
+  test("keeps description, groups, and loop when provided", () => {
     const agent = defineAgent("sales", {
       name: "Sales Assistant",
       description: "Quotes and contacts.",
       model,
       instructions: "Assist.",
+      groups: [agentRuntime],
       loop: { stopWhen: { maxSteps: 16 } },
     })
 
     expect(agent.description).toBe("Quotes and contacts.")
+    expect(agent.groupIds).toEqual(["agent-runtime"])
     expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
   })
 
@@ -125,6 +130,26 @@ describe("defineAgent", () => {
         })
       ).toThrow(AgentDefinitionError)
     }
+  })
+
+  test("rejects invalid group definitions", () => {
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        groups: [{ kind: "not-a-group", id: "x" } as never],
+      })
+    ).toThrow(AgentDefinitionError)
+
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        groups: [agentRuntime, agentRuntime],
+      })
+    ).toThrow(AgentDefinitionError)
   })
 })
 
@@ -213,5 +238,44 @@ describe("agent discovery + registry", () => {
     await expect(
       createSixb({ projectRoot, ontologies: [Room], agents: [dup], ...createTestRuntimeDeps() })
     ).rejects.toThrow(RuntimeError)
+  })
+
+  test("rejects agents that reference unregistered execution groups", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const agent = defineAgent("ops", {
+      name: "Ops",
+      model,
+      instructions: "x",
+      groups: [agentRuntime],
+    })
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        agents: [agent],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(AgentDefinitionError)
+  })
+
+  test("accepts agents whose execution groups are registered", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const agent = defineAgent("ops", {
+      name: "Ops",
+      model,
+      instructions: "x",
+      groups: [agentRuntime],
+    })
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Room],
+      agents: [agent],
+      groups: [agentRuntime],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.agents.getById("ops")?.groupIds).toEqual(["agent-runtime"])
   })
 })

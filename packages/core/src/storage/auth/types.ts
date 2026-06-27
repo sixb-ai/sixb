@@ -3,7 +3,7 @@ import type { AccessTokenKind, AuthSessionAudience, Principal } from "../../auth
 export type UserStatus = "active" | "suspended"
 export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
-export type GroupMembershipSource = "invitation" | "manual"
+export type GroupMembershipSource = "invitation" | "manual" | "agent"
 export type AccessTokenSubjectType = "user" | "serviceAccount"
 
 export interface UserRecord {
@@ -232,6 +232,14 @@ export interface UpsertAuthServiceAccountGroupMembershipInput {
   readonly createdAt?: Date
 }
 
+export interface ReconcileAuthServiceAccountGroupMembershipsInput {
+  readonly projectId: string
+  readonly serviceAccountId: string
+  readonly groupIds: readonly string[]
+  readonly source: "agent"
+  readonly updatedAt?: Date
+}
+
 export interface CreateAuthSessionInput {
   readonly id: string
   readonly projectId: string
@@ -434,6 +442,9 @@ export interface AuthServiceAccountGroupMembershipStore {
   upsert(
     input: UpsertAuthServiceAccountGroupMembershipInput
   ): Promise<ServiceAccountGroupMembershipRecord>
+  reconcileForServiceAccount(
+    input: ReconcileAuthServiceAccountGroupMembershipsInput
+  ): Promise<readonly ServiceAccountGroupMembershipRecord[]>
   listForServiceAccount(params: {
     readonly projectId: string
     readonly serviceAccountId: string

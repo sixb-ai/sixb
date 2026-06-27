@@ -9,7 +9,7 @@
 import { ActionRegistry, ActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents"
-import { AgentsRuntime } from "../agents"
+import { AgentsRuntime, validateAgentGroupReferences } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -299,6 +299,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       }
       agentIds.add(agent.id)
     }
+    validateAgentGroupReferences(agents, this.security)
     this.agents = new AgentsRuntime(this.runtimeContext, agents)
 
     const { objectProjections, linkProjections, telemetryProjections } = categorizeProjections(

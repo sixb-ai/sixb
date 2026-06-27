@@ -2,14 +2,18 @@ import type {
   AgentMessagePart,
   AgentStorage,
   AgentsRuntime,
+  AuthStorage,
   EventsRuntime,
   Queues,
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
 
-// Keep root storage for transactions while making agent storage non-optional after context setup.
-export type AgentWorkerStorage = Storage & { readonly agents: AgentStorage }
+// Keep root storage for transactions while making worker-required stores non-optional after setup.
+export type AgentWorkerStorage = Storage & {
+  readonly agents: AgentStorage
+  readonly auth: AuthStorage
+}
 
 /**
  * The runtime surface the agent worker is constructed with (mirrors `ActionWorkerSixb`). `Sixb`

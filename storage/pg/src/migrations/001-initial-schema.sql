@@ -573,7 +573,7 @@ CREATE TABLE IF NOT EXISTS auth_service_account_group_memberships (
   project_id TEXT NOT NULL,
   service_account_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual')),
+  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual', 'agent')),
   created_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (project_id, service_account_id, group_id),
   FOREIGN KEY (project_id, service_account_id)
@@ -681,7 +681,7 @@ CREATE TABLE IF NOT EXISTS auth_group_memberships (
   project_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
-  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual')),
+  source TEXT NOT NULL CHECK (source IN ('invitation', 'manual', 'agent')),
   created_at TIMESTAMPTZ NOT NULL,
   PRIMARY KEY (project_id, user_id, group_id),
   FOREIGN KEY (project_id, user_id)

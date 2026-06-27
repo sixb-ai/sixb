@@ -737,6 +737,7 @@ export type {
   QueueActionRunInput,
   QueueWorkflowRunInput,
   ReclaimAgentRunInput,
+  ReconcileAuthServiceAccountGroupMembershipsInput,
   RecordActionCommitInput,
   RecordActionEffectsInput,
   RecordActionWritebackInput,

@@ -1,4 +1,5 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { GroupDefinition } from "../security"
 
 /**
  * Loop / stop controls for an agent run.
@@ -22,6 +23,7 @@ export interface DefineAgentConfig {
   readonly description?: string
   readonly model: LanguageModelV3
   readonly instructions: string
+  readonly groups?: readonly GroupDefinition[]
   readonly loop?: AgentLoopConfig
 }
 
@@ -40,5 +42,6 @@ export interface AgentDefinition<TId extends string = string> {
   readonly description?: string
   readonly model: LanguageModelV3
   readonly instructions: string
+  readonly groupIds: readonly string[]
   readonly loop?: AgentLoopConfig
 }
