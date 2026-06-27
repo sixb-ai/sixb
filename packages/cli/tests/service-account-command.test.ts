@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-const servers: Bun.Server[] = []
+const servers: Bun.Server<undefined>[] = []
 
 afterEach(() => {
   while (servers.length > 0) {
@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("sixb service-account command", () => {
   test("creates service accounts with SIXB_API_URL and SIXB_API_TOKEN", async () => {
-    let authorizationHeader: string | null = null
+    let authorizationHeader = null as string | null
     let requestedPath = ""
     let requestBody: unknown
     const server = Bun.serve({
@@ -87,7 +87,7 @@ describe("sixb service-account command", () => {
   })
 
   test("creates service-account tokens under one service account", async () => {
-    let authorizationHeader: string | null = null
+    let authorizationHeader = null as string | null
     let requestedPath = ""
     let requestBody: unknown
     const server = Bun.serve({

@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
-const servers: Bun.Server[] = []
+const servers: Bun.Server<undefined>[] = []
 
 afterEach(() => {
   while (servers.length > 0) {
@@ -13,7 +13,7 @@ afterEach(() => {
 
 describe("sixb token command", () => {
   test("lists tokens with SIXB_API_URL and SIXB_API_TOKEN", async () => {
-    let authorizationHeader: string | null = null
+    let authorizationHeader = null as string | null
     let requestedPath = ""
     const server = Bun.serve({
       hostname: "127.0.0.1",

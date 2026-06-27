@@ -162,9 +162,9 @@ describe("meta connector — instagram", () => {
   })
 
   test("rejects an empty ig user id before requesting", () => {
-    const promise = meta({ accessToken: "t" })
-      .connect(CONTEXT)
-      .then((client) => client.instagram("  "))
+    const promise = Promise.resolve(meta({ accessToken: "t" }).connect(CONTEXT)).then((client) =>
+      client.instagram("  ")
+    )
     expect(promise).rejects.toThrow("igUserId must not be empty")
   })
 })
