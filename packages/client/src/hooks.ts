@@ -18,11 +18,17 @@ import {
   toTelemetryHistoryWithRange,
 } from "./models"
 
+export * from "./agent-streams"
 export * from "./events"
 export * from "./events-hooks"
 export * from "./events-provider"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./query-hooks"
+export {
+  type UseAgentRunStreamOptions,
+  type UseAgentRunStreamResult,
+  useAgentRunStream,
+} from "./useAgentRunStream"
 
 type QueryKey = readonly [
   {

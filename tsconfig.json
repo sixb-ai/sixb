@@ -15,6 +15,7 @@
       "@sixb/broker-redis": ["./broker/redis/src/index.ts"],
       "@sixb/cli": ["./packages/cli/src/index.tsx"],
       "@sixb/client": ["./packages/client/src/index.ts"],
+      "@sixb/client/agent-streams": ["./packages/client/src/agent-streams.ts"],
       "@sixb/client/browser": ["./packages/client/src/browser.ts"],
       "@sixb/client/events": ["./packages/client/src/events.ts"],
       "@sixb/client/hooks": ["./packages/client/src/hooks.ts"],
@@ -29,6 +30,7 @@
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
+      "@sixb/core/agents/streams": ["./packages/core/src/agents/streams.ts"],
       "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
@@ -52,6 +54,7 @@
       "@sixb/ui/hooks/*.ts": ["./packages/ui/src/hooks/*.ts"],
       "@sixb/ui/hooks/*.tsx": ["./packages/ui/src/hooks/*.tsx"],
       "@sixb/ui/lib": ["./packages/ui/src/lib/index.ts"],
+      "@sixb/ui/lib/shiki": ["./packages/ui/src/lib/shiki.ts"],
       "@sixb/ui/lib/utils": ["./packages/ui/src/lib/utils.ts"],
       "@sixb/workflow-worker": ["./packages/workflow-worker/src/index.ts"]
     }

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
+  createSixbAgentsWebSocketUrl,
+  parseAgentRunStreamServerMessage,
+} from "../src/agent-streams"
+import {
   configureSixbBrowserClient,
   createSixbSignInUrl,
   type SixbBrowserRuntimeConfig,
@@ -30,6 +34,58 @@ describe("event websocket URLs", () => {
     expect(createSixbEventsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
       "wss://api.example.com/ws/events"
     )
+  })
+})
+
+describe("agent stream websocket helpers", () => {
+  test("defaults to the local Sixb API websocket origin", () => {
+    expect(createSixbAgentsWebSocketUrl()).toBe("ws://localhost:3002/ws/agents")
+  })
+
+  test("derives the agents websocket URL from an API base URL", () => {
+    expect(createSixbAgentsWebSocketUrl("http://localhost:3002/api")).toBe(
+      "ws://localhost:3002/ws/agents"
+    )
+    expect(createSixbAgentsWebSocketUrl("https://api.example.com/v1?ignored=true")).toBe(
+      "wss://api.example.com/ws/agents"
+    )
+  })
+
+  test("parses valid records while keeping UI chunks opaque", () => {
+    const parsed = parseAgentRunStreamServerMessage(
+      JSON.stringify({
+        type: "record",
+        record: {
+          streamId: "agents.runs.run_1",
+          cursor: "cursor_1",
+          name: "agent.ui.chunk",
+          key: "run_1",
+          publishedAt: "2026-06-27T16:00:00.000Z",
+          payload: {
+            schemaVersion: 1,
+            type: "agent.ui.chunk",
+            projectId: "project_1",
+            runId: "run_1",
+            threadId: "thread_1",
+            agentId: "agent_1",
+            attempt: 1,
+            occurredAt: "2026-06-27T16:00:00.000Z",
+            chunkIndex: 0,
+            chunk: { future: ["shape"] },
+          },
+        },
+      })
+    )
+
+    expect(parsed?.type).toBe("record")
+    expect(parsed?.type === "record" ? parsed.record.cursor : null).toBe("cursor_1")
+  })
+
+  test("drops malformed frames without throwing", () => {
+    expect(parseAgentRunStreamServerMessage("not json")).toBeNull()
+    expect(
+      parseAgentRunStreamServerMessage(JSON.stringify({ type: "record", record: {} }))
+    ).toBeNull()
   })
 })
 

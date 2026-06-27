@@ -71,6 +71,15 @@ import {
   AlertDialogTrigger,
   AlertTitle,
   AspectRatio,
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+  AttachmentTrigger,
   Avatar,
   AvatarFallback,
   AvatarImage,
@@ -82,6 +91,10 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
   BreadcrumbSeparator,
+  Bubble,
+  BubbleContent,
+  BubbleGroup,
+  BubbleReactions,
   Button,
   ButtonGroup,
   ButtonGroupSeparator,
@@ -198,6 +211,9 @@ import {
   Kbd,
   KbdGroup,
   Label,
+  Marker,
+  MarkerContent,
+  MarkerIcon,
   Menubar,
   MenubarContent,
   MenubarItem,
@@ -205,6 +221,12 @@ import {
   MenubarSeparator,
   MenubarShortcut,
   MenubarTrigger,
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
   MiniSparkline,
   NativeSelect,
   NativeSelectOptGroup,
@@ -343,6 +365,17 @@ function Block({ label, children }: { label: string; children: React.ReactNode }
   )
 }
 
+function Specimen({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      <div>{children}</div>
+    </div>
+  )
+}
+
 function ChartPreviewCard({
   title,
   description,
@@ -467,6 +500,16 @@ const RADIAL_CHART_CONFIG = {
 
 const COMMAND_PREVIEW_IDLE_VALUE = "__sixb_command_preview_idle__"
 
+const BUBBLE_VARIANTS = [
+  { variant: "default", label: "Default" },
+  { variant: "secondary", label: "Secondary" },
+  { variant: "tinted", label: "Tinted" },
+  { variant: "muted", label: "Muted" },
+  { variant: "outline", label: "Outline" },
+  { variant: "ghost", label: "Ghost" },
+  { variant: "destructive", label: "Destructive" },
+] as const
+
 function Showcase() {
   const [search, setSearch] = useState("")
   const [dataset, setDataset] = useState("erp.customers")
@@ -584,6 +627,180 @@ function Showcase() {
               <Badge variant="link">Link</Badge>
             </div>
           </Block>
+        </Section>
+
+        <Section
+          title="Agents Chat"
+          description="Conversation primitives composed into a live agent thread, with the bubble and attachment variant sets shown alongside."
+        >
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(19rem,1fr)]">
+            <Card className="gap-0 overflow-hidden p-0">
+              <div className="flex items-center gap-3 border-b border-border px-4 py-3">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+                  <Sparkles className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">invoices-analysis</p>
+                  <p className="truncate text-xs text-muted-foreground">Agent run · 6 steps</p>
+                </div>
+                <Badge variant="secondary" className="gap-1.5">
+                  <span className="size-1.5 animate-pulse rounded-full bg-foreground/60" />
+                  Streaming
+                </Badge>
+              </div>
+
+              <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+                <MessageScroller className="h-[440px] bg-card">
+                  <MessageScrollerViewport>
+                    <MessageScrollerContent className="p-4">
+                      <MessageScrollerItem messageId="thread-start" scrollAnchor>
+                        <Marker variant="separator">
+                          <MarkerContent>Run started · 2:14 PM</MarkerContent>
+                        </Marker>
+                      </MessageScrollerItem>
+
+                      <MessageScrollerItem messageId="user-request" scrollAnchor>
+                        <BubbleGroup className="items-end">
+                          <Bubble align="end">
+                            <BubbleContent>
+                              Check the latest invoice sync and tell me which accounts need review.
+                            </BubbleContent>
+                          </Bubble>
+                        </BubbleGroup>
+                      </MessageScrollerItem>
+
+                      <MessageScrollerItem messageId="step-inspect" scrollAnchor>
+                        <Marker>
+                          <MarkerIcon>
+                            <CheckCircle2 />
+                          </MarkerIcon>
+                          <MarkerContent>
+                            Inspected the latest sync · compared 12,904 rows
+                          </MarkerContent>
+                        </Marker>
+                      </MessageScrollerItem>
+
+                      <MessageScrollerItem messageId="assistant-plan" scrollAnchor>
+                        <BubbleGroup>
+                          <Bubble variant="secondary">
+                            <BubbleContent>
+                              I grouped the failed rows by owner. Two accounts need a manual check
+                              before the next projection run.
+                            </BubbleContent>
+                            <BubbleReactions>✓ 2</BubbleReactions>
+                          </Bubble>
+                        </BubbleGroup>
+                      </MessageScrollerItem>
+
+                      <MessageScrollerItem messageId="attachments" scrollAnchor>
+                        <AttachmentGroup>
+                          <Attachment state="done">
+                            <AttachmentMedia>
+                              <FileText />
+                            </AttachmentMedia>
+                            <AttachmentContent>
+                              <AttachmentTitle>invoice-review.csv</AttachmentTitle>
+                              <AttachmentDescription>18 KB · generated now</AttachmentDescription>
+                            </AttachmentContent>
+                            <AttachmentActions>
+                              <AttachmentAction aria-label="Remove invoice review">
+                                <Trash2 />
+                              </AttachmentAction>
+                            </AttachmentActions>
+                            <AttachmentTrigger aria-label="Open invoice review attachment" />
+                          </Attachment>
+
+                          <Attachment state="processing">
+                            <AttachmentMedia>
+                              <Spinner />
+                            </AttachmentMedia>
+                            <AttachmentContent>
+                              <AttachmentTitle>owner-summary.md</AttachmentTitle>
+                              <AttachmentDescription>Preparing preview</AttachmentDescription>
+                            </AttachmentContent>
+                          </Attachment>
+                        </AttachmentGroup>
+                      </MessageScrollerItem>
+
+                      <MessageScrollerItem messageId="assistant-status" scrollAnchor>
+                        <Marker role="status">
+                          <MarkerIcon>
+                            <Spinner />
+                          </MarkerIcon>
+                          <MarkerContent className="shimmer text-muted-foreground">
+                            Generating response...
+                          </MarkerContent>
+                        </Marker>
+                      </MessageScrollerItem>
+                    </MessageScrollerContent>
+                  </MessageScrollerViewport>
+                  <MessageScrollerButton />
+                </MessageScroller>
+              </MessageScrollerProvider>
+            </Card>
+
+            <Card className="gap-0 divide-y divide-border p-0">
+              <Specimen label="Bubble variants">
+                <div className="flex flex-col gap-2">
+                  {BUBBLE_VARIANTS.map(({ variant, label }) => (
+                    <Bubble key={variant} variant={variant}>
+                      <BubbleContent>{label}</BubbleContent>
+                    </Bubble>
+                  ))}
+                </div>
+              </Specimen>
+
+              <Specimen label="Attachment states">
+                <div className="flex flex-col gap-2">
+                  <Attachment size="sm" state="idle" className="w-full max-w-full">
+                    <AttachmentMedia>
+                      <Upload />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>drop-files</AttachmentTitle>
+                      <AttachmentDescription>Waiting</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                  <Attachment size="sm" state="uploading" className="w-full max-w-full">
+                    <AttachmentMedia>
+                      <Spinner />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>sync-output.csv</AttachmentTitle>
+                      <AttachmentDescription>Uploading 42%</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                  <Attachment size="sm" state="processing" className="w-full max-w-full">
+                    <AttachmentMedia>
+                      <Spinner />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>owner-summary.md</AttachmentTitle>
+                      <AttachmentDescription>Preparing preview</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                  <Attachment size="sm" state="error" className="w-full max-w-full">
+                    <AttachmentMedia>
+                      <FileText />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>stale-export.json</AttachmentTitle>
+                      <AttachmentDescription>Permission denied</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                  <Attachment size="sm" state="done" className="w-full max-w-full">
+                    <AttachmentMedia>
+                      <CheckCircle2 />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>run-report.pdf</AttachmentTitle>
+                      <AttachmentDescription>Ready</AttachmentDescription>
+                    </AttachmentContent>
+                  </Attachment>
+                </div>
+              </Specimen>
+            </Card>
+          </div>
         </Section>
 
         <Section

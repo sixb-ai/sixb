@@ -15,6 +15,8 @@ visual language that works for dense operational tools.
   - Sixb typography, radius, border, scrollbar, and chart tokens
 - **shadcn/Radix primitives** in `src/components/ui`
   - buttons, inputs, charts, dialogs, dropdowns, tables, tabs, sidebar, tooltips, and more
+- **Agent/chat primitives** in `src/components/ui`
+  - message scrollers, bubbles, markers, attachments, and streaming status utilities
 - **Sixb components** in `src/components`
   - collection headers, card grids, empty states, theme switching, and small charts
 - **Hooks and utilities** in `src/hooks` and `src/lib`
@@ -67,6 +69,115 @@ import { Button } from "@sixb/ui/components/ui/button"
 import { cn } from "@sixb/ui/lib/utils"
 ```
 
+## Agent Chat Primitives
+
+The package includes shadcn's newer chat-oriented primitives, adapted to Sixb's tokens and
+exported from the normal component barrel:
+
+| Component | Purpose |
+| --- | --- |
+| `MessageScroller*` | Accessible auto-scroll container for chat/thread views |
+| `Bubble`, `BubbleContent`, `BubbleGroup`, `BubbleReactions` | User and assistant message bubbles |
+| `Marker`, `MarkerIcon`, `MarkerContent` | Status rows, run checkpoints, separators, and tool activity |
+| `Attachment*` | File, dataset, and generated-artifact previews |
+
+Typical thread composition:
+
+```tsx
+import {
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+  Bubble,
+  BubbleContent,
+  BubbleGroup,
+  Marker,
+  MarkerContent,
+  MarkerIcon,
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  Spinner,
+} from "@sixb/ui/components"
+
+export function AgentThread() {
+  return (
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+      <MessageScroller className="h-full rounded-lg border border-border bg-background">
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="p-4">
+            <MessageScrollerItem messageId="request" scrollAnchor>
+              <BubbleGroup className="items-end">
+                <Bubble align="end">
+                  <BubbleContent>Summarize the failed invoice rows.</BubbleContent>
+                </Bubble>
+              </BubbleGroup>
+            </MessageScrollerItem>
+
+            <MessageScrollerItem messageId="status" scrollAnchor>
+              <Marker role="status">
+                <MarkerIcon>
+                  <Spinner />
+                </MarkerIcon>
+                <MarkerContent className="shimmer text-muted-foreground">
+                  Generating response...
+                </MarkerContent>
+              </Marker>
+            </MessageScrollerItem>
+
+            <MessageScrollerItem messageId="attachment" scrollAnchor>
+              <Attachment state="done">
+                <AttachmentMedia />
+                <AttachmentContent>
+                  <AttachmentTitle>invoice-review.csv</AttachmentTitle>
+                  <AttachmentDescription>18 KB</AttachmentDescription>
+                </AttachmentContent>
+              </Attachment>
+            </MessageScrollerItem>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+      </MessageScroller>
+    </MessageScrollerProvider>
+  )
+}
+```
+
+`MessageScroller` uses `@shadcn/react/message-scroller` for the scroll state machine.
+Keep chat-specific behavior in app code; `@sixb/ui` should stay visual and compositional.
+
+## CSS Utilities
+
+`globals.css` includes a small set of shared utilities used by chat and dense app
+surfaces:
+
+- `scroll-fade`, `scroll-fade-x`, `scroll-fade-y`, edge utilities like
+  `scroll-fade-b`, and size utilities like `scroll-fade-24`
+- `shimmer`, `shimmer-once`, `shimmer-reverse`, `shimmer-none`
+- `shimmer-color-*`, `shimmer-duration-*`, `shimmer-spread-*`, `shimmer-angle-*`
+- `scrollbar-thin`, `scrollbar-none`, `no-scrollbar`, and `scrollbar-gutter-stable`
+
+The shimmer defaults match shadcn's utility behavior: `2s` duration,
+`calc(3ch + 40px)` spread, `20deg` angle, current-color-derived highlight, RTL-aware
+direction, and reduced-motion fallback. Sixb exposes those defaults as CSS variables so
+apps can theme them after importing the stylesheet:
+
+```css
+@import "@sixb/ui/globals.css";
+
+:root {
+  --shimmer-duration: 1800ms;
+  --shimmer-angle: 24deg;
+  --shimmer-spread: 4.5rem;
+  --shimmer-highlight: color-mix(in oklch, currentColor 32%, transparent);
+}
+```
+
 ## Theming
 
 Every color, font, radius, and shadow in this package resolves through CSS variables, and
@@ -104,6 +215,7 @@ The token contract:
 | Sidebar | `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`, `--sidebar-accent`, `--sidebar-border`, `--sidebar-ring` (+ `-foreground` pairs) | the sidebar component family |
 | Type & shape | `--font-sans`, `--font-serif`, `--font-mono`, `--radius` | typography and corner rounding |
 | Elevation | `--shadow-2xs` … `--shadow-2xl` | shadows (hairline-only by default) |
+| Motion utilities | `--shimmer-duration`, `--shimmer-spread`, `--shimmer-angle`, `--shimmer-highlight` | shimmer defaults for streaming text |
 
 Pairs matter: anything that sets a background token should keep its `-foreground` partner
 readable (e.g. a dark `--primary` needs a light `--primary-foreground`). When only a few
@@ -135,6 +247,18 @@ bun --filter @sixb/ui dev
 
 The preview server listens on `http://localhost:3010`.
 
+If that port is already occupied, set `PORT`:
+
+```bash
+PORT=3011 bun --filter @sixb/ui dev
+```A
+
+Build the static preview bundle:
+
+```bash
+bun --filter @sixb/ui build:preview
+```
+
 Typecheck the package:
 
 ```bash
@@ -155,17 +279,34 @@ After adding a primitive:
 
 1. Export it from `src/components/index.ts`.
 2. Make sure it uses `@sixb/ui/lib/utils` for `cn`.
-3. Keep styling aligned with the existing tokens and compact sizing.
-4. Add it to the preview app when seeing it in context would help future changes.
-5. Run `bun --filter @sixb/ui typecheck`.
+3. Use `radix-ui` and `lucide-react` imports in the same style as nearby files.
+4. Keep styling aligned with the existing tokens and compact sizing.
+5. Add it to the preview app when seeing it in context would help future changes.
+6. Run `bun --filter @sixb/ui typecheck`.
+
+Some shadcn v4 utilities and newer chat primitives are distributed through the upstream
+registry/CSS package before the CLI has stable aliases for every configured style. When
+that happens, prefer copying the upstream registry component source, adapting imports to
+`@sixb/ui`, and documenting any vendored CSS utility in this README.
 
 ## Public Exports
 
 ```ts
-import { Button, Card, EmptyState, MiniSparkline, ThemeSwitcher } from "@sixb/ui/components"
+import {
+  Attachment,
+  Bubble,
+  Button,
+  Card,
+  EmptyState,
+  Marker,
+  MessageScroller,
+  MiniSparkline,
+  ThemeSwitcher,
+} from "@sixb/ui/components"
 import { ThemeProvider, useTheme, useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib"
 ```
 
-The package is currently private to the workspace, so treat it as an internal foundation for
-Sixb-maintained apps and packages.
+Treat this package as the maintained shared UI foundation for Sixb apps and packages. Keep
+public exports intentional, documented, and covered by the preview when they affect visual
+or interaction behavior.

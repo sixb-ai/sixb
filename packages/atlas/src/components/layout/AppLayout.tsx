@@ -45,6 +45,7 @@ export function AppLayout() {
       projectionCount={sidebarData?.projectionCount}
       workflowCount={sidebarData?.workflowCount}
       actionCount={sidebarData?.actionCount}
+      agentCount={sidebarData?.agentCount}
       ruleCount={sidebarData?.ruleCount}
       ontologyCount={sidebarData?.ontologyCount}
     />

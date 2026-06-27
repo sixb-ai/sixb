@@ -33,6 +33,18 @@ export {
   AlertDialogTrigger,
 } from "./ui/alert-dialog"
 export { AspectRatio } from "./ui/aspect-ratio"
+export {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+  AttachmentTrigger,
+  attachmentVariants,
+} from "./ui/attachment"
 export { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
 export { Badge, badgeVariants } from "./ui/badge"
 export {
@@ -44,6 +56,7 @@ export {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "./ui/breadcrumb"
+export { Bubble, BubbleContent, BubbleGroup, BubbleReactions, bubbleVariants } from "./ui/bubble"
 export { Button, buttonVariants } from "./ui/button"
 export {
   ButtonGroup,
@@ -208,6 +221,8 @@ export {
 } from "./ui/item"
 export { Kbd, KbdGroup } from "./ui/kbd"
 export { Label } from "./ui/label"
+export { Markdown, type MarkdownProps } from "./ui/markdown"
+export { Marker, MarkerContent, MarkerIcon, markerVariants } from "./ui/marker"
 export {
   Menubar,
   MenubarCheckboxItem,
@@ -226,6 +241,17 @@ export {
   MenubarSubTrigger,
   MenubarTrigger,
 } from "./ui/menubar"
+export {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+  useMessageScroller,
+  useMessageScrollerScrollable,
+  useMessageScrollerVisibility,
+} from "./ui/message-scroller"
 export { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "./ui/native-select"
 export {
   NavigationMenu,
