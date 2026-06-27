@@ -370,6 +370,7 @@ export function ProjectWorkspace() {
   return (
     <Routes>
       <Route path="pipelines/:pipelineId" element={<PipelineDetailPage />} />
+      <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
       <Route path="actions" element={<ActionsPage />} />
       <Route path="actions/runs/:runId" element={<ActionRunDetailPage />} />
       <Route element={<WorkflowLiveUpdatesBoundary />}>
@@ -407,7 +408,6 @@ export function ProjectWorkspace() {
             <Route path="home" element={<Navigate to="/" replace />} />
             <Route path="objects" element={<Navigate to="/" replace />} />
             <Route path="datasets" element={<DatasetsPage />} />
-            <Route path="datasets/:datasetId" element={<DatasetDetailPage />} />
             <Route path="connectors" element={<ConnectorsPage />} />
             <Route path="connectors/:connectorId" element={<ConnectorDetailPage />} />
             <Route path="syncs" element={<SyncsPage />} />

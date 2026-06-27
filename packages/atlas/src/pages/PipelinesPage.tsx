@@ -58,7 +58,6 @@ import {
   Loader2,
   LoaderCircle,
   Play,
-  Rows3,
   Search,
   Workflow,
   X,
@@ -66,6 +65,8 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
+import { isNumericColumnType } from "../lib/datasets"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
@@ -796,18 +797,6 @@ function formatRowCount(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
 
-function formatCellValue(value: unknown): string {
-  if (value === null || value === undefined) return "—"
-  if (typeof value === "string") return value
-  if (typeof value === "number" || typeof value === "boolean") return String(value)
-  if (value instanceof Date) return value.toISOString()
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
-
 function DatasetPreviewDrawer({
   datasetId,
   open,
@@ -834,14 +823,18 @@ function DatasetPreviewDrawer({
 
   const dataset: GetDatasetResponse | undefined = datasetQuery.data
   const rowsData: ListDatasetRowsResponse | undefined = rowsQuery.data
-  const columns = rowsData?.columns ?? dataset?.schema.columns.map((c) => c.name) ?? []
-  const columnTypes = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const col of dataset?.schema.columns ?? []) {
-      map.set(col.name, `${col.type}${col.nullable ? "?" : ""}`)
+  const schemaColumns = rowsData?.version?.schema.columns ?? dataset?.schema.columns ?? []
+  const columns = rowsData?.columns ?? schemaColumns.map((c) => c.name)
+  const columnMeta = useMemo(() => {
+    const map = new Map<string, DatasetGridColumnMeta>()
+    for (const col of rowsData?.version?.schema.columns ?? dataset?.schema.columns ?? []) {
+      map.set(col.name, {
+        type: `${col.type}${col.nullable ? "?" : ""}`,
+        numeric: isNumericColumnType(col.type),
+      })
     }
     return map
-  }, [dataset])
+  }, [dataset, rowsData])
 
   const rows = rowsData?.rows ?? []
   const version = dataset?.latestVersion ?? rowsData?.version ?? null
@@ -938,85 +931,16 @@ function DatasetPreviewDrawer({
           </div>
         </div>
 
-        {/* Table */}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {datasetQuery.isLoading || rowsQuery.isLoading ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="flex items-center gap-3 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span className="text-sm">Loading dataset...</span>
-              </div>
-            </div>
-          ) : errorText ? (
-            <div className="flex h-full items-center justify-center px-6">
-              <EmptyState
-                icon={<Rows3 className="h-9 w-9" />}
-                title="Could not load preview"
-                description={errorText}
-                className="py-6"
-              />
-            </div>
-          ) : columns.length === 0 ? (
-            <div className="flex h-full items-center justify-center px-6">
-              <EmptyState
-                icon={<Rows3 className="h-9 w-9" />}
-                title="No schema"
-                description="This dataset has no declared columns."
-                className="py-6"
-              />
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="flex h-full items-center justify-center px-6">
-              <EmptyState
-                icon={<Rows3 className="h-9 w-9" />}
-                title="No rows yet"
-                description="This dataset hasn't been materialized. Trigger a run to populate it."
-                className="py-6"
-              />
-            </div>
-          ) : (
-            <Table>
-              <TableHeader className="sticky top-0 z-10">
-                <TableRow>
-                  {columns.map((column) => (
-                    <TableHead key={column} className="font-mono normal-case first:pl-5 last:pr-5">
-                      <div className="flex flex-col">
-                        <span className="text-[11px] text-foreground">{column}</span>
-                        {columnTypes.get(column) && (
-                          <span className="text-[10px] text-muted-foreground">
-                            {columnTypes.get(column)}
-                          </span>
-                        )}
-                      </div>
-                    </TableHead>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row, rowIndex) => (
-                  <TableRow key={`row-${rowIndex}`}>
-                    {columns.map((column) => {
-                      const raw = (row as Record<string, unknown>)[column]
-                      const isNullish = raw === null || raw === undefined
-                      return (
-                        <TableCell
-                          key={column}
-                          className={cn(
-                            "max-w-[320px] truncate whitespace-nowrap font-mono text-[11px] first:pl-5 last:pr-5",
-                            isNullish ? "italic text-muted-foreground/60" : "text-foreground"
-                          )}
-                          title={formatCellValue(raw)}
-                        >
-                          {formatCellValue(raw)}
-                        </TableCell>
-                      )
-                    })}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </div>
+        {/* Rows — shared dataset grid (sticky header, resizable columns, click-to-expand) */}
+        <DatasetTableGrid
+          columns={columns}
+          columnMeta={columnMeta}
+          rows={rows}
+          offset={rowsData?.offset ?? 0}
+          isLoading={datasetQuery.isLoading || rowsQuery.isLoading}
+          isError={Boolean(errorText)}
+          emptyDescription="This dataset hasn't been materialized. Trigger a run to populate it."
+        />
 
         {rowsData && rows.length > 0 && (
           <div className="flex shrink-0 items-center justify-between border-t border-border bg-background/40 px-5 py-2 text-[11px] text-muted-foreground">

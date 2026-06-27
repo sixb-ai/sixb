@@ -1,9 +1,4 @@
-import type {
-  GetDatasetResponse,
-  ListDatasetRowsResponse,
-  ListDatasetsResponse,
-  ListDatasetVersionsResponse,
-} from "@sixb/client"
+import type { ListDatasetsResponse, ListDatasetVersionsResponse } from "@sixb/client"
 import {
   getDatasetOptions,
   listDatasetRowsOptions,
@@ -11,15 +6,24 @@ import {
   listDatasetVersionsOptions,
 } from "@sixb/client/hooks"
 import {
+  Badge,
   Button,
   Card,
   CollectionCardButton,
   CollectionCardGrid,
   CollectionHeader,
   CollectionViewToggle,
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
   EmptyState,
   Input,
-  Label,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectContent,
   SelectItem,
@@ -37,27 +41,30 @@ import { useQuery } from "@tanstack/react-query"
 import {
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Columns3,
   Database,
-  GitBranch,
+  Info,
   Loader2,
+  RefreshCw,
   Search,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
-import { formatValue } from "../lib/formatValue"
-import { humanizeIdentifier } from "../lib/labels"
+import { DatasetDetails } from "../features/datasets/DatasetDetails"
+import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
+import {
+  consumerCount,
+  datasetName,
+  formatBytes,
+  formatCount,
+  isNumericColumnType,
+  sourceCount,
+} from "../lib/datasets"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
 
-type Dataset = ListDatasetsResponse[number] | GetDatasetResponse
 type DatasetListItem = ListDatasetsResponse[number]
-// The catalog list/detail routes return a lightweight `latestVersion` summary.
-// Full version metadata (schema, producer, sizeBytes) comes from the versions
-// route, so detail views type their versions from that response.
 type DatasetVersion = ListDatasetVersionsResponse["versions"][number]
-type DatasetColumn = Dataset["schema"]["columns"][number]
 type DatasetListViewStyle = "cards" | "table"
 
 const datasetListViewOptions = [
@@ -65,49 +72,9 @@ const datasetListViewOptions = [
   { value: "table", label: "Table" },
 ] as const
 
-const rowPreviewLimit = 50
+const pageSizeOptions = ["50", "100", "250", "500", "1000"] as const
 const emptyDatasetVersions: DatasetVersion[] = []
-
-function datasetName(dataset: Pick<Dataset, "id">): string {
-  return humanizeIdentifier(dataset.id)
-}
-
-function formatCount(value?: number): string {
-  return typeof value === "number" ? value.toLocaleString() : "-"
-}
-
-function formatBytes(value?: number): string {
-  if (typeof value !== "number") return "-"
-  if (value === 0) return "0 B"
-
-  const units = ["B", "KB", "MB", "GB", "TB"]
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  const scaled = value / 1024 ** index
-  const precision = scaled >= 10 || index === 0 ? 0 : 1
-
-  return `${scaled.toFixed(precision)} ${units[index]}`
-}
-
-function datasetSummary(dataset: Dataset): string {
-  const parts = [
-    dataset.materialized ? "Materialized dataset" : "Declared dataset",
-    `${dataset.schema.columns.length} column${dataset.schema.columns.length === 1 ? "" : "s"}`,
-  ]
-
-  if (dataset.latestVersion?.rowCount !== undefined) {
-    parts.push(`${formatCount(dataset.latestVersion.rowCount)} rows`)
-  }
-
-  return parts.join(" · ")
-}
-
-function sourceCount(dataset: Dataset): number {
-  return dataset.syncIds.length + dataset.sourcePipelineIds.length + dataset.projectionIds.length
-}
-
-function consumerCount(dataset: Dataset): number {
-  return dataset.targetPipelineIds.length
-}
+const emptyRows: Array<Record<string, unknown>> = []
 
 function datasetSearchText(dataset: DatasetListItem): string {
   return [
@@ -208,437 +175,6 @@ function DatasetTableView({
         </TableBody>
       </Table>
     </Card>
-  )
-}
-
-function DetailSurface({
-  title,
-  actions,
-  children,
-  className,
-}: {
-  title: string
-  actions?: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <section
-      className={cn(
-        "min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card px-5 py-5 sm:px-6",
-        className
-      )}
-    >
-      <div className="mb-4 flex min-w-0 items-center justify-between gap-4">
-        <h2 className="text-[15px] font-semibold tracking-tight text-foreground">{title}</h2>
-        {actions}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function MetricTile({
-  label,
-  value,
-  detail,
-}: {
-  label: string
-  value: React.ReactNode
-  detail?: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 px-5 py-4">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-2 min-w-0 truncate text-2xl font-semibold tracking-tight tabular-nums text-foreground">
-        {value}
-      </div>
-      {detail && (
-        <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{detail}</div>
-      )}
-    </div>
-  )
-}
-
-function DatasetMetrics({
-  dataset,
-  selectedVersion,
-}: {
-  dataset: Dataset
-  selectedVersion: DatasetVersion | null
-}) {
-  const versionMode = selectedVersion?.mode
-  const versionValue = versionMode
-    ? versionMode.charAt(0).toUpperCase() + versionMode.slice(1)
-    : "—"
-
-  return (
-    <div className="grid overflow-hidden rounded-lg border border-border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 sm:divide-border/40 lg:grid-cols-4">
-      <MetricTile
-        label="Version"
-        value={versionValue}
-        detail={selectedVersion?.versionId ?? undefined}
-      />
-      <MetricTile label="Rows" value={formatCount(selectedVersion?.rowCount)} />
-      <MetricTile
-        label="Columns"
-        value={selectedVersion?.schema.columns.length ?? dataset.schema.columns.length}
-        detail={
-          dataset.partitionBy?.length
-            ? `Partitioned by ${dataset.partitionBy.join(", ")}`
-            : undefined
-        }
-      />
-      <MetricTile
-        label="Storage"
-        value={formatBytes(selectedVersion?.sizeBytes)}
-        detail={dataset.materialized ? "Materialized" : "Declared only"}
-      />
-    </div>
-  )
-}
-
-function VersionSelect({
-  versions,
-  selectedVersionId,
-  onSelect,
-}: {
-  versions: DatasetVersion[]
-  selectedVersionId: string | null
-  onSelect: (versionId: string) => void
-}) {
-  if (versions.length === 0) return null
-
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        Version
-      </Label>
-      <Select value={selectedVersionId ?? undefined} onValueChange={onSelect}>
-        <SelectTrigger className="h-9 max-w-[280px] font-mono text-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {versions.map((version) => (
-            <SelectItem key={version.versionId} value={version.versionId} className="font-mono">
-              {version.versionId}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  )
-}
-
-function SchemaTable({
-  columns,
-  partitionBy,
-}: {
-  columns: DatasetColumn[]
-  partitionBy?: string[]
-}) {
-  if (columns.length === 0) {
-    return (
-      <EmptyState
-        icon={<Columns3 className="h-10 w-10" />}
-        title="No schema"
-        description="This dataset has no declared columns."
-        className="py-8"
-      />
-    )
-  }
-
-  const partitionColumns = new Set(partitionBy ?? [])
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
-            <th className="pb-2.5 font-medium">Column</th>
-            <th className="px-3 pb-2.5 font-medium">Type</th>
-            <th className="pb-2.5 text-right font-medium">Role</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/30">
-          {columns.map((column) => (
-            <tr key={column.name}>
-              <td className="py-3 pr-4 font-mono text-xs text-foreground">{column.name}</td>
-              <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
-                {column.type}
-                {column.nullable ? "?" : ""}
-              </td>
-              <td className="py-3 text-right">
-                {partitionColumns.has(column.name) ? (
-                  <span className="inline-flex items-center rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground">
-                    Partition
-                  </span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Column</span>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function RowPreview({
-  rows,
-  isLoading,
-  isError,
-  offset,
-  onPrevious,
-  onNext,
-}: {
-  rows: ListDatasetRowsResponse | undefined
-  isLoading: boolean
-  isError: boolean
-  offset: number
-  onPrevious: () => void
-  onNext: () => void
-}) {
-  if (isLoading) {
-    return (
-      <div className="py-10">
-        <div className="flex items-center gap-3 text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Loading rows...</span>
-        </div>
-      </div>
-    )
-  }
-
-  if (isError) {
-    return (
-      <EmptyState
-        icon={<Database className="h-10 w-10" />}
-        title="Rows unavailable"
-        description="Could not load the selected dataset version."
-        className="py-8"
-      />
-    )
-  }
-
-  if (!rows || rows.rows.length === 0) {
-    return (
-      <EmptyState
-        icon={<Database className="h-10 w-10" />}
-        title="No rows"
-        description="This dataset version does not have preview rows."
-        className="py-8"
-      />
-    )
-  }
-
-  const rangeStart = offset + 1
-  const rangeEnd = offset + rows.rows.length
-  const rangeLabel =
-    typeof rows.total === "number"
-      ? `${rangeStart}-${rangeEnd} of ${formatCount(rows.total)}`
-      : `${rangeStart}-${rangeEnd}`
-
-  return (
-    <div className="-mx-5 min-w-0 border-y border-border sm:-mx-6">
-      <div className="max-h-[520px] overflow-auto">
-        <Table className="min-w-[720px] table-fixed">
-          <TableHeader className="sticky top-0 z-10">
-            <TableRow>
-              {rows.columns.map((column, columnIndex) => (
-                <TableHead
-                  key={column}
-                  className={cn(
-                    "w-48 font-mono normal-case",
-                    columnIndex === 0 && "pl-5 sm:pl-6",
-                    columnIndex === rows.columns.length - 1 && "pr-5 sm:pr-6"
-                  )}
-                >
-                  <span className="block truncate">{column}</span>
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.rows.map((row, index) => (
-              <TableRow key={`${rows.offset}:${index}`} className="align-top">
-                {rows.columns.map((column, columnIndex) => (
-                  <TableCell
-                    key={column}
-                    className={cn(
-                      columnIndex === 0 && "pl-5 sm:pl-6",
-                      columnIndex === rows.columns.length - 1 && "pr-5 sm:pr-6"
-                    )}
-                  >
-                    <span className="block max-h-16 overflow-hidden break-words font-mono text-xs text-foreground">
-                      {formatValue(row[column])}
-                    </span>
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="mt-3 flex flex-col gap-2 px-5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <span className="tabular-nums">{rangeLabel}</span>
-        <div className="flex items-center gap-1">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onPrevious}
-            disabled={offset === 0}
-            aria-label="Previous page"
-          >
-            <ChevronLeft />
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            onClick={onNext}
-            disabled={!rows.hasMore}
-            aria-label="Next page"
-          >
-            <ChevronRight />
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function VersionsTable({
-  versions,
-  selectedVersionId,
-  onSelect,
-}: {
-  versions: DatasetVersion[]
-  selectedVersionId: string | null
-  onSelect: (versionId: string) => void
-}) {
-  if (versions.length === 0) {
-    return (
-      <EmptyState
-        icon={<Clock3 className="h-10 w-10" />}
-        title="No versions"
-        description="Committed dataset versions will appear here."
-        className="py-8"
-      />
-    )
-  }
-
-  return (
-    <div className="-mx-2 max-h-[420px] overflow-auto">
-      <ul className="divide-y divide-border/30">
-        {versions.map((version) => {
-          const selected = version.versionId === selectedVersionId
-
-          return (
-            <li key={version.versionId}>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => onSelect(version.versionId)}
-                className={cn(
-                  "h-auto w-full justify-start py-2.5 text-left",
-                  selected && "bg-muted"
-                )}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate font-mono text-xs text-foreground">{version.versionId}</p>
-                  <p className="mt-1 truncate text-[11px] font-normal text-muted-foreground">
-                    {version.producer
-                      ? `${version.producer.kind}${
-                          version.producer.id ? ` / ${version.producer.id}` : ""
-                        }`
-                      : formatRelativeTime(version.createdAt)}
-                  </p>
-                </div>
-              </Button>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
-}
-
-function DetailField({
-  label,
-  value,
-  mono,
-}: {
-  label: string
-  value: React.ReactNode
-  mono?: boolean
-}) {
-  return (
-    <div className="min-w-0">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className={cn("mt-1 break-words text-sm text-foreground", mono && "font-mono text-xs")}>
-        {value}
-      </dd>
-    </div>
-  )
-}
-
-function ReferenceList({
-  label,
-  ids,
-  onSelect,
-}: {
-  label: string
-  ids: string[]
-  onSelect?: (id: string) => void
-}) {
-  if (ids.length === 0) return null
-
-  return (
-    <div className="min-w-0">
-      <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-      <div className="mt-2 flex flex-col">
-        {ids.map((id) => {
-          const content = (
-            <>
-              <GitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span className="truncate">{id}</span>
-            </>
-          )
-
-          if (onSelect) {
-            return (
-              <Button
-                key={id}
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => onSelect(id)}
-                className="-mx-2 max-w-full justify-start font-mono text-xs text-foreground"
-              >
-                {content}
-              </Button>
-            )
-          }
-
-          return (
-            <span
-              key={id}
-              className="inline-flex max-w-full items-center gap-2 px-0 py-1.5 font-mono text-xs text-foreground"
-            >
-              {content}
-            </span>
-          )
-        })}
-      </div>
-    </div>
   )
 }
 
@@ -749,17 +285,84 @@ export function DatasetsPage() {
   )
 }
 
+function ColumnsMenu({
+  columns,
+  hiddenColumns,
+  onToggle,
+  onShowAll,
+}: {
+  columns: string[]
+  hiddenColumns: Set<string>
+  onToggle: (column: string) => void
+  onShowAll: () => void
+}) {
+  const visibleCount = columns.length - hiddenColumns.size
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
+          <Columns3 className="size-3.5" />
+          Columns
+          {hiddenColumns.size > 0 ? (
+            <span className="tabular-nums text-muted-foreground">
+              {visibleCount}/{columns.length}
+            </span>
+          ) : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-[60vh] w-56 overflow-auto">
+        <div className="flex items-center justify-between px-2 py-1">
+          <DropdownMenuLabel className="p-0">Columns</DropdownMenuLabel>
+          {hiddenColumns.size > 0 ? (
+            <button
+              type="button"
+              onClick={onShowAll}
+              className="text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              Show all
+            </button>
+          ) : null}
+        </div>
+        <DropdownMenuSeparator />
+        {columns.map((column) => (
+          <DropdownMenuCheckboxItem
+            key={column}
+            checked={!hiddenColumns.has(column)}
+            onCheckedChange={() => onToggle(column)}
+            onSelect={(event) => event.preventDefault()}
+            className="font-mono text-xs"
+          >
+            <span className="truncate">{column}</span>
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function DatasetDetailPage() {
   const { datasetId = "" } = useParams()
   const navigate = useNavigate()
   const decodedDatasetId = decodeURIComponent(datasetId)
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
   const [rowsOffset, setRowsOffset] = useState(0)
+  const [quickFilter, setQuickFilter] = useState("")
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set())
+  const [pageSize, setPageSize] = useState<number>(() =>
+    Number(getCollectionViewStyle("dataset-page-size", pageSizeOptions, "100"))
+  )
+
+  // Different dataset → drop column/filter state that only made sense before.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: effect is keyed on the dataset id to reset state on navigation, not because the body reads it
+  useEffect(() => {
+    setHiddenColumns(new Set())
+    setQuickFilter("")
+    setRowsOffset(0)
+  }, [decodedDatasetId])
 
   const datasetQuery = useQuery({
-    ...getDatasetOptions({
-      path: { datasetId: decodedDatasetId },
-    }),
+    ...getDatasetOptions({ path: { datasetId: decodedDatasetId } }),
     enabled: decodedDatasetId.length > 0,
   })
 
@@ -788,8 +391,6 @@ export function DatasetDetailPage() {
     }
   }, [dataset?.latestVersion?.versionId, selectedVersionId, versions])
 
-  // Full version metadata lives in the versions route; the catalog summary on
-  // `dataset.latestVersion` only drives selection defaults above.
   const selectedVersion =
     versions.find((version) => version.versionId === selectedVersionId) ?? null
 
@@ -803,16 +404,85 @@ export function DatasetDetailPage() {
       path: { datasetId: decodedDatasetId },
       query: {
         versionId: selectedVersionId ?? undefined,
-        limit: String(rowPreviewLimit),
+        limit: String(pageSize),
         offset: String(rowsOffset),
       },
     }),
     enabled: decodedDatasetId.length > 0 && selectedVersionId !== null,
   })
 
+  const rowsData = rowsQuery.data
+
+  // Prefer the full version metadata; fall back to the version embedded in the
+  // rows response so stats render before the versions list resolves.
+  const schemaColumns =
+    selectedVersion?.schema.columns ??
+    rowsData?.version?.schema.columns ??
+    dataset?.schema.columns ??
+    []
+
+  const columnMeta = useMemo(() => {
+    const map = new Map<string, DatasetGridColumnMeta>()
+    for (const column of schemaColumns) {
+      map.set(column.name, {
+        type: `${column.type}${column.nullable ? "?" : ""}`,
+        numeric: isNumericColumnType(column.type),
+      })
+    }
+    return map
+  }, [schemaColumns])
+
+  const allColumns = rowsData?.columns ?? schemaColumns.map((column) => column.name)
+
+  const visibleColumns = useMemo(
+    () => allColumns.filter((column) => !hiddenColumns.has(column)),
+    [allColumns, hiddenColumns]
+  )
+
+  const rawRows = rowsData?.rows ?? emptyRows
+
+  const filteredRows = useMemo(() => {
+    const query = quickFilter.trim().toLowerCase()
+    if (!query) return rawRows
+    return rawRows.filter((row) =>
+      visibleColumns.some((column) => {
+        const value = row[column]
+        if (value === null || value === undefined) return false
+        return String(typeof value === "object" ? JSON.stringify(value) : value)
+          .toLowerCase()
+          .includes(query)
+      })
+    )
+  }, [rawRows, quickFilter, visibleColumns])
+
+  const toggleColumn = (column: string) => {
+    setHiddenColumns((previous) => {
+      const next = new Set(previous)
+      if (next.has(column)) {
+        next.delete(column)
+      } else if (allColumns.length - next.size > 1) {
+        // Keep at least one column visible.
+        next.add(column)
+      }
+      return next
+    })
+  }
+
+  const handlePageSizeChange = (next: string) => {
+    setPageSize(Number(next))
+    setRowsOffset(0)
+    setCollectionViewStyle("dataset-page-size", next)
+  }
+
+  const handleRefresh = () => {
+    datasetQuery.refetch()
+    versionsQuery.refetch()
+    if (selectedVersionId !== null) rowsQuery.refetch()
+  }
+
   if (datasetQuery.isLoading) {
     return (
-      <div className="flex h-full items-center justify-center py-24">
+      <div className="flex h-full items-center justify-center">
         <div className="flex items-center gap-3 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span className="text-sm">Loading dataset...</span>
@@ -823,18 +493,20 @@ export function DatasetDetailPage() {
 
   if (datasetQuery.isError || !dataset) {
     return (
-      <div className="mx-auto w-full max-w-2xl space-y-4">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate("/datasets")}
-          className="-ml-2 self-start text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft />
-          Datasets
-        </Button>
-        <div className="rounded-lg border border-border bg-card p-8">
+      <div className="flex h-full flex-col">
+        <div className="border-b border-border px-4 py-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/datasets")}
+            className="-ml-2 text-muted-foreground hover:text-foreground"
+          >
+            <ChevronLeft />
+            Datasets
+          </Button>
+        </div>
+        <div className="flex flex-1 items-center justify-center p-6">
           <EmptyState
             icon={<Database className="h-10 w-10" />}
             title="Dataset not found"
@@ -845,115 +517,236 @@ export function DatasetDetailPage() {
     )
   }
 
-  const schemaColumns = selectedVersion?.schema.columns ?? dataset.schema.columns
+  const rowCount = selectedVersion?.rowCount ?? rowsData?.version?.rowCount ?? rowsData?.total
+  const sizeBytes = selectedVersion?.sizeBytes ?? rowsData?.version?.sizeBytes
+  const rangeStart = rawRows.length > 0 ? rowsOffset + 1 : 0
+  const rangeEnd = rowsOffset + rawRows.length
+  const totalRows = rowsData?.total ?? rowCount
+  const rangeLabel =
+    typeof totalRows === "number"
+      ? `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()} of ${formatCount(totalRows)}`
+      : `${rangeStart.toLocaleString()}–${rangeEnd.toLocaleString()}`
+  const filterActive = quickFilter.trim().length > 0
+  const noCommittedVersions = selectedVersionId === null && versions.length === 0
+
+  const versionSummary = {
+    versionId:
+      selectedVersion?.versionId ?? rowsData?.version?.versionId ?? selectedVersionId ?? undefined,
+    rowCount,
+    sizeBytes,
+    createdAt: selectedVersion?.createdAt ?? rowsData?.version?.createdAt,
+    mode: selectedVersion?.mode ?? rowsData?.version?.mode,
+    producer: selectedVersion?.producer ?? rowsData?.version?.producer,
+  }
+
+  const latestVersionId = dataset.latestVersion?.versionId
+  const isLatestVersion = selectedVersionId != null && selectedVersionId === latestVersionId
+  const versionLabel = isLatestVersion
+    ? "Latest"
+    : selectedVersion?.createdAt
+      ? formatRelativeTime(selectedVersion.createdAt)
+      : "Version"
 
   return (
-    <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4 overflow-hidden">
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => navigate("/datasets")}
-        className="-ml-2 self-start text-muted-foreground hover:text-foreground"
-      >
-        <ChevronLeft />
-        Datasets
-      </Button>
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+      <header className="flex shrink-0 items-start gap-2 border-b border-border px-3 py-3 sm:px-4">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => navigate("/datasets")}
+          aria-label="Back to datasets"
+          className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground"
+        >
+          <ChevronLeft />
+        </Button>
 
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-[32px]">
-            {datasetName(dataset)}
-          </h1>
-          <p className="mt-1.5 break-all font-mono text-xs text-muted-foreground">{dataset.id}</p>
-          <p className="mt-2 text-sm text-muted-foreground">{datasetSummary(dataset)}</p>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-tight text-foreground">
+              {datasetName(dataset)}
+            </h1>
+            <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-normal">
+              {dataset.materialized ? "Materialized" : "Declared"}
+            </Badge>
+          </div>
+          <p className="truncate text-[11px] text-muted-foreground">
+            <span className="font-mono">{dataset.id}</span>
+            <span className="hidden sm:inline">
+              {" · "}
+              {[
+                versionSummary.mode,
+                `${formatCount(rowCount)} rows`,
+                `${schemaColumns.length} cols`,
+                formatBytes(sizeBytes),
+                versionSummary.createdAt
+                  ? `updated ${formatRelativeTime(versionSummary.createdAt)}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </p>
         </div>
-        <VersionSelect
-          versions={versions}
-          selectedVersionId={selectedVersionId}
-          onSelect={handleSelectVersion}
-        />
+
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 shrink-0 gap-1.5 self-center px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Info className="size-3.5" />
+              <span className="hidden sm:inline">Details</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80">
+            <DatasetDetails
+              dataset={dataset}
+              columnCount={schemaColumns.length}
+              versionSummary={versionSummary}
+              onNavigate={(path) => navigate(path)}
+            />
+          </PopoverContent>
+        </Popover>
       </header>
 
-      <DatasetMetrics dataset={dataset} selectedVersion={selectedVersion} />
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="space-y-4">
-          <DetailSurface title="Rows">
-            {selectedVersion ? (
-              <RowPreview
-                rows={rowsQuery.data}
-                isLoading={rowsQuery.isLoading}
-                isError={rowsQuery.isError}
-                offset={rowsOffset}
-                onPrevious={() => setRowsOffset((offset) => Math.max(0, offset - rowPreviewLimit))}
-                onNext={() => setRowsOffset((offset) => offset + rowPreviewLimit)}
-              />
-            ) : (
-              <EmptyState
-                icon={<Database className="h-10 w-10" />}
-                title="No version selected"
-                description="Rows are available after the dataset has a committed version."
-                className="py-8"
-              />
-            )}
-          </DetailSurface>
-
-          <DetailSurface title="Schema">
-            <SchemaTable columns={schemaColumns} partitionBy={dataset.partitionBy} />
-          </DetailSurface>
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 sm:px-4">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={quickFilter}
+            onChange={(event) => setQuickFilter(event.target.value)}
+            placeholder="Filter rows..."
+            className="h-8 w-44 pl-8 text-xs sm:w-64"
+          />
         </div>
+        {filterActive ? (
+          <span className="text-xs tabular-nums text-muted-foreground">
+            {filteredRows.length.toLocaleString()} of {rawRows.length.toLocaleString()}
+          </span>
+        ) : null}
 
-        <aside className="space-y-4">
-          <DetailSurface title="Details">
-            <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2 lg:grid-cols-1">
-              <DetailField
-                label="Type"
-                value={dataset.materialized ? "Materialized" : "Declared"}
-              />
-              <DetailField label="Description" value={dataset.description ?? "No description"} />
-            </dl>
-          </DetailSurface>
+        <div className="ml-auto flex items-center gap-2">
+          {versions.length > 0 ? (
+            <Select value={selectedVersionId ?? undefined} onValueChange={handleSelectVersion}>
+              <SelectTrigger
+                size="sm"
+                className="h-8 w-[140px] text-xs"
+                aria-label="Select version"
+                title={selectedVersionId ?? undefined}
+              >
+                <span className="truncate">{versionLabel}</span>
+              </SelectTrigger>
+              <SelectContent position="popper" align="end" className="max-w-[320px]">
+                {versions.map((version) => (
+                  <SelectItem key={version.versionId} value={version.versionId} className="text-xs">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5">
+                        <span className="max-w-[190px] truncate font-mono">
+                          {version.versionId}
+                        </span>
+                        {version.versionId === latestVersionId ? (
+                          <span className="shrink-0 rounded bg-muted px-1 py-px text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Latest
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="max-w-[210px] truncate text-[10px] text-muted-foreground">
+                        {[
+                          version.mode,
+                          formatRelativeTime(version.createdAt),
+                          typeof version.rowCount === "number"
+                            ? `${formatCount(version.rowCount)} rows`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+          <ColumnsMenu
+            columns={allColumns}
+            hiddenColumns={hiddenColumns}
+            onToggle={toggleColumn}
+            onShowAll={() => setHiddenColumns(new Set())}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={handleRefresh}
+            aria-label="Refresh"
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+          >
+            <RefreshCw className={cn(rowsQuery.isFetching && "animate-spin")} />
+          </Button>
+        </div>
+      </div>
 
-          <DetailSurface title="Versions">
-            {versionsQuery.isLoading ? (
-              <div className="py-10">
-                <div className="flex items-center gap-3 text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm">Loading versions...</span>
-                </div>
-              </div>
-            ) : versionsQuery.isError ? (
-              <EmptyState
-                icon={<Clock3 className="h-10 w-10" />}
-                title="Versions unavailable"
-                description="Could not load dataset version history."
-                className="py-8"
-              />
-            ) : (
-              <VersionsTable
-                versions={versions}
-                selectedVersionId={selectedVersionId}
-                onSelect={handleSelectVersion}
-              />
-            )}
-          </DetailSurface>
+      <DatasetTableGrid
+        key={decodedDatasetId}
+        columns={visibleColumns}
+        columnMeta={columnMeta}
+        rows={filteredRows}
+        offset={rowsOffset}
+        isLoading={selectedVersionId !== null && rowsQuery.isLoading}
+        isError={rowsQuery.isError}
+        emptyDescription={
+          noCommittedVersions
+            ? "No committed versions yet. Rows appear after the dataset is materialized."
+            : filterActive
+              ? "No rows on this page match your filter."
+              : "This dataset version does not have preview rows."
+        }
+      />
 
-          {sourceCount(dataset) + consumerCount(dataset) > 0 && (
-            <DetailSurface title="References">
-              <div className="space-y-5">
-                <ReferenceList
-                  label="Syncs"
-                  ids={dataset.syncIds}
-                  onSelect={(syncId) => navigate(`/syncs/${encodeURIComponent(syncId)}`)}
-                />
-                <ReferenceList label="Source pipelines" ids={dataset.sourcePipelineIds} />
-                <ReferenceList label="Target pipelines" ids={dataset.targetPipelineIds} />
-                <ReferenceList label="Projections" ids={dataset.projectionIds} />
-              </div>
-            </DetailSurface>
-          )}
-        </aside>
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-3 py-1.5 sm:px-4">
+        <span className="text-xs tabular-nums text-muted-foreground">
+          {rowsOffset > 0 || rowsData?.hasMore ? rangeLabel : `${formatCount(rowCount)} rows`}
+          {filterActive ? ` · ${filteredRows.length.toLocaleString()} shown` : ""}
+        </span>
+        <div className="flex items-center gap-2">
+          <Select value={String(pageSize)} onValueChange={handlePageSizeChange}>
+            <SelectTrigger size="sm" className="h-8 w-[104px] text-xs" aria-label="Rows per page">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent position="popper" align="end">
+              {pageSizeOptions.map((option) => (
+                <SelectItem key={option} value={option} className="text-xs">
+                  {option} rows
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRowsOffset((offset) => Math.max(0, offset - pageSize))}
+              disabled={rowsOffset === 0}
+              aria-label="Previous page"
+            >
+              <ChevronLeft />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={() => setRowsOffset((offset) => offset + pageSize)}
+              disabled={!rowsData?.hasMore}
+              aria-label="Next page"
+            >
+              <ChevronRight />
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   )
