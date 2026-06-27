@@ -11,6 +11,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { startTransition, useCallback, useEffect, useRef, useState } from "react"
 import type { SixbEvent, SixbEventOfType } from "./events"
 import type { SubscribableEvents } from "./events-builder"
+import { useEventsRegistry } from "./events-provider"
 import type { EventSocketState } from "./events-transport"
 import { type TelemetryUpdate, telemetryUpdateFromEvent } from "./telemetry-events"
 
@@ -43,6 +44,7 @@ export function useEvents<TEvent extends SixbEvent>(
   onErrorRef.current = options?.onError
 
   const [state, setState] = useState<EventSocketState>(DISCONNECTED)
+  const registry = useEventsRegistry()
 
   const enabled = options?.enabled ?? true
   const afterCursor = options?.afterCursor
@@ -61,17 +63,25 @@ export function useEvents<TEvent extends SixbEvent>(
       return
     }
 
-    const unsubscribe = builderRef.current.subscribe((event) => onEventRef.current(event), {
+    const handler = (event: SixbEvent) => onEventRef.current(event as TEvent)
+    const onError = (message: string) => onErrorRef.current?.(message)
+
+    // With a provider, delegate to the shared socket; otherwise open a
+    // per-builder socket. The transport options apply only to the standalone
+    // socket — the shared socket manages its own lifecycle.
+    if (registry) {
+      return registry.register(builderRef.current.ir, handler, { onError, onStateChange: setState })
+    }
+
+    return builderRef.current.subscribe((event) => onEventRef.current(event), {
       afterCursor,
       limit,
       reconnect,
       reconnectDelayMs,
-      onError: (message) => onErrorRef.current?.(message),
+      onError,
       onStateChange: setState,
     })
-
-    return unsubscribe
-  }, [enabled, irKey, afterCursor, limit, reconnect, reconnectDelayMs])
+  }, [enabled, irKey, afterCursor, limit, reconnect, reconnectDelayMs, registry])
 
   return state
 }

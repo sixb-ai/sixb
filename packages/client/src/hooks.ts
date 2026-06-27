@@ -20,6 +20,7 @@ import {
 
 export * from "./events"
 export * from "./events-hooks"
+export * from "./events-provider"
 export * from "./generated/@tanstack/react-query.gen"
 export * from "./query-hooks"
 export {
