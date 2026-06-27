@@ -61,6 +61,25 @@ describe("parseSubscriptionMessage", () => {
     })
   })
 
+  test("accepts object-scoped subscriptions", () => {
+    const result = parseSubscriptionMessage({
+      type: "subscribe",
+      topic: "telemetry",
+      objectTypeId: "device",
+      primaryId: "fan-1",
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        type: "subscribe",
+        topic: "telemetry",
+        objectTypeId: "device",
+        primaryId: "fan-1",
+      },
+    })
+  })
+
   test("rejects non-object payloads", () => {
     const result = parseSubscriptionMessage("subscribe")
 
@@ -140,6 +159,65 @@ describe("/ws/events subscriptions", () => {
             topic: "telemetry",
           },
         })
+      } finally {
+        ws.close()
+      }
+    })
+  })
+
+  test("scopes the stream to one object when objectTypeId/primaryId are set", async () => {
+    await withWsServer(async ({ baseUrl, sixb }) => {
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
+
+        const [matching] = await sixb.events.append({
+          events: [
+            {
+              type: "telemetry.appended",
+              payload: {
+                objectTypeId: "device",
+                objectId: "fan-1",
+                propertyId: "rpm",
+                value: 1200,
+                at: "2026-02-18T10:00:10.000Z",
+              },
+            },
+          ],
+        })
+        await sixb.events.append({
+          events: [
+            {
+              type: "telemetry.appended",
+              payload: {
+                objectTypeId: "device",
+                objectId: "fan-2",
+                propertyId: "rpm",
+                value: 800,
+                at: "2026-02-18T10:00:11.000Z",
+              },
+            },
+          ],
+        })
+
+        ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            topic: "telemetry",
+            types: ["telemetry.appended"],
+            objectTypeId: "device",
+            primaryId: "fan-1",
+          })
+        )
+
+        expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
+        // Only the fan-1 event is delivered; fan-2 is filtered server-side.
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "event",
+          event: { cursor: matching?.cursor, payload: { objectId: "fan-1" } },
+        })
+        await expectNoWsMessage(ws)
       } finally {
         ws.close()
       }

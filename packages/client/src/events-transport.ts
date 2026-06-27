@@ -20,6 +20,10 @@ export interface EventSocketState {
 export interface EventSocketOptions {
   readonly topic?: SixbEventTopic
   readonly types?: readonly SixbEventType[]
+  /** Object-type scope; the server narrows the stream when set. */
+  readonly objectTypeId?: string
+  /** Object-instance scope; the server narrows the stream when set. */
+  readonly primaryId?: string
   readonly afterCursor?: string
   readonly limit?: number
   readonly reconnect?: boolean
@@ -56,6 +60,8 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
   const {
     topic,
     types,
+    objectTypeId,
+    primaryId,
     limit,
     reconnect = true,
     reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
@@ -90,6 +96,8 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
           type: "subscribe",
           ...(topic ? { topic } : {}),
           ...(types && types.length > 0 ? { types } : {}),
+          ...(objectTypeId ? { objectTypeId } : {}),
+          ...(primaryId ? { primaryId } : {}),
           ...(latestCursor ? { afterCursor: latestCursor } : {}),
           ...(limit ? { limit } : {}),
         })

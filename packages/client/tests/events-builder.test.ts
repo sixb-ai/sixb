@@ -213,7 +213,7 @@ describe("builder subscribe over the transport", () => {
     globalThis.WebSocket = originalWebSocket
   })
 
-  test("sends a topic/types subscribe message and delivers only matching events", () => {
+  test("sends a scoped subscribe message and delivers only matching events", () => {
     const received: SixbEvent[] = []
     const unsubscribe = events(Sensor)
       .object("sensor-1")
@@ -225,10 +225,15 @@ describe("builder subscribe over the transport", () => {
 
     ws.onopen?.()
     const subscribeMessage = JSON.parse(ws.sent[0])
-    expect(subscribeMessage).toMatchObject({ type: "subscribe", topic: "telemetry" })
+    expect(subscribeMessage).toMatchObject({
+      type: "subscribe",
+      topic: "telemetry",
+      // Object scope is pushed to the server (slice B).
+      objectTypeId: "Sensor",
+      primaryId: "sensor-1",
+    })
     expect(subscribeMessage.types).toEqual(["telemetry.appended"])
-    // The fine scope stays client-side in slice A.
-    expect(subscribeMessage.objectTypeId).toBeUndefined()
+    // The property scope stays client-side; the predicate refines it.
     expect(subscribeMessage.propertyId).toBeUndefined()
 
     ws.onmessage?.({ data: JSON.stringify({ type: "event", event: telemetryEvent }) })

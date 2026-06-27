@@ -170,6 +170,11 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
       const socket = createEventSocket({
         topic: filter.topic,
         types: filter.types,
+        // Server-side scope (slice B); the client predicate still refines on
+        // propertyId/linkId/runId and is the fallback when the server ignores
+        // these fields.
+        objectTypeId: filter.objectTypeId,
+        primaryId: filter.primaryId,
         afterCursor: subscribeOptions?.afterCursor,
         limit: subscribeOptions?.limit,
         reconnect: subscribeOptions?.reconnect,

@@ -8,6 +8,8 @@ import { decodeWsMessage, safeSend } from "../utils/ws"
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
   types?: DomainEvent["type"][]
+  objectTypeId?: string
+  primaryId?: string
   afterCursor?: string
   limit: number
   polling: boolean
@@ -18,6 +20,8 @@ const SubscribeSchema = z.object({
   type: z.literal("subscribe"),
   topic: z.enum(EVENT_TOPICS).optional(),
   types: z.array(z.enum(EVENT_TYPES)).optional(),
+  objectTypeId: z.string().optional(),
+  primaryId: z.string().optional(),
   afterCursor: z.string().optional(),
   limit: z.number().int().positive().max(500).optional(),
 })
@@ -62,6 +66,8 @@ function createDefaultState(): EventSubscriptionState {
   return {
     topics: undefined,
     types: undefined,
+    objectTypeId: undefined,
+    primaryId: undefined,
     afterCursor: undefined,
     limit: 200,
     polling: false,
@@ -108,9 +114,13 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
         })
 
         // Each event payload may carry object data, so visibility is derived
-        // per-event from the principal's grants (see `canViewEvent`). The cursor
-        // advances over every event read, not just the ones sent.
+        // per-event from the principal's grants (see `canViewEvent`), and the
+        // optional object scope narrows the stream further. The cursor advances
+        // over every event read, not just the ones sent.
         for (const event of events) {
+          if (!eventMatchesScope(event, state.objectTypeId, state.primaryId)) {
+            continue
+          }
           if (canViewEvent(authz, event)) {
             safeSend(ws, { type: "event", event })
           }
@@ -163,6 +173,8 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
         stopPolling(ws)
         state.topics = undefined
         state.types = undefined
+        state.objectTypeId = undefined
+        state.primaryId = undefined
         state.afterCursor = await resolveLatestCursor(server)
         safeSend(ws, { type: "unsubscribed" })
         return
@@ -170,6 +182,8 @@ export function registerWsRoutes(app: Elysia, server: SixbServer) {
 
       state.topics = parsed.data.topic ? [parsed.data.topic] : undefined
       state.types = parsed.data.types
+      state.objectTypeId = parsed.data.objectTypeId
+      state.primaryId = parsed.data.primaryId
       state.limit = parsed.data.limit ?? state.limit
       state.afterCursor = parsed.data.afterCursor ?? state.afterCursor
 
@@ -198,4 +212,39 @@ function wsStateKey(ws: object): object {
 function wsAuthz(ws: object): AuthorizationContext | null {
   const data = (ws as { data?: { authz?: AuthorizationContext | null } }).data
   return data?.authz ?? null
+}
+
+/**
+ * Narrow an event to an optional object scope. The scope keys are topic-aware:
+ * objects/telemetry carry `objectTypeId`, links carry it on the source side;
+ * the instance id is `primaryId` (objects), `objectId` (telemetry) or
+ * `sourceId` (links). Events without those keys (e.g. workflows) never match a
+ * scoped subscription, mirroring the client-side predicate.
+ */
+function eventMatchesScope(
+  event: DomainEvent,
+  objectTypeId: string | undefined,
+  primaryId: string | undefined
+): boolean {
+  if (objectTypeId === undefined && primaryId === undefined) {
+    return true
+  }
+
+  const payload = event.payload as Record<string, unknown>
+  const eventObjectTypeId = event.topic === "links" ? payload.sourceTypeId : payload.objectTypeId
+  if (objectTypeId !== undefined && eventObjectTypeId !== objectTypeId) {
+    return false
+  }
+
+  const eventPrimaryId =
+    event.topic === "telemetry"
+      ? payload.objectId
+      : event.topic === "links"
+        ? payload.sourceId
+        : payload.primaryId
+  if (primaryId !== undefined && eventPrimaryId !== primaryId) {
+    return false
+  }
+
+  return true
 }
