@@ -1546,8 +1546,8 @@ describe("SixbServer HTTP contract", () => {
         }>
       }
 
-      // No provider speaks expand, so it runs through the bounded fallback.
-      expect(body.plan.mode).toBe("fallback")
+      // The SQLite provider speaks expand, so it hydrates links via pushdown.
+      expect(body.plan.mode).toBe("pushdown")
       const system = body.objects.find((object) => object.primaryId === "system")
       // "many" cardinality serializes as an array of the linked objects.
       expect(system?.links?.contains).toEqual([
