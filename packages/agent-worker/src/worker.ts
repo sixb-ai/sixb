@@ -4,15 +4,10 @@ import type {
   AgentRunRecord,
   AgentRunRequestedQueueJob,
   ClaimedQueueJob,
+  Principal,
   QueueWorkerFailureDecision,
 } from "@sixb/core"
-import {
-  AgentStorageError,
-  createAgentRunId,
-  createAgentRunLeaseId,
-  isAbortError,
-  QueueWorker,
-} from "@sixb/core"
+import { AgentStorageError, createAgentRunLeaseId, isAbortError, QueueWorker } from "@sixb/core"
 import {
   AgentFinalizationError,
   AgentLeaseHeldError,
@@ -21,7 +16,13 @@ import {
 } from "./errors"
 import { finishRunOrThrow } from "./finalize"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
-import type { AgentWorkerContext, AgentWorkerOptions, AgentWorkerSixb, StreamSink } from "./types"
+import type {
+  AgentWorkerContext,
+  AgentWorkerOptions,
+  AgentWorkerSixb,
+  AgentWorkerStorage,
+  StreamSink,
+} from "./types"
 
 const DEFAULT_AGENT_LEASE_MS = 60_000
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
@@ -34,12 +35,20 @@ const FINALIZE_RETRY_BACKOFF_MS = 5_000
  */
 const MAX_FINALIZE_ATTEMPTS = 10
 const NOOP_SINK: StreamSink = { onPart() {} }
+const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 /** Outcome of trying to own a run for a claimed job. */
 type Reservation =
   | { readonly kind: "run"; readonly run: AgentRunRecord }
   | { readonly kind: "held"; readonly availableAt: string }
   | { readonly kind: "skip" }
+
+type QueuedRun = {
+  readonly agent: AgentDefinition
+  readonly threadId: string
+  readonly runId: string
+  readonly triggerMessageId: string
+}
 
 /**
  * Cohosted worker that turns `agent.run.requested` jobs into persisted agent runs.
@@ -98,13 +107,19 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       throw new AgentWorkerError(`Unsupported agent job type '${job.type}'.`)
     }
 
-    const { agentId, threadId, triggerMessageId } = job.payload
+    const { agentId, threadId, runId, triggerMessageId } = job.payload
     const agent = this.sixb.agents.getById(agentId)
     if (!agent) {
       throw new AgentWorkerError(`Unknown agent '${agentId}'.`)
     }
 
-    const reservation = await this.reserveOrReclaim(context, { agent, threadId, triggerMessageId })
+    const reservation = await this.reserveOrReclaim(context, {
+      agent,
+      threadId,
+      runId,
+      triggerMessageId,
+      requestedByPrincipal: job.payload.requestedByPrincipal ?? SYSTEM_PRINCIPAL,
+    })
     if (reservation.kind === "skip") {
       return
     }
@@ -184,57 +199,79 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
   private async reserveOrReclaim(
     context: AgentWorkerContext,
-    input: { agent: AgentDefinition; threadId: string; triggerMessageId: string }
+    input: {
+      agent: AgentDefinition
+      threadId: string
+      runId: string
+      triggerMessageId: string
+      requestedByPrincipal: Principal
+    }
   ): Promise<Reservation> {
     try {
-      const run = await context.storage.runs.reserve({
-        id: createAgentRunId(),
+      const run = await context.storage.agents.runs.reserve({
+        id: input.runId,
         projectId: context.id,
         threadId: input.threadId,
         agentId: input.agent.id,
         triggerMessageId: input.triggerMessageId,
+        requestedByPrincipal: input.requestedByPrincipal,
         modelId: input.agent.model.modelId,
         lease: freshLease(context.leaseMs),
       })
       return { kind: "run", run }
     } catch (error) {
-      if (!(error instanceof AgentStorageError) || error.code !== "active_run_exists") {
+      if (!(error instanceof AgentStorageError)) {
         throw error
       }
-      return this.takeOverActiveRun(context, input)
+      if (error.code === "active_run_exists") {
+        const thread = await context.storage.agents.threads.getById({
+          projectId: context.id,
+          id: input.threadId,
+        })
+        const activeRunId = thread?.activeRunId
+        if (!activeRunId) {
+          // The active run cleared between our reserve and this read; bounce briefly and try to win.
+          return { kind: "held", availableAt: backoff(SHORT_BACKOFF_MS) }
+        }
+        if (activeRunId !== input.runId) {
+          // A different turn owns the thread (single-flight): wait for it to clear.
+          return { kind: "held", availableAt: backoff(context.leaseMs) }
+        }
+        return this.reclaimOrSkipQueuedRun(context, input)
+      }
+      if (error.code === "duplicate_id") {
+        return this.reclaimOrSkipQueuedRun(context, input)
+      }
+      throw error
     }
   }
 
-  private async takeOverActiveRun(
+  private async reclaimOrSkipQueuedRun(
     context: AgentWorkerContext,
-    input: { threadId: string; triggerMessageId: string }
+    input: QueuedRun
   ): Promise<Reservation> {
-    const { storage, id: projectId } = context
-    const thread = await storage.threads.getById({ projectId, id: input.threadId })
-    const activeRunId = thread?.activeRunId
-    if (!activeRunId) {
-      // The active run cleared between our reserve and this read; bounce briefly and try to win.
+    const run = await context.storage.agents.runs.getById({
+      projectId: context.id,
+      id: input.runId,
+    })
+    if (!run) {
       return { kind: "held", availableAt: backoff(SHORT_BACKOFF_MS) }
     }
-
-    const active = await storage.runs.getById({ projectId, id: activeRunId })
-    if (!active) {
-      return { kind: "held", availableAt: backoff(SHORT_BACKOFF_MS) }
+    if (
+      run.id !== input.runId ||
+      run.threadId !== input.threadId ||
+      run.agentId !== input.agent.id ||
+      run.triggerMessageId !== input.triggerMessageId
+    ) {
+      throw new AgentWorkerError(`Agent run '${input.runId}' does not match its queued request.`)
     }
-    if (active.status !== "running") {
-      // Already terminal (late redelivery) — nothing to do.
+    if (run.status !== "running") {
       return { kind: "skip" }
     }
-    if (active.triggerMessageId !== input.triggerMessageId) {
-      // A different turn owns the thread (single-flight): wait for it to clear.
-      return { kind: "held", availableAt: backoff(context.leaseMs) }
-    }
-
-    // Crash redelivery of our own run: take it over iff its lease has actually expired.
     try {
-      const reclaimed = await storage.runs.reclaim({
-        projectId,
-        id: activeRunId,
+      const reclaimed = await context.storage.agents.runs.reclaim({
+        projectId: context.id,
+        id: input.runId,
         lease: freshLease(context.leaseMs),
       })
       return { kind: "run", run: reclaimed }
@@ -257,11 +294,13 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     error: unknown
   ): Promise<void> {
     try {
-      await finishRunOrThrow(
-        context.storage,
-        { projectId: context.id, id: runId, leaseId, status, error: toErrorMessage(error) },
-        runId
-      )
+      await finishRunOrThrow(context.storage.agents, {
+        projectId: context.id,
+        id: runId,
+        leaseId,
+        status,
+        error: toErrorMessage(error),
+      })
     } catch (finalizeError) {
       // Lease already lost / run already terminal — nothing more to record, the delivery is acked.
       if (finalizeError instanceof AgentLeaseLostError) {
@@ -278,13 +317,13 @@ function buildAgentContext(
   options: AgentWorkerOptions,
   leaseMs: number
 ): AgentWorkerContext {
-  const storage = sixb.storage.agents
-  if (!storage) {
+  const storage = sixb.storage
+  if (!storage.agents) {
     throw new AgentWorkerError("Agent workers require storage.agents support.")
   }
   return {
     id: sixb.id,
-    storage,
+    storage: storage as AgentWorkerStorage,
     tools: options.tools ?? {},
     streamSink: options.streamSink ?? NOOP_SINK,
     leaseMs,

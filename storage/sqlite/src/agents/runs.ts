@@ -55,6 +55,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
               thread_id,
               agent_id,
               trigger_message_id,
+              requested_by_principal_type,
+              requested_by_principal_id,
+              execution_principal_type,
+              execution_principal_id,
               status,
               model_id,
               attempt,
@@ -62,7 +66,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
               lease_expires_at,
               created_at,
               started_at
-            ) VALUES (?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?)
           `
           )
           .run(
@@ -71,6 +75,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.threadId,
             input.agentId,
             input.triggerMessageId,
+            input.requestedByPrincipal.type,
+            input.requestedByPrincipal.id,
+            input.executionPrincipal?.type ?? null,
+            input.executionPrincipal?.id ?? null,
             input.modelId ?? null,
             input.lease.id,
             input.lease.expiresAt.toISOString(),

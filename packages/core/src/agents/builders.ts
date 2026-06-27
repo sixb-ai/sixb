@@ -1,6 +1,6 @@
 import { AgentDefinitionError } from "./errors"
 import type { AgentDefinition, DefineAgentConfig } from "./types"
-import { assertNonEmpty } from "./validation"
+import { assertNonEmpty, assertValidLoopConfig } from "./validation"
 
 /**
  * Define an agent: a conversational, looping actor auto-discovered from `agents/`.
@@ -20,6 +20,7 @@ export function defineAgent<const TId extends string>(
   if (config.model === undefined || config.model === null) {
     throw new AgentDefinitionError("[Sixb] Agent model is required.")
   }
+  assertValidLoopConfig(config.loop)
 
   return {
     kind: "agent",

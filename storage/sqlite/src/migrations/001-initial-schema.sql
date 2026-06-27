@@ -713,6 +713,14 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   thread_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
   trigger_message_id TEXT NOT NULL,
+  requested_by_principal_type TEXT NOT NULL DEFAULT 'system' CHECK (
+    requested_by_principal_type IN ('user', 'serviceAccount', 'system')
+  ),
+  requested_by_principal_id TEXT NOT NULL DEFAULT 'system',
+  execution_principal_type TEXT CHECK (
+    execution_principal_type IS NULL OR execution_principal_type = 'serviceAccount'
+  ),
+  execution_principal_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
   model_id TEXT,
   finish_reason TEXT,
@@ -748,6 +756,10 @@ CREATE TABLE IF NOT EXISTS agent_messages (
   thread_id TEXT NOT NULL,
   run_id TEXT,
   role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant')),
+  author_principal_type TEXT CHECK (
+    author_principal_type IS NULL OR author_principal_type IN ('user', 'serviceAccount', 'system')
+  ),
+  author_principal_id TEXT,
   seq INTEGER NOT NULL CHECK (seq >= 1),
   parts TEXT NOT NULL,
   metadata TEXT,

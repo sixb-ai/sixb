@@ -1,4 +1,10 @@
-import type { AgentRunRecord, AgentStorage } from "@sixb/core"
+import type {
+  AgentRunRecord,
+  AgentStorage,
+  AppendAgentMessageInput,
+  FinishAgentRunInput,
+  Storage,
+} from "@sixb/core"
 import { AgentStorageError } from "@sixb/core"
 import { AgentFinalizationError, AgentLeaseLostError } from "./errors"
 
@@ -30,25 +36,53 @@ export function isTerminalOrLeaseGone(error: unknown): boolean {
  */
 export async function finishRunOrThrow(
   storage: AgentStorage,
-  input: Parameters<AgentStorage["runs"]["finish"]>[0],
-  runId: string
+  input: FinishAgentRunInput
 ): Promise<AgentRunRecord> {
-  let lastError: unknown
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await storage.runs.finish(input)
     } catch (error) {
-      if (isTerminalOrLeaseGone(error)) {
-        throw new AgentLeaseLostError(runId)
-      }
-      lastError = error
-      const delay = FINALIZE_BACKOFF_MS[attempt]
-      if (delay === undefined) {
-        throw new AgentFinalizationError(runId, { cause: lastError })
-      }
-      await sleep(delay)
+      await waitBeforeFinalizeRetry(input.id, attempt, error)
     }
   }
+}
+
+export async function appendMessageAndFinishRunOrThrow(
+  storage: Storage,
+  input: {
+    readonly message: AppendAgentMessageInput
+    readonly finish: FinishAgentRunInput
+  }
+): Promise<AgentRunRecord> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await storage.transaction(async (tx) => {
+        const agents = tx.agents
+        if (!agents) {
+          throw new Error("[SixbAgentWorker] Agent storage is not configured.")
+        }
+        await agents.messages.append(input.message)
+        return agents.runs.finish(input.finish)
+      })
+    } catch (error) {
+      await waitBeforeFinalizeRetry(input.finish.id, attempt, error)
+    }
+  }
+}
+
+async function waitBeforeFinalizeRetry(
+  runId: string,
+  attempt: number,
+  error: unknown
+): Promise<void> {
+  if (isTerminalOrLeaseGone(error)) {
+    throw new AgentLeaseLostError(runId)
+  }
+  const delay = FINALIZE_BACKOFF_MS[attempt]
+  if (delay === undefined) {
+    throw new AgentFinalizationError(runId, { cause: error })
+  }
+  await sleep(delay)
 }
 
 function sleep(ms: number): Promise<void> {

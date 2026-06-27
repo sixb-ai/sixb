@@ -1,3 +1,4 @@
+import type { Principal } from "../auth"
 import type { JsonValue } from "../json"
 
 export interface QueueJobEnvelope {
@@ -160,8 +161,8 @@ export interface ActionRunRequestedQueueJob
   > {}
 
 /**
- * An agent turn is requested for a thread. The payload carries only the *intent* — the worker
- * generates the run id and reserves the run at claim time (reserve-at-claim), so it owns the
+ * An agent turn is requested for a thread. The payload carries the *intent* plus the request-time
+ * run id — the worker reserves the run row at claim time (reserve-at-claim), so it owns the
  * `agent_runs` lease from birth and there is never an orphan run between request and pickup.
  */
 export interface AgentRunRequestedQueueJob
@@ -170,7 +171,9 @@ export interface AgentRunRequestedQueueJob
     {
       readonly agentId: string
       readonly threadId: string
+      readonly runId: string
       readonly triggerMessageId: string
+      readonly requestedByPrincipal?: Principal
     }
   > {}
 

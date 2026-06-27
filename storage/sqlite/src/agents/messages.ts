@@ -59,13 +59,15 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
               thread_id,
               run_id,
               role,
+              author_principal_type,
+              author_principal_id,
               seq,
               parts,
               metadata,
               content_version,
               created_at,
               completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
           )
           .run(
@@ -74,6 +76,8 @@ export class SqliteAgentMessageStore implements AgentMessageStore {
             input.threadId,
             input.runId,
             input.role,
+            input.authorPrincipal?.type ?? null,
+            input.authorPrincipal?.id ?? null,
             seqRow.next,
             JSON.stringify(input.parts),
             input.metadata === undefined ? null : JSON.stringify(input.metadata),
