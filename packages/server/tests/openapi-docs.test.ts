@@ -49,14 +49,31 @@ function createDocsApi() {
   return createSixbApi(new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() }))
 }
 
+async function fetchDocsJsonWithoutWarnings(app: ReturnType<typeof createDocsApi>) {
+  const originalWarn = console.warn
+  const warnings: string[] = []
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(" "))
+  }
+
+  try {
+    const response = await app.fetch(new Request("http://localhost/docs/json"))
+    expect(response.status).toBe(200)
+    const spec = (await response.json()) as OpenApiDocument
+    expect(warnings.filter((warning) => warning.includes("Recursive reference detected"))).toEqual(
+      []
+    )
+    return spec
+  } finally {
+    console.warn = originalWarn
+  }
+}
+
 describe("OpenAPI docs", () => {
   test("documents CSRF auth for protected mutating API routes", async () => {
     const app = createDocsApi()
-    const response = await app.fetch(new Request("http://localhost/docs/json"))
+    const spec = await fetchDocsJsonWithoutWarnings(app)
 
-    expect(response.status).toBe(200)
-
-    const spec = (await response.json()) as OpenApiDocument
     expect(spec.components?.securitySchemes?.sixbCsrf).toEqual({
       type: "apiKey",
       in: "header",
@@ -80,6 +97,8 @@ describe("OpenAPI docs", () => {
       ["post", "/api/pipelines/{pipelineId}/runs"],
       ["post", "/api/workflow-interventions/{interventionId}/submit"],
       ["post", "/api/workflow-interventions/{interventionId}/cancel"],
+      ["post", "/api/agent-threads"],
+      ["post", "/api/agent-threads/{threadId}/messages"],
       ["put", "/api/objects/{objectTypeId}/{objectId}"],
       ["put", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],
       ["delete", "/api/objects/{objectTypeId}/{objectId}/links/{linkId}"],

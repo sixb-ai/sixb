@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { ignoreOverride, type JsonSchema7Type, type OverrideCallback } from "zod-to-json-schema"
 
 export const ErrorResponseSchema = z.object({ error: z.string() })
 
@@ -22,3 +23,31 @@ export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
     z.record(JsonValueSchema),
   ])
 )
+
+const JsonValueOpenApiSchema = {
+  description: "Any JSON-compatible value.",
+  nullable: true,
+  anyOf: [
+    { type: "string" },
+    { type: "number" },
+    { type: "boolean" },
+    { type: "array", items: {} },
+    { type: "object", additionalProperties: true },
+  ],
+} as JsonSchema7Type
+
+const jsonValueSchemaDef = JsonValueSchema._def
+
+/**
+ * Runtime validation needs the recursive JSON-value Zod schema above. OpenAPI
+ * does not need to expand that recursion at every metadata/input leaf; these
+ * fields are intentionally arbitrary JSON values. Emit that contract directly
+ * so zod-to-json-schema does not hit its "$refStrategy: none" recursion path.
+ */
+export const jsonValueOpenApiOverride: OverrideCallback = (def) => {
+  if (def === jsonValueSchemaDef) {
+    return JsonValueOpenApiSchema
+  }
+
+  return ignoreOverride
+}

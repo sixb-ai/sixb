@@ -10,7 +10,7 @@ import {
   Sixb,
   type SixbOptions,
 } from "@sixb/core"
-import { parseSubscriptionMessage } from "../src/routes/ws"
+import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 

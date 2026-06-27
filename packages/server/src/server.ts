@@ -27,7 +27,8 @@ import {
 import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
-import { registerWsRoutes } from "./routes/ws"
+import { registerWebSocketRoutes } from "./routes/ws"
+import { jsonValueOpenApiOverride } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
 
 export interface SixbServerOptions {
@@ -201,6 +202,7 @@ export function createSixbApi(server: SixbServer) {
           { name: "Projections", description: "Projection definitions" },
           { name: "Objects", description: "Twin objects and state" },
           { name: "Actions", description: "Global and object action requests" },
+          { name: "Agents", description: "Agent catalog, threads, messages, and run state" },
           { name: "Links", description: "Object relationship links" },
           { name: "Telemetry", description: "Telemetry history and appends" },
           { name: "Events", description: "Domain event stream" },
@@ -212,7 +214,11 @@ export function createSixbApi(server: SixbServer) {
       },
       mapJsonSchema: {
         zod: (schema: Parameters<typeof zodToJsonSchema>[0]) =>
-          zodToJsonSchema(schema, { $refStrategy: "none", target: "openApi3" }),
+          zodToJsonSchema(schema, {
+            $refStrategy: "none",
+            target: "openApi3",
+            override: jsonValueOpenApiOverride,
+          }),
       },
     })
   )
@@ -225,7 +231,7 @@ export function createSixbApi(server: SixbServer) {
   })
   registerHttpRoutes(app, sixb)
   registerWebhookRoutes(app, sixb)
-  registerWsRoutes(app, server)
+  registerWebSocketRoutes(app, server)
 
   return app
 }

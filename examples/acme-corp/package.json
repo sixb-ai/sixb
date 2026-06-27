@@ -20,6 +20,7 @@
     "@sixb/ui": "workspace:*",
     "@tailwindcss/cli": "^4.2.2",
     "@tanstack/react-query": "^5.0.0",
+    "ai": "^6.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-router-dom": "^7.13.0",

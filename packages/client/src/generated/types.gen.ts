@@ -4256,6 +4256,540 @@ export type GetActionRunResponses = {
 
 export type GetActionRunResponse = GetActionRunResponses[keyof GetActionRunResponses]
 
+export type ListAgentsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/agents"
+}
+
+export type ListAgentsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: Array<{
+    id: string
+    name: string
+    description?: string
+    modelId?: string
+    groupIds: Array<string>
+    loop?: {
+      stopWhen?: {
+        maxSteps?: number
+      }
+    }
+  }>
+}
+
+export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses]
+
+export type GetAgentData = {
+  body?: never
+  path: {
+    agentId: string
+  }
+  query?: never
+  url: "/api/agents/{agentId}"
+}
+
+export type GetAgentErrors = {
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAgentError = GetAgentErrors[keyof GetAgentErrors]
+
+export type GetAgentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    name: string
+    description?: string
+    modelId?: string
+    groupIds: Array<string>
+    loop?: {
+      stopWhen?: {
+        maxSteps?: number
+      }
+    }
+  }
+}
+
+export type GetAgentResponse = GetAgentResponses[keyof GetAgentResponses]
+
+export type ListAgentThreadsData = {
+  body?: never
+  path?: never
+  query?: {
+    agentId?: string
+    status?: "active" | "archived"
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/agent-threads"
+}
+
+export type ListAgentThreadsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type ListAgentThreadsError = ListAgentThreadsErrors[keyof ListAgentThreadsErrors]
+
+export type ListAgentThreadsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    threads: Array<{
+      id: string
+      projectId: string
+      agentId: string
+      ownerPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      title?: string
+      status: "active" | "archived"
+      activeRunId: string | null
+      lastMessageAt?: string
+      messageCount: number
+      createdAt: string
+      updatedAt: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentThreadsResponse = ListAgentThreadsResponses[keyof ListAgentThreadsResponses]
+
+export type CreateAgentThreadData = {
+  body: {
+    agentId: string
+    title?: string
+    threadId?: string
+  }
+  path?: never
+  query?: never
+  url: "/api/agent-threads"
+}
+
+export type CreateAgentThreadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type CreateAgentThreadError = CreateAgentThreadErrors[keyof CreateAgentThreadErrors]
+
+export type CreateAgentThreadResponses = {
+  /**
+   * Response for status 201
+   */
+  201: {
+    thread: {
+      id: string
+      projectId: string
+      agentId: string
+      ownerPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      title?: string
+      status: "active" | "archived"
+      activeRunId: string | null
+      lastMessageAt?: string
+      messageCount: number
+      createdAt: string
+      updatedAt: string
+    }
+  }
+}
+
+export type CreateAgentThreadResponse = CreateAgentThreadResponses[keyof CreateAgentThreadResponses]
+
+export type GetAgentThreadData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}"
+}
+
+export type GetAgentThreadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAgentThreadError = GetAgentThreadErrors[keyof GetAgentThreadErrors]
+
+export type GetAgentThreadResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    projectId: string
+    agentId: string
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    title?: string
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type GetAgentThreadResponse = GetAgentThreadResponses[keyof GetAgentThreadResponses]
+
+export type ListAgentThreadMessagesData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    role?: "system" | "user" | "assistant"
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/agent-threads/{threadId}/messages"
+}
+
+export type ListAgentThreadMessagesErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type ListAgentThreadMessagesError =
+  ListAgentThreadMessagesErrors[keyof ListAgentThreadMessagesErrors]
+
+export type ListAgentThreadMessagesResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    messages: Array<{
+      id: string
+      projectId: string
+      threadId: string
+      runId: string | null
+      role: "system" | "user" | "assistant"
+      authorPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      seq: number
+      parts: Array<
+        | {
+            type: "text"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "reasoning"
+            text: string
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "step-start"
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-available"
+            /**
+             * Any JSON-compatible value.
+             */
+            output:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "tool-call"
+            toolCallId: string
+            toolName: string
+            dynamic?: boolean
+            providerExecuted?: boolean
+            /**
+             * Any JSON-compatible value.
+             */
+            input:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            state: "output-error"
+            errorText: string
+          }
+      >
+      /**
+       * Any JSON-compatible value.
+       */
+      metadata?:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
+      contentVersion: number
+      createdAt: string
+      completedAt?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentThreadMessagesResponse =
+  ListAgentThreadMessagesResponses[keyof ListAgentThreadMessagesResponses]
+
+export type PostAgentThreadMessageData = {
+  body: {
+    text: string
+    messageId?: string
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/messages"
+}
+
+export type PostAgentThreadMessageErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type PostAgentThreadMessageError =
+  PostAgentThreadMessageErrors[keyof PostAgentThreadMessageErrors]
+
+export type PostAgentThreadMessageResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    threadId: string
+    runId: string
+    triggerMessageId: string
+    jobId?: string
+    createdThread: boolean
+    streamId: string
+  }
+}
+
+export type PostAgentThreadMessageResponse =
+  PostAgentThreadMessageResponses[keyof PostAgentThreadMessageResponses]
+
+export type GetAgentRunData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query?: never
+  url: "/api/agent-runs/{runId}"
+}
+
+export type GetAgentRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type GetAgentRunError = GetAgentRunErrors[keyof GetAgentRunErrors]
+
+export type GetAgentRunResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    id: string
+    projectId: string
+    threadId: string
+    agentId: string
+    triggerMessageId: string
+    requestedByPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    executionPrincipal?: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    status: "running" | "succeeded" | "failed" | "cancelled"
+    modelId?: string
+    finishReason?:
+      | "stop"
+      | "length"
+      | "content-filter"
+      | "tool-calls"
+      | "error"
+      | "other"
+      | "unknown"
+    usage?: {
+      inputTokens?: number
+      outputTokens?: number
+      totalTokens?: number
+      reasoningTokens?: number
+      cachedInputTokens?: number
+    }
+    error?: string
+    attempt: number
+    streamId: string
+    createdAt: string
+    startedAt?: string
+    completedAt?: string
+  }
+}
+
+export type GetAgentRunResponse = GetAgentRunResponses[keyof GetAgentRunResponses]
+
 export type ListObjectLinksData = {
   body?: never
   path: {
