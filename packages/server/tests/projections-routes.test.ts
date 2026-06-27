@@ -84,7 +84,7 @@ function createSixbStub(
 
 function appWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext | null) {
   return registerProjectionRoutes(
-    new Elysia().derive(() => ({ authz, scoped: null })),
+    new Elysia().derive(() => ({ authz, scoped: null })) as unknown as Elysia,
     sixb
   )
 }
@@ -115,7 +115,7 @@ describe("projection routes", () => {
   })
 
   test("run list passes the viewable object type set to storage", async () => {
-    let captured: ListProjectionRunsInput | null = null
+    let captured = null as ListProjectionRunsInput | null
     const sixb = createSixbStub({
       async list(input: ListProjectionRunsInput) {
         captured = input

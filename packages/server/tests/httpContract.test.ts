@@ -31,6 +31,8 @@ import {
   prop,
   Sixb,
   type SixbOptions,
+  type Storage,
+  type WorkflowDefinition,
 } from "@sixb/core"
 import {
   SqliteActionRunStorage,
@@ -137,7 +139,9 @@ const inspectDeviceStep = defineWorkflowStep("inspect-device")
   .output({ deviceId: "string", healthy: "boolean" })
   .run(({ input }) => ({ deviceId: input.deviceId, healthy: true }))
 
-const inspectDeviceWorkflow = defineWorkflow("inspect-device-workflow")
+// Widen to the base type at the definition site: materializing these builder
+// result types against the wide ontology generic is a known TS2589 landmine.
+const inspectDeviceWorkflow: WorkflowDefinition = defineWorkflow("inspect-device-workflow")
   .input({ deviceId: "string" })
   .when(nightlyGithub)
   .then(inspectDeviceStep)
@@ -152,7 +156,9 @@ const reviewDeviceHealth = defineIntervention("review-device-health", {
   })
   .defaults(({ input }) => ({ approved: input.healthy }))
 
-const reviewDeviceHealthWorkflow = defineWorkflow("review-device-health-workflow")
+const reviewDeviceHealthWorkflow: WorkflowDefinition = defineWorkflow(
+  "review-device-health-workflow"
+)
   .input({ deviceId: "string" })
   .then(inspectDeviceStep)
   .then(reviewDeviceHealth)
@@ -301,22 +307,24 @@ describe("SixbServer HTTP contract", () => {
     const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
 
     const lakeStorage = new InMemoryLakeStorage()
+    const storage: Storage = {
+      objects: new SqliteObjectStorage(),
+      timeseries: new SqliteTimeseriesStorage(),
+      syncRuns: new SqliteSyncRunStorage(),
+      pipelineRuns: new SqlitePipelineRunStorage(),
+      workflowRuns: new SqliteWorkflowRunStorage(),
+      workflowInterventions: new SqliteWorkflowInterventionStorage(),
+      webhookRuns: new SqliteWebhookRunStorage(),
+      actionRuns: new SqliteActionRunStorage(),
+      rules: new SqliteRulesStorage(),
+      transaction: (run) => Promise.resolve(run(storage)),
+    }
     const sixb = createSixbInstance<readonly OntologySource[]>({
       id: "contract-project",
       ontology: [Space, Device],
       actions: [setSpeed, renameDevice, syncDeviceLabel, createMaintenanceRun],
       broker: new InMemoryBroker(),
-      storage: {
-        objects: new SqliteObjectStorage(),
-        timeseries: new SqliteTimeseriesStorage(),
-        syncRuns: new SqliteSyncRunStorage(),
-        pipelineRuns: new SqlitePipelineRunStorage(),
-        workflowRuns: new SqliteWorkflowRunStorage(),
-        workflowInterventions: new SqliteWorkflowInterventionStorage(),
-        webhookRuns: new SqliteWebhookRunStorage(),
-        actionRuns: new SqliteActionRunStorage(),
-        rules: new SqliteRulesStorage(),
-      },
+      storage,
       lakeStorage,
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),

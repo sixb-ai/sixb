@@ -90,6 +90,12 @@ class SharedQueues implements Queues {
   get workflows() {
     return this.inner.workflows
   }
+  get actions() {
+    return this.inner.actions
+  }
+  get agents() {
+    return this.inner.agents
+  }
 
   async close(): Promise<void> {
     logFixtureEvent({ type: "queues:close" })

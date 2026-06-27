@@ -1332,11 +1332,15 @@ describe("authorized event websocket", () => {
 
       // No connection-level events grant: both principals connect, and the
       // stream is filtered per-event by their grants during polling.
-      const runnerWs = new WebSocket(wsUrl, { headers: runner.headers })
+      // Bun's WebSocket accepts an options object with `headers`; the DOM lib
+      // types only model the subprotocols argument, so widen at the call site.
+      const runnerWs = new WebSocket(wsUrl, { headers: runner.headers } as unknown as string[])
       expect(await nextWsMessage(runnerWs)).toEqual({ type: "connected", channel: "events" })
       runnerWs.close()
 
-      const operatorWs = new WebSocket(wsUrl, { headers: operator.headers })
+      const operatorWs = new WebSocket(wsUrl, {
+        headers: operator.headers,
+      } as unknown as string[])
       expect(await nextWsMessage(operatorWs)).toEqual({ type: "connected", channel: "events" })
       operatorWs.close()
     } finally {
