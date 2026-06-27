@@ -17,6 +17,7 @@ export type GrantKind =
   | "run:workflow"
   | "run:sync"
   | "run:pipeline"
+  | "run:agent"
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
@@ -26,6 +27,7 @@ export interface GrantUniverse {
   readonly workflowIds: ReadonlySet<string>
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
+  readonly agentIds: ReadonlySet<string>
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
 }
 
@@ -78,6 +80,11 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     universeKey: "pipelineIds",
     subject: "pipeline",
     fix: "Add it to 'pipelines/' or pass it to createSixb({ pipelines }).",
+  },
+  "run:agent": {
+    universeKey: "agentIds",
+    subject: "agent",
+    fix: "Add it to 'agents/' or pass it to createSixb({ agents }).",
   },
 }
 

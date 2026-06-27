@@ -123,10 +123,12 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
     const order = input.order ?? "desc"
     const statuses = input.statuses ? new Set(input.statuses) : null
+    const agentIds = input.agentIds ? new Set(input.agentIds) : null
 
     const filtered = [...this.state.threads.values()]
       .filter((thread) => thread.projectId === input.projectId)
       .filter((thread) => (input.agentId ? thread.agentId === input.agentId : true))
+      .filter((thread) => (agentIds ? agentIds.has(thread.agentId) : true))
       .filter((thread) => (statuses ? statuses.has(thread.status) : true))
       .filter((thread) =>
         input.ownerPrincipal ? principalsEqual(thread.ownerPrincipal, input.ownerPrincipal) : true

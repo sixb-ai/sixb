@@ -64,6 +64,7 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
       "run:workflow": new Set(),
       "run:sync": new Set(),
       "run:pipeline": new Set(),
+      "run:agent": new Set(),
     },
   }
 }

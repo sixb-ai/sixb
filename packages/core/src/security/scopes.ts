@@ -9,6 +9,7 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
+import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
@@ -17,7 +18,14 @@ import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
 
 /** Capability targets a scope can range over. */
-export type ScopeTarget = "object" | "dataset" | "action" | "workflow" | "sync" | "pipeline"
+export type ScopeTarget =
+  | "object"
+  | "dataset"
+  | "action"
+  | "workflow"
+  | "sync"
+  | "pipeline"
+  | "agent"
 
 interface ScopeTargetInput {
   object: ObjectType
@@ -26,6 +34,7 @@ interface ScopeTargetInput {
   workflow: WorkflowDefinition
   sync: SyncDefinition
   pipeline: PipelineDefinition
+  agent: AgentDefinition
 }
 
 /**
@@ -85,3 +94,5 @@ export const workflows = (): Scope<"workflow"> => allScope("workflow")
 export const syncs = (): Scope<"sync"> => allScope("sync")
 
 export const pipelines = (): Scope<"pipeline"> => allScope("pipeline")
+
+export const agents = (): Scope<"agent"> => allScope("agent")

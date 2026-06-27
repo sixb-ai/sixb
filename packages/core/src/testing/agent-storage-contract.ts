@@ -146,6 +146,22 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         const sales = await storage.threads.list({ projectId, agentId: "sales", order: "asc" })
         expect(sales.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_c"])
 
+        const visibleAgents = await storage.threads.list({
+          projectId,
+          agentIds: ["support"],
+          order: "asc",
+        })
+        expect(visibleAgents.threads.map((thread) => thread.id)).toEqual(["thr_b"])
+
+        const salesVisibleAgents = await storage.threads.list({
+          projectId,
+          agentId: "sales",
+          agentIds: ["support"],
+          order: "asc",
+        })
+        expect(salesVisibleAgents.threads).toEqual([])
+        expect(salesVisibleAgents.total).toBe(0)
+
         const active = await storage.threads.list({ projectId, statuses: ["active"], order: "asc" })
         expect(active.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_b"])
 

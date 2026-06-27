@@ -32,7 +32,7 @@ export interface ApplyGrant {
   readonly selection: Selection
 }
 
-export type RunGrantTarget = "workflow" | "sync" | "pipeline"
+export type RunGrantTarget = "workflow" | "sync" | "pipeline" | "agent"
 
 export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
   readonly kind: "grant"

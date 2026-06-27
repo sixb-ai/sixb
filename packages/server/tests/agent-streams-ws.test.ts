@@ -207,13 +207,55 @@ describe("canAccessAgentRunStream", () => {
       lease: { id: "lease_ws_1", expiresAt: new Date("2099-01-01T00:00:00.000Z") },
     })
 
-    await expect(canAccessAgentRunStream(sixb, { runId, authz: authz(owner) })).resolves.toEqual({
+    await expect(
+      canAccessAgentRunStream(sixb, { runId, authz: authz(owner, [agentId]) })
+    ).resolves.toEqual({
       ok: true,
+    })
+    await expect(canAccessAgentRunStream(sixb, { runId, authz: authz(owner) })).resolves.toEqual({
+      ok: false,
+      message: "Agent run not found.",
     })
     await expect(
       canAccessAgentRunStream(sixb, {
         runId,
-        authz: authz({ type: "user", id: "usr_other" }),
+        authz: authz({ type: "user", id: "usr_other" }, [agentId]),
+      })
+    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+  })
+
+  test("allows pre-claim subscriptions when the thread is owned and runnable", async () => {
+    const sixb = createSixbInstance<readonly OntologySource[]>({
+      id: projectId,
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      auth: { id: "test", kind: "dev" },
+    })
+    const owner: Principal = { type: "user", id: "usr_owner" }
+    const agents = agentStorage(sixb)
+    await agents.threads.create({
+      id: threadId,
+      projectId,
+      agentId,
+      ownerPrincipal: owner,
+    })
+
+    await expect(
+      canAccessAgentRunStream(sixb, {
+        runId: "agt_run_not_reserved",
+        threadId,
+        authz: authz(owner, [agentId]),
+      })
+    ).resolves.toEqual({ ok: true })
+    await expect(
+      canAccessAgentRunStream(sixb, {
+        runId: "agt_run_not_reserved",
+        threadId,
+        authz: authz(owner),
       })
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
@@ -462,7 +504,7 @@ function decodeWsData(value: unknown): string {
   return String(value)
 }
 
-function authz(principal: Principal): AuthorizationContext {
+function authz(principal: Principal, agentIds: readonly string[] = []): AuthorizationContext {
   return {
     principal,
     groupIds: [],
@@ -474,6 +516,7 @@ function authz(principal: Principal): AuthorizationContext {
       "run:workflow": new Set(),
       "run:sync": new Set(),
       "run:pipeline": new Set(),
+      "run:agent": new Set(agentIds),
     },
   }
 }

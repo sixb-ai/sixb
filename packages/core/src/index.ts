@@ -547,6 +547,7 @@ export type {
 } from "./security"
 export {
   actions,
+  agents,
   assertGrantDefinition,
   assertGroupDefinition,
   assertInvitePolicyDefinition,

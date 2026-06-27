@@ -5,6 +5,8 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   type ActionDefinition,
+  type AgentDefinition,
+  agents,
   can,
   canInviteGroupIds,
   col,
@@ -12,6 +14,7 @@ import {
   type DatasetDefinition,
   datasets,
   defineAction,
+  defineAgent,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -47,6 +50,14 @@ const Account = defineObjectType({
 
 const AccountSnapshot = defineDataset("account.snapshot", {
   schema: [col("id", "string")],
+})
+
+const model = {} as Parameters<typeof defineAgent>[1]["model"]
+
+const opsAgent = defineAgent("ops", {
+  name: "Ops Agent",
+  model,
+  instructions: "Assist operators.",
 })
 
 const sourceConnector = defineConnector("source", {
@@ -353,7 +364,7 @@ describe("role definitions", () => {
     })
   })
 
-  test("can.run supports sync and pipeline definitions and scopes", () => {
+  test("can.run supports sync, pipeline, and agent definitions and scopes", () => {
     expect(can.run(syncAccounts)).toEqual({
       kind: "grant",
       capability: "run",
@@ -379,6 +390,19 @@ describe("role definitions", () => {
       capability: "run",
       target: "pipeline",
       selection: { all: true, except: ["normalize-accounts"] },
+    })
+    expect(can.run(opsAgent)).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "agent",
+      selection: { all: false, ids: ["ops"] },
+    })
+    expect(can.run(agents()).selection).toEqual({ all: true, except: [] })
+    expect(can.run(agents().except([opsAgent]))).toEqual({
+      kind: "grant",
+      capability: "run",
+      target: "agent",
+      selection: { all: true, except: ["ops"] },
     })
   })
 
@@ -524,6 +548,26 @@ describe("role definitions", () => {
     )
   })
 
+  test("runtime registration rejects run grants on unknown agents", () => {
+    const role: RoleDefinition = {
+      kind: "role",
+      id: "agent.runner",
+      grantedToGroupIds: ["commercial"],
+      grants: [
+        {
+          kind: "grant",
+          capability: "run",
+          target: "agent",
+          selection: { all: false, ids: ["missing"] },
+        },
+      ],
+    }
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "unknown agent 'missing'"
+    )
+  })
+
   test("valid roles register and resolve from the security registry", () => {
     const role = defineRole("contract.operator", {
       grantedTo: [commercial],
@@ -629,6 +673,7 @@ function createRuntime(
     datasets?: readonly DatasetDefinition[]
     syncs?: readonly SyncDefinition[]
     pipelines?: readonly PipelineDefinition[]
+    agents?: readonly AgentDefinition[]
   } = {}
 ): Sixb<readonly [typeof Account]> {
   return new Sixb<readonly [typeof Account]>({

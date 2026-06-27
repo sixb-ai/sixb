@@ -5,6 +5,7 @@ import {
   can,
   col,
   defineAction,
+  defineAgent,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -86,6 +87,20 @@ const contractPipeline: PipelineDefinition =
 const invoicePipeline: PipelineDefinition =
   definePipeline("invoice-pipeline").then(invoicePipelineStep)
 
+const model = {} as Parameters<typeof defineAgent>[1]["model"]
+
+const contractAgent = defineAgent("contract-agent", {
+  name: "Contract Agent",
+  model,
+  instructions: "Help with contracts.",
+})
+
+const invoiceAgent = defineAgent("invoice-agent", {
+  name: "Invoice Agent",
+  model,
+  instructions: "Help with invoices.",
+})
+
 // Widened to the base type, like renewContract below: keeps the registered
 // actions array out of the deep Sixb<tuple> instantiation (TS2589).
 const sendContract: ActionDefinition = defineAction("send-contract")
@@ -132,7 +147,12 @@ const contractSender = defineRole("contract.sender", {
 
 const operationsRunner = defineRole("operations.runner", {
   grantedTo: [operations],
-  grants: [can.run(renewContract), can.run(syncContracts), can.run(contractPipeline)],
+  grants: [
+    can.run(renewContract),
+    can.run(syncContracts),
+    can.run(contractPipeline),
+    can.run(contractAgent),
+  ],
 })
 
 const principal = { type: "user", id: "adam" } as const
@@ -148,6 +168,7 @@ function createRuntime() {
     syncs: [syncContracts, syncInvoices],
     pipelines: [contractPipeline, invoicePipeline],
     workflows: [renewContract],
+    agents: [contractAgent, invoiceAgent],
     groups: [commercial, finance, ops, operations],
     roles: [contractOperator, invoiceViewer, contractSender, operationsRunner],
     ...createTestRuntimeDeps(),
@@ -381,6 +402,38 @@ describe("sixb.as() operational access", () => {
     expect(operator.listPipelines()).toEqual([])
     expect(operator.getPipelineById("contract-pipeline")).toBeNull()
   })
+
+  test("agent catalog narrows to runnable agents", () => {
+    const sixb = createRuntime()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    expect(runner.listAgents().map((agent) => agent.id)).toEqual(["contract-agent"])
+    expect(runner.getAgentById("contract-agent")?.id).toBe("contract-agent")
+    expect(runner.getAgentById("invoice-agent")).toBeNull()
+
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(operator.listAgents()).toEqual([])
+    expect(operator.getAgentById("contract-agent")).toBeNull()
+  })
+
+  test("agent run requests require can.run", async () => {
+    const sixb = createRuntime()
+
+    const runner = sixb.as(contextFor(sixb, ["operations"]))
+    const result = await runner.requestAgentRun({
+      agentId: "contract-agent",
+      text: "Summarize this account.",
+    })
+    expect(result.runId).toBeString()
+
+    const operator = sixb.as(contextFor(sixb, ["commercial"]))
+    expect(
+      operator.requestAgentRun({
+        agentId: "contract-agent",
+        text: "Summarize this account.",
+      })
+    ).rejects.toThrow(AuthorizationError)
+  })
 })
 
 describe("sixb.as() fails closed on ungranted surfaces", () => {
@@ -440,12 +493,14 @@ describe("ScopedSixb surface", () => {
         "authorization",
         "getDatasetById",
         "getActionById",
+        "getAgentById",
         "getObject",
         "getPipelineById",
         "getSyncById",
         "getWorkflowById",
         "list",
         "listActions",
+        "listAgents",
         "listDatasets",
         "listPipelines",
         "listSyncs",
@@ -453,6 +508,7 @@ describe("ScopedSixb surface", () => {
         "objects",
         "readEvents",
         "requestAction",
+        "requestAgentRun",
         "runWorkflow",
       ].sort()
     )

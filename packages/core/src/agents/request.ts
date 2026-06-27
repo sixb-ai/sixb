@@ -1,4 +1,5 @@
 import type { Principal } from "../auth"
+import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
 import { AgentRequestError } from "./errors"
@@ -51,6 +52,8 @@ export async function requestAgentRun(
   agent: AgentDefinition,
   input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
+  assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
+
   const agents = requireAgentStorage(runtime)
   const projectId = runtime.projectId
   const principal = input.principal ?? SYSTEM_PRINCIPAL

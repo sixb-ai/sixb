@@ -7,7 +7,9 @@ import {
   type AgentThreadRecord,
   type AuthorizationContext,
   agentRunStreamId,
+  assertAuthorized,
   createAgentThreadId,
+  isAllowed,
   type OntologySource,
   type Principal,
   type Sixb,
@@ -109,8 +111,15 @@ function principalsEqual(left: Principal, right: Principal): boolean {
   return left.type === right.type && left.id === right.id
 }
 
+function canRunAgent(authz: AuthorizationContext | null, agentId: string): boolean {
+  return !authz || isAllowed(authz, { kind: "agent.run", agentId })
+}
+
 function canAccessThread(authz: AuthorizationContext | null, thread: AgentThreadRecord): boolean {
-  return !authz || principalsEqual(authz.principal, thread.ownerPrincipal)
+  return (
+    !authz ||
+    (principalsEqual(authz.principal, thread.ownerPrincipal) && canRunAgent(authz, thread.agentId))
+  )
 }
 
 async function getAccessibleThread(params: {
@@ -162,18 +171,30 @@ function missingAgentStorageResponse(set: { status?: number | string }): { error
 
 export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app
-    .get("/api/agents", () => sixb.agents.list().map(serializeAgent), {
-      response: { 200: AgentCatalogItemSchema.array() },
-      detail: {
-        summary: "List registered agents",
-        tags: ["Agents"],
-        operationId: "listAgents",
+    .get(
+      "/api/agents",
+      (context) => {
+        const { scoped } = requestAuthState(context)
+        const agents = scoped ? scoped.listAgents() : sixb.agents.list()
+        return agents.map(serializeAgent)
       },
-    })
+      {
+        response: { 200: AgentCatalogItemSchema.array() },
+        detail: {
+          summary: "List registered agents",
+          tags: ["Agents"],
+          operationId: "listAgents",
+        },
+      }
+    )
     .get(
       "/api/agents/:agentId",
-      ({ params, set }) => {
-        const agent = sixb.agents.getById(params.agentId)
+      (context) => {
+        const { params, set } = context
+        const { scoped } = requestAuthState(context)
+        const agent = scoped
+          ? scoped.getAgentById(params.agentId)
+          : sixb.agents.getById(params.agentId)
         if (!agent) {
           set.status = 404
           return { error: "Agent not found" }
@@ -208,6 +229,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           const result = await storage.threads.list({
             projectId: sixb.id,
             agentId: parsed.agentId,
+            agentIds: authz ? [...authz.grants["run:agent"]] : undefined,
             statuses: parsed.status ? [parsed.status] : undefined,
             ownerPrincipal: authz?.principal,
             limit,
@@ -246,6 +268,10 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             set.status = 404
             return { error: "Agent not found" }
           }
+          assertAuthorized(
+            { authorization: authz ?? undefined },
+            { kind: "agent.run", agentId: agent.id }
+          )
 
           const storage = sixb.storage.agents
           if (!storage) {
@@ -271,6 +297,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: {
           201: CreateAgentThreadResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
         },
         detail: {
@@ -380,7 +407,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
       "/api/agent-threads/:threadId/messages",
       async (context) => {
         const { params, body, set } = context
-        const { authz } = requestAuthState(context)
+        const { authz, scoped } = requestAuthState(context)
         try {
           const storage = sixb.storage.agents
           if (!storage) {
@@ -399,13 +426,16 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           }
 
           const parsed = PostAgentMessageBodySchema.parse(body)
-          const result = await sixb.agents.request({
+          const requestInput = {
             agentId: thread.agentId,
             threadId: thread.id,
             text: parsed.text,
             messageId: parsed.messageId,
             principal: principalForRequest(authz),
-          })
+          }
+          const result = await (scoped
+            ? scoped.requestAgentRun(requestInput)
+            : sixb.agents.request(requestInput))
 
           set.status = 202
           return PostAgentMessageResponseSchema.parse({
@@ -422,6 +452,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: {
           202: PostAgentMessageResponseSchema,
           400: ErrorResponseSchema,
+          403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
         },

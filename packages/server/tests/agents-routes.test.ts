@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
+  agents as agentScope,
+  can,
   createAgentRunLeaseId,
   createSessionCredential,
   defineAgent,
+  defineGroup,
+  defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -34,6 +38,25 @@ const ops = defineAgent("ops", {
   instructions: "Internal ops instructions.",
 })
 
+const supportUsers = defineGroup("support-users")
+const opsUsers = defineGroup("ops-users")
+const admins = defineGroup("admins")
+
+const supportAgentRunner = defineRole("support.agent-runner", {
+  grantedTo: [supportUsers],
+  grants: [can.run(assistant)],
+})
+
+const opsAgentRunner = defineRole("ops.agent-runner", {
+  grantedTo: [opsUsers],
+  grants: [can.run(ops)],
+})
+
+const adminAgentRunner = defineRole("admin.agent-runner", {
+  grantedTo: [admins],
+  grants: [can.run(agentScope())],
+})
+
 function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
@@ -46,6 +69,8 @@ function createRuntime(options: { readonly auth?: boolean } = {}) {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues,
+    groups: [supportUsers, opsUsers, admins],
+    roles: [supportAgentRunner, opsAgentRunner, adminAgentRunner],
     auth: options.auth ? { id: "test", kind: "dev" as const } : undefined,
   })
 
@@ -61,13 +86,25 @@ function createApp(options: { readonly auth?: boolean } = {}) {
   return { app, sixb, storage, queues }
 }
 
-async function seedSession(storage: InMemoryStorage, userId: string) {
+async function seedSession(
+  storage: InMemoryStorage,
+  userId: string,
+  groupIds: readonly string[] = ["support-users"]
+) {
   const credential = createSessionCredential(`ses_${userId}`)
   await storage.auth.users.create({
     id: userId,
     projectId: "agent-route-tests",
     email: `${userId}@acme.com`,
   })
+  for (const groupId of groupIds) {
+    await storage.auth.groupMemberships.upsert({
+      projectId: "agent-route-tests",
+      userId,
+      groupId,
+      source: "manual",
+    })
+  }
   await storage.auth.sessions.create({
     id: credential.sessionId,
     projectId: "agent-route-tests",
@@ -136,6 +173,59 @@ describe("agent routes", () => {
     const missingResponse = await app.fetch(new Request("http://localhost/api/agents/missing"))
     expect(missingResponse.status).toBe(404)
     expect(await missingResponse.json()).toEqual({ error: "Agent not found" })
+  })
+
+  test("narrows the agent catalog and rejects thread creation without can.run", async () => {
+    const { app, storage } = createApp({ auth: true })
+    const support = await seedSession(storage, "usr_support", ["support-users"])
+    const opsSession = await seedSession(storage, "usr_ops", ["ops-users"])
+    const admin = await seedSession(storage, "usr_admin", ["admins"])
+    const noAccess = await seedSession(storage, "usr_none", [])
+
+    const supportList = await app.fetch(
+      new Request("http://localhost/api/agents", { headers: support.headers })
+    )
+    expect(((await supportList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual([
+      "assistant",
+    ])
+
+    const hidden = await app.fetch(
+      new Request("http://localhost/api/agents/ops", { headers: support.headers })
+    )
+    expect(hidden.status).toBe(404)
+
+    const opsList = await app.fetch(
+      new Request("http://localhost/api/agents", { headers: opsSession.headers })
+    )
+    expect(((await opsList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual(["ops"])
+
+    const adminList = await app.fetch(
+      new Request("http://localhost/api/agents", { headers: admin.headers })
+    )
+    expect(((await adminList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual([
+      "assistant",
+      "ops",
+    ])
+
+    const deniedThread = await app.fetch(
+      jsonRequest(
+        "/api/agent-threads",
+        "POST",
+        { agentId: "assistant", title: "Denied" },
+        noAccess.csrfHeaders
+      )
+    )
+    expect(deniedThread.status).toBe(403)
+
+    const allowedThread = await app.fetch(
+      jsonRequest(
+        "/api/agent-threads",
+        "POST",
+        { agentId: "assistant", title: "Allowed" },
+        support.csrfHeaders
+      )
+    )
+    expect(allowedThread.status).toBe(201)
   })
 
   test("creates a thread, posts a message, and enqueues a reserve-at-claim run", async () => {
@@ -319,6 +409,13 @@ describe("agent routes", () => {
     expect(otherThreadResponse.status).toBe(201)
     const ownerThread = (await ownerThreadResponse.json()) as { thread: { id: string } }
     const otherThread = (await otherThreadResponse.json()) as { thread: { id: string } }
+    await storage.agents.threads.create({
+      id: "owner-ops-thread",
+      projectId: sixb.id,
+      agentId: "ops",
+      ownerPrincipal: { type: "user", id: "usr_owner" },
+      title: "Owned but ungranted",
+    })
 
     const ownerList = await app.fetch(
       new Request("http://localhost/api/agent-threads", { headers: owner.headers })
@@ -328,6 +425,13 @@ describe("agent routes", () => {
       total: 1,
       threads: [{ id: ownerThread.thread.id, ownerPrincipal: { type: "user", id: "usr_owner" } }],
     })
+
+    const hiddenOwnedThread = await app.fetch(
+      new Request("http://localhost/api/agent-threads/owner-ops-thread", {
+        headers: owner.headers,
+      })
+    )
+    expect(hiddenOwnedThread.status).toBe(404)
 
     const hiddenThread = await app.fetch(
       new Request(`http://localhost/api/agent-threads/${otherThread.thread.id}`, {

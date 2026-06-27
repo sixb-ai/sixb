@@ -66,7 +66,10 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
-    if (input.statuses !== undefined && input.statuses.length === 0) {
+    if (
+      (input.statuses !== undefined && input.statuses.length === 0) ||
+      (input.agentIds !== undefined && input.agentIds.length === 0)
+    ) {
       return { threads: [], hasMore: false, total: 0 }
     }
 
@@ -77,6 +80,12 @@ export class PgAgentThreadStore implements AgentThreadStore {
     if (input.agentId) {
       whereClauses.push(`agent_id = $${index++}`)
       params.push(input.agentId)
+    }
+
+    if (input.agentIds) {
+      const placeholders = input.agentIds.map(() => `$${index++}`)
+      whereClauses.push(`agent_id IN (${placeholders.join(", ")})`)
+      params.push(...input.agentIds)
     }
 
     if (input.statuses) {
