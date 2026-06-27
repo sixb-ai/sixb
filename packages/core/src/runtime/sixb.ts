@@ -158,6 +158,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.ontology = new OntologyRegistry({ sources: this.ontologySources })
     this.actionRegistry = new ActionRegistry(options.actions ?? [], this.ontology)
     const registeredActionIds = new Set(this.actionRegistry.list().map((action) => action.id))
+    const agents = options.agents ?? []
     this.security = createRuntimeSecurityRegistry({
       groups: options.groups ?? [],
       roles: options.roles ?? [],
@@ -168,6 +169,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       workflowIds: new Set((options.workflows ?? []).map((workflow) => workflow.id)),
       syncIds: new Set((options.syncs ?? []).map((sync) => sync.id)),
       pipelineIds: new Set((options.pipelines ?? []).map((pipeline) => pipeline.id)),
+      agentIds: new Set(agents.map((agent) => agent.id)),
       getSubTypes: (objectTypeId) => this.ontology.getSubTypes(objectTypeId),
     })
     this.auth = new AuthRuntime({
@@ -291,7 +293,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
 
-    const agents = options.agents ?? []
     const agentIds = new Set<string>()
     for (const agent of agents) {
       if (agentIds.has(agent.id)) {
@@ -516,6 +517,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
           getById: (pipelineId) => this.getPipelineById(pipelineId),
         },
         workflows: this.workflows,
+        agents: this.agents,
       }
     )
   }

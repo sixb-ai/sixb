@@ -33,10 +33,21 @@ export class AgentsRuntime {
 
   /** Trigger an agent turn: persist the user message and enqueue the run intent. */
   request(input: RequestAgentRunInput): Promise<RequestAgentRunResult> {
+    return this.requestAs(this.runtime, input)
+  }
+
+  /**
+   * Trigger an agent turn on behalf of an explicit runtime context, so scoped
+   * SDKs can enforce caller grants while reusing the registered definitions.
+   */
+  requestAs(
+    runtime: SixbRuntimeContext,
+    input: RequestAgentRunInput
+  ): Promise<RequestAgentRunResult> {
     const agent = this.getById(input.agentId)
     if (!agent) {
       throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
     }
-    return requestAgentRun(this.runtime, agent, input)
+    return requestAgentRun(runtime, agent, input)
   }
 }

@@ -10,6 +10,12 @@
 
 import type { ActionDefinition, RequestActionInput, RequestActionResult } from "../actions"
 import { requestAction as requestRuntimeAction } from "../actions/request"
+import type {
+  AgentDefinition,
+  AgentsRuntime,
+  RequestAgentRunInput,
+  RequestAgentRunResult,
+} from "../agents"
 import {
   type AuthorizationContext,
   type AuthzRequest,
@@ -79,7 +85,7 @@ export interface ScopedObjectSet<
  * Principal-scoped runtime surface.
  *
  * Exposes only operations whose grants are enforceable end to end
- * (`can.view`, `can.apply`). Everything else — writes, links, telemetry,
+ * (`can.view`, `can.apply`, `can.run`). Everything else — writes, links, telemetry,
  * infra handles, lifecycle, auth — stays on the privileged runtime.
  */
 export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> {
@@ -137,6 +143,15 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Look up a runnable pipeline definition; null hides pipelines the principal cannot run. */
   getPipelineById(pipelineId: string): PipelineDefinition | null
 
+  /** Agent definitions the principal may run. */
+  listAgents(): readonly AgentDefinition[]
+
+  /** Look up a runnable agent definition; null hides agents the principal cannot run. */
+  getAgentById(agentId: string): AgentDefinition | null
+
+  /** Request an agent turn. Requires `can.run`. */
+  requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
+
   /** Read the domain events the principal is allowed to see (derived from grants). */
   readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
 }
@@ -157,6 +172,7 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
       readonly getById: (pipelineId: string) => PipelineDefinition | null
     }
     readonly workflows: WorkflowsRuntime
+    readonly agents: AgentsRuntime
   }
 ): ScopedSixb<TOntologySources> {
   const canListAction = (action: ActionDefinition) =>
@@ -198,6 +214,7 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
     kind: "workflow.run",
     workflowId,
   }))
+  const agents = scopedCatalog(deps.agents, (agentId) => ({ kind: "agent.run", agentId }))
 
   const scoped = {
     authorization: runtime.authorization,
@@ -245,6 +262,10 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
 
     listPipelines: pipelines.list,
     getPipelineById: pipelines.getById,
+
+    listAgents: agents.list,
+    getAgentById: agents.getById,
+    requestAgentRun: (input: RequestAgentRunInput) => deps.agents.requestAs(runtime, input),
 
     // No standalone events grant: the stream is filtered to events whose
     // subject the principal may view/apply/run. `limit` applies before this

@@ -54,6 +54,7 @@ export function createRuntimeSecurityRegistry(input: {
   readonly workflowIds?: ReadonlySet<string>
   readonly syncIds?: ReadonlySet<string>
   readonly pipelineIds?: ReadonlySet<string>
+  readonly agentIds?: ReadonlySet<string>
   readonly getSubTypes?: (objectTypeId: string) => readonly string[]
 }): SecurityRegistry {
   const securityDefinitions = validateSecurityDefinitionsAtStartup({
@@ -66,6 +67,7 @@ export function createRuntimeSecurityRegistry(input: {
     workflowIds: input.workflowIds,
     syncIds: input.syncIds,
     pipelineIds: input.pipelineIds,
+    agentIds: input.agentIds,
   })
 
   const universe = {
@@ -75,6 +77,7 @@ export function createRuntimeSecurityRegistry(input: {
     workflowIds: input.workflowIds ?? new Set<string>(),
     syncIds: input.syncIds ?? new Set<string>(),
     pipelineIds: input.pipelineIds ?? new Set<string>(),
+    agentIds: input.agentIds ?? new Set<string>(),
     getSubTypes: input.getSubTypes ?? (() => []),
   }
   const resolvedRoles = securityDefinitions.roles.map((role) => ({

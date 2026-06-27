@@ -163,9 +163,12 @@ export function assertGrantDefinition(
     value.capability === "run" &&
     value.target !== "workflow" &&
     value.target !== "sync" &&
-    value.target !== "pipeline"
+    value.target !== "pipeline" &&
+    value.target !== "agent"
   ) {
-    throw createError(`[Sixb] ${field} run grant target must be 'workflow', 'sync', or 'pipeline'.`)
+    throw createError(
+      `[Sixb] ${field} run grant target must be 'workflow', 'sync', 'pipeline', or 'agent'.`
+    )
   }
 
   assertSelection(value.selection, field, createError)
@@ -241,6 +244,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly syncIds?: ReadonlySet<string>
   /** Registered pipeline ids — when provided, pipeline run grants must reference them. */
   readonly pipelineIds?: ReadonlySet<string>
+  /** Registered agent ids — when provided, agent run grants must reference them. */
+  readonly agentIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()

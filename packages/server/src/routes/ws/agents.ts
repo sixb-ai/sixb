@@ -3,6 +3,7 @@ import {
   agentRunStreamDefinition,
   agentRunStreamId,
   type BrokerRecord,
+  isAllowed,
   type OntologySource,
   type Principal,
   type Sixb,
@@ -107,6 +108,10 @@ export async function canAccessAgentRunStream(
   }
 
   if (!principalsEqual(input.authz.principal, thread.ownerPrincipal)) {
+    return { ok: false, message: "Agent run not found." }
+  }
+
+  if (!isAllowed(input.authz, { kind: "agent.run", agentId: thread.agentId })) {
     return { ok: false, message: "Agent run not found." }
   }
 

@@ -23,6 +23,7 @@ function context(grants: {
   run?: readonly string[]
   syncs?: readonly string[]
   pipelines?: readonly string[]
+  agents?: readonly string[]
 }): AuthorizationContext {
   return {
     principal: { type: "user", id: "u1" },
@@ -35,6 +36,7 @@ function context(grants: {
       "run:workflow": new Set(grants.run ?? []),
       "run:sync": new Set(grants.syncs ?? []),
       "run:pipeline": new Set(grants.pipelines ?? []),
+      "run:agent": new Set(grants.agents ?? []),
     },
   }
 }
@@ -104,6 +106,21 @@ describe("evaluate", () => {
       allowed: false,
       requirements: ["run:pipeline:pipeline-orders"],
       missing: ["run:pipeline:pipeline-orders"],
+    })
+  })
+
+  test("agent.run checks agent grants", () => {
+    expect(
+      evaluate(context({ agents: ["ops"] }), {
+        kind: "agent.run",
+        agentId: "ops",
+      })
+    ).toEqual({ allowed: true, requirements: ["run:agent:ops"], missing: [] })
+
+    expect(evaluate(context({}), { kind: "agent.run", agentId: "ops" })).toEqual({
+      allowed: false,
+      requirements: ["run:agent:ops"],
+      missing: ["run:agent:ops"],
     })
   })
 

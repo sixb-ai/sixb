@@ -36,6 +36,8 @@ export interface CreateAgentThreadInput {
 export interface ListAgentThreadsInput {
   readonly projectId: string
   readonly agentId?: string
+  /** Optional allowlist intersected with `agentId` when both are provided. Empty means no rows. */
+  readonly agentIds?: readonly string[]
   readonly statuses?: readonly AgentThreadStatus[]
   readonly ownerPrincipal?: Principal
   readonly limit?: number

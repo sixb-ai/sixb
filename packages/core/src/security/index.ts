@@ -9,7 +9,7 @@ export {
   resolveInvitePolicyScope,
 } from "./invite-policies"
 export type { Scope, ScopeTarget } from "./scopes"
-export { actions, datasets, ontology, pipelines, syncs, workflows } from "./scopes"
+export { actions, agents, datasets, ontology, pipelines, syncs, workflows } from "./scopes"
 export type {
   ApplyGrant,
   GrantCapability,

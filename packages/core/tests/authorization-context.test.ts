@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   actions,
+  agents,
   can,
   col,
   createSessionCredential,
   datasets,
   defineAction,
+  defineAgent,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -83,6 +85,20 @@ const invoicesPipelineStep = definePipelineStep("pipeline-invoices-step")
 const contractsPipeline = definePipeline("pipeline-contracts").then(contractsPipelineStep)
 const invoicesPipeline = definePipeline("pipeline-invoices").then(invoicesPipelineStep)
 
+const model = {} as Parameters<typeof defineAgent>[1]["model"]
+
+const contractAgent = defineAgent("contract-agent", {
+  name: "Contract Agent",
+  model,
+  instructions: "Help with contracts.",
+})
+
+const invoiceAgent = defineAgent("invoice-agent", {
+  name: "Invoice Agent",
+  model,
+  instructions: "Help with invoices.",
+})
+
 const sendContract = defineAction("send-contract")
   .params({})
   .edits(() => {})
@@ -98,6 +114,7 @@ const contractOperator = defineRole("contract.operator", {
     can.apply(sendContract),
     can.run(syncContracts),
     can.run(contractsPipeline),
+    can.run(contractAgent),
   ],
 })
 
@@ -115,6 +132,7 @@ const adminOperator = defineRole("admin.operator", {
     can.run(workflows()),
     can.run(syncs()),
     can.run(pipelines()),
+    can.run(agents()),
   ],
 })
 
@@ -130,6 +148,7 @@ describe("resolveAuthorizationContext", () => {
     workflowIds: new Set<string>(),
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
+    agentIds: new Set(["contract-agent", "invoice-agent"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
   }
 
@@ -161,6 +180,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["apply:action"]).toEqual(new Set(["send-contract"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
+    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
   })
 
   test("unions grants across all matched roles", () => {
@@ -173,6 +193,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["view:dataset"]).toEqual(new Set(["raw.invoices"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
+    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
   })
 
   test("principals without matching roles resolve to empty grants", () => {
@@ -185,6 +206,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:workflow"].size).toBe(0)
     expect(context.grants["run:sync"].size).toBe(0)
     expect(context.grants["run:pipeline"].size).toBe(0)
+    expect(context.grants["run:agent"].size).toBe(0)
   })
 
   test("expands broad grants to the registered universe", () => {
@@ -201,6 +223,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:pipeline"]).toEqual(
       new Set(["pipeline-contracts", "pipeline-invoices"])
     )
+    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent", "invoice-agent"]))
   })
 
   test("except() excludes named datasets and keeps the rest of the dataset universe", () => {
@@ -237,6 +260,18 @@ describe("resolveAuthorizationContext", () => {
 
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
     expect(context.grants["run:pipeline"].has("pipeline-invoices")).toBe(false)
+  })
+
+  test("except() excludes named agents and keeps the rest of the agent universe", () => {
+    const mostAgents = defineRole("most.agents", {
+      grantedTo: [admins],
+      grants: [can.run(agents().except([invoiceAgent]))],
+    })
+
+    const context = resolve(["admins"], [mostAgents])
+
+    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
+    expect(context.grants["run:agent"].has("invoice-agent")).toBe(false)
   })
 
   test("except() excludes the named types and keeps the rest of the universe", () => {
@@ -278,6 +313,7 @@ describe("auth.createAuthorizationContext", () => {
       syncs: [syncContracts, syncInvoices],
       pipelines: [contractsPipeline, invoicesPipeline],
       actions: [sendContract],
+      agents: [contractAgent, invoiceAgent],
       groups: [commercial, finance],
       roles: [contractOperator, invoiceViewer],
       auth: { id: "test", kind: "dev" },
@@ -347,6 +383,7 @@ describe("auth.createAuthorizationContext", () => {
     expect(context.grants["apply:action"]).toEqual(new Set(["send-contract"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
+    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
   })
 
   test("rejects unauthenticated requests", async () => {

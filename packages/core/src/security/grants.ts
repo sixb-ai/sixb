@@ -8,6 +8,7 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
+import type { AgentDefinition } from "../agents/types"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
 import type { PipelineDefinition } from "../pipelines"
@@ -85,22 +86,34 @@ function isPipelineDefinitionInput(value: unknown): value is PipelineDefinition 
   )
 }
 
+function isAgentDefinitionInput(value: unknown): value is AgentDefinition {
+  return typeof value === "object" && value !== null && (value as AgentDefinition).kind === "agent"
+}
+
 function runTargetFrom(
   input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition,
-    "workflow" | "sync" | "pipeline"
+    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition,
+    "workflow" | "sync" | "pipeline" | "agent"
   >
-): "workflow" | "sync" | "pipeline" {
+): "workflow" | "sync" | "pipeline" | "agent" {
   if (isScope(input)) {
-    if (input.target !== "workflow" && input.target !== "sync" && input.target !== "pipeline") {
+    if (
+      input.target !== "workflow" &&
+      input.target !== "sync" &&
+      input.target !== "pipeline" &&
+      input.target !== "agent"
+    ) {
       throw new SecurityValidationError(
-        "[Sixb] can.run scope target must be workflow, sync, or pipeline."
+        "[Sixb] can.run scope target must be workflow, sync, pipeline, or agent."
       )
     }
     return input.target
   }
 
   const first = Array.isArray(input) ? input[0] : input
+  if (isAgentDefinitionInput(first)) {
+    return "agent"
+  }
   if (isPipelineDefinitionInput(first)) {
     return "pipeline"
   }
@@ -110,10 +123,11 @@ function runTargetFrom(
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
+function run(input: GrantInput<AgentDefinition, "agent">): RunGrant<"agent">
 function run(
   input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition,
-    "workflow" | "sync" | "pipeline"
+    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition,
+    "workflow" | "sync" | "pipeline" | "agent"
   >
 ): RunGrant {
   return {
