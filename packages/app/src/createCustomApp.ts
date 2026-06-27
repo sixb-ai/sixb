@@ -1,6 +1,7 @@
 import { watch } from "node:fs"
 import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
+import { pathToFileURL } from "node:url"
 import { type BuildAppResult, buildApp } from "./build"
 import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
@@ -237,7 +238,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath } = await prepareGeneratedApp()
-      let htmlBundle = await importHtmlBundle(htmlPath)
+      let htmlImportVersion = 0
+      let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
       const serveOptions = (bundle: Bun.HTMLBundle) =>
         ({
@@ -257,6 +259,22 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       // change the stylesheet source, so both regenerate the entry and
       // recompile CSS. Debounced so a burst of saves builds once.
       let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+      let rebuildChain: Promise<void> = Promise.resolve()
+      const enqueueRebuild = () => {
+        rebuildChain = rebuildChain
+          .then(async () => {
+            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            htmlImportVersion++
+            htmlBundle = await importHtmlBundle(nextHtmlPath, htmlImportVersion)
+            server.reload(serveOptions(htmlBundle))
+          })
+          .catch((error) => {
+            // Keep serving the last good build, but tell the user why styles
+            // or routes are stale instead of failing silently.
+            const message = error instanceof Error ? error.message : String(error)
+            console.error(`[SixbCustomApp] Rebuild failed: ${message}`)
+          })
+      }
       const watcher = watch(appDir, { recursive: true }, (_eventType, filename) => {
         if (!filename) return
         if (!/\.(ts|tsx|css)$/.test(String(filename))) return
@@ -266,16 +284,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         }
         rebuildTimer = setTimeout(() => {
           rebuildTimer = null
-          void (async () => {
-            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
-            htmlBundle = await importHtmlBundle(nextHtmlPath)
-            server.reload(serveOptions(htmlBundle))
-          })().catch((error) => {
-            // Keep serving the last good build, but tell the user why styles
-            // or routes are stale instead of failing silently.
-            const message = error instanceof Error ? error.message : String(error)
-            console.error(`[SixbCustomApp] Rebuild failed: ${message}`)
-          })
+          enqueueRebuild()
         }, 80)
       })
 
@@ -291,6 +300,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             rebuildTimer = null
           }
           watcher.close()
+          await rebuildChain
           await tailwindCompiler?.stop()
           await builtInAgentCssCompiler?.stop()
           server.stop(true)
@@ -648,8 +658,10 @@ function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute
   } as unknown as BunServeRoute
 }
 
-async function importHtmlBundle(htmlPath: string): Promise<Bun.HTMLBundle> {
-  const htmlModule = (await import(htmlPath)) as { default: Bun.HTMLBundle }
+async function importHtmlBundle(htmlPath: string, version: number): Promise<Bun.HTMLBundle> {
+  const url = pathToFileURL(htmlPath)
+  url.searchParams.set("v", String(version))
+  const htmlModule = (await import(url.href)) as { default: Bun.HTMLBundle }
   return htmlModule.default
 }
 
