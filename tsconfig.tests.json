@@ -1,4 +1,9 @@
 {
+  // Type-checks every package's test files against the .d.ts emitted by the
+  // build graph. Package `src` is NOT checked here — that happens in
+  // `tsconfig.build.json` (`bun run build:types`), which runs first. The globs
+  // below cover all build-graph workspace roots, so new packages are picked up
+  // automatically. Examples/docs/sandbox keep their own `typegen && tsc`.
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
@@ -10,42 +15,13 @@
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tests.tsbuildinfo"
   },
   "include": [
-    "packages/action-worker/tests/**/*.ts",
-    "packages/agent-worker/tests/**/*.ts",
-    "packages/app/tests/**/*.ts",
-    "packages/app/tests/**/*.tsx",
-    "packages/atlas/tests/**/*.ts",
-    "packages/atlas/tests/**/*.tsx",
-    "packages/cli/tests/**/*.ts",
-    "packages/cli/tests/**/*.tsx",
-    "packages/client/tests/**/*.ts",
-    "packages/core/tests/**/*.ts",
-    "packages/orchestrator/tests/**/*.ts",
-    "packages/pipeline-worker/tests/**/*.ts",
-    "packages/projection-worker/tests/**/*.ts",
-    "packages/rules-worker/tests/**/*.ts",
-    "packages/server/tests/**/*.ts",
-    "packages/server/tests/**/*.tsx",
-    "packages/sync-worker/tests/**/*.ts",
-    "packages/workflow-worker/tests/**/*.ts",
-    "connectors/companycam/tests/**/*.ts",
-    "connectors/github/tests/**/*.ts",
-    "connectors/meta/tests/**/*.ts",
-    "connectors/pipedrive/tests/**/*.ts",
-    "connectors/rest/tests/**/*.ts",
-    "connectors/sftp/tests/**/*.ts",
-    "connectors/sql/tests/**/*.ts",
-    "connectors/teamleader/tests/**/*.ts",
-    "storage/blob-local/tests/**/*.ts",
-    "storage/blob-s3/tests/**/*.ts",
-    "storage/ducklake/tests/**/*.ts",
-    "storage/lake-local/tests/**/*.ts",
-    "storage/pg/tests/**/*.ts",
-    "storage/sqlite/tests/**/*.ts",
-    "broker/nats/tests/**/*.ts",
-    "broker/redis/tests/**/*.ts",
-    "queues/bullmq/tests/**/*.ts",
-    "auth/magic-link/tests/**/*.ts",
-    "auth/oidc/tests/**/*.ts"
+    "packages/*/tests/**/*.ts",
+    "packages/*/tests/**/*.tsx",
+    "connectors/*/tests/**/*.ts",
+    "connectors/*/tests/**/*.tsx",
+    "storage/*/tests/**/*.ts",
+    "broker/*/tests/**/*.ts",
+    "queues/*/tests/**/*.ts",
+    "auth/*/tests/**/*.ts"
   ]
 }
