@@ -8,6 +8,9 @@ import type {
 } from "@sixb/core"
 import type { ToolSet } from "ai"
 
+// Keep root storage for transactions while making agent storage non-optional after context setup.
+export type AgentWorkerStorage = Storage & { readonly agents: AgentStorage }
+
 /**
  * The runtime surface the agent worker is constructed with (mirrors `ActionWorkerSixb`). `Sixb`
  * satisfies it structurally, so cohosting passes `sixb` directly. The worker resolves a run's model
@@ -28,7 +31,7 @@ export interface AgentWorkerSixb {
  */
 export interface AgentWorkerContext {
   readonly id: string
-  readonly storage: AgentStorage
+  readonly storage: AgentWorkerStorage
   readonly tools: ToolSet
   readonly streamSink: StreamSink
   readonly leaseMs: number

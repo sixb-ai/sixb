@@ -184,6 +184,10 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.threadId,
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
+      requestedByPrincipal: clone(input.requestedByPrincipal),
+      ...(input.executionPrincipal === undefined
+        ? {}
+        : { executionPrincipal: clone(input.executionPrincipal) }),
       status: "running",
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       attempt: 1,
@@ -363,6 +367,9 @@ class InMemoryAgentMessageStore implements AgentMessageStore {
       threadId: input.threadId,
       runId: input.runId,
       role: input.role,
+      ...(input.authorPrincipal === undefined
+        ? {}
+        : { authorPrincipal: clone(input.authorPrincipal) }),
       seq,
       parts: clone(input.parts),
       ...(input.metadata === undefined ? {} : { metadata: clone(input.metadata) }),

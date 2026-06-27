@@ -19,6 +19,10 @@ export interface AgentStorageContractSuiteOptions<TStorage extends AgentStorage 
 const projectId = "project-a"
 const otherProjectId = "project-b"
 const owner: Principal = { type: "user", id: "usr_1" }
+const serviceAccount: Extract<Principal, { readonly type: "serviceAccount" }> = {
+  type: "serviceAccount",
+  id: "svc_agent_sales",
+}
 
 function at(value: string): Date {
   return new Date(value)
@@ -54,6 +58,7 @@ function reserveInput(overrides: Partial<ReserveAgentRunInput> = {}): ReserveAge
     threadId: "thr_1",
     agentId: "sales",
     triggerMessageId: "msg_user_1",
+    requestedByPrincipal: owner,
     lease: lease("lease_1", "2026-06-23T10:05:00.000Z"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,
@@ -168,6 +173,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
 
         const run = await storage.runs.reserve(reserveInput({ id: "run_1" }))
         expect(run).toMatchObject({ status: "running", attempt: 1, threadId: "thr_1" })
+        expect(run.requestedByPrincipal).toEqual(owner)
         expect(run.lease?.id).toBe("lease_1")
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: "run_1",
@@ -480,17 +486,26 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           runId: null,
           role: "user",
           parts: [{ type: "text", text: "Hello agent" }],
+          authorPrincipal: owner,
           createdAt: at("2026-06-23T10:00:30.000Z"),
         })
         expect(userMessage).toMatchObject({ seq: 1, role: "user", runId: null, contentVersion: 1 })
+        expect(userMessage.authorPrincipal).toEqual(owner)
 
-        await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        const run = await storage.runs.reserve(
+          reserveInput({
+            id: "run_1",
+            executionPrincipal: serviceAccount,
+          })
+        )
+        expect(run.executionPrincipal).toEqual(serviceAccount)
         const assistantMessage = await storage.messages.append({
           id: "msg_asst_1",
           projectId,
           threadId: "thr_1",
           runId: "run_1",
           role: "assistant",
+          authorPrincipal: serviceAccount,
           parts: [
             { type: "reasoning", text: "thinking about it" },
             {
@@ -506,6 +521,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           createdAt: at("2026-06-23T10:01:00.000Z"),
         })
         expect(assistantMessage).toMatchObject({ seq: 2, role: "assistant", runId: "run_1" })
+        expect(assistantMessage.authorPrincipal).toEqual(serviceAccount)
 
         const thread = await storage.threads.getById({ projectId, id: "thr_1" })
         expect(thread).toMatchObject({ messageCount: 2 })

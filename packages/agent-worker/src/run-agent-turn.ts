@@ -8,7 +8,7 @@ import type {
 import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
 import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
 import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
-import { finishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
+import { appendMessageAndFinishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
 import type { AgentWorkerContext, StreamSink } from "./types"
 
 export const DEFAULT_MAX_STEPS = 8
@@ -52,8 +52,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   if (!leaseId) {
     throw new AgentWorkerError(`Agent run '${runId}' has no lease to run under.`)
   }
+  const agents = storage.agents
 
-  const history = await storage.messages.list({ projectId, threadId: run.threadId, order: "asc" })
+  const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
   // `toModelMessages` is core's `ai`-free mirror of `convertToModelMessages`. The only type gap is
   // `providerOptions`, which core types as the wider `JsonValue` (it cannot depend on `ai`); the
   // values originate from the SDK, so the runtime shape is compatible. The worker is where `ai`
@@ -91,7 +92,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   let leaseLost = false
   const heartbeat = startLeaseHeartbeat({
-    storage,
+    storage: agents,
     projectId,
     runId,
     leaseId,
@@ -136,31 +137,31 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   // One last renew right before we write: a successful renew proves we still hold the lease, and it
   // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
-  await renewOrLost({ storage, projectId, runId, leaseId, leaseMs })
+  await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
 
   for (const part of assistant.parts) {
     await emitPart(streamSink, part)
   }
 
-  await storage.messages.append({
-    id: createAgentMessageId(),
-    projectId,
-    threadId: run.threadId,
-    runId,
-    role: assistant.role,
-    parts: assistant.parts,
-    ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-  })
-
   const usage = mapUsage(await result.totalUsage)
   const finishReason = await result.finishReason
+  const assistantMessageId = createAgentMessageId()
 
-  // `finishRunOrThrow` retries transient blips in place; if the lease is gone it raises
-  // `AgentLeaseLostError` (ack), and a persistent infra failure raises `AgentFinalizationError`
-  // (redeliver) — so a finalize that cannot complete never leaves the thread silently locked.
-  return finishRunOrThrow(
-    storage,
-    {
+  // The assistant append and run finish share one transaction, so redelivery cannot observe a
+  // finalized message without the terminal run state that releases the thread. Transient blips are
+  // retried in place.
+  return appendMessageAndFinishRunOrThrow(storage, {
+    message: {
+      id: assistantMessageId,
+      projectId,
+      threadId: run.threadId,
+      runId,
+      role: assistant.role,
+      parts: assistant.parts,
+      ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
+      ...(run.executionPrincipal === undefined ? {} : { authorPrincipal: run.executionPrincipal }),
+    },
+    finish: {
       projectId,
       id: runId,
       leaseId,
@@ -169,8 +170,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       finishReason,
       ...(usage === undefined ? {} : { usage }),
     },
-    runId
-  )
+  })
 }
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider

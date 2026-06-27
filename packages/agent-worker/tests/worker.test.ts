@@ -25,13 +25,14 @@ import {
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV3 } from "ai/test"
+import { AgentWorker, type AgentWorkerStorage } from "../src"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
-import { AgentWorker } from "../src/worker"
 import { waitFor } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"
+const REQUESTER = { type: "user", id: "usr_requester" } as const
 
 const USAGE: LanguageModelV3Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
@@ -137,33 +138,89 @@ function agentStorageOf(sixb: TestSixb): AgentStorage {
   return storage
 }
 
+function workerStorageOf(storage: Storage): AgentWorkerStorage {
+  if (!storage.agents) {
+    throw new Error("expected agent storage")
+  }
+  return storage as AgentWorkerStorage
+}
+
 async function listMessages(storage: AgentStorage, threadId: string) {
   const result = await storage.messages.list({ projectId: PROJECT_ID, threadId, order: "asc" })
   return result.messages
 }
 
 /**
- * Wrap an {@link AgentStorage} so `runs.finish` fails with a non-terminal (infra) error its first
- * `failTimes` calls, then delegates. Method delegation is explicit (not spread) to preserve the
- * underlying store's `this` binding.
+ * Wrap root storage so agent `runs.finish` fails with a non-terminal (infra) error its first
+ * `failTimes` calls, including when the worker finalizes through `storage.transaction(...)`.
  */
-function withFlakyFinish(storage: AgentStorage, failTimes: number): AgentStorage {
-  let fails = 0
-  const runs: AgentStorage["runs"] = {
-    reserve: (input) => storage.runs.reserve(input),
-    renewLease: (input) => storage.runs.renewLease(input),
-    reclaim: (input) => storage.runs.reclaim(input),
-    getById: (params) => storage.runs.getById(params),
-    list: (input) => storage.runs.list(input),
-    finish: (input) => {
-      if (fails < failTimes) {
-        fails += 1
-        return Promise.reject(new Error("storage blip"))
-      }
-      return storage.runs.finish(input)
-    },
+function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Storage {
+  const agents = storage.agents
+  if (!agents) {
+    throw new Error("expected agent storage")
   }
-  return { threads: storage.threads, runs, messages: storage.messages }
+  let fails = 0
+  const wrapAgents = (agents: AgentStorage): AgentStorage => ({
+    threads: agents.threads,
+    messages: agents.messages,
+    runs: {
+      reserve: (input) => agents.runs.reserve(input),
+      renewLease: (input) => agents.runs.renewLease(input),
+      reclaim: (input) => agents.runs.reclaim(input),
+      getById: (params) => agents.runs.getById(params),
+      list: (input) => agents.runs.list(input),
+      finish: (input) => {
+        if (fails < failTimes) {
+          fails += 1
+          return Promise.reject(new Error("storage blip"))
+        }
+        return agents.runs.finish(input)
+      },
+    },
+  })
+  return {
+    ...storage,
+    agents: wrapAgents(agents),
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const agents = tx.agents
+        return run({
+          ...tx,
+          ...(agents ? { agents: wrapAgents(agents) } : {}),
+        })
+      }, options),
+  }
+}
+
+function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
+  const agents = storage.agents
+  if (!agents) {
+    throw new Error("expected agent storage")
+  }
+  const wrapAgents = (agents: AgentStorage): AgentStorage => ({
+    threads: agents.threads,
+    messages: agents.messages,
+    runs: {
+      reserve: (input) => agents.runs.reserve(input),
+      renewLease: (input) => agents.runs.renewLease(input),
+      reclaim: (input) => agents.runs.reclaim(input),
+      getById: (params) => agents.runs.getById(params),
+      list: (input) => agents.runs.list(input),
+      finish: () => Promise.reject(new Error("storage down after message generation")),
+    },
+  })
+  return {
+    ...storage,
+    agents: wrapAgents(agents),
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const agents = tx.agents
+        return run({
+          ...tx,
+          ...(agents ? { agents: wrapAgents(agents) } : {}),
+        })
+      }, options),
+  }
 }
 
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
@@ -191,14 +248,20 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    const result = await sixb.agents.request({ agentId: "assistant", text: "hello" })
+    const result = await sixb.agents.request({
+      agentId: "assistant",
+      text: "hello",
+      principal: REQUESTER,
+    })
 
     expect(result.createdThread).toBe(true)
     expect(result.jobId).toBeDefined()
+    expect(result.runId.startsWith("agt_run_")).toBe(true)
 
     const messages = await listMessages(storage, result.threadId)
     expect(messages).toHaveLength(1)
     expect(messages[0]).toMatchObject({ role: "user", runId: null })
+    expect(messages[0]?.authorPrincipal).toEqual(REQUESTER)
     expect(messages[0]?.parts).toEqual([{ type: "text", text: "hello" }])
 
     // Reserve-at-claim: no run record exists yet, and the thread is still idle.
@@ -219,7 +282,10 @@ describe("AgentWorker", () => {
     })
     await worker.start()
     try {
-      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+      const { threadId, runId } = await sixb.agents.request({
+        agentId: "assistant",
+        text: "echo hi",
+      })
 
       const run = await waitFor(
         async () => {
@@ -231,6 +297,7 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
+      expect(run.id).toBe(runId)
       expect(run.attempt).toBe(1)
       expect(run.finishReason).toBe("stop")
       expect(run.modelId).toBe("mock-model")
@@ -275,11 +342,12 @@ describe("AgentWorker", () => {
     // Open a thread and simulate an in-flight run by reserving directly.
     const first = await sixb.agents.request({ agentId: "assistant", text: "first" })
     await storage.runs.reserve({
-      id: createAgentRunId(),
+      id: first.runId,
       projectId: PROJECT_ID,
       threadId: first.threadId,
       agentId: "assistant",
       triggerMessageId: first.triggerMessageId,
+      requestedByPrincipal: REQUESTER,
       lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
     })
 
@@ -298,17 +366,18 @@ describe("AgentWorker", () => {
 
     // Trigger normally, then simulate a worker that crashed mid-run: an active run whose lease has
     // already expired, with the same trigger message the redelivered job carries.
-    const { threadId, triggerMessageId } = await sixb.agents.request({
+    const { threadId, runId, triggerMessageId } = await sixb.agents.request({
       agentId: "assistant",
       text: "echo hi",
     })
-    const crashedRunId = createAgentRunId()
+    const crashedRunId = runId
     await storage.runs.reserve({
       id: crashedRunId,
       projectId: PROJECT_ID,
       threadId,
       agentId: "assistant",
       triggerMessageId,
+      requestedByPrincipal: REQUESTER,
       lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() - 1_000) },
     })
 
@@ -333,19 +402,19 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    const { threadId, triggerMessageId } = await sixb.agents.request({
+    const { threadId, runId, triggerMessageId } = await sixb.agents.request({
       agentId: "assistant",
       text: "echo hi",
     })
 
     // This worker reserved the run, but its lease already expired and another worker reclaimed it.
-    const runId = createAgentRunId()
     const staleRun = await storage.runs.reserve({
       id: runId,
       projectId: PROJECT_ID,
       threadId,
       agentId: "assistant",
       triggerMessageId,
+      requestedByPrincipal: REQUESTER,
       lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() - 1_000) },
     })
     await storage.runs.reclaim({
@@ -357,7 +426,7 @@ describe("AgentWorker", () => {
     const promise = runAgentTurn({
       context: {
         id: PROJECT_ID,
-        storage,
+        storage: workerStorageOf(sixb.storage),
         tools: echoTool,
         streamSink: { onPart() {} },
         leaseMs: 60_000,
@@ -466,7 +535,7 @@ describe("AgentWorker", () => {
     const workerSixb = {
       id: sixb.id,
       events: sixb.events,
-      storage: { agents: withFlakyFinish(storage, 2) } as unknown as Storage,
+      storage: withFlakyAgentFinishStorage(sixb.storage, 2),
       queues: sixb.queues,
       agents: sixb.agents,
     }
@@ -497,6 +566,75 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  test("rolls back the assistant message when finalization fails before redelivery", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const request = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+    const run = await storage.runs.reserve({
+      id: request.runId,
+      projectId: PROJECT_ID,
+      threadId: request.threadId,
+      agentId: "assistant",
+      triggerMessageId: request.triggerMessageId,
+      requestedByPrincipal: REQUESTER,
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+    })
+
+    const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
+    await expect(
+      runAgentTurn({
+        context: {
+          id: PROJECT_ID,
+          storage: workerStorageOf(failingStorage),
+          tools: echoTool,
+          streamSink: { onPart() {} },
+          leaseMs: 60_000,
+          heartbeatMs: 20_000,
+          defaultMaxSteps: 4,
+          turnTimeoutMs: 60_000,
+        },
+        agent: sixb.agents.getById("assistant")!,
+        run,
+        signal: new AbortController().signal,
+      })
+    ).rejects.toBeInstanceOf(AgentFinalizationError)
+
+    const afterFailure = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+    expect(afterFailure?.status).toBe("running")
+    expect(
+      (await listMessages(storage, request.threadId)).filter((m) => m.role === "assistant")
+    ).toHaveLength(0)
+
+    const reclaimed = await storage.runs.reclaim({
+      projectId: PROJECT_ID,
+      id: request.runId,
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      now: new Date(Date.now() + 120_000),
+    })
+    await runAgentTurn({
+      context: {
+        id: PROJECT_ID,
+        storage: workerStorageOf(sixb.storage),
+        tools: echoTool,
+        streamSink: { onPart() {} },
+        leaseMs: 60_000,
+        heartbeatMs: 20_000,
+        defaultMaxSteps: 4,
+        turnTimeoutMs: 60_000,
+      },
+      agent: sixb.agents.getById("assistant")!,
+      run: reclaimed,
+      signal: new AbortController().signal,
+    })
+
+    const finalRun = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+    expect(finalRun?.status).toBe("succeeded")
+    expect(finalRun?.attempt).toBe(2)
+    expect(
+      (await listMessages(storage, request.threadId)).filter((m) => m.role === "assistant")
+    ).toHaveLength(1)
   })
 
   test("fails the run and releases the thread when a turn exceeds its wall-clock budget", async () => {
@@ -533,14 +671,36 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
 
     // A live run (valid, far-future lease) owns the thread, triggered by message "A".
-    const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "first" })
-    const activeRunId = createAgentRunId()
+    const {
+      threadId,
+      runId: activeRunId,
+      triggerMessageId: triggerA,
+    } = await sixb.agents.request({
+      agentId: "assistant",
+      text: "first",
+    })
+    const [queuedA] = await sixb.queues.agents.claim({
+      projectId: PROJECT_ID,
+      workerId: "test-drain",
+      limit: 1,
+      leaseMs: 60_000,
+    })
+    if (!queuedA) {
+      throw new Error("expected queued first turn")
+    }
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: queuedA.job.id,
+      leaseId: queuedA.leaseId,
+    })
+
     await storage.runs.reserve({
       id: activeRunId,
       projectId: PROJECT_ID,
       threadId,
       agentId: "assistant",
-      triggerMessageId: "trigger-A",
+      triggerMessageId: triggerA,
+      requestedByPrincipal: REQUESTER,
       lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 300_000) },
     })
 
@@ -551,7 +711,12 @@ describe("AgentWorker", () => {
       jobs: [
         {
           type: "agent.run.requested",
-          payload: { agentId: "assistant", threadId, triggerMessageId: "trigger-B" },
+          payload: {
+            agentId: "assistant",
+            threadId,
+            runId: createAgentRunId(),
+            triggerMessageId: "trigger-B",
+          },
         },
       ],
     })
@@ -593,7 +758,7 @@ describe("finishRunOrThrow", () => {
 
   test("raises AgentFinalizationError when an infra error persists across retries", async () => {
     const storage = finishingStorage(() => Promise.reject(new Error("db down")))
-    await expect(finishRunOrThrow(storage, succeededInput, "agt_run_x")).rejects.toBeInstanceOf(
+    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
       AgentFinalizationError
     )
   })
@@ -602,7 +767,7 @@ describe("finishRunOrThrow", () => {
     const storage = finishingStorage(() =>
       Promise.reject(new AgentStorageError("lease_lost", "gone"))
     )
-    await expect(finishRunOrThrow(storage, succeededInput, "agt_run_x")).rejects.toBeInstanceOf(
+    await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
       AgentLeaseLostError
     )
   })

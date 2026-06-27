@@ -113,6 +113,19 @@ describe("defineAgent", () => {
       })
     ).toThrow(AgentDefinitionError)
   })
+
+  test("rejects invalid maxSteps loop settings", () => {
+    for (const maxSteps of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(() =>
+        defineAgent("bad", {
+          name: "Bad",
+          model,
+          instructions: "x",
+          loop: { stopWhen: { maxSteps } },
+        })
+      ).toThrow(AgentDefinitionError)
+    }
+  })
 })
 
 describe("isAgentDefinition", () => {

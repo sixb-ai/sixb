@@ -105,6 +105,8 @@ export interface AgentRunRecord {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  readonly requestedByPrincipal: Principal
+  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly status: AgentRunStatus
   readonly modelId?: string
   /** Why the run ended (our own SDK-independent enum). */
@@ -125,6 +127,8 @@ export interface ReserveAgentRunInput {
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
+  readonly requestedByPrincipal: Principal
+  readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
   readonly lease: AgentRunLease
   readonly createdAt?: Date
@@ -198,6 +202,8 @@ export interface AgentMessageRecord {
   /** The run that produced this message; `null` for user-authored messages. */
   readonly runId: string | null
   readonly role: AgentMessageRole
+  /** Principal that authored this persisted message: caller for user messages, agent identity later for assistant messages. */
+  readonly authorPrincipal?: Principal
   /** Monotonic per thread, assigned by the store. */
   readonly seq: number
   /** Structured message content — text / reasoning / step boundaries / tool calls. */
@@ -216,6 +222,7 @@ export interface AppendAgentMessageInput extends AgentMessage {
   readonly projectId: string
   readonly threadId: string
   readonly runId: string | null
+  readonly authorPrincipal?: Principal
   readonly createdAt?: Date
   readonly completedAt?: Date
 }

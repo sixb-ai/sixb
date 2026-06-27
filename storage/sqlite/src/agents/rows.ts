@@ -33,6 +33,10 @@ export interface AgentRunRow {
   thread_id: string
   agent_id: string
   trigger_message_id: string
+  requested_by_principal_type: Principal["type"] | null
+  requested_by_principal_id: string | null
+  execution_principal_type: "serviceAccount" | null
+  execution_principal_id: string | null
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
@@ -56,6 +60,8 @@ export interface AgentMessageRow {
   thread_id: string
   run_id: string | null
   role: AgentMessageRecord["role"]
+  author_principal_type: Principal["type"] | null
+  author_principal_id: string | null
   seq: number
   parts: string
   metadata: string | null
@@ -89,6 +95,14 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     threadId: row.thread_id,
     agentId: row.agent_id,
     triggerMessageId: row.trigger_message_id,
+    requestedByPrincipal: principalFromColumns(
+      row.requested_by_principal_type,
+      row.requested_by_principal_id
+    ) ?? { type: "system", id: "system" },
+    executionPrincipal: serviceAccountPrincipalFromColumns(
+      row.execution_principal_type,
+      row.execution_principal_id
+    ),
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
@@ -112,6 +126,7 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     threadId: row.thread_id,
     runId: row.run_id,
     role: row.role,
+    authorPrincipal: principalFromColumns(row.author_principal_type, row.author_principal_id),
     seq: row.seq,
     parts: JSON.parse(row.parts) as AgentMessagePart[],
     // A null/absent column and an explicit JSON `null` both mean "no metadata" (jsonb cannot tell
@@ -121,6 +136,20 @@ export function rowToMessageRecord(row: AgentMessageRow): AgentMessageRecord {
     createdAt: new Date(row.created_at),
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
   }
+}
+
+function principalFromColumns(
+  type: Principal["type"] | null | undefined,
+  id: string | null | undefined
+): Principal | undefined {
+  return type && id ? { type, id } : undefined
+}
+
+function serviceAccountPrincipalFromColumns(
+  type: "serviceAccount" | null | undefined,
+  id: string | null | undefined
+): Extract<Principal, { readonly type: "serviceAccount" }> | undefined {
+  return type === "serviceAccount" && id ? { type, id } : undefined
 }
 
 function rowToUsage(row: AgentRunRow): AgentRunUsage | undefined {

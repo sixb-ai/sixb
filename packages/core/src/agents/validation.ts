@@ -1,5 +1,5 @@
 import { AgentDefinitionError } from "./errors"
-import type { AgentDefinition } from "./types"
+import type { AgentDefinition, AgentLoopConfig } from "./types"
 
 export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
@@ -15,6 +15,18 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
     typeof value.name === "string" &&
     typeof value.instructions === "string"
   )
+}
+
+export function assertValidLoopConfig(loop: AgentLoopConfig | undefined): void {
+  const maxSteps = loop?.stopWhen?.maxSteps
+  if (maxSteps === undefined) {
+    return
+  }
+  if (!Number.isInteger(maxSteps) || maxSteps <= 0) {
+    throw new AgentDefinitionError(
+      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive finite integer."
+    )
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
