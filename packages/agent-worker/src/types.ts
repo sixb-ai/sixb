@@ -1,13 +1,14 @@
 import type {
-  AgentMessagePart,
   AgentStorage,
   AgentsRuntime,
   AuthStorage,
+  Broker,
   EventsRuntime,
   Queues,
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
+import type { StreamSink } from "./stream-sink"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
 export type AgentWorkerStorage = Storage & {
@@ -22,6 +23,7 @@ export type AgentWorkerStorage = Storage & {
  */
 export interface AgentWorkerSixb {
   readonly id: string
+  readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
   readonly queues: Queues
@@ -44,16 +46,6 @@ export interface AgentWorkerContext {
   readonly turnTimeoutMs: number
 }
 
-/**
- * Where the loop routes streamed assistant parts. **No-op in production for this slice** — the
- * stream is meant to flow through the broker on a dedicated per-run channel, which is a later slice.
- * Baking the seam now keeps that slice a pure addition (provide a real sink) with zero loop change.
- * A sink failure is isolated by the loop: it never blocks the turn or the lease heartbeat.
- */
-export interface StreamSink {
-  onPart(part: AgentMessagePart): void | Promise<void>
-}
-
 export interface AgentWorkerOptions {
   /**
    * The `agent_runs` lease duration, in ms. Also used as the queue visibility timeout so that, on
@@ -66,7 +58,7 @@ export interface AgentWorkerOptions {
   readonly heartbeatMs?: number
   /** Tools exposed to the model. V1 ships an empty set; tests inject a generic tool. */
   readonly tools?: ToolSet
-  /** Stream routing seam. Defaults to a no-op sink. */
+  /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
   /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 8. */
   readonly defaultMaxSteps?: number

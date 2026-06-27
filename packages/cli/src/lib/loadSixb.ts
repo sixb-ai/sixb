@@ -3,6 +3,7 @@ import type {
   ActionDefinition,
   AgentsRuntime,
   AuthRuntime,
+  Broker,
   ConnectorAdapter,
   ConnectorClient,
   ConnectorDefinition,
@@ -23,6 +24,7 @@ import type {
 
 export interface LoadedSixb extends SixbRuntimeContext {
   readonly id: string
+  readonly broker: Broker
   readonly auth: AuthRuntime
   listObjectTypes(): readonly unknown[]
   getFunctionDefinitions(): readonly FunctionDefinition[]
@@ -73,6 +75,7 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     "ontology" in value &&
     "actionRegistry" in value &&
     "events" in value &&
+    "broker" in value &&
     "storage" in value &&
     "lakeStorage" in value &&
     "blobStorage" in value &&

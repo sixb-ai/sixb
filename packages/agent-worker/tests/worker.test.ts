@@ -5,11 +5,14 @@ import type {
   LanguageModelV3Usage,
 } from "@ai-sdk/provider"
 import {
-  type AgentMessagePart,
   AgentRequestError,
+  type AgentRunStreamEvent,
   type AgentStorage,
   AgentStorageError,
   type AgentsRuntime,
+  type AppendAgentMessageInput,
+  agentRunStreamId,
+  type Broker,
   createAgentRunId,
   createAgentRunLeaseId,
   defineAgent,
@@ -26,7 +29,12 @@ import {
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV3 } from "ai/test"
-import { AgentWorker, type AgentWorkerStorage } from "../src"
+import {
+  AgentWorker,
+  type AgentWorkerStorage,
+  createBrokerStreamSink,
+  NOOP_STREAM_SINK,
+} from "../src"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -105,6 +113,7 @@ const echoTool: ToolSet = {
 // action-worker tests do).
 interface TestSixb {
   readonly id: string
+  readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
   readonly queues: Queues
@@ -113,7 +122,7 @@ interface TestSixb {
 
 const SixbCtor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
 
-function buildSixb(model: LanguageModelV3): TestSixb {
+function buildSixb(model: LanguageModelV3, broker: Broker = new InMemoryBroker()): TestSixb {
   const agent = defineAgent("assistant", {
     name: "Assistant",
     model,
@@ -126,12 +135,23 @@ function buildSixb(model: LanguageModelV3): TestSixb {
     ontology: [],
     agents: [agent],
     groups: [AGENT_RUNTIME_GROUP],
-    broker: new InMemoryBroker(),
+    broker,
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
   })
+}
+
+class FailingRunStreamBroker extends InMemoryBroker {
+  override append(
+    params: Parameters<InMemoryBroker["append"]>[0]
+  ): ReturnType<InMemoryBroker["append"]> {
+    if (params.streamId.startsWith("agents.runs.")) {
+      return Promise.reject(new Error("broker append down"))
+    }
+    return super.append(params)
+  }
 }
 
 function agentStorageOf(sixb: TestSixb): AgentStorage {
@@ -163,6 +183,13 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
 async function listMessages(storage: AgentStorage, threadId: string) {
   const result = await storage.messages.list({ projectId: PROJECT_ID, threadId, order: "asc" })
   return result.messages
+}
+
+async function listRunStreamRecords(broker: Broker, runId: string) {
+  return broker.read({
+    projectId: PROJECT_ID,
+    streamId: agentRunStreamId(runId),
+  })
 }
 
 /**
@@ -238,6 +265,40 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
   }
 }
 
+function withObservedAgentMessageAppendStorage(
+  storage: Storage,
+  onBeforeAppend: (input: AppendAgentMessageInput) => void | Promise<void>
+): Storage {
+  const agents = storage.agents
+  if (!agents) {
+    throw new Error("expected agent storage")
+  }
+  const wrapAgents = (agents: AgentStorage): AgentStorage => ({
+    threads: agents.threads,
+    runs: agents.runs,
+    messages: {
+      getById: (params) => agents.messages.getById(params),
+      list: (input) => agents.messages.list(input),
+      append: async (input) => {
+        await onBeforeAppend(input)
+        return agents.messages.append(input)
+      },
+    },
+  })
+  return {
+    ...storage,
+    agents: wrapAgents(agents),
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const agents = tx.agents
+        return run({
+          ...tx,
+          ...(agents ? { agents: wrapAgents(agents) } : {}),
+        })
+      }, options),
+  }
+}
+
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
 function hangingModel(): MockLanguageModelV3 {
   return new MockLanguageModelV3({
@@ -290,11 +351,9 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
-    const streamed: AgentMessagePart[] = []
 
     const worker = new AgentWorker(sixb, {
       tools: echoTool,
-      streamSink: { onPart: (part) => void streamed.push(part) },
     })
     await worker.start()
     try {
@@ -352,9 +411,6 @@ describe("AgentWorker", () => {
         true
       )
 
-      // The stream seam saw exactly the persisted parts, in order.
-      expect(streamed).toEqual([...parts])
-
       await expect(
         auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
       ).resolves.toMatchObject({
@@ -393,9 +449,204 @@ describe("AgentWorker", () => {
         },
         { label: "agent run token revoked" }
       )
+
+      const streamRecords = await listRunStreamRecords(sixb.broker, runId)
+      const streamNames = streamRecords.map((record) => record.name)
+      expect(streamNames[0]).toBe("agent.run.started")
+      expect(streamNames.at(-2)).toBe("agent.message.finalized")
+      expect(streamNames.at(-1)).toBe("agent.run.finished")
+      expect(streamNames.filter((name) => name === "agent.ui.chunk").length).toBeGreaterThan(0)
+
+      const finalizedIndex = streamNames.indexOf("agent.message.finalized")
+      const firstChunkIndex = streamNames.indexOf("agent.ui.chunk")
+      expect(firstChunkIndex).toBeGreaterThan(0)
+      expect(firstChunkIndex).toBeLessThan(finalizedIndex)
+
+      const chunks = streamRecords
+        .filter((record) => record.name === "agent.ui.chunk")
+        .map(
+          (record) =>
+            record.payload as unknown as Extract<
+              AgentRunStreamEvent,
+              { readonly type: "agent.ui.chunk" }
+            >
+        )
+      expect(chunks.map((chunk) => chunk.chunkIndex)).toEqual(chunks.map((_, index) => index))
+      expect(chunks.every((chunk) => chunk.attempt === 1)).toBe(true)
+
+      const finishedPayload = streamRecords.find(
+        (record) => record.name === "agent.run.finished"
+      )?.payload
+      expect(finishedPayload).toMatchObject({
+        type: "agent.run.finished",
+        status: "succeeded",
+        runId,
+        attempt: 1,
+      })
     } finally {
       await worker.stop()
     }
+  })
+
+  test("publishes UI chunks before appending the finalized assistant message", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    let chunksBeforeAssistantAppend = 0
+    let finalizedBeforeAssistantAppend = false
+
+    const observedStorage = withObservedAgentMessageAppendStorage(sixb.storage, async (input) => {
+      if (input.role !== "assistant" || input.runId === null) {
+        return
+      }
+      const records = await listRunStreamRecords(sixb.broker, input.runId)
+      chunksBeforeAssistantAppend = records.filter(
+        (record) => record.name === "agent.ui.chunk"
+      ).length
+      finalizedBeforeAssistantAppend = records.some(
+        (record) => record.name === "agent.message.finalized"
+      )
+    })
+    const workerSixb = {
+      id: sixb.id,
+      broker: sixb.broker,
+      events: sixb.events,
+      storage: observedStorage,
+      queues: sixb.queues,
+      agents: sixb.agents,
+    }
+
+    const worker = new AgentWorker(workerSixb, { tools: echoTool })
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+      await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run terminal" }
+      )
+
+      expect(chunksBeforeAssistantAppend).toBeGreaterThan(0)
+      expect(finalizedBeforeAssistantAppend).toBe(false)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("continues the turn when broker run stream publishing fails", async () => {
+    const sixb = buildSixb(toolThenAnswerModel(), new FailingRunStreamBroker())
+    const storage = agentStorageOf(sixb)
+    const originalConsoleError = console.error
+    console.error = () => {}
+
+    const worker = new AgentWorker(sixb, { tools: echoTool })
+    try {
+      await worker.start()
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run terminal despite stream publish failures" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const assistants = (await listMessages(storage, threadId)).filter(
+        (message) => message.role === "assistant"
+      )
+      expect(assistants).toHaveLength(1)
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
+    }
+  })
+
+  test("continues the turn when a custom stream sink fails", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const originalConsoleError = console.error
+    console.error = () => {}
+
+    const worker = new AgentWorker(sixb, {
+      tools: echoTool,
+      streamSink: {
+        async publishStarted() {
+          throw new Error("sink down")
+        },
+        async publishUiChunk() {
+          throw new Error("sink down")
+        },
+        async publishMessageFinalized() {
+          throw new Error("sink down")
+        },
+        async publishRunFinished() {
+          throw new Error("sink down")
+        },
+      },
+    })
+    try {
+      await worker.start()
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run terminal despite custom stream sink failures" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const assistants = (await listMessages(storage, threadId)).filter(
+        (message) => message.role === "assistant"
+      )
+      expect(assistants).toHaveLength(1)
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
+    }
+  })
+
+  test("drops non-JSON UI chunks without corrupting durable run state", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const request = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
+    const run = await storage.runs.reserve({
+      id: request.runId,
+      projectId: PROJECT_ID,
+      threadId: request.threadId,
+      agentId: "assistant",
+      triggerMessageId: request.triggerMessageId,
+      requestedByPrincipal: REQUESTER,
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+    })
+
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const originalConsoleError = console.error
+    console.error = () => {}
+    try {
+      await createBrokerStreamSink({
+        broker: sixb.broker,
+        projectId: PROJECT_ID,
+      }).publishUiChunk({
+        run,
+        chunkIndex: 0,
+        chunk: circular,
+      })
+    } finally {
+      console.error = originalConsoleError
+    }
+
+    expect(await listRunStreamRecords(sixb.broker, request.runId)).toHaveLength(0)
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })).toMatchObject({
+      status: "running",
+      attempt: 1,
+    })
   })
 
   test("rejects a second message while a run is active (single-flight, trigger layer)", async () => {
@@ -456,6 +707,23 @@ describe("AgentWorker", () => {
       )
       expect(reclaimed.status).toBe("succeeded")
       expect(reclaimed.attempt).toBe(2)
+
+      const streamRecords = await listRunStreamRecords(sixb.broker, crashedRunId)
+      expect(
+        streamRecords.find((record) => record.name === "agent.run.started")?.payload
+      ).toMatchObject({
+        type: "agent.run.started",
+        runId: crashedRunId,
+        attempt: 2,
+      })
+      expect(
+        streamRecords.find((record) => record.name === "agent.run.finished")?.payload
+      ).toMatchObject({
+        type: "agent.run.finished",
+        status: "succeeded",
+        runId: crashedRunId,
+        attempt: 2,
+      })
     } finally {
       await worker.stop()
     }
@@ -491,7 +759,7 @@ describe("AgentWorker", () => {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
         tools: echoTool,
-        streamSink: { onPart() {} },
+        streamSink: NOOP_STREAM_SINK,
         leaseMs: 60_000,
         heartbeatMs: 20_000,
         defaultMaxSteps: 4,
@@ -539,6 +807,16 @@ describe("AgentWorker", () => {
       )
       expect(run.status).toBe("failed")
       expect(run.error).toBeDefined()
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).find(
+          (record) => record.name === "agent.run.finished"
+        )?.payload
+      ).toMatchObject({
+        type: "agent.run.finished",
+        status: "failed",
+        runId: run.id,
+        attempt: 1,
+      })
 
       // Thread released so a later message can run.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
@@ -572,7 +850,7 @@ describe("AgentWorker", () => {
 
     const worker = new AgentWorker(sixb)
     await worker.start()
-    const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "hang" })
+    const { threadId, runId } = await sixb.agents.request({ agentId: "assistant", text: "hang" })
 
     // Wait until the run is reserved and in-flight, then stop the worker.
     await waitFor(
@@ -586,6 +864,16 @@ describe("AgentWorker", () => {
 
     const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
     expect(list.runs[0]?.status).toBe("cancelled")
+    expect(
+      (await listRunStreamRecords(sixb.broker, runId)).find(
+        (record) => record.name === "agent.run.finished"
+      )?.payload
+    ).toMatchObject({
+      type: "agent.run.finished",
+      status: "cancelled",
+      runId,
+      attempt: 1,
+    })
     const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
     expect(thread?.activeRunId).toBeNull()
   })
@@ -597,6 +885,7 @@ describe("AgentWorker", () => {
     // the real storage (both delegate to the same underlying state).
     const workerSixb = {
       id: sixb.id,
+      broker: sixb.broker,
       events: sixb.events,
       storage: withFlakyAgentFinishStorage(sixb.storage, 2),
       queues: sixb.queues,
@@ -652,7 +941,10 @@ describe("AgentWorker", () => {
           id: PROJECT_ID,
           storage: workerStorageOf(failingStorage),
           tools: echoTool,
-          streamSink: { onPart() {} },
+          streamSink: createBrokerStreamSink({
+            broker: sixb.broker,
+            projectId: PROJECT_ID,
+          }),
           leaseMs: 60_000,
           heartbeatMs: 20_000,
           defaultMaxSteps: 4,
@@ -669,6 +961,12 @@ describe("AgentWorker", () => {
     expect(
       (await listMessages(storage, request.threadId)).filter((m) => m.role === "assistant")
     ).toHaveLength(0)
+    const afterFailureRecords = await listRunStreamRecords(sixb.broker, request.runId)
+    expect(afterFailureRecords.some((record) => record.name === "agent.ui.chunk")).toBe(true)
+    expect(afterFailureRecords.some((record) => record.name === "agent.message.finalized")).toBe(
+      false
+    )
+    expect(afterFailureRecords.some((record) => record.name === "agent.run.finished")).toBe(false)
 
     const reclaimed = await storage.runs.reclaim({
       projectId: PROJECT_ID,
@@ -681,7 +979,10 @@ describe("AgentWorker", () => {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
         tools: echoTool,
-        streamSink: { onPart() {} },
+        streamSink: createBrokerStreamSink({
+          broker: sixb.broker,
+          projectId: PROJECT_ID,
+        }),
         leaseMs: 60_000,
         heartbeatMs: 20_000,
         defaultMaxSteps: 4,
@@ -698,6 +999,25 @@ describe("AgentWorker", () => {
     expect(
       (await listMessages(storage, request.threadId)).filter((m) => m.role === "assistant")
     ).toHaveLength(1)
+
+    const finalRecords = await listRunStreamRecords(sixb.broker, request.runId)
+    const finalizedRecords = finalRecords.filter(
+      (record) => record.name === "agent.message.finalized"
+    )
+    expect(finalizedRecords).toHaveLength(1)
+    expect(finalizedRecords[0]?.payload).toMatchObject({
+      type: "agent.message.finalized",
+      runId: request.runId,
+      attempt: 2,
+    })
+    const finishedRecords = finalRecords.filter((record) => record.name === "agent.run.finished")
+    expect(finishedRecords).toHaveLength(1)
+    expect(finishedRecords[0]?.payload).toMatchObject({
+      type: "agent.run.finished",
+      status: "succeeded",
+      runId: request.runId,
+      attempt: 2,
+    })
   })
 
   test("fails the run and releases the thread when a turn exceeds its wall-clock budget", async () => {
@@ -719,6 +1039,16 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("failed")
       expect(run.error).toContain("turn budget")
+      expect(
+        (await listRunStreamRecords(sixb.broker, run.id)).find(
+          (record) => record.name === "agent.run.finished"
+        )?.payload
+      ).toMatchObject({
+        type: "agent.run.finished",
+        status: "failed",
+        runId: run.id,
+        attempt: 1,
+      })
       // Thread released so a later message can run, and no assistant message was persisted.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
       expect(thread?.activeRunId).toBeNull()

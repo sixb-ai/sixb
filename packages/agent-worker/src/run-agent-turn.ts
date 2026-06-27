@@ -9,7 +9,7 @@ import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
 import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
 import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
-import type { AgentWorkerContext, StreamSink } from "./types"
+import type { AgentWorkerContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 8
 
@@ -41,7 +41,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     id: projectId,
     storage,
     tools,
-    streamSink,
     leaseMs,
     heartbeatMs,
     defaultMaxSteps,
@@ -105,11 +104,16 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   })
 
   let drainError: unknown
+  let chunkIndex = 0
   try {
-    // Draining the UI stream drives the model loop and fires `onFinish`. We do not forward chunks
-    // here — V1 emits final parts to the sink below (see `StreamSink`).
-    for await (const _chunk of uiStream) {
-      // intentional drain
+    // Draining the UI stream drives the model loop and fires `onFinish`. Chunks are live UI state:
+    // publish them to the broker stream, but keep durable messages final-only.
+    for await (const chunk of uiStream) {
+      await context.streamSink.publishUiChunk({
+        run,
+        chunkIndex: chunkIndex++,
+        chunk,
+      })
     }
   } catch (error) {
     drainError = error
@@ -139,10 +143,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
   await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
 
-  for (const part of assistant.parts) {
-    await emitPart(streamSink, part)
-  }
-
   const usage = mapUsage(await result.totalUsage)
   const finishReason = await result.finishReason
   const assistantMessageId = createAgentMessageId()
@@ -150,7 +150,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // The assistant append and run finish share one transaction, so redelivery cannot observe a
   // finalized message without the terminal run state that releases the thread. Transient blips are
   // retried in place.
-  return appendMessageAndFinishRunOrThrow(storage, {
+  const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
     message: {
       id: assistantMessageId,
       projectId,
@@ -171,6 +171,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       ...(usage === undefined ? {} : { usage }),
     },
   })
+
+  await context.streamSink.publishMessageFinalized({
+    run,
+    messageId: assistantMessageId,
+  })
+  await context.streamSink.publishRunFinished(finalizedRun)
+
+  return finalizedRun
 }
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider
@@ -250,15 +258,6 @@ async function renewOrLost(input: {
       throw new AgentLeaseLostError(input.runId)
     }
     throw error
-  }
-}
-
-async function emitPart(sink: StreamSink, part: AgentMessage["parts"][number]): Promise<void> {
-  try {
-    await sink.onPart(part)
-  } catch (error) {
-    // The sink is observational; never let it break the turn.
-    console.error("[SixbAgentWorker] Stream sink failed:", error)
   }
 }
 
