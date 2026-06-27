@@ -269,14 +269,15 @@ describe("custom app Tailwind build (e2e)", () => {
     const app = await createCustomApp({ rootDir: tempRoot, apiBaseUrl: "http://127.0.0.1:3000" })
     const server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
     const generatedCssPath = join(tempRoot, ".sixb", "generated", "app.css")
+    const watchedUtility = "--sixb-watch-sentinel"
 
     try {
-      expect(await readFile(generatedCssPath, "utf-8")).not.toContain("uppercase")
+      expect(await readFile(generatedCssPath, "utf-8")).not.toContain(watchedUtility)
 
       // A page edit introduces a new utility class; the framework's own
       // watcher must pick it up without any userland CSS watcher.
       const updatedPage =
-        'export default function Page() { return <main className="line-through uppercase">ok</main> }\n'
+        'export default function Page() { return <main className="line-through [--sixb-watch-sentinel:1]">ok</main> }\n'
       await writeFile(join(tempRoot, "app", "page.tsx"), updatedPage)
 
       const deadline = Date.now() + 10_000
@@ -284,7 +285,7 @@ describe("custom app Tailwind build (e2e)", () => {
       let attempts = 0
       while (Date.now() < deadline) {
         css = await readFile(generatedCssPath, "utf-8")
-        if (css.includes("uppercase")) break
+        if (css.includes(watchedUtility)) break
         attempts++
         if (attempts % 20 === 0) {
           // macOS fsevents can drop the first event on a freshly created
@@ -293,7 +294,7 @@ describe("custom app Tailwind build (e2e)", () => {
         }
         await Bun.sleep(100)
       }
-      expect(css).toContain("uppercase")
+      expect(css).toContain(watchedUtility)
     } finally {
       await server.stop()
     }
