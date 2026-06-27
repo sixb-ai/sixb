@@ -110,6 +110,7 @@ export {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "./ui/context-menu"
+export { DataTable, type DataTableColumn } from "./ui/data-table"
 export {
   Dialog,
   DialogClose,
