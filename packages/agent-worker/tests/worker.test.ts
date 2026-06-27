@@ -24,7 +24,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
-import { MockLanguageModelV3, simulateReadableStream } from "ai/test"
+import { convertArrayToReadableStream, MockLanguageModelV3 } from "ai/test"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -39,7 +39,7 @@ const USAGE: LanguageModelV3Usage = {
 }
 
 function stream(chunks: LanguageModelV3StreamPart[]) {
-  return { stream: simulateReadableStream({ chunks, initialDelayInMs: 0, chunkDelayInMs: 0 }) }
+  return { stream: convertArrayToReadableStream(chunks) }
 }
 
 function finish(unified: "stop" | "tool-calls"): LanguageModelV3StreamPart {
