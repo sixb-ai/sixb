@@ -23,12 +23,12 @@ import {
   revokeAgentRunAccessToken,
 } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
+import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
 import type {
   AgentWorkerContext,
   AgentWorkerOptions,
   AgentWorkerSixb,
   AgentWorkerStorage,
-  StreamSink,
 } from "./types"
 
 const DEFAULT_AGENT_LEASE_MS = 60_000
@@ -37,11 +37,10 @@ const SHORT_BACKOFF_MS = 250
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 /**
- * Cap on redeliveries for a run we cannot finalize. Beyond it the job dead-letters (visibly) instead
- * of churning forever; the still-`running` run awaits storage recovery + a reaper (a later slice).
+ * Cap on redeliveries for a run we cannot finalize. Beyond it the job is marked failed instead of
+ * retrying forever; the run remains non-terminal until storage recovery or explicit repair.
  */
 const MAX_FINALIZE_ATTEMPTS = 10
-const NOOP_SINK: StreamSink = { onPart() {} }
 const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 /** Outcome of trying to own a run for a claimed job. */
@@ -148,6 +147,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     let runToken: AgentRunAccessToken | null = null
 
     try {
+      await context.streamSink.publishStarted(run)
       runToken = await mintAgentRunAccessToken({
         storage: context.storage,
         projectId: context.id,
@@ -173,7 +173,16 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
       // is redelivered rather than acked with the thread left silently locked.
       const aborted = signal.aborted || isAbortError(error)
-      await this.recordFate(context, run.id, leaseId, aborted ? "cancelled" : "failed", error)
+      const finalized = await this.recordFate(
+        context,
+        run.id,
+        leaseId,
+        aborted ? "cancelled" : "failed",
+        error
+      )
+      if (finalized) {
+        await context.streamSink.publishRunFinished(finalized)
+      }
       // Shutdown abort: rethrow so `onAbortError` fails the job (the run is already `cancelled`).
       // Model/tool failure or turn timeout: fate is on the record, so we ack by returning.
       if (aborted) {
@@ -326,9 +335,9 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     leaseId: string,
     status: "failed" | "cancelled",
     error: unknown
-  ): Promise<void> {
+  ): Promise<AgentRunRecord | undefined> {
     try {
-      await finishRunOrThrow(context.storage.agents, {
+      return await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
         id: runId,
         leaseId,
@@ -338,7 +347,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     } catch (finalizeError) {
       // Lease already lost / run already terminal — nothing more to record, the delivery is acked.
       if (finalizeError instanceof AgentLeaseLostError) {
-        return
+        return undefined
       }
       // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
       throw finalizeError
@@ -362,7 +371,9 @@ function buildAgentContext(
     id: sixb.id,
     storage: storage as AgentWorkerStorage,
     tools: options.tools ?? {},
-    streamSink: options.streamSink ?? NOOP_SINK,
+    streamSink: isolateStreamSink(
+      options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
+    ),
     leaseMs,
     heartbeatMs: options.heartbeatMs ?? Math.max(1, Math.floor(leaseMs / 3)),
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,

@@ -1,29 +1,67 @@
 # @sixb/agent-worker
 
-The cohosted worker that turns `agent.run.requested` queue jobs into persisted agent runs.
+Runs `agent.run.requested` queue jobs for a Sixb project.
 
-A trigger (`sixb.agents.request(...)`) persists the user message and enqueues an *intent*; this worker
-claims it, mints the run + lease (**reserve-at-claim**, so there is never an orphan run), streams the
-model with the AI SDK, and persists the assistant message + finalizes the run.
+The worker claims queued agent intents created by `sixb.agents.request(...)`, reserves or reclaims
+the run record, keeps the run lease alive while the model is streaming, writes the final assistant
+message, and finalizes the run.
 
-## Liveness (two layers)
+## Usage
 
-- The **queue lane** delivers and redelivers (on lease expiry).
-- The **`agent_runs` lease** is the sole authority on who may write — every write is fenced on the
-  lease id, kept fresh by a heartbeat during the turn.
+```ts
+import { AgentWorker } from "@sixb/agent-worker"
 
-## Run fate
+const worker = new AgentWorker(sixb, {
+  tools,
+})
 
-A run's terminal state lives on its record:
+await worker.start()
+```
 
-- **model/tool failure** → `failed`, job acked;
-- **shutdown** → `cancelled`, job released for another process;
-- **turn timeout** (`turnTimeoutMs`, default 5 min) → `failed`, thread released;
-- **lease lost mid-turn** (reclaimed as a suspected crash) → writes nothing, acks the duplicate;
-- **finalize cannot be recorded** (storage unavailable) → the job is **not** acked; it is redelivered
-  (bounded) so a later delivery finalizes the run, rather than leaving the thread silently locked.
+`sixb` must provide `storage.agents`, `storage.auth`, `queues.agents`, `agents`, and `broker`.
 
-## Not in this package
+## Execution Model
 
-HTTP/WebSocket surface, broker streaming (the `StreamSink` seam is a no-op by default), and the real
-sandbox + tools live in later slices.
+- User requests persist the user message and enqueue an intent.
+- The worker reserves the run at claim time, so queued intents do not create orphan run records.
+- The run lease is the authority for ownership; heartbeat renewal keeps it fresh during the turn.
+- Lease-fenced finalization prevents stale workers from writing after a reclaim.
+- The assistant message append and successful run finish happen in one storage transaction.
+
+## Live Stream
+
+Each run has a broker stream named `agents.runs.${runId}`.
+
+The default `StreamSink` writes:
+
+- `agent.run.started`
+- `agent.ui.chunk`
+- `agent.message.finalized`
+- `agent.run.finished`
+
+Live AI SDK UI chunks are broker records only. They are not inserted into `agent_messages`.
+`agent_messages` stores the final assistant message after the model turn completes.
+
+The default sink is created with `createBrokerStreamSink(...)`. Tests can pass `NOOP_STREAM_SINK` or
+a custom `streamSink`.
+
+## Run Fate
+
+The terminal run state is stored on the run record:
+
+- Model or tool failure: `failed`
+- Turn timeout: `failed`
+- Worker shutdown during a turn: `cancelled`
+- Lease lost mid-turn: no writes from the stale worker
+- Finalization storage failure: job is retried up to a bounded attempt limit; if finalization still
+  cannot be recorded, the job is marked failed and the run remains non-terminal for repair
+
+## Options
+
+- `tools`: AI SDK tools exposed to the model.
+- `streamSink`: stream sink override; defaults to a broker-backed sink.
+- `leaseMs`: run lease and queue visibility duration; defaults to 60 seconds.
+- `heartbeatMs`: lease renewal interval; defaults to one third of `leaseMs`.
+- `turnTimeoutMs`: wall-clock turn budget; defaults to 5 minutes.
+- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `8`.
+- `idlePollMs`: queue polling interval while idle.

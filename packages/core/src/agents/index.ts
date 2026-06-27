@@ -44,5 +44,12 @@ export {
   requestAgentRun,
 } from "./request"
 export { AgentsRuntime } from "./runtime"
+export type { AgentRunStreamEvent, AgentRunStreamId } from "./streams"
+export {
+  AGENT_RUN_STREAM_SCHEMA_VERSION,
+  agentRunStreamDefinition,
+  agentRunStreamId,
+  DEFAULT_AGENT_RUN_STREAM_RETENTION,
+} from "./streams"
 export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./types"
 export { isAgentDefinition, validateAgentGroupReferences } from "./validation"
