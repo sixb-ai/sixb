@@ -35,7 +35,9 @@ Use this skill before reading object data or answering questions about current o
 3. Prefer the smallest query that answers the question.
 4. Start with a low limit when exploring, then widen only when needed.
 5. Use count, exists, and facets endpoints for aggregate questions instead of listing everything.
-6. Inspect API error messages and query plan issues before retrying.
+6. Only use the exact endpoint patterns documented in the references. Do not invent alternative
+   URL forms; the agent API proxy only allows documented routes.
+7. Inspect API error messages and query plan issues before retrying.
 
 ## References
 
@@ -62,6 +64,10 @@ links, and applicable actions that are visible to the agent.
 
 ## List Objects
 
+This is the only list-by-type route. Put the object type id in the \`objectTypeId\` query param
+using the exact casing from the ontology. Do not use \`/api/objects/{objectTypeId}\` to list
+objects; that path is not an API route.
+
 \`\`\`bash
 curl -sS "$SIXB_API_BASE_URL/api/objects?objectTypeId=customer&limit=20"
 \`\`\`
@@ -73,6 +79,9 @@ Common query params: \`objectTypeId\`, \`limit\`, \`cursor\`, \`includeSubtypes\
 \`\`\`bash
 curl -sS "$SIXB_API_BASE_URL/api/objects/customer/cust-001"
 \`\`\`
+
+The path form is only for reading one object by id: \`/api/objects/{objectTypeId}/{primaryId}\`.
+It is not the collection route for a type.
 
 ## Object Query
 
@@ -102,6 +111,16 @@ curl -sS -H "Content-Type: application/json" \\
 curl -sS -H "Content-Type: application/json" \\
   -X POST "$SIXB_API_BASE_URL/api/objects/query/facets" \\
   --data '{"query":{"kind":"start","objectTypeId":"customer"},"facets":[{"propertyId":"status"}]}'
+\`\`\`
+
+## Common Mistakes
+
+\`\`\`bash
+# This does not list customers; the proxy blocks it because it is not a documented route.
+curl -sS "$SIXB_API_BASE_URL/api/objects/customer"
+
+# Use the list route instead.
+curl -sS "$SIXB_API_BASE_URL/api/objects?objectTypeId=customer&limit=20"
 \`\`\`
 `,
       },
