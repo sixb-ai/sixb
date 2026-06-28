@@ -204,6 +204,16 @@ describe("server auth guard", () => {
         headers,
       })
     )
+    const acceptedTelemetryRead = await app.fetch(
+      new Request("http://localhost/api/objects/device/fan-1/telemetry/rpm/latest", {
+        headers,
+      })
+    )
+    const acceptedActionRunDetail = await app.fetch(
+      new Request("http://localhost/api/action-runs/act_run_1", {
+        headers,
+      })
+    )
     const rejectedAuthManagement = await app.fetch(
       new Request("http://localhost/api/auth/sessions", {
         headers,
@@ -222,6 +232,8 @@ describe("server auth guard", () => {
 
     expect(accepted.status).toBe(200)
     expect(await accepted.json()).toEqual({ id: "test-project" })
+    expect(acceptedTelemetryRead.status).toBe(404)
+    expect(acceptedActionRunDetail.status).toBe(404)
     expect(rejectedAuthManagement.status).toBe(403)
     expect(rejectedRawWrite.status).toBe(403)
   })

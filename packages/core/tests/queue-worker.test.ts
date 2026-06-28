@@ -159,7 +159,7 @@ describe("QueueWorker", () => {
     await worker.stop()
   })
 
-  test("claimLimit batches multiple jobs per claim", async () => {
+  test("claimLimit batches and executes multiple jobs concurrently", async () => {
     const queues = new InMemoryQueues()
     const claimSizes: number[] = []
     const originalClaim = queues.syncRuns.claim.bind(queues.syncRuns)
@@ -170,10 +170,17 @@ describe("QueueWorker", () => {
     }
 
     const processed: string[] = []
+    const completed: string[] = []
+    let release: () => void = () => {}
+    const releasePromise = new Promise<void>((resolve) => {
+      release = resolve
+    })
 
     class BatchWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
         processed.push(claimed.job.id)
+        await releasePromise
+        completed.push(claimed.job.id)
       }
     }
 
@@ -187,17 +194,28 @@ describe("QueueWorker", () => {
 
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
-      jobs: [
-        { type: "sync.run.requested", payload: { syncId: "a" } },
-        { type: "sync.run.requested", payload: { syncId: "b" } },
-        { type: "sync.run.requested", payload: { syncId: "c" } },
-      ],
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "a" } }],
     })
 
     await worker.start()
-    await waitFor(() => processed.length === 3)
-    await worker.stop()
+    try {
+      await waitFor(() => processed.length === 1)
+      await queues.syncRuns.enqueue({
+        projectId: PROJECT_ID,
+        jobs: [
+          { type: "sync.run.requested", payload: { syncId: "b" } },
+          { type: "sync.run.requested", payload: { syncId: "c" } },
+        ],
+      })
+      await waitFor(() => processed.length === 3)
+      expect(completed).toHaveLength(0)
+      release()
+      await waitFor(() => completed.length === 3)
+    } finally {
+      release()
+      await worker.stop()
+    }
 
-    expect(claimSizes[0]).toBe(3)
+    expect(claimSizes).toContain(2)
   })
 })

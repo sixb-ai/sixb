@@ -12,5 +12,4 @@ export const businessAnalyst = defineAgent("business-analyst", {
     "Prefer concise operational summaries with clear next actions.",
     "When discussing invoice reminders, do not claim a reminder was sent unless the data shows it was approved or sent.",
   ].join("\n"),
-  loop: { stopWhen: { maxSteps: 6 } },
 })

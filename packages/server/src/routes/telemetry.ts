@@ -1,5 +1,6 @@
 import { getTelemetryHistoryBatch, isAllowed, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
@@ -111,7 +112,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           summary: "Get bulk telemetry history",
           tags: ["Telemetry"],
           operationId: "getBulkTelemetryHistory",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: bearerSecurityRequirement("getBulkTelemetryHistory"),
         },
       }
     )
@@ -155,6 +156,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           summary: "Get telemetry history",
           tags: ["Telemetry"],
           operationId: "getTelemetryHistory",
+          security: bearerSecurityRequirement("getTelemetryHistory"),
         },
       }
     )
@@ -197,6 +199,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           summary: "Get latest telemetry point",
           tags: ["Telemetry"],
           operationId: "getLatestTelemetry",
+          security: bearerSecurityRequirement("getLatestTelemetry"),
         },
       }
     )

@@ -33,6 +33,24 @@ export interface CommandResult {
 }
 
 /**
+ * Provider-level network egress policy. `restricted` declares the exact origins a sandbox should be
+ * able to reach; providers that cannot enforce target-level egress may document weaker local-dev
+ * behavior, but production providers should treat the allow list as authoritative.
+ */
+export type SandboxNetworkPolicy =
+  | { readonly mode: "none" }
+  | {
+      readonly mode: "restricted"
+      readonly allow: readonly SandboxNetworkTarget[]
+    }
+  | { readonly mode: "all" }
+
+export interface SandboxNetworkTarget {
+  readonly name: string
+  readonly origin: string
+}
+
+/**
  * Options accepted by every SandboxFactory.create. Provider-specific factories
  * may extend this type with their own options.
  */
@@ -40,7 +58,7 @@ export interface CreateSandboxOptions {
   readonly workingDirectory?: string
   readonly env?: Readonly<Record<string, string>>
   readonly timeout?: number
-  readonly allowNetwork?: boolean
+  readonly network?: SandboxNetworkPolicy
 }
 
 export interface Sandbox {

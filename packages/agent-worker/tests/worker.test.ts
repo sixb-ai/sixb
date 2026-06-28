@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 import type {
   LanguageModelV3,
   LanguageModelV3StreamPart,
@@ -13,6 +15,7 @@ import {
   type AppendAgentMessageInput,
   agentRunStreamId,
   type Broker,
+  type CreateSandboxOptions,
   createAgentRunId,
   createAgentRunLeaseId,
   defineAgent,
@@ -24,6 +27,9 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type Queues,
+  type RunCommandOptions,
+  type Sandbox,
+  type SandboxFactory,
   Sixb,
   type Storage,
 } from "@sixb/core"
@@ -31,16 +37,22 @@ import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV3 } from "ai/test"
 import {
   AgentWorker,
+  type AgentWorkerContext,
+  type AgentWorkerOptions,
   type AgentWorkerStorage,
   createBrokerStreamSink,
   NOOP_STREAM_SINK,
 } from "../src"
+import { startAgentApiProxy } from "../src/api-proxy"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
+import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
+import { createAgentRunEnvironment } from "../src/run-environment"
 import { waitFor } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"
+const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
 
@@ -93,6 +105,139 @@ function toolThenAnswerModel(): MockLanguageModelV3 {
   })
 }
 
+function bashThenAnswerModel(): MockLanguageModelV3 {
+  let call = 0
+  return new MockLanguageModelV3({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "bash-call-1",
+            toolName: "bash",
+            input: JSON.stringify({
+              command: "echo 'Hello, world!' | grep Hello",
+              cwd: "/workspace",
+              timeoutMs: 1234,
+            }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Bash ran successfully" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function apiBashThenAnswerModel(): MockLanguageModelV3 {
+  let call = 0
+  return new MockLanguageModelV3({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "bash-api-call-1",
+            toolName: "bash",
+            input: JSON.stringify({
+              command: "print-sixb-env",
+            }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "API context is available" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function controlledBlockingAnswerModel(): {
+  readonly model: MockLanguageModelV3
+  startedCount(): number
+  waitForStarted(count: number): Promise<void>
+  releaseAll(): void
+} {
+  let started = 0
+  const releases: Array<() => void> = []
+  const waiters: Array<{ readonly count: number; readonly resolve: () => void }> = []
+
+  const notifyStarted = () => {
+    for (const waiter of waiters) {
+      if (started >= waiter.count) {
+        waiter.resolve()
+      }
+    }
+  }
+
+  return {
+    model: new MockLanguageModelV3({
+      modelId: "mock-model",
+      doStream: async (options) => ({
+        stream: new ReadableStream<LanguageModelV3StreamPart>({
+          start(controller) {
+            started += 1
+            const callId = started
+            let released = false
+            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            const release = () => {
+              if (released) return
+              released = true
+              controller.enqueue({ type: "text-start", id: `t-${callId}` })
+              controller.enqueue({ type: "text-delta", id: `t-${callId}`, delta: "done" })
+              controller.enqueue({ type: "text-end", id: `t-${callId}` })
+              controller.enqueue(finish("stop"))
+              controller.close()
+            }
+
+            controller.enqueue({ type: "stream-start", warnings: [] })
+            releases.push(release)
+            notifyStarted()
+            if (options.abortSignal?.aborted) {
+              abort()
+            } else {
+              options.abortSignal?.addEventListener("abort", abort, { once: true })
+            }
+          },
+        }),
+      }),
+    }),
+    startedCount() {
+      return started
+    },
+    waitForStarted(count) {
+      if (started >= count) {
+        return Promise.resolve()
+      }
+      return new Promise((resolve) => {
+        waiters.push({ count, resolve })
+      })
+    },
+    releaseAll() {
+      for (const release of releases.splice(0)) {
+        release()
+      }
+    },
+  }
+}
+
 const echoTool: ToolSet = {
   echo: tool({
     description: "Echo a value back.",
@@ -118,11 +263,92 @@ interface TestSixb {
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime
+  readonly sandboxes?: SandboxFactory
 }
 
 const SixbCtor = Sixb as unknown as new (options: Record<string, unknown>) => TestSixb
 
-function buildSixb(model: LanguageModelV3, broker: Broker = new InMemoryBroker()): TestSixb {
+function workerOptions(
+  options: Omit<AgentWorkerOptions, "apiBaseUrl"> & { readonly apiBaseUrl?: string } = {}
+): AgentWorkerOptions {
+  return { ...options, apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL }
+}
+
+interface RecordedCommand {
+  readonly command: string
+  readonly args: readonly string[]
+  readonly options: RunCommandOptions
+}
+
+class RecordingSandbox implements Sandbox {
+  readonly id: string
+  readonly provider = "recording"
+  readonly workingDirectory: string
+  status: "running" | "stopped" | "failed" = "running"
+  readonly commands: RecordedCommand[] = []
+  destroyed = false
+
+  constructor(id: string) {
+    this.id = id
+    this.workingDirectory = `/tmp/sixb-recording-sandbox/${id}`
+  }
+
+  async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
+    this.commands.push({ command, args, options })
+    const script = args.at(-1)
+    if (command === "bash" && script === "print-sixb-env") {
+      const env = options.env ?? {}
+      return {
+        exitCode: 0,
+        stdout: [
+          `base=${env.SIXB_API_BASE_URL ?? ""}`,
+          `project=${env.SIXB_PROJECT_ID ?? ""}`,
+          `agent=${env.SIXB_AGENT_ID ?? ""}`,
+          `thread=${env.SIXB_THREAD_ID ?? ""}`,
+          `run=${env.SIXB_RUN_ID ?? ""}`,
+          `skills=${env.SIXB_SKILLS_DIR ?? ""}`,
+          `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
+          `token=${env.SIXB_ACCESS_TOKEN ?? ""}`,
+        ].join("\n"),
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    return {
+      exitCode: 0,
+      stdout: `ran ${command} ${args.join(" ")}`.trim(),
+      stderr: "",
+      durationMs: 1,
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.status = "stopped"
+  }
+
+  async destroy(): Promise<void> {
+    this.destroyed = true
+    await this.stop()
+  }
+}
+
+class RecordingSandboxFactory implements SandboxFactory {
+  readonly sandboxes: RecordingSandbox[] = []
+  readonly createOptions: CreateSandboxOptions[] = []
+
+  async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    this.createOptions.push(options)
+    const sandbox = new RecordingSandbox(`sandbox-${this.sandboxes.length + 1}`)
+    this.sandboxes.push(sandbox)
+    return sandbox
+  }
+}
+
+function buildSixb(
+  model: LanguageModelV3,
+  broker: Broker = new InMemoryBroker(),
+  sandboxes: SandboxFactory = new RecordingSandboxFactory()
+): TestSixb {
   const agent = defineAgent("assistant", {
     name: "Assistant",
     model,
@@ -140,6 +366,7 @@ function buildSixb(model: LanguageModelV3, broker: Broker = new InMemoryBroker()
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
+    sandboxes,
   })
 }
 
@@ -178,6 +405,87 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
     throw new Error("expected auth storage")
   }
   return storage as AgentWorkerStorage
+}
+
+function buildAgentWorkerContext(
+  sixb: TestSixb,
+  input: { readonly apiBaseUrl?: string; readonly baseTools?: ToolSet } = {}
+): AgentWorkerContext {
+  if (!sixb.sandboxes) {
+    throw new Error("expected sandbox factory")
+  }
+  return {
+    id: sixb.id,
+    storage: workerStorageOf(sixb.storage),
+    sandboxes: sixb.sandboxes,
+    baseTools: input.baseTools ?? {},
+    apiBaseUrl: input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
+    streamSink: NOOP_STREAM_SINK,
+    leaseMs: 60_000,
+    heartbeatMs: 20_000,
+    defaultMaxSteps: 4,
+    turnTimeoutMs: 60_000,
+  }
+}
+
+async function reserveRequestedRun(
+  sixb: TestSixb,
+  input: { readonly threadId: string; readonly runId: string; readonly triggerMessageId: string }
+) {
+  return agentStorageOf(sixb).runs.reserve({
+    id: input.runId,
+    projectId: PROJECT_ID,
+    threadId: input.threadId,
+    agentId: "assistant",
+    triggerMessageId: input.triggerMessageId,
+    requestedByPrincipal: REQUESTER,
+    lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+  })
+}
+
+async function runBashTool(
+  context: { readonly tools: ToolSet },
+  command: string
+): Promise<{ readonly stdout: string }> {
+  const bash = context.tools.bash as unknown as {
+    execute(
+      input: { readonly command: string },
+      options: { readonly abortSignal?: AbortSignal }
+    ): Promise<{ readonly stdout: string }>
+  }
+  return bash.execute({ command }, { abortSignal: new AbortController().signal })
+}
+
+function stdoutValue(stdout: string, key: string): string {
+  const prefix = `${key}=`
+  return (
+    stdout
+      .split("\n")
+      .find((line) => line.startsWith(prefix))
+      ?.slice(prefix.length) ?? ""
+  )
+}
+
+function restrictedOrigin(option: CreateSandboxOptions | undefined): string {
+  if (option?.network?.mode !== "restricted") {
+    throw new Error("Expected restricted sandbox network.")
+  }
+  const origin = option.network.allow[0]?.origin
+  if (!origin) {
+    throw new Error("Expected restricted sandbox origin.")
+  }
+  return origin
+}
+
+async function runToken(sixb: TestSixb, runId: string) {
+  const tokens = await authStorageOf(sixb).accessTokens.list({
+    projectId: PROJECT_ID,
+    kind: "serviceAccount",
+    subjectType: "serviceAccount",
+    subjectId: "svc_agent_assistant",
+    includeRevoked: true,
+  })
+  return tokens.accessTokens.find((accessToken) => accessToken.name === `Agent run ${runId}`)
 }
 
 async function listMessages(storage: AgentStorage, threadId: string) {
@@ -320,6 +628,129 @@ function hangingModel(): MockLanguageModelV3 {
 }
 
 describe("AgentWorker", () => {
+  test("requires an API base URL", () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+
+    expect(() => new AgentWorker(sixb, { apiBaseUrl: "" })).toThrow(
+      "Agent workers require options.apiBaseUrl."
+    )
+  })
+
+  test("creates isolated API proxy, sandbox env, and token per concurrent run environment", async () => {
+    const upstreamRequests: Array<{ readonly authorization: string | null }> = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        upstreamRequests.push({ authorization: request.headers.get("authorization") })
+        return Response.json({ ok: true })
+      },
+    })
+    const upstreamPort = upstream.port
+    if (upstreamPort === undefined) {
+      upstream.stop(true)
+      throw new Error("Expected upstream test server port.")
+    }
+
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const agent = sixb.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const [firstRequest, secondRequest] = await Promise.all([
+      sixb.agents.request({ agentId: "assistant", text: "first" }),
+      sixb.agents.request({ agentId: "assistant", text: "second" }),
+    ])
+    const [firstRun, secondRun] = await Promise.all([
+      reserveRequestedRun(sixb, firstRequest),
+      reserveRequestedRun(sixb, secondRequest),
+    ])
+
+    const context = buildAgentWorkerContext(sixb, {
+      apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/`,
+    })
+    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+    const [firstEnvironment, secondEnvironment] = await Promise.all([
+      createAgentRunEnvironment({ context, agent, run: firstRun }),
+      createAgentRunEnvironment({ context, agent, run: secondRun }),
+    ])
+    let firstDisposed = false
+    let secondDisposed = false
+
+    try {
+      expect(sandboxes.createOptions).toHaveLength(2)
+      const origins = sandboxes.createOptions.map(restrictedOrigin)
+      expect(new Set(origins).size).toBe(2)
+
+      const [firstBash, secondBash] = await Promise.all([
+        runBashTool(firstEnvironment.turnContext, "print-sixb-env"),
+        runBashTool(secondEnvironment.turnContext, "print-sixb-env"),
+      ])
+      const firstBaseUrl = stdoutValue(firstBash.stdout, "base")
+      const secondBaseUrl = stdoutValue(secondBash.stdout, "base")
+
+      expect(firstBaseUrl).not.toBe(secondBaseUrl)
+      expect(origins).toContain(firstBaseUrl)
+      expect(origins).toContain(secondBaseUrl)
+      expect(firstBash.stdout).toContain(`run=${firstRun.id}`)
+      expect(secondBash.stdout).toContain(`run=${secondRun.id}`)
+      expect(firstBash.stdout).toContain(`thread=${firstRun.threadId}`)
+      expect(secondBash.stdout).toContain(`thread=${secondRun.threadId}`)
+      expect(stdoutValue(firstBash.stdout, "skills")).not.toBe(
+        stdoutValue(secondBash.stdout, "skills")
+      )
+      expect(stdoutValue(firstBash.stdout, "context")).not.toBe(
+        stdoutValue(secondBash.stdout, "context")
+      )
+      const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
+      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR to reference skill file paths")
+      expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+      expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
+
+      const firstProxyResponse = await fetch(`${firstBaseUrl}/api/object-types`)
+      const secondProxyResponse = await fetch(`${secondBaseUrl}/api/object-types`)
+      expect(firstProxyResponse.status).toBe(200)
+      expect(secondProxyResponse.status).toBe(200)
+      await firstProxyResponse.json()
+      await secondProxyResponse.json()
+      expect(upstreamRequests).toHaveLength(2)
+      expect(upstreamRequests[0]?.authorization).toStartWith("Bearer sixb_sat_")
+      expect(upstreamRequests[1]?.authorization).toStartWith("Bearer sixb_sat_")
+      expect(upstreamRequests[0]?.authorization).not.toBe(upstreamRequests[1]?.authorization)
+
+      expect((await runToken(sixb, firstRun.id))?.revokedAt).toBeUndefined()
+      expect((await runToken(sixb, secondRun.id))?.revokedAt).toBeUndefined()
+
+      await firstEnvironment.dispose()
+      firstDisposed = true
+      await expect(runToken(sixb, firstRun.id)).resolves.toMatchObject({
+        revokedAt: expect.any(Date),
+      })
+      expect((await runToken(sixb, secondRun.id))?.revokedAt).toBeUndefined()
+
+      const stillAlive = await fetch(`${secondBaseUrl}/api/object-types`)
+      expect(stillAlive.status).toBe(200)
+      await stillAlive.json()
+    } finally {
+      if (!firstDisposed) {
+        await firstEnvironment.dispose()
+      }
+      if (!secondDisposed) {
+        await secondEnvironment.dispose()
+        secondDisposed = true
+      }
+      upstream.stop(true)
+    }
+
+    await expect(runToken(sixb, firstRun.id)).resolves.toMatchObject({
+      revokedAt: expect.any(Date),
+    })
+    await expect(runToken(sixb, secondRun.id)).resolves.toMatchObject({
+      revokedAt: expect.any(Date),
+    })
+  })
+
   test("trigger persists the user message and enqueues an intent without creating a run", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -352,9 +783,12 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
 
-    const worker = new AgentWorker(sixb, {
-      tools: echoTool,
-    })
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({
+        tools: echoTool,
+      })
+    )
     await worker.start()
     try {
       const { threadId, runId } = await sixb.agents.request({
@@ -426,30 +860,6 @@ describe("AgentWorker", () => {
         ["agent-runtime", "agent"],
       ])
 
-      const token = await waitFor(
-        async () => {
-          const tokens = await auth.accessTokens.list({
-            projectId: PROJECT_ID,
-            kind: "serviceAccount",
-            subjectType: "serviceAccount",
-            subjectId: "svc_agent_assistant",
-            includeRevoked: true,
-          })
-          return tokens.accessTokens.find(
-            (accessToken) => accessToken.name === `Agent run ${runId}`
-          )
-        },
-        { label: "agent run token persisted" }
-      )
-      expect(token.groupIds).toEqual(["agent-runtime"])
-      await waitFor(
-        async () => {
-          const refreshed = await auth.accessTokens.getById({ projectId: PROJECT_ID, id: token.id })
-          return refreshed?.revokedAt ? refreshed : null
-        },
-        { label: "agent run token revoked" }
-      )
-
       const streamRecords = await listRunStreamRecords(sixb.broker, runId)
       const streamNames = streamRecords.map((record) => record.name)
       expect(streamNames[0]).toBe("agent.run.started")
@@ -488,6 +898,473 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("runs the built-in bash tool in a per-run sandbox", async () => {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(bashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({
+        agentId: "assistant",
+        text: "run bash",
+      })
+
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "bash run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const createOptions = sandboxes.createOptions[0]
+      expect(createOptions?.network).toMatchObject({
+        mode: "restricted",
+        allow: [{ name: "sixb-api" }],
+      })
+      if (createOptions?.network?.mode !== "restricted") {
+        throw new Error("Expected restricted sandbox network.")
+      }
+      expect(createOptions.network.allow[0]?.origin).toStartWith("http://127.0.0.1:")
+
+      const sandbox = sandboxes.sandboxes[0]
+      expect(sandbox).toBeDefined()
+      await waitFor(() => (sandbox?.destroyed ? true : null), {
+        label: "sandbox destroyed",
+      })
+      expect(sandbox?.commands).toHaveLength(1)
+      const command = sandbox?.commands[0]
+      expect(command?.command).toBe("bash")
+      expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
+      expect(command?.options.cwd).toBe("/workspace")
+      expect(command?.options.env?.SIXB_API_BASE_URL).toStartWith("http://127.0.0.1:")
+      expect(command?.options.env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
+      expect(command?.options.timeout).toBe(1234)
+      expect(command?.options.signal).toBeInstanceOf(AbortSignal)
+
+      const messages = await listMessages(storage, threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      const parts = assistant?.parts ?? []
+      expect(
+        parts.find((part) => part.type === "tool-call" && part.toolName === "bash")
+      ).toMatchObject({
+        type: "tool-call",
+        toolName: "bash",
+        state: "output-available",
+        input: {
+          command: "echo 'Hello, world!' | grep Hello",
+          cwd: "/workspace",
+          timeoutMs: 1234,
+        },
+        output: {
+          exitCode: 0,
+          stdout: "ran bash -lc echo 'Hello, world!' | grep Hello",
+          stderr: "",
+          durationMs: 1,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        },
+      })
+      expect(parts.some((part) => part.type === "text" && part.text.includes("Bash ran"))).toBe(
+        true
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("passes Sixb API proxy env and skills into the per-run sandbox", async () => {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(apiBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const auth = authStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const { threadId, runId } = await sixb.agents.request({
+        agentId: "assistant",
+        text: "inspect sixb api context",
+      })
+
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "api bash run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const createOptions = sandboxes.createOptions[0]
+      expect(createOptions?.network).toMatchObject({
+        mode: "restricted",
+        allow: [{ name: "sixb-api" }],
+      })
+      if (createOptions?.network?.mode !== "restricted") {
+        throw new Error("Expected restricted sandbox network.")
+      }
+      expect(createOptions.network.allow[0]?.origin).toStartWith("http://127.0.0.1:")
+
+      const command = sandboxes.sandboxes[0]?.commands[0]
+      expect(command?.command).toBe("bash")
+      expect(command?.args).toEqual(["-lc", "print-sixb-env"])
+      const env = command?.options.env
+      expect(env?.SIXB_API_BASE_URL).toStartWith("http://127.0.0.1:")
+      expect(env?.SIXB_PROJECT_ID).toBe(PROJECT_ID)
+      expect(env?.SIXB_AGENT_ID).toBe("assistant")
+      expect(env?.SIXB_THREAD_ID).toBe(threadId)
+      expect(env?.SIXB_RUN_ID).toBe(runId)
+      expect(env?.SIXB_CONTEXT_DIR).toContain("/.sixb/agent")
+      expect(env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
+      expect(env?.SIXB_RUN_CONTEXT).toContain("/.sixb/agent/context/run.json")
+      expect(env?.SIXB_API_GUIDE).toBeUndefined()
+      expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
+
+      if (!env?.SIXB_SKILLS_DIR || !env.SIXB_RUN_CONTEXT) {
+        throw new Error("Expected sandbox API env.")
+      }
+
+      const querySkill = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "SKILL.md"),
+        "utf-8"
+      )
+      expect(querySkill).toContain("name: sixb-query")
+      expect(querySkill).toContain("/api/object-types")
+      expect(querySkill).toContain("references/query-api.md")
+      expect(querySkill).not.toContain("SIXB_ACCESS_TOKEN")
+
+      const queryApiReference = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-api.md"),
+        "utf-8"
+      )
+      expect(queryApiReference).toContain("/api/objects/query")
+      expect(queryApiReference).toContain("/api/objects/query/facets")
+      expect(queryApiReference).toContain("Do not send top-level")
+      expect(queryApiReference).toContain('"kind":"limit"')
+
+      const queryShapesReference = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-shapes.md"),
+        "utf-8"
+      )
+      expect(queryShapesReference).toContain('"kind": "page"')
+      expect(queryShapesReference).toContain('"pageSize": 20')
+      expect(queryShapesReference).toContain(
+        '"pageToken": "next-page-token-from-previous-response"'
+      )
+
+      const queryExamplesReference = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "examples.md"),
+        "utf-8"
+      )
+      expect(queryExamplesReference).toContain("keep pagination and limits inside")
+      expect(queryExamplesReference).toContain('"kind": "limit"')
+
+      const telemetrySkill = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "SKILL.md"),
+        "utf-8"
+      )
+      expect(telemetrySkill).toContain("name: sixb-telemetry")
+      expect(telemetrySkill).toContain("references/telemetry-api.md")
+
+      const telemetryApiReference = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "references", "telemetry-api.md"),
+        "utf-8"
+      )
+      expect(telemetryApiReference).toContain("/api/telemetry/history")
+      expect(telemetryApiReference).toContain("/telemetry/rpm/latest")
+
+      const actionsSkill = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-actions", "SKILL.md"),
+        "utf-8"
+      )
+      expect(actionsSkill).toContain("name: sixb-actions")
+      expect(actionsSkill).toContain("references/actions-api.md")
+
+      const actionsApiReference = await readFile(
+        join(env.SIXB_SKILLS_DIR, "sixb-actions", "references", "actions-api.md"),
+        "utf-8"
+      )
+      expect(actionsApiReference).toContain("/api/actions")
+      expect(actionsApiReference).toContain("ask for approval")
+      expect(actionsApiReference).toContain("Do not request the action until the user approves")
+      expect(actionsApiReference).toContain("/api/action-runs/action_run_id")
+      expect(actionsApiReference).toContain("without a `kind`")
+      expect(actionsApiReference).toContain('"objectTypeId": "customer", "primaryId": "cust-001"')
+
+      const runContext = JSON.parse(await readFile(env.SIXB_RUN_CONTEXT, "utf-8")) as unknown
+      expect(runContext).toMatchObject({
+        projectId: PROJECT_ID,
+        agentId: "assistant",
+        threadId,
+        runId,
+        apiBaseUrl: env.SIXB_API_BASE_URL,
+      })
+
+      const messages = await listMessages(storage, threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      const toolPart = assistant?.parts.find(
+        (part) => part.type === "tool-call" && part.toolName === "bash"
+      )
+      if (!toolPart || toolPart.type !== "tool-call" || toolPart.state !== "output-available") {
+        throw new Error("Expected completed bash tool call.")
+      }
+      const output = toolPart.output
+      const stdout =
+        output && typeof output === "object" && "stdout" in output ? String(output.stdout) : ""
+      expect(output).toMatchObject({
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      })
+      expect(stdout).toContain(`base=${env.SIXB_API_BASE_URL}`)
+      expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
+      expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
+      expect(stdout).toContain("token=")
+      expect(stdout).not.toContain("sixb_sat_")
+      expect(
+        assistant?.parts.some(
+          (part) => part.type === "text" && part.text.includes("API context is available")
+        )
+      ).toBe(true)
+
+      const token = await waitFor(
+        async () => {
+          const tokens = await auth.accessTokens.list({
+            projectId: PROJECT_ID,
+            kind: "serviceAccount",
+            subjectType: "serviceAccount",
+            subjectId: "svc_agent_assistant",
+            includeRevoked: true,
+          })
+          return tokens.accessTokens.find(
+            (accessToken) => accessToken.name === `Agent run ${runId}`
+          )
+        },
+        { label: "agent API run token persisted" }
+      )
+      expect(token.groupIds).toEqual(["agent-runtime"])
+      await waitFor(
+        async () => {
+          const refreshed = await auth.accessTokens.getById({ projectId: PROJECT_ID, id: token.id })
+          return refreshed?.revokedAt ? refreshed : null
+        },
+        { label: "agent API run token revoked" }
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("runs jobs for different threads concurrently with isolated run environments", async () => {
+    const controlled = controlledBlockingAnswerModel()
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const auth = authStorageOf(sixb)
+
+    const firstRequest = await sixb.agents.request({ agentId: "assistant", text: "first" })
+
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({ concurrency: 2, idlePollMs: 10, tools: echoTool })
+    )
+    await worker.start()
+    try {
+      await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
+        label: "first model stream started",
+      })
+      const firstInitiallyRunning = await storage.runs.getById({
+        projectId: PROJECT_ID,
+        id: firstRequest.runId,
+      })
+      expect(firstInitiallyRunning?.status).toBe("running")
+
+      const secondRequest = await sixb.agents.request({ agentId: "assistant", text: "second" })
+
+      await waitFor(() => (controlled.startedCount() >= 2 ? true : null), {
+        label: "two concurrent model streams started",
+      })
+
+      const [firstRunning, secondRunning] = await Promise.all([
+        storage.runs.getById({ projectId: PROJECT_ID, id: firstRequest.runId }),
+        storage.runs.getById({ projectId: PROJECT_ID, id: secondRequest.runId }),
+      ])
+      expect(firstRunning?.status).toBe("running")
+      expect(secondRunning?.status).toBe("running")
+
+      expect(sandboxes.createOptions).toHaveLength(2)
+      const origins = sandboxes.createOptions.map(restrictedOrigin)
+      expect(new Set(origins).size).toBe(2)
+
+      controlled.releaseAll()
+
+      const [firstRun, secondRun] = await Promise.all([
+        waitFor(
+          async () => {
+            const run = await storage.runs.getById({
+              projectId: PROJECT_ID,
+              id: firstRequest.runId,
+            })
+            return run && run.status !== "running" ? run : null
+          },
+          { label: "first concurrent run terminal" }
+        ),
+        waitFor(
+          async () => {
+            const run = await storage.runs.getById({
+              projectId: PROJECT_ID,
+              id: secondRequest.runId,
+            })
+            return run && run.status !== "running" ? run : null
+          },
+          { label: "second concurrent run terminal" }
+        ),
+      ])
+
+      expect(firstRun.status).toBe("succeeded")
+      expect(secondRun.status).toBe("succeeded")
+      expect(
+        (await listMessages(storage, firstRequest.threadId)).some(
+          (message) => message.role === "assistant"
+        )
+      ).toBe(true)
+      expect(
+        (await listMessages(storage, secondRequest.threadId)).some(
+          (message) => message.role === "assistant"
+        )
+      ).toBe(true)
+
+      const tokens = await waitFor(
+        async () => {
+          const firstToken = await runToken(sixb, firstRequest.runId)
+          const secondToken = await runToken(sixb, secondRequest.runId)
+          return firstToken?.revokedAt && secondToken?.revokedAt ? [firstToken, secondToken] : null
+        },
+        { label: "concurrent run tokens revoked" }
+      )
+      expect(tokens[0].revokedAt).toBeInstanceOf(Date)
+      expect(tokens[1].revokedAt).toBeInstanceOf(Date)
+
+      const streamRecords = await Promise.all([
+        listRunStreamRecords(sixb.broker, firstRequest.runId),
+        listRunStreamRecords(sixb.broker, secondRequest.runId),
+      ])
+      expect(
+        streamRecords.every((records) =>
+          records.some((record) => record.name === "agent.run.finished")
+        )
+      ).toBe(true)
+      await expect(
+        auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
+      ).resolves.toBeDefined()
+    } finally {
+      controlled.releaseAll()
+      await worker.stop()
+    }
+  })
+
+  test("agent API proxy injects run auth and blocks non-agent API routes", async () => {
+    const upstreamRequests: Array<{
+      readonly method: string
+      readonly pathname: string
+      readonly search: string
+      readonly authorization: string | null
+      readonly cookie: string | null
+    }> = []
+    const upstream = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        const url = new URL(request.url)
+        upstreamRequests.push({
+          method: request.method,
+          pathname: url.pathname,
+          search: url.search,
+          authorization: request.headers.get("authorization"),
+          cookie: request.headers.get("cookie"),
+        })
+        return Response.json({ ok: true, path: url.pathname, query: url.search })
+      },
+    })
+    const upstreamPort = upstream.port
+    if (upstreamPort === undefined) {
+      upstream.stop(true)
+      throw new Error("Expected upstream test server port.")
+    }
+
+    const proxy = startAgentApiProxy({
+      apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/`,
+      accessToken: "sixb_sat_test_secret",
+      runId: "run-test",
+    })
+
+    try {
+      const allowed = await fetch(`${proxy.baseUrl}/api/object-types?limit=10`, {
+        headers: {
+          authorization: "Bearer attacker",
+          cookie: "sid=attacker",
+        },
+      })
+      expect(allowed.status).toBe(200)
+      await expect(allowed.json()).resolves.toEqual({
+        ok: true,
+        path: "/api/object-types",
+        query: "?limit=10",
+      })
+
+      expect(upstreamRequests).toEqual([
+        {
+          method: "GET",
+          pathname: "/api/object-types",
+          search: "?limit=10",
+          authorization: "Bearer sixb_sat_test_secret",
+          cookie: null,
+        },
+      ])
+
+      const latest = await fetch(`${proxy.baseUrl}/api/objects/device/fan-1/telemetry/rpm/latest`)
+      expect(latest.status).toBe(200)
+      const bulk = await fetch(`${proxy.baseUrl}/api/telemetry/history`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          series: [{ objectTypeId: "device", objectId: "fan-1", propertyId: "rpm" }],
+        }),
+      })
+      expect(bulk.status).toBe(200)
+      expect(upstreamRequests.at(-2)).toMatchObject({
+        method: "GET",
+        pathname: "/api/objects/device/fan-1/telemetry/rpm/latest",
+        authorization: "Bearer sixb_sat_test_secret",
+      })
+      expect(upstreamRequests.at(-1)).toMatchObject({
+        method: "POST",
+        pathname: "/api/telemetry/history",
+        authorization: "Bearer sixb_sat_test_secret",
+      })
+
+      const actionRun = await fetch(`${proxy.baseUrl}/api/action-runs/act_run_1`)
+      expect(actionRun.status).toBe(200)
+      expect(upstreamRequests.at(-1)).toMatchObject({
+        method: "GET",
+        pathname: "/api/action-runs/act_run_1",
+        authorization: "Bearer sixb_sat_test_secret",
+      })
+
+      const denied = await fetch(`${proxy.baseUrl}/api/auth/access-tokens`)
+      expect(denied.status).toBe(403)
+      expect(upstreamRequests).toHaveLength(4)
+    } finally {
+      await proxy.stop()
+      upstream.stop(true)
+    }
+  })
+
   test("publishes UI chunks before appending the finalized assistant message", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -513,9 +1390,10 @@ describe("AgentWorker", () => {
       storage: observedStorage,
       queues: sixb.queues,
       agents: sixb.agents,
+      sandboxes: sixb.sandboxes,
     }
 
-    const worker = new AgentWorker(workerSixb, { tools: echoTool })
+    const worker = new AgentWorker(workerSixb, workerOptions({ tools: echoTool }))
     await worker.start()
     try {
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
@@ -541,7 +1419,7 @@ describe("AgentWorker", () => {
     const originalConsoleError = console.error
     console.error = () => {}
 
-    const worker = new AgentWorker(sixb, { tools: echoTool })
+    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
     try {
       await worker.start()
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
@@ -571,23 +1449,26 @@ describe("AgentWorker", () => {
     const originalConsoleError = console.error
     console.error = () => {}
 
-    const worker = new AgentWorker(sixb, {
-      tools: echoTool,
-      streamSink: {
-        async publishStarted() {
-          throw new Error("sink down")
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({
+        tools: echoTool,
+        streamSink: {
+          async publishStarted() {
+            throw new Error("sink down")
+          },
+          async publishUiChunk() {
+            throw new Error("sink down")
+          },
+          async publishMessageFinalized() {
+            throw new Error("sink down")
+          },
+          async publishRunFinished() {
+            throw new Error("sink down")
+          },
         },
-        async publishUiChunk() {
-          throw new Error("sink down")
-        },
-        async publishMessageFinalized() {
-          throw new Error("sink down")
-        },
-        async publishRunFinished() {
-          throw new Error("sink down")
-        },
-      },
-    })
+      })
+    )
     try {
       await worker.start()
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
@@ -695,7 +1576,7 @@ describe("AgentWorker", () => {
       lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() - 1_000) },
     })
 
-    const worker = new AgentWorker(sixb, { tools: echoTool })
+    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
     await worker.start()
     try {
       const reclaimed = await waitFor(
@@ -778,6 +1659,48 @@ describe("AgentWorker", () => {
     expect(run?.status).toBe("running")
   })
 
+  test("adds concise Sixb context to every model system prompt", async () => {
+    let capturedSystem: string | undefined
+    const model = new MockLanguageModelV3({
+      modelId: "mock-model",
+      doStream: async (options) => {
+        capturedSystem = options.prompt.find((message) => message.role === "system")?.content
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Done" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const request = await sixb.agents.request({ agentId: "assistant", text: "hello" })
+    const run = await reserveRequestedRun(sixb, request)
+
+    await runAgentTurn({
+      context: {
+        id: PROJECT_ID,
+        storage: workerStorageOf(sixb.storage),
+        tools: {},
+        systemAddendum: "Extra sandbox context.",
+        streamSink: NOOP_STREAM_SINK,
+        leaseMs: 60_000,
+        heartbeatMs: 20_000,
+        defaultMaxSteps: 4,
+        turnTimeoutMs: 60_000,
+      },
+      agent: sixb.agents.getById("assistant")!,
+      run,
+      signal: new AbortController().signal,
+    })
+
+    expect(capturedSystem).toContain("You are a helpful test assistant.")
+    expect(capturedSystem).toContain("You are operating as a Sixb agent")
+    expect(capturedSystem).toContain("sandboxed bash tool")
+    expect(capturedSystem).toContain("Extra sandbox context.")
+  })
+
   test("records a run-level failure on the record (model error)", async () => {
     const failingModel = new MockLanguageModelV3({
       modelId: "mock-model",
@@ -793,7 +1716,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(failingModel)
     const storage = agentStorageOf(sixb)
 
-    const worker = new AgentWorker(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "hi" })
@@ -848,7 +1771,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(blockingModel)
     const storage = agentStorageOf(sixb)
 
-    const worker = new AgentWorker(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     const { threadId, runId } = await sixb.agents.request({ agentId: "assistant", text: "hang" })
 
@@ -890,9 +1813,10 @@ describe("AgentWorker", () => {
       storage: withFlakyAgentFinishStorage(sixb.storage, 2),
       queues: sixb.queues,
       agents: sixb.agents,
+      sandboxes: sixb.sandboxes,
     }
 
-    const worker = new AgentWorker(workerSixb, { tools: echoTool })
+    const worker = new AgentWorker(workerSixb, workerOptions({ tools: echoTool }))
     await worker.start()
     try {
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
@@ -1024,7 +1948,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(hangingModel())
     const storage = agentStorageOf(sixb)
 
-    const worker = new AgentWorker(sixb, { turnTimeoutMs: 50 })
+    const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 50 }))
     await worker.start()
     try {
       const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "hang" })
@@ -1114,7 +2038,7 @@ describe("AgentWorker", () => {
       ],
     })
 
-    const worker = new AgentWorker(sixb, { tools: echoTool })
+    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
     await worker.start()
     try {
       // Let the worker claim + hold the job (held jobs are rescheduled a full lease out, so B will

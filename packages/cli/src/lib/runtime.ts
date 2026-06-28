@@ -40,6 +40,7 @@ export interface RunningSixbRuntime {
 
 export interface StartSixbRuntimeOptions {
   readonly cohostWorkers?: boolean
+  readonly agentApiBaseUrl?: string
 }
 
 export interface RunningRulesRuntime {
@@ -228,7 +229,9 @@ export async function startSixbRuntime(
       }
 
       if (sixb.agents.list().length > 0 && sixb.storage.agents) {
-        agentWorker = new AgentWorker(sixb)
+        agentWorker = new AgentWorker(sixb, {
+          apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
+        })
         await agentWorker.start()
       }
 
@@ -286,6 +289,14 @@ function formatRouteDiagnosticWarning(diagnostic: CompileRoutesDiagnostic): stri
     case "workflow.schedule.input-required":
       return `[Sixb] Workflow '${diagnostic.workflowId}' is scheduled but has non-empty input (${diagnostic.inputFields.join(", ")}); it was not auto-routed.`
   }
+}
+
+function requireAgentApiBaseUrl(value: string | undefined): string {
+  const trimmed = value?.trim()
+  if (!trimmed) {
+    throw new Error("[SixbCLI] Agent workers require an API public origin.")
+  }
+  return trimmed
 }
 
 export async function runUntilSignal(onShutdown: () => Promise<void>): Promise<void> {

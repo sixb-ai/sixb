@@ -40,11 +40,6 @@ export async function runDev(options: DevOptions = {}) {
     sixb = await loadSixbFromEntry(entry)
     const projectRoot = dirname(resolve(entry))
 
-    runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-    const authEnabled = sixb.auth.isEnabled()
-
-    app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />)
-
     const customAppProbe = await createCustomApp({ rootDir: projectRoot })
     const hasCustomApp = await customAppProbe.hasRoutes()
     const topology = resolveBrowserTopology({
@@ -58,6 +53,14 @@ export async function runDev(options: DevOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
       includeCustomApp: hasCustomApp,
     })
+
+    runtime = await startSixbRuntime(sixb, {
+      cohostWorkers: true,
+      agentApiBaseUrl: topology.apiPublicOrigin,
+    })
+    const authEnabled = sixb.auth.isEnabled()
+
+    app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />)
 
     server = createSixbServer({
       sixb: sixb as unknown as never,

@@ -961,6 +961,8 @@ export type {
   RunCommandOptions,
   Sandbox,
   SandboxFactory,
+  SandboxNetworkPolicy,
+  SandboxNetworkTarget,
   SandboxStatus,
 } from "./sandboxes"
 export {

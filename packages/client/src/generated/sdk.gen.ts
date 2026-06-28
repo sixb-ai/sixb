@@ -1150,6 +1150,7 @@ export const getActionRun = <ThrowOnError extends boolean = false>(
   options: Options<GetActionRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/action-runs/{runId}",
     ...options,
   })
@@ -1331,7 +1332,10 @@ export const getBulkTelemetryHistory = <ThrowOnError extends boolean = false>(
     GetBulkTelemetryHistoryErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/telemetry/history",
     ...options,
     headers: {
@@ -1350,7 +1354,11 @@ export const getTelemetryHistory = <ThrowOnError extends boolean = false>(
     GetTelemetryHistoryResponses,
     GetTelemetryHistoryErrors,
     ThrowOnError
-  >({ url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/history", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/history",
+    ...options,
+  })
 
 /**
  * Get latest telemetry point
@@ -1362,7 +1370,11 @@ export const getLatestTelemetry = <ThrowOnError extends boolean = false>(
     GetLatestTelemetryResponses,
     GetLatestTelemetryErrors,
     ThrowOnError
-  >({ url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/latest", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/latest",
+    ...options,
+  })
 
 /**
  * Read domain events

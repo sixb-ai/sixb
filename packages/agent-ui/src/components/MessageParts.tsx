@@ -2,6 +2,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@
 import { cn } from "@sixb/ui/lib/utils"
 import { AlertTriangle, ChevronRight, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { BashToolView } from "../bash/BashToolView"
 import type { LivePart } from "../liveRun"
 import type { AgentMessagePart } from "../types"
 
@@ -190,6 +191,22 @@ function ReasoningPreview({ text, streaming }: { text: string; streaming: boolea
 }
 
 function ToolCallRow({ tool }: { tool: NormalizedTool }) {
+  // The agent's one tool is `bash`; render it through the friendly, intent-aware view. Any other
+  // tool falls back to the generic input/output inspector below.
+  if (tool.toolName === "bash") {
+    return (
+      <BashToolView
+        tool={{
+          state: tool.state,
+          input: tool.input,
+          inputText: tool.inputText,
+          output: tool.output,
+          errorText: tool.errorText,
+        }}
+      />
+    )
+  }
+
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
