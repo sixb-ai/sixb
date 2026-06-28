@@ -14,7 +14,7 @@ export interface AgentInboundUiMessagePart {
   readonly text?: string
   readonly state?: string
   // Provider metadata stays `unknown` here, exactly like `input` / `output` / `rawInput`: the SDK
-  // types it as `SharedV3ProviderMetadata` (a nested record), which is not structurally a Sixb
+  // types it as provider metadata (a nested record), which is not structurally a Sixb
   // `JsonValue`, so constraining it would break the "real SDK message assigns without a cast"
   // contract (locked by the consumer's compat test). `fromAiSdk` validates it to JSON at runtime.
   readonly providerMetadata?: unknown
@@ -35,7 +35,7 @@ export interface AgentInboundUiMessage {
   readonly parts: readonly AgentInboundUiMessagePart[]
 }
 
-// ── Outbound (read) — PRECISE, aligned with AI SDK v6 ───────────────────────────────────────────
+// ── Outbound (read) — PRECISE, aligned with the AI SDK message surface ──────────────────────────
 
 interface AgentUiToolPartBody {
   readonly toolCallId: string
@@ -300,7 +300,7 @@ function toUiToolPart(part: AgentToolCallPartResult): AgentUiToolPart {
 // ── toModelMessages (read) ──────────────────────────────────────────────────────────────────────
 
 /**
- * Project messages into AI SDK v6 `ModelMessage`s for replay into a model. The assistant/tool split
+ * Project messages into AI SDK `ModelMessage`s for replay into a model. The assistant/tool split
  * is hand-rolled to mirror `convertToModelMessages` (no `ai` import): assistant parts are grouped
  * into blocks at each `step-start`; each block yields one `assistant` message plus, for any
  * non-provider-executed tool calls, one `tool` message. Provider-executed tool results stay inline

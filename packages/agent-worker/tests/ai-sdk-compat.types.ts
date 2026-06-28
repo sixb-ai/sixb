@@ -1,12 +1,14 @@
 /**
- * Type-only contract between Sixb's `ai`-free message types and the AI SDK v6 shapes the worker
+ * Type-only contract between Sixb's `ai`-free message types and the AI SDK shapes the worker
  * actually feeds. This file is never executed; it fails the build if the contract drifts.
  */
+
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import type { AgentInboundUiMessage, AgentMessage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core"
-import type { ModelMessage, UIMessage } from "ai"
+import type { ModelMessage, streamText, UIMessage } from "ai"
 
-// A real v6 `UIMessage` must assign to `fromAiSdk`'s inbound shape *without a cast* — this is the
+// A real `UIMessage` must assign to `fromAiSdk`'s inbound shape *without a cast* — this is the
 // safety net at the SDK boundary and the reason the worker can pass `responseMessage` straight in.
 declare const sdkMessage: UIMessage
 const _inbound: AgentInboundUiMessage = sdkMessage
@@ -18,5 +20,15 @@ const _inbound: AgentInboundUiMessage = sdkMessage
 declare const history: readonly AgentMessage[]
 const _model: ModelMessage[] = toModelMessages(history) as ModelMessage[]
 
+// Agent-level reasoning is a first-class AI SDK streamText setting, not provider-specific metadata.
+declare const sdkModel: LanguageModelV4
+const _streamTextOptions: Parameters<typeof streamText>[0] = {
+  model: sdkModel,
+  prompt: "hello",
+  reasoning: "medium",
+  providerOptions: { openai: { reasoningSummary: "detailed" } },
+}
+
 void _inbound
 void _model
+void _streamTextOptions

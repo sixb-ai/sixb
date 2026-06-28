@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import type {
-  LanguageModelV3,
-  LanguageModelV3StreamPart,
-  LanguageModelV3Usage,
+  LanguageModelV4,
+  LanguageModelV4CallOptions,
+  LanguageModelV4StreamPart,
+  LanguageModelV4Usage,
 } from "@ai-sdk/provider"
 import {
+  type AgentReasoningLevel,
   AgentRequestError,
   type AgentRunStreamEvent,
   type AgentStorage,
@@ -34,7 +36,7 @@ import {
   type Storage,
 } from "@sixb/core"
 import { jsonSchema, type ToolSet, tool } from "ai"
-import { convertArrayToReadableStream, MockLanguageModelV3 } from "ai/test"
+import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import {
   AgentWorker,
   type AgentWorkerContext,
@@ -55,16 +57,16 @@ const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
 
-const USAGE: LanguageModelV3Usage = {
+const USAGE: LanguageModelV4Usage = {
   inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
   outputTokens: { total: 7, text: 7, reasoning: 0 },
 }
 
-function stream(chunks: LanguageModelV3StreamPart[]) {
+function stream(chunks: LanguageModelV4StreamPart[]) {
   return { stream: convertArrayToReadableStream(chunks) }
 }
 
-function finish(unified: "stop" | "tool-calls"): LanguageModelV3StreamPart {
+function finish(unified: "stop" | "tool-calls"): LanguageModelV4StreamPart {
   return { type: "finish", finishReason: { unified, raw: unified }, usage: USAGE }
 }
 
@@ -72,9 +74,9 @@ function finish(unified: "stop" | "tool-calls"): LanguageModelV3StreamPart {
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
  * reasoning + text. A stateful `doStream` (not the array form) guarantees per-call ordering.
  */
-function toolThenAnswerModel(): MockLanguageModelV3 {
+function toolThenAnswerModel(): MockLanguageModelV4 {
   let call = 0
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     modelId: "mock-model",
     doStream: async () => {
       call += 1
@@ -104,9 +106,9 @@ function toolThenAnswerModel(): MockLanguageModelV3 {
   })
 }
 
-function bashThenAnswerModel(): MockLanguageModelV3 {
+function bashThenAnswerModel(): MockLanguageModelV4 {
   let call = 0
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     modelId: "mock-model",
     doStream: async () => {
       call += 1
@@ -137,9 +139,9 @@ function bashThenAnswerModel(): MockLanguageModelV3 {
   })
 }
 
-function apiBashThenAnswerModel(): MockLanguageModelV3 {
+function apiBashThenAnswerModel(): MockLanguageModelV4 {
   let call = 0
-  return new MockLanguageModelV3({
+  return new MockLanguageModelV4({
     modelId: "mock-model",
     doStream: async () => {
       call += 1
@@ -169,7 +171,7 @@ function apiBashThenAnswerModel(): MockLanguageModelV3 {
 }
 
 function controlledBlockingAnswerModel(): {
-  readonly model: MockLanguageModelV3
+  readonly model: MockLanguageModelV4
   startedCount(): number
   waitForStarted(count: number): Promise<void>
   releaseAll(): void
@@ -187,10 +189,10 @@ function controlledBlockingAnswerModel(): {
   }
 
   return {
-    model: new MockLanguageModelV3({
+    model: new MockLanguageModelV4({
       modelId: "mock-model",
       doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV3StreamPart>({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
           start(controller) {
             started += 1
             const callId = started
@@ -344,13 +346,19 @@ class RecordingSandboxFactory implements SandboxFactory {
 }
 
 function buildSixb(
-  model: LanguageModelV3,
+  model: LanguageModelV4,
   broker: Broker = new InMemoryBroker(),
-  sandboxes: SandboxFactory = new RecordingSandboxFactory()
+  sandboxes: SandboxFactory = new RecordingSandboxFactory(),
+  options: {
+    readonly reasoning?: AgentReasoningLevel
+    readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
+  } = {}
 ): TestSixb {
   const agent = defineAgent("assistant", {
     name: "Assistant",
     model,
+    ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
+    ...(options.providerOptions === undefined ? {} : { providerOptions: options.providerOptions }),
     instructions: "You are a helpful test assistant.",
     groups: [AGENT_RUNTIME_GROUP],
     loop: { stopWhen: { maxSteps: 4 } },
@@ -596,11 +604,11 @@ function withObservedAgentMessageAppendStorage(
 }
 
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
-function hangingModel(): MockLanguageModelV3 {
-  return new MockLanguageModelV3({
+function hangingModel(): MockLanguageModelV4 {
+  return new MockLanguageModelV4({
     modelId: "mock-model",
     doStream: async (options) => ({
-      stream: new ReadableStream<LanguageModelV3StreamPart>({
+      stream: new ReadableStream<LanguageModelV4StreamPart>({
         start(controller) {
           controller.enqueue({ type: "stream-start", warnings: [] })
           const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
@@ -1499,7 +1507,7 @@ describe("AgentWorker", () => {
 
   test("adds concise Sixb context to every model system prompt", async () => {
     let capturedSystem: string | undefined
-    const model = new MockLanguageModelV3({
+    const model = new MockLanguageModelV4({
       modelId: "mock-model",
       doStream: async (options) => {
         capturedSystem = options.prompt.find((message) => message.role === "system")?.content
@@ -1539,11 +1547,55 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toContain("Extra sandbox context.")
   })
 
+  test("passes agent model options into streamText", async () => {
+    let capturedReasoning: unknown
+    let capturedProviderOptions: unknown
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async (options) => {
+        capturedReasoning = options.reasoning
+        capturedProviderOptions = options.providerOptions
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Done" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      reasoning: "high",
+      providerOptions: { openai: { reasoningSummary: "detailed" } },
+    })
+    const request = await sixb.agents.request({ agentId: "assistant", text: "hello" })
+    const run = await reserveRequestedRun(sixb, request)
+
+    await runAgentTurn({
+      context: {
+        id: PROJECT_ID,
+        storage: workerStorageOf(sixb.storage),
+        tools: {},
+        streamSink: NOOP_STREAM_SINK,
+        leaseMs: 60_000,
+        heartbeatMs: 20_000,
+        defaultMaxSteps: 4,
+        turnTimeoutMs: 60_000,
+      },
+      agent: sixb.agents.getById("assistant")!,
+      run,
+      signal: new AbortController().signal,
+    })
+
+    expect(capturedReasoning).toBe("high")
+    expect(capturedProviderOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
+  })
+
   test("records a run-level failure on the record (model error)", async () => {
-    const failingModel = new MockLanguageModelV3({
+    const failingModel = new MockLanguageModelV4({
       modelId: "mock-model",
       doStream: async () => ({
-        stream: new ReadableStream<LanguageModelV3StreamPart>({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             controller.error(new Error("provider boom"))
@@ -1589,10 +1641,10 @@ describe("AgentWorker", () => {
 
   test("cancels the run when the worker is stopped mid-turn", async () => {
     // A model whose stream blocks until the call is aborted, so the turn is reliably in-flight.
-    const blockingModel = new MockLanguageModelV3({
+    const blockingModel = new MockLanguageModelV4({
       modelId: "mock-model",
       doStream: async (options) => {
-        const blocked = new ReadableStream<LanguageModelV3StreamPart>({
+        const blocked = new ReadableStream<LanguageModelV4StreamPart>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             const abort = () => controller.error(new DOMException("Aborted", "AbortError"))

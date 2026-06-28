@@ -55,7 +55,7 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@ai-sdk/provider": "^3.0.10"
+    "@ai-sdk/provider": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

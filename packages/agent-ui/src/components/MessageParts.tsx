@@ -132,7 +132,7 @@ function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean 
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="w-fit max-w-full">
-      <CollapsibleTrigger className="group mb-1 flex items-center gap-1.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground">
+      <CollapsibleTrigger className="group mb-1 flex items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
         <span className={cn(streaming && "shimmer")}>{streaming ? "Reasoning…" : "Reasoning"}</span>
         <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>

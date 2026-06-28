@@ -28,6 +28,7 @@ const assistant = defineAgent("assistant", {
   name: "Support Assistant",
   description: "Answers support questions.",
   model,
+  reasoning: "medium",
   instructions: "Do not expose this over HTTP.",
   loop: { stopWhen: { maxSteps: 4 } },
 })
@@ -153,6 +154,7 @@ describe("agent routes", () => {
         name: "Support Assistant",
         description: "Answers support questions.",
         modelId: "test-model",
+        reasoning: "medium",
         groupIds: [],
         loop: { stopWhen: { maxSteps: 4 } },
       },

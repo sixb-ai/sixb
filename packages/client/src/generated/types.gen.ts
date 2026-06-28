@@ -4272,6 +4272,7 @@ export type ListAgentsResponses = {
     name: string
     description?: string
     modelId?: string
+    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     groupIds: Array<string>
     loop?: {
       stopWhen?: {
@@ -4312,6 +4313,7 @@ export type GetAgentResponses = {
     name: string
     description?: string
     modelId?: string
+    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     groupIds: Array<string>
     loop?: {
       stopWhen?: {

@@ -60,5 +60,11 @@ export {
   agentRunStreamId,
   DEFAULT_AGENT_RUN_STREAM_RETENTION,
 } from "./streams"
-export type { AgentDefinition, AgentLoopConfig, DefineAgentConfig } from "./types"
+export type {
+  AgentDefinition,
+  AgentLoopConfig,
+  AgentReasoningLevel,
+  DefineAgentConfig,
+} from "./types"
+export { AGENT_REASONING_LEVELS } from "./types"
 export { isAgentDefinition, validateAgentGroupReferences } from "./validation"

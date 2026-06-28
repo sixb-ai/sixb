@@ -56,7 +56,7 @@ export interface ListAgentThreadsResult {
 export type AgentRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
 /**
- * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK v6 unified finish
+ * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK unified finish
  * reasons), so reads are typed and exhaustive without core depending on `ai`. `other`/`unknown` are
  * catch-alls: a provider value we don't recognise still records *that* the run ended.
  */
