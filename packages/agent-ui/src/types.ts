@@ -6,7 +6,7 @@ import type {
 } from "@sixb/client"
 
 // The generated client describes agent payloads as inline response shapes. Re-derive the row types
-// here so the rest of the Atlas agents feature has stable, readable names to work with.
+// here so the rest of the agent UI has stable, readable names to work with.
 
 export type Agent = ListAgentsResponse[number]
 

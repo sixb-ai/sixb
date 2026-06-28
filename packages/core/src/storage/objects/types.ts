@@ -31,7 +31,7 @@ export interface ObjectRow {
    *
    * Populated by the core executor during graph-aware reads; storage providers
    * never read or write it. The wire response schema and the client `TwinObject`
-   * `.links` typing are layered on top of this runtime shape in a later slice.
+   * `.links` typing are layered on top of this runtime shape.
    */
   links?: ObjectRowLinks
 }

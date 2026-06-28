@@ -16,7 +16,7 @@ export const AGENT_REASONING_LEVELS = [
 /**
  * Loop / stop controls for an agent run.
  *
- * Inert in PR1 — consumed by the agent worker in a later slice.
+ * Consumed by the agent worker when it executes a run.
  */
 export interface AgentLoopConfig {
   readonly stopWhen?: {
@@ -27,8 +27,8 @@ export interface AgentLoopConfig {
 /**
  * Declarative config accepted by {@link defineAgent}.
  *
- * Every field is a static value in PR1. `instructions` is a plain string for now;
- * widening it to `string | (ctx) => string` later is backwards-compatible.
+ * Every field is a static value. `instructions` is a plain string; widening it to
+ * `string | (ctx) => string` later would be backwards-compatible.
  */
 export interface DefineAgentConfig {
   readonly name: string
@@ -42,12 +42,12 @@ export interface DefineAgentConfig {
 }
 
 /**
- * Inert agent definition registered with Sixb.
+ * Agent definition registered with Sixb.
  *
- * Definitions are safe to export from `agents/` modules. Later slices turn them into
- * running, streaming agents; PR1 only loads and registers them. The `model` is an
+ * Definitions are safe to export from `agents/` modules; the runtime loads and
+ * registers them. The agent worker runs them as streaming turns. The `model` is an
  * AI SDK language model instance and is therefore not serialisable — the worker
- * (later slice) resolves a definition from its own discovery rather than over the wire.
+ * resolves a definition from its own discovery rather than over the wire.
  */
 export interface AgentDefinition<TId extends string = string> {
   readonly kind: "agent"

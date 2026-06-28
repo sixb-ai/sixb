@@ -18,10 +18,9 @@ import {
 /**
  * Narrow adapter around `@duckdb/node-api`.
  *
- * Keeping the public provider behind this interface lets later slices add
- * appender/query helpers without leaking driver types into `DuckLakeStorage`.
- * Calls on a runtime are serialized through one queue because a runtime owns
- * one DuckDB connection.
+ * Keeping the public provider behind this interface confines the driver types to
+ * this module instead of leaking them into `DuckLakeStorage`. Calls on a runtime
+ * are serialized through one queue because a runtime owns one DuckDB connection.
  */
 export interface DuckDbQueryRuntime {
   run(sql: string, values?: readonly DuckDBValue[]): Promise<void>

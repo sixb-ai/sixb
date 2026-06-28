@@ -41,6 +41,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { formatBytes } from "../lib/datasets"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
@@ -113,12 +114,6 @@ function webhookRunDuration(run: WebhookRun): string {
   const minutes = Math.floor(ms / 60_000)
   const seconds = Math.round((ms % 60_000) / 1000)
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
-}
-
-function formatBytes(value: number | undefined): string {
-  if (value === undefined) return "-"
-  if (value < 1024) return `${value} B`
-  return `${(value / 1024).toFixed(1)} KB`
 }
 
 function formatClaimResult(value: WebhookRun["deliveryClaimResult"]): string {

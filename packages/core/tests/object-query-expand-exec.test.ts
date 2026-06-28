@@ -14,9 +14,9 @@ import {
 } from "../src"
 import type { StoredLinkUpsertedEvent, StoredObjectUpsertedEvent } from "../src/events"
 
-// Execution-side tests for `.expand()`: the planner now routes expand through the
+// Execution-side tests for `.expand()`: the planner routes expand through the
 // bounded fallback, and the executor hydrates links over the batch storage
-// primitives. The slice-1 suite already covers IR/normalize/validate/explain.
+// primitives.
 
 const sortable = { searchable: true, filterable: true, sortable: true } as const
 

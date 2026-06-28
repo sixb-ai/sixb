@@ -11,9 +11,9 @@ import {
 /**
  * Define an agent: a conversational, looping actor auto-discovered from `agents/`.
  *
- * The returned definition is inert and can be exported from a project-level `agents/`
- * module. Later slices turn it into a running, streaming agent; PR1 only loads and
- * registers it (`sixb.agents`).
+ * The returned definition is declarative and can be exported from a project-level
+ * `agents/` module. The runtime loads and registers it (`sixb.agents`); the agent
+ * worker executes it as a running, streaming agent.
  */
 export function defineAgent<const TId extends string>(
   id: TId,

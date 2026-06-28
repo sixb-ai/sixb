@@ -19,7 +19,7 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
 const tempRoots = new Set<string>()
 
-// PR1 never reads the model, so a stub conforming to the type is enough.
+// These tests don't execute runs, so a stub conforming to the model type is enough.
 const model = {} as LanguageModelV4
 const agentRuntime = defineGroup("agent-runtime", { label: "Agent runtime" })
 

@@ -57,7 +57,7 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
 }
 
 // Logs every lake definition probe so tests can assert role startup never opens
-// the lake catalog (the thundering-herd regression this slice removes).
+// the lake catalog (guarding against a thundering-herd regression).
 class TrackingLakeStorage extends InMemoryLakeStorage {
   override async assertDatasetDefinitionsCompatible(
     definitions: readonly DatasetDefinition[]
