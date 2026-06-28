@@ -18,6 +18,7 @@ import {
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
+import { consumeInternalRequestAuthState } from "./auth/scope"
 import {
   SIXB_BEARER_SECURITY_SCHEME,
   SIXB_BEARER_SECURITY_SCHEME_ID,
@@ -161,6 +162,11 @@ export function createSixbApi(server: SixbServer) {
   // and `authz` stay null for public routes and disabled auth (privileged mode).
   app
     .derive(async ({ request }) => {
+      const internalAuthState = consumeInternalRequestAuthState(request)
+      if (internalAuthState) {
+        return { auth: { kind: "allow" as const, session: null }, ...internalAuthState }
+      }
+
       const auth = await guard.resolve(request)
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return { auth, authz: null, scoped: null }

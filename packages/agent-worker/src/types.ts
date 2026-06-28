@@ -73,8 +73,8 @@ export interface AgentWorkerOptions {
   /** Lease heartbeat interval during a turn, in ms. Defaults to `leaseMs / 3`. */
   readonly heartbeatMs?: number
   /**
-   * Sixb server origin the worker proxies for agent-run sandboxes, for example
-   * `http://localhost:3002`. The sandbox receives only the per-run proxy URL.
+   * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3002`.
+   * The sandbox receives a run-scoped gateway URL under this origin.
    */
   readonly apiBaseUrl: string
   /** Tools exposed to the model in addition to the built-in `bash` tool. */

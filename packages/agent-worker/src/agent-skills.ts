@@ -36,7 +36,7 @@ Use this skill before reading object data or answering questions about current o
 4. Start with a low limit when exploring, then widen only when needed.
 5. Use count, exists, and facets endpoints for aggregate questions instead of listing everything.
 6. Only use the exact endpoint patterns documented in the references. Do not invent alternative
-   URL forms; the agent API proxy only allows documented routes.
+   URL forms; the agent API gateway only allows documented routes.
 7. Inspect API error messages and query plan issues before retrying.
 
 ## References
@@ -116,7 +116,7 @@ curl -sS -H "Content-Type: application/json" \\
 ## Common Mistakes
 
 \`\`\`bash
-# This does not list customers; the proxy blocks it because it is not a documented route.
+# This does not list customers; the gateway blocks it because it is not a documented route.
 curl -sS "$SIXB_API_BASE_URL/api/objects/customer"
 
 # Use the list route instead.
@@ -322,7 +322,7 @@ values, or historical telemetry for an object.
 2. Confirm the object type has the telemetry property id you need.
 3. Use latest for current state and history for trends or time windows.
 4. Use bulk history when comparing multiple object/property series.
-5. Treat telemetry through the agent proxy as read-only.
+5. Treat telemetry through the agent gateway as read-only.
 
 ## References
 
@@ -469,12 +469,12 @@ export async function writeAgentSkills(skillsDir: string): Promise<void> {
 
 export function renderAgentSkillCatalog(): string {
   return [
-    "Sixb API access is available from the sandboxed bash tool through a per-run proxy.",
+    "Sixb API access is available from the sandboxed bash tool through a per-run gateway URL.",
     "Agent Skills are installed under $SIXB_SKILLS_DIR.",
     "Use $SIXB_SKILLS_DIR to reference skill file paths; do not hardcode sandbox directory paths.",
     "Before using a matching Sixb ontology API surface, read that skill's SKILL.md with bash/cat.",
     "Use live ontology and object APIs rather than guessing schema or relying on stale context.",
-    "Do not add Authorization or Cookie headers. The proxy authenticates allowed requests.",
+    "Do not add Authorization or Cookie headers. The gateway authenticates allowed requests.",
     "Operate through the ontology layer: object types, object reads/queries, telemetry reads, and declared actions.",
     "",
     "Available Agent Skills:",

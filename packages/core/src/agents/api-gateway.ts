@@ -1,3 +1,15 @@
+import { createHmac, timingSafeEqual } from "node:crypto"
+
+export const AGENT_API_GATEWAY_PREFIX = "/__sixb/agent-api"
+
+const AGENT_API_GATEWAY_CAPABILITY_PREFIX = "sixb_agw_v1_"
+
+export interface AgentApiGatewayCapabilityInput {
+  readonly projectId: string
+  readonly runId: string
+  readonly leaseId: string
+}
+
 export interface AgentApiRoute {
   readonly method: string
   readonly path: string
@@ -22,19 +34,42 @@ export const AGENT_API_ROUTES: readonly AgentApiRoute[] = [
   { method: "GET", path: "/api/action-runs/:runId" },
 ]
 
+export function createAgentApiGatewayCapability(input: AgentApiGatewayCapabilityInput): string {
+  return `${AGENT_API_GATEWAY_CAPABILITY_PREFIX}${capabilityDigest(input)}`
+}
+
+export function isValidAgentApiGatewayCapability(
+  input: AgentApiGatewayCapabilityInput & { readonly capability: string }
+): boolean {
+  const expected = createAgentApiGatewayCapability(input)
+  const actual = input.capability
+  const expectedBuffer = Buffer.from(expected)
+  const actualBuffer = Buffer.from(actual)
+  return (
+    expectedBuffer.byteLength === actualBuffer.byteLength &&
+    timingSafeEqual(expectedBuffer, actualBuffer)
+  )
+}
+
 export function isAllowedAgentApiRequest(method: string, pathname: string): boolean {
   const normalizedMethod = method.toUpperCase()
-  const normalizedPath = normalizePath(pathname)
+  const normalizedPath = normalizeAgentApiPath(pathname)
   return AGENT_API_ROUTES.some(
     (route) => route.method === normalizedMethod && matchesPathPattern(normalizedPath, route.path)
   )
 }
 
-export function normalizePath(pathname: string): string {
+export function normalizeAgentApiPath(pathname: string): string {
   if (pathname.length > 1 && pathname.endsWith("/")) {
     return pathname.slice(0, -1)
   }
   return pathname
+}
+
+function capabilityDigest(input: AgentApiGatewayCapabilityInput): string {
+  return createHmac("sha256", input.leaseId)
+    .update(`agent-api-gateway:${input.projectId}:${input.runId}`)
+    .digest("base64url")
 }
 
 function matchesPathPattern(pathname: string, pattern: string): boolean {

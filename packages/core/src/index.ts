@@ -1283,6 +1283,8 @@ export { defineFunction } from "./functions"
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentApiGatewayCapabilityInput,
+  AgentApiRoute,
   AgentDefinition,
   AgentInboundUiMessage,
   AgentInboundUiMessagePart,
@@ -1314,6 +1316,8 @@ export type {
   RequestAgentRunResult,
 } from "./agents"
 export {
+  AGENT_API_GATEWAY_PREFIX,
+  AGENT_API_ROUTES,
   AGENT_MESSAGE_CONTENT_VERSION,
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   AgentDefinitionError,
@@ -1322,6 +1326,7 @@ export {
   AgentsRuntime,
   agentRunStreamDefinition,
   agentRunStreamId,
+  createAgentApiGatewayCapability,
   createAgentMessageId,
   createAgentRunId,
   createAgentRunLeaseId,
@@ -1330,6 +1335,9 @@ export {
   defineAgent,
   fromAiSdk,
   isAgentDefinition,
+  isAllowedAgentApiRequest,
+  isValidAgentApiGatewayCapability,
+  normalizeAgentApiPath,
   requestAgentRun,
   toModelMessages,
   toUiMessage,

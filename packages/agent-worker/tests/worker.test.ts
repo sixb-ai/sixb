@@ -43,7 +43,6 @@ import {
   createBrokerStreamSink,
   NOOP_STREAM_SINK,
 } from "../src"
-import { startAgentApiProxy } from "../src/api-proxy"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
@@ -477,17 +476,6 @@ function restrictedOrigin(option: CreateSandboxOptions | undefined): string {
   return origin
 }
 
-async function runToken(sixb: TestSixb, runId: string) {
-  const tokens = await authStorageOf(sixb).accessTokens.list({
-    projectId: PROJECT_ID,
-    kind: "serviceAccount",
-    subjectType: "serviceAccount",
-    subjectId: "svc_agent_assistant",
-    includeRevoked: true,
-  })
-  return tokens.accessTokens.find((accessToken) => accessToken.name === `Agent run ${runId}`)
-}
-
 async function listMessages(storage: AgentStorage, threadId: string) {
   const result = await storage.messages.list({ projectId: PROJECT_ID, threadId, order: "asc" })
   return result.messages
@@ -636,22 +624,7 @@ describe("AgentWorker", () => {
     )
   })
 
-  test("creates isolated API proxy, sandbox env, and token per concurrent run environment", async () => {
-    const upstreamRequests: Array<{ readonly authorization: string | null }> = []
-    const upstream = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      fetch(request) {
-        upstreamRequests.push({ authorization: request.headers.get("authorization") })
-        return Response.json({ ok: true })
-      },
-    })
-    const upstreamPort = upstream.port
-    if (upstreamPort === undefined) {
-      upstream.stop(true)
-      throw new Error("Expected upstream test server port.")
-    }
-
+  test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
     const agent = sixb.agents.getById("assistant")
@@ -668,7 +641,7 @@ describe("AgentWorker", () => {
     ])
 
     const context = buildAgentWorkerContext(sixb, {
-      apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/`,
+      apiBaseUrl: "http://sixb-api.local/api/",
     })
     await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
     const [firstEnvironment, secondEnvironment] = await Promise.all([
@@ -681,7 +654,7 @@ describe("AgentWorker", () => {
     try {
       expect(sandboxes.createOptions).toHaveLength(2)
       const origins = sandboxes.createOptions.map(restrictedOrigin)
-      expect(new Set(origins).size).toBe(2)
+      expect(new Set(origins)).toEqual(new Set(["http://sixb-api.local"]))
 
       const [firstBash, secondBash] = await Promise.all([
         runBashTool(firstEnvironment.turnContext, "print-sixb-env"),
@@ -691,8 +664,14 @@ describe("AgentWorker", () => {
       const secondBaseUrl = stdoutValue(secondBash.stdout, "base")
 
       expect(firstBaseUrl).not.toBe(secondBaseUrl)
-      expect(origins).toContain(firstBaseUrl)
-      expect(origins).toContain(secondBaseUrl)
+      expect(firstBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
+      expect(secondBaseUrl).toStartWith("http://sixb-api.local/__sixb/agent-api/")
+      expect(new URL(firstBaseUrl).origin).toBe(origins[0])
+      expect(new URL(secondBaseUrl).origin).toBe(origins[1])
+      expect(firstBaseUrl).toContain(`/${encodeURIComponent(firstRun.id)}/`)
+      expect(secondBaseUrl).toContain(`/${encodeURIComponent(secondRun.id)}/`)
+      expect(firstBaseUrl).not.toContain("sixb_sat_")
+      expect(secondBaseUrl).not.toContain("sixb_sat_")
       expect(firstBash.stdout).toContain(`run=${firstRun.id}`)
       expect(secondBash.stdout).toContain(`run=${secondRun.id}`)
       expect(firstBash.stdout).toContain(`thread=${firstRun.threadId}`)
@@ -708,30 +687,10 @@ describe("AgentWorker", () => {
       expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
 
-      const firstProxyResponse = await fetch(`${firstBaseUrl}/api/object-types`)
-      const secondProxyResponse = await fetch(`${secondBaseUrl}/api/object-types`)
-      expect(firstProxyResponse.status).toBe(200)
-      expect(secondProxyResponse.status).toBe(200)
-      await firstProxyResponse.json()
-      await secondProxyResponse.json()
-      expect(upstreamRequests).toHaveLength(2)
-      expect(upstreamRequests[0]?.authorization).toStartWith("Bearer sixb_sat_")
-      expect(upstreamRequests[1]?.authorization).toStartWith("Bearer sixb_sat_")
-      expect(upstreamRequests[0]?.authorization).not.toBe(upstreamRequests[1]?.authorization)
-
-      expect((await runToken(sixb, firstRun.id))?.revokedAt).toBeUndefined()
-      expect((await runToken(sixb, secondRun.id))?.revokedAt).toBeUndefined()
-
       await firstEnvironment.dispose()
       firstDisposed = true
-      await expect(runToken(sixb, firstRun.id)).resolves.toMatchObject({
-        revokedAt: expect.any(Date),
-      })
-      expect((await runToken(sixb, secondRun.id))?.revokedAt).toBeUndefined()
-
-      const stillAlive = await fetch(`${secondBaseUrl}/api/object-types`)
-      expect(stillAlive.status).toBe(200)
-      await stillAlive.json()
+      expect(sandboxes.sandboxes[0]?.destroyed).toBe(true)
+      expect(sandboxes.sandboxes[1]?.destroyed).toBe(false)
     } finally {
       if (!firstDisposed) {
         await firstEnvironment.dispose()
@@ -740,15 +699,8 @@ describe("AgentWorker", () => {
         await secondEnvironment.dispose()
         secondDisposed = true
       }
-      upstream.stop(true)
     }
-
-    await expect(runToken(sixb, firstRun.id)).resolves.toMatchObject({
-      revokedAt: expect.any(Date),
-    })
-    await expect(runToken(sixb, secondRun.id)).resolves.toMatchObject({
-      revokedAt: expect.any(Date),
-    })
+    expect(sandboxes.sandboxes.every((sandbox) => sandbox.destroyed)).toBe(true)
   })
 
   test("trigger persists the user message and enqueues an intent without creating a run", async () => {
@@ -929,7 +881,7 @@ describe("AgentWorker", () => {
       if (createOptions?.network?.mode !== "restricted") {
         throw new Error("Expected restricted sandbox network.")
       }
-      expect(createOptions.network.allow[0]?.origin).toStartWith("http://127.0.0.1:")
+      expect(createOptions.network.allow[0]?.origin).toBe("http://localhost:3002")
 
       const sandbox = sandboxes.sandboxes[0]
       expect(sandbox).toBeDefined()
@@ -941,7 +893,9 @@ describe("AgentWorker", () => {
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
       expect(command?.options.cwd).toBe("/workspace")
-      expect(command?.options.env?.SIXB_API_BASE_URL).toStartWith("http://127.0.0.1:")
+      expect(command?.options.env?.SIXB_API_BASE_URL).toStartWith(
+        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(run.id)}/`
+      )
       expect(command?.options.env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
       expect(command?.options.timeout).toBe(1234)
       expect(command?.options.signal).toBeInstanceOf(AbortSignal)
@@ -977,7 +931,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("passes Sixb API proxy env and skills into the per-run sandbox", async () => {
+  test("passes Sixb API gateway env and skills into the per-run sandbox", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(apiBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
     const storage = agentStorageOf(sixb)
@@ -1009,13 +963,15 @@ describe("AgentWorker", () => {
       if (createOptions?.network?.mode !== "restricted") {
         throw new Error("Expected restricted sandbox network.")
       }
-      expect(createOptions.network.allow[0]?.origin).toStartWith("http://127.0.0.1:")
+      expect(createOptions.network.allow[0]?.origin).toBe("http://localhost:3002")
 
       const command = sandboxes.sandboxes[0]?.commands[0]
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "print-sixb-env"])
       const env = command?.options.env
-      expect(env?.SIXB_API_BASE_URL).toStartWith("http://127.0.0.1:")
+      expect(env?.SIXB_API_BASE_URL).toStartWith(
+        `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(runId)}/`
+      )
       expect(env?.SIXB_PROJECT_ID).toBe(PROJECT_ID)
       expect(env?.SIXB_AGENT_ID).toBe("assistant")
       expect(env?.SIXB_THREAD_ID).toBe(threadId)
@@ -1137,29 +1093,14 @@ describe("AgentWorker", () => {
         )
       ).toBe(true)
 
-      const token = await waitFor(
-        async () => {
-          const tokens = await auth.accessTokens.list({
-            projectId: PROJECT_ID,
-            kind: "serviceAccount",
-            subjectType: "serviceAccount",
-            subjectId: "svc_agent_assistant",
-            includeRevoked: true,
-          })
-          return tokens.accessTokens.find(
-            (accessToken) => accessToken.name === `Agent run ${runId}`
-          )
-        },
-        { label: "agent API run token persisted" }
-      )
-      expect(token.groupIds).toEqual(["agent-runtime"])
-      await waitFor(
-        async () => {
-          const refreshed = await auth.accessTokens.getById({ projectId: PROJECT_ID, id: token.id })
-          return refreshed?.revokedAt ? refreshed : null
-        },
-        { label: "agent API run token revoked" }
-      )
+      const tokens = await auth.accessTokens.list({
+        projectId: PROJECT_ID,
+        kind: "serviceAccount",
+        subjectType: "serviceAccount",
+        subjectId: "svc_agent_assistant",
+        includeRevoked: true,
+      })
+      expect(tokens.accessTokens).toEqual([])
     } finally {
       await worker.stop()
     }
@@ -1204,7 +1145,7 @@ describe("AgentWorker", () => {
 
       expect(sandboxes.createOptions).toHaveLength(2)
       const origins = sandboxes.createOptions.map(restrictedOrigin)
-      expect(new Set(origins).size).toBe(2)
+      expect(new Set(origins)).toEqual(new Set(["http://localhost:3002"]))
 
       controlled.releaseAll()
 
@@ -1244,17 +1185,6 @@ describe("AgentWorker", () => {
         )
       ).toBe(true)
 
-      const tokens = await waitFor(
-        async () => {
-          const firstToken = await runToken(sixb, firstRequest.runId)
-          const secondToken = await runToken(sixb, secondRequest.runId)
-          return firstToken?.revokedAt && secondToken?.revokedAt ? [firstToken, secondToken] : null
-        },
-        { label: "concurrent run tokens revoked" }
-      )
-      expect(tokens[0].revokedAt).toBeInstanceOf(Date)
-      expect(tokens[1].revokedAt).toBeInstanceOf(Date)
-
       const streamRecords = await Promise.all([
         listRunStreamRecords(sixb.broker, firstRequest.runId),
         listRunStreamRecords(sixb.broker, secondRequest.runId),
@@ -1270,103 +1200,6 @@ describe("AgentWorker", () => {
     } finally {
       controlled.releaseAll()
       await worker.stop()
-    }
-  })
-
-  test("agent API proxy injects run auth and blocks non-agent API routes", async () => {
-    const upstreamRequests: Array<{
-      readonly method: string
-      readonly pathname: string
-      readonly search: string
-      readonly authorization: string | null
-      readonly cookie: string | null
-    }> = []
-    const upstream = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      async fetch(request) {
-        const url = new URL(request.url)
-        upstreamRequests.push({
-          method: request.method,
-          pathname: url.pathname,
-          search: url.search,
-          authorization: request.headers.get("authorization"),
-          cookie: request.headers.get("cookie"),
-        })
-        return Response.json({ ok: true, path: url.pathname, query: url.search })
-      },
-    })
-    const upstreamPort = upstream.port
-    if (upstreamPort === undefined) {
-      upstream.stop(true)
-      throw new Error("Expected upstream test server port.")
-    }
-
-    const proxy = startAgentApiProxy({
-      apiBaseUrl: `http://127.0.0.1:${upstreamPort}/api/`,
-      accessToken: "sixb_sat_test_secret",
-      runId: "run-test",
-    })
-
-    try {
-      const allowed = await fetch(`${proxy.baseUrl}/api/object-types?limit=10`, {
-        headers: {
-          authorization: "Bearer attacker",
-          cookie: "sid=attacker",
-        },
-      })
-      expect(allowed.status).toBe(200)
-      await expect(allowed.json()).resolves.toEqual({
-        ok: true,
-        path: "/api/object-types",
-        query: "?limit=10",
-      })
-
-      expect(upstreamRequests).toEqual([
-        {
-          method: "GET",
-          pathname: "/api/object-types",
-          search: "?limit=10",
-          authorization: "Bearer sixb_sat_test_secret",
-          cookie: null,
-        },
-      ])
-
-      const latest = await fetch(`${proxy.baseUrl}/api/objects/device/fan-1/telemetry/rpm/latest`)
-      expect(latest.status).toBe(200)
-      const bulk = await fetch(`${proxy.baseUrl}/api/telemetry/history`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          series: [{ objectTypeId: "device", objectId: "fan-1", propertyId: "rpm" }],
-        }),
-      })
-      expect(bulk.status).toBe(200)
-      expect(upstreamRequests.at(-2)).toMatchObject({
-        method: "GET",
-        pathname: "/api/objects/device/fan-1/telemetry/rpm/latest",
-        authorization: "Bearer sixb_sat_test_secret",
-      })
-      expect(upstreamRequests.at(-1)).toMatchObject({
-        method: "POST",
-        pathname: "/api/telemetry/history",
-        authorization: "Bearer sixb_sat_test_secret",
-      })
-
-      const actionRun = await fetch(`${proxy.baseUrl}/api/action-runs/act_run_1`)
-      expect(actionRun.status).toBe(200)
-      expect(upstreamRequests.at(-1)).toMatchObject({
-        method: "GET",
-        pathname: "/api/action-runs/act_run_1",
-        authorization: "Bearer sixb_sat_test_secret",
-      })
-
-      const denied = await fetch(`${proxy.baseUrl}/api/auth/access-tokens`)
-      expect(denied.status).toBe(403)
-      expect(upstreamRequests).toHaveLength(4)
-    } finally {
-      await proxy.stop()
-      upstream.stop(true)
     }
   })
 

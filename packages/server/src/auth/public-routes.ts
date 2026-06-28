@@ -1,4 +1,4 @@
-import { isCsrfExemptMethod } from "@sixb/core"
+import { AGENT_API_GATEWAY_PREFIX, isCsrfExemptMethod } from "@sixb/core"
 
 export type RouteAccessKind = "public" | "api" | "html" | "websocket"
 
@@ -38,6 +38,10 @@ export function isPublicRoute(pathname: string, method: string): boolean {
   }
 
   if ((pathname === "/favicon.svg" || pathname === "/favicon.ico") && normalizedMethod === "GET") {
+    return true
+  }
+
+  if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
     return true
   }
 
