@@ -345,6 +345,13 @@ class RecordingSandboxFactory implements SandboxFactory {
   }
 }
 
+/** A factory whose provisioning always fails (e.g. missing isolation backend). */
+class FailingSandboxFactory implements SandboxFactory {
+  async create(): Promise<Sandbox> {
+    throw new Error("sandbox provisioning unavailable")
+  }
+}
+
 function buildSixb(
   model: LanguageModelV4,
   broker: Broker = new InMemoryBroker(),
@@ -1673,6 +1680,50 @@ describe("AgentWorker", () => {
         runId: run.id,
         attempt: 1,
       })
+
+      // Thread released so a later message can run.
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
+      expect(thread?.activeRunId).toBeNull()
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails the run when the sandbox cannot be provisioned (no bash used)", async () => {
+    // The model answers without ever invoking bash. Provisioning runs concurrently and fails; the
+    // run must be recorded `failed` rather than finalizing as a success with no working sandbox.
+    const answerModel = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async () =>
+        stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Answer without bash" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ]),
+    })
+    const sixb = buildSixb(answerModel, new InMemoryBroker(), new FailingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({ agentId: "assistant", text: "hi" })
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "run failed" }
+      )
+      expect(run.status).toBe("failed")
+      expect(run.error).toContain("sandbox provisioning unavailable")
+
+      // The turn threw before finalizing, so no assistant message was persisted.
+      const messages = await listMessages(storage, threadId)
+      expect(messages.every((message) => message.role !== "assistant")).toBe(true)
 
       // Thread released so a later message can run.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })

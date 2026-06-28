@@ -180,7 +180,6 @@
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
-        "@sixb/sandboxes-local": "workspace:*",
         "@sixb/sandboxes-smolvm": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
@@ -575,6 +574,9 @@
     "sandboxes/smolvm": {
       "name": "@sixb/sandboxes-smolvm",
       "version": "0.1.0",
+      "bin": {
+        "sixb-agent-image": "./scripts/build-agent-image.ts",
+      },
       "dependencies": {
         "@sixb/core": "workspace:*",
       },

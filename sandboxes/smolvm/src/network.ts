@@ -26,9 +26,16 @@ export function buildNetworkFlags(policy: SandboxNetworkPolicy): string[] {
 }
 
 /**
- * Extract the bare hostname from an origin. smolvm allow-host examples use
- * DNS hostnames without a port, so we allow at the host level and let any port
- * on that host through; for the sixb gateway (our own server) that is fine.
+ * Extract the bare hostname from an origin for `--allow-host`.
+ *
+ * SECURITY NOTE: smolvm's `--allow-host <HOSTNAME>` is hostname-granular only —
+ * it takes a hostname resolved at VM start, with no port. So an allowed origin's
+ * port is necessarily dropped and the guest can reach ANY port on that host. For
+ * the sixb gateway on a dedicated origin this is fine, but when the gateway
+ * shares a host with other services (e.g. a LAN IP that also runs ssh/postgres)
+ * the allow entry is effectively host-wide. smolvm exposes no port-scoped egress
+ * flag, so this cannot be tightened here; isolate the gateway on its own host/IP
+ * if per-port egress matters.
  */
 function hostFromOrigin(origin: string): string {
   try {

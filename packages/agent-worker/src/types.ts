@@ -55,6 +55,11 @@ export interface AgentTurnContext {
   readonly storage: AgentWorkerStorage
   readonly tools: ToolSet
   readonly systemAddendum?: string
+  /**
+   * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
+   * value is irrelevant here (the bash tool consumes the handle); only its rejection matters.
+   */
+  readonly sandboxReady?: Promise<unknown>
   readonly streamSink: StreamSink
   readonly leaseMs: number
   readonly heartbeatMs: number

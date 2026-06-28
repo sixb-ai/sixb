@@ -89,18 +89,24 @@ class BrokerStreamSink implements StreamSink {
       return
     }
 
-    await this.publish({
-      schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
-      type: "agent.ui.chunk",
-      projectId: this.projectId,
-      runId: input.run.id,
-      threadId: input.run.threadId,
-      agentId: input.run.agentId,
-      attempt: input.run.attempt,
-      chunkIndex: input.chunkIndex,
-      chunk,
-      occurredAt: new Date().toISOString(),
-    })
+    // `chunk` is already validated JSON and every other field is a JSON primitive, so the event is
+    // JSON as-built. Publish it pre-validated so the chunk — the highest-frequency agent event, one
+    // per streamed token batch — is not serialized a second time inside `publish`.
+    await this.publish(
+      {
+        schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+        type: "agent.ui.chunk",
+        projectId: this.projectId,
+        runId: input.run.id,
+        threadId: input.run.threadId,
+        agentId: input.run.agentId,
+        attempt: input.run.attempt,
+        chunkIndex: input.chunkIndex,
+        chunk,
+        occurredAt: new Date().toISOString(),
+      },
+      { prevalidated: true }
+    )
   }
 
   async publishMessageFinalized(input: {
@@ -139,10 +145,17 @@ class BrokerStreamSink implements StreamSink {
     })
   }
 
-  private async publish(event: AgentRunStreamEvent): Promise<void> {
+  private async publish(
+    event: AgentRunStreamEvent,
+    options: { readonly prevalidated?: boolean } = {}
+  ): Promise<void> {
     await this.ensure(event.runId)
-    // Broker payloads are plain JSON; keep SDK-specific chunk shapes opaque at this boundary.
-    const payload = toBrokerJson(event, "Agent stream event")
+    // Broker payloads are plain JSON; keep SDK-specific chunk shapes opaque at this boundary. A
+    // pre-validated event (its only opaque field, the chunk, was already encoded by the caller) is
+    // already JSON, so it is forwarded as-is instead of being serialized a second time.
+    const payload = options.prevalidated
+      ? (event as unknown as JsonValue)
+      : toBrokerJson(event, "Agent stream event")
     await this.broker.append({
       projectId: this.projectId,
       streamId: agentRunStreamId(event.runId),

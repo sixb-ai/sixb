@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { agentDockerfilePath, agentImageName, defaultAgentImagePath } from "../src/agent-image"
+import {
+  agentDockerfilePath,
+  agentImageName,
+  defaultAgentImageCandidates,
+  defaultAgentImagePath,
+} from "../src/agent-image"
 
 describe("agent image paths", () => {
   test("default path lives under the XDG cache when set", () => {
@@ -34,5 +39,23 @@ describe("agent image paths", () => {
   test("targeted build filenames encode the arch", () => {
     expect(agentImageName("linux/amd64")).toBe("sixb-agent-amd64.tar")
     expect(agentImageName("arm64")).toBe("sixb-agent-arm64.tar")
+  })
+
+  test("default lookup prefers the canonical archive, then a cross-built arch archive", () => {
+    const prev = process.env.XDG_CACHE_HOME
+    process.env.XDG_CACHE_HOME = "/tmp/xdg-cache-test"
+    try {
+      const candidates = defaultAgentImageCandidates()
+      // The canonical host build is preferred over the arch-suffixed cross-build archive.
+      expect(candidates[0]).toBe("/tmp/xdg-cache-test/sixb/smolvm/sixb-agent.tar")
+      expect(candidates[1]).toMatch(/\/sixb\/smolvm\/sixb-agent-(amd64|arm64|[^/]+)\.tar$/)
+      expect(candidates[1]).not.toBe(candidates[0])
+    } finally {
+      if (prev === undefined) {
+        delete process.env.XDG_CACHE_HOME
+      } else {
+        process.env.XDG_CACHE_HOME = prev
+      }
+    }
   })
 })

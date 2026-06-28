@@ -3,6 +3,7 @@ export {
   agentImageName,
   type BuildAgentImageOptions,
   buildAgentImage,
+  defaultAgentImageCandidates,
   defaultAgentImagePath,
 } from "./agent-image"
 export {
