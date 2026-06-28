@@ -61,11 +61,11 @@ The terminal run state is stored on the run record:
 ## Options
 
 - `tools`: additional AI SDK tools exposed to the model alongside the built-in `bash` tool.
-- `apiBaseUrl`: required Sixb server origin used by a per-run API proxy. The worker injects the
-  proxy URL into run sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into `SIXB_SKILLS_DIR`,
-  and creates the sandbox with a restricted network policy allowing the proxy origin. The proxy
-  exposes scoped ontology, object, telemetry read, and action routes. The run access token stays in
-  the worker process and is never exposed through sandbox environment variables.
+- `apiBaseUrl`: required Sixb server origin that hosts the agent API gateway. The worker injects a
+  run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into
+  `SIXB_SKILLS_DIR`, and creates the sandbox with a restricted network policy allowing the server
+  origin. The gateway authorizes scoped ontology, object, telemetry read, and action routes from the
+  run lease and managed agent service account; no bearer token is exposed to the sandbox.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.

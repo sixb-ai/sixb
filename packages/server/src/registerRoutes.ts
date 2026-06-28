@@ -2,6 +2,7 @@ import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { registerActionRunRoutes } from "./routes/action-runs"
 import { registerActionRoutes } from "./routes/actions"
+import { registerAgentApiGatewayRoutes } from "./routes/agent-api-gateway"
 import { registerAgentRoutes } from "./routes/agents"
 import { registerConnectorRoutes } from "./routes/connectors"
 import { registerDatasetRoutes } from "./routes/datasets"
@@ -20,6 +21,7 @@ import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
 export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+  registerAgentApiGatewayRoutes(app, sixb)
   registerProjectRoutes(app, sixb)
   registerStatusRoutes(app, sixb)
   registerConnectorRoutes(app, sixb)

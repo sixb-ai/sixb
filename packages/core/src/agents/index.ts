@@ -13,6 +13,15 @@ export type {
   AgentUiToolPart,
 } from "./adapters"
 export { fromAiSdk, toModelMessages, toUiMessage } from "./adapters"
+export type { AgentApiGatewayCapabilityInput, AgentApiRoute } from "./api-gateway"
+export {
+  AGENT_API_GATEWAY_PREFIX,
+  AGENT_API_ROUTES,
+  createAgentApiGatewayCapability,
+  isAllowedAgentApiRequest,
+  isValidAgentApiGatewayCapability,
+  normalizeAgentApiPath,
+} from "./api-gateway"
 export { defineAgent } from "./builders"
 export {
   AgentDefinitionError,

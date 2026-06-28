@@ -105,7 +105,7 @@ export function BashToolView({ tool }: { tool: BashTool }) {
 
   return (
     <Collapsible>
-      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-none text-muted-foreground transition-colors hover:text-foreground">
+      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
         <Icon className="size-3.5 shrink-0" />
         <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
         {!running && description.detail ? (
@@ -142,7 +142,7 @@ function ToolLine({
   return (
     <div
       className={cn(
-        "flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-none",
+        "flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal",
         tone === "error" ? "text-destructive" : "text-muted-foreground"
       )}
     >

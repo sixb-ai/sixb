@@ -29,6 +29,23 @@ export interface RequestAuthState {
   readonly scoped: ScopedSixb<readonly OntologySource[]> | null
 }
 
+const internalRequestAuthState = new WeakMap<Request, RequestAuthState>()
+
+export function registerInternalRequestAuthState(
+  request: Request,
+  authState: RequestAuthState
+): void {
+  internalRequestAuthState.set(request, authState)
+}
+
+export function consumeInternalRequestAuthState(request: Request): RequestAuthState | undefined {
+  const authState = internalRequestAuthState.get(request)
+  if (authState) {
+    internalRequestAuthState.delete(request)
+  }
+  return authState
+}
+
 /**
  * Read the derived auth state from a route handler's context.
  *
