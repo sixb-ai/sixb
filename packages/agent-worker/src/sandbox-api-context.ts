@@ -1,12 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import { renderAgentSkillCatalog, writeAgentSkills } from "./agent-skills"
+import { writeAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
-  readonly systemAddendum: string
 }
 
 export interface PrepareAgentSandboxApiContextInput {
@@ -54,6 +53,5 @@ export async function prepareAgentSandboxApiContext(
       SIXB_THREAD_ID: input.threadId,
       SIXB_RUN_ID: input.runId,
     },
-    systemAddendum: renderAgentSkillCatalog(),
   }
 }

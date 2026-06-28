@@ -73,7 +73,26 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     timedOut = true
     timeoutAbort.abort()
   }, turnTimeoutMs)
-  const abortSignal = AbortSignal.any([signal, heartbeatAbort.signal, timeoutAbort.signal])
+
+  // The sandbox provisions concurrently with this turn (see `createAgentRunEnvironment`). If it
+  // fails, the run must be recorded `failed` rather than finalizing as a success with a dead
+  // sandbox — even when the model never invokes bash. Capture the cause and abort the stream so the
+  // turn ends now. We do NOT await provisioning before finalizing: a turn that out-runs a slow boot
+  // keeps the latency win, so a boot that fails only after the turn has drained still finalizes
+  // (best-effort strict).
+  const provisionAbort = new AbortController()
+  let provisionError: unknown
+  context.sandboxReady?.catch((error) => {
+    provisionError = error
+    provisionAbort.abort()
+  })
+
+  const abortSignal = AbortSignal.any([
+    signal,
+    heartbeatAbort.signal,
+    timeoutAbort.signal,
+    provisionAbort.signal,
+  ])
 
   const result = streamText({
     model: agent.model,
@@ -128,6 +147,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   if (leaseLost) {
     throw new AgentLeaseLostError(runId)
+  }
+  // Sandbox provisioning failed (and likely aborted the stream above): surface the real cause ahead
+  // of the abort-shaped `drainError` it produced, so the run is recorded `failed` with that reason.
+  if (provisionError !== undefined) {
+    throw provisionError
   }
   // A timeout aborts the stream, surfacing as `drainError`; check our flag first so a timed-out turn
   // throws the typed (non-abort) error and is recorded `failed` rather than treated as a shutdown.

@@ -38,11 +38,17 @@ export async function createAgentRunEnvironment(
   })
   const apiOrigin = new URL(apiBaseUrl).origin
 
-  // Provision concurrently; do NOT await. The bash tool and dispose() await this.
+  // Provision concurrently; do NOT await. The bash tool, the turn, and dispose() await this.
   const ready = provisionSandbox({ context, agent, run, apiBaseUrl, apiOrigin })
-  // Creation failure is surfaced where it is awaited (bash tool / dispose);
-  // attach a no-op catch so an unused rejection is not reported as unhandled.
+  // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
+  // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
+  // Track settlement so dispose() can avoid blocking teardown on a boot still in flight.
+  let settled = false
+  const markSettled = () => {
+    settled = true
+  }
+  ready.then(markSettled, markSettled)
 
   return {
     turnContext: {
@@ -53,13 +59,14 @@ export async function createAgentRunEnvironment(
         bash: createBashTool(() => ready),
       },
       systemAddendum: renderAgentSkillCatalog(),
+      sandboxReady: ready,
       streamSink: context.streamSink,
       leaseMs: context.leaseMs,
       heartbeatMs: context.heartbeatMs,
       defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },
-    dispose: () => disposeEnvironment(ready),
+    dispose: () => disposeEnvironment(ready, () => settled),
   }
 }
 
@@ -94,13 +101,22 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
   }
 }
 
-async function disposeEnvironment(ready: Promise<BashSandboxHandle>): Promise<void> {
-  // If provisioning failed, provisionSandbox already cleaned up; nothing to do.
-  const sandbox = await ready.then(
-    (handle) => handle.sandbox,
-    () => null
-  )
-  await sandbox?.destroy().catch((error) => {
-    console.error("[SixbAgentWorker] Could not destroy agent run sandbox:", error)
-  })
+function disposeEnvironment(
+  ready: Promise<BashSandboxHandle>,
+  isSettled: () => boolean
+): Promise<void> {
+  // Destroy the sandbox once provisioning settles. A rejection means provisionSandbox already
+  // reclaimed whatever it half-created, so there is nothing left to destroy.
+  const teardown = ready
+    .then(
+      (handle) => handle.sandbox.destroy(),
+      () => undefined
+    )
+    .catch((error) => {
+      console.error("[SixbAgentWorker] Could not destroy agent run sandbox:", error)
+    })
+  // If the boot is still in flight (the model answered before it finished and never used bash), do
+  // not stall run teardown on it — the destroy above is chained and runs when the boot settles.
+  // Once provisioning has settled, await the (now-fast) destroy so cleanup completes inline.
+  return isSettled() ? teardown : Promise.resolve()
 }

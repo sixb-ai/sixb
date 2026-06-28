@@ -6,7 +6,7 @@ import {
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
 } from "@sixb/core"
-import { defaultAgentImagePath } from "./agent-image"
+import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
 import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
 import { probeSmolvm, type SmolvmProbe } from "./preflight"
@@ -15,10 +15,13 @@ import { SmolvmSandbox } from "./smolvm-sandbox"
 export interface SmolvmSandboxFactoryOptions {
   /**
    * Image the VM boots from. Defaults to the managed agent archive built by
-   * `bun run agent:image` (offline, fast, strict egress). Set a different local
-   * `.tar` path, or a registry reference (e.g. `node:22`) to pull at boot.
+   * `bun run agent:image` (offline, fast, strict egress); a cross-built
+   * `sixb-agent-<arch>.tar` in the cache is picked up automatically. Set a
+   * different local `.tar` path, or a registry reference (e.g. `node:22`) to pull
+   * at boot. Pass `null` for a bare machine (built-in busybox rootfs, fully
+   * offline, no image).
    */
-  readonly image?: string
+  readonly image?: string | null
   /** smolvm binary name or absolute path. Defaults to "smolvm" (resolved on PATH). */
   readonly bin?: string
   /** `--storage` GiB: OCI layers + container data (smolvm default 20). */
@@ -48,23 +51,17 @@ const DEFAULT_BIN = "smolvm"
  * lazily, on the first create.
  */
 export class SmolvmSandboxFactory implements SandboxFactory {
-  private readonly cli: SmolvmCliConfig
+  private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined
 
-  constructor(private readonly defaults: SmolvmSandboxFactoryOptions = {}) {
-    this.cli = {
-      bin: defaults.bin ?? DEFAULT_BIN,
-      image: defaults.image ?? defaultAgentImagePath(),
-      ...(defaults.storageGiB !== undefined ? { storageGiB: defaults.storageGiB } : {}),
-      ...(defaults.overlayGiB !== undefined ? { overlayGiB: defaults.overlayGiB } : {}),
-    }
-  }
+  constructor(private readonly defaults: SmolvmSandboxFactoryOptions = {}) {}
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
-    this.ensureAvailable()
-    this.ensureImage()
+    const cli = this.resolveCli()
+    this.ensureAvailable(cli)
+    this.ensureImage(cli)
     return await SmolvmSandbox.create({
-      cli: this.cli,
+      cli,
       registryHosts: this.defaults.registryHosts ?? DOCKER_HUB_REGISTRY_HOSTS,
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.defaults.network,
@@ -73,21 +70,52 @@ export class SmolvmSandboxFactory implements SandboxFactory {
     })
   }
 
-  private ensureAvailable(): void {
+  /** Resolve the smolvm CLI config once, picking the default image archive lazily. */
+  private resolveCli(): SmolvmCliConfig {
+    if (this.cli === undefined) {
+      const image = resolveImage(this.defaults.image)
+      this.cli = {
+        bin: this.defaults.bin ?? DEFAULT_BIN,
+        ...(image !== undefined ? { image } : {}),
+        ...(this.defaults.storageGiB !== undefined ? { storageGiB: this.defaults.storageGiB } : {}),
+        ...(this.defaults.overlayGiB !== undefined ? { overlayGiB: this.defaults.overlayGiB } : {}),
+      }
+    }
+    return this.cli
+  }
+
+  private ensureAvailable(cli: SmolvmCliConfig): void {
     if (this.probe === undefined) {
-      this.probe = probeSmolvm(this.cli.bin)
+      this.probe = probeSmolvm(cli.bin)
     }
     if (!this.probe.ok) {
       throw new SandboxIsolationUnavailableError(`[Sandbox] ${this.probe.message}`)
     }
   }
 
-  private ensureImage(): void {
-    const image = this.cli.image
+  private ensureImage(cli: SmolvmCliConfig): void {
+    const image = cli.image
     if (image !== undefined && isLocalImageArchive(image) && !existsSync(image)) {
       throw new SandboxIsolationUnavailableError(
         `[Sandbox] agent image not found at ${image}. Build it once with \`bun run agent:image\` (requires Docker or Podman), or set \`image\` to a prebuilt .tar or a registry reference.`
       )
     }
   }
+}
+
+/**
+ * Resolve the configured image option into a CLI image:
+ * - `undefined` -> the managed agent archive (prefers an existing `sixb-agent.tar`,
+ *   else a cross-built `sixb-agent-<arch>.tar`; falls back to the canonical path).
+ * - `null`      -> bare machine (no image; built-in busybox rootfs, fully offline).
+ * - string      -> used as-is (a local `.tar` path or a registry reference).
+ */
+function resolveImage(image: string | null | undefined): string | undefined {
+  if (image === null) {
+    return undefined
+  }
+  if (image !== undefined) {
+    return image
+  }
+  return defaultAgentImageCandidates().find((path) => existsSync(path)) ?? defaultAgentImagePath()
 }

@@ -17,7 +17,6 @@
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/lake-local": "workspace:*",
-    "@sixb/sandboxes-local": "workspace:*",
     "@sixb/sandboxes-smolvm": "workspace:*",
     "@sixb/sqlite": "workspace:*",
     "@sixb/ui": "workspace:*",
