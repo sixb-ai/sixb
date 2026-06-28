@@ -711,6 +711,49 @@ describe("AgentWorker", () => {
     expect(sandboxes.sandboxes.every((sandbox) => sandbox.destroyed)).toBe(true)
   })
 
+  test("provisions the sandbox concurrently without blocking turn start", async () => {
+    // Gate sandbox creation so we can prove the turn context is ready before the
+    // sandbox finishes booting. If creation were on the critical path, awaiting
+    // createAgentRunEnvironment below would hang until releaseCreate().
+    let releaseCreate: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseCreate = resolve
+    })
+    const recording = new RecordingSandboxFactory()
+    const sandboxes: SandboxFactory = {
+      async create(options: CreateSandboxOptions = {}) {
+        await gate
+        return recording.create(options)
+      },
+    }
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const agent = sixb.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const request = await sixb.agents.request({ agentId: "assistant", text: "hi" })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
+    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+
+    // Resolves while create() is still gated: the system prompt is ready and the
+    // sandbox has not been built yet.
+    const environment = await createAgentRunEnvironment({ context, agent, run })
+    expect(environment.turnContext.systemAddendum).toContain("Available Agent Skills")
+    expect(recording.sandboxes).toHaveLength(0)
+
+    try {
+      // Boot completes -> the bash tool resolves the sandbox and runs.
+      releaseCreate()
+      const bash = await runBashTool(environment.turnContext, "echo hi")
+      expect(bash.stdout).toContain("ran bash")
+      expect(recording.sandboxes).toHaveLength(1)
+    } finally {
+      await environment.dispose()
+    }
+    expect(recording.sandboxes[0]?.destroyed).toBe(true)
+  })
+
   test("trigger persists the user message and enqueues an intent without creating a run", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)

@@ -16,13 +16,20 @@ export interface BashToolOutput extends CommandResult {
   readonly stderrTruncated: boolean
 }
 
-export interface BashToolOptions {
+/** The sandbox plus its run-scoped env, resolved lazily on first bash use. */
+export interface BashSandboxHandle {
+  readonly sandbox: Sandbox
   readonly env?: Readonly<Record<string, string>>
 }
 
+/**
+ * Build the bash tool from a resolver that yields the sandbox on demand. The
+ * resolver is awaited on the first command, not at tool-construction time, so
+ * sandbox creation can run concurrently with the model's first response instead
+ * of blocking the turn. A resolver rejection surfaces as a failed command.
+ */
 export function createBashTool(
-  sandbox: Sandbox,
-  options: BashToolOptions = {}
+  resolveSandbox: () => Promise<BashSandboxHandle>
 ): Tool<BashToolInput, BashToolOutput> {
   return tool({
     description: "Run a Bash command in the agent run sandbox.",
@@ -37,9 +44,10 @@ export function createBashTool(
       additionalProperties: false,
     }),
     async execute(input, { abortSignal }): Promise<BashToolOutput> {
+      const { sandbox, env } = await resolveSandbox()
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {
         cwd: input.cwd,
-        env: options.env,
+        env,
         timeout: normalizeTimeout(input.timeoutMs),
         signal: abortSignal,
       })
