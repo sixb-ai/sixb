@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   AgentDefinitionError,
   createSixb,
@@ -20,7 +20,7 @@ const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index
 const tempRoots = new Set<string>()
 
 // PR1 never reads the model, so a stub conforming to the type is enough.
-const model = {} as LanguageModelV3
+const model = {} as LanguageModelV4
 const agentRuntime = defineGroup("agent-runtime", { label: "Agent runtime" })
 
 const Room = defineObjectType({
@@ -59,7 +59,7 @@ function agentModule(id: string, name = "Agent"): string {
 
 export const ${id} = defineAgent("${id}", {
   name: "${name}",
-  model: { specificationVersion: "v3", provider: "test", modelId: "test" },
+  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
   instructions: "You assist the user.",
 })
 `
@@ -78,21 +78,31 @@ describe("defineAgent", () => {
     expect(agent.name).toBe("Sales Assistant")
     expect(agent.instructions).toBe("Assist.")
     expect(agent.groupIds).toEqual([])
+    expect(agent.reasoning).toBeUndefined()
+    expect(agent.providerOptions).toBeUndefined()
     expect(agent.description).toBeUndefined()
     expect(agent.loop).toBeUndefined()
   })
 
-  test("keeps description, groups, and loop when provided", () => {
+  test("keeps description, model options, groups, and loop when provided", () => {
     const agent = defineAgent("sales", {
       name: "Sales Assistant",
       description: "Quotes and contacts.",
       model,
+      reasoning: "medium",
+      providerOptions: {
+        openai: {
+          reasoningSummary: "detailed",
+        },
+      },
       instructions: "Assist.",
       groups: [agentRuntime],
       loop: { stopWhen: { maxSteps: 16 } },
     })
 
     expect(agent.description).toBe("Quotes and contacts.")
+    expect(agent.reasoning).toBe("medium")
+    expect(agent.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
     expect(agent.groupIds).toEqual(["agent-runtime"])
     expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
   })
@@ -114,7 +124,7 @@ describe("defineAgent", () => {
       defineAgent("a", {
         name: "A",
         instructions: "x",
-        model: undefined as unknown as LanguageModelV3,
+        model: undefined as unknown as LanguageModelV4,
       })
     ).toThrow(AgentDefinitionError)
   })
@@ -130,6 +140,44 @@ describe("defineAgent", () => {
         })
       ).toThrow(AgentDefinitionError)
     }
+  })
+
+  test("rejects invalid reasoning settings", () => {
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        reasoning: "maximum" as never,
+      })
+    ).toThrow(AgentDefinitionError)
+  })
+
+  test("rejects invalid provider options", () => {
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        providerOptions: [] as never,
+      })
+    ).toThrow(AgentDefinitionError)
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        providerOptions: { openai: "fast" } as never,
+      })
+    ).toThrow(AgentDefinitionError)
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        providerOptions: { openai: { fn: () => undefined } } as never,
+      })
+    ).toThrow(AgentDefinitionError)
   })
 
   test("rejects invalid group definitions", () => {

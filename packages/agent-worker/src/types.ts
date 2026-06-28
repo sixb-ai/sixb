@@ -20,7 +20,7 @@ export type AgentWorkerStorage = Storage & {
 /**
  * The runtime surface the agent worker is constructed with (mirrors `ActionWorkerSixb`). `Sixb`
  * satisfies it structurally, so cohosting passes `sixb` directly. The worker resolves a run's model
- * via `agents.getById` (the model is a non-serialisable `LanguageModelV3`, never sent over the wire).
+ * via `agents.getById` (the model is a non-serialisable language model, never sent over the wire).
  */
 export interface AgentWorkerSixb {
   readonly id: string

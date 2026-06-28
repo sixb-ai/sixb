@@ -7,7 +7,7 @@ import type { AgentDefinition } from "./types"
  * Holds the agent definitions registered with a Sixb instance and exposes lookup + the run trigger.
  *
  * Definition lookup (`list` / `getById`) is what the worker uses to resolve a run's model (the model
- * is a non-serialisable `LanguageModelV3`, so it is never sent over the wire). `request(...)` is the
+ * is a non-serialisable language model, so it is never sent over the wire). `request(...)` is the
  * trigger surface, mirroring `sixb.actions.request`.
  *
  * Duplicate ids are rejected by the `Sixb` constructor before this is built.

@@ -4,7 +4,8 @@ import { gateway } from "ai"
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
   description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups for Acme.",
-  model: gateway("deepseek/deepseek-v4-flash"),
+  model: gateway("openai/gpt-5.5"),
+  reasoning: "medium",
   instructions: [
     "You are Acme Corp's invoicing assistant for the Sixb demo.",
     "Focus on invoices, balances, due dates, and reminder status.",
@@ -12,4 +13,9 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
     "Never claim a reminder was sent unless the data shows it was approved or sent.",
     "Prefer short, action-oriented summaries.",
   ].join("\n"),
+  providerOptions: {
+    openai: {
+      reasoningSummary: "detailed", // 'auto' | 'detailed'
+    },
+  },
 })

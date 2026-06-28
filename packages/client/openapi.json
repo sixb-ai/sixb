@@ -12342,6 +12342,18 @@
                       "modelId": {
                         "type": "string"
                       },
+                      "reasoning": {
+                        "type": "string",
+                        "enum": [
+                          "provider-default",
+                          "none",
+                          "minimal",
+                          "low",
+                          "medium",
+                          "high",
+                          "xhigh"
+                        ]
+                      },
                       "groupIds": {
                         "type": "array",
                         "items": {
@@ -12411,6 +12423,18 @@
                     },
                     "modelId": {
                       "type": "string"
+                    },
+                    "reasoning": {
+                      "type": "string",
+                      "enum": [
+                        "provider-default",
+                        "none",
+                        "minimal",
+                        "low",
+                        "medium",
+                        "high",
+                        "xhigh"
+                      ]
                     },
                     "groupIds": {
                       "type": "array",

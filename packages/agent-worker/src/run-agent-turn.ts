@@ -77,6 +77,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const result = streamText({
     model: agent.model,
+    ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
+    ...(agent.providerOptions === undefined ? {} : { providerOptions: agent.providerOptions }),
     system: systemInstructions(agent.instructions, context.systemAddendum),
     messages: modelMessages,
     tools,
@@ -271,7 +273,7 @@ async function renewOrLost(input: {
   }
 }
 
-/** Map AI SDK v6 usage onto the stored {@link AgentRunUsage}, dropping unknown fields. */
+/** Map AI SDK usage onto the stored {@link AgentRunUsage}, dropping unknown fields. */
 function mapUsage(usage: LanguageModelUsage): AgentRunUsage | undefined {
   const mapped: {
     inputTokens?: number
@@ -289,11 +291,11 @@ function mapUsage(usage: LanguageModelUsage): AgentRunUsage | undefined {
   if (usage.totalTokens !== undefined) {
     mapped.totalTokens = usage.totalTokens
   }
-  const reasoning = usage.outputTokenDetails?.reasoningTokens ?? usage.reasoningTokens
+  const reasoning = usage.outputTokenDetails.reasoningTokens
   if (reasoning !== undefined) {
     mapped.reasoningTokens = reasoning
   }
-  const cached = usage.inputTokenDetails?.cacheReadTokens ?? usage.cachedInputTokens
+  const cached = usage.inputTokenDetails.cacheReadTokens
   if (cached !== undefined) {
     mapped.cachedInputTokens = cached
   }

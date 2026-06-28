@@ -1,5 +1,17 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider"
+import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import type { GroupDefinition } from "../security"
+
+export type AgentReasoningLevel = NonNullable<LanguageModelV4CallOptions["reasoning"]>
+
+export const AGENT_REASONING_LEVELS = [
+  "provider-default",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly AgentReasoningLevel[]
 
 /**
  * Loop / stop controls for an agent run.
@@ -21,7 +33,9 @@ export interface AgentLoopConfig {
 export interface DefineAgentConfig {
   readonly name: string
   readonly description?: string
-  readonly model: LanguageModelV3
+  readonly model: LanguageModelV4
+  readonly reasoning?: AgentReasoningLevel
+  readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
   readonly loop?: AgentLoopConfig
@@ -32,7 +46,7 @@ export interface DefineAgentConfig {
  *
  * Definitions are safe to export from `agents/` modules. Later slices turn them into
  * running, streaming agents; PR1 only loads and registers them. The `model` is an
- * AI SDK v6 `LanguageModelV3` instance and is therefore not serialisable — the worker
+ * AI SDK language model instance and is therefore not serialisable — the worker
  * (later slice) resolves a definition from its own discovery rather than over the wire.
  */
 export interface AgentDefinition<TId extends string = string> {
@@ -40,7 +54,9 @@ export interface AgentDefinition<TId extends string = string> {
   readonly id: TId
   readonly name: string
   readonly description?: string
-  readonly model: LanguageModelV3
+  readonly model: LanguageModelV4
+  readonly reasoning?: AgentReasoningLevel
+  readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
   readonly instructions: string
   readonly groupIds: readonly string[]
   readonly loop?: AgentLoopConfig

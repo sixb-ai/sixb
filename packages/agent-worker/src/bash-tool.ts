@@ -1,5 +1,5 @@
 import type { CommandResult, Sandbox } from "@sixb/core"
-import { jsonSchema, tool } from "ai"
+import { jsonSchema, type Tool, tool } from "ai"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
 const MAX_COMMAND_TIMEOUT_MS = 120_000
@@ -20,7 +20,10 @@ export interface BashToolOptions {
   readonly env?: Readonly<Record<string, string>>
 }
 
-export function createBashTool(sandbox: Sandbox, options: BashToolOptions = {}) {
+export function createBashTool(
+  sandbox: Sandbox,
+  options: BashToolOptions = {}
+): Tool<BashToolInput, BashToolOutput> {
   return tool({
     description: "Run a Bash command in the agent run sandbox.",
     inputSchema: jsonSchema<BashToolInput>({

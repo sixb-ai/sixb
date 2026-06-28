@@ -1,3 +1,4 @@
+import { AGENT_REASONING_LEVELS } from "@sixb/core"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
 
@@ -26,11 +27,14 @@ export const AgentLoopConfigSchema = z.object({
     .optional(),
 })
 
+export const AgentReasoningLevelSchema = z.enum(AGENT_REASONING_LEVELS)
+
 export const AgentCatalogItemSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string().optional(),
   modelId: z.string().optional(),
+  reasoning: AgentReasoningLevelSchema.optional(),
   groupIds: z.array(z.string()),
   loop: AgentLoopConfigSchema.optional(),
 })

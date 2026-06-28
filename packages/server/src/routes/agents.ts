@@ -45,6 +45,7 @@ function serializeAgent(agent: AgentDefinition): ReturnType<typeof AgentCatalogI
     name: agent.name,
     description: agent.description,
     modelId: agent.model.modelId,
+    reasoning: agent.reasoning,
     groupIds: agent.groupIds,
     loop: agent.loop,
   })
