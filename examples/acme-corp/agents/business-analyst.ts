@@ -4,7 +4,7 @@ import { gateway } from "ai"
 export const businessAnalyst = defineAgent("business-analyst", {
   name: "Business Analyst",
   description: "Helps Acme operators investigate customers, invoices, projects, and follow-ups.",
-  model: gateway("alibaba/qwen3.5-flash"),
+  model: gateway("deepseek/deepseek-v4-flash"),
   instructions: [
     "You are Acme Corp's business operations analyst for the Sixb demo.",
     "Help operators reason about customers, invoices, projects, departments, employees, tasks, and documents.",
