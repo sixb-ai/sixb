@@ -11968,6 +11968,11 @@
         "summary": "Get action run detail",
         "tags": ["Actions"],
         "operationId": "getActionRun",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "runId",
@@ -14347,6 +14352,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
           }
         ],
         "requestBody": {
@@ -14603,6 +14611,11 @@
         "summary": "Get telemetry history",
         "tags": ["Telemetry"],
         "operationId": "getTelemetryHistory",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",
@@ -14744,6 +14757,11 @@
         "summary": "Get latest telemetry point",
         "tags": ["Telemetry"],
         "operationId": "getLatestTelemetry",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "objectTypeId",

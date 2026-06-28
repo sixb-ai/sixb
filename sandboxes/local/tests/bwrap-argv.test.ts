@@ -9,7 +9,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     expect(argv).toEqual([
@@ -33,18 +33,34 @@ describe("buildBwrapArgv", () => {
     ])
   })
 
-  test("allowNetwork true drops --unshare-net", () => {
+  test('network.mode="all" drops --unshare-net', () => {
     const argv = buildBwrapArgv({
       command: "curl",
       args: ["https://example.com"],
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: true,
+      network: { mode: "all" },
     })
 
     expect(argv).not.toContain("--unshare-net")
     expect(argv).toContain("--unshare-pid")
+  })
+
+  test('network.mode="restricted" drops --unshare-net for local best-effort access', () => {
+    const argv = buildBwrapArgv({
+      command: "curl",
+      args: ["http://127.0.0.1:3000"],
+      workingDirectory: "/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      network: {
+        mode: "restricted",
+        allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3000" }],
+      },
+    })
+
+    expect(argv).not.toContain("--unshare-net")
   })
 
   test("readOnlyPaths produce --ro-bind pairs in input order", () => {
@@ -54,7 +70,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: ["/usr", "/opt/data"],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     const usrIdx = argv.findIndex(
@@ -74,7 +90,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: ["/var/cache/agent"],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     const wdIdx = argv.findIndex(
@@ -94,7 +110,7 @@ describe("buildBwrapArgv", () => {
       workingDirectory: "/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     const dashDash = argv.indexOf("--")

@@ -8,6 +8,7 @@ import {
   type RunCommandOptions,
   type Sandbox,
   SandboxIsolationUnavailableError,
+  type SandboxNetworkPolicy,
   SandboxNotRunningError,
   type SandboxStatus,
 } from "@sixb/core"
@@ -40,7 +41,7 @@ export class LocalSandbox implements Sandbox {
   private readonly backend: ResolvedIsolation
   private readonly sandboxEnv: Readonly<Record<string, string>>
   private readonly defaultTimeoutMs: number | undefined
-  private readonly allowNetwork: boolean
+  private readonly network: SandboxNetworkPolicy
   private readonly readOnlyPaths: readonly string[]
   private readonly readWritePaths: readonly string[]
   private readonly inFlight = new Set<AbortController>()
@@ -52,7 +53,7 @@ export class LocalSandbox implements Sandbox {
     readonly backend: ResolvedIsolation
     readonly env: Readonly<Record<string, string>>
     readonly timeout: number | undefined
-    readonly allowNetwork: boolean
+    readonly network: SandboxNetworkPolicy
     readonly readOnlyPaths: readonly string[]
     readonly readWritePaths: readonly string[]
     readonly cleanupWorkingDirectory: boolean
@@ -62,7 +63,7 @@ export class LocalSandbox implements Sandbox {
     this.backend = input.backend
     this.sandboxEnv = input.env
     this.defaultTimeoutMs = input.timeout
-    this.allowNetwork = input.allowNetwork
+    this.network = input.network
     this.readOnlyPaths = input.readOnlyPaths
     this.readWritePaths = input.readWritePaths
     this.cleanupWorkingDirectory = input.cleanupWorkingDirectory
@@ -93,7 +94,7 @@ export class LocalSandbox implements Sandbox {
       backend,
       env: options.env ?? {},
       timeout: options.timeout,
-      allowNetwork: options.allowNetwork ?? false,
+      network: options.network ?? { mode: "none" },
       readOnlyPaths: options.readOnlyPaths ?? [],
       readWritePaths: options.readWritePaths ?? [],
       cleanupWorkingDirectory: generated,
@@ -169,7 +170,7 @@ export class LocalSandbox implements Sandbox {
         workingDirectory: this.workingDirectory,
         readOnlyPaths: this.readOnlyPaths,
         readWritePaths: this.readWritePaths,
-        allowNetwork: this.allowNetwork,
+        network: this.network,
       })
     }
     if (this.backend === "seatbelt") {
@@ -177,7 +178,7 @@ export class LocalSandbox implements Sandbox {
         workingDirectory: this.workingDirectory,
         readOnlyPaths: this.readOnlyPaths,
         readWritePaths: this.readWritePaths,
-        allowNetwork: this.allowNetwork,
+        network: this.network,
       })
       return buildSeatbeltArgv({ profile, command, args })
     }

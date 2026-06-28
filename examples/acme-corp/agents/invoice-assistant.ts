@@ -12,5 +12,4 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
     "Never claim a reminder was sent unless the data shows it was approved or sent.",
     "Prefer short, action-oriented summaries.",
   ].join("\n"),
-  loop: { stopWhen: { maxSteps: 6 } },
 })

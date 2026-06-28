@@ -12,13 +12,15 @@ message, and finalizes the run.
 import { AgentWorker } from "@sixb/agent-worker"
 
 const worker = new AgentWorker(sixb, {
+  apiBaseUrl: "http://localhost:3002",
   tools,
 })
 
 await worker.start()
 ```
 
-`sixb` must provide `storage.agents`, `storage.auth`, `queues.agents`, `agents`, and `broker`.
+`sixb` must provide `storage.agents`, `storage.auth`, `queues.agents`, `agents`, `broker`, and
+`sandboxes`.
 
 ## Execution Model
 
@@ -58,7 +60,14 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `tools`: AI SDK tools exposed to the model.
+- `tools`: additional AI SDK tools exposed to the model alongside the built-in `bash` tool.
+- `apiBaseUrl`: required Sixb server origin used by a per-run API proxy. The worker injects the
+  proxy URL into run sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into `SIXB_SKILLS_DIR`,
+  and creates the sandbox with a restricted network policy allowing the proxy origin. The proxy
+  exposes scoped ontology, object, telemetry read, and action routes. The run access token stays in
+  the worker process and is never exposed through sandbox environment variables.
+- `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
+  to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: run lease and queue visibility duration; defaults to 60 seconds.
 - `heartbeatMs`: lease renewal interval; defaults to one third of `leaseMs`.

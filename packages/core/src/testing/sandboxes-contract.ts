@@ -7,7 +7,7 @@ import { type SandboxFactory, SandboxNotRunningError } from "../sandboxes"
  * meaningful for it. Tests gated by an unsupported capability are skipped.
  */
 export interface SandboxesContractCapabilities {
-  /** allowNetwork: false actually blocks outbound network access. */
+  /** network.mode="none" actually blocks outbound network access. */
   readonly networkBlocking?: boolean
   /** readOnlyPaths/readWritePaths actually restrict filesystem writes. */
   readonly readOnlyEnforcement?: boolean
@@ -260,8 +260,8 @@ export function runSandboxesContractSuite(
 
     if (capabilities.networkBlocking) {
       describe("network isolation", () => {
-        test("allowNetwork: false blocks outbound DNS / TCP", async () => {
-          const sandbox = await factory.create({ allowNetwork: false })
+        test('network.mode="none" blocks outbound DNS / TCP', async () => {
+          const sandbox = await factory.create({ network: { mode: "none" } })
           try {
             const result = await sandbox.runCommand("curl", [
               "-sS",
@@ -275,8 +275,8 @@ export function runSandboxesContractSuite(
           }
         })
 
-        test("allowNetwork: true permits outbound traffic", async () => {
-          const sandbox = await factory.create({ allowNetwork: true })
+        test('network.mode="all" permits outbound traffic', async () => {
+          const sandbox = await factory.create({ network: { mode: "all" } })
           try {
             const result = await sandbox.runCommand("curl", [
               "-sS",

@@ -7,7 +7,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     expect(profile).toBe(
@@ -24,16 +24,30 @@ describe("buildSeatbeltProfile", () => {
     )
   })
 
-  test("allowNetwork true drops the network-outbound deny", () => {
+  test('network.mode="all" drops the network-outbound deny', () => {
     const profile = buildSeatbeltProfile({
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: true,
+      network: { mode: "all" },
     })
 
     expect(profile).not.toContain("network-outbound")
     expect(profile).toContain("(allow default)")
+  })
+
+  test('network.mode="restricted" drops the network-outbound deny for local best-effort access', () => {
+    const profile = buildSeatbeltProfile({
+      workingDirectory: "/private/tmp/wd",
+      readOnlyPaths: [],
+      readWritePaths: [],
+      network: {
+        mode: "restricted",
+        allow: [{ name: "sixb-api", origin: "http://127.0.0.1:3000" }],
+      },
+    })
+
+    expect(profile).not.toContain("network-outbound")
   })
 
   test("readWritePaths produce additional file-write allow rules", () => {
@@ -41,7 +55,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: [],
       readWritePaths: ["/private/var/cache/agent"],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     expect(profile).toContain('(allow file-write* (subpath "/private/var/cache/agent"))')
@@ -52,7 +66,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: '/tmp/with "quotes"\\and\\backslashes',
       readOnlyPaths: [],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     expect(profile).toContain(
@@ -65,7 +79,7 @@ describe("buildSeatbeltProfile", () => {
       workingDirectory: "/private/tmp/wd",
       readOnlyPaths: ["/etc/secrets"],
       readWritePaths: [],
-      allowNetwork: false,
+      network: { mode: "none" },
     })
 
     expect(profile).not.toContain("/etc/secrets")

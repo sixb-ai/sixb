@@ -15,14 +15,9 @@ import {
   AgentWorkerError,
 } from "./errors"
 import { finishRunOrThrow } from "./finalize"
-import {
-  type AgentRunAccessToken,
-  mintAgentRunAccessToken,
-  reconcileAgentExecutionIdentities,
-  reconcileAgentExecutionIdentity,
-  revokeAgentRunAccessToken,
-} from "./identity"
+import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
+import { type AgentRunEnvironment, createAgentRunEnvironment } from "./run-environment"
 import { createBrokerStreamSink, isolateStreamSink } from "./stream-sink"
 import type {
   AgentWorkerContext,
@@ -32,6 +27,7 @@ import type {
 } from "./types"
 
 const DEFAULT_AGENT_LEASE_MS = 60_000
+const DEFAULT_AGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
 const SHORT_BACKOFF_MS = 250
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
@@ -72,21 +68,25 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
 
-  constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions = {}) {
-    const leaseMs = options.leaseMs ?? DEFAULT_AGENT_LEASE_MS
+  constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions) {
+    const resolvedOptions = options as AgentWorkerOptions | undefined
+    if (!resolvedOptions) {
+      throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
+    }
+    const leaseMs = resolvedOptions.leaseMs ?? DEFAULT_AGENT_LEASE_MS
     super({
       projectId: sixb.id,
       queue: sixb.queues.agents,
       workerId: `agent-worker-${sixb.id}`,
-      claimLimit: 1,
+      claimLimit: normalizeConcurrency(resolvedOptions.concurrency),
       // Queue visibility ≥ run lease so a redelivered run is already reclaimable.
       leaseMs,
-      idlePollMs: options.idlePollMs,
+      idlePollMs: resolvedOptions.idlePollMs,
     })
 
     this.sixb = sixb
     this.idleWithoutAgents = sixb.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options, leaseMs)
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, resolvedOptions, leaseMs)
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
@@ -144,18 +144,17 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     }
     const run = reservation.run
     const leaseId = run.lease?.id
-    let runToken: AgentRunAccessToken | null = null
+    let environment: AgentRunEnvironment | null = null
 
     try {
       await context.streamSink.publishStarted(run)
-      runToken = await mintAgentRunAccessToken({
-        storage: context.storage,
-        projectId: context.id,
+      environment = await createAgentRunEnvironment({ context, agent, run })
+      await runAgentTurn({
+        context: environment.turnContext,
         agent,
         run,
-        turnTimeoutMs: context.turnTimeoutMs,
+        signal,
       })
-      await runAgentTurn({ context, agent, run, signal })
     } catch (error) {
       // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
       if (error instanceof AgentLeaseLostError) {
@@ -189,15 +188,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         throw error
       }
     } finally {
-      if (runToken) {
-        await revokeAgentRunAccessToken({
-          storage: context.storage,
-          projectId: context.id,
-          tokenId: runToken.accessToken.id,
-        }).catch((error) => {
-          console.error("[SixbAgentWorker] Could not revoke agent run token:", error)
-        })
-      }
+      await environment?.dispose()
     }
   }
 
@@ -367,10 +358,17 @@ function buildAgentContext(
   if (!storage.auth) {
     throw new AgentWorkerError("Agent workers require storage.auth support.")
   }
+  if (!sixb.sandboxes) {
+    throw new AgentWorkerError(
+      "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
+    )
+  }
   return {
     id: sixb.id,
     storage: storage as AgentWorkerStorage,
-    tools: options.tools ?? {},
+    sandboxes: sixb.sandboxes,
+    baseTools: options.tools ?? {},
+    apiBaseUrl: normalizeRequiredString(options.apiBaseUrl),
     streamSink: isolateStreamSink(
       options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
     ),
@@ -394,4 +392,22 @@ function toErrorMessage(error: unknown): string {
     return error.message
   }
   return String(error)
+}
+
+function normalizeRequiredString(value: string | undefined): string {
+  const trimmed = value?.trim()
+  if (!trimmed) {
+    throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
+  }
+  return trimmed
+}
+
+function normalizeConcurrency(value: number | undefined): number {
+  if (value === undefined) {
+    return DEFAULT_AGENT_CONCURRENCY
+  }
+  if (!Number.isFinite(value) || value < 1) {
+    throw new AgentWorkerError("Agent worker concurrency must be at least 1.")
+  }
+  return Math.floor(value)
 }

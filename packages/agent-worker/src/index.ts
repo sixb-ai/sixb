@@ -1,3 +1,4 @@
+export { type BashToolOptions, type BashToolOutput, createBashTool } from "./bash-tool"
 export {
   AgentFinalizationError,
   AgentLeaseHeldError,
@@ -13,6 +14,7 @@ export {
   type StreamSink,
 } from "./stream-sink"
 export type {
+  AgentTurnContext,
   AgentWorkerContext,
   AgentWorkerOptions,
   AgentWorkerSixb,

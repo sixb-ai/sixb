@@ -10,5 +10,7 @@ export type {
   RunCommandOptions,
   Sandbox,
   SandboxFactory,
+  SandboxNetworkPolicy,
+  SandboxNetworkTarget,
   SandboxStatus,
 } from "./sandbox"

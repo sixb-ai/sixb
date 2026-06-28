@@ -36,12 +36,37 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
   }
 
   protected async run(signal: AbortSignal): Promise<void> {
-    while (!signal.aborted) {
-      const claimed = await this.claimOrIdle(signal)
-      for (const claimedJob of claimed) {
-        if (signal.aborted) break
-        await this.handle(claimedJob, signal)
+    const inFlight = new Set<Promise<void>>()
+    let runError: unknown = null
+
+    try {
+      while (!signal.aborted && !runError) {
+        while (!signal.aborted && !runError && inFlight.size >= this.config.claimLimit) {
+          await Promise.race(inFlight)
+        }
+        if (runError || signal.aborted) {
+          continue
+        }
+
+        const capacity = this.config.claimLimit - inFlight.size
+        const claimed = await this.claimOrIdle(signal, capacity)
+        for (const claimedJob of claimed) {
+          const promise = this.handle(claimedJob, signal)
+            .catch((error) => {
+              runError ??= error
+            })
+            .finally(() => {
+              inFlight.delete(promise)
+            })
+          inFlight.add(promise)
+        }
       }
+    } finally {
+      await Promise.allSettled(inFlight)
+    }
+
+    if (runError) {
+      throw runError
     }
   }
 
@@ -63,14 +88,17 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
     return { kind: "retry" }
   }
 
-  private async claimOrIdle(signal: AbortSignal): Promise<readonly ClaimedQueueJob<TJob>[]> {
-    const { projectId, queue, workerId, leaseMs, claimLimit, idlePollMs } = this.config
+  private async claimOrIdle(
+    signal: AbortSignal,
+    limit: number
+  ): Promise<readonly ClaimedQueueJob<TJob>[]> {
+    const { projectId, queue, workerId, leaseMs, idlePollMs } = this.config
 
     try {
       const claimed = await queue.claim({
         projectId,
         workerId,
-        limit: claimLimit,
+        limit,
         leaseMs,
       })
       if (claimed.length === 0) {

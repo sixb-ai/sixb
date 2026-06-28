@@ -1,5 +1,6 @@
 import { type ActionRunRecord, canViewActionRun, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import {
   ActionRunDetailSchema,
@@ -145,6 +146,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
           summary: "Get action run detail",
           tags: ["Actions"],
           operationId: "getActionRun",
+          security: bearerSecurityRequirement("getActionRun"),
         },
       }
     )

@@ -1,4 +1,9 @@
-import type { CreateSandboxOptions, Sandbox, SandboxFactory } from "@sixb/core"
+import type {
+  CreateSandboxOptions,
+  Sandbox,
+  SandboxFactory,
+  SandboxNetworkPolicy,
+} from "@sixb/core"
 import type { LocalIsolation } from "./isolation/detect"
 import { LocalSandbox } from "./local-sandbox"
 
@@ -11,7 +16,7 @@ export interface LocalSandboxFactoryOptions {
   /** Default timeout, in milliseconds, applied when none is specified. */
   readonly timeout?: number
   /** Default network policy. Overridable per-create. */
-  readonly allowNetwork?: boolean
+  readonly network?: SandboxNetworkPolicy
 }
 
 /**
@@ -27,7 +32,7 @@ export class LocalSandboxFactory implements SandboxFactory {
       readOnlyPaths: this.defaults.readOnlyPaths,
       readWritePaths: this.defaults.readWritePaths,
       timeout: options.timeout ?? this.defaults.timeout,
-      allowNetwork: options.allowNetwork ?? this.defaults.allowNetwork,
+      network: options.network ?? this.defaults.network,
       env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
       workingDirectory: options.workingDirectory,
     })

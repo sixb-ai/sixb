@@ -5,11 +5,18 @@ import type { AgentRunStatus } from "./types"
 // Mirrors the durable `AgentMessagePart` shapes, but kept separate because live chunks arrive as
 // deltas keyed by id/toolCallId and must be merged incrementally.
 export type LivePart =
-  | { readonly kind: "text"; readonly id: string; text: string }
-  | { readonly kind: "reasoning"; readonly id: string; text: string; done: boolean }
+  | { readonly kind: "text"; readonly id: string; readonly stepIndex?: number; text: string }
+  | {
+      readonly kind: "reasoning"
+      readonly id: string
+      readonly stepIndex?: number
+      text: string
+      done: boolean
+    }
   | {
       readonly kind: "tool"
       readonly id: string
+      readonly stepIndex?: number
       toolName: string
       state: "input-streaming" | "input-available" | "output-available" | "output-error"
       inputText: string
@@ -26,6 +33,8 @@ export interface LiveRunState {
   readonly modelId?: string
   /** Ordered live parts, in the order their first chunk arrived. */
   readonly parts: readonly LivePart[]
+  /** AI SDK model step currently being streamed. Used to keep reused part ids ordered. */
+  readonly stepIndex?: number
   /** Set once the worker persists the assistant message; the hook reloads durable state on change. */
   readonly finalizedMessageId: string | null
   /** Terminal run status, or null while in-flight. */
@@ -46,6 +55,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     runId,
     active: false,
     parts: [],
+    stepIndex: 0,
     finalizedMessageId: null,
     finishStatus: null,
     finishError: null,
@@ -116,6 +126,8 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
     case "reasoning-delta":
     case "reasoning-end":
       return reduceReasoning(state, chunk)
+    case "start-step":
+      return { ...state, stepIndex: liveStepIndex(state) + 1 }
     case "tool-input-start":
     case "tool-input-delta":
     case "tool-input-available":
@@ -135,10 +147,12 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
 function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
   const id = typeof chunk.id === "string" ? chunk.id : "text"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
+  const stepIndex = liveStepIndex(state)
   return upsertPart(
     state,
-    (part): part is Extract<LivePart, { kind: "text" }> => part.kind === "text" && part.id === id,
-    () => ({ kind: "text", id, text: delta }),
+    (part): part is Extract<LivePart, { kind: "text" }> =>
+      part.kind === "text" && part.id === id && part.stepIndex === stepIndex,
+    () => ({ kind: "text", id, stepIndex, text: delta }),
     (part) => (delta ? { ...part, text: part.text + delta } : part)
   )
 }
@@ -147,11 +161,12 @@ function reduceReasoning(state: LiveRunState, chunk: Record<string, unknown>): L
   const id = typeof chunk.id === "string" ? chunk.id : "reasoning"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
   const done = chunk.type === "reasoning-end"
+  const stepIndex = liveStepIndex(state)
   return upsertPart(
     state,
     (part): part is Extract<LivePart, { kind: "reasoning" }> =>
-      part.kind === "reasoning" && part.id === id,
-    () => ({ kind: "reasoning", id, text: delta, done }),
+      part.kind === "reasoning" && part.id === id && part.stepIndex === stepIndex,
+    () => ({ kind: "reasoning", id, stepIndex, text: delta, done }),
     (part) => ({ ...part, text: part.text + delta, done: done || part.done })
   )
 }
@@ -160,6 +175,7 @@ function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
   const id = typeof chunk.toolCallId === "string" ? chunk.toolCallId : null
   if (!id) return state
   const toolName = typeof chunk.toolName === "string" ? chunk.toolName : undefined
+  const stepIndex = liveStepIndex(state)
 
   return upsertPart(
     state,
@@ -168,6 +184,7 @@ function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRu
       const base: Extract<LivePart, { kind: "tool" }> = {
         kind: "tool",
         id,
+        stepIndex,
         toolName: toolName ?? "tool",
         inputText: "",
         state: "input-streaming",
@@ -235,4 +252,8 @@ function upsertPart<T extends LivePart>(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
+}
+
+function liveStepIndex(state: LiveRunState): number {
+  return state.stepIndex ?? 0
 }

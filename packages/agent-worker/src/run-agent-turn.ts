@@ -9,13 +9,15 @@ import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
 import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
 import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import { appendMessageAndFinishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
-import type { AgentWorkerContext } from "./types"
+import type { AgentTurnContext } from "./types"
 
-export const DEFAULT_MAX_STEPS = 8
+export const DEFAULT_MAX_STEPS = 25
+const DEFAULT_SYSTEM_CONTEXT =
+  "You are operating as a Sixb agent with a sandboxed bash tool and scoped access to the current Sixb ontology API. Use live API context for object types, objects, telemetry, and declared actions; keep work grounded in the user's request, explain important assumptions briefly, and ask before making domain changes."
 
 export interface RunAgentTurnInput {
   /** The worker's stable execution context (storage, tools, stream sink, lease timings). */
-  readonly context: AgentWorkerContext
+  readonly context: AgentTurnContext
   readonly agent: AgentDefinition
   /** The run this worker already reserved (or reclaimed). We own `run.lease`. */
   readonly run: AgentRunRecord
@@ -75,7 +77,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const result = streamText({
     model: agent.model,
-    system: agent.instructions,
+    system: systemInstructions(agent.instructions, context.systemAddendum),
     messages: modelMessages,
     tools,
     stopWhen: stepCountIs(maxSteps),
@@ -179,6 +181,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   await context.streamSink.publishRunFinished(finalizedRun)
 
   return finalizedRun
+}
+
+function systemInstructions(instructions: string, addendum: string | undefined): string {
+  const base = `${instructions.trimEnd()}\n\n${DEFAULT_SYSTEM_CONTEXT}`
+  if (!addendum) {
+    return base
+  }
+  return `${base}\n\n${addendum}`
 }
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider

@@ -1,10 +1,12 @@
+import type { SandboxNetworkPolicy } from "@sixb/core"
+
 export interface BwrapArgvInput {
   readonly command: string
   readonly args: readonly string[]
   readonly workingDirectory: string
   readonly readOnlyPaths: readonly string[]
   readonly readWritePaths: readonly string[]
-  readonly allowNetwork: boolean
+  readonly network: SandboxNetworkPolicy
 }
 
 /**
@@ -26,7 +28,7 @@ export function buildBwrapArgv(input: BwrapArgvInput): readonly string[] {
   argv.push("--proc", "/proc", "--dev", "/dev")
 
   argv.push("--unshare-pid")
-  if (!input.allowNetwork) {
+  if (!allowsOutboundNetwork(input.network)) {
     argv.push("--unshare-net")
   }
 
@@ -34,4 +36,9 @@ export function buildBwrapArgv(input: BwrapArgvInput): readonly string[] {
   argv.push("--", input.command, ...input.args)
 
   return argv
+}
+
+function allowsOutboundNetwork(policy: SandboxNetworkPolicy): boolean {
+  // Local bwrap support is binary today: no network namespace for "none", host network otherwise.
+  return policy.mode !== "none"
 }

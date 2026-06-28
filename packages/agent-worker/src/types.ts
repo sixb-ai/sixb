@@ -5,6 +5,7 @@ import type {
   Broker,
   EventsRuntime,
   Queues,
+  SandboxFactory,
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
@@ -28,6 +29,7 @@ export interface AgentWorkerSixb {
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime
+  readonly sandboxes?: SandboxFactory
 }
 
 /**
@@ -38,7 +40,21 @@ export interface AgentWorkerSixb {
 export interface AgentWorkerContext {
   readonly id: string
   readonly storage: AgentWorkerStorage
+  readonly sandboxes: SandboxFactory
+  readonly baseTools: ToolSet
+  readonly apiBaseUrl: string
+  readonly streamSink: StreamSink
+  readonly leaseMs: number
+  readonly heartbeatMs: number
+  readonly defaultMaxSteps: number
+  readonly turnTimeoutMs: number
+}
+
+export interface AgentTurnContext {
+  readonly id: string
+  readonly storage: AgentWorkerStorage
   readonly tools: ToolSet
+  readonly systemAddendum?: string
   readonly streamSink: StreamSink
   readonly leaseMs: number
   readonly heartbeatMs: number
@@ -56,11 +72,18 @@ export interface AgentWorkerOptions {
   readonly idlePollMs?: number
   /** Lease heartbeat interval during a turn, in ms. Defaults to `leaseMs / 3`. */
   readonly heartbeatMs?: number
-  /** Tools exposed to the model. V1 ships an empty set; tests inject a generic tool. */
+  /**
+   * Sixb server origin the worker proxies for agent-run sandboxes, for example
+   * `http://localhost:3002`. The sandbox receives only the per-run proxy URL.
+   */
+  readonly apiBaseUrl: string
+  /** Tools exposed to the model in addition to the built-in `bash` tool. */
   readonly tools?: ToolSet
+  /** Maximum number of agent run jobs this worker claims and executes at once. Defaults to 4. */
+  readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
-  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 8. */
+  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 25. */
   readonly defaultMaxSteps?: number
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded
