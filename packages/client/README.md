@@ -116,21 +116,32 @@ const temperatureHistoryOptions = telemetryHistoryQueryOptions({
 
 ### Domain events
 
+Subscribe with the fluent `events(Type)` builder (mirrors `objects(Type)`):
+channels narrow the event and type the payload, `.object(key)` scopes to one
+instance, and the hooks take a built builder as their first argument.
+
 ```typescript
-import { useSixbEvents } from "@sixb/client/hooks"
+import { events, useEvents, useLatest } from "@sixb/client/hooks"
+import { Thermostat } from "./ontology/Thermostat"
 
 function LiveDashboard() {
-  const { connected } = useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent(event) {
-      console.log(event.type, event.payload)
-    },
-  })
+  // Typed telemetry value for one property.
+  const { connected } = useEvents(
+    events(Thermostat).telemetry(Thermostat.p.temperature),
+    (event) => console.log(event.payload.value)
+  )
+
+  // Latest value per property for a single object.
+  const { values } = useLatest(events(Thermostat).object("living-room").telemetry())
 
   return <div>{connected ? "Connected" : "Disconnected"}</div>
 }
 ```
+
+Mount `SixbEventsProvider` once near the app root to multiplex every hook onto a
+single shared WebSocket (without it, each hook opens its own socket). Use
+`useInvalidateOnEvent(builder, resolveKeys)` to invalidate TanStack Query keys on
+matching events.
 
 ### UI models
 
@@ -146,5 +157,5 @@ The models module provides normalized types and adapter functions that transform
 | Entry point | What it provides |
 |---|---|
 | `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
-| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks), and `useSixbEvents` |
+| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks), the `events(Type)` builder, and event hooks (`useEvents`, `useLatest`, `useLatestByObject`, `useInvalidateOnEvent`, `SixbEventsProvider`) |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

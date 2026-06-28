@@ -1,5 +1,6 @@
-import type { ObjectSummary } from "@sixb/client"
+import type { ObjectSummary, TelemetryUpdate } from "@sixb/client"
 import {
+  events,
   getProjectInfoOptions,
   listActionsOptions,
   listConnectorsOptions,
@@ -12,7 +13,7 @@ import {
   listSyncsOptions,
   listWorkflowsOptions,
   objectCountOptions,
-  useSixbEvents,
+  useLatestByObject,
 } from "@sixb/client/hooks"
 import { Button, Card, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -34,11 +35,6 @@ import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccoun
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
 import { SettingsTokensPage } from "../components/SettingsTokensPage"
 import { WorkflowLiveUpdatesBoundary } from "../features/workflows/components/WorkflowLiveUpdatesBoundary"
-import {
-  type TelemetryUpdate,
-  telemetryUpdateFromEvent,
-  telemetryUpdateKey,
-} from "../lib/telemetryEvents"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -72,7 +68,6 @@ export function ProjectWorkspace() {
   const objectIdFromUrl = firstSegment && !KNOWN_VIEWS.has(firstSegment) ? firstSegment : null
   const { setSidebarData } = useContext(SidebarDataContext)
 
-  const [latestUpdates, setLatestUpdates] = useState<Record<string, TelemetryUpdate>>({})
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
   const [searchParams, setSearchParams] = useSearchParams()
   const classFilter = searchParams.get("class") || null
@@ -105,11 +100,6 @@ export function ProjectWorkspace() {
     retry: false,
   })
   const resolvedProjectName = projectInfo?.id ?? ""
-
-  useEffect(() => {
-    if (!resolvedProjectName) return
-    setLatestUpdates({})
-  }, [resolvedProjectName])
 
   const { data: objectTypes = [], isLoading: objectTypesLoading } = useQuery({
     ...listObjectTypesOptions(),
@@ -250,28 +240,22 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
-  const handleUpdate = useCallback(
-    (update: TelemetryUpdate) => {
-      if (resolvedProjectName && update.projectName !== resolvedProjectName) return
-
-      const key = telemetryUpdateKey(update.projectName, update.objectId, update.propertyId)
-      setLatestUpdates((previous) => ({
-        ...previous,
-        [key]: update,
-      }))
-    },
-    [resolvedProjectName]
-  )
-
-  useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
+  const { byObject: latestByObject } = useLatestByObject(events.telemetry(), {
     enabled: Boolean(resolvedProjectName),
-    onEvent(event) {
-      const update = telemetryUpdateFromEvent(event)
-      if (update) handleUpdate(update)
-    },
   })
+
+  // Flatten the per-object live telemetry into the `project:object:property`
+  // keyed store the workspace renders from, scoped to the current project.
+  const latestUpdates = useMemo(() => {
+    const flattened: Record<string, TelemetryUpdate> = {}
+    for (const updatesByProperty of Object.values(latestByObject)) {
+      for (const update of Object.values(updatesByProperty)) {
+        if (resolvedProjectName && update.projectName !== resolvedProjectName) continue
+        flattened[`${update.projectName}:${update.objectId}:${update.propertyId}`] = update
+      }
+    }
+    return flattened
+  }, [latestByObject, resolvedProjectName])
 
   const selectedObjectIdForSidebar = objectIdFromUrl
 

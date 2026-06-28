@@ -4,6 +4,7 @@ import {
   requireSixbBrowserAuthSession,
   type SixbBrowserRuntimeConfig,
 } from "@sixb/client/browser"
+import { SixbEventsProvider } from "@sixb/client/hooks"
 import { ThemeProvider } from "@sixb/ui/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
@@ -63,11 +64,13 @@ function renderApp(): void {
   getRoot().render(
     <React.StrictMode>
       <QueryClientProvider client={getQueryClient()}>
-        <ThemeProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </ThemeProvider>
+        <SixbEventsProvider>
+          <ThemeProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </ThemeProvider>
+        </SixbEventsProvider>
       </QueryClientProvider>
     </React.StrictMode>
   )

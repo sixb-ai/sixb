@@ -21,17 +21,6 @@ export type SixbEventOfTopic<TTopic extends SixbEventTopic> = DomainEvent extend
       : never
     : never
   : never
-export type SixbEventForSubscription<
-  TTopic extends SixbEventTopic | undefined,
-  TTypes extends readonly SixbEventType[] | undefined,
-> = TTypes extends readonly SixbEventType[]
-  ? TTopic extends SixbEventTopic
-    ? Extract<SixbEventOfType<TTypes[number]>, { topic: TTopic }>
-    : SixbEventOfType<TTypes[number]>
-  : TTopic extends SixbEventTopic
-    ? SixbEventOfTopic<TTopic>
-    : SixbEvent
-
 export function isSixbEvent(value: unknown): value is SixbEvent {
   return (
     isRecord(value) &&
@@ -48,3 +37,8 @@ export function isSixbEvent(value: unknown): value is SixbEvent {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
+
+// The fluent builder, its React-free transport, and the shared telemetry model.
+export * from "./events-builder"
+export * from "./events-transport"
+export * from "./telemetry-events"

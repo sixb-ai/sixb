@@ -1,7 +1,7 @@
 import { encodeObjectId } from "@sixb/client"
-import { getObjectOptions, requestActionMutation, useSixbEvents } from "@sixb/client/hooks"
+import { events, getObjectOptions, requestActionMutation, useLatest } from "@sixb/client/hooks"
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { useCallback, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useParams } from "react-router-dom"
 import {
   acUnitObjectTypeId,
@@ -9,7 +9,6 @@ import {
   FAN_SPEED_NAMES,
   MODE_NAMES,
 } from "../../../lib/acUnitConstants"
-import { type TelemetryUpdate, telemetryUpdateFromEvent } from "../../../lib/telemetryEvents"
 
 function decodeKey(input: string | undefined): string | null {
   if (!input) return null
@@ -329,24 +328,7 @@ export default function UnitDetail() {
   })
   const object = objectQuery.data
 
-  const [liveState, setLiveState] = useState<Record<string, TelemetryUpdate>>({})
-
-  const handleUpdate = useCallback(
-    (update: TelemetryUpdate) => {
-      if (update.objectTypeId !== acUnitObjectTypeId || update.objectId !== objectKey) return
-      setLiveState((prev) => ({ ...prev, [update.propertyId]: update }))
-    },
-    [objectKey]
-  )
-
-  const { connected } = useSixbEvents({
-    topic: "telemetry",
-    types: ["telemetry.appended"],
-    onEvent(event) {
-      const update = telemetryUpdateFromEvent(event)
-      if (update) handleUpdate(update)
-    },
-  })
+  const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
   const { mutate: sendAction } = useMutation(requestActionMutation())
 
   function val(propId: string): unknown {

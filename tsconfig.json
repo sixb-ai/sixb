@@ -29,6 +29,7 @@
       "@sixb/connector-teamleader": ["./connectors/teamleader/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
       "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
+      "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],

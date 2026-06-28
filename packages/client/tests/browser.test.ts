@@ -4,9 +4,9 @@ import {
   createSixbSignInUrl,
   type SixbBrowserRuntimeConfig,
 } from "../src/browser"
+import { createSixbEventsWebSocketUrl } from "../src/events-transport"
 import { client } from "../src/generated/client.gen"
 import { requestSyncRun } from "../src/generated/sdk.gen"
-import { createSixbEventsWebSocketUrl } from "../src/useSixbEvents"
 
 const runtimeConfig: SixbBrowserRuntimeConfig = {
   api: { baseUrl: "http://localhost:3002" },
