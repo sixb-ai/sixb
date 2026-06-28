@@ -181,6 +181,7 @@
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
+        "@sixb/sandboxes-smolvm": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",
@@ -562,6 +563,17 @@
     },
     "sandboxes/local": {
       "name": "@sixb/sandboxes-local",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
+    "sandboxes/smolvm": {
+      "name": "@sixb/sandboxes-smolvm",
       "version": "0.1.0",
       "dependencies": {
         "@sixb/core": "workspace:*",
@@ -1036,6 +1048,8 @@
     "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
 
     "@sixb/sandboxes-local": ["@sixb/sandboxes-local@workspace:sandboxes/local"],
+
+    "@sixb/sandboxes-smolvm": ["@sixb/sandboxes-smolvm@workspace:sandboxes/smolvm"],
 
     "@sixb/server": ["@sixb/server@workspace:packages/server"],
 

@@ -1,4 +1,4 @@
-export { type BashToolOptions, type BashToolOutput, createBashTool } from "./bash-tool"
+export { type BashSandboxHandle, type BashToolOutput, createBashTool } from "./bash-tool"
 export {
   AgentFinalizationError,
   AgentLeaseHeldError,
