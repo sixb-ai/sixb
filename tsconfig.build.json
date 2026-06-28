@@ -26,6 +26,9 @@
       "path": "connectors/pipedrive/tsconfig.build.json"
     },
     {
+      "path": "connectors/pandadoc/tsconfig.build.json"
+    },
+    {
       "path": "connectors/rest/tsconfig.build.json"
     },
     {
