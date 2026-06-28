@@ -69,24 +69,20 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   private readonly idleWithoutAgents: boolean
 
   constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions) {
-    const resolvedOptions = options as AgentWorkerOptions | undefined
-    if (!resolvedOptions) {
-      throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
-    }
-    const leaseMs = resolvedOptions.leaseMs ?? DEFAULT_AGENT_LEASE_MS
+    const leaseMs = options.leaseMs ?? DEFAULT_AGENT_LEASE_MS
     super({
       projectId: sixb.id,
       queue: sixb.queues.agents,
       workerId: `agent-worker-${sixb.id}`,
-      claimLimit: normalizeConcurrency(resolvedOptions.concurrency),
+      claimLimit: normalizeConcurrency(options.concurrency),
       // Queue visibility ≥ run lease so a redelivered run is already reclaimable.
       leaseMs,
-      idlePollMs: resolvedOptions.idlePollMs,
+      idlePollMs: options.idlePollMs,
     })
 
     this.sixb = sixb
     this.idleWithoutAgents = sixb.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, resolvedOptions, leaseMs)
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options, leaseMs)
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {

@@ -15,10 +15,9 @@ const DEFAULT_KILL_EXIT_CODE = 137
  * AbortSignal handling, and never throws. Command-agnostic: here it runs the
  * smolvm CLI, but the wrapper makes no assumptions about what it spawns.
  *
- * NOTE: on timeout/abort we SIGKILL the host smolvm process. The integration
- * spike (spec §11 #1) must confirm this also reaps the in-guest command; if a
- * runaway guest process can outlive its exec session, stop()/destroy() reaps
- * the whole VM as the backstop.
+ * NOTE: on timeout/abort we SIGKILL the host smolvm process. If a runaway guest
+ * process can outlive its exec session, stop()/destroy() reaps the whole VM as
+ * the backstop.
  */
 export async function exec(options: ExecOptions): Promise<CommandResult> {
   const start = Date.now()

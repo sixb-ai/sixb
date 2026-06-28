@@ -6,7 +6,7 @@
  * ("type instantiation is excessively deep"). The `@ts-expect-error` lines prove
  * links and `orderBy` properties are constrained to the resolved target type.
  *
- * Slice 3 adds the row-typing section: each `.expand(...)` widens the row's
+ * The row-typing section asserts each `.expand(...)` widens the row's
  * `.links` (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, with
  * optional `.linkProperties` and nested `.links`). Direct ObjectType links are
  * precise without a generated registry; id-only refs still use the registry.
@@ -140,7 +140,7 @@ function authoring(): void {
 
 void authoring
 
-// ── Row `.links` typing (slice 3) ──────────────────────────────────────────
+// ── Row `.links` typing ──────────────────────────────────────────
 //
 // Extract the row from a built query the same way production reads it: a direct
 // conditional `infer` on the `first()` terminal (never `Awaited<ReturnType<…>>`,

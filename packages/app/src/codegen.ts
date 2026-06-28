@@ -80,9 +80,9 @@ export async function generateAppEntry(
     authEnabled?: boolean
     appDir?: string
     /**
-     * Stylesheet to import from the generated entry. `undefined` keeps the
-     * legacy behavior (import `app/globals.css` when it exists); `null` skips
-     * the import; a path imports that file (e.g. compiled Tailwind output).
+     * Stylesheet to import from the generated entry. `undefined` auto-detects
+     * `app/globals.css` and imports it when it exists; `null` skips the import;
+     * a path imports that file (e.g. compiled Tailwind output).
      */
     stylesheetPath?: string | null
     /** Framework-owned stylesheets imported before the app stylesheet. */

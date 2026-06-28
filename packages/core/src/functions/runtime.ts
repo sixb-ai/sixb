@@ -21,7 +21,6 @@ export class FunctionRuntime {
   private readonly sixb: Sixb<readonly OntologySource[]>
   private readonly functions: readonly FunctionDefinition[]
   private readonly cleanups: CleanupFn[] = []
-  private readonly activeFunctions = new Set<string>()
   private started = false
 
   constructor(options: FunctionRuntimeOptions) {
@@ -62,8 +61,7 @@ export class FunctionRuntime {
     const errors: unknown[] = []
 
     while (this.cleanups.length > 0) {
-      const cleanup = this.cleanups.pop()
-      if (!cleanup) continue
+      const cleanup = this.cleanups.pop()!
 
       try {
         await cleanup()
@@ -98,7 +96,7 @@ export class FunctionRuntime {
         return
       }
 
-      void this.invokeCronHandler(functionId, trigger)
+      void this.safeInvoke(functionId, trigger, (ctx) => trigger.handler(ctx))
     }
 
     const interval = setInterval(tick, 1_000)
@@ -111,7 +109,7 @@ export class FunctionRuntime {
 
   private startIntervalTrigger(functionId: string, trigger: IntervalTriggerDefinition): void {
     const tick = () => {
-      void this.invokeIntervalHandler(functionId, trigger)
+      void this.safeInvoke(functionId, trigger, (ctx) => trigger.handler(ctx))
     }
 
     const handle = setInterval(tick, trigger.intervalMs)
@@ -128,37 +126,10 @@ export class FunctionRuntime {
     fn: (ctx: FunctionContext) => Promise<void> | void
   ): Promise<void> {
     const context = this.createContext({ id: functionId, trigger })
-    this.activeFunctions.add(functionId)
     try {
       await fn(context)
     } catch (error) {
       console.error(`[Sixb] Function '${functionId}' ${trigger.type} handler failed:`, error)
-    } finally {
-      this.activeFunctions.delete(functionId)
-    }
-  }
-
-  private async invokeCronHandler(
-    functionId: string,
-    trigger: CronTriggerDefinition
-  ): Promise<void> {
-    await this.safeInvoke(functionId, trigger, (ctx) => trigger.handler(ctx))
-  }
-
-  private async invokeIntervalHandler(
-    functionId: string,
-    trigger: IntervalTriggerDefinition
-  ): Promise<void> {
-    const metadata: FunctionMetadata = { id: functionId, trigger }
-    const context = this.createContext(metadata)
-
-    try {
-      await trigger.handler(context)
-    } catch (error) {
-      console.error(
-        `[Sixb] Function '${functionId}' interval handler failed:`,
-        error instanceof Error ? error.message : String(error)
-      )
     }
   }
 

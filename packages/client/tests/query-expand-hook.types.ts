@@ -1,4 +1,4 @@
-// Typecheck-only proof for the slice-5 `BuiltRow.links` hook fix: a row coming
+// Typecheck-only proof for the `BuiltRow.links` hook typing: a row coming
 // out of `useObjectsQuery`/`useObjectsInfinite` must carry PRECISE nested
 // `.links` AND survive `.map()`/`.flatMap()` over the result set WITHOUT tripping
 // TS2589. The builder-path proof (object-query-expand-recursion.types.ts) only
