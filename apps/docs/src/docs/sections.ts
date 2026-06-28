@@ -18,6 +18,8 @@ export const sections: readonly SectionDef[] = [
   { folder: "data", title: "Data" },
   { folder: "rules", title: "Rules" },
   { folder: "workflows", title: "Workflows" },
+  { folder: "agents", title: "Agents" },
+  { folder: "sandboxes", title: "Sandboxes" },
   { folder: "events", title: "Events & Webhooks" },
   { folder: "apps", title: "Building Apps" },
   { folder: "client", title: "Client SDK" },

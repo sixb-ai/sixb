@@ -33,6 +33,8 @@ acme-corp/
 │   └── business-health.ts
 ├── workflows/
 │   └── invoice-reminder.ts
+├── agents/
+│   └── invoice-assistant.ts
 ├── security/
 │   ├── groups/
 │   │   └── finance-admins.ts
@@ -66,6 +68,7 @@ a definition picked up depends on where it lives, not what the file is named.
 | `pipelines/` | Pipeline definitions | [Pipelines](../data/pipelines.md) |
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
 | `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
+| `agents/` | Agent definitions | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
 | `security/invite-policies/` | Invite-policy definitions | [Authentication](../auth/authentication.md) |
