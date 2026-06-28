@@ -72,7 +72,9 @@ export interface CreateSixbOptions {
  * Create a Sixb runtime using convention-based discovery.
  *
  * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
- * `syncs/`, `rules/`, `workflows/`, and `connectors/` relative to `projectRoot`.
+ * `datasets/`, `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
+ * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,invite-policies}/`
+ * relative to `projectRoot`.
  */
 export async function createSixb(
   options: CreateSixbOptions

@@ -1,0 +1,138 @@
+# Sandboxes
+
+A sandbox is an isolated environment where an agent runs bash commands. Reach for one whenever an
+[agent](../agents/overview.md) needs a shell: file work, scripts, `curl` against the sixb API
+gateway. The sandbox keeps that work off your host — its filesystem, network, and processes are
+walled off from the machine the runtime runs on.
+
+You pick a provider once and wire it into `createSixb`. Everything above the sandbox — the agent,
+its bash tool, its run lifecycle — is written against one provider-agnostic contract, so swapping
+providers never touches agent code.
+
+## The contract
+
+Two interfaces define the whole surface. A **`SandboxFactory`** holds the provider's defaults and is
+passed once to `createSixb`. A **`Sandbox`** is one isolated environment that runs commands.
+
+```ts
+interface SandboxFactory {
+  create(options?: CreateSandboxOptions): Promise<Sandbox>
+}
+
+interface Sandbox {
+  readonly id: string
+  readonly provider: string // "local" | "smolvm"
+  readonly status: "running" | "stopped" | "failed"
+  readonly workingDirectory: string
+
+  runCommand(
+    command: string,
+    args?: readonly string[],
+    options?: RunCommandOptions
+  ): Promise<CommandResult>
+
+  stop(): Promise<void> // mark stopped; later runCommand rejects. Idempotent.
+  destroy(): Promise<void> // stop and reclaim provider resources. Idempotent.
+}
+```
+
+The worker calls `factory.create()` once per agent run and `runCommand(...)` per command, then
+`destroy()` on teardown.
+
+`runCommand` resolves with a `CommandResult` rather than throwing on a non-zero exit — a failed
+command is data, not an exception:
+
+| Field | Meaning |
+| --- | --- |
+| `exitCode` | Process exit code (`0` on success) |
+| `stdout` | Captured standard output |
+| `stderr` | Captured standard error |
+| `durationMs` | Wall-clock run time |
+| `timedOut` | `true` when the command was killed for exceeding its timeout |
+
+`RunCommandOptions` overrides the sandbox-level defaults for a single call:
+
+| Option | Meaning |
+| --- | --- |
+| `cwd` | Working directory for this command |
+| `env` | Env merged on top of the sandbox env; per-call wins on collision |
+| `timeout` | Timeout in milliseconds; on expiry the command is killed and `timedOut` is set |
+| `signal` | An `AbortSignal` to cancel an in-flight command |
+
+`CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
+`timeout`, and `network`.
+
+## Wiring
+
+Construct a factory and pass it as `sandboxes`:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { LocalSandboxFactory } from "@sixb/sandboxes-local"
+
+export const sixb = await createSixb({
+  // ...broker, storage, queues, ontology, agents
+  sandboxes: new LocalSandboxFactory(),
+})
+```
+
+Switching to stronger isolation is a one-line change — the rest of the app is unaffected:
+
+```ts
+import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
+
+createSixb({ sandboxes: new SmolvmSandboxFactory() })
+```
+
+## Network policy
+
+Every provider speaks the same `SandboxNetworkPolicy`. It is set per-run at `create(...)` (or as a
+factory default) and governs what the sandbox can reach over the network:
+
+| Mode | Meaning |
+| --- | --- |
+| `{ mode: "none" }` | No outbound network (the default when none is set) |
+| `{ mode: "restricted", allow: [...] }` | Only the listed origins are reachable |
+| `{ mode: "all" }` | Unrestricted egress (discouraged in production) |
+
+Each `restricted` entry is a `{ name, origin }` target, for example
+`{ name: "sixb-api", origin: "http://10.0.0.5:3002" }`.
+
+Providers differ in how precisely they can enforce `restricted`. The [smolvm](./smolvm.md) provider
+enforces a real per-host allow list inside the microVM. The [local](./local.md) provider's isolation
+backends are all-or-nothing today: `none` blocks outbound network, any other mode allows host
+network. The contract is the same; read each provider page for what it actually enforces.
+
+## How agents use a sandbox
+
+You rarely call `runCommand` yourself. The agent worker does it:
+
+1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
+   whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
+   else.
+2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and the bash
+   tool awaits it lazily on the first command, so boot latency does not block the turn.
+3. Each `bash` tool call becomes `runCommand("bash", ["-lc", script], ...)`.
+4. On run teardown the worker calls `destroy()`.
+
+Because egress is locked to the gateway, the agent's only way to read or write app data is through
+that gateway — there is no open internet. See
+[Agent tools and the gateway](../agents/tools-and-gateway.md) for what the gateway exposes.
+
+## Choosing a provider
+
+| Provider | Package | Isolation | Use when |
+| --- | --- | --- | --- |
+| [Local](./local.md) | `@sixb/sandboxes-local` | OS sandboxing (seatbelt / bwrap) or passthrough | Development and local iteration |
+| [smolvm](./smolvm.md) | `@sixb/sandboxes-smolvm` | Hardware-isolated microVM | Production, or whenever stronger isolation is required |
+
+Rule of thumb: **local for dev, smolvm for stronger isolation in prod.** The local provider always
+boots — it falls back to no isolation when OS tooling is missing — so it is friction-free for
+development. smolvm gives each run its own microVM with a true per-host egress allow list, at the
+cost of a one-time binary install and image build.
+
+## Related
+
+- [Local sandbox](./local.md) — OS-level isolation backends and auto-detection
+- [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
+- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool can reach
