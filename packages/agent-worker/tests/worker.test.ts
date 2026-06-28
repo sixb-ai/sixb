@@ -1037,6 +1037,7 @@ describe("AgentWorker", () => {
       expect(querySkill).toContain("name: sixb-query")
       expect(querySkill).toContain("/api/object-types")
       expect(querySkill).toContain("references/query-api.md")
+      expect(querySkill).toContain("Do not invent alternative")
       expect(querySkill).not.toContain("SIXB_ACCESS_TOKEN")
 
       const queryApiReference = await readFile(
@@ -1046,6 +1047,10 @@ describe("AgentWorker", () => {
       expect(queryApiReference).toContain("/api/objects/query")
       expect(queryApiReference).toContain("/api/objects/query/facets")
       expect(queryApiReference).toContain("Do not send top-level")
+      expect(queryApiReference).toContain("This is the only list-by-type route")
+      expect(queryApiReference).toContain("Do not use `/api/objects/{objectTypeId}`")
+      expect(queryApiReference).toContain("Common Mistakes")
+      expect(queryApiReference).toContain('/api/objects/customer"')
       expect(queryApiReference).toContain('"kind":"limit"')
 
       const queryShapesReference = await readFile(
