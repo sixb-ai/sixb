@@ -29,6 +29,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
     entrypoints: [options.entryPath],
     outdir,
     target: "browser",
+    conditions: ["bun"],
     publicPath: "/",
     minify: true,
     sourcemap: "external",
