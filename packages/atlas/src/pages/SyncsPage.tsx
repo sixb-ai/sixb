@@ -40,6 +40,7 @@ import {
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { useSyncLiveUpdates } from "../features/syncs/hooks/useSyncLiveUpdates"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
@@ -550,6 +551,7 @@ function SyncRunList({ runs, queuedRun }: { runs: SyncRun[]; queuedRun: QueuedRu
 
 export function SyncsPage() {
   const { data: syncs = [], isLoading, isError } = useQuery(listSyncsOptions())
+  useSyncLiveUpdates({ enabled: syncs.length > 0 })
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [viewStyle, setViewStyle] = useState<SyncListViewStyle>(() =>
@@ -666,6 +668,7 @@ export function SyncDetailPage() {
   const navigate = useNavigate()
   const decodedSyncId = decodeURIComponent(syncId)
   const [queuedRun, setQueuedRun] = useState<QueuedRun | null>(null)
+  useSyncLiveUpdates({ syncId: decodedSyncId, enabled: decodedSyncId.length > 0 })
 
   const syncQuery = useQuery({
     ...getSyncOptions({
@@ -679,7 +682,6 @@ export function SyncDetailPage() {
       query: { syncId: decodedSyncId, limit: "12", order: "desc" },
     }),
     enabled: decodedSyncId.length > 0,
-    refetchInterval: queuedRun ? 1000 : 5000,
   })
 
   const requestRun = useMutation(requestSyncRunMutation())
@@ -710,8 +712,6 @@ export function SyncDetailPage() {
       {
         onSuccess: (result) => {
           setQueuedRun({ id: result.runId, queuedAt: result.queuedAt })
-          void syncQuery.refetch()
-          void runsQuery.refetch()
         },
       }
     )

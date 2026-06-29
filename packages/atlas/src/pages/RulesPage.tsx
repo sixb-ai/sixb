@@ -27,6 +27,7 @@ import { useQuery } from "@tanstack/react-query"
 import { BellRing, ChevronLeft, ChevronRight, ListChecks, Loader2, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { useRuleLiveUpdates } from "../features/rules/hooks/useRuleLiveUpdates"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -535,6 +536,7 @@ function RulesContent({
 export function RulesPage() {
   const rulesQuery = useQuery(listRulesOptions())
   const statesQuery = useQuery(listRuleStatesOptions({ query: { order: "desc" } }))
+  useRuleLiveUpdates({ enabled: (rulesQuery.data?.length ?? 0) > 0 })
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [viewStyle, setViewStyle] = useState<RulesListViewStyle>(() =>
@@ -645,6 +647,7 @@ export function RuleDetailPage() {
   const { ruleId = "" } = useParams()
   const navigate = useNavigate()
   const decodedRuleId = decodeURIComponent(ruleId)
+  useRuleLiveUpdates({ ruleId: decodedRuleId, enabled: decodedRuleId.length > 0 })
 
   const ruleQuery = useQuery({
     ...getRuleOptions({
@@ -658,7 +661,6 @@ export function RuleDetailPage() {
       query: { ruleId: decodedRuleId, order: "desc" },
     }),
     enabled: decodedRuleId.length > 0,
-    refetchInterval: 5000,
   })
 
   const rule = ruleQuery.data

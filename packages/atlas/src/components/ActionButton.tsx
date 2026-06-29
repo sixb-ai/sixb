@@ -1,5 +1,6 @@
 import type { ActionParam, ObjectAction } from "@sixb/client"
-import { executeAction as executeActionRequest } from "@sixb/client"
+import { decodeObjectId } from "@sixb/client"
+import { useActionRunMutation } from "@sixb/client/hooks"
 import {
   Badge,
   Button,
@@ -39,6 +40,7 @@ interface ActionParamsDialogProps {
   action: ObjectAction
   actionId: string
   onSubmit: (params: ActionParams) => void
+  submitting?: boolean
 }
 
 function ActionParamsDialog({
@@ -47,6 +49,7 @@ function ActionParamsDialog({
   action,
   actionId,
   onSubmit,
+  submitting = false,
 }: ActionParamsDialogProps) {
   const [values, setValues] = useState<Record<string, string>>({})
 
@@ -137,10 +140,18 @@ function ActionParamsDialog({
           ))}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={submitting}
+            >
               Cancel
             </Button>
-            <Button type="submit">Run</Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Run
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -157,48 +168,58 @@ export function ActionButton({
   requireConfirm,
 }: ActionButtonProps) {
   const navigate = useNavigate()
-  const [isExecuting, setIsExecuting] = useState(false)
   const [showParams, setShowParams] = useState(false)
   const [result, setResult] = useState<{ success: boolean; message?: string } | null>(null)
-
-  const hasRequiredParams = Object.values(action.params ?? {}).some((p: ActionParam) => p.required)
-  const shouldConfirm = requireConfirm ?? tone === "danger"
-
-  const runAction = async (params?: ActionParams) => {
-    if (shouldConfirm) {
-      const confirmed = window.confirm(`Run "${actionId.replace(/-/g, " ")}" on ${objectId}?`)
-      if (!confirmed) return
-    }
-
-    setIsExecuting(true)
-    setResult(null)
-
-    try {
-      const response = await executeActionRequest({
-        path: { objectId, actionId },
-        body: { params },
-      })
-
-      if (response.data?.success && response.data.runId) {
-        setResult({ success: true })
-        navigate(`/actions/runs/${response.data.runId}`)
-      } else if (response.data?.success) {
-        setResult({ success: true })
-        setTimeout(() => setResult(null), 2000)
-      } else {
-        setResult({ success: false, message: response.data?.error ?? "Action failed" })
-        setTimeout(() => setResult(null), 3000)
-      }
-    } catch (error) {
+  const requestAction = useActionRunMutation({
+    invalidateOnCommit: true,
+    onSuccess: (run) => {
+      setResult({ success: true })
+      setShowParams(false)
+      navigate(`/actions/runs/${run.id}`)
+    },
+    onError: (error) => {
+      setShowParams(false)
       setResult({
         success: false,
         message: error instanceof Error ? error.message : "Action failed",
       })
       setTimeout(() => setResult(null), 3000)
-    } finally {
-      setIsExecuting(false)
-      setShowParams(false)
+    },
+  })
+
+  const hasRequiredParams = Object.values(action.params ?? {}).some((p: ActionParam) => p.required)
+  const shouldConfirm = requireConfirm ?? tone === "danger"
+
+  const runAction = (params?: ActionParams) => {
+    if (shouldConfirm) {
+      const confirmed = window.confirm(`Run "${actionId.replace(/-/g, " ")}" on ${objectId}?`)
+      if (!confirmed) return
     }
+
+    requestAction.reset()
+    setResult(null)
+
+    const parsed = decodeObjectId(objectId)
+    if (!parsed) {
+      setResult({
+        success: false,
+        message: `Invalid object id: ${objectId}`,
+      })
+      setTimeout(() => setResult(null), 3000)
+      return
+    }
+
+    requestAction.mutate({
+      path: { actionId },
+      body: {
+        subject: {
+          kind: "object",
+          objectTypeId: parsed.objectTypeId,
+          primaryId: parsed.primaryId,
+        },
+        ...(params && Object.keys(params).length > 0 ? { params } : {}),
+      },
+    })
   }
 
   const handleClick = () => {
@@ -218,6 +239,7 @@ export function ActionButton({
         : tone === "primary"
           ? "default"
           : "outline"
+  const isExecuting = requestAction.isPending
 
   return (
     <>
@@ -239,6 +261,7 @@ export function ActionButton({
         action={action}
         actionId={actionId}
         onSubmit={runAction}
+        submitting={isExecuting}
       />
     </>
   )

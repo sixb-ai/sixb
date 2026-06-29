@@ -3,6 +3,7 @@ import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
+import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import {
   ActionRunDiffSummary,
   ActionRunMetaGrid,
@@ -15,10 +16,12 @@ export function ActionRunDetailPage() {
   const runQuery = useQuery({
     ...getActionRunOptions({ path: { runId } }),
     enabled: runId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === "queued" || status === "running" ? 2000 : false
-    },
+  })
+  const status = runQuery.data?.status
+  useActionLiveUpdates({
+    runId,
+    enabled:
+      runId.length > 0 && (status === undefined || status === "queued" || status === "running"),
   })
 
   if (!runId) {

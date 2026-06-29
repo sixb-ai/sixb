@@ -66,6 +66,7 @@ import {
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
+import { usePipelineLiveUpdates } from "../features/pipelines/hooks/usePipelineLiveUpdates"
 import { formatBytes, isNumericColumnType } from "../lib/datasets"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -276,6 +277,7 @@ function PipelineTableView({
 
 export function PipelinesPage() {
   const { data: pipelines = [], isLoading, isError } = useQuery(listPipelinesOptions())
+  usePipelineLiveUpdates({ enabled: pipelines.length > 0 })
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [viewStyle, setViewStyle] = useState<PipelineListViewStyle>(() =>
@@ -720,7 +722,6 @@ function RunsFloatingPanel({
       query: { pipelineId, limit: "20", order: "desc" },
     }),
     enabled: open,
-    refetchInterval: open ? 5000 : false,
   })
 
   if (!open) return null
@@ -954,6 +955,10 @@ export function PipelineDetailPage() {
   const decodedPipelineId = decodeURIComponent(pipelineId)
   const [runsOpen, setRunsOpen] = useState(false)
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null)
+  usePipelineLiveUpdates({
+    pipelineId: decodedPipelineId,
+    enabled: decodedPipelineId.length > 0,
+  })
 
   const pipelineQuery = useQuery({
     ...getPipelineOptions({ path: { pipelineId: decodedPipelineId } }),
@@ -969,7 +974,6 @@ export function PipelineDetailPage() {
       {
         onSuccess: () => {
           setRunsOpen(true)
-          void pipelineQuery.refetch()
         },
       }
     )

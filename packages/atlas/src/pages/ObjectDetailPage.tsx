@@ -36,6 +36,8 @@ import { TelemetryChart } from "../components/TelemetryChart"
 import { TelemetryValue } from "../components/TelemetryValue"
 import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
+import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
+import { useObjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
@@ -43,7 +45,6 @@ import { formatRelativeTime } from "../lib/time"
 
 interface ObjectDetailPageProps {
   projectName: string
-  latestUpdates: Record<string, TelemetryUpdate>
   objectLookup: Record<string, ObjectSummary>
 }
 
@@ -232,11 +233,7 @@ function getUsagePercent(
   return null
 }
 
-export function ObjectDetailPage({
-  projectName,
-  latestUpdates,
-  objectLookup,
-}: ObjectDetailPageProps) {
+export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPageProps) {
   const { objectId } = useParams<{ objectId: string }>()
   const navigate = useNavigate()
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null)
@@ -246,6 +243,10 @@ export function ObjectDetailPage({
     isoTimestamp(startOfLocalDay(new Date(Date.now() - 7 * 86_400_000)))
   )
   const [customTo, setCustomTo] = useState(() => isoTimestamp(endOfLocalDay(new Date())))
+  useObjectLiveUpdates({ objectId, enabled: Boolean(projectName && objectId) })
+  const latestUpdates = useObjectTelemetryUpdates(projectName, objectId, {
+    enabled: Boolean(objectId),
+  })
 
   useEffect(() => {
     if (!objectId) return

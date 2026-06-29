@@ -40,10 +40,6 @@ export function WorkflowRunHistoryTab() {
         },
       }
     },
-    refetchInterval:
-      selectedStatus === "all" || selectedStatus === "queued" || selectedStatus === "running"
-        ? 5000
-        : false,
   })
   const runs = useMemo(
     () => runsQuery.data?.pages.flatMap((page) => page.runs) ?? [],
