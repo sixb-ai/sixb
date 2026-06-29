@@ -57,8 +57,36 @@ describe("scopeKeysForEvent", () => {
     ).toEqual({ runId: "r3" })
   })
 
+  test("action topics carry action, run, and object subject scope", () => {
+    expect(
+      scopeKeysForEvent(
+        event("actions", "action.requested", {
+          actionId: "approveQuote",
+          runId: "act-1",
+          subject: { kind: "object", objectTypeId: "Quote", primaryId: "quote-1" },
+        })
+      )
+    ).toEqual({
+      actionId: "approveQuote",
+      runId: "act-1",
+      objectTypeId: "Quote",
+      primaryId: "quote-1",
+    })
+  })
+
+  test("global action topics carry action and run scope", () => {
+    expect(
+      scopeKeysForEvent(
+        event("actions", "action.completed", {
+          actionId: "refreshCache",
+          runId: "act-2",
+          subject: { kind: "none" },
+        })
+      )
+    ).toEqual({ actionId: "refreshCache", runId: "act-2" })
+  })
+
   test("topics without an object/run scope return no keys", () => {
-    expect(scopeKeysForEvent(event("actions", "action.requested", { actionId: "a" }))).toEqual({})
     expect(
       scopeKeysForEvent(
         event("rules", "rule.triggered", {
