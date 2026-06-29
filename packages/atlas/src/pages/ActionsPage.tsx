@@ -4,13 +4,10 @@ import type {
   ListActionsResponse,
 } from "@sixb/client"
 import {
-  getActionRunQueryKey,
   listActionRunsOptions,
-  listActionRunsQueryKey,
   listActionsOptions,
-  listActionsQueryKey,
   listObjectsInfiniteOptions,
-  requestActionMutation,
+  useActionRunMutation,
 } from "@sixb/client/hooks"
 import {
   Alert,
@@ -50,11 +47,12 @@ import {
   Textarea,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
 import { type SyntheticEvent, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
+import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
 import {
   type ActionRequestPayload,
@@ -93,6 +91,7 @@ const actionRunStatusClasses: Record<ActionRunStatus, string> = {
 export function ActionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab: ActionsPageTab = searchParams.get("tab") === "runs" ? "runs" : "actions"
+  useActionLiveUpdates({ enabled: activeTab === "runs" })
 
   const handleTabChange = (value: string) => {
     const nextTab: ActionsPageTab = value === "runs" ? "runs" : "actions"
@@ -206,10 +205,6 @@ function PhaseBadge({ active, children }: { active: boolean; children: string })
 function ActionRunHistoryTab() {
   const runsQuery = useQuery({
     ...listActionRunsOptions({ query: { limit: "50", order: "desc" } }),
-    refetchInterval: (query) =>
-      query.state.data?.runs.some((run) => run.status === "queued" || run.status === "running")
-        ? 2000
-        : false,
   })
   const runs = runsQuery.data?.runs ?? []
 
@@ -297,23 +292,15 @@ function ActionRequestDialog({
   subject?: { kind: "object"; objectTypeId: string; primaryId: string }
 }) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState<Record<string, string>>({})
   const [subjectPrimaryId, setSubjectPrimaryId] = useState(subject?.primaryId ?? "")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  const requestAction = useMutation({
-    ...requestActionMutation(),
-    onSuccess: async (response) => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: listActionsQueryKey() }),
-        queryClient.invalidateQueries({ queryKey: listActionRunsQueryKey() }),
-        queryClient.invalidateQueries({
-          queryKey: getActionRunQueryKey({ path: { runId: response.runId } }),
-        }),
-      ])
+  const requestAction = useActionRunMutation({
+    invalidateOnCommit: true,
+    onSuccess: (run) => {
       setOpen(false)
-      navigate(`/actions/runs/${response.runId}`)
+      navigate(`/actions/runs/${run.id}`)
     },
   })
 
@@ -438,7 +425,7 @@ function ActionRequestDialog({
             </Button>
             <Button type="submit" disabled={requestAction.isPending}>
               {requestAction.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Request action
+              {requestAction.isPending ? "Running action..." : "Request action"}
             </Button>
           </DialogFooter>
         </form>

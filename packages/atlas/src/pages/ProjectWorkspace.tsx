@@ -1,6 +1,5 @@
-import type { ObjectSummary, TelemetryUpdate } from "@sixb/client"
+import type { ObjectSummary } from "@sixb/client"
 import {
-  events,
   getProjectInfoOptions,
   listActionsOptions,
   listAgentsOptions,
@@ -14,7 +13,6 @@ import {
   listSyncsOptions,
   listWorkflowsOptions,
   objectCountOptions,
-  useLatestByObject,
 } from "@sixb/client/hooks"
 import { Button, Card, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -35,7 +33,6 @@ import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
 import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccountsPage"
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
 import { SettingsTokensPage } from "../components/SettingsTokensPage"
-import { WorkflowLiveUpdatesBoundary } from "../features/workflows/components/WorkflowLiveUpdatesBoundary"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -247,23 +244,6 @@ export function ProjectWorkspace() {
     enabled: !!projectInfo,
   })
 
-  const { byObject: latestByObject } = useLatestByObject(events.telemetry(), {
-    enabled: Boolean(resolvedProjectName),
-  })
-
-  // Flatten the per-object live telemetry into the `project:object:property`
-  // keyed store the workspace renders from, scoped to the current project.
-  const latestUpdates = useMemo(() => {
-    const flattened: Record<string, TelemetryUpdate> = {}
-    for (const updatesByProperty of Object.values(latestByObject)) {
-      for (const update of Object.values(updatesByProperty)) {
-        if (resolvedProjectName && update.projectName !== resolvedProjectName) continue
-        flattened[`${update.projectName}:${update.objectId}:${update.propertyId}`] = update
-      }
-    }
-    return flattened
-  }, [latestByObject, resolvedProjectName])
-
   const selectedObjectIdForSidebar = objectIdFromUrl
 
   useEffect(() => {
@@ -299,12 +279,6 @@ export function ProjectWorkspace() {
   useEffect(() => {
     return () => setSidebarData(null)
   }, [setSidebarData])
-
-  const latestProjectUpdates = useMemo(
-    () =>
-      Object.values(latestUpdates).filter((update) => update.projectName === resolvedProjectName),
-    [latestUpdates, resolvedProjectName]
-  )
 
   const objectLookup = useMemo(
     () =>
@@ -369,12 +343,10 @@ export function ProjectWorkspace() {
       <Route path="agents" element={<AgentsPage />} />
       <Route path="agents/new/:agentId" element={<AgentsPage />} />
       <Route path="agents/:threadId" element={<AgentsPage />} />
-      <Route element={<WorkflowLiveUpdatesBoundary />}>
-        <Route path="workflows" element={<WorkflowsPage />} />
-        <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
-        <Route path="runs" element={<RunsTabRedirect />} />
-        <Route path="runs/:runId" element={<RunDetailPage />} />
-      </Route>
+      <Route path="workflows" element={<WorkflowsPage />} />
+      <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
+      <Route path="runs" element={<RunsTabRedirect />} />
+      <Route path="runs/:runId" element={<RunDetailPage />} />
       <Route
         path="*"
         element={constrained(
@@ -394,7 +366,6 @@ export function ProjectWorkspace() {
                   classFilter={classFilter}
                   selectedObjectType={selectedObjectType}
                   selectedObjectId={selectedObjectIdForSidebar}
-                  latestProjectUpdates={latestProjectUpdates}
                   onSortByChange={handleObjectSortByChange}
                   onClassFilterChange={setClassFilter}
                   onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
@@ -430,11 +401,7 @@ export function ProjectWorkspace() {
             <Route
               path=":objectId"
               element={
-                <ObjectDetailPage
-                  projectName={resolvedProjectName}
-                  latestUpdates={latestUpdates}
-                  objectLookup={objectLookup}
-                />
+                <ObjectDetailPage projectName={resolvedProjectName} objectLookup={objectLookup} />
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />

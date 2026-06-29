@@ -26,6 +26,7 @@ import { WorkflowNodeRow } from "../features/workflows/components/nodes/Workflow
 import { RequestWorkflowRunDialog } from "../features/workflows/components/RequestWorkflowRunDialog"
 import { RunHistoryTable } from "../features/workflows/components/runs/RunHistoryTable"
 import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
+import { useWorkflowLiveUpdates } from "../features/workflows/hooks/useWorkflowLiveUpdates"
 import {
   allWorkflowRunStatuses,
   isWorkflowRunStatus,
@@ -42,6 +43,7 @@ type WorkflowTab = "definition" | "runs"
 export function WorkflowDetailPage() {
   const { workflowId = "" } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
+  useWorkflowLiveUpdates({ workflowId, enabled: workflowId.length > 0 })
   const workflowQuery = useQuery({
     ...getWorkflowOptions({ path: { workflowId } }),
     enabled: workflowId.length > 0,
@@ -338,10 +340,6 @@ function WorkflowDetailRunsTab({ workflowId }: { workflowId: string }) {
         },
       }
     },
-    refetchInterval:
-      selectedStatus === "all" || selectedStatus === "queued" || selectedStatus === "running"
-        ? 5000
-        : false,
   })
 
   const runs = useMemo(

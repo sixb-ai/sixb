@@ -52,6 +52,7 @@ import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { DatasetDetails } from "../features/datasets/DatasetDetails"
 import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
+import { useDatasetLiveUpdates } from "../features/datasets/hooks/useDatasetLiveUpdates"
 import {
   consumerCount,
   datasetName,
@@ -180,6 +181,7 @@ function DatasetTableView({
 
 export function DatasetsPage() {
   const { data: datasets = [], isLoading, isError } = useQuery(listDatasetsOptions())
+  useDatasetLiveUpdates({ enabled: datasets.length > 0 })
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
   const [viewStyle, setViewStyle] = useState<DatasetListViewStyle>(() =>
@@ -346,6 +348,7 @@ export function DatasetDetailPage() {
   const navigate = useNavigate()
   const decodedDatasetId = decodeURIComponent(datasetId)
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
+  useDatasetLiveUpdates({ datasetId: decodedDatasetId, enabled: decodedDatasetId.length > 0 })
   const [rowsOffset, setRowsOffset] = useState(0)
   const [quickFilter, setQuickFilter] = useState("")
   const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => new Set())

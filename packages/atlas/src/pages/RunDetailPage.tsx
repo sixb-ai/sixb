@@ -10,11 +10,11 @@ import { StructuredValue } from "../components/StructuredValue"
 import { RunNodeRow } from "../features/workflows/components/nodes/RunNodeRow"
 import { RunProgress } from "../features/workflows/components/runs/RunProgress"
 import { StatusBadge } from "../features/workflows/components/runs/StatusBadge"
+import { useWorkflowLiveUpdates } from "../features/workflows/hooks/useWorkflowLiveUpdates"
 import {
   formatDate,
   formatRunDuration,
   formatRunStartedDate,
-  isActiveRunStatus,
   runTimeLabel,
   type WorkflowRunDetail,
 } from "../features/workflows/utils/workflows"
@@ -24,10 +24,16 @@ export function RunDetailPage() {
   const runQuery = useQuery({
     ...getWorkflowRunOptions({ path: { runId } }),
     enabled: runId.length > 0,
-    refetchInterval: (query) => {
-      const status = query.state.data?.run.status
-      return status && isActiveRunStatus(status) ? 5000 : false
-    },
+  })
+  const runStatus = runQuery.data?.run.status
+  useWorkflowLiveUpdates({
+    runId,
+    enabled:
+      runId.length > 0 &&
+      (runStatus === undefined ||
+        runStatus === "queued" ||
+        runStatus === "running" ||
+        runStatus === "waiting"),
   })
   const workflowId = runQuery.data?.run.workflowId
   const workflowQuery = useQuery({

@@ -1,23 +1,28 @@
-import {
-  events,
-  getWorkflowQueryKey,
-  getWorkflowRunQueryKey,
-  listWorkflowRunsInfiniteQueryKey,
-  listWorkflowRunsQueryKey,
-  listWorkflowsQueryKey,
-  useInvalidateOnEvent,
-} from "@sixb/client/hooks"
+import { events, useInvalidateOnEvent } from "@sixb/client/hooks"
+import { type InvalidationKey, queryKey, queryKeyWithPath } from "../../../lib/liveUpdateKeys"
 
-export function useWorkflowLiveUpdates() {
+const debounceMs = 100
+
+export function useWorkflowLiveUpdates(
+  options: { enabled?: boolean; workflowId?: string; runId?: string } = {}
+) {
+  const builder = options.runId ? events.workflows().run(options.runId) : events.workflows()
+
   useInvalidateOnEvent(
-    events.workflows(),
-    (event) => [
-      listWorkflowsQueryKey(),
-      listWorkflowRunsQueryKey(),
-      listWorkflowRunsInfiniteQueryKey(),
-      getWorkflowQueryKey({ path: { workflowId: event.payload.workflowId } }),
-      getWorkflowRunQueryKey({ path: { runId: event.payload.runId } }),
-    ],
-    { debounceMs: 100 }
+    builder,
+    (event) => {
+      if (options.workflowId && event.payload.workflowId !== options.workflowId) return []
+
+      const keys: InvalidationKey[] = [
+        queryKey("listWorkflows"),
+        queryKey("listWorkflowRuns"),
+        queryKey("listWorkflowInterventions"),
+        queryKeyWithPath("getWorkflow", { workflowId: event.payload.workflowId }),
+        queryKeyWithPath("getWorkflowRun", { runId: event.payload.runId }),
+      ]
+
+      return keys
+    },
+    { enabled: options.enabled ?? true, debounceMs }
   )
 }

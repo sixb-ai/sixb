@@ -6,12 +6,14 @@ import { useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { WorkflowRunHistoryTab } from "../features/workflows/components/runs/WorkflowRunHistoryTab"
 import { WorkflowCard } from "../features/workflows/components/workflows/WorkflowCard"
+import { useWorkflowLiveUpdates } from "../features/workflows/hooks/useWorkflowLiveUpdates"
 
 type WorkflowsPageTab = "workflows" | "runs"
 
 export function WorkflowsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab: WorkflowsPageTab = searchParams.get("tab") === "runs" ? "runs" : "workflows"
+  useWorkflowLiveUpdates()
 
   const handleTabChange = (value: string) => {
     const nextTab: WorkflowsPageTab = value === "runs" ? "runs" : "workflows"

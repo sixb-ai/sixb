@@ -27,6 +27,8 @@ import { type ReactNode, useDeferredValue, useEffect, useMemo, useState } from "
 import { LetterAvatar, LoadingState } from "../components/common"
 import { ObjectIcon } from "../components/ObjectIcon"
 import { ObjectQueryBar, ObjectsQueryPagination } from "../components/objects/ObjectQueryBar"
+import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
+import { useProjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
 import { formatCount } from "../lib/formatValue"
 import { formatLocation, humanizeIdentifier } from "../lib/labels"
 import {
@@ -69,7 +71,6 @@ interface ObjectsWorkbenchProps {
   classFilter?: string | null
   selectedObjectType?: AtlasObjectType | null
   selectedObjectId?: string | null
-  latestProjectUpdates: TelemetryUpdate[]
   onSortByChange: (sortBy: ObjectSortPreference) => void
   onClassFilterChange: (objectTypeId: string | null) => void
   onSelectObject: (id: string) => void
@@ -122,7 +123,6 @@ export function ObjectsWorkbench({
   classFilter,
   selectedObjectType,
   selectedObjectId,
-  latestProjectUpdates,
   onSortByChange,
   onClassFilterChange,
   onSelectObject,
@@ -134,6 +134,7 @@ export function ObjectsWorkbench({
   const [querySort, setQuerySort] = useState<QuerySort | null>(null)
   const [viewStyle, setViewStyle] = useState<ViewStyle>(getObjectViewStyle)
   const selectedTypeMode = classFilter != null
+  useObjectLiveUpdates({ enabled: Boolean(projectName) })
 
   useEffect(() => {
     if (classFilter === undefined) return
@@ -182,6 +183,9 @@ export function ObjectsWorkbench({
     querySort,
     textSearchEnabled,
   ])
+  const latestProjectUpdates = useProjectTelemetryUpdates(projectName, {
+    enabled: queryMode && viewStyle === "table",
+  })
 
   const facetQuery = useMemo(() => {
     if (!queryMode || !classFilter) return null

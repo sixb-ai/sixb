@@ -42,7 +42,6 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
   }
   const interventionsQuery = useQuery({
     ...listWorkflowInterventionsOptions(interventionQueryOptions),
-    refetchInterval: 5000,
   })
   const workflowQuery = useQuery(getWorkflowOptions({ path: { workflowId: node.workflowId } }))
   const intervention = interventionsQuery.data?.interventions[0]
