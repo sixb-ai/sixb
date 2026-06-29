@@ -19,14 +19,37 @@ export const pressButton = defineAction("pressButton", {
     const client = await getRokuApi(sixb, target.properties.controlHost)
     await client.keypress(params.button)
 
-    if (params.button === "PowerOff") {
-      // TODO(actions-v2): move local telemetry writes out of writeback once EditBatch supports them.
+    const nextPowerState = expectedPowerStateAfterKeypress(
+      params.button,
+      target.properties.powerState
+    )
+    if (nextPowerState) {
+      // Telemetry is not part of EditBatch yet, so mirror action-known state
+      // immediately from writeback instead of waiting for the next device poll.
       await sixb.objects(Television).appendTelemetryBatch([
         {
           id: target.primaryId,
-          properties: { powerState: "PowerOff" },
+          properties: {
+            powerState: nextPowerState,
+            ...(nextPowerState === "PowerOff" ? { activeApp: null, mediaState: null } : {}),
+          },
           at: new Date(),
         },
       ])
     }
   })
+
+function expectedPowerStateAfterKeypress(
+  button: string,
+  currentPowerState: unknown
+): string | null {
+  if (button === "PowerOff") {
+    return "PowerOff"
+  }
+
+  if (button === "Power") {
+    return currentPowerState === "PowerOn" ? "PowerOff" : "PowerOn"
+  }
+
+  return null
+}

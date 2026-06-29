@@ -10,6 +10,8 @@ interface EventSubscriptionState {
   types?: DomainEvent["type"][]
   objectTypeId?: string
   primaryId?: string
+  actionId?: string
+  runId?: string
   afterCursor?: string
   limit: number
   polling: boolean
@@ -22,6 +24,8 @@ const SubscribeSchema = z.object({
   types: z.array(z.enum(EVENT_TYPES)).optional(),
   objectTypeId: z.string().optional(),
   primaryId: z.string().optional(),
+  actionId: z.string().optional(),
+  runId: z.string().optional(),
   afterCursor: z.string().optional(),
   limit: z.number().int().positive().max(500).optional(),
 })
@@ -68,6 +72,8 @@ function createDefaultState(): EventSubscriptionState {
     types: undefined,
     objectTypeId: undefined,
     primaryId: undefined,
+    actionId: undefined,
+    runId: undefined,
     afterCursor: undefined,
     limit: 200,
     polling: false,
@@ -115,10 +121,10 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
 
         // Each event payload may carry object data, so visibility is derived
         // per-event from the principal's grants (see `canViewEvent`), and the
-        // optional object scope narrows the stream further. The cursor advances
-        // over every event read, not just the ones sent.
+        // optional scope narrows the stream further. The cursor advances over
+        // every event read, not just the ones sent.
         for (const event of events) {
-          if (!eventMatchesScope(event, state.objectTypeId, state.primaryId)) {
+          if (!eventMatchesScope(event, state)) {
             continue
           }
           if (canViewEvent(authz, event)) {
@@ -175,6 +181,8 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
         state.types = undefined
         state.objectTypeId = undefined
         state.primaryId = undefined
+        state.actionId = undefined
+        state.runId = undefined
         state.afterCursor = await resolveLatestCursor(server)
         safeSend(ws, { type: "unsubscribed" })
         return
@@ -184,6 +192,8 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       state.types = parsed.data.types
       state.objectTypeId = parsed.data.objectTypeId
       state.primaryId = parsed.data.primaryId
+      state.actionId = parsed.data.actionId
+      state.runId = parsed.data.runId
       state.limit = parsed.data.limit ?? state.limit
       state.afterCursor = parsed.data.afterCursor ?? state.afterCursor
 
@@ -204,16 +214,18 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
 }
 
 /**
- * Narrow an event to an optional object scope. Scope keys are resolved by core's
+ * Narrow an event to an optional subscription scope. Scope keys are resolved by core's
  * `scopeKeysForEvent` (the same extraction the client predicate uses), so events
  * without those keys (e.g. workflows) never match a scoped subscription.
  */
-function eventMatchesScope(
-  event: DomainEvent,
-  objectTypeId: string | undefined,
-  primaryId: string | undefined
-): boolean {
-  if (objectTypeId === undefined && primaryId === undefined) {
+function eventMatchesScope(event: DomainEvent, filter: EventSubscriptionState): boolean {
+  const { objectTypeId, primaryId, actionId, runId } = filter
+  if (
+    objectTypeId === undefined &&
+    primaryId === undefined &&
+    actionId === undefined &&
+    runId === undefined
+  ) {
     return true
   }
 
@@ -222,6 +234,12 @@ function eventMatchesScope(
     return false
   }
   if (primaryId !== undefined && scope.primaryId !== primaryId) {
+    return false
+  }
+  if (actionId !== undefined && scope.actionId !== actionId) {
+    return false
+  }
+  if (runId !== undefined && scope.runId !== runId) {
     return false
   }
 

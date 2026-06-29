@@ -51,35 +51,32 @@ const { data: history } = await getTelemetryHistory({
   query: { from: "2025-01-01T00:00:00Z", to: "2025-01-02T00:00:00Z", order: "asc" },
 })
 
-// Request an action on an object, then inspect the durable run
-import { getActionRun, requestAction } from "@sixb/client"
+// Request an action on an object, then wait for terminal success/failure
+import { requestActionAndWait } from "@sixb/client"
 
-const { data: requested } = await requestAction({
+const run = await requestActionAndWait({
   path: { actionId: "setTemperature" },
   body: {
     subject: { kind: "object", objectTypeId: "thermostat", primaryId: "living-room" },
     params: { target: 72 },
   },
-  throwOnError: true,
-})
-
-const { data: run } = await getActionRun({
-  path: { runId: requested.runId },
-  throwOnError: true,
+  timeoutMs: 30_000,
 })
 ```
 
 ### React Query hooks
 
-```typescript
+```tsx
 import { useQuery } from "@tanstack/react-query"
 import {
   listObjectsOptions,
   getObjectOptions,
   getTelemetryHistoryOptions,
   telemetryHistoryQueryOptions,
+  useActionRunMutation,
   useTelemetryHistoryQuery,
 } from "@sixb/client/hooks"
+import { Thermostat } from "./ontology/Thermostat"
 
 // List objects with automatic caching and refetching
 const { data: objects } = useQuery(listObjectsOptions())
@@ -112,7 +109,31 @@ const temperatureHistoryOptions = telemetryHistoryQueryOptions({
   objectId: "living-room",
   property: Thermostat.p.temperature,
 })
+
+// Action mutation whose success means the action run reached terminal success.
+function SetTemperatureButton() {
+  const setTemperature = useActionRunMutation<{ target: number }>({
+    actionId: "setTemperature",
+    subject: { objectType: Thermostat, primaryId: "living-room" },
+    invalidateOnCommit: true,
+  })
+
+  return (
+    <button
+      type="button"
+      disabled={setTemperature.isPending}
+      onClick={() => setTemperature.mutate({ target: 72 })}
+    >
+      {setTemperature.isPending ? "Setting..." : "Set to 72"}
+    </button>
+  )
+}
 ```
+
+Use `useActionRunMutation()` for app buttons where loading, success, and error states should
+reflect the final action run. Keep the generated `requestActionMutation()` or root
+`requestAction()` for enqueue-only flows where accepting the request is enough, such as long
+background work or screens that immediately navigate to a run detail view.
 
 ### Domain events
 
@@ -120,7 +141,7 @@ Subscribe with the fluent `events(Type)` builder (mirrors `objects(Type)`):
 channels narrow the event and type the payload, `.object(key)` scopes to one
 instance, and the hooks take a built builder as their first argument.
 
-```typescript
+```tsx
 import { events, useEvents, useLatest } from "@sixb/client/hooks"
 import { Thermostat } from "./ontology/Thermostat"
 
@@ -138,10 +159,21 @@ function LiveDashboard() {
 }
 ```
 
-Mount `SixbEventsProvider` once near the app root to multiplex every hook onto a
-single shared WebSocket (without it, each hook opens its own socket). Use
-`useInvalidateOnEvent(builder, resolveKeys)` to invalidate TanStack Query keys on
-matching events.
+Action events can be scoped by run, action id, or object subject when a screen needs custom
+coordination:
+
+```typescript
+useEvents(events.actions().run("run_123").terminal(), (event) => {
+  console.log("action finished", event.payload.runId)
+})
+
+useEvents(events.actions().subject(Thermostat).object("living-room").completed(), () => {
+  console.log("thermostat action succeeded")
+})
+```
+
+Use `useInvalidateOnEvent(builder, resolveKeys)` to invalidate TanStack Query keys on
+matching events. See `docs/client/events.md` for the full event builder and hook guide.
 
 ### UI models
 
@@ -156,6 +188,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), all generated types, and UI model types/adapters |
-| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks), the `events(Type)` builder, and event hooks (`useEvents`, `useLatest`, `useLatestByObject`, `useInvalidateOnEvent`, `SixbEventsProvider`) |
+| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), terminal action wait helpers (`requestActionAndWait`, `waitForActionRun`), all generated types, and UI model types/adapters |
+| `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks, `useActionRunMutation`), object-query key/invalidation helpers, the `events(Type)` builder, and event hooks (`useEvents`, `useLatest`, `useLatestByObject`, `useInvalidateOnEvent`, `SixbEventsProvider`) |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`, `executeAction`) |

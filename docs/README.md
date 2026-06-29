@@ -108,4 +108,5 @@ it to an `Employee`, append telemetry, or render it in your app.
 - [Ontology](ontology/overview.md) — model your domain
 - [Objects](objects/overview.md) — read, write, and query object instances
 - [Building apps](apps/overview.md) — put a typed UI on top
+- [Running actions from apps](apps/actions.md) — wire action buttons with terminal state
 - [Manual install](fundamentals/manual-install.md) — add Sixb to an existing project

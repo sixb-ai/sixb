@@ -1,6 +1,6 @@
 import { encodeObjectId } from "@sixb/client"
-import { events, getObjectOptions, requestActionMutation, useLatest } from "@sixb/client/hooks"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { events, getObjectOptions, useActionRunMutation, useLatest } from "@sixb/client/hooks"
+import { useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 import { useParams } from "react-router-dom"
 import {
@@ -9,6 +9,7 @@ import {
   FAN_SPEED_NAMES,
   MODE_NAMES,
 } from "../../../lib/acUnitConstants"
+import { PanasonicAcUnit } from "../../../ontology/acUnit"
 
 function decodeKey(input: string | undefined): string | null {
   if (!input) return null
@@ -286,9 +287,24 @@ function ThermostatGauge({
 
 /* ── Toggle ── */
 
-function Toggle({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+function Toggle({
+  label,
+  on,
+  onToggle,
+  disabled = false,
+}: {
+  label: string
+  on: boolean
+  onToggle: () => void
+  disabled?: boolean
+}) {
   return (
-    <button type="button" className={`toggle ${on ? "is-on" : ""}`} onClick={onToggle}>
+    <button
+      type="button"
+      className={`toggle ${on ? "is-on" : ""}`}
+      onClick={onToggle}
+      disabled={disabled}
+    >
       <span className="toggle-track">
         <span className="toggle-thumb" />
       </span>
@@ -329,7 +345,9 @@ export default function UnitDetail() {
   const object = objectQuery.data
 
   const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
-  const { mutate: sendAction } = useMutation(requestActionMutation())
+  const { mutate: sendAction, isPending: actionPending } = useActionRunMutation({
+    invalidateOnCommit: true,
+  })
 
   function val(propId: string): unknown {
     return liveState[propId]?.value ?? object?.properties[propId]
@@ -363,15 +381,11 @@ export default function UnitDetail() {
   }, [objectKey, object?.properties])
 
   function doAction(actionId: string, params: Record<string, unknown>) {
-    if (!objectKey) return
+    if (!objectKey || actionPending) return
     sendAction({
       path: { actionId },
       body: {
-        subject: {
-          kind: "object",
-          objectTypeId: acUnitObjectTypeId,
-          primaryId: objectKey,
-        },
+        subject: { objectType: PanasonicAcUnit, primaryId: objectKey },
         params,
       },
     })
@@ -476,6 +490,7 @@ export default function UnitDetail() {
                   <button
                     type="button"
                     className="control-btn"
+                    disabled={actionPending || target == null}
                     onClick={() =>
                       target != null && doAction("setTemperature", { value: target - 0.5 })
                     }
@@ -488,6 +503,7 @@ export default function UnitDetail() {
                   <button
                     type="button"
                     className="control-btn"
+                    disabled={actionPending || target == null}
                     onClick={() =>
                       target != null && doAction("setTemperature", { value: target + 0.5 })
                     }
@@ -507,6 +523,7 @@ export default function UnitDetail() {
                       key={code}
                       type="button"
                       className={`control-btn ${mode === Number(code) ? "active" : ""}`}
+                      disabled={actionPending}
                       onClick={() => doAction("setMode", { mode: Number(code) })}
                     >
                       {name}
@@ -523,6 +540,7 @@ export default function UnitDetail() {
                       key={code}
                       type="button"
                       className={`control-btn ${fanSpeed === Number(code) ? "active" : ""}`}
+                      disabled={actionPending}
                       onClick={() => doAction("setFan", { speed: Number(code) })}
                     >
                       {name}
@@ -540,6 +558,7 @@ export default function UnitDetail() {
                     <button
                       type="button"
                       className={`control-btn ${power ? "power-on" : "power-off"}`}
+                      disabled={actionPending}
                       onClick={() => doAction("setPower", { on: !power })}
                       style={{ minWidth: "5.5rem" }}
                     >
@@ -550,11 +569,13 @@ export default function UnitDetail() {
                     label="ECO"
                     on={eco}
                     onToggle={() => doAction("setEco", { enabled: !eco })}
+                    disabled={actionPending}
                   />
                   <Toggle
                     label="nanoe"
                     on={nanoe}
                     onToggle={() => doAction("setNanoe", { enabled: !nanoe })}
+                    disabled={actionPending}
                   />
                 </div>
               </div>

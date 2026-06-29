@@ -85,6 +85,24 @@ describe("events builder IR", () => {
     expect(events.all().ir).toEqual({})
     expect(events.telemetry().ir).toEqual({ topic: "telemetry" })
     expect(events.workflows().run("run-1").ir).toEqual({ topic: "workflows", runId: "run-1" })
+    expect(events.actions().run("act-1").action("approveQuote").terminal().ir).toEqual({
+      topic: "actions",
+      runId: "act-1",
+      actionId: "approveQuote",
+      types: ["action.completed", "action.failed"],
+    })
+    expect(events.actions().subject(Sensor).object("sensor-1").completed().ir).toEqual({
+      topic: "actions",
+      objectTypeId: "Sensor",
+      primaryId: "sensor-1",
+      types: ["action.completed"],
+    })
+    expect(events.actions().subject("Sensor").object("sensor-1").failed().ir).toEqual({
+      topic: "actions",
+      objectTypeId: "Sensor",
+      primaryId: "sensor-1",
+      types: ["action.failed"],
+    })
   })
 })
 
@@ -137,6 +155,47 @@ describe("buildEventPredicate", () => {
     expect(matches(event({ ...wfEvent, payload: { workflowId: "wf-1", runId: "run-2" } }))).toBe(
       false
     )
+  })
+
+  test("actions match run, action id and object subject scope", () => {
+    const matches = buildEventPredicate(
+      events.actions().run("act-1").action("approveQuote").subject(Sensor).object("sensor-1").ir
+    )
+    const actionCompleted = event({
+      type: "action.completed",
+      topic: "actions",
+      payload: {
+        actionId: "approveQuote",
+        runId: "act-1",
+        subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
+        finishedAt: "2026-01-01T00:00:00.000Z",
+      },
+    })
+    expect(matches(actionCompleted)).toBe(true)
+    expect(
+      matches(
+        event({ ...actionCompleted, payload: { ...actionCompleted.payload, runId: "act-2" } })
+      )
+    ).toBe(false)
+    expect(
+      matches(
+        event({
+          ...actionCompleted,
+          payload: { ...actionCompleted.payload, actionId: "rejectQuote" },
+        })
+      )
+    ).toBe(false)
+    expect(
+      matches(
+        event({
+          ...actionCompleted,
+          payload: {
+            ...actionCompleted.payload,
+            subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-2" },
+          },
+        })
+      )
+    ).toBe(false)
   })
 
   test("an empty filter matches everything", () => {
@@ -246,6 +305,34 @@ describe("builder subscribe over the transport", () => {
       }),
     })
     expect(received).toHaveLength(1)
+
+    unsubscribe()
+    expect(ws.closed).toBe(true)
+  })
+
+  test("sends action run, action id and subject scope to the server", () => {
+    const unsubscribe = events
+      .actions()
+      .run("act-1")
+      .action("approveQuote")
+      .subject(Sensor)
+      .object("sensor-1")
+      .terminal()
+      .subscribe(() => undefined)
+
+    const ws = FakeWebSocket.instances.at(-1)
+    if (!ws) throw new Error("expected a websocket")
+
+    ws.onopen?.()
+    expect(JSON.parse(ws.sent[0])).toMatchObject({
+      type: "subscribe",
+      topic: "actions",
+      types: ["action.completed", "action.failed"],
+      runId: "act-1",
+      actionId: "approveQuote",
+      objectTypeId: "Sensor",
+      primaryId: "sensor-1",
+    })
 
     unsubscribe()
     expect(ws.closed).toBe(true)

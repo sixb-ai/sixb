@@ -178,6 +178,26 @@ const { data } = useQuery({
 })
 ```
 
+## Query Keys and Invalidation
+
+The hooks export stable object-query keys and exact invalidation helpers for apps that need
+manual cache control:
+
+```tsx
+import { invalidateObjectQuery, objectQueryKeys } from "@sixb/client/hooks"
+
+await queryClient.invalidateQueries({
+  queryKey: objectQueryKeys.count(openProjects),
+  exact: true,
+})
+
+await invalidateObjectQuery(queryClient, openProjects.limit(50))
+```
+
+For action buttons, prefer `useActionRunMutation({ invalidateOnCommit: true })`. It waits for
+the terminal action run and invalidates action-run caches plus object-query caches when the run
+commits edits.
+
 ## Transport overrides
 
 Hooks execute the query IR through the global SDK client (`client`, exported from
@@ -234,4 +254,6 @@ try {
 - [/objects/querying](../objects/querying.md) — fluent builder reference
 - [/objects/http-reference](../objects/http-reference.md) — query route contracts
 - [/apps/querying-data](../apps/querying-data.md) — querying from custom apps
+- [/client/events](events.md) — live event hooks and invalidation patterns
+- [/apps/actions](../apps/actions.md) — running actions and invalidating queries from apps
 - [/client](overview.md) — SDK setup and client configuration

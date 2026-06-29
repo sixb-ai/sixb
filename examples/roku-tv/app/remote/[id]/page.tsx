@@ -2,21 +2,22 @@ import {
   events,
   getObjectOptions,
   getObjectTypeOptions,
-  requestActionMutation,
+  useActionRunMutation,
   useLatest,
 } from "@sixb/client/hooks"
 import { encodeObjectId } from "@sixb/client/models"
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { useCallback, useMemo, useState } from "react"
 import { Link, useParams } from "react-router-dom"
 import { televisionObjectTypeId, televisionTwinProps } from "../../../lib/televisionTwin"
+import { Television } from "../../../ontology/television"
 
 const KEYS = {
   dpad: ["Up", "Down", "Left", "Right", "Select"],
   nav: ["Back", "Home", "Info"],
   media: ["Rev", "Play", "Fwd"],
   volume: ["VolumeUp", "VolumeDown", "VolumeMute"],
-  power: ["Power"],
+  power: ["Power", "PowerOff"],
 } as const
 
 type RokuKey = (typeof KEYS)[keyof typeof KEYS][number]
@@ -37,6 +38,7 @@ const KEY_LABELS: Partial<Record<RokuKey, string>> = {
   VolumeDown: "Vol-",
   VolumeMute: "Mute",
   Power: "Power",
+  PowerOff: "Off",
 }
 
 const APP_SHORTCUTS = ["Netflix", "Prime", "Hulu", "Disney+"] as const
@@ -47,15 +49,17 @@ function RemoteButton({
   onClick,
   variant = "default",
   active = false,
+  loading = false,
   disabled = false,
 }: {
   label: string
   onClick: () => void
   variant?: "default" | "power" | "small" | "ok" | "shortcut"
   active?: boolean
+  loading?: boolean
   disabled?: boolean
 }) {
-  const baseClasses = `remote-btn${active ? " is-active" : ""}`
+  const baseClasses = `remote-btn${active ? " is-active" : ""}${loading ? " is-loading" : ""}`
   const variants = {
     default: "",
     power: " power",
@@ -70,8 +74,10 @@ function RemoteButton({
       className={`${baseClasses}${variants[variant]}`}
       onClick={onClick}
       disabled={disabled}
+      aria-busy={loading}
     >
-      {label}
+      <span className="remote-btn-label">{label}</span>
+      {loading ? <span className="remote-btn-spinner" aria-hidden="true" /> : null}
     </button>
   )
 }
@@ -117,8 +123,31 @@ export default function RemoteControl() {
 
   const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
 
-  const { mutate: sendAction } = useMutation(requestActionMutation())
-  const [lastPressedKey, setLastPressedKey] = useState<RokuKey | null>(null)
+  const { mutateAsync: sendAction } = useActionRunMutation<{
+    button: RokuKey
+  }>({
+    actionId: "pressButton",
+    subject: objectKey ? { objectType: Television, primaryId: objectKey } : undefined,
+    invalidateOnCommit: true,
+  })
+  const [pendingByKey, setPendingByKey] = useState<Partial<Record<RokuKey, number>>>({})
+
+  const incrementPending = useCallback((key: RokuKey) => {
+    setPendingByKey((current) => ({ ...current, [key]: (current[key] ?? 0) + 1 }))
+  }, [])
+
+  const decrementPending = useCallback((key: RokuKey) => {
+    setPendingByKey((current) => {
+      const nextCount = (current[key] ?? 0) - 1
+      const next = { ...current }
+      if (nextCount > 0) {
+        next[key] = nextCount
+      } else {
+        delete next[key]
+      }
+      return next
+    })
+  }, [])
 
   const pressKey = useCallback(
     (key: RokuKey) => {
@@ -126,25 +155,19 @@ export default function RemoteControl() {
         return
       }
 
-      setLastPressedKey(key)
-      sendAction({
-        path: {
-          actionId: "pressButton",
-        },
-        body: {
-          subject: {
-            kind: "object",
-            objectTypeId: televisionObjectTypeId,
-            primaryId: objectKey,
-          },
-          params: { button: key },
-        },
-      })
-      setTimeout(() => {
-        setLastPressedKey((current) => (current === key ? null : current))
-      }, 170)
+      incrementPending(key)
+      void sendAction({ button: key })
+        .catch((error) => {
+          console.error(
+            `[Sixb] Roku action ${key} failed:`,
+            error instanceof Error ? error.message : String(error)
+          )
+        })
+        .finally(() => {
+          decrementPending(key)
+        })
     },
-    [objectKey, sendAction]
+    [decrementPending, incrementPending, objectKey, sendAction]
   )
 
   const powerState =
@@ -158,6 +181,21 @@ export default function RemoteControl() {
     object?.properties[televisionTwinProps.mediaState]
   const availableActions = objectTypeQuery.data?.actions?.map((a) => a.id) ?? []
   const isPoweredOn = powerState === "PowerOn"
+  const powerButtonKey: RokuKey = isPoweredOn ? "PowerOff" : "Power"
+  const pendingEntries = (Object.entries(pendingByKey) as [RokuKey, number][]).filter(
+    ([, count]) => count > 0
+  )
+  const pendingCount = pendingEntries.reduce((total, [, count]) => total + count, 0)
+  const pendingLabel =
+    pendingEntries.length === 1
+      ? `${KEY_LABELS[pendingEntries[0][0]] ?? pendingEntries[0][0]}${
+          pendingEntries[0][1] > 1 ? ` x${pendingEntries[0][1]}` : ""
+        }`
+      : pendingCount > 0
+        ? `${pendingCount} pending`
+        : null
+  const powerActionPending = (pendingByKey.Power ?? 0) > 0 || (pendingByKey.PowerOff ?? 0) > 0
+  const keyIsPending = (key: RokuKey) => (pendingByKey[key] ?? 0) > 0
 
   const title = useMemo(() => {
     return asString(object?.properties[televisionTwinProps.name]) ?? objectKey ?? "Television"
@@ -187,7 +225,11 @@ export default function RemoteControl() {
             <div className="telemetry-grid">
               <div className="panel-glass telemetry-card">
                 <p className="telemetry-label">Power</p>
-                <p className={`telemetry-value ${isPoweredOn ? "is-ok" : "is-warn"}`}>
+                <p
+                  className={`telemetry-value ${isPoweredOn ? "is-ok" : "is-warn"}${
+                    powerActionPending ? " is-pending" : ""
+                  }`}
+                >
                   {isPoweredOn ? "On" : "Standby"}
                 </p>
               </div>
@@ -203,6 +245,12 @@ export default function RemoteControl() {
             <div className="telemetry-footnote">
               Actions: {availableActions.join(", ") || "(none)"}
             </div>
+            {pendingLabel ? (
+              <div className="action-pending-row" role="status">
+                <span className="action-pending-spinner" aria-hidden="true" />
+                <span>{pendingLabel}</span>
+              </div>
+            ) : null}
           </section>
 
           <section className="device-remote fade-slide stagger-2">
@@ -219,15 +267,19 @@ export default function RemoteControl() {
 
             <div className="remote-row">
               <RemoteButton
-                label={KEY_LABELS.Power ?? "Power"}
-                onClick={() => pressKey("Power")}
+                label={KEY_LABELS[powerButtonKey] ?? powerButtonKey}
+                onClick={() => pressKey(powerButtonKey)}
                 variant="power"
-                active={lastPressedKey === "Power"}
+                active={powerActionPending}
+                loading={powerActionPending}
+                disabled={!objectKey || powerActionPending}
               />
               <RemoteButton
                 label={KEY_LABELS.Home ?? "Home"}
                 onClick={() => pressKey("Home")}
-                active={lastPressedKey === "Home"}
+                active={keyIsPending("Home")}
+                loading={keyIsPending("Home")}
+                disabled={!objectKey}
               />
             </div>
 
@@ -236,30 +288,40 @@ export default function RemoteControl() {
               <RemoteButton
                 label={KEY_LABELS.Up ?? "Up"}
                 onClick={() => pressKey("Up")}
-                active={lastPressedKey === "Up"}
+                active={keyIsPending("Up")}
+                loading={keyIsPending("Up")}
+                disabled={!objectKey}
               />
               <div />
               <RemoteButton
                 label={KEY_LABELS.Left ?? "Left"}
                 onClick={() => pressKey("Left")}
-                active={lastPressedKey === "Left"}
+                active={keyIsPending("Left")}
+                loading={keyIsPending("Left")}
+                disabled={!objectKey}
               />
               <RemoteButton
                 label={KEY_LABELS.Select ?? "OK"}
                 onClick={() => pressKey("Select")}
                 variant="ok"
-                active={lastPressedKey === "Select"}
+                active={keyIsPending("Select")}
+                loading={keyIsPending("Select")}
+                disabled={!objectKey}
               />
               <RemoteButton
                 label={KEY_LABELS.Right ?? "Right"}
                 onClick={() => pressKey("Right")}
-                active={lastPressedKey === "Right"}
+                active={keyIsPending("Right")}
+                loading={keyIsPending("Right")}
+                disabled={!objectKey}
               />
               <div />
               <RemoteButton
                 label={KEY_LABELS.Down ?? "Down"}
                 onClick={() => pressKey("Down")}
-                active={lastPressedKey === "Down"}
+                active={keyIsPending("Down")}
+                loading={keyIsPending("Down")}
+                disabled={!objectKey}
               />
               <div />
             </div>
@@ -271,7 +333,9 @@ export default function RemoteControl() {
                   label={KEY_LABELS[key] ?? key}
                   onClick={() => pressKey(key)}
                   variant="small"
-                  active={lastPressedKey === key}
+                  active={keyIsPending(key)}
+                  loading={keyIsPending(key)}
+                  disabled={!objectKey}
                 />
               ))}
             </div>
@@ -282,7 +346,9 @@ export default function RemoteControl() {
                   key={key}
                   label={KEY_LABELS[key] ?? key}
                   onClick={() => pressKey(key)}
-                  active={lastPressedKey === key}
+                  active={keyIsPending(key)}
+                  loading={keyIsPending(key)}
+                  disabled={!objectKey}
                 />
               ))}
             </div>
@@ -294,7 +360,9 @@ export default function RemoteControl() {
                   label={KEY_LABELS[key] ?? key}
                   onClick={() => pressKey(key)}
                   variant="small"
-                  active={lastPressedKey === key}
+                  active={keyIsPending(key)}
+                  loading={keyIsPending(key)}
+                  disabled={!objectKey}
                 />
               ))}
             </div>
