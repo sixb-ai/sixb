@@ -320,10 +320,43 @@ a {
   color: var(--warn);
 }
 
+.telemetry-value.is-pending {
+  text-shadow: 0 0 18px currentColor;
+}
+
 .telemetry-footnote {
   margin-top: 1rem;
   font-size: 0.9rem;
   color: var(--muted);
+}
+
+.action-pending-row {
+  margin-top: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0.42rem 0.72rem;
+  border: 1px solid rgba(83, 224, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(8, 19, 36, 0.72);
+  color: var(--accent-soft);
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.action-pending-spinner,
+.remote-btn-spinner {
+  display: inline-block;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.28);
+  border-top-color: currentColor;
+  animation: spin 700ms linear infinite;
+}
+
+.action-pending-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .code-tag {
@@ -423,6 +456,9 @@ a {
 }
 
 .remote-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
   border: 0;
   color: #dce7ff;
   font-weight: 670;
@@ -441,6 +477,21 @@ a {
     0 10px 20px rgba(0, 0, 0, 0.35),
     inset 0 1px 1px rgba(255, 255, 255, 0.22);
   transition: transform 100ms ease, box-shadow 100ms ease, border-color 150ms ease;
+}
+
+.remote-btn-label {
+  grid-area: 1 / 1;
+}
+
+.remote-btn-spinner {
+  grid-area: 1 / 1;
+  width: 1rem;
+  height: 1rem;
+  color: var(--accent-soft);
+}
+
+.remote-btn.is-loading .remote-btn-label {
+  opacity: 0.24;
 }
 
 .remote-btn:hover {
@@ -535,7 +586,13 @@ a {
 }
 
 .remote-btn:disabled {
-  opacity: 1;
+  cursor: wait;
+}
+
+.remote-btn:disabled:not(.is-loading) {
+  cursor: default;
+  opacity: 0.52;
+  filter: saturate(0.72);
 }
 
 .shortcuts-row {
@@ -585,6 +642,12 @@ a {
   50% {
     opacity: 0.62;
     transform: scale(1.28);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

@@ -80,6 +80,31 @@ describe("parseSubscriptionMessage", () => {
     })
   })
 
+  test("accepts action-scoped subscriptions", () => {
+    const result = parseSubscriptionMessage({
+      type: "subscribe",
+      topic: "actions",
+      types: ["action.completed", "action.failed"],
+      actionId: "approveQuote",
+      runId: "act-1",
+      objectTypeId: "Quote",
+      primaryId: "q_123",
+    })
+
+    expect(result).toEqual({
+      ok: true,
+      data: {
+        type: "subscribe",
+        topic: "actions",
+        types: ["action.completed", "action.failed"],
+        actionId: "approveQuote",
+        runId: "act-1",
+        objectTypeId: "Quote",
+        primaryId: "q_123",
+      },
+    })
+  })
+
   test("rejects non-object payloads", () => {
     const result = parseSubscriptionMessage("subscribe")
 
@@ -216,6 +241,85 @@ describe("/ws/events subscriptions", () => {
         expect(await nextWsMessage(ws)).toMatchObject({
           type: "event",
           event: { cursor: matching?.cursor, payload: { objectId: "fan-1" } },
+        })
+        await expectNoWsMessage(ws)
+      } finally {
+        ws.close()
+      }
+    })
+  })
+
+  test("scopes action streams by run, action id and object subject", async () => {
+    await withWsServer(async ({ baseUrl, sixb }) => {
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
+
+        const [matching] = await sixb.events.append({
+          events: [
+            {
+              type: "action.completed",
+              payload: {
+                actionId: "approveQuote",
+                runId: "act-1",
+                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
+                finishedAt: "2026-02-18T10:00:10.000Z",
+              },
+            },
+          ],
+        })
+        await sixb.events.append({
+          events: [
+            {
+              type: "action.completed",
+              payload: {
+                actionId: "approveQuote",
+                runId: "act-2",
+                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
+                finishedAt: "2026-02-18T10:00:11.000Z",
+              },
+            },
+            {
+              type: "action.completed",
+              payload: {
+                actionId: "rejectQuote",
+                runId: "act-1",
+                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_123" },
+                finishedAt: "2026-02-18T10:00:12.000Z",
+              },
+            },
+            {
+              type: "action.completed",
+              payload: {
+                actionId: "approveQuote",
+                runId: "act-1",
+                subject: { kind: "object", objectTypeId: "Quote", primaryId: "q_999" },
+                finishedAt: "2026-02-18T10:00:13.000Z",
+              },
+            },
+          ],
+        })
+
+        ws.send(
+          JSON.stringify({
+            type: "subscribe",
+            topic: "actions",
+            types: ["action.completed"],
+            actionId: "approveQuote",
+            runId: "act-1",
+            objectTypeId: "Quote",
+            primaryId: "q_123",
+          })
+        )
+
+        expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "event",
+          event: {
+            cursor: matching?.cursor,
+            payload: { actionId: "approveQuote", runId: "act-1" },
+          },
         })
         await expectNoWsMessage(ws)
       } finally {

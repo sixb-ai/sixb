@@ -24,6 +24,10 @@ export interface EventSocketOptions {
   readonly objectTypeId?: string
   /** Object-instance scope; the server narrows the stream when set. */
   readonly primaryId?: string
+  /** Action id scope; the server narrows the stream when set. */
+  readonly actionId?: string
+  /** Run id scope; the server narrows run/action streams when set. */
+  readonly runId?: string
   readonly afterCursor?: string
   readonly limit?: number
   readonly reconnect?: boolean
@@ -52,7 +56,7 @@ type EventStreamServerMessage =
  * the same fields when they are sent on the subscribe message).
  */
 export function createEventSocket(options: EventSocketOptions): EventSocket {
-  const { topic, types, objectTypeId, primaryId, limit } = options
+  const { topic, types, objectTypeId, primaryId, actionId, runId, limit } = options
   let latestCursor = options.afterCursor
 
   return createReconnectingSocket({
@@ -68,6 +72,8 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
       ...(types && types.length > 0 ? { types } : {}),
       ...(objectTypeId ? { objectTypeId } : {}),
       ...(primaryId ? { primaryId } : {}),
+      ...(actionId ? { actionId } : {}),
+      ...(runId ? { runId } : {}),
       ...(latestCursor ? { afterCursor: latestCursor } : {}),
       ...(limit ? { limit } : {}),
     }),

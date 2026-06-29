@@ -6,7 +6,7 @@ schema, so every route, request body, and response is typed end to end.
 
 The package ships as a set of focused subpaths. You import only the layer you
 need: the raw generated SDK, a typed object-query builder, TanStack Query
-hooks, a live WebSocket events hook, or the browser auth bootstrap.
+hooks, live WebSocket event hooks, or the browser auth bootstrap.
 
 ## Mental model
 
@@ -34,10 +34,10 @@ layer and never touch the transport directly. In a standalone app, configure
 
 | Import | What it gives you |
 | --- | --- |
-| `@sixb/client` | Generated per-route SDK functions, the shared `client`, and the UI models from `/models` |
+| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, and the UI models from `/models` |
 | `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
-| `@sixb/client/events` | `SixbEvent` types and the `isSixbEvent` guard |
+| `@sixb/client/events` | `SixbEvent` types and the `events(...)` builder |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
 | `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
 
@@ -62,6 +62,27 @@ const { data } = await listObjects({
 Every SDK function accepts the standard hey-api options (`path`, `query`,
 `body`, `throwOnError`, `responseStyle`, and a per-call `client` override). The
 shared `client` is also exported here for configuration.
+
+For actions that should behave like a normal async command, use
+`requestActionAndWait`. It sends the enqueue request, listens for terminal action
+events, and fetches the final action-run detail as the source of truth.
+
+```ts
+import { requestActionAndWait } from "@sixb/client"
+
+const run = await requestActionAndWait({
+  path: { actionId: "markPaid" },
+  body: {
+    subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-1" },
+    params: { paymentMethod: "card" },
+  },
+  timeoutMs: 30_000,
+})
+```
+
+Failed and cancelled terminal runs reject with `ActionRunFailedError`; timeouts
+reject with `ActionRunTimeoutError`. Keep the generated `requestAction()` when
+you only need enqueue acknowledgement.
 
 ## /query: typed object queries
 
@@ -117,26 +138,46 @@ import { SixbProvider } from "@sixb/client/hooks"
 For typed-query hooks (`useObjectsQuery` and friends), see
 [querying data](../apps/querying-data.md).
 
-## /events: live WebSocket
+### Action run mutations
 
-`@sixb/client/events` carries the `SixbEvent` union types and the `isSixbEvent`
-guard. The `useSixbEvents` hook (re-exported from `/hooks`) opens a WebSocket to
-`/ws/events`, subscribes by `topic` and/or `types`, and reconnects on drop.
+Use `useActionRunMutation` when mutation state should represent the final action
+run, not just the enqueue request.
 
 ```tsx
-import { useSixbEvents } from "@sixb/client/hooks"
+import { useActionRunMutation } from "@sixb/client/hooks"
+import { Invoice } from "../ontology/invoice"
 
-const { connected } = useSixbEvents({
-  topic: "telemetry",
-  types: ["telemetry.appended"],
-  onEvent(event) {
-    // event is narrowed to telemetry.appended
-  },
+const markPaid = useActionRunMutation<{ paymentMethod: "card" | "ach" }>({
+  actionId: "markPaid",
+  subject: { objectType: Invoice, primaryId: invoiceId },
+  invalidateOnCommit: true,
 })
 ```
 
-The subscription type is narrowed from `topic` and `types`. See the
-[events](../events/overview.md) section for the full topic and type catalog.
+With `invalidateOnCommit: true`, terminal runs refresh action-run caches and, when
+a commit diff exists, object detail caches plus the typed object-query cache
+group. See [running actions from apps](../apps/actions.md) for loading, error,
+high-frequency control, and manual invalidation patterns.
+
+## /events: live WebSocket
+
+`@sixb/client/events` carries the `SixbEvent` union types, the `isSixbEvent`
+guard, and the fluent `events(...)` builder. React apps use the builder through
+hooks re-exported from `/hooks`: `useEvents`, `useLatest`, `useLatestByObject`,
+and `useInvalidateOnEvent`.
+
+```tsx
+import { events, useEvents } from "@sixb/client/hooks"
+import { Invoice } from "../ontology/invoice"
+
+useEvents(events(Invoice).object(invoiceId).upserted(), (event) => {
+  console.log(event.payload.properties)
+})
+```
+
+The builder scopes and narrows event payloads by object type, topic, action run,
+and action subject. See [client events](events.md) for setup, builder methods,
+latest telemetry hooks, and cache invalidation patterns.
 
 ## /browser: auth bootstrap
 
@@ -191,14 +232,17 @@ so they are safe to pass through URLs and route params.
 | One-off API call, no React | root SDK function (`@sixb/client`) |
 | Typed object query, no React | `@sixb/client/query` |
 | React component reading data | `@sixb/client/hooks` |
-| Live updates in React | `useSixbEvents` (`@sixb/client/hooks`) |
+| React action button with terminal loading/error state | `useActionRunMutation` (`@sixb/client/hooks`) |
+| Live updates in React | `events(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
 | Bootstrap a standalone browser client | `@sixb/client/browser` |
 | Encode/decode ids or fire actions | `@sixb/client/models` |
 
 ## Related
 
 - [Typed queries](typed-queries.md) — the object-query builder reference
+- [Client events](events.md) — live event builders and React hooks
 - [Querying data in apps](../apps/querying-data.md) — hooks in practice
+- [Running actions from apps](../apps/actions.md) — action buttons and terminal mutation state
 - [Events](../events/overview.md) — topics and event types
 - [Authentication](../auth/authentication.md) — sessions and CSRF
 - [Building apps](../apps/overview.md) — the Sixb-served app model

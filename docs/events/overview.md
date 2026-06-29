@@ -104,6 +104,10 @@ const unsubscribe = await sixb.events.subscribe(
 unsubscribe()
 ```
 
+In browser apps, use the `@sixb/client` event builder and React hooks instead of hand-written
+predicates. See [Client events](../client/events.md). For action buttons, prefer
+`useActionRunMutation` unless the screen needs broader live coordination.
+
 ### Appending events
 
 `sixb.events.append(input)` writes one or more events. The runtime emits domain events for
@@ -216,7 +220,9 @@ webhook delivery storage to be configured.
 ## Related
 
 - [Connectors](../data/connectors.md) — where webhooks live
+- [Client events](../client/events.md) — event builders and React hooks for apps
 - [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative
   reactions to object state and multi-step processes
+- [Running actions from apps](../apps/actions.md) — action button state and scoped action events
 - [Server](../server/overview.md) — the HTTP/WebSocket API
 - [Authorization](../auth/authorization.md) — how `/api/events` is scoped

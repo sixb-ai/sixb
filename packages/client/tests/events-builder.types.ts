@@ -145,6 +145,45 @@ events
     void runId
   })
 
+events
+  .actions()
+  .run("act-1")
+  .action("approveQuote")
+  .subject(Sensor)
+  .object("sensor-1")
+  .completed()
+  .subscribe((event) => {
+    const runId: string = event.payload.runId
+    const actionId: string = event.payload.actionId
+    const finishedAt: string = event.payload.finishedAt
+    // @ts-expect-error — completed events do not carry an error payload.
+    void event.payload.error
+    void [runId, actionId, finishedAt]
+  })
+
+events
+  .actions()
+  .subject("Sensor")
+  .object("sensor-1")
+  .failed()
+  .subscribe((event) => {
+    const message: string = event.payload.error.message
+    void message
+  })
+
+events
+  .actions()
+  .terminal()
+  .subscribe((event) => {
+    if (event.type === "action.failed") {
+      const message: string = event.payload.error.message
+      void message
+    } else {
+      const finishedAt: string = event.payload.finishedAt
+      void finishedAt
+    }
+  })
+
 // ── TS2589 stressor: wide object type through `.upserted()` + `.map()` ────────
 
 const WideThing = defineObjectType({

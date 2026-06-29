@@ -174,9 +174,31 @@ query.data?.map((object) => object.primaryId)
 For everything else — filtering, search, facets, link traversal, paging, and typed rows — use the
 typed builder.
 
+## Invalidating After Actions
+
+For app buttons that run actions, prefer `useActionRunMutation({ invalidateOnCommit: true })`.
+It waits for terminal action success or failure and refreshes object-query caches from the
+committed run, so most screens do not need custom event listeners.
+
+If you are handling events manually, use the exported key helpers instead of copying cache keys:
+
+```tsx
+import { invalidateObjectQuery } from "@sixb/client/hooks"
+import { useQueryClient } from "@tanstack/react-query"
+import { openInvoices } from "../queries/invoices"
+
+const queryClient = useQueryClient()
+
+await invalidateObjectQuery(queryClient, openInvoices.limit(50))
+```
+
+See [running actions](actions.md) for complete button, loading, and error patterns.
+
 ## Related
 
 - [Querying Objects](../objects/querying.md) — the full query language and predicate reference.
 - [Client](../client/overview.md) — the browser client and transport.
 - [Typed Queries](../client/typed-queries.md) — typed queries from the browser in depth.
+- [Client Events](../client/events.md) — live updates, telemetry hooks, and event invalidation.
+- [Running actions](actions.md) — action buttons and cache invalidation in apps.
 - [Apps](overview.md) — building app screens and routes.

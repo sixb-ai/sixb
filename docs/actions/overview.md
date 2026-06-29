@@ -246,6 +246,12 @@ await sixb.actions.request({
 request idempotent — re-requesting the same `runId` with the same action, subject, and params
 returns the existing run (`created: false`) instead of starting a new one.
 
+In browser apps, prefer `useActionRunMutation` from `@sixb/client/hooks` for button-driven
+commands. Its loading, success, and error states track the terminal run, and
+`invalidateOnCommit: true` refreshes object queries after committed edits. The generated
+`requestActionMutation()` remains enqueue-only and resolves as soon as the server accepts the
+request. See [running actions from apps](../apps/actions.md).
+
 | Option | Applies to | Meaning |
 | --- | --- | --- |
 | `action` / `actionId` | both | The action to run — pass the definition or its id. |
@@ -278,13 +284,22 @@ The runtime also appends [domain events](../events/overview.md) you can subscrib
 | `action.completed` | Run succeeded | `actionId`, `runId`, `subject`, `finishedAt` |
 | `action.failed` | Run failed | `actionId`, `runId`, `subject`, `error`, `finishedAt` |
 
-These are how `requestActionAndWait` detects completion. To react to a run, subscribe through
-`sixb.events`, or model the reaction as a [rule](../rules/overview.md) or
-[workflow](../workflows/overview.md).
+These are how `requestActionAndWait` detects completion. In client code, the fluent event
+builder can scope action events by run, action id, or object subject:
+
+```tsx
+events.actions().run(runId).terminal()
+events.actions().action("markPaid").completed()
+events.actions().subject(Invoice).object("inv-1").failed()
+```
+
+To react to a run on the server, subscribe through `sixb.events`, or model the reaction as a
+[rule](../rules/overview.md) or [workflow](../workflows/overview.md).
 
 ## Related
 
 - [Objects](../objects/overview.md) — the CRUD and edit facade actions stage into.
 - [Object CRUD](../objects/crud.md) — `create`/`update`/`delete`/`link` used inside `edits`.
 - [Events](../events/overview.md) — the domain-event stream actions emit.
+- [Running actions from apps](../apps/actions.md) — React action buttons and terminal state.
 - [Authorization](../auth/authorization.md) — `apply:action` grants gate who can request actions.

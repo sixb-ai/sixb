@@ -22,8 +22,9 @@ the API.
 | `app/public/` static assets | Same-origin `<a>` click interception (SPA nav) |
 
 Pages fetch data with the typed hooks from `@sixb/client/hooks` and the typed
-query builder from `@sixb/client/query`, then render with your own components or
-`@sixb/ui`. See [querying data](querying-data.md).
+query builder from `@sixb/client/query`, run action buttons with
+`useActionRunMutation`, then render with your own components or `@sixb/ui`. See
+[querying data](querying-data.md) and [running actions](actions.md).
 
 > `app/` is not discovered by `createSixb()` — it is built and served separately
 > by the CLI. Your ontology, datasets, functions, and the rest stay in their own
@@ -106,8 +107,9 @@ export default function ProjectsPage() {
 }
 ```
 
-Hooks, the query builder, filtering, faceting, telemetry, and actions are covered
-in [querying data](querying-data.md).
+Hooks, the query builder, filtering, faceting, and telemetry are covered in
+[querying data](querying-data.md). Button-driven action flows are covered in
+[running actions](actions.md).
 
 ### Navigation
 
@@ -198,8 +200,12 @@ bun sixb app
 
 ## Next
 
-- [Querying data](querying-data.md) — fetch objects, telemetry, facets, and
-  actions from pages with the typed `@sixb/client/hooks` and `@sixb/client/query`.
+- [Querying data](querying-data.md) — fetch objects, telemetry, and facets from
+  pages with the typed `@sixb/client/hooks` and `@sixb/client/query`.
+- [Client events](../client/events.md) — live telemetry, activity feeds, and
+  event-driven invalidation.
+- [Running actions](actions.md) — wire action buttons with terminal loading,
+  success, error, and cache invalidation states.
 - [Typed client](../client/overview.md) — the generated client the hooks build on,
   for non-app callers.
 - [Authentication](../auth/authentication.md) — how the app shell establishes the

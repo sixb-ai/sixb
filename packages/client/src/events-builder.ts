@@ -40,6 +40,8 @@ export interface EventsFilterIR {
   readonly linkId?: string
   /** `.run(runId)` scope (workflows / pipelines / syncs). */
   readonly runId?: string
+  /** `.action(actionId)` scope (actions). */
+  readonly actionId?: string
 }
 
 // ── Payload typing ──────────────────────────────────────────────────────────
@@ -139,6 +141,42 @@ export interface EventsRunBuilder<TEvent extends SixbEvent> extends Subscribable
   run(runId: string): EventsRunBuilder<TEvent>
 }
 
+/** Object-subject scope builder for action events: `events.actions().subject(Type).object(id)`. */
+export interface EventsActionSubjectBuilder<TEvent extends SixbEvent>
+  extends SubscribableEvents<TEvent> {
+  /** Scope to a single action subject object. */
+  object(primaryId: string): EventsActionBuilder<TEvent>
+}
+
+/** Action-scoped topic builder: `events.actions().run(runId).completed()`. */
+export interface EventsActionBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
+  /** Scope to a single action run id. */
+  run(runId: string): EventsActionBuilder<TEvent>
+
+  /** Scope to one action definition id. */
+  action(actionId: string): EventsActionBuilder<TEvent>
+
+  /** Scope to an object-bound action subject type. */
+  subject<TObjectType extends ObjectTypeWithTokens>(
+    objectType: TObjectType
+  ): EventsActionSubjectBuilder<TEvent>
+  subject(objectTypeId: string): EventsActionSubjectBuilder<TEvent>
+
+  /** Action request events. */
+  requested(): EventsActionBuilder<SixbEventOfType<"action.requested">>
+
+  /** Successful terminal action events. */
+  completed(): EventsActionBuilder<SixbEventOfType<"action.completed">>
+
+  /** Failed or cancelled terminal action events. */
+  failed(): EventsActionBuilder<SixbEventOfType<"action.failed">>
+
+  /** All terminal action events. */
+  terminal(): EventsActionBuilder<
+    SixbEventOfType<"action.completed"> | SixbEventOfType<"action.failed">
+  >
+}
+
 /**
  * The minimal builder contract the React hooks consume: a filter IR plus a
  * typed `subscribe`. Every builder surface satisfies it, and the hooks infer
@@ -160,10 +198,10 @@ export interface EventSubscribeExecutor {
 }
 
 /**
- * WebSocket-backed executor. The transport receives the coarse `topic`/`types`
- * subscription; the finer scope (objectTypeId / primaryId / propertyId / linkId
- * / runId) is applied client-side by `buildEventPredicate` before the handler
- * runs — exactly the manual filtering every call site reimplements today.
+ * WebSocket-backed executor. The transport sends the server-supported scope,
+ * then `buildEventPredicate` applies the full filter client-side before the
+ * handler runs. That keeps property/link filters local and makes server
+ * filtering an optimization rather than a correctness dependency.
  */
 export function createWsSubscribeExecutor(options?: { client?: Client }): EventSubscribeExecutor {
   const baseUrl = options?.client?.getConfig().baseUrl
@@ -173,11 +211,12 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
       const socket = createEventSocket({
         topic: filter.topic,
         types: filter.types,
-        // Coarse object scope is filtered server-side; the client predicate
-        // still refines on propertyId/linkId/runId and is the fallback when the
-        // server ignores these fields.
+        // Object/action/run scope is filtered server-side; the client predicate
+        // still refines propertyId/linkId and guards correctness.
         objectTypeId: filter.objectTypeId,
         primaryId: filter.primaryId,
+        actionId: filter.actionId,
+        runId: filter.runId,
         afterCursor: subscribeOptions?.afterCursor,
         limit: subscribeOptions?.limit,
         reconnect: subscribeOptions?.reconnect,
@@ -213,6 +252,7 @@ export function buildEventPredicate(filter: EventsFilterIR): (event: SixbEvent) 
     if (filter.propertyId !== undefined && scope.propertyId !== filter.propertyId) return false
     if (filter.linkId !== undefined && scope.linkId !== filter.linkId) return false
     if (filter.runId !== undefined && scope.runId !== filter.runId) return false
+    if (filter.actionId !== undefined && scope.actionId !== filter.actionId) return false
 
     return true
   }
@@ -270,6 +310,31 @@ class EventsBuilderImpl {
     return this.withFilter({ runId })
   }
 
+  action(actionId: string): EventsBuilderImpl {
+    return this.withFilter({ actionId })
+  }
+
+  subject(objectType: ObjectTypeWithTokens | string): EventsBuilderImpl {
+    const objectTypeId = typeof objectType === "string" ? objectType : objectType.id
+    return this.withFilter({ objectTypeId })
+  }
+
+  requested(): EventsBuilderImpl {
+    return this.withFilter({ topic: "actions", types: ["action.requested"] })
+  }
+
+  completed(): EventsBuilderImpl {
+    return this.withFilter({ topic: "actions", types: ["action.completed"] })
+  }
+
+  failed(): EventsBuilderImpl {
+    return this.withFilter({ topic: "actions", types: ["action.failed"] })
+  }
+
+  terminal(): EventsBuilderImpl {
+    return this.withFilter({ topic: "actions", types: ["action.completed", "action.failed"] })
+  }
+
   subscribe(handler: (event: SixbEvent) => void, options?: EventSubscribeOptions): () => void {
     return this.params.executor.subscribe(this.params.filter, handler, options)
   }
@@ -308,7 +373,7 @@ export interface SixbEventsApi {
   objects(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"objects">>
   telemetry(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"telemetry">>
   links(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"links">>
-  actions(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"actions">>
+  actions(options?: SixbEventsClientOptions): EventsActionBuilder<SixbEventOfTopic<"actions">>
   schedules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"schedules">>
   rules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"rules">>
   datasets(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"datasets">>
@@ -331,6 +396,12 @@ function runBuilder<TEvent extends SixbEvent>(
   return createBuilder({ topic }, options) as unknown as EventsRunBuilder<TEvent>
 }
 
+function actionBuilder<TEvent extends SixbEvent>(
+  options?: SixbEventsClientOptions
+): EventsActionBuilder<TEvent> {
+  return createBuilder({ topic: "actions" }, options) as unknown as EventsActionBuilder<TEvent>
+}
+
 const eventsApi = (<TObjectType extends ObjectTypeWithTokens>(
   objectType: TObjectType,
   options?: SixbEventsClientOptions
@@ -344,7 +415,7 @@ eventsApi.all = (options) => createBuilder({}, options) as unknown as EventsTopi
 eventsApi.objects = (options) => topicBuilder("objects", options)
 eventsApi.telemetry = (options) => topicBuilder("telemetry", options)
 eventsApi.links = (options) => topicBuilder("links", options)
-eventsApi.actions = (options) => topicBuilder("actions", options)
+eventsApi.actions = (options) => actionBuilder(options)
 eventsApi.schedules = (options) => topicBuilder("schedules", options)
 eventsApi.rules = (options) => topicBuilder("rules", options)
 eventsApi.datasets = (options) => topicBuilder("datasets", options)
