@@ -16,6 +16,9 @@ describe("Acme review app", () => {
     const routes = await app.scanRoutes()
     expect(routes.map((route) => route.path).sort()).toEqual([
       "/",
+      // Dev fixtures for the custom app's default error boundary / not-found view.
+      "/crash",
+      "/not-found",
       "/projects",
       "/review/:interventionId",
     ])
