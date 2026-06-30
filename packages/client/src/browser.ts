@@ -1,5 +1,9 @@
 import { configureSixbClient as configureGeneratedSixbClient, normalizeSixbApiBaseUrl } from "./api"
 import { client } from "./generated/client.gen"
+
+export type { SixbApiErrorInit } from "./api"
+export { isSixbApiError, SixbApiError } from "./api"
+
 import { getAuthSession } from "./generated/sdk.gen"
 import type { GetAuthSessionResponse } from "./generated/types.gen"
 

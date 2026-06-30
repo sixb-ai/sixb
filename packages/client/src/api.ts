@@ -25,8 +25,61 @@ export interface SixbClientOptions {
   readonly credentials?: RequestCredentials
 }
 
+export interface SixbApiErrorInit {
+  readonly status: number
+  readonly statusText?: string
+  readonly url?: string
+  readonly method?: string
+  readonly body?: unknown
+}
+
+/**
+ * A structured HTTP error thrown by the Sixb client. The raw generated client
+ * throws the bare response body (a string, or parsed JSON) with no status code
+ * or identity, which makes failures impossible to branch on and prints as
+ * cryptic quoted text in dev tooling. `SixbApiError` carries the status, the
+ * parsed `body`, and a readable `message`, so callers and error boundaries can
+ * tell a `404` apart from a `500` instead of catching a stringy blob.
+ */
+export class SixbApiError extends Error {
+  readonly status: number
+  readonly statusText: string
+  readonly url: string
+  readonly method: string
+  readonly body: unknown
+
+  constructor(message: string, init: SixbApiErrorInit) {
+    super(message)
+    this.name = "SixbApiError"
+    this.status = init.status
+    this.statusText = init.statusText ?? ""
+    this.url = init.url ?? ""
+    this.method = init.method ?? ""
+    this.body = init.body
+  }
+}
+
+/**
+ * Identifies a `SixbApiError` across bundle boundaries. The custom app and the
+ * client are bundled separately, so a plain `instanceof` would miss errors that
+ * crossed packages; the structural fallback recognizes them by shape.
+ */
+export function isSixbApiError(value: unknown): value is SixbApiError {
+  if (value instanceof SixbApiError) {
+    return true
+  }
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { name?: unknown }).name === "SixbApiError" &&
+    typeof (value as { status?: unknown }).status === "number"
+  )
+}
+
 export function createSixbClient(options: SixbClientOptions = {}): SixbClient {
-  return createClient(createSixbClientConfig(options))
+  const client = createClient(createSixbClientConfig(options))
+  installSixbErrorInterceptor(client)
+  return client
 }
 
 export function configureSixbClient(
@@ -34,6 +87,7 @@ export function configureSixbClient(
   options: SixbClientOptions = {}
 ): SixbClient {
   client.setConfig(createSixbClientConfig(options))
+  installSixbErrorInterceptor(client)
   return client
 }
 
@@ -103,4 +157,72 @@ function stripTrailingApiPath(pathname: string): string {
   }
 
   return trimmed
+}
+
+/**
+ * Maps the generated client's raw error (bare body) into a `SixbApiError`.
+ * Runs for every failed response regardless of `throwOnError`, so both thrown
+ * errors and the `{ error }` result field carry the structured type. Network
+ * failures (no `response`) are already native `Error`s and pass through.
+ */
+function sixbErrorInterceptor(
+  error: unknown,
+  response: Response | undefined,
+  request: Request | undefined
+): unknown {
+  if (isSixbApiError(error) || !response) {
+    return error
+  }
+
+  const method = request?.method ?? ""
+  const url = response.url || request?.url || ""
+  return new SixbApiError(buildSixbApiErrorMessage(method, url, response, error), {
+    status: response.status,
+    statusText: response.statusText,
+    url,
+    method,
+    body: error,
+  })
+}
+
+function buildSixbApiErrorMessage(
+  method: string,
+  url: string,
+  response: Response,
+  body: unknown
+): string {
+  const status = response.statusText
+    ? `${response.status} ${response.statusText}`
+    : String(response.status)
+  const target = [method, safeRequestPath(url)].filter(Boolean).join(" ")
+  const head = target ? `[SixbClient] ${target} → ${status}` : `[SixbClient] request → ${status}`
+  const detail = extractErrorDetail(body)
+  return detail ? `${head}: ${detail}` : head
+}
+
+function extractErrorDetail(body: unknown): string | undefined {
+  if (typeof body === "string") {
+    return body.trim() || undefined
+  }
+  if (body && typeof body === "object" && "error" in body) {
+    const message = (body as { error: unknown }).error
+    if (typeof message === "string" && message.trim()) {
+      return message
+    }
+  }
+  return undefined
+}
+
+function safeRequestPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url
+  }
+}
+
+function installSixbErrorInterceptor(client: SixbClient): void {
+  if (!client.interceptors.error.exists(sixbErrorInterceptor)) {
+    client.interceptors.error.use(sixbErrorInterceptor)
+  }
 }

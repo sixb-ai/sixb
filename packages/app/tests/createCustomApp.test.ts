@@ -233,6 +233,22 @@ describe("createCustomApp.dev", () => {
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
   })
 
+  test("wraps routes in an error boundary that special-cases 404s", async () => {
+    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const main = await readFile(mainPath, "utf-8")
+
+    // A safety net catches uncaught render throws instead of blanking the page.
+    expect(main).toContain("class AppErrorBoundary")
+    expect(main).toContain("getDerivedStateFromError")
+    expect(main).toContain("<RoutedErrorBoundary>")
+    // A 404 is an expected "not found" state, not the generic crash screen.
+    expect(main).toContain("isSixbApiError(error) && error.status === 404")
+    expect(main).toContain("import {\n  configureSixbBrowserClient,\n  isSixbApiError,")
+    // Unmatched client routes render the not-found view instead of a blank page.
+    expect(main).toContain('<Route path="*" element={<NotFoundView />} />')
+    expect(main).toContain("function NotFoundView()")
+  })
+
   test("route manifest statically imports every page", async () => {
     const generatedDir = join(tempRoot, ".sixb", "generated")
     const manifestPath = await generateRouteManifest(
