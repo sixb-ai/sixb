@@ -127,10 +127,11 @@ export async function generateAppEntry(
   // Generate main.tsx
   const mainContent = `import React from "react"
 import { createRoot } from "react-dom/client"
-import { BrowserRouter, Routes, Route, matchPath, useNavigate } from "react-router-dom"
+import { BrowserRouter, Routes, Route, matchPath, useNavigate, useLocation } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   configureSixbBrowserClient,
+  isSixbApiError,
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
 } from "@sixb/client/browser"
@@ -247,18 +248,159 @@ function InternalLinkInterceptor() {
   return null
 }
 
+// Shared presentational fallback used by the not-found view and the error
+// boundary. Styled with @sixb/ui design tokens (var(--token)) so it adopts the
+// app's theme when those tokens are loaded, but every token has a hardcoded
+// fallback so it stays self-contained and readable when they are not. The
+// background/foreground pair is always set together so text stays legible
+// regardless of the surrounding app's background.
+function AppFallback({
+  title,
+  detail,
+  showReload = true,
+}: {
+  title: string
+  detail: string
+  showReload?: boolean
+}) {
+  return (
+    <div
+      role="alert"
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "1rem",
+        padding: "2rem",
+        textAlign: "center",
+        fontFamily:
+          "var(--font-sans, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif)",
+        background: "var(--background, #ffffff)",
+        color: "var(--foreground, #1f2933)",
+      }}
+    >
+      <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{title}</h1>
+      <p style={{ margin: 0, maxWidth: "32rem", color: "var(--muted-foreground, #52606d)" }}>
+        {detail}
+      </p>
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <a
+          href="/"
+          style={{
+            padding: "0.5rem 1rem",
+            borderRadius: "var(--radius, 0.5rem)",
+            background: "var(--primary, #1f2933)",
+            color: "var(--primary-foreground, #ffffff)",
+            textDecoration: "none",
+          }}
+        >
+          Go home
+        </a>
+        {showReload ? (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              padding: "0.5rem 1rem",
+              borderRadius: "var(--radius, 0.5rem)",
+              border: "1px solid var(--border, #cbd2d9)",
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            Reload
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+// The not-found view. Rendered both for unmatched client routes (the catch-all
+// route below) and for an expected 404 surfaced through a query. Apps will be
+// able to override this via app/not-found.tsx.
+function NotFoundView() {
+  return (
+    <AppFallback
+      title="Not found"
+      detail="The page or resource you requested does not exist."
+      showReload={false}
+    />
+  )
+}
+
+// Last-resort safety net so an uncaught render throw (a 404 surfaced through a
+// suspense/throwOnError query, a bug, a failed import) shows a fallback instead
+// of a blank page and a console error. A missing object is an expected state,
+// so a 404 reuses the not-found view rather than the generic crash screen.
+// Apps will be able to override this via app/error.tsx.
+function AppErrorFallback({ error }: { error: unknown }) {
+  if (isSixbApiError(error) && error.status === 404) {
+    return <NotFoundView />
+  }
+  return (
+    <AppFallback
+      title="Something went wrong"
+      detail={error instanceof Error ? error.message : String(error)}
+    />
+  )
+}
+
+class AppErrorBoundary extends React.Component<
+  { resetKey: string; children: React.ReactNode },
+  { error: unknown }
+> {
+  state: { error: unknown } = { error: null }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("[SixbApp] Uncaught render error:", error)
+  }
+
+  // Clear the error when the route changes so navigating away (or an in-app
+  // link) recovers without a full reload.
+  componentDidUpdate(prevProps: { resetKey: string }) {
+    if (this.state.error !== null && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ error: null })
+    }
+  }
+
+  render() {
+    if (this.state.error !== null) {
+      return <AppErrorFallback error={this.state.error} />
+    }
+    return this.props.children
+  }
+}
+
+function RoutedErrorBoundary({ children }: { children: React.ReactNode }) {
+  const location = useLocation()
+  return (
+    <AppErrorBoundary resetKey={location.pathname + location.search}>{children}</AppErrorBoundary>
+  )
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <InternalLinkInterceptor />
-        ${layoutWrapperStart}
-          <Routes>
-            {routes.map((route) => (
-              <Route key={route.path} path={route.path} element={<route.component />} />
-            ))}
-          </Routes>
-        ${layoutWrapperEnd}
+        <RoutedErrorBoundary>
+          ${layoutWrapperStart}
+            <Routes>
+              {routes.map((route) => (
+                <Route key={route.path} path={route.path} element={<route.component />} />
+              ))}
+              <Route path="*" element={<NotFoundView />} />
+            </Routes>
+          ${layoutWrapperEnd}
+        </RoutedErrorBoundary>
       </BrowserRouter>
     </QueryClientProvider>
   )

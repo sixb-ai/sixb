@@ -18,6 +18,7 @@ import type {
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core/query"
 import { createObjectQueryBuilder } from "@sixb/core/query"
+import { isSixbApiError } from "./api"
 import type { Client } from "./generated/client"
 import { countObjects, existsObjects, facetObjects, queryObjects } from "./generated/sdk.gen"
 import type {
@@ -162,9 +163,13 @@ function toWireQuery(query: ObjectQuery): WireObjectQuery {
 }
 
 function toSixbQueryError(error: unknown): SixbQueryError {
-  if (error && typeof error === "object" && "error" in error) {
-    const body = error as { error: unknown; issues?: ObjectQueryIssue[] }
-    return new SixbQueryError(`[SixbClient] ${String(body.error)}`, body.issues ?? [])
+  // The browser client wraps failures in `SixbApiError`; tests and bare clients
+  // surface the raw response body. Unwrap to the body either way so server-sent
+  // query issues survive.
+  const body = isSixbApiError(error) ? error.body : error
+  if (body && typeof body === "object" && "error" in body) {
+    const payload = body as { error: unknown; issues?: ObjectQueryIssue[] }
+    return new SixbQueryError(`[SixbClient] ${String(payload.error)}`, payload.issues ?? [])
   }
   return new SixbQueryError("[SixbClient] Object query request failed")
 }
