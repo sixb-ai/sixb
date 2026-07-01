@@ -21,7 +21,7 @@ interface SandboxFactory {
 
 interface Sandbox {
   readonly id: string
-  readonly provider: string // "local" | "smolvm"
+  readonly provider: string // "local" | "smolvm" | "vercel"
   readonly status: "running" | "stopped" | "failed"
   readonly workingDirectory: string
 
@@ -96,6 +96,15 @@ import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 createSixb({ sandboxes: new SmolvmSandboxFactory() })
 ```
 
+Or use Vercel-hosted Firecracker microVMs when the agent worker already has Vercel Sandbox
+credentials and the Sixb API gateway is reachable from Vercel:
+
+```ts
+import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
+
+createSixb({ sandboxes: new VercelSandboxFactory() })
+```
+
 ## Network policy
 
 Every provider speaks the same `SandboxNetworkPolicy`. It is set per-run at `create(...)` (or as a
@@ -111,9 +120,11 @@ Each `restricted` entry is a `{ name, origin }` target, for example
 `{ name: "sixb-api", origin: "http://10.0.0.5:3002" }`.
 
 Providers differ in how precisely they can enforce `restricted`. The [smolvm](./smolvm.md) provider
-enforces a real per-host allow list inside the microVM. The [local](./local.md) provider's isolation
-backends are all-or-nothing today: `none` blocks outbound network, any other mode allows host
-network. The contract is the same; read each provider page for what it actually enforces.
+enforces a real per-host allow list inside the microVM. The [Vercel](./vercel.md) provider maps
+restricted HTTPS origins to Vercel's TLS/SNI firewall and IP origins to CIDR rules. The
+[local](./local.md) provider's isolation backends are all-or-nothing today: `none` blocks outbound
+network, any other mode allows host network. The contract is the same; read each provider page for
+what it actually enforces.
 
 ## How agents use a sandbox
 
@@ -136,15 +147,19 @@ that gateway — there is no open internet. See
 | Provider | Package | Isolation | Use when |
 | --- | --- | --- | --- |
 | [Local](./local.md) | `@sixb/sandboxes-local` | OS sandboxing (seatbelt / bwrap) or passthrough | Development and local iteration |
-| [smolvm](./smolvm.md) | `@sixb/sandboxes-smolvm` | Hardware-isolated microVM | Production, or whenever stronger isolation is required |
+| [smolvm](./smolvm.md) | `@sixb/sandboxes-smolvm` | Hardware-isolated microVM | Production on hosts where you can run smolvm |
+| [Vercel](./vercel.md) | `@sixb/sandboxes-vercel` | Vercel-hosted Firecracker microVM | Production on Vercel, or hosted workers with Vercel Sandbox credentials |
 
-Rule of thumb: **local for dev, smolvm for stronger isolation in prod.** The local provider always
-boots — it falls back to no isolation when OS tooling is missing — so it is friction-free for
+Rule of thumb: **local for dev, smolvm or Vercel for stronger isolation in prod.** The local provider
+always boots — it falls back to no isolation when OS tooling is missing — so it is friction-free for
 development. smolvm gives each run its own microVM with a true per-host egress allow list, at the
-cost of a one-time binary install and image build.
+cost of a one-time binary install and image build. Vercel gives you remote managed microVMs with no
+host hypervisor setup, but the Sixb API gateway must be reachable from Vercel (usually a public HTTPS
+origin, not localhost).
 
 ## Related
 
 - [Local sandbox](./local.md) — OS-level isolation backends and auto-detection
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
+- [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
 - [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool can reach
