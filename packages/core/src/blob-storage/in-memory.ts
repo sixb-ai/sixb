@@ -1,5 +1,12 @@
 import { BlobStorageError } from "./errors"
-import type { BlobInfo, BlobStorage, FileRef, PutBlobInput } from "./types"
+import type {
+  BlobByteRange,
+  BlobInfo,
+  BlobStorage,
+  FileRef,
+  PutBlobInput,
+  RangeReadableBlobStorage,
+} from "./types"
 import { blobIdFromDigest, computeBlobDigest, createFileRef, readBlobBody } from "./utils"
 
 type StoredBlob = {
@@ -7,7 +14,7 @@ type StoredBlob = {
   readonly info: BlobInfo
 }
 
-export class InMemoryBlobStorage implements BlobStorage {
+export class InMemoryBlobStorage implements BlobStorage, RangeReadableBlobStorage {
   private readonly blobsById = new Map<string, StoredBlob>()
 
   async put(input: PutBlobInput): Promise<FileRef> {
@@ -32,16 +39,27 @@ export class InMemoryBlobStorage implements BlobStorage {
   }
 
   async open(blobId: string): Promise<ReadableStream<Uint8Array>> {
-    const stored = this.blobsById.get(blobId)
-    if (!stored) {
-      throw new BlobStorageError(`[BlobStorage] Unknown blob '${blobId}'`)
-    }
-
+    const stored = this.requireStoredBlob(blobId)
     return new Blob([new Uint8Array(stored.bytes)]).stream()
+  }
+
+  async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
+    const stored = this.requireStoredBlob(blobId)
+    const bytes = stored.bytes.slice(range.start, range.endInclusive + 1)
+    return new Blob([bytes]).stream()
   }
 
   async stat(blobId: string): Promise<BlobInfo | null> {
     const stored = this.blobsById.get(blobId)
     return stored ? { ...stored.info } : null
+  }
+
+  private requireStoredBlob(blobId: string): StoredBlob {
+    const stored = this.blobsById.get(blobId)
+    if (!stored) {
+      throw new BlobStorageError(`[BlobStorage] Unknown blob '${blobId}'`)
+    }
+
+    return stored
   }
 }

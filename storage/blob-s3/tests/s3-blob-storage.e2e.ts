@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { BlobStorageError } from "@sixb/core"
+import { BlobStorageError, computeBlobDigest } from "@sixb/core"
 import { S3BlobStorage } from "../src"
 
 const encoder = new TextEncoder()
@@ -35,6 +35,12 @@ describe("S3BlobStorage", () => {
 
     const stream = await storage.open(fileRef.blobId)
     expect(await new Response(stream).text()).toBe("hello s3")
+
+    const rangeStream = await storage.openRange(fileRef.blobId, {
+      start: 6,
+      endInclusive: 7,
+    })
+    expect(await new Response(rangeStream).text()).toBe("s3")
   })
 
   test("returns stable content-addressed ids", async () => {
@@ -62,5 +68,53 @@ describe("S3BlobStorage", () => {
     await expect(storage.stat(missingBlobId)).resolves.toBeNull()
     await expect(storage.open(missingBlobId)).rejects.toBeInstanceOf(BlobStorageError)
     await expect(storage.open(missingBlobId)).rejects.toThrow(`Unknown blob '${missingBlobId}'`)
+  })
+
+  test("completes a direct-put staged upload into a FileRef", async () => {
+    const storage = createStorage()
+    const uploadId = `upload_${randomUUID().replaceAll("-", "")}`
+    const body = "staged s3"
+    const digest = computeBlobDigest(encoder.encode(body))
+    const upload = await storage.createUpload({
+      uploadId,
+      fileName: "staged.txt",
+      mediaType: "text/plain",
+      logicalPath: "docs/staged.txt",
+      sizeBytes: 9,
+      expectedDigest: digest,
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+
+    expect(upload.strategy).toBe("direct-put")
+    if (upload.strategy !== "direct-put") {
+      throw new Error("Expected direct-put upload strategy.")
+    }
+    expect(upload.stagingKey).toContain(`/uploads/${uploadId}/object`)
+
+    const uploadResponse = await fetch(upload.url, {
+      method: upload.method,
+      headers: upload.headers,
+      body,
+    })
+    expect(uploadResponse.ok).toBe(true)
+
+    const fileRef = await storage.completeUpload({
+      uploadId,
+      stagingKey: upload.stagingKey,
+      fileName: "staged.txt",
+      mediaType: "text/plain",
+      logicalPath: "docs/staged.txt",
+      expectedSizeBytes: 9,
+      expectedDigest: digest,
+    })
+
+    expect(fileRef.blobId).toBe(`blob_${fileRef.digest.slice("sha256:".length)}`)
+    expect(fileRef.sizeBytes).toBe(9)
+    expect(fileRef.fileName).toBe("staged.txt")
+    expect(fileRef.mediaType).toBe("text/plain")
+    expect(fileRef.logicalPath).toBe("docs/staged.txt")
+
+    const stream = await storage.open(fileRef.blobId)
+    expect(await new Response(stream).text()).toBe("staged s3")
   })
 })

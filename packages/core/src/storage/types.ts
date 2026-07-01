@@ -1,6 +1,7 @@
 import type { ActionRunStorage } from "./action-runs"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
+import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
 import type { PipelineRunStorage } from "./pipeline-runs"
 import type { ProjectionRunStorage } from "./projection-runs"
@@ -92,6 +93,14 @@ export {
   ObjectStorageError,
   StorageTransactionError,
 } from "./errors"
+export type {
+  CreateFileUploadSessionInput,
+  FileUploadSession,
+  FileUploadSessionStore,
+  FileUploadStatus,
+  FileUploadStrategy,
+} from "./file-upload-sessions"
+export { FileUploadSessionError } from "./file-upload-sessions"
 export type {
   LinkDirection,
   ObjectLinkRow,
@@ -229,6 +238,7 @@ export interface Storage {
   webhookDeliveries?: WebhookDeliveryStorage
   webhookRuns?: WebhookRunStorage
   rules?: RulesStorage
+  fileUploadSessions?: FileUploadSessionStore
 
   transaction<T>(
     run: (tx: Storage) => Promise<T> | T,

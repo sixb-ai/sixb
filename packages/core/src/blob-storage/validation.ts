@@ -1,4 +1,10 @@
-import type { BlobDigest, FileRef } from "./types"
+import type {
+  BlobDigest,
+  BlobStorage,
+  DirectUploadBlobStorage,
+  FileRef,
+  RangeReadableBlobStorage,
+} from "./types"
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -26,4 +32,23 @@ export function isFileRef(value: unknown): value is FileRef {
     (value.mediaType === undefined || typeof value.mediaType === "string") &&
     (value.logicalPath === undefined || typeof value.logicalPath === "string")
   )
+}
+
+export function supportsDirectUpload(
+  storage: BlobStorage
+): storage is BlobStorage & DirectUploadBlobStorage {
+  const candidate = storage as Partial<DirectUploadBlobStorage>
+  return (
+    typeof candidate.createUpload === "function" &&
+    typeof candidate.signUploadPart === "function" &&
+    typeof candidate.completeUpload === "function" &&
+    typeof candidate.abortUpload === "function"
+  )
+}
+
+export function supportsRangeRead(
+  storage: BlobStorage
+): storage is BlobStorage & RangeReadableBlobStorage {
+  const candidate = storage as Partial<RangeReadableBlobStorage>
+  return typeof candidate.openRange === "function"
 }
