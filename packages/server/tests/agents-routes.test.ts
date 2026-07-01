@@ -18,11 +18,13 @@ import {
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
+// Minimal stand-in: these route tests never invoke the model (the worker does), so a partial shape
+// cast through unknown is enough to satisfy defineAgent's type.
 const model = {
   specificationVersion: "v3",
   provider: "test",
   modelId: "test-model",
-} as Parameters<typeof defineAgent>[1]["model"]
+} as unknown as Parameters<typeof defineAgent>[1]["model"]
 
 const assistant = defineAgent("assistant", {
   name: "Support Assistant",
