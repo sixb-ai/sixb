@@ -56,6 +56,17 @@ describe("LocalBlobStorage", () => {
     expect(await new Response(stream).text()).toBe("stored body")
   })
 
+  test("openRange streams a byte range from disk", async () => {
+    const fileRef = await store.put({ body: encoder.encode("stored body") })
+
+    const stream = await store.openRange(fileRef.blobId, {
+      start: 7,
+      endInclusive: 10,
+    })
+
+    expect(await new Response(stream).text()).toBe("body")
+  })
+
   test("stat returns blob info without reading payload through the API", async () => {
     const fileRef = await store.put({ body: encoder.encode("blob info") })
     const hex = fileRef.digest.slice("sha256:".length)

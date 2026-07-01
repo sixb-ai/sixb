@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto"
+import { createReadStream } from "node:fs"
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
+import { Readable } from "node:stream"
 import {
+  type BlobByteRange,
   type BlobInfo,
   type BlobStorage,
   BlobStorageError,
@@ -11,6 +14,7 @@ import {
   createFileRef,
   type FileRef,
   type PutBlobInput,
+  type RangeReadableBlobStorage,
   readBlobBody,
 } from "@sixb/core"
 import type { LocalBlobStorageOptions } from "./types"
@@ -32,7 +36,7 @@ function hexFromBlobId(blobId: string): string | null {
   return blobId.slice("blob_".length)
 }
 
-export class LocalBlobStorage implements BlobStorage {
+export class LocalBlobStorage implements BlobStorage, RangeReadableBlobStorage {
   private readonly basePath: string
 
   constructor(options: LocalBlobStorageOptions = {}) {
@@ -62,18 +66,19 @@ export class LocalBlobStorage implements BlobStorage {
   }
 
   async open(blobId: string): Promise<ReadableStream<Uint8Array>> {
-    const hex = hexFromBlobId(blobId)
-    if (!hex) {
-      throw new BlobStorageError(`[BlobLocal] Invalid blob id '${blobId}'`)
-    }
-
-    const contentPath = this.contentPathForHex(hex)
-    if (!(await pathExists(contentPath))) {
-      throw new BlobStorageError(`[BlobLocal] Unknown blob '${blobId}'`)
-    }
-
+    const contentPath = await this.requireContentPath(blobId)
     const bytes = await readFile(contentPath)
     return new Blob([new Uint8Array(bytes)]).stream()
+  }
+
+  async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
+    const contentPath = await this.requireContentPath(blobId)
+    return Readable.toWeb(
+      createReadStream(contentPath, {
+        start: range.start,
+        end: range.endInclusive,
+      })
+    ) as unknown as ReadableStream<Uint8Array>
   }
 
   async stat(blobId: string): Promise<BlobInfo | null> {
@@ -93,6 +98,20 @@ export class LocalBlobStorage implements BlobStorage {
       digest: `sha256:${hex}`,
       sizeBytes: contentStat.size,
     }
+  }
+
+  private async requireContentPath(blobId: string): Promise<string> {
+    const hex = hexFromBlobId(blobId)
+    if (!hex) {
+      throw new BlobStorageError(`[BlobLocal] Invalid blob id '${blobId}'`)
+    }
+
+    const contentPath = this.contentPathForHex(hex)
+    if (!(await pathExists(contentPath))) {
+      throw new BlobStorageError(`[BlobLocal] Unknown blob '${blobId}'`)
+    }
+
+    return contentPath
   }
 
   private sha256RootPath(): string {

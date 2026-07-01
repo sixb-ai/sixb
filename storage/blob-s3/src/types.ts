@@ -23,6 +23,11 @@ export interface S3BlobStorageOptions {
   readonly sessionToken?: string
   /** Optional ACL forwarded to Bun's S3Client. */
   readonly acl?: S3BlobStorageAcl
+  /**
+   * Force path-style object URLs for signed direct-upload requests.
+   * Defaults to true for localhost/IP endpoints and false otherwise.
+   */
+  readonly pathStyle?: boolean
   /** Key prefix that contains the blobs/sha256 object layout. Defaults to "sixb". */
   readonly basePath?: string
 }

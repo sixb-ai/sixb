@@ -149,6 +149,22 @@ export {
   StorageTransactionError,
 } from "./errors"
 export type {
+  CreateFileUploadSessionInput,
+  FileUploadSession,
+  FileUploadSessionStore,
+  FileUploadStatus,
+  FileUploadStrategy,
+} from "./file-upload-sessions"
+export {
+  createFileUploadId,
+  createUploadExpiresAt,
+  DEFAULT_FILE_UPLOAD_SESSION_TTL_MS,
+  DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
+  FileUploadSessionError,
+  InMemoryFileUploadSessions,
+  principalKey,
+} from "./file-upload-sessions"
+export type {
   DefineMigrationsOptions,
   MigrationCapableStorage,
   MigrationHistoryStore,
@@ -338,6 +354,7 @@ import { InMemoryActionRunStorage } from "./action-runs"
 import { InMemoryAgentStorage } from "./agents"
 import { InMemoryAuthStorage } from "./auth"
 import { StorageTransactionError } from "./errors"
+import { InMemoryFileUploadSessions } from "./file-upload-sessions"
 import { InMemoryObjectStorage } from "./objects"
 import { InMemoryPipelineRunStorage } from "./pipeline-runs"
 import { InMemoryProjectionRunStorage } from "./projection-runs"
@@ -365,6 +382,7 @@ export class InMemoryStorage implements Storage {
   readonly webhookDeliveries = new InMemoryWebhookDeliveryStorage()
   readonly webhookRuns = new InMemoryWebhookRunStorage()
   readonly rules = new InMemoryRulesStorage()
+  readonly fileUploadSessions = new InMemoryFileUploadSessions()
 
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
   private transactionTail: Promise<void> = Promise.resolve()
@@ -446,6 +464,7 @@ export class InMemoryStorage implements Storage {
       webhookDeliveries: this.webhookDeliveries.snapshot(),
       webhookRuns: this.webhookRuns.snapshot(),
       rules: this.rules.snapshot(),
+      fileUploadSessions: this.fileUploadSessions.snapshot(),
     }
   }
 
@@ -463,6 +482,7 @@ export class InMemoryStorage implements Storage {
     this.webhookDeliveries.restore(snapshot.webhookDeliveries)
     this.webhookRuns.restore(snapshot.webhookRuns)
     this.rules.restore(snapshot.rules)
+    this.fileUploadSessions.restore(snapshot.fileUploadSessions)
   }
 }
 
@@ -480,4 +500,5 @@ interface InMemoryStorageSnapshot {
   readonly webhookDeliveries: ReturnType<InMemoryWebhookDeliveryStorage["snapshot"]>
   readonly webhookRuns: ReturnType<InMemoryWebhookRunStorage["snapshot"]>
   readonly rules: ReturnType<InMemoryRulesStorage["snapshot"]>
+  readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
 }

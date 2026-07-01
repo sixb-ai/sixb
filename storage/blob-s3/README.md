@@ -34,6 +34,45 @@ const info = await blobStorage.stat(fileRef.blobId)
 const stream = await blobStorage.open(fileRef.blobId)
 ```
 
+## Staged Direct Uploads
+
+`S3BlobStorage` also implements Sixb's optional direct-upload capability. The HTTP Files API uses
+this to issue a short-lived signed `PUT` URL for browser uploads, then completes the staged object
+back into the same content-addressed `FileRef` model.
+
+```ts
+const digest = await sha256File(file)
+const upload = await blobStorage.createUpload({
+  uploadId: "upload_123",
+  fileName: "invoice.pdf",
+  mediaType: "application/pdf",
+  sizeBytes: file.size,
+  expectedDigest: digest,
+  expiresAt: new Date(Date.now() + 60_000),
+})
+
+if (upload.strategy === "direct-put") {
+  await fetch(upload.url, {
+    method: upload.method,
+    headers: upload.headers,
+    body: file,
+  })
+
+  const fileRef = await blobStorage.completeUpload({
+    uploadId: upload.uploadId,
+    stagingKey: upload.stagingKey,
+    fileName: "invoice.pdf",
+    mediaType: "application/pdf",
+    expectedSizeBytes: file.size,
+    expectedDigest: digest,
+  })
+}
+```
+
+The signed upload includes an `x-amz-checksum-sha256` header so the storage provider validates the
+bytes uploaded by the browser. Bucket CORS must allow `PUT`, `x-amz-checksum-sha256`, and
+`content-type` for browser direct uploads.
+
 For S3-compatible providers, pass an `endpoint`:
 
 ```ts

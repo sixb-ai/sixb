@@ -49,6 +49,18 @@ describe("InMemoryBlobStorage", () => {
     expect(await new Response(stream).text()).toBe("streamed body")
   })
 
+  test("openRange streams a byte range", async () => {
+    const store = new InMemoryBlobStorage()
+    const fileRef = await store.put({ body: encoder.encode("range bytes") })
+
+    const stream = await store.openRange(fileRef.blobId, {
+      start: 6,
+      endInclusive: 10,
+    })
+
+    expect(await new Response(stream).text()).toBe("bytes")
+  })
+
   test("stat returns size and digest info", async () => {
     const store = new InMemoryBlobStorage()
     const fileRef = await store.put({ body: encoder.encode("blob info") })
