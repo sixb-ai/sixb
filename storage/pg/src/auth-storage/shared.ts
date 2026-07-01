@@ -619,6 +619,25 @@ export async function upsertGroupMembership(
   return membership
 }
 
+export async function removeGroupMembership(
+  sql: SQLClient,
+  params: { readonly projectId: string; readonly userId: string; readonly groupId: string }
+): Promise<GroupMembershipRecord | null> {
+  const projectId = assertNonEmpty(params.projectId, "Project id")
+  const userId = assertNonEmpty(params.userId, "User id")
+  const groupId = assertNonEmpty(params.groupId, "Group id")
+
+  const [row] = await sql<PgAuthGroupMembershipRow[]>`
+    DELETE FROM auth_group_memberships
+    WHERE project_id = ${projectId}
+      AND user_id = ${userId}
+      AND group_id = ${groupId}
+    RETURNING *
+  `
+
+  return row ? rowToGroupMembershipRecord(row) : null
+}
+
 export async function getGroupMembership(
   sql: SQLClient,
   params: { readonly projectId: string; readonly userId: string; readonly groupId: string }

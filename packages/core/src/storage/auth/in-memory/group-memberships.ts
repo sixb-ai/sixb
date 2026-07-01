@@ -4,13 +4,22 @@ import type {
   UpsertAuthGroupMembershipInput,
 } from "../types"
 import type { AuthStorageState } from "./shared"
-import { cloneRecord, upsertGroupMembershipRecord } from "./shared"
+import { cloneRecord, removeGroupMembershipRecord, upsertGroupMembershipRecord } from "./shared"
 
 export class InMemoryAuthGroupMembershipStore implements AuthGroupMembershipStore {
   constructor(private readonly state: AuthStorageState) {}
 
   async upsert(input: UpsertAuthGroupMembershipInput): Promise<GroupMembershipRecord> {
     return cloneRecord(upsertGroupMembershipRecord(this.state, input))
+  }
+
+  async remove(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly groupId: string
+  }): Promise<GroupMembershipRecord | null> {
+    const removed = removeGroupMembershipRecord(this.state, params)
+    return removed ? cloneRecord(removed) : null
   }
 
   async listForUser(params: {

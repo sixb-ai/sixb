@@ -451,6 +451,24 @@ export function upsertGroupMembershipRecord(
   return membership
 }
 
+export function removeGroupMembershipRecord(
+  state: AuthStorageState,
+  params: { readonly projectId: string; readonly userId: string; readonly groupId: string }
+): GroupMembershipRecord | null {
+  const projectId = assertNonEmpty(params.projectId, "Project id")
+  const userId = assertNonEmpty(params.userId, "User id")
+  const groupId = assertNonEmpty(params.groupId, "Group id")
+
+  const key = groupMembershipKey(projectId, userId, groupId)
+  const existing = state.groupMemberships.get(key)
+  if (!existing) {
+    return null
+  }
+
+  state.groupMemberships.delete(key)
+  return existing
+}
+
 function assertAccessTokenSubject(
   kind: CreateAuthAccessTokenInput["kind"],
   subjectType: CreateAuthAccessTokenInput["subjectType"]
