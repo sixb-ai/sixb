@@ -25,6 +25,7 @@ const authStrategy = {
 const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 const finance = defineGroup("finance")
+const engineering = defineGroup("engineering")
 
 const magicLinkStrategy: MagicLinkAuthStrategy = {
   id: "magic-link",
@@ -1038,5 +1039,324 @@ describe("Sixb auth runtime", () => {
         secure: false,
       })
     ).toThrow("__Host- auth cookies require secure cookies")
+  })
+})
+
+function createMemberRuntime() {
+  const deps = createTestRuntimeDeps()
+  const sixb = new Sixb<readonly []>({
+    id: "project-a",
+    ontology: [] as const,
+    ...deps,
+    groups: [securityAdmins, commercial, finance, engineering],
+    membershipPolicies: [
+      defineMembershipPolicy("member-administration", {
+        // Granted to commercial too so a caller can be both a policy holder and a
+        // target within scope, which is what the self-protection tests exercise.
+        grantedTo: [securityAdmins, commercial],
+        scope: [commercial, finance],
+        can: ["invite", "assignGroups", "suspend"],
+      }),
+    ],
+    auth: authStrategy,
+  })
+
+  return { deps, sixb }
+}
+
+async function seedMember(
+  deps: ReturnType<typeof createTestRuntimeDeps>,
+  sixb: Sixb<readonly []>,
+  params: {
+    readonly userId: string
+    readonly email: string
+    readonly groupIds?: readonly string[]
+    readonly status?: "active" | "suspended"
+  }
+): Promise<void> {
+  await deps.storage.auth.users.create({
+    id: params.userId,
+    projectId: sixb.id,
+    email: params.email,
+    status: params.status,
+  })
+  for (const groupId of params.groupIds ?? []) {
+    await deps.storage.auth.groupMemberships.upsert({
+      projectId: sixb.id,
+      userId: params.userId,
+      groupId,
+      source: "manual",
+    })
+  }
+}
+
+describe("Sixb auth member management", () => {
+  test("membership options expose assignable groups and capabilities", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+
+    const options = await sixb.auth.getMembershipOptions(request)
+
+    expect(options.groups.map((group) => group.id).sort()).toEqual(["commercial", "finance"])
+    expect(options.capabilities).toEqual({ invite: true, assignGroups: true, suspend: true })
+  })
+
+  test("lists members in scope, hides out-of-scope users, and includes group-less members", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_commercial",
+      email: "commercial@acme.com",
+      groupIds: ["commercial"],
+    })
+    await seedMember(deps, sixb, { userId: "usr_groupless", email: "groupless@acme.com" })
+    await seedMember(deps, sixb, {
+      userId: "usr_out",
+      email: "out@acme.com",
+      groupIds: ["engineering"],
+    })
+    // A member with any out-of-scope group is out of scope as a whole.
+    await seedMember(deps, sixb, {
+      userId: "usr_mixed",
+      email: "mixed@acme.com",
+      groupIds: ["commercial", "engineering"],
+    })
+
+    const list = await sixb.auth.listMembers(request, { order: "asc" })
+    const ids = list.members.map((member) => member.user.id)
+
+    expect(ids).toContain("usr_commercial")
+    expect(ids).toContain("usr_groupless")
+    expect(ids).not.toContain("usr_out")
+    expect(ids).not.toContain("usr_mixed")
+    // The admin's own group (security-admins) is out of scope, so they are not listed.
+    expect(ids).not.toContain("usr_admin")
+    expect(list.total).toBe(ids.length)
+  })
+
+  test("member capabilities reflect status and self-protection", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_self",
+      email: "self@acme.com",
+      groupIds: ["commercial"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_active",
+      email: "active@acme.com",
+      groupIds: ["finance"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_suspended",
+      email: "suspended@acme.com",
+      groupIds: ["finance"],
+      status: "suspended",
+    })
+
+    const list = await sixb.auth.listMembers(request, { order: "asc" })
+    const capabilities = new Map(
+      list.members.map((member) => [member.user.id, member.capabilities])
+    )
+
+    expect(capabilities.get("usr_self")).toEqual({
+      assignGroups: true,
+      suspend: false,
+      reactivate: false,
+    })
+    expect(capabilities.get("usr_active")).toEqual({
+      assignGroups: true,
+      suspend: true,
+      reactivate: false,
+    })
+    expect(capabilities.get("usr_suspended")).toEqual({
+      assignGroups: true,
+      suspend: false,
+      reactivate: true,
+    })
+  })
+
+  test("assigns and removes a member's groups within scope", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_target",
+      email: "target@acme.com",
+      groupIds: ["commercial"],
+    })
+
+    const result = await sixb.auth.updateMemberGroups(request, {
+      userId: "usr_target",
+      groupIds: ["finance"],
+    })
+
+    expect(result.groupIds).toEqual(["finance"])
+    await expect(
+      deps.storage.auth.groupMemberships.listForUser({ projectId: sixb.id, userId: "usr_target" })
+    ).resolves.toMatchObject([{ groupId: "finance", source: "manual" }])
+  })
+
+  test("rejects group assignment outside scope and unknown groups", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_target",
+      email: "target@acme.com",
+      groupIds: ["commercial"],
+    })
+
+    await expect(
+      sixb.auth.updateMemberGroups(request, { userId: "usr_target", groupIds: ["engineering"] })
+    ).rejects.toThrow("not allowed to assign")
+    await expect(
+      sixb.auth.updateMemberGroups(request, { userId: "usr_target", groupIds: ["ghost"] })
+    ).rejects.toThrow("Unknown group")
+  })
+
+  test("treats out-of-scope and missing targets identically", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_out",
+      email: "out@acme.com",
+      groupIds: ["engineering"],
+    })
+
+    await expect(
+      sixb.auth.updateMemberGroups(request, { userId: "usr_out", groupIds: ["commercial"] })
+    ).rejects.toThrow("not found")
+    await expect(sixb.auth.suspendMember(request, { userId: "usr_missing" })).rejects.toThrow(
+      "not found"
+    )
+  })
+
+  test("blocks removing your own groups but allows adding in-scope groups", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_self",
+      email: "self@acme.com",
+      groupIds: ["commercial"],
+    })
+
+    await expect(
+      sixb.auth.updateMemberGroups(request, { userId: "usr_self", groupIds: [] })
+    ).rejects.toThrow("cannot remove their own groups")
+
+    const result = await sixb.auth.updateMemberGroups(request, {
+      userId: "usr_self",
+      groupIds: ["commercial", "finance"],
+    })
+    expect([...result.groupIds].sort()).toEqual(["commercial", "finance"])
+  })
+
+  test("suspends and reactivates an in-scope member and stops their sessions", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_admin",
+      email: "admin@acme.com",
+      groupIds: ["security-admins"],
+    })
+    const targetCredential = createSessionCredential("ses_target")
+    await deps.storage.auth.users.create({
+      id: "usr_target",
+      projectId: sixb.id,
+      email: "target@acme.com",
+    })
+    await deps.storage.auth.groupMemberships.upsert({
+      projectId: sixb.id,
+      userId: "usr_target",
+      groupId: "commercial",
+      source: "manual",
+    })
+    await deps.storage.auth.sessions.create({
+      id: targetCredential.sessionId,
+      projectId: sixb.id,
+      userId: "usr_target",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: targetCredential.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const targetRequest = () =>
+      new Request("http://localhost/api/project", {
+        headers: { cookie: `sixb_session=${targetCredential.cookieValue}` },
+      })
+
+    // The target's session authenticates and is cached before suspension.
+    await expect(sixb.auth.getSession(targetRequest())).resolves.toMatchObject({
+      authenticated: true,
+    })
+
+    const suspended = await sixb.auth.suspendMember(request, { userId: "usr_target" })
+    expect(suspended.user.status).toBe("suspended")
+    expect(suspended.groupIds).toEqual(["commercial"])
+
+    // Suspension revokes sessions and drops the cached entry, so the target no
+    // longer authenticates.
+    await expect(sixb.auth.getSession(targetRequest())).resolves.toMatchObject({
+      authenticated: false,
+      reason: "invalid_session",
+    })
+
+    const reactivated = await sixb.auth.reactivateMember(request, { userId: "usr_target" })
+    expect(reactivated.user.status).toBe("active")
+    // Reactivation does not restore sessions.
+    await expect(sixb.auth.getSession(targetRequest())).resolves.toMatchObject({
+      authenticated: false,
+    })
+  })
+
+  test("blocks suspending yourself", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_self",
+      email: "self@acme.com",
+      groupIds: ["commercial"],
+    })
+
+    await expect(sixb.auth.suspendMember(request, { userId: "usr_self" })).rejects.toThrow(
+      "cannot suspend themselves"
+    )
+  })
+
+  test("a caller without a membership policy manages nobody", async () => {
+    const { deps, sixb } = createMemberRuntime()
+    const request = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_plain",
+      email: "plain@acme.com",
+      groupIds: ["finance"],
+    })
+    await seedMember(deps, sixb, {
+      userId: "usr_target",
+      email: "target@acme.com",
+      groupIds: ["commercial"],
+    })
+
+    const options = await sixb.auth.getMembershipOptions(request)
+    expect(options.capabilities).toEqual({ invite: false, assignGroups: false, suspend: false })
+    await expect(sixb.auth.listMembers(request)).resolves.toMatchObject({ members: [], total: 0 })
+    await expect(sixb.auth.suspendMember(request, { userId: "usr_target" })).rejects.toThrow(
+      "not found"
+    )
   })
 })
