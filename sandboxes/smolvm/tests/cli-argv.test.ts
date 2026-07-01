@@ -12,11 +12,10 @@ import {
 const config: SmolvmCliConfig = { bin: "smolvm", image: "node:22-slim" }
 
 describe("buildCreateArgv", () => {
-  test("includes name, image, and volume", () => {
+  test("includes name and image, and never mounts a host volume", () => {
     const argv = buildCreateArgv(config, {
       id: "run-1",
       network: [],
-      volume: "/tmp/wd:/tmp/wd",
     })
     expect(argv).toEqual([
       "smolvm",
@@ -26,15 +25,14 @@ describe("buildCreateArgv", () => {
       "run-1",
       "--image",
       "node:22-slim",
-      "--volume",
-      "/tmp/wd:/tmp/wd",
     ])
+    expect(argv).not.toContain("--volume")
   })
 
   test("appends storage and overlay sizes when configured", () => {
     const argv = buildCreateArgv(
       { ...config, storageGiB: 40, overlayGiB: 8 },
-      { id: "run-1", network: [], volume: "/wd:/wd" }
+      { id: "run-1", network: [] }
     )
     expect(argv).toContain("--storage")
     expect(argv[argv.indexOf("--storage") + 1]).toBe("40")
@@ -43,16 +41,15 @@ describe("buildCreateArgv", () => {
   })
 
   test("omits --image for a bare machine (no image configured)", () => {
-    const argv = buildCreateArgv({ bin: "smolvm" }, { id: "run-1", network: [], volume: "/wd:/wd" })
+    const argv = buildCreateArgv({ bin: "smolvm" }, { id: "run-1", network: [] })
     expect(argv).not.toContain("--image")
-    expect(argv).toEqual(["smolvm", "machine", "create", "--name", "run-1", "--volume", "/wd:/wd"])
+    expect(argv).toEqual(["smolvm", "machine", "create", "--name", "run-1"])
   })
 
   test("appends network flags last", () => {
     const argv = buildCreateArgv(config, {
       id: "run-1",
       network: ["--net", "--allow-host", "api.example.com"],
-      volume: "/wd:/wd",
     })
     expect(argv.slice(-3)).toEqual(["--net", "--allow-host", "api.example.com"])
   })

@@ -72,6 +72,45 @@ export interface BuildAgentImageOptions {
   readonly tag?: string
 }
 
+/** `<builder> build [--platform <p>] -t <tag> -f <dockerfile> <contextDir>` */
+export function buildImageBuildArgv(input: {
+  readonly builder: string
+  readonly platform?: string
+  readonly tag: string
+  readonly dockerfile: string
+  readonly contextDir: string
+}): string[] {
+  const platformArgs = input.platform ? ["--platform", input.platform] : []
+  return [
+    input.builder,
+    "build",
+    ...platformArgs,
+    "-t",
+    input.tag,
+    "-f",
+    input.dockerfile,
+    input.contextDir,
+  ]
+}
+
+/** `<builder> save <tag> -o <output>` */
+export function buildImageSaveArgv(input: {
+  readonly builder: string
+  readonly tag: string
+  readonly output: string
+}): string[] {
+  return [input.builder, "save", input.tag, "-o", input.output]
+}
+
+/** Detect an available container builder, preferring docker over podman. `which` is injectable for tests. */
+export function detectBuilder(
+  which: (command: string) => string | null = Bun.which
+): string | undefined {
+  if (which("docker")) return "docker"
+  if (which("podman")) return "podman"
+  return undefined
+}
+
 /**
  * Build the agent image archive with Docker/Podman. Returns the output path.
  * Requires a builder on PATH — this is the one-time setup step; every run after
@@ -94,17 +133,18 @@ export async function buildAgentImage(options: BuildAgentImageOptions = {}): Pro
   }
 
   const dockerfile = agentDockerfilePath()
-  const platformArgs = options.platform ? ["--platform", options.platform] : []
   await mkdir(dirname(output), { recursive: true })
-  await run([builder, "build", ...platformArgs, "-t", tag, "-f", dockerfile, dirname(dockerfile)])
-  await run([builder, "save", tag, "-o", output])
+  await run(
+    buildImageBuildArgv({
+      builder,
+      platform: options.platform,
+      tag,
+      dockerfile,
+      contextDir: dirname(dockerfile),
+    })
+  )
+  await run(buildImageSaveArgv({ builder, tag, output }))
   return output
-}
-
-function detectBuilder(): string | undefined {
-  if (Bun.which("docker")) return "docker"
-  if (Bun.which("podman")) return "podman"
-  return undefined
 }
 
 async function run(argv: string[]): Promise<void> {

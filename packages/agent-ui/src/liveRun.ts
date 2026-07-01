@@ -1,38 +1,20 @@
 import type { AgentRunStreamEvent } from "@sixb/client"
+import type { NormalizedPart, NormalizedTool } from "./parts"
 import type { AgentRunStatus } from "./types"
-
-// A single piece of the in-flight assistant message, reconstructed from `agent.ui.chunk` events.
-// Mirrors the durable `AgentMessagePart` shapes, but kept separate because live chunks arrive as
-// deltas keyed by id/toolCallId and must be merged incrementally.
-export type LivePart =
-  | { readonly kind: "text"; readonly id: string; readonly stepIndex?: number; text: string }
-  | {
-      readonly kind: "reasoning"
-      readonly id: string
-      readonly stepIndex?: number
-      text: string
-      done: boolean
-    }
-  | {
-      readonly kind: "tool"
-      readonly id: string
-      readonly stepIndex?: number
-      toolName: string
-      state: "input-streaming" | "input-available" | "output-available" | "output-error"
-      inputText: string
-      input?: unknown
-      output?: unknown
-      errorText?: string
-    }
 
 export interface LiveRunState {
   /** The run this state belongs to, or null when idle. */
   readonly runId: string | null
   /** True once `agent.run.started` arrives and the run has not finished. */
   readonly active: boolean
-  readonly modelId?: string
-  /** Ordered live parts, in the order their first chunk arrived. */
-  readonly parts: readonly LivePart[]
+  /** Ordered, render-ready parts of the in-flight assistant message, in first-chunk order. */
+  readonly parts: readonly NormalizedPart[]
+  /**
+   * Internal bookkeeping, index-aligned with `parts`: the identity each part is merged on as more
+   * chunks arrive (text/reasoning by id within a step, tools by their global call id). Not meant for
+   * rendering — the view consumes `parts` directly.
+   */
+  readonly partKeys: readonly string[]
   /** AI SDK model step currently being streamed. Used to keep reused part ids ordered. */
   readonly stepIndex?: number
   /** Set once the worker persists the assistant message; the hook reloads durable state on change. */
@@ -55,6 +37,7 @@ export function createLiveRunState(runId: string | null = null): LiveRunState {
     runId,
     active: false,
     parts: [],
+    partKeys: [],
     stepIndex: 0,
     finalizedMessageId: null,
     finishStatus: null,
@@ -90,12 +73,7 @@ export function liveRunReducer(state: LiveRunState, action: LiveRunAction): Live
 function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunState {
   switch (event.type) {
     case "agent.run.started":
-      return {
-        ...state,
-        runId: event.runId,
-        active: true,
-        ...(event.modelId === undefined ? {} : { modelId: event.modelId }),
-      }
+      return { ...state, runId: event.runId, active: true }
     case "agent.ui.chunk":
       return applyChunk(state, event.chunk)
     case "agent.message.finalized":
@@ -147,13 +125,11 @@ function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
 function reduceText(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
   const id = typeof chunk.id === "string" ? chunk.id : "text"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
-  const stepIndex = liveStepIndex(state)
   return upsertPart(
     state,
-    (part): part is Extract<LivePart, { kind: "text" }> =>
-      part.kind === "text" && part.id === id && part.stepIndex === stepIndex,
-    () => ({ kind: "text", id, stepIndex, text: delta }),
-    (part) => (delta ? { ...part, text: part.text + delta } : part)
+    spanKey("text", id, liveStepIndex(state)),
+    () => ({ kind: "text", text: delta }),
+    (part) => (part.kind === "text" && delta ? { kind: "text", text: part.text + delta } : part)
   )
 }
 
@@ -161,93 +137,97 @@ function reduceReasoning(state: LiveRunState, chunk: Record<string, unknown>): L
   const id = typeof chunk.id === "string" ? chunk.id : "reasoning"
   const delta = typeof chunk.delta === "string" ? chunk.delta : ""
   const done = chunk.type === "reasoning-end"
-  const stepIndex = liveStepIndex(state)
   return upsertPart(
     state,
-    (part): part is Extract<LivePart, { kind: "reasoning" }> =>
-      part.kind === "reasoning" && part.id === id && part.stepIndex === stepIndex,
-    () => ({ kind: "reasoning", id, stepIndex, text: delta, done }),
-    (part) => ({ ...part, text: part.text + delta, done: done || part.done })
+    spanKey("reasoning", id, liveStepIndex(state)),
+    () => ({ kind: "reasoning", text: delta, streaming: !done }),
+    (part) =>
+      part.kind === "reasoning"
+        ? { kind: "reasoning", text: part.text + delta, streaming: part.streaming && !done }
+        : part
   )
 }
 
 function reduceTool(state: LiveRunState, chunk: Record<string, unknown>): LiveRunState {
-  const id = typeof chunk.toolCallId === "string" ? chunk.toolCallId : null
-  if (!id) return state
+  const toolCallId = typeof chunk.toolCallId === "string" ? chunk.toolCallId : null
+  if (!toolCallId) return state
   const toolName = typeof chunk.toolName === "string" ? chunk.toolName : undefined
-  const stepIndex = liveStepIndex(state)
 
   return upsertPart(
     state,
-    (part): part is Extract<LivePart, { kind: "tool" }> => part.kind === "tool" && part.id === id,
-    () => {
-      const base: Extract<LivePart, { kind: "tool" }> = {
-        kind: "tool",
-        id,
-        stepIndex,
-        toolName: toolName ?? "tool",
-        inputText: "",
-        state: "input-streaming",
-      }
-      return { ...base, ...applyToolChunk(base, chunk) }
-    },
-    (part) => ({ ...part, ...(toolName ? { toolName } : {}), ...applyToolChunk(part, chunk) })
+    // Tool call ids are globally unique, so a call is matched across steps by id alone.
+    `tool#${toolCallId}`,
+    () => ({
+      kind: "tool",
+      tool: applyToolChunk(
+        { toolName: toolName ?? "tool", state: "input-streaming", inputText: "" },
+        chunk
+      ),
+    }),
+    (part) =>
+      part.kind === "tool"
+        ? {
+            kind: "tool",
+            tool: applyToolChunk({ ...part.tool, ...(toolName ? { toolName } : {}) }, chunk),
+          }
+        : part
   )
 }
 
-type ToolPartFields = Partial<Omit<Extract<LivePart, { kind: "tool" }>, "kind" | "id">> & {
-  inputText: string
-}
-
-function applyToolChunk(
-  part: { inputText: string },
-  chunk: Record<string, unknown>
-): ToolPartFields {
+function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): NormalizedTool {
   switch (chunk.type) {
     case "tool-input-start":
-      return { inputText: part.inputText, state: "input-streaming" }
+      return { ...tool, state: "input-streaming" }
     case "tool-input-delta":
       return {
+        ...tool,
         inputText:
-          part.inputText + (typeof chunk.inputTextDelta === "string" ? chunk.inputTextDelta : ""),
+          (tool.inputText ?? "") +
+          (typeof chunk.inputTextDelta === "string" ? chunk.inputTextDelta : ""),
         state: "input-streaming",
       }
     case "tool-input-available":
-      return { inputText: part.inputText, state: "input-available", input: chunk.input }
+      return { ...tool, state: "input-available", input: chunk.input }
     case "tool-input-error":
       return {
-        inputText: part.inputText,
+        ...tool,
         state: "output-error",
         input: chunk.input,
         errorText: typeof chunk.errorText === "string" ? chunk.errorText : "Tool input error.",
       }
     case "tool-output-available":
-      return { inputText: part.inputText, state: "output-available", output: chunk.output }
+      return { ...tool, state: "output-available", output: chunk.output }
     case "tool-output-error":
       return {
-        inputText: part.inputText,
+        ...tool,
         state: "output-error",
         errorText: typeof chunk.errorText === "string" ? chunk.errorText : "Tool error.",
       }
     default:
-      return { inputText: part.inputText }
+      return tool
   }
 }
 
-// Append a new part if none matches, otherwise replace the matching one in place — preserving order.
-function upsertPart<T extends LivePart>(
+// Append a new part when its key is unseen, otherwise merge into the matching one in place —
+// preserving order. `partKeys` stays index-aligned with `parts`.
+function upsertPart(
   state: LiveRunState,
-  match: (part: LivePart) => part is T,
-  create: () => T,
-  update: (part: T) => T
+  key: string,
+  create: () => NormalizedPart,
+  update: (part: NormalizedPart) => NormalizedPart
 ): LiveRunState {
-  const index = state.parts.findIndex(match)
+  const index = state.partKeys.indexOf(key)
   if (index === -1) {
-    return { ...state, parts: [...state.parts, create()] }
+    return { ...state, parts: [...state.parts, create()], partKeys: [...state.partKeys, key] }
   }
-  const next = state.parts.slice()
-  next[index] = update(state.parts[index] as T)
-  return { ...state, parts: next }
+  const parts = state.parts.slice()
+  parts[index] = update(parts[index] as NormalizedPart)
+  return { ...state, parts }
+}
+
+// The identity a text/reasoning span merges on: the same id reused in a later step is a new part.
+function spanKey(kind: "text" | "reasoning", id: string, stepIndex: number): string {
+  return `${kind}#${stepIndex}#${id}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

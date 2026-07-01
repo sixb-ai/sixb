@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { readFile } from "node:fs/promises"
 import { join } from "node:path"
 import type {
   LanguageModelV4,
@@ -32,6 +31,7 @@ import {
   type RunCommandOptions,
   type Sandbox,
   type SandboxFactory,
+  type SandboxFileRecord,
   Sixb,
   type Storage,
 } from "@sixb/core"
@@ -45,6 +45,7 @@ import {
   createBrokerStreamSink,
   NOOP_STREAM_SINK,
 } from "../src"
+import { normalizeApiBaseUrl } from "../src/api-url"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
@@ -287,11 +288,27 @@ class RecordingSandbox implements Sandbox {
   readonly workingDirectory: string
   status: "running" | "stopped" | "failed" = "running"
   readonly commands: RecordedCommand[] = []
+  readonly writtenFiles: SandboxFileRecord[] = []
   destroyed = false
 
   constructor(id: string) {
     this.id = id
     this.workingDirectory = `/tmp/sixb-recording-sandbox/${id}`
+  }
+
+  /** Read a materialized file's text back, mirroring what a subsequent runCommand would see. */
+  readFileContents(path: string): string {
+    const record = this.writtenFiles.find((file) => file.path === path)
+    if (!record) {
+      throw new Error(`[test] sandbox did not materialize ${path}`)
+    }
+    return typeof record.contents === "string"
+      ? record.contents
+      : new TextDecoder().decode(record.contents)
+  }
+
+  async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
+    this.writtenFiles.push(...files)
   }
 
   async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
@@ -433,7 +450,8 @@ function buildAgentWorkerContext(
     storage: workerStorageOf(sixb.storage),
     sandboxes: sixb.sandboxes,
     baseTools: input.baseTools ?? {},
-    apiBaseUrl: input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
+    // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
+    apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
     leaseMs: 60_000,
     heartbeatMs: 20_000,
@@ -761,6 +779,56 @@ describe("AgentWorker", () => {
     expect(recording.sandboxes[0]?.destroyed).toBe(true)
   })
 
+  test("dispose detaches an in-flight sandbox teardown that destroys once boot settles", async () => {
+    // The "model answered before the sandbox finished booting" case: dispose must not stall on the
+    // in-flight boot, but the teardown must not be orphaned either. It is handed to onDetachedTeardown
+    // (which AgentWorker registers and drains on stop()). Here we assert that seam deterministically.
+    let releaseCreate: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseCreate = resolve
+    })
+    const recording = new RecordingSandboxFactory()
+    const sandboxes: SandboxFactory = {
+      async create(options: CreateSandboxOptions = {}) {
+        await gate
+        return recording.create(options)
+      },
+    }
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const agent = sixb.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const request = await sixb.agents.request({ agentId: "assistant", text: "hi" })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb)
+    await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+
+    let detached: Promise<void> | null = null
+    const environment = await createAgentRunEnvironment({
+      context,
+      agent,
+      run,
+      onDetachedTeardown: (teardown) => {
+        detached = teardown
+      },
+    })
+
+    // Dispose while boot is still gated (in flight): the teardown is detached, not awaited inline,
+    // and nothing has been created or destroyed yet.
+    await environment.dispose()
+    if (!detached) {
+      throw new Error("Expected dispose to detach the in-flight teardown.")
+    }
+    expect(recording.sandboxes).toHaveLength(0)
+
+    // Let provisioning finish; the drained teardown then reaps the now-created sandbox.
+    releaseCreate()
+    await detached
+    expect(recording.sandboxes).toHaveLength(1)
+    expect(recording.sandboxes[0]?.destroyed).toBe(true)
+  })
+
   test("trigger persists the user message and enqueues an intent without creating a run", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
@@ -1044,9 +1112,15 @@ describe("AgentWorker", () => {
         throw new Error("Expected sandbox API env.")
       }
 
-      const querySkill = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "SKILL.md"),
-        "utf-8"
+      // Skills + run context are materialized through sandbox.writeFiles (not the host fs), so read
+      // them back from the sandbox's captured records the way a guest command would.
+      const sandbox = sandboxes.sandboxes[0]
+      if (!sandbox) {
+        throw new Error("Expected a provisioned sandbox.")
+      }
+
+      const querySkill = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "SKILL.md")
       )
       expect(querySkill).toContain("name: sixb-query")
       expect(querySkill).toContain("/api/object-types")
@@ -1054,9 +1128,8 @@ describe("AgentWorker", () => {
       expect(querySkill).toContain("Do not invent alternative")
       expect(querySkill).not.toContain("SIXB_ACCESS_TOKEN")
 
-      const queryApiReference = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-api.md"),
-        "utf-8"
+      const queryApiReference = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-api.md")
       )
       expect(queryApiReference).toContain("/api/objects/query")
       expect(queryApiReference).toContain("/api/objects/query/facets")
@@ -1067,9 +1140,8 @@ describe("AgentWorker", () => {
       expect(queryApiReference).toContain('/api/objects/customer"')
       expect(queryApiReference).toContain('"kind":"limit"')
 
-      const queryShapesReference = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-shapes.md"),
-        "utf-8"
+      const queryShapesReference = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "query-shapes.md")
       )
       expect(queryShapesReference).toContain('"kind": "page"')
       expect(queryShapesReference).toContain('"pageSize": 20')
@@ -1077,37 +1149,32 @@ describe("AgentWorker", () => {
         '"pageToken": "next-page-token-from-previous-response"'
       )
 
-      const queryExamplesReference = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "examples.md"),
-        "utf-8"
+      const queryExamplesReference = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-query", "references", "examples.md")
       )
       expect(queryExamplesReference).toContain("keep pagination and limits inside")
       expect(queryExamplesReference).toContain('"kind": "limit"')
 
-      const telemetrySkill = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "SKILL.md"),
-        "utf-8"
+      const telemetrySkill = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "SKILL.md")
       )
       expect(telemetrySkill).toContain("name: sixb-telemetry")
       expect(telemetrySkill).toContain("references/telemetry-api.md")
 
-      const telemetryApiReference = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "references", "telemetry-api.md"),
-        "utf-8"
+      const telemetryApiReference = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-telemetry", "references", "telemetry-api.md")
       )
       expect(telemetryApiReference).toContain("/api/telemetry/history")
       expect(telemetryApiReference).toContain("/telemetry/rpm/latest")
 
-      const actionsSkill = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-actions", "SKILL.md"),
-        "utf-8"
+      const actionsSkill = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-actions", "SKILL.md")
       )
       expect(actionsSkill).toContain("name: sixb-actions")
       expect(actionsSkill).toContain("references/actions-api.md")
 
-      const actionsApiReference = await readFile(
-        join(env.SIXB_SKILLS_DIR, "sixb-actions", "references", "actions-api.md"),
-        "utf-8"
+      const actionsApiReference = sandbox.readFileContents(
+        join(env.SIXB_SKILLS_DIR, "sixb-actions", "references", "actions-api.md")
       )
       expect(actionsApiReference).toContain("/api/actions")
       expect(actionsApiReference).toContain("ask for approval")
@@ -1116,7 +1183,7 @@ describe("AgentWorker", () => {
       expect(actionsApiReference).toContain("without a `kind`")
       expect(actionsApiReference).toContain('"objectTypeId": "customer", "primaryId": "cust-001"')
 
-      const runContext = JSON.parse(await readFile(env.SIXB_RUN_CONTEXT, "utf-8")) as unknown
+      const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({
         projectId: PROJECT_ID,
         agentId: "assistant",

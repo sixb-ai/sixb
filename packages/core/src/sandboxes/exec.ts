@@ -1,4 +1,4 @@
-import type { CommandResult } from "@sixb/core"
+import type { CommandResult } from "./sandbox"
 
 export interface ExecOptions {
   readonly argv: readonly string[]
@@ -11,13 +11,11 @@ export interface ExecOptions {
 const DEFAULT_KILL_EXIT_CODE = 137
 
 /**
- * Spawn a child process and gather its result. Wraps Bun.spawn with timeout and
- * AbortSignal handling, and never throws. Command-agnostic: here it runs the
- * smolvm CLI, but the wrapper makes no assumptions about what it spawns.
- *
- * NOTE: on timeout/abort we SIGKILL the host smolvm process. If a runaway guest
- * process can outlive its exec session, stop()/destroy() reaps the whole VM as
- * the backstop.
+ * Spawn a child process and gather its {@link CommandResult}. Wraps Bun.spawn with timeout and
+ * AbortSignal handling, and never throws. Command-agnostic: the wrapper makes no assumptions about
+ * what it spawns, so sandbox providers share it. On timeout/abort it SIGKILLs the spawned process;
+ * any provider whose spawned process merely fronts a longer-lived resource (e.g. a VM) is
+ * responsible for reaping that resource in its own stop()/destroy().
  */
 export async function exec(options: ExecOptions): Promise<CommandResult> {
   const start = Date.now()

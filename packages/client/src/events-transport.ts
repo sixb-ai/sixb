@@ -9,13 +9,13 @@
  * may import it.
  */
 import { isSixbEvent, type SixbEvent, type SixbEventTopic, type SixbEventType } from "./events"
-import { client } from "./generated/client.gen"
+import {
+  createReconnectingSocket,
+  createSixbWebSocketUrl,
+  type ReconnectingSocketState,
+} from "./ws-socket"
 
-export interface EventSocketState {
-  readonly connected: boolean
-  readonly reconnecting: boolean
-  readonly error: string | null
-}
+export type EventSocketState = ReconnectingSocketState
 
 export interface EventSocketOptions {
   readonly topic?: SixbEventTopic
@@ -45,11 +45,6 @@ type EventStreamServerMessage =
   | { readonly type: "error"; readonly message: string }
   | { readonly type: "event"; readonly event: SixbEvent }
 
-const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
-const DEFAULT_RECONNECT_DELAY_MS = 1000
-
-const INITIAL_STATE: EventSocketState = { connected: false, reconnecting: false, error: null }
-
 /**
  * Open a subscribing WebSocket to `/ws/events` and stream matching events to
  * `onEvent`. The socket tracks the latest cursor across reconnects so no event
@@ -57,55 +52,27 @@ const INITIAL_STATE: EventSocketState = { connected: false, reconnecting: false,
  * the same fields when they are sent on the subscribe message).
  */
 export function createEventSocket(options: EventSocketOptions): EventSocket {
-  const {
-    topic,
-    types,
-    objectTypeId,
-    primaryId,
-    limit,
-    reconnect = true,
-    reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
-  } = options
-
-  let state = INITIAL_STATE
+  const { topic, types, objectTypeId, primaryId, limit } = options
   let latestCursor = options.afterCursor
-  let stopped = false
-  let openedOnce = false
-  let socket: WebSocket | null = null
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-  const setState = (next: EventSocketState) => {
-    state = next
-    options.onStateChange?.(next)
-  }
-
-  const connect = () => {
-    if (stopped) return
-
-    const ws = new WebSocket(createSixbEventsWebSocketUrl(options.baseUrl))
-    socket = ws
-    setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
-
-    ws.onopen = () => {
-      if (stopped) return
-
-      openedOnce = true
-      setState({ connected: true, reconnecting: false, error: null })
-      ws.send(
-        JSON.stringify({
-          type: "subscribe",
-          ...(topic ? { topic } : {}),
-          ...(types && types.length > 0 ? { types } : {}),
-          ...(objectTypeId ? { objectTypeId } : {}),
-          ...(primaryId ? { primaryId } : {}),
-          ...(latestCursor ? { afterCursor: latestCursor } : {}),
-          ...(limit ? { limit } : {}),
-        })
-      )
-    }
-
-    ws.onmessage = (messageEvent) => {
-      const message = parseEventStreamMessage(messageEvent.data)
+  return createReconnectingSocket({
+    url: createSixbEventsWebSocketUrl(options.baseUrl),
+    reconnect: options.reconnect,
+    reconnectDelayMs: options.reconnectDelayMs,
+    connectionErrorMessage: "Event websocket connection failed.",
+    onError: options.onError,
+    onStateChange: options.onStateChange,
+    subscribeMessage: () => ({
+      type: "subscribe",
+      ...(topic ? { topic } : {}),
+      ...(types && types.length > 0 ? { types } : {}),
+      ...(objectTypeId ? { objectTypeId } : {}),
+      ...(primaryId ? { primaryId } : {}),
+      ...(latestCursor ? { afterCursor: latestCursor } : {}),
+      ...(limit ? { limit } : {}),
+    }),
+    onMessage: (data, sink) => {
+      const message = parseEventStreamMessage(data)
       if (!message) return
 
       if (message.type === "event") {
@@ -117,54 +84,14 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
       }
 
       if (message.type === "error") {
-        options.onError?.(message.message)
-        setState({ ...state, error: message.message })
+        sink.reportError(message.message)
       }
-    }
-
-    ws.onerror = () => {
-      const message = "Event websocket connection failed."
-      options.onError?.(message)
-      setState({ ...state, error: message })
-    }
-
-    ws.onclose = () => {
-      if (socket === ws) {
-        socket = null
-      }
-
-      if (stopped) return
-
-      setState({ connected: false, reconnecting: reconnect, error: state.error })
-
-      if (reconnect) {
-        reconnectTimer = setTimeout(connect, reconnectDelayMs)
-      }
-    }
-  }
-
-  connect()
-
-  return {
-    close() {
-      stopped = true
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
-      socket?.close()
-      socket = null
     },
-  }
+  })
 }
 
 export function createSixbEventsWebSocketUrl(baseUrl?: string): string {
-  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.pathname = "/ws/events"
-  url.search = ""
-  url.hash = ""
-  return url.toString()
+  return createSixbWebSocketUrl("/ws/events", baseUrl)
 }
 
 export function parseEventStreamMessage(value: unknown): EventStreamServerMessage | null {

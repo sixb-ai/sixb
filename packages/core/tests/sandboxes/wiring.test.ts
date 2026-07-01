@@ -19,6 +19,7 @@ function makeFactory(): SandboxFactory {
         status: "running",
         workingDirectory: "/tmp/stub",
         runCommand: async () => ({ exitCode: 0, stdout: "", stderr: "", durationMs: 0 }),
+        writeFiles: async () => {},
         stop: async () => {},
         destroy: async () => {},
       }) satisfies Sandbox,

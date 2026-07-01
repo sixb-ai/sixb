@@ -1,4 +1,5 @@
 import type { SandboxNetworkPolicy } from "@sixb/core"
+import { allowsOutboundNetwork } from "./network"
 
 export interface SeatbeltProfileInput {
   readonly workingDirectory: string
@@ -45,9 +46,4 @@ export function buildSeatbeltArgv(input: SeatbeltArgvInput): readonly string[] {
 
 function sbplString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
-}
-
-function allowsOutboundNetwork(policy: SandboxNetworkPolicy): boolean {
-  // Local Seatbelt support is binary today: deny outbound for "none", host network otherwise.
-  return policy.mode !== "none"
 }

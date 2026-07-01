@@ -3,9 +3,11 @@ import type { SandboxNetworkPolicy } from "@sixb/core"
 /**
  * Translate a provider-agnostic network policy into smolvm CLI flags.
  *
- * - "none":       no flags; the VM gets no network at all.
- * - "restricted": "--net" plus one "--allow-host <host>" per allowed origin.
- * - "all":        "--net" with no allow list (discouraged in production).
+ * - "none":              no flags; the VM gets no network at all.
+ * - "restricted" (allow): "--net" plus one "--allow-host <host>" per allowed origin.
+ * - "restricted" (empty): no flags — an empty allow list means deny-all, NOT allow-all. A bare
+ *   "--net" with no --allow-host opens the whole network, so we must emit nothing here.
+ * - "all":                "--net" with no allow list (discouraged in production).
  *
  * This is strictly stronger than the local backend's all-or-nothing network
  * namespace toggle: smolvm enforces the per-origin allow list the Sandbox
@@ -17,6 +19,9 @@ export function buildNetworkFlags(policy: SandboxNetworkPolicy): string[] {
   }
   if (policy.mode === "all") {
     return ["--net"]
+  }
+  if (policy.allow.length === 0) {
+    return []
   }
   const flags = ["--net"]
   for (const target of policy.allow) {

@@ -23,6 +23,7 @@
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "prepack": "bun run build"
   },
   "dependencies": {

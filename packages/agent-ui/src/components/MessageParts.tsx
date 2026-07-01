@@ -3,78 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { AlertTriangle, ChevronRight, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { BashToolView } from "../bash/BashToolView"
-import type { LivePart } from "../liveRun"
-import type { AgentMessagePart } from "../types"
-
-// A render-ready view of a message part, shared by durable messages and the live streaming row.
-export type NormalizedTool = {
-  readonly toolName: string
-  readonly state: "input-streaming" | "input-available" | "output-available" | "output-error"
-  readonly input?: unknown
-  readonly inputText?: string
-  readonly output?: unknown
-  readonly errorText?: string
-}
-
-export type NormalizedPart =
-  | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "reasoning"; readonly text: string; readonly streaming: boolean }
-  | { readonly kind: "tool"; readonly tool: NormalizedTool }
-  | { readonly kind: "step-start" }
-
-export function normalizeDurableParts(parts: readonly AgentMessagePart[]): NormalizedPart[] {
-  return parts.map((part): NormalizedPart => {
-    switch (part.type) {
-      case "text":
-        return { kind: "text", text: part.text }
-      case "reasoning":
-        return { kind: "reasoning", text: part.text, streaming: false }
-      case "tool-call":
-        return {
-          kind: "tool",
-          tool:
-            part.state === "output-available"
-              ? {
-                  toolName: part.toolName,
-                  state: part.state,
-                  input: part.input,
-                  output: part.output,
-                }
-              : {
-                  toolName: part.toolName,
-                  state: part.state,
-                  input: part.input,
-                  errorText: part.errorText,
-                },
-        }
-      default:
-        return { kind: "step-start" }
-    }
-  })
-}
-
-export function normalizeLiveParts(parts: readonly LivePart[]): NormalizedPart[] {
-  return parts.map((part): NormalizedPart => {
-    switch (part.kind) {
-      case "text":
-        return { kind: "text", text: part.text }
-      case "reasoning":
-        return { kind: "reasoning", text: part.text, streaming: !part.done }
-      default:
-        return {
-          kind: "tool",
-          tool: {
-            toolName: part.toolName,
-            state: part.state,
-            input: part.input,
-            inputText: part.inputText,
-            output: part.output,
-            errorText: part.errorText,
-          },
-        }
-    }
-  })
-}
+import type { NormalizedPart, NormalizedTool } from "../parts"
 
 /**
  * Render an assistant body from normalized parts. Adjacent text parts are merged into a single

@@ -19,9 +19,10 @@ It implements the same `Sandbox` / `SandboxFactory` contract as every provider â
 ## How a run works
 
 Per agent run the factory creates a machine, boots it from an image, runs the agent's bash through
-`smolvm machine exec`, then stops and deletes the machine on teardown. The run's working directory is
-bind-mounted into the guest at the **identical absolute path** on host and guest, so paths the worker
-writes on the host (skills, run context) resolve unchanged inside the VM.
+`smolvm machine exec`, then stops and deletes the machine on teardown. The guest filesystem is fully
+isolated from the host â€” there is no bind mount. Files the worker needs in the guest (skills, run
+context) are materialized **in-guest** by `writeFiles`, which executes a short script inside the VM
+that base64-decodes each payload into place under the working directory.
 
 Boot is fast (well under the model's first-response latency), so the VM is ready before the agent
 asks for it.

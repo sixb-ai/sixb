@@ -486,10 +486,12 @@ export {
   parseAccessTokenValue,
   parseCookieHeader,
   parseSessionCookieValue,
+  principalsEqual,
   resolveAuthConfig,
   resolveAuthCookieOptions,
   resolveAuthSessionAudience,
   SERVICE_ACCOUNT_ACCESS_TOKEN_PREFIX,
+  SYSTEM_PRINCIPAL,
   serializeCookie,
   shouldUseSecureCookies,
   verifyDoubleSubmitCsrf,
@@ -953,19 +955,27 @@ export { InMemoryQueues, QueueError } from "./queues"
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./workers"
 export { isAbortError, QueueWorker, Worker, WorkerAbortError } from "./workers"
 
+// ── HTTP ──────────────────────────────────────────────
+
+export type { SixbApiRoute } from "./http"
+export { matchesPathPattern, normalizeRoutePath, pathSegmentsFor, SIXB_API_ROUTES } from "./http"
+
 // ── Sandboxes ──────────────────────────────────────────────
 
 export type {
   CommandResult,
   CreateSandboxOptions,
+  ExecOptions,
   RunCommandOptions,
   Sandbox,
   SandboxFactory,
+  SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
   SandboxStatus,
 } from "./sandboxes"
 export {
+  exec,
   SandboxError,
   SandboxIsolationUnavailableError,
   SandboxNotRunningError,
@@ -1339,7 +1349,6 @@ export {
   isAgentDefinition,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  normalizeAgentApiPath,
   requestAgentRun,
   toModelMessages,
   toUiMessage,

@@ -1,16 +1,30 @@
 import { MiniSparkline } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { formatRelativeTime } from "../format"
+import {
+  arrayLen,
+  extractObjects,
+  formatValue,
+  metaLine,
+  namedItems,
+  numberField,
+  numberOr,
+  pickColumns,
+  runTiming,
+  type SeriesPoint,
+  seriesUnit,
+  singleObject,
+  stringField,
+  toSeriesData,
+} from "./data"
 import { capitalize, humanize, isRecord, type ParsedBashOutput, subjectLabel } from "./interpret"
 
 // Each renderer takes the already-parsed bash output and renders the decoded `json` natively, with
 // the lightest possible chrome — no nested boxes, no badge pills. Anything a renderer doesn't
-// recognize falls through to the neutral data view, never to raw JSON in the reading path.
+// recognize falls through to the neutral data view, never to raw JSON in the reading path. The pure
+// shaping (rows, columns, series, labels) lives in `./data`; this file owns only the JSX.
 
 const MAX_ROWS = 50
-const MAX_COLUMNS = 5
-// Property keys that just echo the row's identity — never worth a column of their own.
-const REDUNDANT_KEYS = new Set(["id", "primaryId", "objectTypeId"])
 
 interface ApiViewProps {
   readonly parsed: ParsedBashOutput
@@ -426,11 +440,6 @@ function PropertySheet({
   )
 }
 
-interface SeriesPoint {
-  readonly value: number
-  readonly timestamp: string
-}
-
 /** Latest reading + min/max framing a single sparkline. */
 function SeriesChart({ data, unit }: { data: readonly SeriesPoint[]; unit?: string }) {
   const values = data.map((point) => point.value)
@@ -523,116 +532,4 @@ function CellValue({ value }: { value: unknown }) {
   if (Array.isArray(value))
     return <span className="text-muted-foreground/60">{value.length} items</span>
   return <span className="text-muted-foreground/60">…</span>
-}
-
-// --- Helpers ---------------------------------------------------------------
-
-interface ObjectRecord {
-  readonly primaryId?: unknown
-  readonly properties?: unknown
-  readonly [key: string]: unknown
-}
-
-function extractObjects(json: unknown): ObjectRecord[] | null {
-  if (Array.isArray(json)) return json.filter(isRecord) as ObjectRecord[]
-  if (isRecord(json) && Array.isArray(json.objects)) {
-    return json.objects.filter(isRecord) as ObjectRecord[]
-  }
-  return null
-}
-
-function singleObject(json: unknown): ObjectRecord | null {
-  if (isRecord(json) && isRecord(json.object)) return json.object as ObjectRecord
-  if (isRecord(json)) return json as ObjectRecord
-  return null
-}
-
-/** Most-populated property keys across the first rows, skipping identity echoes. */
-function pickColumns(objects: readonly ObjectRecord[]): string[] {
-  const counts = new Map<string, number>()
-  for (const object of objects.slice(0, 20)) {
-    const properties = isRecord(object.properties) ? object.properties : {}
-    for (const key of Object.keys(properties)) {
-      if (REDUNDANT_KEYS.has(key)) continue
-      counts.set(key, (counts.get(key) ?? 0) + 1)
-    }
-  }
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, MAX_COLUMNS)
-    .map(([key]) => key)
-}
-
-/** Numeric telemetry points, sorted oldest→newest, ready for MiniSparkline. */
-function toSeriesData(points: unknown): SeriesPoint[] {
-  if (!Array.isArray(points)) return []
-  return points
-    .filter(isRecord)
-    .map((point) => ({
-      value: typeof point.value === "number" ? point.value : Number.NaN,
-      timestamp: typeof point.at === "string" ? point.at : "",
-    }))
-    .filter((point) => Number.isFinite(point.value) && point.timestamp !== "")
-    .sort((a, b) => (a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0))
-}
-
-/** The most-advanced timestamp on a run, phrased relatively. */
-function runTiming(run: Record<string, unknown>): string {
-  const finished = stringField(run, "finishedAt")
-  if (finished) return `finished ${formatRelativeTime(finished)}`
-  const started = stringField(run, "startedAt")
-  if (started) return `started ${formatRelativeTime(started)}`
-  const queued = stringField(run, "queuedAt")
-  return queued ? `queued ${formatRelativeTime(queued)}` : ""
-}
-
-function seriesUnit(points: unknown): string | undefined {
-  if (!Array.isArray(points)) return undefined
-  for (const point of points) {
-    if (isRecord(point) && typeof point.unit === "string") return point.unit
-  }
-  return undefined
-}
-
-/** Name + a short meta hint for properties/links/actions of an object-type definition. */
-function namedItems(value: unknown): Array<{ name: string; meta?: string }> {
-  if (!Array.isArray(value)) return []
-  return value.filter(isRecord).map((item) => {
-    const name = stringField(item, "name") ?? stringField(item, "id") ?? "—"
-    const target = stringField(item, "targetObjectTypeId")
-    const semanticType = stringField(item, "semanticType")
-    const mode = item.mode === "telemetry" ? "telemetry" : undefined
-    return { name, meta: target ?? semanticType ?? mode }
-  })
-}
-
-function metaLine(parts: ReadonlyArray<readonly [number, string, string]>): string {
-  return parts
-    .filter(([n]) => n > 0)
-    .map(([n, one, many]) => `${n} ${n === 1 ? one : many}`)
-    .join(" · ")
-}
-
-function stringField(value: Record<string, unknown>, field: string): string | undefined {
-  return typeof value[field] === "string" ? (value[field] as string) : undefined
-}
-
-function numberField(value: unknown, field: string): number | null {
-  return isRecord(value) && typeof value[field] === "number" ? (value[field] as number) : null
-}
-
-function numberOr(value: unknown, fallback: number): number {
-  return typeof value === "number" ? value : fallback
-}
-
-function arrayLen(value: unknown): number {
-  return Array.isArray(value) ? value.length : 0
-}
-
-function formatValue(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "—"
-  if (typeof value === "string") return value
-  if (typeof value === "number") return value.toLocaleString()
-  if (typeof value === "boolean") return value ? "Yes" : "No"
-  return String(value)
 }

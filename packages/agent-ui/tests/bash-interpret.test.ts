@@ -89,6 +89,43 @@ describe("classifyCommand", () => {
     ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
   })
 
+  test("treats a curl with a body flag but no -X as an implicit POST", () => {
+    // No `-X POST`: curl still POSTs because `-d` is present. Without the inference this would
+    // default to GET and be mislabelled as an actions list rather than an action request.
+    expect(
+      classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -d '{}'`)
+    ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
+    expect(
+      classifyCommand(
+        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" --data-raw '{"reason":"x"}'`
+      )
+    ).toEqual({ kind: "api-action-request", actionId: "archiveCustomer" })
+    // --data-urlencode is a real curl body flag, so it implies POST too.
+    expect(
+      classifyCommand(
+        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" --data-urlencode 'reason=x'`
+      ).kind
+    ).toBe("api-action-request")
+  })
+
+  test("does not infer POST from a body flag that only appears inside a quoted argument", () => {
+    // The `--data` here is inside a header value, not a real curl flag: method stays GET, so this
+    // is an actions list — not an action request. Guards the quote-blanking in the method detector.
+    expect(
+      classifyCommand(
+        `curl -sS "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -H "X-Note: --data disabled"`
+      ).kind
+    ).toBe("api-actions-list")
+  })
+
+  test("keeps an explicit method even when a body flag is present", () => {
+    // `-X GET` must win over the implicit-POST inference triggered by `-d`.
+    expect(
+      classifyCommand(`curl -sS -X GET "$SIXB_API_BASE_URL/api/actions/archiveCustomer" -d '{}'`)
+        .kind
+    ).toBe("api-actions-list")
+  })
+
   test("classifies an action run lookup", () => {
     expect(classifyCommand(`curl -sS "$SIXB_API_BASE_URL/api/action-runs/run-abc123"`)).toEqual({
       kind: "api-action-run",

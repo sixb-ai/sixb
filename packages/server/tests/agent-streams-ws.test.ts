@@ -259,6 +259,51 @@ describe("canAccessAgentRunStream", () => {
       })
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
+
+  test("rejects pre-claim subscriptions that cannot be resolved or owned", async () => {
+    const sixb = createSixbInstance<readonly OntologySource[]>({
+      id: projectId,
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      auth: { id: "test", kind: "dev" },
+    })
+    const owner: Principal = { type: "user", id: "usr_owner" }
+    const agents = agentStorage(sixb)
+    await agents.threads.create({ id: threadId, projectId, agentId, ownerPrincipal: owner })
+
+    // No run reserved and no threadId supplied: the caller must include one to subscribe early.
+    await expect(
+      canAccessAgentRunStream(sixb, {
+        runId: "agt_run_not_reserved",
+        authz: authz(owner, [agentId]),
+      })
+    ).resolves.toEqual({
+      ok: false,
+      message: "Agent run not found. Include threadId when subscribing before the run starts.",
+    })
+
+    // threadId points at a non-existent thread.
+    await expect(
+      canAccessAgentRunStream(sixb, {
+        runId: "agt_run_not_reserved",
+        threadId: "thr_missing",
+        authz: authz(owner, [agentId]),
+      })
+    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+
+    // threadId points at a thread owned by a different principal.
+    await expect(
+      canAccessAgentRunStream(sixb, {
+        runId: "agt_run_not_reserved",
+        threadId,
+        authz: authz({ type: "user", id: "usr_other" }, [agentId]),
+      })
+    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
+  })
 })
 
 function createSixbInstance<TOntologySources extends readonly OntologySource[]>(

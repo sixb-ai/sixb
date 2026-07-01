@@ -38,22 +38,24 @@ export function isLocalImageArchive(image: string): boolean {
   return LOCAL_IMAGE_ARCHIVE_SUFFIXES.some((suffix) => lower.endsWith(suffix))
 }
 
-/** `smolvm machine create --name <id> [--image <img>] --volume <vol> [--storage N] [--overlay N] [<net>...]` */
+/**
+ * `smolvm machine create --name <id> [--image <img>] [--storage N] [--overlay N] [<net>...]`
+ *
+ * No host volume is mounted: the guest filesystem is fully isolated and files are materialized
+ * in-guest via {@link SmolvmSandbox.writeFiles}.
+ */
 export function buildCreateArgv(
   config: SmolvmCliConfig,
   params: {
     readonly id: string
     /** Network flags from buildNetworkFlags. */
     readonly network: readonly string[]
-    /** Bind mount, "<hostDir>:<guestDir>". */
-    readonly volume: string
   }
 ): string[] {
   const argv = [config.bin, "machine", "create", "--name", params.id]
   if (config.image !== undefined) {
     argv.push("--image", config.image)
   }
-  argv.push("--volume", params.volume)
   if (config.storageGiB !== undefined) {
     argv.push("--storage", String(config.storageGiB))
   }

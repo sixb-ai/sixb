@@ -7,6 +7,7 @@ runSandboxesContractSuite("LocalSandbox (none)", {
   createFactory: () => new LocalSandboxFactory({ isolation: "none" }),
   capabilities: {
     networkBlocking: false,
+    restrictedEgressEnforcement: false,
     readOnlyEnforcement: false,
     isolation: false,
   },

@@ -118,11 +118,25 @@ function extractApiRequest(command: string): ApiRequest | null {
   const query = new URLSearchParams(queryIndex === -1 ? "" : raw.slice(queryIndex + 1))
   const segments = path.split("/").filter(Boolean).slice(1) // drop leading "api"
 
-  const methodMatch = command.match(/(?:-X|--request)\s*([A-Za-z]+)/)
-  const method = (methodMatch?.[1] ?? "GET").toUpperCase()
+  // Detect the method on the command with quoted spans blanked out, so a `-X`/`-d` token that only
+  // appears inside the URL, a header value, or a JSON body is never mistaken for a real curl flag.
+  const flags = command.replace(/'[^']*'|"[^"]*"/g, " ")
+  const explicitMethod = flags.match(/(?:-X|--request)\s*([A-Za-z]+)/)?.[1]
+  // curl treats a body flag with no explicit method as an implicit POST, so infer it here rather
+  // than mislabelling e.g. `curl .../api/actions/:id -d '{}'` as a GET (an actions list).
+  const method = explicitMethod
+    ? explicitMethod.toUpperCase()
+    : CURL_DATA_FLAG_RE.test(flags)
+      ? "POST"
+      : "GET"
 
   return { method, segments, query, body: extractCurlBody(command) }
 }
+
+// A curl body flag (`-d`, `--data`, `--data-raw|binary|ascii|urlencode`) as a standalone token,
+// including glued forms (`-d@file`, `--data=…`). Detects presence for method inference only — apply
+// it to the quote-blanked command so payload text can't trigger a false match.
+const CURL_DATA_FLAG_RE = /(?:^|\s)(?:--data(?:-raw|-binary|-ascii|-urlencode)?|-d)(?=[\s=@])/
 
 /** Extract and JSON-parse a curl `--data '...'` / `-d '...'` payload, if present. */
 function extractCurlBody(command: string): unknown {

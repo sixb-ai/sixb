@@ -1,14 +1,9 @@
-import {
-  type AuthorizationContext,
-  canViewEvent,
-  type DomainEvent,
-  scopeKeysForEvent,
-} from "@sixb/core"
+import { canViewEvent, type DomainEvent, scopeKeysForEvent } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
 
 interface EventSubscriptionState {
   topics?: DomainEvent["topic"][]
@@ -206,17 +201,6 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       states.delete(wsStateKey(ws))
     },
   })
-}
-
-function wsStateKey(ws: object): object {
-  const raw = (ws as { raw?: unknown }).raw
-  return raw && typeof raw === "object" ? raw : ws
-}
-
-/** Read the authorization context the auth derive attached to the upgrade request. */
-function wsAuthz(ws: object): AuthorizationContext | null {
-  const data = (ws as { data?: { authz?: AuthorizationContext | null } }).data
-  return data?.authz ?? null
 }
 
 /**

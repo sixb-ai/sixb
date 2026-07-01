@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * Build the canonical sixb agent sandbox image archive.
  *

@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, test } from "bun:test"
-import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { probeSmolvm } from "../src/preflight"
 import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
@@ -11,10 +10,11 @@ import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
  *
  * Uses a BARE machine (no image) on purpose: it boots fully offline from the
  * built-in busybox rootfs, so the test needs no Docker and no prebuilt archive
- * in CI. It validates the real lifecycle, the dir:dir volume mount, --workdir,
- * --env, exit codes, and stream separation end to end. The rootfs ships busybox
- * `sh` (not bash), so commands use `sh`. (The factory defaults to the managed
- * bash+curl image; that path is covered by the manual build + docs.)
+ * in CI. It validates the real lifecycle, in-guest file materialization via
+ * writeFiles, --workdir, --env, exit codes, and stream separation end to end.
+ * The rootfs ships busybox `sh` (not bash), so commands use `sh`. (The factory
+ * defaults to the managed bash+curl image; that path is covered by the manual
+ * build + docs.)
  */
 const available = probeSmolvm("smolvm").ok
 const guard = available ? describe : describe.skip
@@ -43,12 +43,11 @@ guard("SmolvmSandbox (real bare VM)", () => {
     }
   }, 180_000)
 
-  test("guest sees files written to workingDirectory on the host (dir:dir mount)", async () => {
+  test("guest reads files materialized in-guest via writeFiles", async () => {
     const sandbox = await createBare()
     try {
-      const contextDir = join(sandbox.workingDirectory, ".sixb", "agent", "context")
-      await mkdir(contextDir, { recursive: true })
-      await writeFile(join(contextDir, "run.json"), '{"ok":true}', "utf-8")
+      const runContextPath = join(sandbox.workingDirectory, ".sixb", "agent", "context", "run.json")
+      await sandbox.writeFiles([{ path: runContextPath, contents: '{"ok":true}' }])
 
       const result = await sandbox.runCommand("sh", ["-lc", "cat .sixb/agent/context/run.json"])
       expect(result.exitCode).toBe(0)

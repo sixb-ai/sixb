@@ -1,5 +1,5 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
-import type { Principal } from "../../auth"
+import { principalsEqual } from "../../auth"
 import { AgentStorageError } from "./errors"
 import type {
   AgentMessageRecord,
@@ -29,10 +29,6 @@ function key(projectId: string, id: string): string {
 
 function clone<T>(value: T): T {
   return structuredClone(value)
-}
-
-function principalsEqual(a: Principal, b: Principal): boolean {
-  return a.type === b.type && a.id === b.id
 }
 
 function compareByDate(

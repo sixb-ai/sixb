@@ -37,7 +37,13 @@ printf '%s\\n' "$*" >> ${JSON.stringify(logPath)}
 case "$2" in
   create) [ "${failOn}" = "create" ] && exit 1 ;;
   start) [ "${failOn}" = "start" ] && exit 1 ;;
-  exec) printf 'stdout-from-fake'; printf 'stderr-from-fake' 1>&2; exit ${execExit} ;;
+  exec)
+    # The working-directory bootstrap (mkdir) must always succeed; execExit models the guest
+    # command's exit code, which only applies to the caller's runCommand.
+    case "$*" in
+      *"-- mkdir "*) exit 0 ;;
+    esac
+    printf 'stdout-from-fake'; printf 'stderr-from-fake' 1>&2; exit ${execExit} ;;
 esac
 exit 0
 `
@@ -66,9 +72,11 @@ describe("SmolvmSandbox lifecycle", () => {
     const calls = await readCalls()
     expect(calls[0]).toContain("machine create --name run-1")
     expect(calls[0]).toContain("--image node:22-slim")
-    // The host workdir is bind-mounted into the guest at the identical path.
-    expect(calls[0]).toContain(`--volume ${sandbox.workingDirectory}:${sandbox.workingDirectory}`)
+    // The guest filesystem is isolated: no host bind mount. Files arrive via in-guest writeFiles.
+    expect(calls[0]).not.toContain("--volume")
     expect(calls[1]).toContain("machine start --name run-1")
+    // The working directory is created in-guest up front so it is a usable --workdir.
+    expect(calls[2]).toContain(`-- mkdir -p ${sandbox.workingDirectory}`)
 
     await sandbox.destroy()
   })
@@ -86,7 +94,9 @@ describe("SmolvmSandbox lifecycle", () => {
     expect(result.stdout).toBe("stdout-from-fake")
     expect(result.stderr).toBe("stderr-from-fake")
 
-    const execCall = (await readCalls()).find((c) => c.includes("machine exec"))
+    const execCall = (await readCalls()).find(
+      (c) => c.includes("machine exec") && c.includes("bash")
+    )
     expect(execCall).toContain("machine exec --name run-1")
     expect(execCall).toContain(`--workdir ${sandbox.workingDirectory}`)
     expect(execCall).toContain("--env SIXB_RUN_ID=run-1")

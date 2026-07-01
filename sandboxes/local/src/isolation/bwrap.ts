@@ -1,4 +1,5 @@
 import type { SandboxNetworkPolicy } from "@sixb/core"
+import { allowsOutboundNetwork } from "./network"
 
 export interface BwrapArgvInput {
   readonly command: string
@@ -36,9 +37,4 @@ export function buildBwrapArgv(input: BwrapArgvInput): readonly string[] {
   argv.push("--", input.command, ...input.args)
 
   return argv
-}
-
-function allowsOutboundNetwork(policy: SandboxNetworkPolicy): boolean {
-  // Local bwrap support is binary today: no network namespace for "none", host network otherwise.
-  return policy.mode !== "none"
 }

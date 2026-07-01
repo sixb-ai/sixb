@@ -1,18 +1,19 @@
 import { randomUUID } from "node:crypto"
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import {
   type CommandResult,
   type CreateSandboxOptions,
+  exec,
   type RunCommandOptions,
   type Sandbox,
+  type SandboxFileRecord,
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
   type SandboxStatus,
 } from "@sixb/core"
-import { exec } from "./exec"
 import { buildBwrapArgv } from "./isolation/bwrap"
 import {
   detectIsolation,
@@ -20,6 +21,7 @@ import {
   type LocalIsolation,
   type ResolvedIsolation,
 } from "./isolation/detect"
+import { warnIfRestrictedDowngraded } from "./isolation/network"
 import { buildNoneArgv } from "./isolation/none"
 import { buildSeatbeltArgv, buildSeatbeltProfile } from "./isolation/seatbelt"
 
@@ -88,13 +90,18 @@ export class LocalSandbox implements Sandbox {
       id
     )
 
+    // No local backend can enforce a per-origin allow list, so a restricted policy degrades to host
+    // network. Warn once here (rather than per backend) so the degradation is never silent.
+    const network = options.network ?? { mode: "none" }
+    warnIfRestrictedDowngraded(network)
+
     return new LocalSandbox({
       id,
       workingDirectory,
       backend,
       env: options.env ?? {},
       timeout: options.timeout,
-      network: options.network ?? { mode: "none" },
+      network,
       readOnlyPaths: options.readOnlyPaths ?? [],
       readWritePaths: options.readWritePaths ?? [],
       cleanupWorkingDirectory: generated,
@@ -136,6 +143,23 @@ export class LocalSandbox implements Sandbox {
     } finally {
       this.inFlight.delete(controller)
       options.signal?.removeEventListener("abort", onUserAbort)
+    }
+  }
+
+  async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot write files`
+      )
+    }
+    // Local sandboxes execute on the host filesystem, so materializing files is a direct write.
+    // Paths live under workingDirectory, which the isolation profiles already allow writing to.
+    for (const file of files) {
+      await mkdir(dirname(file.path), { recursive: true })
+      await writeFile(file.path, file.contents)
+      if (file.mode !== undefined) {
+        await chmod(file.path, file.mode)
+      }
     }
   }
 

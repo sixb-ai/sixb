@@ -4,9 +4,8 @@ import type {
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
 } from "@sixb/core"
+import { SYSTEM_PRINCIPAL } from "@sixb/core"
 import type { AgentWorkerStorage } from "./types"
-
-const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "agent-worker" }
 
 /** Stable auth identity the worker uses when an agent acts on Sixb resources. */
 export interface AgentExecutionIdentity {

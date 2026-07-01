@@ -217,7 +217,9 @@ describe("agent routes", () => {
         noAccess.csrfHeaders
       )
     )
-    expect(deniedThread.status).toBe(403)
+    // An ungranted agent is hidden: creation 404s (agent not found) rather than 403, so the
+    // response does not disclose that the agent id exists.
+    expect(deniedThread.status).toBe(404)
 
     const allowedThread = await app.fetch(
       jsonRequest(
@@ -310,6 +312,25 @@ describe("agent routes", () => {
         },
       ],
     })
+  })
+
+  test("returns a generic 409 when creating a thread with a duplicate id", async () => {
+    const { app } = createApp()
+
+    const first = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant", threadId: "thr-dup" })
+    )
+    expect(first.status).toBe(201)
+
+    const second = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant", threadId: "thr-dup" })
+    )
+    expect(second.status).toBe(409)
+    const body = (await second.json()) as { error: string }
+    expect(body.error).toBe("Agent thread already exists")
+    // The generic message must not leak the raw provider message (id / project / [Sixb*] prefix).
+    expect(body.error).not.toContain("thr-dup")
+    expect(body.error).not.toContain("[Sixb")
   })
 
   test("returns 409 when posting to a thread with an active run", async () => {

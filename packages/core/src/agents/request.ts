@@ -1,4 +1,5 @@
 import type { Principal } from "../auth"
+import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
@@ -33,8 +34,6 @@ export interface RequestAgentRunResult {
   /** Whether this call created the thread. */
   readonly createdThread: boolean
 }
-
-const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 /**
  * Trigger an agent turn.
