@@ -30,8 +30,8 @@ import type { RuleDefinition } from "../rules/types"
 import { RuntimeError } from "../runtime/errors"
 import type { ScheduleDefinition } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import type { GroupDefinition, InvitePolicyDefinition, RoleDefinition } from "../security"
-import { isGroupDefinition, isInvitePolicyDefinition, isRoleDefinition } from "../security"
+import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
+import { isGroupDefinition, isMembershipPolicyDefinition, isRoleDefinition } from "../security"
 import type { SyncDefinition } from "../syncs"
 import { isSyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -304,25 +304,25 @@ export async function discoverRoles(projectRoot: string): Promise<readonly RoleD
   return roles
 }
 
-export async function discoverInvitePolicies(
+export async function discoverMembershipPolicies(
   projectRoot: string
-): Promise<readonly InvitePolicyDefinition[]> {
-  const invitePoliciesDir = join(projectRoot, "security", "invite-policies")
-  const modulePaths = await listModuleFiles(invitePoliciesDir)
+): Promise<readonly MembershipPolicyDefinition[]> {
+  const policiesDir = join(projectRoot, "security", "policies")
+  const modulePaths = await listModuleFiles(policiesDir)
   const exportedCandidates = await loadModuleExports({
     modulePaths,
     projectRoot,
-    kind: "invitePolicy",
+    kind: "membershipPolicy",
   })
 
-  const invitePolicies: InvitePolicyDefinition[] = []
+  const membershipPolicies: MembershipPolicyDefinition[] = []
   for (const candidate of exportedCandidates) {
-    if (isInvitePolicyDefinition(candidate)) {
-      invitePolicies.push(candidate)
+    if (isMembershipPolicyDefinition(candidate)) {
+      membershipPolicies.push(candidate)
     }
   }
 
-  return invitePolicies
+  return membershipPolicies
 }
 
 export async function discoverWorkflows(
@@ -384,7 +384,7 @@ async function loadModuleExports(options: {
     | "rule"
     | "group"
     | "role"
-    | "invitePolicy"
+    | "membershipPolicy"
     | "workflow"
 }): Promise<unknown[]> {
   const exportedCandidates: unknown[] = []

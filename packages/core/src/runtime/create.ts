@@ -10,7 +10,7 @@ import {
   discoverDatasets,
   discoverFunctions,
   discoverGroups,
-  discoverInvitePolicies,
+  discoverMembershipPolicies,
   discoverOntologySources,
   discoverPipelines,
   discoverProjections,
@@ -31,7 +31,7 @@ import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
-import type { GroupDefinition, InvitePolicyDefinition, RoleDefinition } from "../security"
+import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows"
@@ -63,7 +63,7 @@ export interface CreateSixbOptions {
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
-  invitePolicies?: readonly InvitePolicyDefinition[]
+  membershipPolicies?: readonly MembershipPolicyDefinition[]
   auth?: SixbAuthConfig
   projectRoot?: string
 }
@@ -73,7 +73,7 @@ export interface CreateSixbOptions {
  *
  * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
  * `datasets/`, `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,invite-policies}/`
+ * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
@@ -103,7 +103,7 @@ export async function createSixb(
     workflows,
     groups,
     roles,
-    invitePolicies,
+    membershipPolicies,
     agents,
   ] = await Promise.all([
     options.actions ?? discoverActions(projectRoot),
@@ -118,7 +118,7 @@ export async function createSixb(
     discoverWorkflows(projectRoot),
     discoverGroups(projectRoot),
     discoverRoles(projectRoot),
-    discoverInvitePolicies(projectRoot),
+    discoverMembershipPolicies(projectRoot),
     discoverAgents(projectRoot),
   ])
 
@@ -145,7 +145,7 @@ export async function createSixb(
     workflows: [...(options.workflows ?? []), ...workflows],
     groups: [...(options.groups ?? []), ...groups],
     roles: [...(options.roles ?? []), ...roles],
-    invitePolicies: [...(options.invitePolicies ?? []), ...invitePolicies],
+    membershipPolicies: [...(options.membershipPolicies ?? []), ...membershipPolicies],
     agents: [...(options.agents ?? []), ...agents],
     auth: options.auth,
   })

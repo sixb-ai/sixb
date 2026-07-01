@@ -212,7 +212,7 @@ export type CreateInvitationCapability =
   | { readonly state: "enabled" }
   | {
       readonly state: "disabled"
-      readonly reason: "missing_invite_policy" | "invitation_delivery_not_supported"
+      readonly reason: "missing_membership_policy" | "invitation_delivery_not_supported"
     }
 
 export interface GetInvitationOptionsResult {

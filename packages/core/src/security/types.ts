@@ -54,12 +54,14 @@ export interface RoleDefinition<TId extends string = string> {
   readonly grants: readonly GrantDefinition[]
 }
 
-export interface InvitePolicyDefinition<TId extends string = string> {
-  readonly kind: "invitePolicy"
+export type MembershipOperation = "invite" | "assignGroups" | "suspend"
+
+export interface MembershipPolicyDefinition<TId extends string = string> {
+  readonly kind: "membershipPolicy"
   readonly id: TId
   readonly grantedToGroupIds: readonly string[]
-  readonly canInviteToGroupIds: readonly string[]
-  readonly canInviteWithoutGroups?: boolean
+  readonly scopeGroupIds: readonly string[]
+  readonly can: readonly MembershipOperation[]
 }
 
 export interface RegisteredSecurityDefinitions {
@@ -67,8 +69,8 @@ export interface RegisteredSecurityDefinitions {
   readonly groupsById: ReadonlyMap<string, GroupDefinition>
   readonly roles: readonly RoleDefinition[]
   readonly rolesById: ReadonlyMap<string, RoleDefinition>
-  readonly invitePolicies: readonly InvitePolicyDefinition[]
-  readonly invitePoliciesById: ReadonlyMap<string, InvitePolicyDefinition>
+  readonly membershipPolicies: readonly MembershipPolicyDefinition[]
+  readonly membershipPoliciesById: ReadonlyMap<string, MembershipPolicyDefinition>
 }
 
 export interface SecurityRegistry {
@@ -78,6 +80,6 @@ export interface SecurityRegistry {
   getRoleById(roleId: string): RoleDefinition | null
   /** Roles with their grants pre-expanded to concrete id sets for resolution. */
   getResolvedRoles(): readonly ResolvedRole[]
-  getInvitePolicyDefinitions(): readonly InvitePolicyDefinition[]
-  getInvitePolicyById(policyId: string): InvitePolicyDefinition | null
+  getMembershipPolicyDefinitions(): readonly MembershipPolicyDefinition[]
+  getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null
 }

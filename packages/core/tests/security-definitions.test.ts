@@ -8,7 +8,7 @@ import {
   type AgentDefinition,
   agents,
   can,
-  canInviteGroupIds,
+  canPerformMembershipOperation,
   col,
   createSixb,
   type DatasetDefinition,
@@ -18,20 +18,20 @@ import {
   defineConnector,
   defineDataset,
   defineGroup,
-  defineInvitePolicy,
+  defineMembershipPolicy,
   defineObjectType,
   definePipeline,
   definePipelineStep,
   defineRole,
   defineSync,
   type GroupDefinition,
-  type InvitePolicyDefinition,
+  type MembershipPolicyDefinition,
   ontology,
   type PipelineDefinition,
   pipelines,
   prop,
   type RoleDefinition,
-  resolveInvitePolicyScope,
+  resolveMembershipPolicyScope,
   SecurityValidationError,
   Sixb,
   type SyncDefinition,
@@ -101,71 +101,95 @@ describe("security definitions", () => {
     })
   })
 
-  test("defineInvitePolicy normalizes group definitions to ids", () => {
+  test("defineMembershipPolicy normalizes group definitions to ids", () => {
     const securityAdmins = defineGroup("security-admins")
     const commercial = defineGroup("commercial")
     const finance = defineGroup("finance")
 
     expect(
-      defineInvitePolicy("default-invites", {
+      defineMembershipPolicy("member-admin", {
         grantedTo: [securityAdmins],
-        canInviteTo: [commercial, finance],
-        canInviteWithoutGroups: true,
+        scope: [commercial, finance],
+        can: ["invite", "assignGroups", "suspend"],
       })
     ).toEqual({
-      kind: "invitePolicy",
-      id: "default-invites",
+      kind: "membershipPolicy",
+      id: "member-admin",
       grantedToGroupIds: ["security-admins"],
-      canInviteToGroupIds: ["commercial", "finance"],
-      canInviteWithoutGroups: true,
+      scopeGroupIds: ["commercial", "finance"],
+      can: ["invite", "assignGroups", "suspend"],
     })
   })
 
-  test("defineInvitePolicy rejects policies that grant nothing", () => {
+  test("defineMembershipPolicy rejects policies without operations", () => {
     const securityAdmins = defineGroup("security-admins")
 
     expect(() =>
-      defineInvitePolicy("empty", {
+      defineMembershipPolicy("empty", {
         grantedTo: [securityAdmins],
+        scope: [],
+        can: [],
       })
     ).toThrow(SecurityValidationError)
   })
 
-  test("invite policy scopes combine applicable policies", () => {
-    const scope = resolveInvitePolicyScope({
+  test("membership policy scopes combine applicable policies by operation", () => {
+    const scope = resolveMembershipPolicyScope({
       callerGroupIds: ["security-admins"],
-      invitePolicies: [
+      membershipPolicies: [
         {
-          kind: "invitePolicy",
-          id: "commercial-invites",
+          kind: "membershipPolicy",
+          id: "commercial-membership",
           grantedToGroupIds: ["security-admins"],
-          canInviteToGroupIds: ["commercial"],
+          scopeGroupIds: ["commercial"],
+          can: ["invite", "assignGroups"],
         },
         {
-          kind: "invitePolicy",
-          id: "finance-invites",
+          kind: "membershipPolicy",
+          id: "finance-suspend",
           grantedToGroupIds: ["security-admins"],
-          canInviteToGroupIds: ["finance"],
-          canInviteWithoutGroups: true,
+          scopeGroupIds: ["finance"],
+          can: ["suspend"],
         },
         {
-          kind: "invitePolicy",
+          kind: "membershipPolicy",
+          id: "groupless-invites",
+          grantedToGroupIds: ["security-admins"],
+          scopeGroupIds: [],
+          can: ["invite"],
+        },
+        {
+          kind: "membershipPolicy",
           id: "ignored",
           grantedToGroupIds: ["other-admins"],
-          canInviteToGroupIds: ["engineering"],
+          scopeGroupIds: ["engineering"],
+          can: ["invite", "assignGroups", "suspend"],
         },
       ],
     })
 
-    expect(scope.policyIds).toEqual(["commercial-invites", "finance-invites"])
-    expect([...scope.canInviteToGroupIds]).toEqual(["commercial", "finance"])
-    expect(scope.canInviteWithoutGroups).toBe(true)
-    expect(canInviteGroupIds(scope, ["commercial", "finance"])).toBe(true)
-    expect(canInviteGroupIds(scope, [])).toBe(true)
-    expect(canInviteGroupIds(scope, ["engineering"])).toBe(false)
+    expect(scope.policyIds).toEqual([
+      "commercial-membership",
+      "finance-suspend",
+      "groupless-invites",
+    ])
+    expect(scope.operations.invite.policyIds).toEqual([
+      "commercial-membership",
+      "groupless-invites",
+    ])
+    expect([...scope.operations.invite.groupIds]).toEqual(["commercial"])
+    expect([...scope.operations.assignGroups.groupIds]).toEqual(["commercial"])
+    expect([...scope.operations.suspend.groupIds]).toEqual(["finance"])
+    expect(canPerformMembershipOperation(scope, "invite", ["commercial"])).toBe(true)
+    expect(canPerformMembershipOperation(scope, "invite", [])).toBe(true)
+    expect(canPerformMembershipOperation(scope, "invite", ["finance"])).toBe(false)
+    expect(canPerformMembershipOperation(scope, "assignGroups", ["commercial"])).toBe(true)
+    expect(canPerformMembershipOperation(scope, "assignGroups", [])).toBe(true)
+    expect(canPerformMembershipOperation(scope, "suspend", ["finance"])).toBe(true)
+    expect(canPerformMembershipOperation(scope, "suspend", ["commercial"])).toBe(false)
   })
 
-  test("createSixb discovers groups and invite policies from security folders", async () => {
+  test("createSixb discovers membership policies from security policies folder", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -175,20 +199,20 @@ describe("security definitions", () => {
 
 export const securityAdmins = defineGroup("security-admins")
 export const commercial = defineGroup("commercial")
-export const extraGroups = [defineGroup("finance")]
+export const finance = defineGroup("finance")
 `
     )
 
     await writeProjectFile(
       projectRoot,
-      "security/invite-policies/default.ts",
-      `import { defineInvitePolicy } from "${coreModuleUrl}"
-import { commercial, extraGroups, securityAdmins } from "../groups/team"
+      "security/policies/member-administration.ts",
+      `import { defineMembershipPolicy } from "${coreModuleUrl}"
+import { commercial, finance, securityAdmins } from "../groups/team"
 
-export const defaultInvites = defineInvitePolicy("default-invites", {
+export const memberAdministration = defineMembershipPolicy("member-administration", {
   grantedTo: [securityAdmins],
-  canInviteTo: [commercial, extraGroups[0]],
-  canInviteWithoutGroups: true,
+  scope: [commercial, finance],
+  can: ["invite", "assignGroups", "suspend"],
 })
 `
     )
@@ -199,40 +223,36 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
       ...createTestRuntimeDeps(),
     })
 
-    expect(new Set(sixb.security.getGroupDefinitions().map((group) => group.id))).toEqual(
-      new Set(["security-admins", "commercial", "finance"])
-    )
-    expect(sixb.security.getGroupById("commercial")?.id).toBe("commercial")
-    expect(sixb.security.getGroupById("missing")).toBeNull()
-    expect(sixb.security.getInvitePolicyById("default-invites")).toEqual({
-      kind: "invitePolicy",
-      id: "default-invites",
+    expect(sixb.security.getMembershipPolicyById("member-administration")).toEqual({
+      kind: "membershipPolicy",
+      id: "member-administration",
       grantedToGroupIds: ["security-admins"],
-      canInviteToGroupIds: ["commercial", "finance"],
-      canInviteWithoutGroups: true,
+      scopeGroupIds: ["commercial", "finance"],
+      can: ["invite", "assignGroups", "suspend"],
     })
   })
 
-  test("explicit groups and invite policies register without filesystem discovery", async () => {
+  test("explicit groups and membership policies register without filesystem discovery", async () => {
     const securityAdmins: GroupDefinition = { kind: "group", id: "security-admins" }
     const commercial: GroupDefinition = { kind: "group", id: "commercial" }
-    const invitePolicy: InvitePolicyDefinition = {
-      kind: "invitePolicy",
-      id: "default-invites",
+    const membershipPolicy: MembershipPolicyDefinition = {
+      kind: "membershipPolicy",
+      id: "member-admin",
       grantedToGroupIds: ["security-admins"],
-      canInviteToGroupIds: ["commercial"],
+      scopeGroupIds: ["commercial"],
+      can: ["invite", "assignGroups"],
     }
 
     const sixb = await createSixb({
       projectRoot: await createTempProjectRoot(),
       ontologies: [Account],
       groups: [securityAdmins, commercial],
-      invitePolicies: [invitePolicy],
+      membershipPolicies: [membershipPolicy],
       ...createTestRuntimeDeps(),
     })
 
     expect(sixb.security.getGroupDefinitions()).toEqual([securityAdmins, commercial])
-    expect(sixb.security.getInvitePolicyDefinitions()).toEqual([invitePolicy])
+    expect(sixb.security.getMembershipPolicyDefinitions()).toEqual([membershipPolicy])
   })
 
   test("runtime registration rejects duplicate group ids", () => {
@@ -246,57 +266,73 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
     ).toThrow(SecurityValidationError)
   })
 
-  test("runtime registration rejects duplicate invite policy ids", () => {
+  test("runtime registration rejects duplicate membership policy ids", () => {
     const groups: GroupDefinition[] = [
       { kind: "group", id: "security-admins" },
       { kind: "group", id: "commercial" },
     ]
-
-    const policy: InvitePolicyDefinition = {
-      kind: "invitePolicy",
-      id: "default-invites",
+    const policy: MembershipPolicyDefinition = {
+      kind: "membershipPolicy",
+      id: "member-admin",
       grantedToGroupIds: ["security-admins"],
-      canInviteToGroupIds: ["commercial"],
+      scopeGroupIds: ["commercial"],
+      can: ["invite"],
     }
 
-    expect(() =>
-      createRuntime({
-        groups,
-        invitePolicies: [policy, policy],
-      })
-    ).toThrow(SecurityValidationError)
+    expect(() => createRuntime({ groups, membershipPolicies: [policy, policy] })).toThrow(
+      SecurityValidationError
+    )
   })
 
-  test("runtime registration rejects invite policies referencing unknown groups", () => {
+  test("runtime registration rejects membership policies referencing unknown groups", () => {
     expect(() =>
       createRuntime({
         groups: [{ kind: "group", id: "security-admins" }],
-        invitePolicies: [
+        membershipPolicies: [
           {
-            kind: "invitePolicy",
-            id: "default-invites",
+            kind: "membershipPolicy",
+            id: "member-admin",
             grantedToGroupIds: ["security-admins"],
-            canInviteToGroupIds: ["commercial"],
+            scopeGroupIds: ["commercial"],
+            can: ["invite"],
           },
         ],
       })
     ).toThrow("unknown group 'commercial'")
   })
 
-  test("runtime registration rejects invite policies without granted groups", () => {
+  test("runtime registration rejects membership policies without granted groups", () => {
     expect(() =>
       createRuntime({
         groups: [{ kind: "group", id: "commercial" }],
-        invitePolicies: [
+        membershipPolicies: [
           {
-            kind: "invitePolicy",
-            id: "default-invites",
+            kind: "membershipPolicy",
+            id: "member-admin",
             grantedToGroupIds: [],
-            canInviteToGroupIds: ["commercial"],
+            scopeGroupIds: ["commercial"],
+            can: ["invite"],
           },
         ],
       })
-    ).toThrow("must grant invitation authority")
+    ).toThrow("must grant membership authority")
+  })
+
+  test("runtime registration rejects membership policies without operations", () => {
+    expect(() =>
+      createRuntime({
+        groups: [{ kind: "group", id: "security-admins" }],
+        membershipPolicies: [
+          {
+            kind: "membershipPolicy",
+            id: "member-admin",
+            grantedToGroupIds: ["security-admins"],
+            scopeGroupIds: [],
+            can: [],
+          },
+        ],
+      })
+    ).toThrow("must declare at least one operation")
   })
 
   test("empty security definitions remain allowed at the definition layer", () => {
@@ -304,7 +340,7 @@ export const defaultInvites = defineInvitePolicy("default-invites", {
 
     expect(sixb.security.getGroupDefinitions()).toEqual([])
     expect(sixb.security.getRoleDefinitions()).toEqual([])
-    expect(sixb.security.getInvitePolicyDefinitions()).toEqual([])
+    expect(sixb.security.getMembershipPolicyDefinitions()).toEqual([])
   })
 })
 
@@ -668,7 +704,7 @@ function createRuntime(
   options: {
     groups?: readonly GroupDefinition[]
     roles?: readonly RoleDefinition[]
-    invitePolicies?: readonly InvitePolicyDefinition[]
+    membershipPolicies?: readonly MembershipPolicyDefinition[]
     actions?: readonly ActionDefinition[]
     datasets?: readonly DatasetDefinition[]
     syncs?: readonly SyncDefinition[]

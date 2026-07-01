@@ -12,7 +12,7 @@ may do. Sixb builds it from four small layers:
 | **Groups** | Named buckets that principals belong to |
 | **Roles** | Bundles of grants attached to groups |
 | **Grants** | The capabilities a role gives — view, apply, run |
-| **Invite policies** | Who can invite new people into which groups |
+| **Membership policies** | Who can administer membership for which groups |
 
 At request time these resolve into one set of grants per principal, and a scoped runtime enforces
 them. You describe access next to the ontology, datasets, actions, workflows, syncs, and pipelines
@@ -20,7 +20,7 @@ it protects, and the runtime applies it the same way everywhere.
 
 ## Define a group
 
-A group is a named bucket. Principals belong to groups; roles and invite policies are written
+A group is a named bucket. Principals belong to groups; roles and membership policies are written
 against groups, never against individual users.
 
 ```ts
@@ -142,39 +142,42 @@ export const financeAdminFullAccess = defineRole("finance-admin.full-access", {
 can.view(ontology.objects().except([Customer]))
 ```
 
-## Invite policies
+## Membership policies
 
-An invite policy says which groups can invite new people, and which groups they can place them
-into. Without a matching policy, a principal cannot send invitations.
+A membership policy says which groups can administer membership, which groups they may administer,
+and which operations they may perform. Inviting is one membership operation; managing existing
+members uses the same boundary.
 
 ```ts
-// security/invite-policies/default-invites.ts
-import { defineInvitePolicy } from "@sixb/core"
+// security/policies/member-administration.ts
+import { defineMembershipPolicy } from "@sixb/core"
 import { financeAdmins } from "../groups/finance-admins"
 import { teamMembers } from "../groups/team-members"
 
-export const defaultInvites = defineInvitePolicy("default-invites", {
+export const memberAdministration = defineMembershipPolicy("member-administration", {
   grantedTo: [financeAdmins],
-  canInviteTo: [teamMembers],
+  scope: [teamMembers],
+  can: ["invite"],
 })
 ```
 
-Finance admins can now invite people into `team-members`. A policy must declare `canInviteTo`
-groups, set `canInviteWithoutGroups: true`, or both.
+Finance admins can now invite people into `team-members`. A group-less invitation is also allowed
+when a caller has the `invite` operation; the resulting user can authenticate but receives no
+group-derived grants.
 
 | Option | Meaning |
 | --- | --- |
-| `grantedTo` | Groups whose members can send invitations |
-| `canInviteTo` | Groups invitees may be placed into |
-| `canInviteWithoutGroups` | Allow inviting people with no starting group |
+| `grantedTo` | Groups whose members hold the policy |
+| `scope` | Groups those members may administer |
+| `can` | Membership operations: `invite`, `assignGroups`, `suspend` |
 
 ## How principals join groups
 
-Roles and invite policies act on group membership, so principals need a way into a group.
+Roles and membership policies act on group membership, so principals need a way into a group.
 
 - **Bootstrap** — the auth strategy's `bootstrapGroups` are applied to the first allowed user to
   sign in. This seeds the initial admins.
-- **Invitations** — after that, members covered by an invite policy invite teammates into the
+- **Invitations** — after that, members covered by a membership policy invite teammates into the
   groups that policy allows.
 
 ```ts
@@ -254,7 +257,7 @@ for the event model.
 
 The Sixb server does this for you. It resolves the session once per request and routes
 authenticated traffic through `sixb.as(context)` automatically, so grants are enforced without
-extra wiring. You define groups, roles, and invite policies; the server applies them. See the
+extra wiring. You define groups, roles, and membership policies; the server applies them. See the
 [Server overview](../server/overview.md).
 
 To build a context yourself in a custom integration, resolve it from the request:
@@ -281,26 +284,26 @@ your-project/
       finance-admins.ts
     roles/
       billing-access.ts
-    invite-policies/
-      default-invites.ts
+    policies/
+      member-administration.ts
   sixb.config.ts
 ```
 
 `createSixb()` discovers exported definitions from `security/groups/`, `security/roles/`, and
-`security/invite-policies/` automatically. See
+`security/policies/` automatically. See
 [Project structure](../fundamentals/project-structure.md). You can also register them explicitly:
 
 ```ts
 import { createSixb } from "@sixb/core"
 import { financeAdmins } from "./security/groups/finance-admins"
 import { teamMembers } from "./security/groups/team-members"
-import { defaultInvites } from "./security/invite-policies/default-invites"
+import { memberAdministration } from "./security/policies/member-administration"
 import { financeAdminFullAccess, teamMemberBillingAccess } from "./security/roles/billing-access"
 
 export const sixb = await createSixb({
   groups: [teamMembers, financeAdmins],
   roles: [teamMemberBillingAccess, financeAdminFullAccess],
-  invitePolicies: [defaultInvites],
+  membershipPolicies: [memberAdministration],
 })
 ```
 
@@ -312,7 +315,7 @@ Start from the people, not the permissions.
 2. For each group, write one role describing what it can view, apply, and run.
 3. Start narrow with explicit grants; widen to a breadth selector or `.except([...])` only when a
    group really needs broad reach.
-4. Add an invite policy so the right group can grow the others.
+4. Add a membership policy so the right group can grow the others.
 5. Set `bootstrapGroups` so the first sign-in can administer everything else.
 
 Name groups and roles after the people and their access: `team-members`, `finance-admins`,

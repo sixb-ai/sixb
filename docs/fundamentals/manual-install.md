@@ -103,7 +103,7 @@ from the convention folders.
 | `ontologies` | `OntologySource[]` | Added to discovered `ontology/` sources |
 | `actions`, `functions`, `projections` | arrays | Override discovery when provided |
 | `datasets`, `connectors`, `schedules`, `syncs`, `pipelines`, `rules`, `workflows`, `agents` | arrays | Merged with discovered definitions |
-| `groups`, `roles`, `invitePolicies` | arrays | Merged with discovered security definitions |
+| `groups`, `roles`, `membershipPolicies` | arrays | Merged with discovered security definitions |
 | `auth` | `SixbAuthConfig` | See [Authentication](../auth/authentication.md) |
 | `projectRoot` | `string` | Discovery root (defaults to `process.cwd()`) |
 

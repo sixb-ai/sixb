@@ -160,7 +160,7 @@ them with `defineGroup` (see [Authorization](./authorization.md)).
 ## Invitations
 
 After bootstrap, the team grows through invitations rather than more bootstrap users. Who can invite
-whom into which groups is governed by [invite policies](./authorization.md). The active strategy
+whom into which groups is governed by [membership policies](./authorization.md). The active strategy
 must support invitation delivery — magic link always does; OIDC does when `sendInvitation` is set.
 
 The server exposes invitation management under `/api/auth/invitations`, and the built-in admin UI

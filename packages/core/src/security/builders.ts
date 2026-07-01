@@ -2,13 +2,13 @@ import { SecurityValidationError } from "./errors"
 import type {
   GrantDefinition,
   GroupDefinition,
-  InvitePolicyDefinition,
+  MembershipOperation,
+  MembershipPolicyDefinition,
   RoleDefinition,
 } from "./types"
 import {
   assertGrantDefinition,
   assertNonEmptyString,
-  assertOptionalBoolean,
   assertOptionalString,
   isRecord,
 } from "./validation"
@@ -25,11 +25,13 @@ export interface DefineRoleOptions {
   readonly grants: readonly GrantDefinition[]
 }
 
-export interface DefineInvitePolicyOptions {
+export interface DefineMembershipPolicyOptions {
   readonly grantedTo: readonly GroupDefinition[]
-  readonly canInviteTo?: readonly GroupDefinition[]
-  readonly canInviteWithoutGroups?: boolean
+  readonly scope: readonly GroupDefinition[]
+  readonly can: readonly MembershipOperation[]
 }
+
+const MEMBERSHIP_OPERATIONS = new Set<MembershipOperation>(["invite", "assignGroups", "suspend"])
 
 function assertNonEmptyArray<T>(value: readonly T[], field: string): void {
   if (value.length === 0) {
@@ -45,6 +47,21 @@ function groupIdsFrom(groups: readonly GroupDefinition[], field: string): readon
 
     assertNonEmptyString(group.id, `${field} group id`)
     return group.id
+  })
+}
+
+function membershipOperationsFrom(
+  operations: readonly MembershipOperation[],
+  field: string
+): readonly MembershipOperation[] {
+  return operations.map((operation) => {
+    if (!MEMBERSHIP_OPERATIONS.has(operation)) {
+      throw new SecurityValidationError(
+        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend.`
+      )
+    }
+
+    return operation
   })
 }
 
@@ -93,36 +110,19 @@ export function defineRole<const TId extends string>(
   }
 }
 
-export function defineInvitePolicy<const TId extends string>(
+export function defineMembershipPolicy<const TId extends string>(
   id: TId,
-  options: DefineInvitePolicyOptions
-): InvitePolicyDefinition<TId> {
-  assertNonEmptyString(id, "Invite policy id")
-  assertOptionalBoolean(
-    options.canInviteWithoutGroups,
-    `Invite policy '${id}' canInviteWithoutGroups`
-  )
-  assertNonEmptyArray(options.grantedTo, `Invite policy '${id}' grantedTo`)
-
-  const grantedToGroupIds = groupIdsFrom(options.grantedTo, `Invite policy '${id}' grantedTo`)
-  const canInviteToGroupIds = groupIdsFrom(
-    options.canInviteTo ?? [],
-    `Invite policy '${id}' canInviteTo`
-  )
-
-  if (canInviteToGroupIds.length === 0 && options.canInviteWithoutGroups !== true) {
-    throw new SecurityValidationError(
-      `[Sixb] Invite policy '${id}' must declare canInviteTo groups or canInviteWithoutGroups.`
-    )
-  }
+  options: DefineMembershipPolicyOptions
+): MembershipPolicyDefinition<TId> {
+  assertNonEmptyString(id, "Membership policy id")
+  assertNonEmptyArray(options.grantedTo, `Membership policy '${id}' grantedTo`)
+  assertNonEmptyArray(options.can, `Membership policy '${id}' can`)
 
   return {
-    kind: "invitePolicy",
+    kind: "membershipPolicy",
     id,
-    grantedToGroupIds,
-    canInviteToGroupIds,
-    ...(options.canInviteWithoutGroups !== undefined
-      ? { canInviteWithoutGroups: options.canInviteWithoutGroups }
-      : {}),
+    grantedToGroupIds: groupIdsFrom(options.grantedTo, `Membership policy '${id}' grantedTo`),
+    scopeGroupIds: groupIdsFrom(options.scope, `Membership policy '${id}' scope`),
+    can: membershipOperationsFrom(options.can, `Membership policy '${id}' can`),
   }
 }

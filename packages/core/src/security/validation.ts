@@ -1,9 +1,10 @@
 import { GRANT_KINDS, type GrantUniverseKey, grantKindOf } from "../authorization/grant-kinds"
 import { SecurityValidationError } from "./errors"
+import { isMembershipOperation } from "./membership-policies"
 import type {
   GrantDefinition,
   GroupDefinition,
-  InvitePolicyDefinition,
+  MembershipPolicyDefinition,
   RegisteredSecurityDefinitions,
   RoleDefinition,
 } from "./types"
@@ -57,17 +58,21 @@ function assertStringArray(
   }
 }
 
-export function assertOptionalBoolean(
+function assertMembershipOperationArray(
   value: unknown,
   field: string,
-  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
-): asserts value is boolean | undefined {
-  if (value === undefined) {
-    return
+  createError: CreateSecurityError
+): asserts value is MembershipPolicyDefinition["can"] {
+  if (!Array.isArray(value)) {
+    throw createError(`[Sixb] ${field} must be an array of membership operations.`)
   }
 
-  if (typeof value !== "boolean") {
-    throw createError(`[Sixb] ${field} must be a boolean.`)
+  for (const item of value) {
+    if (!isMembershipOperation(item)) {
+      throw createError(
+        `[Sixb] ${field} must contain only membership operations: invite, assignGroups, suspend.`
+      )
+    }
   }
 }
 
@@ -78,6 +83,21 @@ function assertNoDuplicateIds(ids: readonly string[], field: string): void {
       throw new SecurityValidationError(`[Sixb] ${field} contains duplicate group id '${id}'.`)
     }
     seen.add(id)
+  }
+}
+
+function assertNoDuplicateOperations(
+  operations: readonly MembershipPolicyDefinition["can"][number][],
+  field: string
+): void {
+  const seen = new Set<string>()
+  for (const operation of operations) {
+    if (seen.has(operation)) {
+      throw new SecurityValidationError(
+        `[Sixb] ${field} contains duplicate operation '${operation}'.`
+      )
+    }
+    seen.add(operation)
   }
 }
 
@@ -107,35 +127,31 @@ export function isGroupDefinition(value: unknown): value is GroupDefinition {
   }
 }
 
-export function assertInvitePolicyDefinition(
+export function assertMembershipPolicyDefinition(
   value: unknown,
   createError: CreateSecurityError = (message) => new SecurityValidationError(message)
-): asserts value is InvitePolicyDefinition {
+): asserts value is MembershipPolicyDefinition {
   if (!isRecord(value)) {
-    throw createError("[Sixb] Invite policy definition must be an object.")
+    throw createError("[Sixb] Membership policy definition must be an object.")
   }
 
-  if (value.kind !== "invitePolicy") {
-    throw createError("[Sixb] Invite policy definition kind must be 'invitePolicy'.")
+  if (value.kind !== "membershipPolicy") {
+    throw createError("[Sixb] Membership policy definition kind must be 'membershipPolicy'.")
   }
 
-  assertNonEmptyString(value.id, "Invite policy id", createError)
-  assertStringArray(value.grantedToGroupIds, `Invite policy '${value.id}' grantedTo`, createError)
+  assertNonEmptyString(value.id, "Membership policy id", createError)
   assertStringArray(
-    value.canInviteToGroupIds,
-    `Invite policy '${value.id}' canInviteTo`,
+    value.grantedToGroupIds,
+    `Membership policy '${value.id}' grantedTo`,
     createError
   )
-  assertOptionalBoolean(
-    value.canInviteWithoutGroups,
-    `Invite policy '${value.id}' canInviteWithoutGroups`,
-    createError
-  )
+  assertStringArray(value.scopeGroupIds, `Membership policy '${value.id}' scope`, createError)
+  assertMembershipOperationArray(value.can, `Membership policy '${value.id}' can`, createError)
 }
 
-export function isInvitePolicyDefinition(value: unknown): value is InvitePolicyDefinition {
+export function isMembershipPolicyDefinition(value: unknown): value is MembershipPolicyDefinition {
   try {
-    assertInvitePolicyDefinition(value, (message) => new Error(message))
+    assertMembershipPolicyDefinition(value, (message) => new Error(message))
     return true
   } catch {
     return false
@@ -230,7 +246,7 @@ export function isRoleDefinition(value: unknown): value is RoleDefinition {
 
 export function validateSecurityDefinitionsAtStartup(input: {
   readonly groups: readonly GroupDefinition[]
-  readonly invitePolicies: readonly InvitePolicyDefinition[]
+  readonly membershipPolicies: readonly MembershipPolicyDefinition[]
   readonly roles?: readonly RoleDefinition[]
   /** Registered object type ids — when provided, view grants must reference them. */
   readonly objectTypeIds?: ReadonlySet<string>
@@ -249,7 +265,7 @@ export function validateSecurityDefinitionsAtStartup(input: {
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()
-  const invitePoliciesById = new Map<string, InvitePolicyDefinition>()
+  const membershipPoliciesById = new Map<string, MembershipPolicyDefinition>()
 
   for (const group of input.groups) {
     assertGroupDefinition(group)
@@ -295,45 +311,46 @@ export function validateSecurityDefinitionsAtStartup(input: {
     rolesById.set(role.id, role)
   }
 
-  for (const policy of input.invitePolicies) {
-    assertInvitePolicyDefinition(policy)
+  for (const policy of input.membershipPolicies) {
+    assertMembershipPolicyDefinition(policy)
 
-    if (invitePoliciesById.has(policy.id)) {
-      throw new SecurityValidationError(`[Sixb] Duplicate invite policy id: ${policy.id}`)
+    if (membershipPoliciesById.has(policy.id)) {
+      throw new SecurityValidationError(`[Sixb] Duplicate membership policy id: ${policy.id}`)
     }
 
     if (policy.grantedToGroupIds.length === 0) {
       throw new SecurityValidationError(
-        `[Sixb] Invite policy '${policy.id}' must grant invitation authority to at least one group.`
+        `[Sixb] Membership policy '${policy.id}' must grant membership authority to at least one group.`
       )
     }
 
-    if (policy.canInviteToGroupIds.length === 0 && policy.canInviteWithoutGroups !== true) {
+    if (policy.can.length === 0) {
       throw new SecurityValidationError(
-        `[Sixb] Invite policy '${policy.id}' must declare canInviteTo groups or canInviteWithoutGroups.`
+        `[Sixb] Membership policy '${policy.id}' must declare at least one operation.`
       )
     }
 
-    assertNoDuplicateIds(policy.grantedToGroupIds, `Invite policy '${policy.id}' grantedTo`)
-    assertNoDuplicateIds(policy.canInviteToGroupIds, `Invite policy '${policy.id}' canInviteTo`)
+    assertNoDuplicateIds(policy.grantedToGroupIds, `Membership policy '${policy.id}' grantedTo`)
+    assertNoDuplicateIds(policy.scopeGroupIds, `Membership policy '${policy.id}' scope`)
+    assertNoDuplicateOperations(policy.can, `Membership policy '${policy.id}' can`)
 
     for (const groupId of policy.grantedToGroupIds) {
       if (!groupsById.has(groupId)) {
         throw new SecurityValidationError(
-          `[Sixb] Invite policy '${policy.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
+          `[Sixb] Membership policy '${policy.id}' grantedTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
     }
 
-    for (const groupId of policy.canInviteToGroupIds) {
+    for (const groupId of policy.scopeGroupIds) {
       if (!groupsById.has(groupId)) {
         throw new SecurityValidationError(
-          `[Sixb] Invite policy '${policy.id}' canInviteTo references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
+          `[Sixb] Membership policy '${policy.id}' scope references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
         )
       }
     }
 
-    invitePoliciesById.set(policy.id, policy)
+    membershipPoliciesById.set(policy.id, policy)
   }
 
   return {
@@ -341,8 +358,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
     groupsById,
     roles: [...rolesById.values()],
     rolesById,
-    invitePolicies: [...invitePoliciesById.values()],
-    invitePoliciesById,
+    membershipPolicies: [...membershipPoliciesById.values()],
+    membershipPoliciesById,
   }
 }
 

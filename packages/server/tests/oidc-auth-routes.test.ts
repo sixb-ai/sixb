@@ -8,7 +8,7 @@ import {
 import {
   createSessionCredential,
   defineGroup,
-  defineInvitePolicy,
+  defineMembershipPolicy,
   defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -99,10 +99,11 @@ function createRuntime(options: { readonly failInvitationDelivery?: boolean } = 
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [securityAdmins, commercial],
-    invitePolicies: [
-      defineInvitePolicy("default-invites", {
+    membershipPolicies: [
+      defineMembershipPolicy("default-membership", {
         grantedTo: [securityAdmins],
-        canInviteTo: [commercial],
+        scope: [commercial],
+        can: ["invite"],
       }),
     ],
     auth: oidc({

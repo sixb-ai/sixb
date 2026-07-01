@@ -53,7 +53,7 @@ import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
-  InvitePolicyDefinition,
+  MembershipPolicyDefinition,
   RoleDefinition,
   SecurityRegistry,
 } from "../security"
@@ -100,7 +100,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   agents?: readonly AgentDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
-  invitePolicies?: readonly InvitePolicyDefinition[]
+  membershipPolicies?: readonly MembershipPolicyDefinition[]
   auth?: SixbAuthConfig
 }
 
@@ -162,7 +162,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.security = createRuntimeSecurityRegistry({
       groups: options.groups ?? [],
       roles: options.roles ?? [],
-      invitePolicies: options.invitePolicies ?? [],
+      membershipPolicies: options.membershipPolicies ?? [],
       objectTypeIds: new Set(this.ontology.getObjectTypesById().keys()),
       datasetIds: new Set((options.datasets ?? []).map((dataset) => dataset.id)),
       actionIds: registeredActionIds,

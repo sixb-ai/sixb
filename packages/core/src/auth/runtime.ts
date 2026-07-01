@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import {
-  canInviteGroupIds,
-  missingInviteGroupIds,
-  resolveInvitePolicyScope,
+  canPerformMembershipOperation,
+  missingMembershipGroupIds,
+  resolveMembershipPolicyScope,
   type SecurityRegistry,
 } from "../security"
 import type { Storage } from "../storage"
@@ -843,23 +843,24 @@ export class AuthRuntime {
     options: AuthSessionResolutionOptions = {}
   ): Promise<GetInvitationOptionsResult> {
     const session = await this.requireUser(request, options)
-    const scope = this.resolveInvitePolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const inviteScope = scope.operations.invite
     const groups = this.security
       .getGroupDefinitions()
-      .filter((group) => scope.canInviteToGroupIds.has(group.id))
+      .filter((group) => inviteScope.groupIds.has(group.id))
       .map((group) => ({
         id: group.id,
         ...(group.label !== undefined ? { label: group.label } : {}),
         ...(group.description !== undefined ? { description: group.description } : {}),
       }))
+    const hasInviteMembershipPolicy = inviteScope.policyIds.length > 0
 
     return {
       groups,
-      canInviteWithoutGroups: scope.canInviteWithoutGroups,
+      canInviteWithoutGroups: hasInviteMembershipPolicy,
       capabilities: {
         createInvitation: this.resolveCreateInvitationCapability({
-          canInviteToGroups: groups.length > 0,
-          canInviteWithoutGroups: scope.canInviteWithoutGroups,
+          canInvite: hasInviteMembershipPolicy,
         }),
       },
     }
@@ -940,9 +941,9 @@ export class AuthRuntime {
       statuses: input.statuses,
       order: input.order,
     })
-    const scope = this.resolveInvitePolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
     const manageable = result.invitations.filter((invitation) =>
-      canInviteGroupIds(scope, invitation.groupIds)
+      canPerformMembershipOperation(scope, "invite", invitation.groupIds)
     )
     const page = paginate(manageable, { limit, offset })
 
@@ -1026,23 +1027,22 @@ export class AuthRuntime {
     return groupIds
   }
 
-  private resolveInvitePolicyScopeForUser(callerGroupIds: readonly string[]) {
-    return resolveInvitePolicyScope({
-      invitePolicies: this.security.getInvitePolicyDefinitions(),
+  private resolveMembershipPolicyScopeForUser(callerGroupIds: readonly string[]) {
+    return resolveMembershipPolicyScope({
+      membershipPolicies: this.security.getMembershipPolicyDefinitions(),
       callerGroupIds,
     })
   }
 
   private resolveCreateInvitationCapability(input: {
-    readonly canInviteToGroups: boolean
-    readonly canInviteWithoutGroups: boolean
+    readonly canInvite: boolean
   }): GetInvitationOptionsResult["capabilities"]["createInvitation"] {
     if (!isInvitationDeliveryAuthStrategy(this.getStrategy())) {
       return { state: "disabled", reason: "invitation_delivery_not_supported" }
     }
 
-    if (!input.canInviteToGroups && !input.canInviteWithoutGroups) {
-      return { state: "disabled", reason: "missing_invite_policy" }
+    if (!input.canInvite) {
+      return { state: "disabled", reason: "missing_membership_policy" }
     }
 
     return { state: "enabled" }
@@ -1104,9 +1104,9 @@ export class AuthRuntime {
     callerGroupIds: readonly string[],
     groupIds: readonly string[]
   ): void {
-    const scope = this.resolveInvitePolicyScopeForUser(callerGroupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(callerGroupIds)
 
-    if (canInviteGroupIds(scope, groupIds)) {
+    if (canPerformMembershipOperation(scope, "invite", groupIds)) {
       return
     }
 
@@ -1117,7 +1117,7 @@ export class AuthRuntime {
       )
     }
 
-    const missing = missingInviteGroupIds(scope, groupIds)
+    const missing = missingMembershipGroupIds(scope, "invite", groupIds)
     throw new AuthRuntimeError(
       "authorization_denied",
       `[Sixb] The current user is not allowed to create or manage invitations for group(s): ${missing.join(", ")}.`
