@@ -97,7 +97,6 @@ describe("OpenAPI docs", () => {
       ["post", "/api/files"],
       ["post", "/api/files/uploads"],
       ["put", "/api/files/uploads/{uploadId}/content"],
-      ["post", "/api/files/uploads/{uploadId}/parts/{partNumber}"],
       ["post", "/api/files/uploads/{uploadId}/complete"],
       ["post", "/api/files/uploads/{uploadId}/abort"],
       ["post", "/api/syncs/{syncId}/runs"],
@@ -147,18 +146,29 @@ describe("OpenAPI docs", () => {
     expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()
   })
 
-  test("documents object file content error responses", async () => {
+  test("documents object file content responses", async () => {
     const app = createDocsApi()
     const spec = await fetchDocsJsonWithoutWarnings(app)
     const operations = spec.paths?.["/api/objects/{objectTypeId}/{objectId}/files/content"]
 
-    expect(operations?.get?.responses).toHaveProperty("206")
-    expect(operations?.get?.responses).toHaveProperty("400")
-    expect(operations?.get?.responses).toHaveProperty("404")
-    expect(operations?.get?.responses).toHaveProperty("416")
-    expect(operations?.head?.responses).toHaveProperty("206")
-    expect(operations?.head?.responses).toHaveProperty("400")
-    expect(operations?.head?.responses).toHaveProperty("404")
-    expect(operations?.head?.responses).toHaveProperty("416")
+    for (const method of ["get", "head"] as const) {
+      const responses = operations?.[method]?.responses as
+        | Record<string, { content?: Record<string, { schema?: unknown }> }>
+        | undefined
+      expect(responses).toBeDefined()
+      for (const status of ["200", "206", "400", "404", "416"]) {
+        expect(responses).toHaveProperty(status)
+      }
+    }
+
+    // The success bodies must be documented as binary octet-stream, not JSON.
+    const getResponses = operations?.get?.responses as Record<
+      string,
+      { content?: Record<string, { schema?: { type?: string; format?: string } }> }
+    >
+    for (const status of ["200", "206"]) {
+      const schema = getResponses[status]?.content?.["application/octet-stream"]?.schema
+      expect(schema).toEqual({ type: "string", format: "binary" })
+    }
   })
 })

@@ -23,10 +23,6 @@ export const FileUploadIdParamsSchema = z.object({
   uploadId: z.string().min(1),
 })
 
-export const FileUploadPartParamsSchema = FileUploadIdParamsSchema.extend({
-  partNumber: z.string().regex(/^\d+$/),
-})
-
 export const ServerFileUploadSchema = z.object({
   strategy: z.literal("server"),
   uploadId: z.string(),
@@ -44,39 +40,15 @@ export const DirectPutFileUploadSchema = z.object({
   expiresAt: z.string(),
 })
 
-export const MultipartFileUploadSchema = z.object({
-  strategy: z.literal("multipart"),
-  uploadId: z.string(),
-  partSizeBytes: z.number().int().positive(),
-  expiresAt: z.string(),
-})
-
 export const CreateFileUploadResponseSchema = z.discriminatedUnion("strategy", [
   ServerFileUploadSchema,
   DirectPutFileUploadSchema,
-  MultipartFileUploadSchema,
 ])
 
-export const SignedFileUploadPartSchema = z.object({
-  partNumber: z.number().int().positive(),
-  method: z.literal("PUT"),
-  url: z.string(),
-  headers: z.record(z.string()),
-  expiresAt: z.string(),
+export const CompleteFileUploadBodySchema = z.object({
+  sizeBytes: z.number().int().nonnegative().optional(),
+  digest: BlobDigestSchema.optional(),
 })
-
-export const FileUploadPartSchema = z.object({
-  partNumber: z.number().int().positive(),
-  etag: z.string(),
-})
-
-export const CompleteFileUploadBodySchema = z
-  .object({
-    sizeBytes: z.number().int().nonnegative().optional(),
-    digest: BlobDigestSchema.optional(),
-    parts: z.array(FileUploadPartSchema).optional(),
-  })
-  .optional()
 
 export const FileContentQuerySchema = z.object({
   path: z.string().min(1),

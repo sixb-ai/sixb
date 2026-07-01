@@ -14,6 +14,7 @@ import type {
   WebhookResponse,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 
 const DEFAULT_WEBHOOK_BODY_LIMIT_BYTES = 1024 * 1024
 
@@ -98,7 +99,7 @@ async function dispatchWebhook(options: DispatchWebhookOptions): Promise<unknown
   try {
     rawBody = await readRawBody(request, options.bodyLimitBytes ?? DEFAULT_WEBHOOK_BODY_LIMIT_BYTES)
   } catch (error) {
-    const responseStatus = error instanceof WebhookBodyTooLargeError ? 413 : 400
+    const responseStatus = error instanceof RequestBodyTooLargeError ? 413 : 400
     const message = error instanceof Error ? error.message : String(error)
     set.status = responseStatus
     await finishWebhookRun({
@@ -312,21 +313,8 @@ async function finishWebhookRun(input: WebhookRunFinishInput): Promise<void> {
   }
 }
 
-async function readRawBody(request: Request, limitBytes: number): Promise<Uint8Array> {
-  const contentLengthHeader = request.headers.get("content-length")
-  if (contentLengthHeader) {
-    const contentLength = Number.parseInt(contentLengthHeader, 10)
-    if (Number.isFinite(contentLength) && contentLength > limitBytes) {
-      throw new WebhookBodyTooLargeError(limitBytes)
-    }
-  }
-
-  const buffer = await request.arrayBuffer()
-  if (buffer.byteLength > limitBytes) {
-    throw new WebhookBodyTooLargeError(limitBytes)
-  }
-
-  return new Uint8Array(buffer)
+function readRawBody(request: Request, limitBytes: number): Promise<Uint8Array> {
+  return readRequestBodyWithLimit(request, limitBytes, `Webhook body exceeds ${limitBytes} bytes.`)
 }
 
 function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unknown {
@@ -434,12 +422,6 @@ function setHeader(set: ElysiaSet, key: string, value: string): void {
   }
 
   ;(set.headers as Record<string, string>)[key] = value
-}
-
-class WebhookBodyTooLargeError extends Error {
-  constructor(limitBytes: number) {
-    super(`Webhook body exceeds ${limitBytes} bytes.`)
-  }
 }
 
 function isWebhookResponse(value: unknown): value is WebhookResponse {

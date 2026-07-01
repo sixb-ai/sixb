@@ -248,9 +248,6 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionErrors,
   RevokeAuthSessionResponses,
-  SignFileUploadPartData,
-  SignFileUploadPartErrors,
-  SignFileUploadPartResponses,
   SignOutAllData,
   SignOutAllErrors,
   SignOutAllResponses,
@@ -1244,22 +1241,6 @@ export const uploadFileContent = <ThrowOnError extends boolean = false>(
       },
     }
   )
-
-/**
- * Sign a staged multipart upload part
- */
-export const signFileUploadPart = <ThrowOnError extends boolean = false>(
-  options: Options<SignFileUploadPartData, ThrowOnError>
-) =>
-  (options.client ?? client).post<
-    SignFileUploadPartResponses,
-    SignFileUploadPartErrors,
-    ThrowOnError
-  >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
-    url: "/api/files/uploads/{uploadId}/parts/{partNumber}",
-    ...options,
-  })
 
 /**
  * Complete a staged file upload

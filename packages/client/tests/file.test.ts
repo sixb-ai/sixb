@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { computeBlobDigest } from "@sixb/core"
-import { createSixbClient, uploadFile } from "../src"
+import { createSixbClient, SixbFileUploadError, uploadFile } from "../src"
 
 const encoder = new TextEncoder()
 
@@ -244,5 +244,83 @@ describe("uploadFile", () => {
       digest: computeBlobDigest(encoder.encode("hello direct")),
       sizeBytes: 12,
     })
+  })
+
+  test("throws a typed SixbFileUploadError carrying stage and status on a server error", async () => {
+    const client = createSixbClient({
+      baseUrl: "http://sixb.test/api",
+      auth: { kind: "cookie", csrfToken: () => "csrf_file_1" },
+      fetch: Object.assign(
+        async () => Response.json({ error: "upload rejected" }, { status: 400 }),
+        {
+          preconnect: fetch.preconnect,
+        }
+      ) satisfies typeof fetch,
+    })
+
+    const error = await uploadFile(new Blob(["x"], { type: "text/plain" }), { client }).catch(
+      (thrown) => thrown
+    )
+
+    expect(error).toBeInstanceOf(SixbFileUploadError)
+    expect((error as SixbFileUploadError).stage).toBe("server-put")
+    expect((error as SixbFileUploadError).status).toBe(400)
+    expect((error as SixbFileUploadError).aborted).toBe(false)
+    expect((error as SixbFileUploadError).message).toContain("upload rejected")
+  })
+
+  test("surfaces an aborted upload as an abort-flagged error and cleans up the session", async () => {
+    const requests: Request[] = []
+    const client = createSixbClient({
+      baseUrl: "http://sixb.test/api",
+      auth: { kind: "cookie", csrfToken: () => "csrf_file_1" },
+      fetch: Object.assign(
+        async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+          const request = input instanceof Request && !init ? input : new Request(input, init)
+          requests.push(request)
+
+          if (request.url === "http://sixb.test/api/files/uploads") {
+            return Response.json(
+              {
+                strategy: "server",
+                uploadId: "upload_1",
+                method: "PUT",
+                url: "/api/files/uploads/upload_1/content",
+                expiresAt: "2026-06-30T20:00:00.000Z",
+              },
+              { status: 201 }
+            )
+          }
+
+          if (request.url === "http://sixb.test/api/files/uploads/upload_1/content") {
+            throw new DOMException("The operation was aborted.", "AbortError")
+          }
+
+          if (request.url === "http://sixb.test/api/files/uploads/upload_1/abort") {
+            return Response.json({ success: true })
+          }
+
+          return Response.json({ error: "unexpected" }, { status: 500 })
+        },
+        { preconnect: fetch.preconnect }
+      ) satisfies typeof fetch,
+    })
+
+    const controller = new AbortController()
+    const error = await uploadFile(new Blob(["hello staged"], { type: "text/plain" }), {
+      client,
+      signal: controller.signal,
+      stagedUploadThresholdBytes: 0,
+    }).catch((thrown) => thrown)
+
+    expect(error).toBeInstanceOf(SixbFileUploadError)
+    expect((error as SixbFileUploadError).aborted).toBe(true)
+    expect((error as SixbFileUploadError).stage).toBe("abort")
+
+    // The staged session is released via a detached cleanup abort.
+    const abortRequest = requests.find(
+      (request) => request.url === "http://sixb.test/api/files/uploads/upload_1/abort"
+    )
+    expect(abortRequest?.method).toBe("POST")
   })
 })

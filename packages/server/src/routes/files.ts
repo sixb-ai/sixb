@@ -3,13 +3,13 @@ import {
   computeBlobDigest,
   createFileUploadId,
   createUploadExpiresAt,
+  DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type FileRef,
   type FileUploadSession,
   FileUploadSessionError,
   InMemoryFileUploadSessions,
   type OntologySource,
   type Principal,
-  readBlobBody,
   type Sixb,
   supportsDirectUpload,
 } from "@sixb/core"
@@ -23,17 +23,23 @@ import {
   CreateFileUploadResponseSchema,
   FileRefSchema,
   FileUploadIdParamsSchema,
-  FileUploadPartParamsSchema,
-  SignedFileUploadPartSchema,
 } from "../schemas/files"
 import { handleRouteError } from "../utils/http"
+import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 
-export const DEFAULT_SIMPLE_FILE_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
-export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024 // allow multipart overhead
+// The simple-upload ceiling lives in @sixb/core so the client staged-switch
+// threshold and this server limit stay a single source of truth. The body limit
+// adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
+// form route (it is unrelated to the removed multipart upload strategy).
+export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024
 
 const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+  // Staged/direct-put upload sessions default to an in-memory store: they are NOT
+  // durable across restart and NOT shared across instances. A durable Pg/Sqlite
+  // store is a follow-up; deployments needing durability supply their own via
+  // `sixb.storage.fileUploadSessions`.
   const uploadSessions = sixb.storage.fileUploadSessions ?? new InMemoryFileUploadSessions()
 
   return app
@@ -80,7 +86,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
 
           return FileRefSchema.parse(fileRef)
         } catch (error) {
-          return handleFileRouteError(error, set)
+          return handleRouteError(error, set)
         }
       },
       {
@@ -160,7 +166,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           set.status = 201
           return CreateFileUploadResponseSchema.parse(fileUploadResponse(session))
         } catch (error) {
-          return handleFileRouteError(error, set)
+          return handleRouteError(error, set)
         }
       },
       {
@@ -180,16 +186,13 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
     .put(
       "/api/files/uploads/:uploadId/content",
       async (context) => {
-        const { body, params, request, set } = context
+        const { params, request, set } = context
         const { authz } = requestAuthState(context)
         try {
           const principal = authz?.principal ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
-            throw new FileUploadSessionError(
-              `File upload session is already ${session.status}.`,
-              409
-            )
+            throw terminalSessionError(session.status)
           }
 
           if (session.strategy !== "server") {
@@ -203,13 +206,12 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
             return { error: contentLengthSizeError }
           }
 
-          const uploadBody = await resolveUploadContentBody(body, request)
-          if (!uploadBody) {
+          const uploadBytes = readParsedUploadBytes(context)
+          if (uploadBytes.byteLength === 0) {
             set.status = 400
             return { error: "Expected upload content body." }
           }
 
-          const uploadBytes = await readBlobBody(uploadBody)
           const sizeError = expectedSizeBytesError(session, uploadBytes.byteLength)
           if (sizeError) {
             set.status = 400
@@ -233,11 +235,17 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           await uploadSessions.markUploaded(session.id, fileRef)
           return { success: true }
         } catch (error) {
-          return handleFileRouteError(error, set)
+          return handleRouteError(error, set)
         }
       },
       {
         params: FileUploadIdParamsSchema,
+        // Replace Elysia's default body parser so the octet-stream is read through
+        // the size-capped streaming reader instead of being fully buffered first.
+        parse: readCappedUploadBody,
+        // The cap is enforced during parsing, which is outside the handler's
+        // try/catch, so map its too-large error to 413 here.
+        error: mapUploadContentError,
         response: {
           200: SuccessResponseSchema,
           400: ErrorResponseSchema,
@@ -265,75 +273,13 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       }
     )
     .post(
-      "/api/files/uploads/:uploadId/parts/:partNumber",
-      async (context) => {
-        const { params, set } = context
-        const { authz } = requestAuthState(context)
-        try {
-          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
-          const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
-          if (session.status !== "pending") {
-            throw new FileUploadSessionError(
-              `File upload session is already ${session.status}.`,
-              409
-            )
-          }
-
-          if (
-            session.strategy !== "multipart" ||
-            session.providerUpload?.strategy !== "multipart"
-          ) {
-            set.status = 400
-            return { error: "Upload session does not use multipart strategy." }
-          }
-
-          if (!supportsDirectUpload(sixb.blobStorage)) {
-            set.status = 400
-            return { error: "Blob storage does not support direct uploads." }
-          }
-
-          const signedPart = await sixb.blobStorage.signUploadPart({
-            uploadId: session.id,
-            stagingKey: session.providerUpload.stagingKey,
-            providerUploadId: session.providerUpload.providerUploadId,
-            partNumber: Number.parseInt(params.partNumber, 10),
-            expiresAt: session.expiresAt,
-          })
-          await uploadSessions.addSignedPart(session.id, signedPart)
-
-          return SignedFileUploadPartSchema.parse({
-            ...signedPart,
-            expiresAt: signedPart.expiresAt.toISOString(),
-          })
-        } catch (error) {
-          return handleFileRouteError(error, set)
-        }
-      },
-      {
-        params: FileUploadPartParamsSchema,
-        response: {
-          200: SignedFileUploadPartSchema,
-          400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-          409: ErrorResponseSchema,
-          410: ErrorResponseSchema,
-        },
-        detail: {
-          summary: "Sign a staged multipart upload part",
-          tags: ["Files"],
-          operationId: "signFileUploadPart",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
-        },
-      }
-    )
-    .post(
       "/api/files/uploads/:uploadId/complete",
       async (context) => {
         const { body, params, set } = context
         const { authz } = requestAuthState(context)
         try {
           const principal = authz?.principal ?? SYSTEM_PRINCIPAL
-          const parsed = CompleteFileUploadBodySchema.parse(body)
+          const parsed = CompleteFileUploadBodySchema.parse(body ?? {})
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
           if (session.status === "completed" && session.fileRef) {
@@ -341,25 +287,19 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           }
 
           if (session.status !== "pending") {
-            throw new FileUploadSessionError(
-              `File upload session is already ${session.status}.`,
-              409
-            )
+            throw terminalSessionError(session.status)
           }
 
           const expected = resolveExpectedUploadIdentity({
             session,
-            requestedDigest: parsed?.digest as BlobDigest | undefined,
-            requestedSizeBytes: parsed?.sizeBytes,
+            requestedDigest: parsed.digest as BlobDigest | undefined,
+            requestedSizeBytes: parsed.sizeBytes,
           })
           if (
             session.strategy !== "server" &&
             (expected.digest === undefined || expected.sizeBytes === undefined)
           ) {
-            throw new FileUploadSessionError(
-              "Direct file uploads require an expected digest and size.",
-              400
-            )
+            throw new Error("Direct file uploads require an expected digest and size.")
           }
 
           const fileRef =
@@ -369,19 +309,18 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
                   session,
                   expectedDigest: expected.digest,
                   expectedSizeBytes: expected.sizeBytes,
-                  parts: parsed?.parts,
                   blobStorage: sixb.blobStorage,
                 })
 
           const identityError = expectedFileRefError(expected, fileRef)
           if (identityError) {
-            throw new FileUploadSessionError(identityError, 400)
+            throw new Error(identityError)
           }
 
           await uploadSessions.complete(session.id, fileRef)
           return FileRefSchema.parse(fileRef)
         } catch (error) {
-          return handleFileRouteError(error, set)
+          return handleRouteError(error, set)
         }
       },
       {
@@ -412,7 +351,10 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
           if (session.status === "completed") {
-            throw new FileUploadSessionError("File upload session is already completed.", 409)
+            throw new FileUploadSessionError(
+              "already_completed",
+              "File upload session is already completed."
+            )
           }
 
           if (session.status === "pending" && session.providerUpload) {
@@ -434,7 +376,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
 
           return { success: true }
         } catch (error) {
-          return handleFileRouteError(error, set)
+          return handleRouteError(error, set)
         }
       },
       {
@@ -468,15 +410,6 @@ function fileUploadResponse(session: FileUploadSession) {
     }
   }
 
-  if (session.providerUpload?.strategy === "multipart") {
-    return {
-      strategy: "multipart",
-      uploadId: session.id,
-      partSizeBytes: session.providerUpload.partSizeBytes,
-      expiresAt: session.providerUpload.expiresAt.toISOString(),
-    }
-  }
-
   return {
     strategy: "server",
     uploadId: session.id,
@@ -486,9 +419,51 @@ function fileUploadResponse(session: FileUploadSession) {
   }
 }
 
+// Elysia `parse` hook: reads the staged content stream with a hard size ceiling,
+// so an oversized (or chunked, content-length-lying) body is rejected before it
+// is fully buffered. Its result becomes `context.body`.
+function readCappedUploadBody(context: { request: Request }): Promise<Uint8Array> {
+  return readRequestBodyWithLimit(context.request, DEFAULT_SIMPLE_FILE_UPLOAD_BYTES)
+}
+
+function readParsedUploadBytes(context: { body?: unknown }): Uint8Array {
+  return context.body instanceof Uint8Array ? context.body : new Uint8Array(0)
+}
+
+function mapUploadContentError(context: {
+  error: unknown
+  set: { status?: number | string }
+}): { error: string } | undefined {
+  const tooLarge = asRequestBodyTooLarge(context.error)
+  if (tooLarge) {
+    context.set.status = 413
+    return { error: tooLarge.message }
+  }
+  return undefined
+}
+
+// The cap runs in the `parse` phase, so Elysia surfaces it wrapped in a
+// ParseError; the original error is carried on `cause`.
+function asRequestBodyTooLarge(error: unknown): RequestBodyTooLargeError | undefined {
+  if (error instanceof RequestBodyTooLargeError) {
+    return error
+  }
+  const cause = (error as { cause?: unknown } | null | undefined)?.cause
+  return cause instanceof RequestBodyTooLargeError ? cause : undefined
+}
+
+// A non-pending session is terminal; surface which terminal state so the route
+// boundary maps it to 409. Store lookups already raise `not_found`/`expired`.
+function terminalSessionError(status: "completed" | "aborted"): FileUploadSessionError {
+  return new FileUploadSessionError(
+    status === "completed" ? "already_completed" : "already_aborted",
+    `File upload session is already ${status}.`
+  )
+}
+
 function completeServerUpload(session: FileUploadSession): FileRef {
   if (!session.fileRef) {
-    throw new FileUploadSessionError("Upload content has not been received.", 400)
+    throw new Error("Upload content has not been received.")
   }
 
   return session.fileRef
@@ -498,16 +473,15 @@ async function completeProviderUpload(input: {
   readonly session: FileUploadSession
   readonly expectedDigest?: BlobDigest
   readonly expectedSizeBytes?: number
-  readonly parts: readonly { readonly partNumber: number; readonly etag: string }[] | undefined
   readonly blobStorage: Sixb<readonly OntologySource[]>["blobStorage"]
 }): Promise<FileRef> {
   const { blobStorage, session } = input
   if (!session.providerUpload) {
-    throw new FileUploadSessionError("Upload session does not have provider upload state.", 400)
+    throw new Error("Upload session does not have provider upload state.")
   }
 
   if (!supportsDirectUpload(blobStorage)) {
-    throw new FileUploadSessionError("Blob storage does not support direct uploads.", 400)
+    throw new Error("Blob storage does not support direct uploads.")
   }
 
   const fileRef = await blobStorage.completeUpload({
@@ -521,7 +495,6 @@ async function completeProviderUpload(input: {
       ? {}
       : { expectedSizeBytes: input.expectedSizeBytes }),
     ...(input.expectedDigest === undefined ? {} : { expectedDigest: input.expectedDigest }),
-    ...(input.parts === undefined ? {} : { parts: input.parts }),
   })
 
   return fileRef
@@ -539,7 +512,7 @@ function resolveExpectedUploadIdentity(input: {
 }): ExpectedUploadIdentity {
   const digestError = expectedDigestError(input.session.expectedDigest, input.requestedDigest)
   if (digestError) {
-    throw new FileUploadSessionError(digestError, 400)
+    throw new Error(digestError)
   }
 
   const sizeError = expectedSizeBytesValueError(
@@ -547,7 +520,7 @@ function resolveExpectedUploadIdentity(input: {
     input.requestedSizeBytes
   )
   if (sizeError) {
-    throw new FileUploadSessionError(sizeError, 400)
+    throw new Error(sizeError)
   }
 
   const digest = input.session.expectedDigest ?? input.requestedDigest
@@ -625,44 +598,4 @@ function expectedContentLengthError(session: FileUploadSession, request: Request
   }
 
   return expectedSizeBytesError(session, sizeBytes)
-}
-
-async function resolveUploadContentBody(
-  parsedBody: unknown,
-  request: Request
-): Promise<ArrayBuffer | Uint8Array | Blob | ReadableStream<Uint8Array> | null> {
-  if (typeof parsedBody === "string") {
-    return new TextEncoder().encode(parsedBody)
-  }
-
-  if (
-    parsedBody instanceof ArrayBuffer ||
-    parsedBody instanceof Uint8Array ||
-    parsedBody instanceof Blob
-  ) {
-    return parsedBody
-  }
-
-  if (parsedBody instanceof ReadableStream) {
-    return parsedBody as ReadableStream<Uint8Array>
-  }
-
-  if (!request.body) {
-    return null
-  }
-
-  const buffer = await request.arrayBuffer()
-  return buffer.byteLength > 0 ? buffer : null
-}
-
-function handleFileRouteError(
-  error: unknown,
-  set: { status?: number | string }
-): { error: string } {
-  if (error instanceof FileUploadSessionError) {
-    set.status = error.status
-    return { error: error.message }
-  }
-
-  return handleRouteError(error, set)
 }

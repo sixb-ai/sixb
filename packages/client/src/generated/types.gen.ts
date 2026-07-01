@@ -3829,17 +3829,13 @@ export type GetObjectFileContentErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-  }
+  404: ErrorResponse
   /**
-   * Response for status 416
+   * Requested byte range is not satisfiable
    */
   416: unknown
 }
@@ -3848,14 +3844,17 @@ export type GetObjectFileContentError = GetObjectFileContentErrors[keyof GetObje
 
 export type GetObjectFileContentResponses = {
   /**
-   * Response for status 200
+   * File content
    */
-  200: unknown
+  200: Blob | File
   /**
-   * Response for status 206
+   * Partial file content
    */
-  206: unknown
+  206: Blob | File
 }
+
+export type GetObjectFileContentResponse =
+  GetObjectFileContentResponses[keyof GetObjectFileContentResponses]
 
 export type HeadObjectFileContentData = {
   body?: never
@@ -3874,17 +3873,13 @@ export type HeadObjectFileContentErrors = {
   /**
    * Response for status 400
    */
-  400: {
-    error: string
-  }
+  400: ErrorResponse
   /**
    * Response for status 404
    */
-  404: {
-    error: string
-  }
+  404: ErrorResponse
   /**
-   * Response for status 416
+   * Requested byte range is not satisfiable
    */
   416: unknown
 }
@@ -3894,11 +3889,11 @@ export type HeadObjectFileContentError =
 
 export type HeadObjectFileContentResponses = {
   /**
-   * Response for status 200
+   * File content headers
    */
   200: unknown
   /**
-   * Response for status 206
+   * Partial file content headers
    */
   206: unknown
 }
@@ -4221,12 +4216,6 @@ export type CreateFileUploadResponses = {
         }
         expiresAt: string
       }
-    | {
-        strategy: "multipart"
-        uploadId: string
-        partSizeBytes: number
-        expiresAt: string
-      }
 }
 
 export type CreateFileUploadResponse = CreateFileUploadResponses[keyof CreateFileUploadResponses]
@@ -4280,74 +4269,11 @@ export type UploadFileContentResponses = {
 
 export type UploadFileContentResponse = UploadFileContentResponses[keyof UploadFileContentResponses]
 
-export type SignFileUploadPartData = {
-  body?: never
-  path: {
-    uploadId: string
-    partNumber: string
-  }
-  query?: never
-  url: "/api/files/uploads/{uploadId}/parts/{partNumber}"
-}
-
-export type SignFileUploadPartErrors = {
-  /**
-   * Response for status 400
-   */
-  400: {
-    error: string
-  }
-  /**
-   * Response for status 404
-   */
-  404: {
-    error: string
-  }
-  /**
-   * Response for status 409
-   */
-  409: {
-    error: string
-  }
-  /**
-   * Response for status 410
-   */
-  410: {
-    error: string
-  }
-}
-
-export type SignFileUploadPartError = SignFileUploadPartErrors[keyof SignFileUploadPartErrors]
-
-export type SignFileUploadPartResponses = {
-  /**
-   * Response for status 200
-   */
-  200: {
-    partNumber: number
-    method: "PUT"
-    url: string
-    headers: {
-      [key: string]: string
-    }
-    expiresAt: string
-  }
-}
-
-export type SignFileUploadPartResponse =
-  SignFileUploadPartResponses[keyof SignFileUploadPartResponses]
-
 export type CompleteFileUploadData = {
-  body:
-    | unknown
-    | {
-        sizeBytes?: number
-        digest?: string
-        parts?: Array<{
-          partNumber: number
-          etag: string
-        }>
-      }
+  body: {
+    sizeBytes?: number
+    digest?: string
+  }
   path: {
     uploadId: string
   }

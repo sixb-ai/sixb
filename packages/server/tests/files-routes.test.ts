@@ -6,6 +6,7 @@ import {
   type CompleteBlobUploadInput,
   type CreateBlobUploadInput,
   computeBlobDigest,
+  DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type DirectUploadBlobStorage,
   defineObjectType,
   type FileRef,
@@ -16,14 +17,9 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
-  type SignBlobUploadPartInput,
-  type SignedBlobUploadPart,
   Sixb,
 } from "@sixb/core"
-import {
-  DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES,
-  DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
-} from "../src/routes/files"
+import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -52,10 +48,6 @@ class TestDirectBlobStorage extends InMemoryBlobStorage implements DirectUploadB
       expiresAt: input.expiresAt,
       stagingKey: `staging/${input.uploadId}`,
     }
-  }
-
-  async signUploadPart(_input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart> {
-    throw new Error("Multipart is not used in this test.")
   }
 
   async completeUpload(input: CompleteBlobUploadInput): Promise<FileRef> {
@@ -240,7 +232,7 @@ describe("file routes", () => {
     expect(await contentResponse.json()).toEqual({ success: true })
 
     const completeResponse = await app.fetch(
-      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`)
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
     )
     expect(completeResponse.status).toBe(200)
     const fileRef = (await completeResponse.json()) as FileRef
@@ -318,7 +310,7 @@ describe("file routes", () => {
     const upload = (await createResponse.json()) as { uploadId: string }
 
     const completeResponse = await app.fetch(
-      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`)
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
     )
 
     expect(completeResponse.status).toBe(400)
@@ -339,7 +331,7 @@ describe("file routes", () => {
     expect(await abortResponse.json()).toEqual({ success: true })
 
     const completeResponse = await app.fetch(
-      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`)
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, {})
     )
     expect(completeResponse.status).toBe(409)
     expect(await completeResponse.json()).toEqual({
@@ -386,5 +378,92 @@ describe("file routes", () => {
       error: `File upload digest mismatch: expected ${expectedDigest}, received ${actualDigest}.`,
     })
     expect(await blobStorage.stat(blobIdFromDigest(actualDigest))).toBeNull()
+  })
+
+  test("returns the cached fileRef when completion is retried", async () => {
+    const { app } = createFilesApi()
+    const digest = computeBlobDigest(new TextEncoder().encode("hello large"))
+    const createResponse = await app.fetch(
+      jsonRequest("/api/files/uploads", { fileName: "large.txt", sizeBytes: 11, digest })
+    )
+    const upload = (await createResponse.json()) as { uploadId: string }
+    await app.fetch(stagedContentRequest(upload.uploadId, "hello large"))
+
+    const first = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, { digest, sizeBytes: 11 })
+    )
+    expect(first.status).toBe(200)
+    const firstRef = (await first.json()) as FileRef
+
+    const second = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, { digest, sizeBytes: 11 })
+    )
+    expect(second.status).toBe(200)
+    expect(await second.json()).toEqual(firstRef)
+  })
+
+  test("rejects aborting an already completed upload", async () => {
+    const { app } = createFilesApi()
+    const digest = computeBlobDigest(new TextEncoder().encode("hello large"))
+    const createResponse = await app.fetch(
+      jsonRequest("/api/files/uploads", { sizeBytes: 11, digest })
+    )
+    const upload = (await createResponse.json()) as { uploadId: string }
+    await app.fetch(stagedContentRequest(upload.uploadId, "hello large"))
+    await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/complete`, { digest, sizeBytes: 11 })
+    )
+
+    const abortResponse = await app.fetch(
+      jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`)
+    )
+    expect(abortResponse.status).toBe(409)
+    expect(await abortResponse.json()).toEqual({
+      error: "File upload session is already completed.",
+    })
+  })
+
+  test("treats aborting an already aborted upload as a no-op", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const first = await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
+    expect(first.status).toBe(200)
+
+    const second = await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
+    expect(second.status).toBe(200)
+    expect(await second.json()).toEqual({ success: true })
+  })
+
+  test("rejects staged content for a terminal session", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
+    const upload = (await createResponse.json()) as { uploadId: string }
+    await app.fetch(jsonRequest(`/api/files/uploads/${upload.uploadId}/abort`))
+
+    const contentResponse = await app.fetch(stagedContentRequest(upload.uploadId, "late content"))
+    expect(contentResponse.status).toBe(409)
+    expect(await contentResponse.json()).toEqual({
+      error: "File upload session is already aborted.",
+    })
+  })
+
+  test("rejects staged content that exceeds the upload size limit", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": String(DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1),
+        },
+        body: "small body",
+      })
+    )
+    expect(response.status).toBe(413)
   })
 })
