@@ -10,14 +10,17 @@ import {
 
 import { client } from "../client.gen"
 import {
+  abortFileUpload,
   appendTelemetry,
   cancelWorkflowIntervention,
+  completeFileUpload,
   countObjects,
   createAgentThread,
   createAuthInvitation,
   createAuthPersonalAccessToken,
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
+  createFileUpload,
   disableAuthServiceAccount,
   existsObjects,
   facetObjects,
@@ -35,6 +38,7 @@ import {
   getDatasetVersion,
   getLatestTelemetry,
   getObject,
+  getObjectFileContent,
   getObjectType,
   getPipeline,
   getPipelineRun,
@@ -90,19 +94,28 @@ import {
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
+  signFileUploadPart,
   signOut,
   signOutAll,
   submitWorkflowIntervention,
+  uploadFileContent,
+  uploadFileRaw,
   upsertObject,
   upsertObjectLink,
 } from "../sdk.gen"
 import type {
+  AbortFileUploadData,
+  AbortFileUploadError,
+  AbortFileUploadResponse,
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionError,
   CancelWorkflowInterventionResponse,
+  CompleteFileUploadData,
+  CompleteFileUploadError,
+  CompleteFileUploadResponse,
   CountObjectsData,
   CountObjectsError,
   CountObjectsResponse,
@@ -121,6 +134,9 @@ import type {
   CreateAuthServiceAccountData,
   CreateAuthServiceAccountError,
   CreateAuthServiceAccountResponse,
+  CreateFileUploadData,
+  CreateFileUploadError,
+  CreateFileUploadResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -170,6 +186,8 @@ import type {
   GetLatestTelemetryResponse,
   GetObjectData,
   GetObjectError,
+  GetObjectFileContentData,
+  GetObjectFileContentError,
   GetObjectResponse,
   GetObjectTypeData,
   GetObjectTypeError,
@@ -322,6 +340,9 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
+  SignFileUploadPartData,
+  SignFileUploadPartError,
+  SignFileUploadPartResponse,
   SignOutAllData,
   SignOutAllError,
   SignOutAllResponse,
@@ -331,6 +352,12 @@ import type {
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
+  UploadFileContentData,
+  UploadFileContentError,
+  UploadFileContentResponse,
+  UploadFileRawData,
+  UploadFileRawError,
+  UploadFileRawResponse,
   UpsertObjectData,
   UpsertObjectError,
   UpsertObjectLinkData,
@@ -2170,6 +2197,31 @@ export const facetObjectsMutation = (
   return mutationOptions
 }
 
+export const getObjectFileContentQueryKey = (options: Options<GetObjectFileContentData>) =>
+  createQueryKey("getObjectFileContent", options)
+
+/**
+ * Get object file content
+ */
+export const getObjectFileContentOptions = (options: Options<GetObjectFileContentData>) =>
+  queryOptions<
+    unknown,
+    GetObjectFileContentError,
+    unknown,
+    ReturnType<typeof getObjectFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getObjectFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getObjectFileContentQueryKey(options),
+  })
+
 export const getObjectQueryKey = (options: Options<GetObjectData>) =>
   createQueryKey("getObject", options)
 
@@ -2281,6 +2333,164 @@ export const requestActionMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await requestAction({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Upload a file
+ */
+export const uploadFileRawMutation = (
+  options?: Partial<Options<UploadFileRawData>>
+): UseMutationOptions<UploadFileRawResponse, UploadFileRawError, Options<UploadFileRawData>> => {
+  const mutationOptions: UseMutationOptions<
+    UploadFileRawResponse,
+    UploadFileRawError,
+    Options<UploadFileRawData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await uploadFileRaw({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Create a staged file upload
+ */
+export const createFileUploadMutation = (
+  options?: Partial<Options<CreateFileUploadData>>
+): UseMutationOptions<
+  CreateFileUploadResponse,
+  CreateFileUploadError,
+  Options<CreateFileUploadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateFileUploadResponse,
+    CreateFileUploadError,
+    Options<CreateFileUploadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createFileUpload({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Upload staged file content through Sixb
+ */
+export const uploadFileContentMutation = (
+  options?: Partial<Options<UploadFileContentData>>
+): UseMutationOptions<
+  UploadFileContentResponse,
+  UploadFileContentError,
+  Options<UploadFileContentData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UploadFileContentResponse,
+    UploadFileContentError,
+    Options<UploadFileContentData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await uploadFileContent({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Sign a staged multipart upload part
+ */
+export const signFileUploadPartMutation = (
+  options?: Partial<Options<SignFileUploadPartData>>
+): UseMutationOptions<
+  SignFileUploadPartResponse,
+  SignFileUploadPartError,
+  Options<SignFileUploadPartData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SignFileUploadPartResponse,
+    SignFileUploadPartError,
+    Options<SignFileUploadPartData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await signFileUploadPart({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Complete a staged file upload
+ */
+export const completeFileUploadMutation = (
+  options?: Partial<Options<CompleteFileUploadData>>
+): UseMutationOptions<
+  CompleteFileUploadResponse,
+  CompleteFileUploadError,
+  Options<CompleteFileUploadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CompleteFileUploadResponse,
+    CompleteFileUploadError,
+    Options<CompleteFileUploadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await completeFileUpload({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Abort a staged file upload
+ */
+export const abortFileUploadMutation = (
+  options?: Partial<Options<AbortFileUploadData>>
+): UseMutationOptions<
+  AbortFileUploadResponse,
+  AbortFileUploadError,
+  Options<AbortFileUploadData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    AbortFileUploadResponse,
+    AbortFileUploadError,
+    Options<AbortFileUploadData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await abortFileUpload({
         ...options,
         ...fnOptions,
         throwOnError: true,

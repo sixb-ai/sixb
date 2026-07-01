@@ -25,6 +25,7 @@ const Device = defineObjectType({
 })
 
 interface OpenApiOperation {
+  readonly responses?: Record<string, unknown>
   readonly security?: unknown
 }
 
@@ -93,6 +94,12 @@ describe("OpenAPI docs", () => {
       ["post", "/api/auth/sign-out"],
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
+      ["post", "/api/files"],
+      ["post", "/api/files/uploads"],
+      ["put", "/api/files/uploads/{uploadId}/content"],
+      ["post", "/api/files/uploads/{uploadId}/parts/{partNumber}"],
+      ["post", "/api/files/uploads/{uploadId}/complete"],
+      ["post", "/api/files/uploads/{uploadId}/abort"],
       ["post", "/api/syncs/{syncId}/runs"],
       ["post", "/api/pipelines/{pipelineId}/runs"],
       ["post", "/api/workflow-interventions/{interventionId}/submit"],
@@ -138,5 +145,20 @@ describe("OpenAPI docs", () => {
     expect([...documentedBearer].sort()).toEqual([...expectedBearer].sort())
 
     expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()
+  })
+
+  test("documents object file content error responses", async () => {
+    const app = createDocsApi()
+    const spec = await fetchDocsJsonWithoutWarnings(app)
+    const operations = spec.paths?.["/api/objects/{objectTypeId}/{objectId}/files/content"]
+
+    expect(operations?.get?.responses).toHaveProperty("206")
+    expect(operations?.get?.responses).toHaveProperty("400")
+    expect(operations?.get?.responses).toHaveProperty("404")
+    expect(operations?.get?.responses).toHaveProperty("416")
+    expect(operations?.head?.responses).toHaveProperty("206")
+    expect(operations?.head?.responses).toHaveProperty("400")
+    expect(operations?.head?.responses).toHaveProperty("404")
+    expect(operations?.head?.responses).toHaveProperty("416")
   })
 })

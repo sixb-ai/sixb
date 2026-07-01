@@ -6,7 +6,7 @@
  * query IR, so identical queries share cache entries — inline builders are
  * safe to construct on every render.
  */
-import type { InferPropertyValue, Property, TelemetryPropertyToken } from "@sixb/core"
+import type { FileRef, InferPropertyValue, Property, TelemetryPropertyToken } from "@sixb/core"
 import type {
   ListResult,
   ListResultWithoutTotal,
@@ -19,11 +19,14 @@ import type {
 import {
   infiniteQueryOptions,
   queryOptions,
+  type UseMutationResult,
   type UseQueryResult,
   useInfiniteQuery,
+  useMutation,
   useQuery,
 } from "@tanstack/react-query"
 import { createContext, createElement, type ReactNode, useContext, useMemo } from "react"
+import { type UploadFileInput, uploadFile } from "./file"
 import type { Client } from "./generated/client"
 import { getBulkTelemetryHistory, getTelemetryHistory, type Options } from "./generated/sdk.gen"
 import type { GetBulkTelemetryHistoryData, GetTelemetryHistoryData } from "./generated/types.gen"
@@ -155,6 +158,30 @@ const SixbClientContext = createContext<Client | undefined>(undefined)
 
 export function SixbProvider(props: { client: Client; children?: ReactNode }) {
   return createElement(SixbClientContext.Provider, { value: props.client }, props.children)
+}
+
+export type UseUploadFileInput = UploadFileInput
+
+export function useUploadFile(): UseMutationResult<FileRef, Error, UseUploadFileInput> {
+  const client = useContext(SixbClientContext)
+
+  return useMutation({
+    mutationFn: ({
+      file,
+      fetch,
+      fileName,
+      logicalPath,
+      client: inputClient,
+      stagedUploadThresholdBytes,
+    }) =>
+      uploadFile(file, {
+        client: inputClient ?? client,
+        fetch,
+        fileName,
+        logicalPath,
+        stagedUploadThresholdBytes,
+      }),
+  })
 }
 
 // Hooks accept any built query — anything carrying a normalized `.ir` — and

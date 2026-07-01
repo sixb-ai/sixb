@@ -209,6 +209,7 @@ export function createSixbApi(server: SixbServer) {
           { name: "Objects", description: "Twin objects and state" },
           { name: "Actions", description: "Global and object action requests" },
           { name: "Agents", description: "Agent catalog, threads, messages, and run state" },
+          { name: "Files", description: "File uploads and file references" },
           { name: "Links", description: "Object relationship links" },
           { name: "Telemetry", description: "Telemetry history and appends" },
           { name: "Events", description: "Domain event stream" },
