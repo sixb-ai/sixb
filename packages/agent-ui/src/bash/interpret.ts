@@ -481,7 +481,7 @@ export function objectCount(value: unknown): number | null {
   return null
 }
 
-function numberField(value: unknown, field: string): number | null {
+export function numberField(value: unknown, field: string): number | null {
   return isRecord(value) && typeof value[field] === "number" ? value[field] : null
 }
 

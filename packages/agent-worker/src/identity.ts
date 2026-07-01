@@ -4,8 +4,14 @@ import type {
   ServiceAccountGroupMembershipRecord,
   ServiceAccountRecord,
 } from "@sixb/core"
-import { SYSTEM_PRINCIPAL } from "@sixb/core"
 import type { AgentWorkerStorage } from "./types"
+
+/**
+ * Audit identity recorded as the creator of agent-managed service accounts. It is the worker's own
+ * system identity, kept distinct from the generic core `SYSTEM_PRINCIPAL` so audit trails attribute
+ * these accounts to the agent worker rather than to "system" at large.
+ */
+const AGENT_WORKER_PRINCIPAL: Principal = { type: "system", id: "agent-worker" }
 
 /** Stable auth identity the worker uses when an agent acts on Sixb resources. */
 export interface AgentExecutionIdentity {
@@ -61,7 +67,7 @@ export async function reconcileAgentExecutionIdentity(
         name,
         description,
         status: "active",
-        createdByPrincipal: SYSTEM_PRINCIPAL,
+        createdByPrincipal: AGENT_WORKER_PRINCIPAL,
         createdAt: now,
         updatedAt: now,
       })

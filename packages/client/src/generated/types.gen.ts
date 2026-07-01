@@ -4396,12 +4396,6 @@ export type CreateAgentThreadErrors = {
     error: string
   }
   /**
-   * Response for status 403
-   */
-  403: {
-    error: string
-  }
-  /**
    * Response for status 404
    */
   404: {

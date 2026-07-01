@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, resolve, sep } from "node:path"
 import {
   type CommandResult,
   type CreateSandboxOptions,
@@ -152,15 +152,27 @@ export class LocalSandbox implements Sandbox {
         `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot write files`
       )
     }
-    // Local sandboxes execute on the host filesystem, so materializing files is a direct write.
-    // Paths live under workingDirectory, which the isolation profiles already allow writing to.
+    // Local sandboxes write straight to the host filesystem — there is no guest boundary — so every
+    // path is confined to workingDirectory before writing. Without this an absolute path would escape
+    // onto the host. smolvm needs no such check: its writes land inside the VM.
     for (const file of files) {
-      await mkdir(dirname(file.path), { recursive: true })
-      await writeFile(file.path, file.contents)
+      const target = this.resolveWithinWorkingDirectory(file.path)
+      await mkdir(dirname(target), { recursive: true })
+      await writeFile(target, file.contents)
       if (file.mode !== undefined) {
-        await chmod(file.path, file.mode)
+        await chmod(target, file.mode)
       }
     }
+  }
+
+  private resolveWithinWorkingDirectory(path: string): string {
+    const target = resolve(this.workingDirectory, path)
+    if (target !== this.workingDirectory && !target.startsWith(this.workingDirectory + sep)) {
+      throw new Error(
+        `[Sandbox] writeFiles path '${path}' escapes the sandbox working directory ${this.workingDirectory}`
+      )
+    }
+    return target
   }
 
   async stop(): Promise<void> {

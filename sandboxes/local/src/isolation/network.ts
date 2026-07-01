@@ -10,18 +10,17 @@ export function allowsOutboundNetwork(policy: SandboxNetworkPolicy): boolean {
   return policy.mode !== "none"
 }
 
-let warnedRestrictedDowngrade = false
-
 /**
  * A "restricted" policy asks for a specific allow list, but local backends cannot enforce one and
- * fall back to full host network. Warn once so this downgrade is loud and never reads silently as
- * "all"; use the smolvm provider when egress must actually be restricted.
+ * fall back to full host network. Warn on every restricted sandbox so the downgrade is loud and
+ * never reads silently as "all"; use the smolvm provider when egress must actually be restricted.
+ * (Per-sandbox on purpose: a module-level once-flag would silence every sandbox after the first and
+ * leak state across tests.)
  */
 export function warnIfRestrictedDowngraded(policy: SandboxNetworkPolicy): void {
-  if (warnedRestrictedDowngrade || policy.mode !== "restricted") {
+  if (policy.mode !== "restricted") {
     return
   }
-  warnedRestrictedDowngrade = true
   console.warn(
     "[Sandbox] local sandboxes cannot enforce restricted network egress; downgrading to host " +
       "network. The allow list is NOT applied. Use the smolvm provider for enforced egress."

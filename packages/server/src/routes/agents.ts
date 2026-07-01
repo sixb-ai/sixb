@@ -289,7 +289,8 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: {
           201: CreateAgentThreadResponseSchema,
           400: ErrorResponseSchema,
-          403: ErrorResponseSchema,
+          // No 403: an agent the caller cannot run is reported as 404 (see getAgentById above) so the
+          // response never discloses that a forbidden id exists.
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
         },

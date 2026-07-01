@@ -89,6 +89,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     }
 
     ws.onerror = () => {
+      if (stopped) return
       sink.reportError(options.connectionErrorMessage)
     }
 

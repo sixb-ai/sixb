@@ -657,6 +657,22 @@ describe("AgentWorker", () => {
     )
   })
 
+  test("attributes a managed service account to the agent worker, not to system at large", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const agent = sixb.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
+    const identity = await reconcileAgentExecutionIdentity(context.storage, PROJECT_ID, agent)
+    // Audit attribution must stay the worker's own identity, distinct from the generic core
+    // SYSTEM_PRINCIPAL ({ id: "system" }) — a shared-literal refactor once silently flattened it.
+    expect(identity.serviceAccount.createdByPrincipal).toEqual({
+      type: "system",
+      id: "agent-worker",
+    })
+  })
+
   test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)

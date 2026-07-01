@@ -38,19 +38,26 @@ export interface CommandResult {
  */
 export interface SandboxFileRecord {
   /**
-   * Absolute path valid inside the sandbox — typically under {@link Sandbox.workingDirectory}.
-   * Missing parent directories are created.
+   * Path to the file, resolved within {@link Sandbox.workingDirectory}. Missing parent directories
+   * are created. A provider that writes to the host (rather than an isolated guest) rejects a path
+   * that escapes the working directory.
    */
   readonly path: string
+  /** File contents, written byte-for-byte: a `string` is UTF-8, a `Uint8Array` is raw bytes. */
   readonly contents: string | Uint8Array
-  /** Optional octal file mode (e.g. `0o755`). Providers honor it best-effort. */
+  /** Optional octal file mode (e.g. `0o755`), honored on POSIX-backed providers (local, smolvm). */
   readonly mode?: number
 }
 
 /**
- * Provider-level network egress policy. `restricted` declares the exact origins a sandbox should be
- * able to reach; providers that cannot enforce target-level egress may document weaker local-dev
- * behavior, but production providers should treat the allow list as authoritative.
+ * Provider-level network egress policy:
+ * - `none` — no outbound network.
+ * - `restricted` — only the listed origins may be reached, so an empty `allow` list means deny-all
+ *   on a provider that enforces egress (smolvm). Providers that CANNOT enforce a per-origin allow
+ *   list (the local backend) degrade `restricted` to full host network and warn loudly — so on those
+ *   providers `restricted` behaves like `all`, empty allow list included. Use an enforcing provider
+ *   when egress must actually be constrained.
+ * - `all` — unrestricted outbound network.
  */
 export type SandboxNetworkPolicy =
   | { readonly mode: "none" }
@@ -91,9 +98,14 @@ export interface Sandbox {
 
   /**
    * Materialize files into the sandbox so a subsequent {@link runCommand} can read them. Each
-   * provider decides how the bytes reach the guest; the observable contract is only that the files
-   * exist at their paths afterwards. Missing parent directories are created. Rejects if the sandbox
-   * is not running.
+   * provider decides how the bytes reach the guest; the observable contract is:
+   * - each file exists at its {@link SandboxFileRecord.path} afterwards, with missing parents created;
+   * - an existing file is overwritten;
+   * - `contents` is written byte-for-byte (a `string` as UTF-8, a `Uint8Array` as raw bytes);
+   * - `mode` is applied where the provider's filesystem supports it;
+   * - an empty batch is a no-op.
+   *
+   * Paths must resolve within {@link workingDirectory}. Rejects if the sandbox is not running.
    */
   writeFiles(files: readonly SandboxFileRecord[]): Promise<void>
 
