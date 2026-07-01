@@ -74,6 +74,7 @@ async function main() {
   console.log(
     "[AcmeCorp] To slow each sync read for Atlas realtime checks, set ACME_SYNC_DELAY_MS."
   )
+  console.log("[AcmeCorp] Document sync includes sample PDF and PNG attachments.")
 }
 
 main().catch((error) => {

@@ -71,6 +71,7 @@ export const erpDocumentsDataset = defineDataset("erp.documents", {
     col("createdAt", "timestamp"),
     col("project_id", "string"),
     col("author_id", "string"),
+    col("attachment", "fileRef", { nullable: true }),
   ],
 })
 

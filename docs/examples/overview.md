@@ -10,7 +10,7 @@ they exercise, not in how they are wired.
 
 | Example | What it shows | Storage / broker |
 | --- | --- | --- |
-| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, actions, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
+| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
 | `auth` | Authentication strategies, groups, invite policies, and scoped roles | SQLite + in-memory broker |
 
 Run any example from its own folder:
@@ -33,7 +33,7 @@ example and touches nearly every concept in Sixb, so it is the one to read first
 | --- | --- |
 | `ontology/` | Object types `Customer`, `Department`, `Document`, `Employee`, `Invoice`, `Project`, `Task`, with links between them — see [Ontology](../ontology/overview.md) |
 | `connectors/`, `lib/` | An `acme-erp` connector to a mock ERP exposing customers, invoices, employees, and departments — see [Connectors](../data/connectors.md) |
-| `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets like `erp.invoices` on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
+| `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets like `erp.invoices` and file-backed `erp.documents` rows on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
 | `pipelines/` | `project-reporting` transforms dataset rows — see [Pipelines](../data/pipelines.md) |
 | `projections/` | Mapping dataset and pipeline rows into ontology objects — see [Projections](../data/projections.md) |
 | `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice` — see [Actions](../actions/overview.md) |
@@ -66,6 +66,11 @@ Two demo scripts seed the system from the mock ERP and replay events:
 bun run sync:erp       # pull ERP rows into datasets, then project them into objects
 bun run webhooks:demo  # send sample webhook events at the running app
 ```
+
+The ERP document sync stores a sample PDF and PNG through Sixb blob storage, writes them as
+`fileRef` values into `erp.documents`, and projects them onto `Document.attachment`. After
+`bun run sync:erp`, open Atlas, go to Objects, and select a Document to view or download the
+attachment with the native browser viewer.
 
 ## auth — authentication and access control
 

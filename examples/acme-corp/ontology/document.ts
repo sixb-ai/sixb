@@ -12,6 +12,7 @@ export const Document = defineObjectType({
     prop("type", stringEnum(["proposal", "contract", "specification", "report", "deliverable"])),
     prop("version", "string"),
     prop("createdAt", "timestamp"),
+    prop("attachment", "fileRef"),
   ],
   links: [
     link("project", Project, { cardinality: "one" }),

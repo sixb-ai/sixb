@@ -12,6 +12,7 @@ export const documentProjection = defineProjection("document-proj", Document)
     type: "type",
     version: "version",
     createdAt: "createdAt",
+    attachment: "attachment",
   })
   .withLinks({
     project: {
