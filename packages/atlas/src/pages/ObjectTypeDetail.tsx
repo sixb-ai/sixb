@@ -317,9 +317,8 @@ export function ObjectTypeDetail() {
                           className="flex flex-wrap items-baseline gap-x-2 gap-y-1 font-mono text-xs"
                         >
                           <span className="text-foreground">{param.id}</span>
-                          <span className="text-muted-foreground">
-                            : {formatSchema(param.schema)}
-                          </span>
+                          <span className="text-muted-foreground/50">:</span>
+                          <SchemaType schema={param.schema} />
                           {param.required ? (
                             <Badge variant="outline" className="font-sans text-[9px]">
                               required
@@ -485,7 +484,7 @@ function PropertiesSection({
           <TableBody>
             {properties.map((prop) => (
               <TableRow key={prop.id}>
-                <TableCell>
+                <TableCell className="align-top">
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs text-foreground">{prop.id}</span>
                     {prop.primary ? (
@@ -495,15 +494,15 @@ function PropertiesSection({
                     ) : null}
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {formatSchema(prop.schema)}
+                <TableCell className="align-top">
+                  <SchemaType schema={prop.schema} />
                 </TableCell>
                 {anyDescriptions ? (
-                  <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
+                  <TableCell className="hidden align-top text-xs text-muted-foreground md:table-cell">
                     {prop.description || <span className="text-muted-foreground/50">—</span>}
                   </TableCell>
                 ) : null}
-                <TableCell className="text-right">
+                <TableCell className="text-right align-top">
                   <div className="inline-flex gap-1">
                     {prop.required ? (
                       <Badge variant="outline" className="text-[9px]">
@@ -638,10 +637,200 @@ function formatForeignKeySource(fk: { sourcePropertyId?: string; sourceField?: s
   return fk.sourcePropertyId ?? fk.sourceField ?? "unknown"
 }
 
-function formatSchema(schema: unknown): string {
-  if (typeof schema === "string") return schema
-  if (typeof schema === "object" && schema !== null && "type" in schema) {
-    return String((schema as { type: unknown }).type)
+function isSchemaRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * A schema renders on a single (wrapping) line when it is a primitive, an
+ * enum, or a container whose element is itself inline. Objects — and any
+ * container of objects — expand into a stacked tree instead, so their fields
+ * always indent from a single, consistent left edge.
+ */
+function isInlineSchema(schema: unknown): boolean {
+  if (typeof schema === "string") return true
+  if (!isSchemaRecord(schema) || typeof schema.type !== "string") return true
+  switch (schema.type) {
+    case "object":
+      return false
+    case "array":
+      return isInlineSchema(schema.items)
+    case "map":
+      return isInlineSchema(schema.valueSchema)
+    case "valueTypeRef":
+      return schema._resolved === undefined || isInlineSchema(schema._resolved)
+    default:
+      return true
   }
-  return "unknown"
+}
+
+/**
+ * Renders an ontology property schema in a compact, readable form.
+ *
+ * Primitives render as their bare type name. Complex schemas expand:
+ * enums list their allowed values as chips, objects show their fields,
+ * arrays/maps show their element types, and value-type refs show the
+ * referenced id (plus the resolved schema when codegen populated it).
+ */
+function SchemaType({ schema }: { schema: unknown }): ReactNode {
+  if (typeof schema === "string") {
+    return <SchemaPrimitive>{schema}</SchemaPrimitive>
+  }
+  if (!isSchemaRecord(schema) || typeof schema.type !== "string") {
+    return <SchemaPrimitive>unknown</SchemaPrimitive>
+  }
+
+  switch (schema.type) {
+    case "enum":
+      return <EnumType schema={schema} />
+    case "object":
+      return <ObjectType schema={schema} />
+    case "array":
+      return (
+        <SchemaContainer
+          head={<SchemaKeyword>array</SchemaKeyword>}
+          lead="of"
+          child={schema.items}
+        />
+      )
+    case "map":
+      return (
+        <SchemaContainer
+          head={
+            <>
+              <SchemaKeyword>map</SchemaKeyword>
+              <SchemaPrimitive>string</SchemaPrimitive>
+            </>
+          }
+          lead="→"
+          child={schema.valueSchema}
+        />
+      )
+    case "valueTypeRef":
+      return (
+        <SchemaContainer
+          head={
+            <span className="font-mono text-xs text-foreground">{String(schema.valueTypeId)}</span>
+          }
+          lead={schema._resolved === undefined ? undefined : "ref →"}
+          child={schema._resolved}
+        />
+      )
+    default:
+      return <SchemaPrimitive>{schema.type}</SchemaPrimitive>
+  }
+}
+
+/**
+ * Lays out a container schema (`array`, `map`, `valueTypeRef`) as `<head> lead
+ * <child>`. When the child is inline it stays on one wrapping line; when the
+ * child is a block (an object), the head sits on its own line with the child
+ * indented beneath it — never vertically centered against a tall block.
+ */
+function SchemaContainer({
+  head,
+  lead,
+  child,
+}: {
+  head: ReactNode
+  lead?: string
+  child: unknown
+}) {
+  if (child === undefined) {
+    return <span className="inline-flex flex-wrap items-center gap-1.5">{head}</span>
+  }
+  if (isInlineSchema(child)) {
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {head}
+        {lead ? <SchemaLead>{lead}</SchemaLead> : null}
+        <SchemaType schema={child} />
+      </span>
+    )
+  }
+  return (
+    <div className="space-y-1">
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        {head}
+        {lead ? <SchemaLead>{lead}</SchemaLead> : null}
+      </span>
+      <SchemaNest>
+        <SchemaType schema={child} />
+      </SchemaNest>
+    </div>
+  )
+}
+
+function SchemaPrimitive({ children }: { children: ReactNode }) {
+  return <span className="font-mono text-xs text-muted-foreground">{children}</span>
+}
+
+function SchemaLead({ children }: { children: ReactNode }) {
+  return <span className="text-[10px] font-medium text-muted-foreground/70">{children}</span>
+}
+
+function SchemaNest({ children }: { children: ReactNode }) {
+  return <div className="border-l border-border pl-3">{children}</div>
+}
+
+function SchemaKeyword({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground">
+      {children}
+    </span>
+  )
+}
+
+function EnumType({ schema }: { schema: Record<string, unknown> }) {
+  const values = Array.isArray(schema.values) ? schema.values : []
+  const valueType = typeof schema.valueType === "string" ? schema.valueType : null
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <SchemaKeyword>enum</SchemaKeyword>
+      {valueType ? <SchemaLead>{valueType}</SchemaLead> : null}
+      {values.map((value, index) => (
+        <span
+          key={index}
+          className="inline-flex items-center rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] text-foreground"
+        >
+          {String(value)}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function ObjectType({ schema }: { schema: Record<string, unknown> }) {
+  const properties = isSchemaRecord(schema.properties) ? schema.properties : {}
+  const entries = Object.entries(properties)
+  return (
+    <div className="space-y-1">
+      <SchemaKeyword>object</SchemaKeyword>
+      {entries.length > 0 ? (
+        <SchemaNest>
+          <div className="space-y-1.5">
+            {entries.map(([name, field]) => {
+              const fieldSchema = isSchemaRecord(field) ? field.schema : field
+              const required = isSchemaRecord(field) && field.required === true
+              const inline = isInlineSchema(fieldSchema)
+              return (
+                <div key={name} className="space-y-1">
+                  <div className="flex flex-wrap items-baseline gap-1.5">
+                    <span className="font-mono text-xs text-foreground">{name}</span>
+                    {required ? <SchemaLead>required</SchemaLead> : null}
+                    {inline ? <SchemaType schema={fieldSchema} /> : null}
+                  </div>
+                  {inline ? null : (
+                    <SchemaNest>
+                      <SchemaType schema={fieldSchema} />
+                    </SchemaNest>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </SchemaNest>
+      ) : null}
+    </div>
+  )
 }
