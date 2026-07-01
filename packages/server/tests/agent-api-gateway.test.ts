@@ -11,6 +11,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type OntologySource,
   prop,
   Sixb,
 } from "@sixb/core"
@@ -112,7 +113,7 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
   readonly storage: InMemoryStorage
 }> {
   const storage = new InMemoryStorage()
-  const sixb = new Sixb({
+  const sixb = new Sixb<readonly OntologySource[]>({
     id: PROJECT_ID,
     ontology: [Device, Contract],
     groups: [agentRuntime],
