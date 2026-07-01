@@ -41,7 +41,6 @@ const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
     .min(1)
     .regex(/^\/properties(?:\/|$)/, "Object file content paths must start with /properties/"),
 })
-const FileContentResponseBodySchema = z.any()
 
 function serializeObject(row: {
   primaryId: string
@@ -611,14 +610,15 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       (context) => objectFileContentResponse(sixb, context),
       {
         params: ObjectParamsSchema,
+        // Register the loose query so framework validation only requires `path`;
+        // the handler applies the stricter `^/properties` check and returns a
+        // consistent `{ error }` 400. Registering the strict schema here would
+        // make Elysia emit its own 422 validation body, breaking that contract.
         query: FileContentQuerySchema,
-        response: {
-          200: FileContentResponseBodySchema,
-          206: FileContentResponseBodySchema,
-          400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-          416: FileContentResponseBodySchema,
-        },
+        // No top-level `response` map: Elysia's OpenAPI builder resets responses
+        // to JSON-only whenever one is present, which would erase the binary
+        // `application/octet-stream` bodies. Declaring every status in
+        // `detail.responses` keeps the binary content in the spec.
         detail: {
           summary: "Get object file content",
           tags: ["Objects"],
@@ -669,14 +669,11 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       (context) => objectFileContentResponse(sixb, context, { head: true }),
       {
         params: ObjectParamsSchema,
+        // See the GET route: register the loose query so the handler owns the
+        // strict `^/properties` check and its consistent 400.
         query: FileContentQuerySchema,
-        response: {
-          200: FileContentResponseBodySchema,
-          206: FileContentResponseBodySchema,
-          400: ErrorResponseSchema,
-          404: ErrorResponseSchema,
-          416: FileContentResponseBodySchema,
-        },
+        // See the GET route: no top-level `response` map, so the binary responses
+        // declared in `detail.responses` survive into the spec.
         detail: {
           summary: "Head object file content",
           tags: ["Objects"],

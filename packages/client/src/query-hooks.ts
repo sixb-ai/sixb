@@ -26,7 +26,7 @@ import {
   useQuery,
 } from "@tanstack/react-query"
 import { createContext, createElement, type ReactNode, useContext, useMemo } from "react"
-import { type UploadFileInput, uploadFile } from "./file"
+import { type SixbFileUploadError, type UploadFileInput, uploadFile } from "./file"
 import type { Client } from "./generated/client"
 import { getBulkTelemetryHistory, getTelemetryHistory, type Options } from "./generated/sdk.gen"
 import type { GetBulkTelemetryHistoryData, GetTelemetryHistoryData } from "./generated/types.gen"
@@ -162,7 +162,11 @@ export function SixbProvider(props: { client: Client; children?: ReactNode }) {
 
 export type UseUploadFileInput = UploadFileInput
 
-export function useUploadFile(): UseMutationResult<FileRef, Error, UseUploadFileInput> {
+export function useUploadFile(): UseMutationResult<
+  FileRef,
+  SixbFileUploadError,
+  UseUploadFileInput
+> {
   const client = useContext(SixbClientContext)
 
   return useMutation({
@@ -173,6 +177,7 @@ export function useUploadFile(): UseMutationResult<FileRef, Error, UseUploadFile
       logicalPath,
       client: inputClient,
       stagedUploadThresholdBytes,
+      signal,
     }) =>
       uploadFile(file, {
         client: inputClient ?? client,
@@ -180,6 +185,7 @@ export function useUploadFile(): UseMutationResult<FileRef, Error, UseUploadFile
         fileName,
         logicalPath,
         stagedUploadThresholdBytes,
+        signal,
       }),
   })
 }

@@ -131,6 +131,10 @@ function fileContentHeaders(
   headers.set("content-disposition", contentDispositionHeader(disposition, fileNameFor(fileRef)))
   headers.set("etag", `"${fileRef.digest}"`)
   headers.set("x-content-type-options", "nosniff")
+  // Blobs are content-addressed and immutable, so responses can be cached
+  // aggressively — but only privately: reads are grant-enforced and must never
+  // land in a shared cache.
+  headers.set("cache-control", "private, max-age=31536000, immutable")
   if (canReadRange) {
     headers.set("accept-ranges", "bytes")
   }
