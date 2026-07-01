@@ -3812,6 +3812,97 @@ export type FacetObjectsResponses = {
 
 export type FacetObjectsResponse = FacetObjectsResponses[keyof FacetObjectsResponses]
 
+export type GetObjectFileContentData = {
+  body?: never
+  path: {
+    objectTypeId: string
+    objectId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/objects/{objectTypeId}/{objectId}/files/content"
+}
+
+export type GetObjectFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 416
+   */
+  416: unknown
+}
+
+export type GetObjectFileContentError = GetObjectFileContentErrors[keyof GetObjectFileContentErrors]
+
+export type GetObjectFileContentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: unknown
+  /**
+   * Response for status 206
+   */
+  206: unknown
+}
+
+export type HeadObjectFileContentData = {
+  body?: never
+  path: {
+    objectTypeId: string
+    objectId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/objects/{objectTypeId}/{objectId}/files/content"
+}
+
+export type HeadObjectFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 416
+   */
+  416: unknown
+}
+
+export type HeadObjectFileContentError =
+  HeadObjectFileContentErrors[keyof HeadObjectFileContentErrors]
+
+export type HeadObjectFileContentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: unknown
+  /**
+   * Response for status 206
+   */
+  206: unknown
+}
+
 export type GetObjectData = {
   body?: never
   path: {
@@ -4040,6 +4131,324 @@ export type RequestActionResponses = {
 }
 
 export type RequestActionResponse = RequestActionResponses[keyof RequestActionResponses]
+
+export type UploadFileRawData = {
+  body: {
+    file: Blob | File
+    logicalPath?: string
+  }
+  path?: never
+  query?: never
+  url: "/api/files"
+}
+
+export type UploadFileRawErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 413
+   */
+  413: {
+    error: string
+  }
+}
+
+export type UploadFileRawError = UploadFileRawErrors[keyof UploadFileRawErrors]
+
+export type UploadFileRawResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    blobId: string
+    digest: string
+    sizeBytes: number
+    fileName?: string
+    mediaType?: string
+    logicalPath?: string
+  }
+}
+
+export type UploadFileRawResponse = UploadFileRawResponses[keyof UploadFileRawResponses]
+
+export type CreateFileUploadData = {
+  body: {
+    fileName?: string
+    mediaType?: string
+    sizeBytes?: number
+    digest?: string
+    logicalPath?: string
+  }
+  path?: never
+  query?: never
+  url: "/api/files/uploads"
+}
+
+export type CreateFileUploadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+}
+
+export type CreateFileUploadError = CreateFileUploadErrors[keyof CreateFileUploadErrors]
+
+export type CreateFileUploadResponses = {
+  /**
+   * Response for status 201
+   */
+  201:
+    | {
+        strategy: "server"
+        uploadId: string
+        method: "PUT"
+        url: string
+        expiresAt: string
+      }
+    | {
+        strategy: "direct-put"
+        uploadId: string
+        method: "PUT"
+        url: string
+        headers: {
+          [key: string]: string
+        }
+        expiresAt: string
+      }
+    | {
+        strategy: "multipart"
+        uploadId: string
+        partSizeBytes: number
+        expiresAt: string
+      }
+}
+
+export type CreateFileUploadResponse = CreateFileUploadResponses[keyof CreateFileUploadResponses]
+
+export type UploadFileContentData = {
+  body: Blob | File
+  path: {
+    uploadId: string
+  }
+  query?: never
+  url: "/api/files/uploads/{uploadId}/content"
+}
+
+export type UploadFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 410
+   */
+  410: {
+    error: string
+  }
+}
+
+export type UploadFileContentError = UploadFileContentErrors[keyof UploadFileContentErrors]
+
+export type UploadFileContentResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type UploadFileContentResponse = UploadFileContentResponses[keyof UploadFileContentResponses]
+
+export type SignFileUploadPartData = {
+  body?: never
+  path: {
+    uploadId: string
+    partNumber: string
+  }
+  query?: never
+  url: "/api/files/uploads/{uploadId}/parts/{partNumber}"
+}
+
+export type SignFileUploadPartErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 410
+   */
+  410: {
+    error: string
+  }
+}
+
+export type SignFileUploadPartError = SignFileUploadPartErrors[keyof SignFileUploadPartErrors]
+
+export type SignFileUploadPartResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    partNumber: number
+    method: "PUT"
+    url: string
+    headers: {
+      [key: string]: string
+    }
+    expiresAt: string
+  }
+}
+
+export type SignFileUploadPartResponse =
+  SignFileUploadPartResponses[keyof SignFileUploadPartResponses]
+
+export type CompleteFileUploadData = {
+  body:
+    | unknown
+    | {
+        sizeBytes?: number
+        digest?: string
+        parts?: Array<{
+          partNumber: number
+          etag: string
+        }>
+      }
+  path: {
+    uploadId: string
+  }
+  query?: never
+  url: "/api/files/uploads/{uploadId}/complete"
+}
+
+export type CompleteFileUploadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 410
+   */
+  410: {
+    error: string
+  }
+}
+
+export type CompleteFileUploadError = CompleteFileUploadErrors[keyof CompleteFileUploadErrors]
+
+export type CompleteFileUploadResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    blobId: string
+    digest: string
+    sizeBytes: number
+    fileName?: string
+    mediaType?: string
+    logicalPath?: string
+  }
+}
+
+export type CompleteFileUploadResponse =
+  CompleteFileUploadResponses[keyof CompleteFileUploadResponses]
+
+export type AbortFileUploadData = {
+  body?: never
+  path: {
+    uploadId: string
+  }
+  query?: never
+  url: "/api/files/uploads/{uploadId}/abort"
+}
+
+export type AbortFileUploadErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 410
+   */
+  410: {
+    error: string
+  }
+}
+
+export type AbortFileUploadError = AbortFileUploadErrors[keyof AbortFileUploadErrors]
+
+export type AbortFileUploadResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    success: boolean
+  }
+}
+
+export type AbortFileUploadResponse = AbortFileUploadResponses[keyof AbortFileUploadResponses]
 
 export type ListActionRunsData = {
   body?: never

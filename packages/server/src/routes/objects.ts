@@ -15,11 +15,13 @@ import {
   type Sixb,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { ZodError } from "zod"
+import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
+import { createFileContentResponse, resolveFileRefAtPath } from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { ErrorResponseSchema } from "../schemas/common"
+import { FileContentQuerySchema } from "../schemas/files"
 import {
   ObjectListResponseSchema,
   ObjectParamsSchema,
@@ -32,6 +34,14 @@ import {
   UpsertObjectBodySchema,
 } from "../schemas/objects"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+
+const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
+  path: z
+    .string()
+    .min(1)
+    .regex(/^\/properties(?:\/|$)/, "Object file content paths must start with /properties/"),
+})
+const FileContentResponseBodySchema = z.any()
 
 function serializeObject(row: {
   primaryId: string
@@ -162,6 +172,60 @@ async function getObjectRow(
     objectTypeId: params.objectTypeId,
     primaryId: params.objectId,
   })
+}
+
+async function objectFileContentResponse(
+  sixb: Sixb<readonly OntologySource[]>,
+  context: {
+    readonly params: { readonly objectTypeId: string; readonly objectId: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: { status?: number | string }
+  },
+  options: { readonly head?: boolean } = {}
+) {
+  const { scoped } = requestAuthState(context)
+
+  try {
+    const parsed = ObjectFileContentQuerySchema.parse(context.query)
+    const row = await getObjectRow(sixb, scoped, context.params)
+    if (!row) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const fileRef = resolveFileRefAtPath(serializeObject(row), parsed.path)
+    if (!fileRef) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const response = await createFileContentResponse({
+      blobStorage: sixb.blobStorage,
+      fileRef,
+      disposition: parsed.disposition,
+      head: options.head,
+      rangeHeader: context.request.headers.get("range"),
+    })
+    if (!response) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    if (error instanceof ZodError) {
+      context.set.status = 400
+      return { error: "Invalid file content query" }
+    }
+
+    throw error
+  }
 }
 
 export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
@@ -537,6 +601,112 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
                   schema: { $ref: "#/components/schemas/ErrorResponse" },
                 },
               },
+            },
+          },
+        },
+      }
+    )
+    .get(
+      "/api/objects/:objectTypeId/:objectId/files/content",
+      (context) => objectFileContentResponse(sixb, context),
+      {
+        params: ObjectParamsSchema,
+        query: FileContentQuerySchema,
+        response: {
+          200: FileContentResponseBodySchema,
+          206: FileContentResponseBodySchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          416: FileContentResponseBodySchema,
+        },
+        detail: {
+          summary: "Get object file content",
+          tags: ["Objects"],
+          operationId: "getObjectFileContent",
+          security: bearerSecurityRequirement("getObjectFileContent"),
+          responses: {
+            200: {
+              description: "File content",
+              content: {
+                "application/octet-stream": {
+                  schema: { type: "string", format: "binary" },
+                },
+              },
+            },
+            206: {
+              description: "Partial file content",
+              content: {
+                "application/octet-stream": {
+                  schema: { type: "string", format: "binary" },
+                },
+              },
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            404: {
+              description: "Response for status 404",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            416: {
+              description: "Requested byte range is not satisfiable",
+            },
+          },
+        },
+      }
+    )
+    .head(
+      "/api/objects/:objectTypeId/:objectId/files/content",
+      (context) => objectFileContentResponse(sixb, context, { head: true }),
+      {
+        params: ObjectParamsSchema,
+        query: FileContentQuerySchema,
+        response: {
+          200: FileContentResponseBodySchema,
+          206: FileContentResponseBodySchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          416: FileContentResponseBodySchema,
+        },
+        detail: {
+          summary: "Head object file content",
+          tags: ["Objects"],
+          operationId: "headObjectFileContent",
+          security: bearerSecurityRequirement("headObjectFileContent"),
+          responses: {
+            200: {
+              description: "File content headers",
+            },
+            206: {
+              description: "Partial file content headers",
+            },
+            400: {
+              description: "Response for status 400",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            404: {
+              description: "Response for status 404",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            416: {
+              description: "Requested byte range is not satisfiable",
             },
           },
         },

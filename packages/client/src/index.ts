@@ -8,6 +8,7 @@ export type {
   SixbBrowserRuntimeDefaults,
 } from "./browser"
 export * from "./events"
+export * from "./file"
 export * from "./generated"
 export { client } from "./generated/client.gen"
 
