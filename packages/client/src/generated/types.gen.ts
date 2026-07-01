@@ -4216,6 +4216,12 @@ export type CreateFileUploadResponses = {
         }
         expiresAt: string
       }
+    | {
+        strategy: "multipart"
+        uploadId: string
+        partSizeBytes: number
+        expiresAt: string
+      }
 }
 
 export type CreateFileUploadResponse = CreateFileUploadResponses[keyof CreateFileUploadResponses]
@@ -4269,10 +4275,71 @@ export type UploadFileContentResponses = {
 
 export type UploadFileContentResponse = UploadFileContentResponses[keyof UploadFileContentResponses]
 
+export type SignFileUploadPartData = {
+  body?: never
+  path: {
+    uploadId: string
+    partNumber: string
+  }
+  query?: never
+  url: "/api/files/uploads/{uploadId}/parts/{partNumber}"
+}
+
+export type SignFileUploadPartErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+  /**
+   * Response for status 410
+   */
+  410: {
+    error: string
+  }
+}
+
+export type SignFileUploadPartError = SignFileUploadPartErrors[keyof SignFileUploadPartErrors]
+
+export type SignFileUploadPartResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    partNumber: number
+    method: "PUT"
+    url: string
+    headers: {
+      [key: string]: string
+    }
+    expiresAt: string
+  }
+}
+
+export type SignFileUploadPartResponse =
+  SignFileUploadPartResponses[keyof SignFileUploadPartResponses]
+
 export type CompleteFileUploadData = {
   body: {
     sizeBytes?: number
     digest?: string
+    parts?: Array<{
+      partNumber: number
+      etag: string
+    }>
   }
   path: {
     uploadId: string

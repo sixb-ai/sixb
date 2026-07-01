@@ -17,6 +17,8 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
+  type SignBlobUploadPartInput,
+  type SignedBlobUploadPart,
   Sixb,
 } from "@sixb/core"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
@@ -48,6 +50,10 @@ class TestDirectBlobStorage extends InMemoryBlobStorage implements DirectUploadB
       expiresAt: input.expiresAt,
       stagingKey: `staging/${input.uploadId}`,
     }
+  }
+
+  async signUploadPart(_input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart> {
+    throw new Error("Multipart is not used in this test.")
   }
 
   async completeUpload(input: CompleteBlobUploadInput): Promise<FileRef> {

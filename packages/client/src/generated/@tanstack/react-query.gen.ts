@@ -94,6 +94,7 @@ import {
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
   revokeAuthSession,
+  signFileUploadPart,
   signOut,
   signOutAll,
   submitWorkflowIntervention,
@@ -340,6 +341,9 @@ import type {
   RevokeAuthSessionData,
   RevokeAuthSessionError,
   RevokeAuthSessionResponse,
+  SignFileUploadPartData,
+  SignFileUploadPartError,
+  SignFileUploadPartResponse,
   SignOutAllData,
   SignOutAllError,
   SignOutAllResponse,
@@ -2407,6 +2411,33 @@ export const uploadFileContentMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await uploadFileContent({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Sign a staged multipart upload part
+ */
+export const signFileUploadPartMutation = (
+  options?: Partial<Options<SignFileUploadPartData>>
+): UseMutationOptions<
+  SignFileUploadPartResponse,
+  SignFileUploadPartError,
+  Options<SignFileUploadPartData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SignFileUploadPartResponse,
+    SignFileUploadPartError,
+    Options<SignFileUploadPartData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await signFileUploadPart({
         ...options,
         ...fnOptions,
         throwOnError: true,

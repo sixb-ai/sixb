@@ -23,6 +23,8 @@ import {
   CreateFileUploadResponseSchema,
   FileRefSchema,
   FileUploadIdParamsSchema,
+  FileUploadPartParamsSchema,
+  SignedFileUploadPartSchema,
 } from "../schemas/files"
 import { handleRouteError } from "../utils/http"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
@@ -273,6 +275,65 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
       }
     )
     .post(
+      "/api/files/uploads/:uploadId/parts/:partNumber",
+      async (context) => {
+        const { params, set } = context
+        const { authz } = requestAuthState(context)
+        try {
+          const principal = authz?.principal ?? SYSTEM_PRINCIPAL
+          const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
+          if (session.status !== "pending") {
+            throw terminalSessionError(session.status)
+          }
+
+          if (
+            session.strategy !== "multipart" ||
+            session.providerUpload?.strategy !== "multipart"
+          ) {
+            set.status = 400
+            return { error: "Upload session does not use multipart strategy." }
+          }
+
+          if (!supportsDirectUpload(sixb.blobStorage)) {
+            set.status = 400
+            return { error: "Blob storage does not support direct uploads." }
+          }
+
+          const signedPart = await sixb.blobStorage.signUploadPart({
+            uploadId: session.id,
+            stagingKey: session.providerUpload.stagingKey,
+            providerUploadId: session.providerUpload.providerUploadId,
+            partNumber: Number.parseInt(params.partNumber, 10),
+            expiresAt: session.expiresAt,
+          })
+          await uploadSessions.addSignedPart(session.id, signedPart)
+
+          return SignedFileUploadPartSchema.parse({
+            ...signedPart,
+            expiresAt: signedPart.expiresAt.toISOString(),
+          })
+        } catch (error) {
+          return handleRouteError(error, set)
+        }
+      },
+      {
+        params: FileUploadPartParamsSchema,
+        response: {
+          200: SignedFileUploadPartSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+          410: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Sign a staged multipart upload part",
+          tags: ["Files"],
+          operationId: "signFileUploadPart",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
       "/api/files/uploads/:uploadId/complete",
       async (context) => {
         const { body, params, set } = context
@@ -309,6 +370,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
                   session,
                   expectedDigest: expected.digest,
                   expectedSizeBytes: expected.sizeBytes,
+                  parts: parsed.parts,
                   blobStorage: sixb.blobStorage,
                 })
 
@@ -410,6 +472,15 @@ function fileUploadResponse(session: FileUploadSession) {
     }
   }
 
+  if (session.providerUpload?.strategy === "multipart") {
+    return {
+      strategy: "multipart",
+      uploadId: session.id,
+      partSizeBytes: session.providerUpload.partSizeBytes,
+      expiresAt: session.providerUpload.expiresAt.toISOString(),
+    }
+  }
+
   return {
     strategy: "server",
     uploadId: session.id,
@@ -473,6 +544,7 @@ async function completeProviderUpload(input: {
   readonly session: FileUploadSession
   readonly expectedDigest?: BlobDigest
   readonly expectedSizeBytes?: number
+  readonly parts: readonly { readonly partNumber: number; readonly etag: string }[] | undefined
   readonly blobStorage: Sixb<readonly OntologySource[]>["blobStorage"]
 }): Promise<FileRef> {
   const { blobStorage, session } = input
@@ -495,6 +567,7 @@ async function completeProviderUpload(input: {
       ? {}
       : { expectedSizeBytes: input.expectedSizeBytes }),
     ...(input.expectedDigest === undefined ? {} : { expectedDigest: input.expectedDigest }),
+    ...(input.parts === undefined ? {} : { parts: input.parts }),
   })
 
   return fileRef
