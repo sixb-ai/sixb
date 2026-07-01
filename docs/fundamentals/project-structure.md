@@ -40,8 +40,8 @@ acme-corp/
 │   │   └── finance-admins.ts
 │   ├── roles/
 │   │   └── finance-access.ts
-│   └── invite-policies/
-│       └── default-invites.ts
+│   └── policies/
+│       └── member-administration.ts
 └── app/                    # custom UI — served separately, not discovered
     └── page.tsx
 ```
@@ -71,7 +71,7 @@ a definition picked up depends on where it lives, not what the file is named.
 | `agents/` | Agent definitions | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
-| `security/invite-policies/` | Invite-policy definitions | [Authentication](../auth/authentication.md) |
+| `security/policies/` | Membership-policy definitions | [Authentication](../auth/authentication.md) |
 
 Discovery matches exported *values*, not filenames. One file can export several definitions,
 a definition can be split across files, and an array export is flattened — so

@@ -12,11 +12,11 @@ A request first resolves an identity (authentication), then resolves that identi
 | Layer | Answers | Covers | Page |
 | --- | --- | --- | --- |
 | Authentication | Who you are | Login strategies (magic link, OIDC), sessions, cookies, bootstrap, invitations | [Authentication](./authentication.md) |
-| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.apply` / `can.run`), invite policies, the scoped runtime | [Authorization](./authorization.md) |
+| Authorization | What you may do | Groups, roles, grants (`can.view` / `can.apply` / `can.run`), membership policies, the scoped runtime | [Authorization](./authorization.md) |
 
 ## How they connect
 
-You configure authentication through the `auth` option on `createSixb()`, and authorization through `defineGroup`, `defineRole`, and `defineInvitePolicy`.
+You configure authentication through the `auth` option on `createSixb()`, and authorization through `defineGroup`, `defineRole`, and `defineMembershipPolicy`.
 
 ```ts
 import { createSixb, can, defineGroup, defineRole } from "@sixb/core"

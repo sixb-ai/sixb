@@ -5,7 +5,7 @@ export {
   discoverDatasets,
   discoverFunctions,
   discoverGroups,
-  discoverInvitePolicies,
+  discoverMembershipPolicies,
   discoverOntologySources,
   discoverPipelines,
   discoverProjections,

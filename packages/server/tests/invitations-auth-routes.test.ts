@@ -5,14 +5,14 @@ import {
   type AuthStrategy,
   createSessionCredential,
   defineGroup,
-  defineInvitePolicy,
+  defineMembershipPolicy,
   defineObjectType,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type InvitePolicyDefinition,
+  type MembershipPolicyDefinition,
   type OntologySource,
   prop,
   Sixb,
@@ -48,7 +48,7 @@ function createSender() {
 function createRuntime(
   options: {
     readonly auth?: SixbAuthConfig
-    readonly invitePolicies?: readonly InvitePolicyDefinition[]
+    readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -66,11 +66,11 @@ function createRuntime(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [securityAdmins, commercial, finance],
-    invitePolicies: options.invitePolicies ?? [
-      defineInvitePolicy("default-invites", {
+    membershipPolicies: options.membershipPolicies ?? [
+      defineMembershipPolicy("default-membership", {
         grantedTo: [securityAdmins],
-        canInviteTo: [commercial],
-        canInviteWithoutGroups: true,
+        scope: [commercial],
+        can: ["invite"],
       }),
     ],
     auth: options.auth ?? defaultAuth,
@@ -439,17 +439,18 @@ describe("auth invitation routes", () => {
     })
   })
 
-  test("merges invitation options from applicable invite policies", async () => {
+  test("merges invitation options from applicable membership policies", async () => {
     const { app, storage } = createRuntime({
-      invitePolicies: [
-        defineInvitePolicy("commercial-invites", {
+      membershipPolicies: [
+        defineMembershipPolicy("commercial-membership", {
           grantedTo: [securityAdmins],
-          canInviteTo: [commercial],
+          scope: [commercial],
+          can: ["invite"],
         }),
-        defineInvitePolicy("finance-invites", {
+        defineMembershipPolicy("finance-membership", {
           grantedTo: [securityAdmins],
-          canInviteTo: [finance],
-          canInviteWithoutGroups: true,
+          scope: [finance],
+          can: ["invite"],
         }),
       ],
     })
@@ -471,8 +472,8 @@ describe("auth invitation routes", () => {
     })
   })
 
-  test("returns disabled invitation options when the user has no invite policy", async () => {
-    const { app, storage } = createRuntime({ invitePolicies: [] })
+  test("returns disabled invitation options when the user has no membership policy", async () => {
+    const { app, storage } = createRuntime({ membershipPolicies: [] })
     const admin = await seedAdminSession(storage)
 
     const response = await app.fetch(
@@ -488,7 +489,7 @@ describe("auth invitation routes", () => {
       capabilities: {
         createInvitation: {
           state: "disabled",
-          reason: "missing_invite_policy",
+          reason: "missing_membership_policy",
         },
       },
     })
@@ -645,7 +646,7 @@ describe("auth invitation routes", () => {
     })
   })
 
-  test("lists and revokes invitations by invite policy scope", async () => {
+  test("lists and revokes invitations by membership policy scope", async () => {
     const { app, storage } = createRuntime()
     const admin = await seedAdminSession(storage)
     await storage.auth.invitations.createOrUpdateActive({

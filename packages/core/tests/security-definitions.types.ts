@@ -1,5 +1,5 @@
 import type { SecurityContext } from "../src"
-import { defineGroup, defineInvitePolicy } from "../src"
+import { defineGroup, defineMembershipPolicy } from "../src"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -10,17 +10,26 @@ const commercial = defineGroup("commercial")
 
 type _groupId = Expect<Equal<typeof commercial.id, "commercial">>
 
-const invitePolicy = defineInvitePolicy("default-invites", {
+const membershipPolicy = defineMembershipPolicy("member-admin", {
   grantedTo: [securityAdmins],
-  canInviteTo: [commercial],
+  scope: [commercial],
+  can: ["invite", "assignGroups"],
 })
 
-type _invitePolicyId = Expect<Equal<typeof invitePolicy.id, "default-invites">>
+type _membershipPolicyId = Expect<Equal<typeof membershipPolicy.id, "member-admin">>
 
-defineInvitePolicy("invalid", {
+defineMembershipPolicy("invalid", {
   // @ts-expect-error grantedTo accepts group definitions, not arbitrary objects
   grantedTo: [{ id: "security-admins" }],
-  canInviteTo: [commercial],
+  scope: [commercial],
+  can: ["invite"],
+})
+
+defineMembershipPolicy("invalid-membership", {
+  grantedTo: [securityAdmins],
+  scope: [commercial],
+  // @ts-expect-error can accepts membership operations, not arbitrary strings
+  can: ["delete"],
 })
 
 const context: SecurityContext = {

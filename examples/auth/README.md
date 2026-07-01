@@ -35,8 +35,8 @@ whole flow, not just sign-in:
 - **Groups** — `security-admins` and `team-members` (`security/groups/`).
 - **Bootstrap** — the first user to sign in (`admin@example.com`) is added to
   `security-admins`.
-- **Invite policy** — security admins can invite people into `team-members`
-  (`security/invite-policies/default-invites.ts`).
+- **Membership policy** — security admins can invite people into `team-members`
+  (`security/policies/default-membership.ts`).
 - **Roles** — `team-members` can view `Note`, view the team-notes dataset,
   and apply `acknowledge-note`. `security-admins` use wildcard grants: view all
   objects, view all datasets, apply all actions, run all workflows, and view events

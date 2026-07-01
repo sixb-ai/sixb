@@ -151,7 +151,7 @@ type is required.
 | `datasets/`, `connectors/`, `syncs/`, `pipelines/`, `projections/` | Data integration |
 | `rules/`, `workflows/` | Business logic |
 | `agents/` | Agent definitions |
-| `security/groups/`, `security/roles/`, `security/invite-policies/` | Authorization |
+| `security/groups/`, `security/roles/`, `security/policies/` | Authorization |
 
 `app/` is **not** discovered — the app is served separately. See
 [Project structure](../fundamentals/project-structure.md) for the full layout.

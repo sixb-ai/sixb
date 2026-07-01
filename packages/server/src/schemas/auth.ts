@@ -138,7 +138,7 @@ export const AuthCreateInvitationCapabilitySchema = z.union([
   }),
   z.object({
     state: z.literal("disabled"),
-    reason: z.enum(["missing_invite_policy", "invitation_delivery_not_supported"]),
+    reason: z.enum(["missing_membership_policy", "invitation_delivery_not_supported"]),
   }),
 ])
 

@@ -3440,7 +3440,7 @@
                                 "reason": {
                                   "type": "string",
                                   "enum": [
-                                    "missing_invite_policy",
+                                    "missing_membership_policy",
                                     "invitation_delivery_not_supported"
                                   ]
                                 }

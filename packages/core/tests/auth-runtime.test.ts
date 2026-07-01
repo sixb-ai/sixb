@@ -6,7 +6,7 @@ import {
   createSessionCookieHeader,
   createSessionCredential,
   defineGroup,
-  defineInvitePolicy,
+  defineMembershipPolicy,
   formatSessionCookieValue,
   hashSessionSecret,
   type MagicLinkAuthStrategy,
@@ -109,11 +109,11 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
     ontology: [] as const,
     ...deps,
     groups: [securityAdmins, commercial, finance],
-    invitePolicies: [
-      defineInvitePolicy("default-invites", {
+    membershipPolicies: [
+      defineMembershipPolicy("default-membership", {
         grantedTo: [securityAdmins],
-        canInviteTo: [commercial],
-        canInviteWithoutGroups: true,
+        scope: [commercial],
+        can: ["invite"],
       }),
     ],
     auth: strategy,
@@ -750,7 +750,7 @@ describe("Sixb auth runtime", () => {
     )
   })
 
-  test("lists and revokes invitations through invite policy scope", async () => {
+  test("lists and revokes invitations through membership policy scope", async () => {
     const { deps, sixb } = createInviteRuntime()
     const request = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",

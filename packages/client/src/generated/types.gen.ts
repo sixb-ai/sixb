@@ -1199,7 +1199,7 @@ export type GetAuthInvitationOptionsResponses = {
           }
         | {
             state: "disabled"
-            reason: "missing_invite_policy" | "invitation_delivery_not_supported"
+            reason: "missing_membership_policy" | "invitation_delivery_not_supported"
           }
     }
   }

@@ -1,10 +1,10 @@
-import { defineInvitePolicy } from "@sixb/core"
+import { defineMembershipPolicy } from "@sixb/core"
 import { securityAdmins } from "../groups/security-admins"
 import { teamMembers } from "../groups/team-members"
 
 // Security admins can invite new people into the team-members group.
-export const defaultInvites = defineInvitePolicy("default-invites", {
+export const defaultMembership = defineMembershipPolicy("default-membership", {
   grantedTo: [securityAdmins],
-  canInviteTo: [teamMembers],
-  canInviteWithoutGroups: true,
+  scope: [teamMembers],
+  can: ["invite"],
 })

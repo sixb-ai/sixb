@@ -1,13 +1,18 @@
-export type { DefineGroupOptions, DefineInvitePolicyOptions, DefineRoleOptions } from "./builders"
-export { defineGroup, defineInvitePolicy, defineRole } from "./builders"
+export type {
+  DefineGroupOptions,
+  DefineMembershipPolicyOptions,
+  DefineRoleOptions,
+} from "./builders"
+export { defineGroup, defineMembershipPolicy, defineRole } from "./builders"
 export { SecurityValidationError } from "./errors"
 export { can } from "./grants"
-export type { InvitePolicyScope } from "./invite-policies"
+export type { MembershipOperationScope, MembershipPolicyScope } from "./membership-policies"
 export {
-  canInviteGroupIds,
-  missingInviteGroupIds,
-  resolveInvitePolicyScope,
-} from "./invite-policies"
+  canPerformMembershipOperation,
+  isMembershipOperation,
+  missingMembershipGroupIds,
+  resolveMembershipPolicyScope,
+} from "./membership-policies"
 export type { Scope, ScopeTarget } from "./scopes"
 export { actions, agents, datasets, ontology, pipelines, syncs, workflows } from "./scopes"
 export type {
@@ -15,7 +20,8 @@ export type {
   GrantCapability,
   GrantDefinition,
   GroupDefinition,
-  InvitePolicyDefinition,
+  MembershipOperation,
+  MembershipPolicyDefinition,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,
@@ -28,10 +34,10 @@ export type {
 export {
   assertGrantDefinition,
   assertGroupDefinition,
-  assertInvitePolicyDefinition,
+  assertMembershipPolicyDefinition,
   assertRoleDefinition,
   isGroupDefinition,
-  isInvitePolicyDefinition,
+  isMembershipPolicyDefinition,
   isRoleDefinition,
   validateSecurityDefinitionsAtStartup,
 } from "./validation"

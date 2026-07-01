@@ -11,7 +11,7 @@ they exercise, not in how they are wired.
 | Example | What it shows | Storage / broker |
 | --- | --- | --- |
 | `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
-| `auth` | Authentication strategies, groups, invite policies, and scoped roles | SQLite + in-memory broker |
+| `auth` | Authentication strategies, groups, membership policies, and scoped roles | SQLite + in-memory broker |
 
 Run any example from its own folder:
 
@@ -115,7 +115,7 @@ Beyond sign-in, the `security/` folder shows the full access-control model:
 | File | Demonstrates |
 | --- | --- |
 | `security/groups/` | The `security-admins` and `team-members` groups |
-| `security/invite-policies/` | Security admins can invite people into `team-members` |
+| `security/policies/` | Security admins can invite people into `team-members` |
 | `security/roles/` | Scoped grants per group — `team-members` get `can.view(Note)`, view on the team-notes dataset, and `can.apply(acknowledgeNote)`; `security-admins` get wildcard grants over all objects, datasets, actions, and workflows |
 
 Because grants are scoped, the same UI shows different objects, datasets, and actions depending on

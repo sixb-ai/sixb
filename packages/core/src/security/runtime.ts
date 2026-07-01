@@ -1,7 +1,7 @@
 import { type ResolvedRole, resolveRoleGrants } from "../authorization"
 import type {
   GroupDefinition,
-  InvitePolicyDefinition,
+  MembershipPolicyDefinition,
   RoleDefinition,
   SecurityRegistry,
 } from "./types"
@@ -11,7 +11,7 @@ class RuntimeSecurityRegistry implements SecurityRegistry {
   constructor(
     private readonly groupsById: ReadonlyMap<string, GroupDefinition>,
     private readonly rolesById: ReadonlyMap<string, RoleDefinition>,
-    private readonly invitePoliciesById: ReadonlyMap<string, InvitePolicyDefinition>,
+    private readonly membershipPoliciesById: ReadonlyMap<string, MembershipPolicyDefinition>,
     private readonly resolvedRoles: readonly ResolvedRole[]
   ) {}
 
@@ -35,19 +35,19 @@ class RuntimeSecurityRegistry implements SecurityRegistry {
     return this.resolvedRoles
   }
 
-  getInvitePolicyDefinitions(): readonly InvitePolicyDefinition[] {
-    return [...this.invitePoliciesById.values()]
+  getMembershipPolicyDefinitions(): readonly MembershipPolicyDefinition[] {
+    return [...this.membershipPoliciesById.values()]
   }
 
-  getInvitePolicyById(policyId: string): InvitePolicyDefinition | null {
-    return this.invitePoliciesById.get(policyId) ?? null
+  getMembershipPolicyById(policyId: string): MembershipPolicyDefinition | null {
+    return this.membershipPoliciesById.get(policyId) ?? null
   }
 }
 
 export function createRuntimeSecurityRegistry(input: {
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
-  readonly invitePolicies?: readonly InvitePolicyDefinition[]
+  readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
   readonly objectTypeIds?: ReadonlySet<string>
   readonly datasetIds?: ReadonlySet<string>
   readonly actionIds?: ReadonlySet<string>
@@ -60,7 +60,7 @@ export function createRuntimeSecurityRegistry(input: {
   const securityDefinitions = validateSecurityDefinitionsAtStartup({
     groups: input.groups ?? [],
     roles: input.roles ?? [],
-    invitePolicies: input.invitePolicies ?? [],
+    membershipPolicies: input.membershipPolicies ?? [],
     objectTypeIds: input.objectTypeIds,
     datasetIds: input.datasetIds,
     actionIds: input.actionIds,
@@ -89,7 +89,7 @@ export function createRuntimeSecurityRegistry(input: {
   return new RuntimeSecurityRegistry(
     securityDefinitions.groupsById,
     securityDefinitions.rolesById,
-    securityDefinitions.invitePoliciesById,
+    securityDefinitions.membershipPoliciesById,
     resolvedRoles
   )
 }
