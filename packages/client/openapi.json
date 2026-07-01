@@ -12161,6 +12161,28 @@
                       },
                       "required": ["strategy", "uploadId", "method", "url", "headers", "expiresAt"],
                       "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "strategy": {
+                          "type": "string",
+                          "enum": ["multipart"]
+                        },
+                        "uploadId": {
+                          "type": "string"
+                        },
+                        "partSizeBytes": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "expiresAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["strategy", "uploadId", "partSizeBytes", "expiresAt"],
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -12308,6 +12330,143 @@
         }
       }
     },
+    "/api/files/uploads/{uploadId}/parts/{partNumber}": {
+      "post": {
+        "summary": "Sign a staged multipart upload part",
+        "tags": ["Files"],
+        "operationId": "signFileUploadPart",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "uploadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "partNumber",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "partNumber": {
+                      "type": "integer",
+                      "exclusiveMinimum": true,
+                      "minimum": 0
+                    },
+                    "method": {
+                      "type": "string",
+                      "enum": ["PUT"]
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "headers": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["partNumber", "method", "url", "headers", "expiresAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Response for status 410",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/files/uploads/{uploadId}/complete": {
       "post": {
         "summary": "Complete a staged file upload",
@@ -12343,6 +12502,24 @@
                   "digest": {
                     "type": "string",
                     "pattern": "^sha256:[a-f0-9]{64}$"
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "partNumber": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "etag": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["partNumber", "etag"],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -12359,6 +12536,24 @@
                   "digest": {
                     "type": "string",
                     "pattern": "^sha256:[a-f0-9]{64}$"
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "partNumber": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "etag": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["partNumber", "etag"],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "additionalProperties": false
@@ -12375,6 +12570,24 @@
                   "digest": {
                     "type": "string",
                     "pattern": "^sha256:[a-f0-9]{64}$"
+                  },
+                  "parts": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "partNumber": {
+                          "type": "integer",
+                          "exclusiveMinimum": true,
+                          "minimum": 0
+                        },
+                        "etag": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["partNumber", "etag"],
+                      "additionalProperties": false
+                    }
                   }
                 },
                 "additionalProperties": false

@@ -5,6 +5,7 @@ import {
   abortFileUpload,
   completeFileUpload,
   createFileUpload,
+  signFileUploadPart,
   uploadFileContent,
   uploadFileRaw,
 } from "./generated/sdk.gen"
@@ -15,6 +16,7 @@ export type SixbFileUploadStage =
   | "create"
   | "server-put"
   | "direct-put"
+  | "multipart"
   | "complete"
   | "abort"
 
@@ -93,6 +95,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
     createFileUpload({ body: uploadBody, client: options.client, ...callOptions(options.signal) })
   )
 
+  let parts: Array<{ partNumber: number; etag: string }> | undefined
   let completed: Omit<FileRef, "digest"> & { readonly digest: string }
   try {
     if (upload.strategy === "server") {
@@ -104,7 +107,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
           ...callOptions(options.signal),
         })
       )
-    } else {
+    } else if (upload.strategy === "direct-put") {
       await putDirectUpload({
         file,
         fetch: options.fetch ?? globalThis.fetch,
@@ -113,11 +116,20 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
         url: upload.url,
         signal: options.signal,
       })
+    } else {
+      parts = await uploadMultipartFile({
+        client: options.client,
+        fetch: options.fetch ?? globalThis.fetch,
+        file,
+        partSizeBytes: upload.partSizeBytes,
+        uploadId: upload.uploadId,
+        signal: options.signal,
+      })
     }
 
     completed = await runUploadStep("complete", () =>
       completeFileUpload({
-        body: { digest, sizeBytes: file.size },
+        body: { digest, sizeBytes: file.size, ...(parts === undefined ? {} : { parts }) },
         path: { uploadId: upload.uploadId },
         client: options.client,
         ...callOptions(options.signal),
@@ -165,6 +177,60 @@ async function putDirectUpload(input: {
       { stage: "direct-put", status: response.status }
     )
   }
+}
+
+async function uploadMultipartFile(input: {
+  readonly client?: SixbClient
+  readonly fetch: typeof fetch
+  readonly file: File | Blob
+  readonly partSizeBytes: number
+  readonly uploadId: string
+  readonly signal?: AbortSignal
+}): Promise<Array<{ partNumber: number; etag: string }>> {
+  const parts: Array<{ partNumber: number; etag: string }> = []
+  let partNumber = 1
+
+  for (let offset = 0; offset < input.file.size; offset += input.partSizeBytes) {
+    const signedPart = await runUploadStep("multipart", () =>
+      signFileUploadPart({
+        path: { uploadId: input.uploadId, partNumber: partNumber.toString() },
+        client: input.client,
+        ...callOptions(input.signal),
+      })
+    )
+
+    let response: Response
+    try {
+      response = await input.fetch(signedPart.url, {
+        method: signedPart.method,
+        headers: signedPart.headers,
+        body: input.file.slice(offset, Math.min(input.file.size, offset + input.partSizeBytes)),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      })
+    } catch (error) {
+      throw toSixbFileUploadError(error, "multipart")
+    }
+
+    if (!response.ok) {
+      throw new SixbFileUploadError(
+        `[SixbClient] Multipart file upload part ${partNumber} failed with HTTP ${response.status}.`,
+        { stage: "multipart", status: response.status }
+      )
+    }
+
+    const etag = response.headers.get("etag")
+    if (!etag) {
+      throw new SixbFileUploadError(
+        `[SixbClient] Multipart file upload part ${partNumber} did not return an ETag.`,
+        { stage: "multipart" }
+      )
+    }
+
+    parts.push({ partNumber, etag })
+    partNumber += 1
+  }
+
+  return parts
 }
 
 async function hashFile(file: File | Blob): Promise<FileRef["digest"]> {

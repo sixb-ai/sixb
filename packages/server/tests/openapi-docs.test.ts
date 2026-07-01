@@ -97,6 +97,7 @@ describe("OpenAPI docs", () => {
       ["post", "/api/files"],
       ["post", "/api/files/uploads"],
       ["put", "/api/files/uploads/{uploadId}/content"],
+      ["post", "/api/files/uploads/{uploadId}/parts/{partNumber}"],
       ["post", "/api/files/uploads/{uploadId}/complete"],
       ["post", "/api/files/uploads/{uploadId}/abort"],
       ["post", "/api/syncs/{syncId}/runs"],
