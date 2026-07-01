@@ -5,13 +5,13 @@ import {
   type BrokerRecord,
   isAllowed,
   type OntologySource,
-  type Principal,
+  principalsEqual,
   type Sixb,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
-import { decodeWsMessage, safeSend } from "../../utils/ws"
+import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
 
 interface AgentStreamSubscriptionState {
   runId: string | null
@@ -103,7 +103,7 @@ export async function canAccessAgentRunStream(
   }
 
   const thread = await storage.threads.getById({ projectId: sixb.id, id: threadId })
-  if (!thread || (run && thread.id !== run.threadId)) {
+  if (!thread) {
     return { ok: false, message: "Agent run not found." }
   }
 
@@ -297,20 +297,6 @@ function sendRecords(
   for (const record of records) {
     safeSend(ws, { type: "record", record })
   }
-}
-
-function wsStateKey(ws: object): object {
-  const raw = (ws as { raw?: unknown }).raw
-  return raw && typeof raw === "object" ? raw : ws
-}
-
-function wsAuthz(ws: object): AuthorizationContext | null {
-  const data = (ws as { data?: { authz?: AuthorizationContext | null } }).data
-  return data?.authz ?? null
-}
-
-function principalsEqual(left: Principal, right: Principal): boolean {
-  return left.type === right.type && left.id === right.id
 }
 
 function errorMessage(error: unknown): string {

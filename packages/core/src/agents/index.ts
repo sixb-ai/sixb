@@ -20,7 +20,6 @@ export {
   createAgentApiGatewayCapability,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  normalizeAgentApiPath,
 } from "./api-gateway"
 export { defineAgent } from "./builders"
 export {
@@ -52,6 +51,7 @@ export {
   type RequestAgentRunResult,
   requestAgentRun,
 } from "./request"
+export type { ScopedListAgentThreadsInput } from "./runtime"
 export { AgentsRuntime } from "./runtime"
 export type { AgentRunStreamEvent, AgentRunStreamId } from "./streams"
 export {

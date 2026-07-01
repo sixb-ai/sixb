@@ -7,7 +7,14 @@ import type {
   Principal,
   QueueWorkerFailureDecision,
 } from "@sixb/core"
-import { AgentStorageError, createAgentRunLeaseId, isAbortError, QueueWorker } from "@sixb/core"
+import {
+  AgentStorageError,
+  createAgentRunLeaseId,
+  isAbortError,
+  QueueWorker,
+  SYSTEM_PRINCIPAL,
+} from "@sixb/core"
+import { normalizeApiBaseUrl } from "./api-url"
 import {
   AgentFinalizationError,
   AgentLeaseHeldError,
@@ -37,7 +44,6 @@ const FINALIZE_RETRY_BACKOFF_MS = 5_000
  * retrying forever; the run remains non-terminal until storage recovery or explicit repair.
  */
 const MAX_FINALIZE_ATTEMPTS = 10
-const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
 
 /** Outcome of trying to own a run for a claimed job. */
 type Reservation =
@@ -67,6 +73,11 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   private readonly sixb: AgentWorkerSixb
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
+  /**
+   * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
+   * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
+   */
+  private readonly pendingTeardowns = new Set<Promise<void>>()
 
   constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions) {
     const leaseMs = options.leaseMs ?? DEFAULT_AGENT_LEASE_MS
@@ -102,6 +113,20 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       }
       signal.addEventListener("abort", () => resolve(), { once: true })
     })
+  }
+
+  override async stop(): Promise<void> {
+    // super.stop() awaits every in-flight execute() (and thus its dispose()); draining afterwards
+    // catches the detached teardowns dispose() left running so we never report stopped while a
+    // sandbox machine is still being reaped.
+    await super.stop()
+    await Promise.allSettled([...this.pendingTeardowns])
+  }
+
+  /** Register a detached sandbox teardown so stop() can drain it; self-removes when it settles. */
+  private trackTeardown(teardown: Promise<void>): void {
+    this.pendingTeardowns.add(teardown)
+    void teardown.finally(() => this.pendingTeardowns.delete(teardown))
   }
 
   protected async execute(
@@ -144,7 +169,12 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
     try {
       await context.streamSink.publishStarted(run)
-      environment = await createAgentRunEnvironment({ context, agent, run })
+      environment = await createAgentRunEnvironment({
+        context,
+        agent,
+        run,
+        onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+      })
       await runAgentTurn({
         context: environment.turnContext,
         agent,
@@ -364,7 +394,9 @@ function buildAgentContext(
     storage: storage as AgentWorkerStorage,
     sandboxes: sixb.sandboxes,
     baseTools: options.tools ?? {},
-    apiBaseUrl: normalizeRequiredString(options.apiBaseUrl),
+    // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway
+    // URL builder, the sandbox run context) consumes it verbatim.
+    apiBaseUrl: normalizeApiBaseUrl(normalizeRequiredString(options.apiBaseUrl)),
     streamSink: isolateStreamSink(
       options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
     ),

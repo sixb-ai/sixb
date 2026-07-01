@@ -18,6 +18,18 @@ export type Principal =
   | { readonly type: "serviceAccount"; readonly id: string }
   | { readonly type: "system"; readonly id: string }
 
+/**
+ * The canonical principal for system-originated writes (runs triggered without a caller,
+ * worker fallbacks, decode-time defaults). Import this everywhere instead of inlining a
+ * `{ type: "system", id: "system" }` literal so the system identity never forks.
+ */
+export const SYSTEM_PRINCIPAL: Principal = { type: "system", id: "system" }
+
+/** Structural equality for principals (same type and id). */
+export function principalsEqual(left: Principal, right: Principal): boolean {
+  return left.type === right.type && left.id === right.id
+}
+
 export interface SecurityContext {
   readonly principal: Principal
   readonly sessionId?: string

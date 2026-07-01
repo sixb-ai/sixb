@@ -1,8 +1,6 @@
-import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import { writeAgentSkills } from "./agent-skills"
-import { normalizeApiBaseUrl } from "./api-url"
+import { buildAgentSkillFiles } from "./agent-skills"
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
@@ -24,27 +22,31 @@ export async function prepareAgentSandboxApiContext(
   const skillsDir = join(contextDir, "skills")
   const runContextPath = join(contextDir, "context", "run.json")
 
-  await mkdir(join(contextDir, "context"), { recursive: true })
-  await writeAgentSkills(skillsDir)
-  await writeFile(
-    runContextPath,
-    JSON.stringify(
-      {
-        projectId: input.projectId,
-        agentId: input.agentId,
-        threadId: input.threadId,
-        runId: input.runId,
-        apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl),
-      },
-      null,
-      2
-    ),
-    "utf-8"
+  // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
+  // api-url.ts), so it is used verbatim — no second normalization pass here.
+  const runContext = JSON.stringify(
+    {
+      projectId: input.projectId,
+      agentId: input.agentId,
+      threadId: input.threadId,
+      runId: input.runId,
+      apiBaseUrl: input.apiBaseUrl,
+    },
+    null,
+    2
   )
+
+  // Materialize skills + run context through the sandbox capability rather than the host
+  // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
+  // guest. Awaited before the bash tool runs, so the agent never sees an un-provisioned sandbox.
+  await input.sandbox.writeFiles([
+    ...(await buildAgentSkillFiles(skillsDir)),
+    { path: runContextPath, contents: runContext },
+  ])
 
   return {
     env: {
-      SIXB_API_BASE_URL: normalizeApiBaseUrl(input.apiBaseUrl),
+      SIXB_API_BASE_URL: input.apiBaseUrl,
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
       SIXB_RUN_CONTEXT: runContextPath,

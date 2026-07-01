@@ -3,8 +3,11 @@ import { existsSync } from "node:fs"
 import {
   agentDockerfilePath,
   agentImageName,
+  buildImageBuildArgv,
+  buildImageSaveArgv,
   defaultAgentImageCandidates,
   defaultAgentImagePath,
+  detectBuilder,
 } from "../src/agent-image"
 
 describe("agent image paths", () => {
@@ -57,5 +60,70 @@ describe("agent image paths", () => {
         process.env.XDG_CACHE_HOME = prev
       }
     }
+  })
+})
+
+describe("agent image build argv", () => {
+  test("build argv omits --platform for a host build", () => {
+    expect(
+      buildImageBuildArgv({
+        builder: "docker",
+        tag: "sixb-agent",
+        dockerfile: "/pkg/agent-image/Dockerfile",
+        contextDir: "/pkg/agent-image",
+      })
+    ).toEqual([
+      "docker",
+      "build",
+      "-t",
+      "sixb-agent",
+      "-f",
+      "/pkg/agent-image/Dockerfile",
+      "/pkg/agent-image",
+    ])
+  })
+
+  test("build argv threads --platform right after build for a cross-build", () => {
+    expect(
+      buildImageBuildArgv({
+        builder: "podman",
+        platform: "linux/amd64",
+        tag: "sixb-agent",
+        dockerfile: "/pkg/agent-image/Dockerfile",
+        contextDir: "/pkg/agent-image",
+      })
+    ).toEqual([
+      "podman",
+      "build",
+      "--platform",
+      "linux/amd64",
+      "-t",
+      "sixb-agent",
+      "-f",
+      "/pkg/agent-image/Dockerfile",
+      "/pkg/agent-image",
+    ])
+  })
+
+  test("save argv writes the tag to the output path", () => {
+    expect(
+      buildImageSaveArgv({ builder: "docker", tag: "sixb-agent", output: "/cache/sixb-agent.tar" })
+    ).toEqual(["docker", "save", "sixb-agent", "-o", "/cache/sixb-agent.tar"])
+  })
+})
+
+describe("detectBuilder", () => {
+  test("prefers docker over podman", () => {
+    expect(
+      detectBuilder((cmd) => (cmd === "docker" || cmd === "podman" ? `/usr/bin/${cmd}` : null))
+    ).toBe("docker")
+  })
+
+  test("falls back to podman when docker is absent", () => {
+    expect(detectBuilder((cmd) => (cmd === "podman" ? "/usr/bin/podman" : null))).toBe("podman")
+  })
+
+  test("returns undefined when neither builder is on PATH", () => {
+    expect(detectBuilder(() => null)).toBeUndefined()
   })
 })

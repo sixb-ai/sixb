@@ -126,6 +126,7 @@ export type {
   SixbAuthConfig,
   UnauthenticatedAuthSession,
 } from "./types"
+export { principalsEqual, SYSTEM_PRINCIPAL } from "./types"
 export {
   isInvitationDeliveryAuthStrategy,
   isMagicLinkAuthStrategy,

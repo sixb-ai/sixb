@@ -37,10 +37,13 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
     dispatch({ type: "reset", runId })
   }, [runId])
 
+  // Once the run reaches a terminal status we already have all of its events; stop the subscription
+  // so a server-closed socket does not reconnect on a loop to a run that is already over.
+  const runFinished = live.finishStatus !== null && live.runId === runId
   const { connected, reconnecting } = useAgentRunStream({
     runId,
     threadId,
-    enabled: Boolean(runId && threadId),
+    enabled: Boolean(runId && threadId) && !runFinished,
     onEvent: (event) => dispatch({ type: "event", event }),
     onError: (message) => dispatch({ type: "stream-error", message }),
   })

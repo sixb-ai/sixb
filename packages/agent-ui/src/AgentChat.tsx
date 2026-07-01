@@ -19,8 +19,6 @@ import { ConversationPanel } from "./components/ConversationPanel"
 import { installAgentResizeObserverGuard } from "./resizeObserver"
 import { useThreadStream } from "./useThreadStream"
 
-installAgentResizeObserverGuard()
-
 interface PendingSend {
   readonly threadId: string
   readonly runId: string
@@ -53,6 +51,12 @@ export function AgentChat({
   const threadId = threadIdInput ?? null
   const routeDraftAgentId = draftAgentIdInput ?? null
 
+  // Coalesce ResizeObserver notifications app-wide (guards against benign loop errors). Idempotent,
+  // so running it in a mount effect keeps the side effect out of module evaluation.
+  useEffect(() => {
+    installAgentResizeObserverGuard()
+  }, [])
+
   // Durable catalog + thread list.
   const agentsQuery = useQuery(listAgentsOptions())
   const threadsQuery = useQuery(listAgentThreadsOptions({ query: { limit: "50", order: "desc" } }))
@@ -84,6 +88,17 @@ export function AgentChat({
   // Live run bookkeeping.
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
   const [pendingUser, setPendingUser] = useState<PendingUser | null>(null)
+  // A failed send to surface, scoped to the thread it belongs to (the just-created one when a new
+  // chat's first message fails). English, user-facing.
+  const [sendError, setSendError] = useState<{ threadId: string | null; message: string } | null>(
+    null
+  )
+  // Text handed back to the composer after a failed send. The nonce makes the reseed fire even when
+  // the same text is restored twice.
+  const [draftReseed, setDraftReseed] = useState<{ text: string; nonce: number }>({
+    text: "",
+    nonce: 0,
+  })
 
   const activeRunId =
     threadId !== null
@@ -92,19 +107,18 @@ export function AgentChat({
         null)
       : null
 
-  const { live } = useThreadStream({ threadId, runId: activeRunId })
+  const { live, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
 
-  // Drop the pending run once the finalized assistant message is in durable state.
+  // Drop the pending run once it reaches any terminal status. `activeRunId` then falls back to the
+  // durable `thread.activeRunId`, which stays set until its refetch lands — so the live row survives
+  // the handoff to the stored message without flashing empty. Clearing on every terminal status (not
+  // just a finalized success) means a run that ends without a persisted message — a tool-only turn,
+  // or a lost finalize event — still clears instead of pinning the run and its socket forever.
   useEffect(() => {
-    if (!pendingSend || live.runId !== pendingSend.runId || !live.finishStatus) return
-    if (
-      live.finishStatus === "succeeded" &&
-      live.finalizedMessageId &&
-      messages.some((message) => message.id === live.finalizedMessageId)
-    ) {
+    if (pendingSend && live.runId === pendingSend.runId && live.finishStatus !== null) {
       setPendingSend(null)
     }
-  }, [pendingSend, live.runId, live.finishStatus, live.finalizedMessageId, messages])
+  }, [pendingSend, live.runId, live.finishStatus])
 
   // Drop the optimistic user echo once the durable message lands (or the thread changes).
   useEffect(() => {
@@ -117,6 +131,12 @@ export function AgentChat({
       setPendingUser(null)
     }
   }, [pendingUser, threadId, messages])
+
+  // Drop a stale send error when leaving its thread, but keep one that belongs to the thread we just
+  // navigated to (a first message that failed on a freshly created thread).
+  useEffect(() => {
+    setSendError((current) => (current && current.threadId === threadId ? current : null))
+  }, [threadId])
 
   const createThread = useMutation(createAgentThreadMutation())
   const postMessage = useMutation(postAgentThreadMessageMutation())
@@ -156,7 +176,10 @@ export function AgentChat({
 
   const handleSend = async (text: string) => {
     if (isRunning) return
+    setSendError(null)
     const targetThreadId = threadId
+    // Set only if we create a thread before failing, so the retry lands in the right place.
+    let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
         setPendingUser({ threadId: targetThreadId, text, messageId: null })
@@ -184,6 +207,7 @@ export function AgentChat({
       const created = await createThread.mutateAsync({
         body: { agentId, title: deriveTitle(text) },
       })
+      createdThreadId = created.thread.id
       const newThreadId = created.thread.id
       setPendingUser({ threadId: newThreadId, text, messageId: null })
       const response = await postMessage.mutateAsync({
@@ -199,9 +223,16 @@ export function AgentChat({
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
       onNavigateThread(newThreadId)
     } catch {
-      // A failed post (e.g. 409 active_run_exists) means our view is stale: clear the optimistic
-      // echo and refetch thread state so the composer reflects the real active run.
+      // The send failed (e.g. 409 active_run_exists, or the network dropped). Drop the optimistic
+      // echo, hand the text back to the composer so nothing is lost, and surface the failure. If a
+      // thread was created before the failure, move to it so the retry (and error) land there.
       setPendingUser(null)
+      setDraftReseed((current) => ({ text, nonce: current.nonce + 1 }))
+      setSendError({
+        threadId: createdThreadId ?? targetThreadId,
+        message: "Couldn't send your message. Please try again.",
+      })
+      if (createdThreadId) onNavigateThread(createdThreadId)
       if (targetThreadId !== null) {
         void queryClient.invalidateQueries({
           queryKey: getAgentThreadQueryKey({ path: { threadId: targetThreadId } }),
@@ -266,6 +297,8 @@ export function AgentChat({
           streaming={live.active && live.runId === activeRunId}
           pendingUserText={pendingUserText}
           awaitingResponse={isRunning}
+          reconnecting={reconnecting}
+          sendError={sendError && sendError.threadId === threadId ? sendError.message : null}
           agents={agents}
           agentThreads={agentThreads}
           canGoHome={canGoHome}
@@ -281,6 +314,8 @@ export function AgentChat({
           composerPlaceholder={
             currentAgent ? `Message ${currentAgent.name}...` : "Send a message..."
           }
+          composerDraft={draftReseed.text}
+          composerDraftNonce={draftReseed.nonce}
         />
       )}
     </div>

@@ -33,6 +33,21 @@ export interface CommandResult {
 }
 
 /**
+ * A file to materialize into a sandbox via {@link Sandbox.writeFiles}. `contents` may be text or
+ * raw bytes; providers that transport bytes out of process (e.g. into a VM) may base64-encode them.
+ */
+export interface SandboxFileRecord {
+  /**
+   * Absolute path valid inside the sandbox — typically under {@link Sandbox.workingDirectory}.
+   * Missing parent directories are created.
+   */
+  readonly path: string
+  readonly contents: string | Uint8Array
+  /** Optional octal file mode (e.g. `0o755`). Providers honor it best-effort. */
+  readonly mode?: number
+}
+
+/**
  * Provider-level network egress policy. `restricted` declares the exact origins a sandbox should be
  * able to reach; providers that cannot enforce target-level egress may document weaker local-dev
  * behavior, but production providers should treat the allow list as authoritative.
@@ -73,6 +88,14 @@ export interface Sandbox {
     args?: readonly string[],
     options?: RunCommandOptions
   ): Promise<CommandResult>
+
+  /**
+   * Materialize files into the sandbox so a subsequent {@link runCommand} can read them. Each
+   * provider decides how the bytes reach the guest; the observable contract is only that the files
+   * exist at their paths afterwards. Missing parent directories are created. Rejects if the sandbox
+   * is not running.
+   */
+  writeFiles(files: readonly SandboxFileRecord[]): Promise<void>
 
   /** Mark the sandbox stopped; subsequent runCommand calls reject. Idempotent. */
   stop(): Promise<void>

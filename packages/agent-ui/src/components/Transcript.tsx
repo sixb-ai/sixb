@@ -11,7 +11,7 @@ import {
 import { useMemo } from "react"
 import { hasLiveContent, type LiveRunState } from "../liveRun"
 import type { AgentMessage } from "../types"
-import { LiveAssistant, MessageView, ThinkingMarker } from "./MessageView"
+import { LiveAssistant, MessageView, ReconnectingMarker, ThinkingMarker } from "./MessageView"
 
 export interface TranscriptProps {
   readonly messages: readonly AgentMessage[]
@@ -20,9 +20,17 @@ export interface TranscriptProps {
   readonly pendingUserText?: string | null
   /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
   readonly awaitingResponse?: boolean
+  /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
+  readonly reconnecting?: boolean
 }
 
-export function Transcript({ messages, live, pendingUserText, awaitingResponse }: TranscriptProps) {
+export function Transcript({
+  messages,
+  live,
+  pendingUserText,
+  awaitingResponse,
+  reconnecting,
+}: TranscriptProps) {
   // Keep the live row until the finalized assistant message is present in durable state, so the
   // handoff from streaming to stored content never flashes empty.
   const finalizedInDurable =
@@ -89,6 +97,11 @@ export function Transcript({ messages, live, pendingUserText, awaitingResponse }
             ) : showThinking ? (
               <MessageScrollerItem messageId="thinking">
                 <ThinkingMarker />
+              </MessageScrollerItem>
+            ) : null}
+            {live.active && reconnecting ? (
+              <MessageScrollerItem messageId="reconnecting">
+                <ReconnectingMarker />
               </MessageScrollerItem>
             ) : null}
           </MessageScrollerContent>

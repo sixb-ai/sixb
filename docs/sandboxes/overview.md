@@ -31,13 +31,25 @@ interface Sandbox {
     options?: RunCommandOptions
   ): Promise<CommandResult>
 
+  // Materialize files into the sandbox; a later runCommand can read them. Parent dirs are created.
+  writeFiles(files: readonly SandboxFileRecord[]): Promise<void>
+
   stop(): Promise<void> // mark stopped; later runCommand rejects. Idempotent.
   destroy(): Promise<void> // stop and reclaim provider resources. Idempotent.
 }
 ```
 
-The worker calls `factory.create()` once per agent run and `runCommand(...)` per command, then
-`destroy()` on teardown.
+The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the run's
+skills and context, and `runCommand(...)` per command, then `destroy()` on teardown.
+
+### File materialization
+
+`writeFiles` is how bytes get into a sandbox — the worker never writes to the host filesystem
+directly. Each provider decides how a `SandboxFileRecord` (`{ path, contents, mode? }`) reaches the
+guest: the local provider writes straight to the host filesystem it shares with the guest, while
+smolvm executes an in-guest script that decodes the payload inside the VM. The only guarantee the
+contract makes is observable: after `writeFiles`, the files exist at their paths for a subsequent
+`runCommand`.
 
 `runCommand` resolves with a `CommandResult` rather than throwing on a non-zero exit — a failed
 command is data, not an exception:

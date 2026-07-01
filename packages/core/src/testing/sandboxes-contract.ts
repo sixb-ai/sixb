@@ -9,6 +9,12 @@ import { type SandboxFactory, SandboxNotRunningError } from "../sandboxes"
 export interface SandboxesContractCapabilities {
   /** network.mode="none" actually blocks outbound network access. */
   readonly networkBlocking?: boolean
+  /**
+   * network.mode="restricted" actually enforces the allow list: in-list origins are reachable and
+   * out-of-list origins are blocked. Providers that downgrade restricted to host network (e.g. the
+   * local backend) must leave this false.
+   */
+  readonly restrictedEgressEnforcement?: boolean
   /** readOnlyPaths/readWritePaths actually restrict filesystem writes. */
   readonly readOnlyEnforcement?: boolean
   /** Strong isolation, such as process namespaces, is in effect. */
@@ -26,6 +32,15 @@ export interface SandboxesContractSuiteOptions {
    * Default 200ms.
    */
   readonly shortTimeoutMs?: number
+  /**
+   * Origins used by the restricted-egress slice (only when restrictedEgressEnforcement is set).
+   * `allowedOrigin` goes on the allow list and must be reachable; `blockedOrigin` is left off and
+   * must be blocked. Defaults to example.com / example.org.
+   */
+  readonly restrictedEgressProbe?: {
+    readonly allowedOrigin: string
+    readonly blockedOrigin: string
+  }
 }
 
 const SLEEP_BUDGET_SECONDS = 5
@@ -258,6 +273,43 @@ export function runSandboxesContractSuite(
       })
     })
 
+    describe("file materialization", () => {
+      test("writeFiles materializes files a subsequent command can read", async () => {
+        const sandbox = await factory.create()
+        try {
+          const flat = `${sandbox.workingDirectory}/materialized.txt`
+          const nested = `${sandbox.workingDirectory}/nested/dir/deep.txt`
+          await sandbox.writeFiles([
+            { path: flat, contents: "flat-contents" },
+            { path: nested, contents: "nested-contents" },
+          ])
+
+          const flatResult = await sandbox.runCommand("cat", [flat])
+          expect(flatResult.exitCode).toBe(0)
+          expect(flatResult.stdout).toContain("flat-contents")
+
+          // A nested path proves writeFiles creates missing parent directories.
+          const nestedResult = await sandbox.runCommand("cat", [nested])
+          expect(nestedResult.exitCode).toBe(0)
+          expect(nestedResult.stdout).toContain("nested-contents")
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
+      test("writeFiles after stop rejects", async () => {
+        const sandbox = await factory.create()
+        await sandbox.stop()
+        try {
+          expect(
+            sandbox.writeFiles([{ path: `${sandbox.workingDirectory}/x.txt`, contents: "x" }])
+          ).rejects.toThrow(SandboxNotRunningError)
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+    })
+
     if (capabilities.networkBlocking) {
       describe("network isolation", () => {
         test('network.mode="none" blocks outbound DNS / TCP', async () => {
@@ -285,6 +337,48 @@ export function runSandboxesContractSuite(
               "https://example.com",
             ])
             expect(result.exitCode).not.toBe(6)
+          } finally {
+            await sandbox.destroy()
+          }
+        })
+      })
+    }
+
+    if (capabilities.restrictedEgressEnforcement) {
+      const allowedOrigin = options.restrictedEgressProbe?.allowedOrigin ?? "https://example.com"
+      const blockedOrigin = options.restrictedEgressProbe?.blockedOrigin ?? "https://example.org"
+      const restricted = {
+        mode: "restricted",
+        allow: [{ name: "allowed", origin: allowedOrigin }],
+      } as const
+
+      describe("restricted network egress", () => {
+        test("reaches an origin on the allow list", async () => {
+          const sandbox = await factory.create({ network: restricted })
+          try {
+            const result = await sandbox.runCommand("curl", [
+              "-sS",
+              "--max-time",
+              "5",
+              allowedOrigin,
+            ])
+            // exit 6 is curl's "could not resolve host" — the mark of a blocked origin.
+            expect(result.exitCode).not.toBe(6)
+          } finally {
+            await sandbox.destroy()
+          }
+        })
+
+        test("blocks an origin not on the allow list", async () => {
+          const sandbox = await factory.create({ network: restricted })
+          try {
+            const result = await sandbox.runCommand("curl", [
+              "-sS",
+              "--max-time",
+              "5",
+              blockedOrigin,
+            ])
+            expect(result.exitCode).not.toBe(0)
           } finally {
             await sandbox.destroy()
           }

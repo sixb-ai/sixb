@@ -15,6 +15,7 @@ import type {
   AgentsRuntime,
   RequestAgentRunInput,
   RequestAgentRunResult,
+  ScopedListAgentThreadsInput,
 } from "../agents"
 import {
   type AuthorizationContext,
@@ -32,6 +33,7 @@ import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { PipelineDefinition } from "../pipelines"
 import type { ObjectRow } from "../storage"
+import type { AgentThreadRecord, ListAgentThreadsResult } from "../storage/agents"
 import type { SyncDefinition } from "../syncs"
 import type {
   RequestWorkflowRunInput,
@@ -152,6 +154,12 @@ export interface ScopedSixb<TOntologySources extends readonly OntologySource[]> 
   /** Request an agent turn. Requires `can.run`. */
   requestAgentRun(input: RequestAgentRunInput): Promise<RequestAgentRunResult>
 
+  /** List agent threads the principal owns and may run (owner + `run:agent` filtered). */
+  listThreads(input?: ScopedListAgentThreadsInput): Promise<ListAgentThreadsResult>
+
+  /** Read one agent thread the principal owns and may run; null hides inaccessible threads. */
+  getThread(threadId: string): Promise<AgentThreadRecord | null>
+
   /** Read the domain events the principal is allowed to see (derived from grants). */
   readEvents(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
 }
@@ -266,6 +274,8 @@ export function createScopedSixb<TOntologySources extends readonly OntologySourc
     listAgents: agents.list,
     getAgentById: agents.getById,
     requestAgentRun: (input: RequestAgentRunInput) => deps.agents.requestAs(runtime, input),
+    listThreads: (input?: ScopedListAgentThreadsInput) => deps.agents.listThreadsAs(runtime, input),
+    getThread: (threadId: string) => deps.agents.getThreadAs(runtime, threadId),
 
     // No standalone events grant: the stream is filtered to events whose
     // subject the principal may view/apply/run. `limit` applies before this

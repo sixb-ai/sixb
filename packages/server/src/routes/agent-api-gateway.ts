@@ -3,8 +3,9 @@ import {
   AGENT_API_ROUTES,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  normalizeAgentApiPath,
+  normalizeRoutePath,
   type OntologySource,
+  pathSegmentsFor,
   resolveAuthorizationContext,
   type Sixb,
 } from "@sixb/core"
@@ -162,7 +163,7 @@ function gatewayUpstreamPath(pathname: string): string {
   const prefixLength = pathSegmentsFor(AGENT_API_GATEWAY_PREFIX).length
   const segments = pathSegmentsFor(pathname)
   const upstreamSegments = segments.slice(prefixLength + 2)
-  return normalizeAgentApiPath(`/${upstreamSegments.join("/")}`)
+  return normalizeRoutePath(`/${upstreamSegments.join("/")}`)
 }
 
 function forwardedRequestHeaders(source: Headers): Headers {
@@ -226,10 +227,6 @@ function concatChunks(chunks: readonly Uint8Array[], total: number): ArrayBuffer
     offset += chunk.byteLength
   }
   return buffer
-}
-
-function pathSegmentsFor(pathname: string): string[] {
-  return pathname.split("/").filter(Boolean)
 }
 
 function jsonError(status: number, message: string): Response {

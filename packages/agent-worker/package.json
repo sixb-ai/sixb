@@ -18,6 +18,14 @@
     "test": "bun test",
     "prepack": "bun run build"
   },
+  "sixbBuild": {
+    "assets": [
+      {
+        "from": "./src/skills",
+        "to": "./dist/skills"
+      }
+    ]
+  },
   "dependencies": {
     "@sixb/core": "workspace:*",
     "ai": "^7.0.4"

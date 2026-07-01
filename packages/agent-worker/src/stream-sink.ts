@@ -3,7 +3,6 @@ import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   agentRunStreamDefinition,
   agentRunStreamId,
-  getInvalidJsonValueReason,
 } from "@sixb/core"
 import { AgentWorkerError } from "./errors"
 
@@ -76,6 +75,7 @@ class BrokerStreamSink implements StreamSink {
     })
   }
 
+  /** Publishes one live UI chunk; awaited per chunk so broker backpressure throttles the token stream. */
   async publishUiChunk(input: {
     readonly run: AgentRunRecord
     readonly chunkIndex: number
@@ -143,6 +143,9 @@ class BrokerStreamSink implements StreamSink {
       ...(run.error === undefined ? {} : { error: run.error }),
       occurredAt: new Date().toISOString(),
     })
+    // This is the last event for the run, so drop its ensured-stream marker to bound the Set over a
+    // long-lived worker. Evict only after a successful append, and only on the terminal path.
+    this.ensured.delete(agentRunStreamId(run.id))
   }
 
   private async publish(
@@ -209,20 +212,16 @@ function idempotencyKeyFor(event: AgentRunStreamEvent): string {
 }
 
 function toBrokerJson(value: unknown, label: string): JsonValue {
-  let encoded: unknown
   try {
     const serialized = JSON.stringify(value)
     if (serialized === undefined) {
       throw new AgentWorkerError(`${label} serialized to undefined.`)
     }
-    encoded = JSON.parse(serialized)
+    // The stringify/parse round-trip already yields a pure JSON value (functions/symbols/undefined
+    // are dropped or throw above, NaN/Infinity become null), so no further validation is needed —
+    // the broker append boundary re-checks the payload anyway.
+    return JSON.parse(serialized) as JsonValue
   } catch (error) {
     throw new AgentWorkerError(`${label} could not be JSON encoded.`, { cause: error })
   }
-
-  const reason = getInvalidJsonValueReason(encoded, label)
-  if (reason) {
-    throw new AgentWorkerError(`${label} is not JSON: ${reason}`)
-  }
-  return encoded as JsonValue
 }

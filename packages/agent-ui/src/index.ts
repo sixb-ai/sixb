@@ -6,16 +6,11 @@ export {
   ConversationPanel,
   type ConversationPanelProps,
 } from "./components/ConversationPanel"
-export {
-  AssistantBody,
-  type NormalizedPart,
-  type NormalizedTool,
-  normalizeDurableParts,
-  normalizeLiveParts,
-} from "./components/MessageParts"
+export { AssistantBody } from "./components/MessageParts"
 export {
   LiveAssistant,
   MessageView,
+  ReconnectingMarker,
   RunErrorMarker,
   ThinkingMarker,
 } from "./components/MessageView"
@@ -25,11 +20,11 @@ export {
   createLiveRunState,
   hasLiveContent,
   isAwaitingFirstToken,
-  type LivePart,
   type LiveRunAction,
   type LiveRunState,
   liveRunReducer,
 } from "./liveRun"
+export { type NormalizedPart, type NormalizedTool, normalizeDurableParts } from "./parts"
 export { installAgentResizeObserverGuard } from "./resizeObserver"
 export type {
   Agent,

@@ -27,8 +27,11 @@ describe("buildNetworkFlags", () => {
     ])
   })
 
-  test("restricted with no allow entries -> --net only", () => {
-    expect(buildNetworkFlags({ mode: "restricted", allow: [] })).toEqual(["--net"])
+  test("restricted with no allow entries -> deny-all (no flags), never equivalent to 'all'", () => {
+    expect(buildNetworkFlags({ mode: "restricted", allow: [] })).toEqual([])
+    expect(buildNetworkFlags({ mode: "restricted", allow: [] })).not.toEqual(
+      buildNetworkFlags({ mode: "all" })
+    )
   })
 
   test("falls back to the raw origin string when it is not a valid URL", () => {

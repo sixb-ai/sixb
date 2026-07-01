@@ -2,9 +2,15 @@ import type { AgentRunStreamEvent, BrokerRecord } from "@sixb/core"
 // Import the schema-version value from the browser-safe streams subpath: the `@sixb/core` root pulls
 // in node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
 import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
-import { client } from "./generated/client.gen"
+import {
+  createReconnectingSocket,
+  createSixbWebSocketUrl,
+  type ReconnectingSocket,
+  type ReconnectingSocketState,
+} from "./ws-socket"
 
 export type { AgentRunStreamEvent } from "@sixb/core"
+export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 
 export interface AgentRunStreamRecord extends Omit<BrokerRecord, "payload"> {
   readonly payload: AgentRunStreamEvent
@@ -48,15 +54,60 @@ export type AgentRunStreamServerMessage =
   | { readonly type: "error"; readonly message: string }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
 
-const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
-
 export function createSixbAgentsWebSocketUrl(baseUrl?: string): string {
-  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-  url.pathname = "/ws/agents"
-  url.search = ""
-  url.hash = ""
-  return url.toString()
+  return createSixbWebSocketUrl("/ws/agents", baseUrl)
+}
+
+export interface AgentRunSocketOptions {
+  readonly runId: string
+  readonly threadId?: string
+  readonly afterCursor?: string
+  readonly reconnect?: boolean
+  readonly reconnectDelayMs?: number
+  /** Override the API base url. Defaults to the global client config. */
+  readonly baseUrl?: string
+  readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
+  readonly onError?: (message: string) => void
+  readonly onStateChange?: (state: ReconnectingSocketState) => void
+}
+
+/**
+ * Open a subscribing WebSocket to `/ws/agents` for one run and stream its records to `onEvent`.
+ * Tracks the latest cursor across reconnects so no record is replayed. React-free: the
+ * `useAgentRunStream` hook is a thin wrapper that mirrors the socket state into React state.
+ */
+export function createAgentRunSocket(options: AgentRunSocketOptions): ReconnectingSocket {
+  let latestCursor = options.afterCursor
+
+  return createReconnectingSocket({
+    url: createSixbAgentsWebSocketUrl(options.baseUrl),
+    reconnect: options.reconnect,
+    reconnectDelayMs: options.reconnectDelayMs,
+    connectionErrorMessage: "Agent stream websocket connection failed.",
+    onError: options.onError,
+    onStateChange: options.onStateChange,
+    subscribeMessage: () =>
+      ({
+        type: "subscribe",
+        runId: options.runId,
+        ...(options.threadId ? { threadId: options.threadId } : {}),
+        ...(latestCursor ? { afterCursor: latestCursor } : {}),
+      }) satisfies AgentRunStreamSubscribeMessage,
+    onMessage: (data, sink) => {
+      const message = parseAgentRunStreamServerMessage(data)
+      if (!message) return
+
+      if (message.type === "record") {
+        latestCursor = message.record.cursor
+        options.onEvent(message.record.payload, message.record.cursor)
+        return
+      }
+
+      if (message.type === "error") {
+        sink.reportError(message.message)
+      }
+    },
+  })
 }
 
 export function parseAgentRunStreamServerMessage(

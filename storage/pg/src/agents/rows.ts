@@ -6,6 +6,7 @@ import {
   type AgentThreadRecord,
   coerceAgentRunFinishReason,
   type Principal,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import type { SQLClient, SqlParameter } from "../pg-client"
 
@@ -95,10 +96,9 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     threadId: row.thread_id,
     agentId: row.agent_id,
     triggerMessageId: row.trigger_message_id,
-    requestedByPrincipal: principalFromColumns(
-      row.requested_by_principal_type,
-      row.requested_by_principal_id
-    ) ?? { type: "system", id: "system" },
+    requestedByPrincipal:
+      principalFromColumns(row.requested_by_principal_type, row.requested_by_principal_id) ??
+      SYSTEM_PRINCIPAL,
     executionPrincipal: serviceAccountPrincipalFromColumns(
       row.execution_principal_type,
       row.execution_principal_id

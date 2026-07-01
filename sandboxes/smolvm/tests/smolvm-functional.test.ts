@@ -1,21 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SmolvmSandboxFactory } from "../src/smolvm-sandbox-factory"
 
 /**
  * End-to-end functional test of the full data path — env injection, working
- * directory, stdout/stderr separation, exit codes, host->guest file visibility,
+ * directory, stdout/stderr separation, exit codes, in-guest file materialization,
  * timeout, and abort — driven through SmolvmSandboxFactory exactly as the agent
  * worker would.
  *
  * It uses a faithful fake `smolvm` whose `machine exec` honors smolvm's native
- * `--workdir` and `--env` flags and then runs the forwarded command. Because our
- * volume maps the host workdir to itself (dir:dir), the fake's filesystem view
- * of that directory is identical to a real guest's — so the path bridge is
- * genuinely exercised. The only thing not modeled here is the hypervisor
- * isolation boundary (covered by the real-VM smolvm-integration.test.ts).
+ * `--workdir` and `--env` flags and then runs the forwarded command. The guest
+ * filesystem is not bind-mounted from the host; files reach the guest only by
+ * writeFiles executing an in-guest script. The fake runs those "guest" commands
+ * on the host filesystem, so materializing via writeFiles and reading it back
+ * with runCommand genuinely exercises that path. The only thing not modeled here
+ * is the hypervisor isolation boundary (covered by smolvm-integration.test.ts).
  */
 
 let workspace: string
@@ -70,13 +71,13 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
     }
   })
 
-  test("runs commands in workingDirectory and sees files written there on the host", async () => {
+  test("runs commands in workingDirectory and reads files materialized via writeFiles", async () => {
     const sandbox = await factory().create()
     try {
-      // Mirror what the agent worker's sandbox-api-context does.
-      const contextDir = join(sandbox.workingDirectory, ".sixb", "agent", "context")
-      await mkdir(contextDir, { recursive: true })
-      await writeFile(join(contextDir, "run.json"), '{"runId":"run-1"}', "utf-8")
+      // Mirror what the agent worker's sandbox-api-context does: materialize the run context
+      // through the sandbox capability rather than writing to the host filesystem directly.
+      const runContextPath = join(sandbox.workingDirectory, ".sixb", "agent", "context", "run.json")
+      await sandbox.writeFiles([{ path: runContextPath, contents: '{"runId":"run-1"}' }])
 
       const pwd = await sandbox.runCommand("bash", ["-lc", "pwd"])
       expect(await realpath(pwd.stdout.trim())).toBe(await realpath(sandbox.workingDirectory))

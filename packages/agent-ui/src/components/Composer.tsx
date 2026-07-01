@@ -1,7 +1,7 @@
 import { Spinner, Textarea } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowUp } from "lucide-react"
-import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react"
+import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 export interface ComposerProps {
   readonly onSend: (text: string) => void
@@ -10,14 +10,37 @@ export interface ComposerProps {
   readonly placeholder?: string
   /** Optional status line shown under the input, e.g. while a run is active. */
   readonly hint?: string
+  /**
+   * Text to restore into the input, e.g. after a failed send so the user does not lose it.
+   * Applied whenever `draftNonce` changes to a non-zero value, so re-sending the same text works.
+   */
+  readonly draft?: string
+  readonly draftNonce?: number
 }
 
 const MAX_HEIGHT_PX = 200
 
-export function Composer({ onSend, disabled, pending, placeholder, hint }: ComposerProps) {
+export function Composer({
+  onSend,
+  disabled,
+  pending,
+  placeholder,
+  hint,
+  draft,
+  draftNonce,
+}: ComposerProps) {
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const canSend = value.trim().length > 0 && !disabled && !pending
+
+  // Reseed the input on demand (a failed send hands the text back). Keyed on the nonce so restoring
+  // the same text twice still fires; ignored on mount (nonce 0) so it never clobbers a fresh draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reseed only when the nonce changes
+  useEffect(() => {
+    if (!draftNonce) return
+    setValue(draft ?? "")
+    textareaRef.current?.focus()
+  }, [draftNonce])
 
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes

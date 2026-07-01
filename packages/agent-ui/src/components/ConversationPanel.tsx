@@ -15,6 +15,7 @@ import type { LiveRunState } from "../liveRun"
 import type { Agent, AgentMessage, AgentThread } from "../types"
 import { AgentAvatar } from "./AgentAvatar"
 import { Composer } from "./Composer"
+import { RunErrorMarker } from "./MessageView"
 import { Transcript } from "./Transcript"
 
 export interface ConversationPanelProps {
@@ -27,6 +28,10 @@ export interface ConversationPanelProps {
   readonly pendingUserText?: string | null
   /** A run has been requested and we're waiting on it — show the thinking shimmer immediately. */
   readonly awaitingResponse: boolean
+  /** The active run's stream dropped and is re-subscribing. */
+  readonly reconnecting: boolean
+  /** A failed send to surface above the composer, or null. English, user-facing. */
+  readonly sendError?: string | null
   /** All registered agents, for the header quick-switcher. */
   readonly agents: readonly Agent[]
   /** Other chats with this agent, for the header history menu. */
@@ -41,6 +46,9 @@ export interface ConversationPanelProps {
   readonly composerDisabled: boolean
   readonly composerPending: boolean
   readonly composerPlaceholder?: string
+  /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
+  readonly composerDraft?: string
+  readonly composerDraftNonce?: number
 }
 
 export function ConversationPanel({
@@ -52,6 +60,8 @@ export function ConversationPanel({
   streaming,
   pendingUserText,
   awaitingResponse,
+  reconnecting,
+  sendError,
   agents,
   agentThreads,
   canGoHome,
@@ -63,6 +73,8 @@ export function ConversationPanel({
   composerDisabled,
   composerPending,
   composerPlaceholder,
+  composerDraft,
+  composerDraftNonce,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -147,15 +159,24 @@ export function ConversationPanel({
             live={live}
             pendingUserText={pendingUserText}
             awaitingResponse={awaitingResponse}
+            reconnecting={reconnecting}
           />
         )}
       </div>
+
+      {sendError ? (
+        <div className="mx-auto w-full max-w-3xl px-4 pb-1">
+          <RunErrorMarker message={sendError} />
+        </div>
+      ) : null}
 
       <Composer
         onSend={onSend}
         disabled={composerDisabled}
         pending={composerPending}
         placeholder={composerPlaceholder}
+        draft={composerDraft}
+        draftNonce={composerDraftNonce}
       />
     </div>
   )

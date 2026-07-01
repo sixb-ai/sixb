@@ -1,9 +1,9 @@
 import { Bubble, BubbleContent, Marker, MarkerContent, MarkerIcon } from "@sixb/ui/components"
 import { AlertTriangle } from "lucide-react"
-import type { LiveRunState } from "../liveRun"
-import { isAwaitingFirstToken } from "../liveRun"
+import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
+import { normalizeDurableParts } from "../parts"
 import type { AgentMessage } from "../types"
-import { AssistantBody, normalizeDurableParts, normalizeLiveParts } from "./MessageParts"
+import { AssistantBody } from "./MessageParts"
 
 /** Render a single durable message. System messages are not shown in the reading transcript. */
 export function MessageView({ message }: { message: AgentMessage }) {
@@ -36,7 +36,7 @@ export function LiveAssistant({ live }: { live: LiveRunState }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <AssistantBody parts={normalizeLiveParts(live.parts)} />
+      <AssistantBody parts={live.parts} />
       {live.finishStatus === "failed" ? (
         <RunErrorMarker message={live.finishError ?? "The agent run failed."} />
       ) : null}
@@ -48,6 +48,15 @@ export function ThinkingMarker() {
   return (
     <Marker role="status" aria-label="Agent is thinking">
       <MarkerContent className="shimmer">Thinking…</MarkerContent>
+    </Marker>
+  )
+}
+
+/** Shown while an active run's stream has dropped and the client is re-subscribing. */
+export function ReconnectingMarker() {
+  return (
+    <Marker role="status" aria-label="Reconnecting to the agent stream">
+      <MarkerContent className="shimmer">Connection lost — reconnecting…</MarkerContent>
     </Marker>
   )
 }

@@ -29,7 +29,9 @@ export function createAgentApiGatewayBaseUrl(input: {
     runId: input.run.id,
     leaseId: lease.id,
   })
-  return `${normalizeApiBaseUrl(input.apiBaseUrl)}${AGENT_API_GATEWAY_PREFIX}/${encodeURIComponent(
+  // apiBaseUrl is already normalized at the worker's server-base boundary (buildAgentContext), so
+  // it is appended verbatim rather than normalized again here.
+  return `${input.apiBaseUrl}${AGENT_API_GATEWAY_PREFIX}/${encodeURIComponent(
     input.run.id
   )}/${encodeURIComponent(capability)}`
 }

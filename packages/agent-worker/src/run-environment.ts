@@ -14,6 +14,12 @@ export interface CreateAgentRunEnvironmentInput {
   readonly context: AgentWorkerContext
   readonly agent: AgentDefinition
   readonly run: AgentRunRecord
+  /**
+   * Sink for a sandbox teardown that outlives dispose() (the model answered before the boot
+   * finished, so dispose returns without stalling on it). The worker registers these so a graceful
+   * stop() can drain them instead of leaving orphaned machines being torn down.
+   */
+  readonly onDetachedTeardown?: (teardown: Promise<void>) => void
 }
 
 /**
@@ -66,7 +72,7 @@ export async function createAgentRunEnvironment(
       defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },
-    dispose: () => disposeEnvironment(ready, () => settled),
+    dispose: () => disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
   }
 }
 
@@ -103,7 +109,8 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
 
 function disposeEnvironment(
   ready: Promise<BashSandboxHandle>,
-  isSettled: () => boolean
+  isSettled: () => boolean,
+  onDetachedTeardown?: (teardown: Promise<void>) => void
 ): Promise<void> {
   // Destroy the sandbox once provisioning settles. A rejection means provisionSandbox already
   // reclaimed whatever it half-created, so there is nothing left to destroy.
@@ -115,8 +122,13 @@ function disposeEnvironment(
     .catch((error) => {
       console.error("[SixbAgentWorker] Could not destroy agent run sandbox:", error)
     })
-  // If the boot is still in flight (the model answered before it finished and never used bash), do
-  // not stall run teardown on it — the destroy above is chained and runs when the boot settles.
   // Once provisioning has settled, await the (now-fast) destroy so cleanup completes inline.
-  return isSettled() ? teardown : Promise.resolve()
+  if (isSettled()) {
+    return teardown
+  }
+  // Boot still in flight (the model answered before it finished and never used bash): don't stall
+  // run teardown on it. Hand the chained destroy to the worker so a graceful stop() can drain it
+  // rather than orphaning a machine that is still being torn down.
+  onDetachedTeardown?.(teardown)
+  return Promise.resolve()
 }

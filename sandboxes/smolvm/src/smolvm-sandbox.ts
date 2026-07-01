@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto"
+import { dirname } from "node:path"
 import {
   type CommandResult,
   type CreateSandboxOptions,
+  exec,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
+  type SandboxFileRecord,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
   type SandboxStatus,
@@ -18,7 +21,6 @@ import {
   isLocalImageArchive,
   type SmolvmCliConfig,
 } from "./cli"
-import { exec } from "./exec"
 import { buildNetworkFlags, withRegistryEgress } from "./network"
 import { cleanupWorkdir, type ResolvedWorkdir, resolveWorkdir } from "./workdir"
 
@@ -94,7 +96,7 @@ export class SmolvmSandbox implements Sandbox {
 
     try {
       const created = await exec({
-        argv: buildCreateArgv(options.cli, { id, network, volume: workdir.volume }),
+        argv: buildCreateArgv(options.cli, { id, network }),
         cwd: workdir.dir,
         env: hostEnv(),
       })
@@ -112,6 +114,26 @@ export class SmolvmSandbox implements Sandbox {
       if (started.exitCode !== 0) {
         throw new SandboxError(
           `[Sandbox] smolvm start failed for ${id}: ${started.stderr.trim() || `exit ${started.exitCode}`}`
+        )
+      }
+
+      // The guest filesystem is isolated (no host mount), so create the working directory in-guest
+      // up front. This keeps workingDirectory a valid `--workdir` for the first runCommand even when
+      // no files are materialized first. Run from "/" since workdir.dir does not exist yet.
+      const workdirReady = await exec({
+        argv: buildExecArgv(options.cli, {
+          id,
+          cwd: "/",
+          command: "mkdir",
+          args: ["-p", workdir.dir],
+          env: {},
+        }),
+        cwd: workdir.dir,
+        env: hostEnv(),
+      })
+      if (workdirReady.exitCode !== 0) {
+        throw new SandboxError(
+          `[Sandbox] smolvm working directory setup failed for ${id}: ${workdirReady.stderr.trim() || `exit ${workdirReady.exitCode}`}`
         )
       }
     } catch (error) {
@@ -167,6 +189,39 @@ export class SmolvmSandbox implements Sandbox {
     }
   }
 
+  async writeFiles(files: readonly SandboxFileRecord[]): Promise<void> {
+    if (this.currentStatus !== "running") {
+      throw new SandboxNotRunningError(
+        `[Sandbox] sandbox ${this.id} is ${this.currentStatus}; cannot write files`
+      )
+    }
+    if (files.length === 0) {
+      return
+    }
+    // The guest filesystem is isolated from the host, so materialize files by executing an in-guest
+    // script that base64-decodes each payload into place. Run from "/" (always present) because a
+    // target directory may not exist yet; the script mkdir -p's each one.
+    const result = await exec({
+      argv: buildExecArgv(this.cli, {
+        id: this.id,
+        cwd: "/",
+        command: "sh",
+        args: ["-c", buildWriteFilesScript(files)],
+        env: {},
+      }),
+      cwd: this.workdir.dir,
+      env: hostEnv(),
+    })
+    if (result.exitCode !== 0) {
+      throw new SandboxError(
+        `[Sandbox] smolvm writeFiles failed for ${this.id}: ${result.stderr.trim() || `exit ${result.exitCode}`}`
+      )
+    }
+  }
+
+  // A per-command exec (runCommand) that times out or is aborted only SIGKILLs the host smolvm
+  // CLI process; a runaway guest process can outlive its exec session. stop()/destroy() reap the
+  // whole VM, so they are the backstop that guarantees no guest work survives teardown.
   async stop(): Promise<void> {
     if (this.currentStatus !== "running") {
       return
@@ -218,6 +273,30 @@ function isLoopbackOrigin(origin: string): boolean {
     // fall through with the raw value
   }
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]"
+}
+
+/**
+ * Build a POSIX `sh` script that materializes each file in-guest: create its parent directory, then
+ * base64-decode the payload into place (base64 keeps binary/quoting safe), honoring an optional
+ * mode. `set -e` aborts on the first failure so a partial write surfaces a non-zero exit.
+ */
+function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
+  const lines = ["set -e"]
+  for (const file of files) {
+    const encoded = Buffer.from(file.contents).toString("base64")
+    const quotedPath = shellQuote(file.path)
+    lines.push(`mkdir -p ${shellQuote(dirname(file.path))}`)
+    lines.push(`printf %s ${shellQuote(encoded)} | base64 -d > ${quotedPath}`)
+    if (file.mode !== undefined) {
+      lines.push(`chmod ${file.mode.toString(8)} ${quotedPath}`)
+    }
+  }
+  return lines.join("\n")
+}
+
+/** Single-quote a value for safe interpolation into a POSIX shell script. */
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`
 }
 
 function hostEnv(): Record<string, string> {
