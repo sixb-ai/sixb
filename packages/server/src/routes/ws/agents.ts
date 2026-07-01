@@ -3,9 +3,7 @@ import {
   agentRunStreamDefinition,
   agentRunStreamId,
   type BrokerRecord,
-  isAllowed,
   type OntologySource,
-  principalsEqual,
   type Sixb,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
@@ -102,16 +100,10 @@ export async function canAccessAgentRunStream(
     }
   }
 
-  const thread = await storage.threads.getById({ projectId: sixb.id, id: threadId })
+  // Reuse the one owner + `run:agent` rule instead of re-implementing it here: the scoped surface
+  // returns null for a thread the caller may not read (absent, not owner, or ungranted).
+  const thread = await sixb.as(input.authz).getThread(threadId)
   if (!thread) {
-    return { ok: false, message: "Agent run not found." }
-  }
-
-  if (!principalsEqual(input.authz.principal, thread.ownerPrincipal)) {
-    return { ok: false, message: "Agent run not found." }
-  }
-
-  if (!isAllowed(input.authz, { kind: "agent.run", agentId: thread.agentId })) {
     return { ok: false, message: "Agent run not found." }
   }
 

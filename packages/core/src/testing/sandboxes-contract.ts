@@ -9,12 +9,6 @@ import { type SandboxFactory, SandboxNotRunningError } from "../sandboxes"
 export interface SandboxesContractCapabilities {
   /** network.mode="none" actually blocks outbound network access. */
   readonly networkBlocking?: boolean
-  /**
-   * network.mode="restricted" actually enforces the allow list: in-list origins are reachable and
-   * out-of-list origins are blocked. Providers that downgrade restricted to host network (e.g. the
-   * local backend) must leave this false.
-   */
-  readonly restrictedEgressEnforcement?: boolean
   /** readOnlyPaths/readWritePaths actually restrict filesystem writes. */
   readonly readOnlyEnforcement?: boolean
   /** Strong isolation, such as process namespaces, is in effect. */
@@ -32,15 +26,6 @@ export interface SandboxesContractSuiteOptions {
    * Default 200ms.
    */
   readonly shortTimeoutMs?: number
-  /**
-   * Origins used by the restricted-egress slice (only when restrictedEgressEnforcement is set).
-   * `allowedOrigin` goes on the allow list and must be reachable; `blockedOrigin` is left off and
-   * must be blocked. Defaults to example.com / example.org.
-   */
-  readonly restrictedEgressProbe?: {
-    readonly allowedOrigin: string
-    readonly blockedOrigin: string
-  }
 }
 
 const SLEEP_BUDGET_SECONDS = 5
@@ -297,11 +282,46 @@ export function runSandboxesContractSuite(
         }
       })
 
+      test("writeFiles round-trips binary contents faithfully", async () => {
+        const sandbox = await factory.create()
+        try {
+          const path = `${sandbox.workingDirectory}/binary.dat`
+          const bytes = new Uint8Array([0x00, 0x01, 0xfe, 0xff, 0x0a, 0x7f])
+          await sandbox.writeFiles([{ path, contents: bytes }])
+
+          const size = await sandbox.runCommand("wc", ["-c", path])
+          expect(size.exitCode).toBe(0)
+          expect(size.stdout.trim().split(/\s+/)[0]).toBe(String(bytes.length))
+
+          // od proves the exact bytes survived transport (e.g. a provider's base64 round-trip).
+          const hex = await sandbox.runCommand("od", ["-An", "-v", "-tx1", path])
+          expect(hex.exitCode).toBe(0)
+          expect(hex.stdout.replace(/\s+/g, " ").trim()).toBe("00 01 fe ff 0a 7f")
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
+      test("writeFiles applies an explicit file mode", async () => {
+        const sandbox = await factory.create()
+        try {
+          const path = `${sandbox.workingDirectory}/run.sh`
+          await sandbox.writeFiles([{ path, contents: "#!/bin/sh\necho ran\n", mode: 0o755 }])
+
+          // The exec bit is observable, proving mode was honored (not silently dropped).
+          const result = await sandbox.runCommand("/bin/sh", ["-c", `test -x ${path} && echo yes`])
+          expect(result.exitCode).toBe(0)
+          expect(result.stdout).toContain("yes")
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
       test("writeFiles after stop rejects", async () => {
         const sandbox = await factory.create()
         await sandbox.stop()
         try {
-          expect(
+          await expect(
             sandbox.writeFiles([{ path: `${sandbox.workingDirectory}/x.txt`, contents: "x" }])
           ).rejects.toThrow(SandboxNotRunningError)
         } finally {
@@ -344,47 +364,11 @@ export function runSandboxesContractSuite(
       })
     }
 
-    if (capabilities.restrictedEgressEnforcement) {
-      const allowedOrigin = options.restrictedEgressProbe?.allowedOrigin ?? "https://example.com"
-      const blockedOrigin = options.restrictedEgressProbe?.blockedOrigin ?? "https://example.org"
-      const restricted = {
-        mode: "restricted",
-        allow: [{ name: "allowed", origin: allowedOrigin }],
-      } as const
-
-      describe("restricted network egress", () => {
-        test("reaches an origin on the allow list", async () => {
-          const sandbox = await factory.create({ network: restricted })
-          try {
-            const result = await sandbox.runCommand("curl", [
-              "-sS",
-              "--max-time",
-              "5",
-              allowedOrigin,
-            ])
-            // exit 6 is curl's "could not resolve host" — the mark of a blocked origin.
-            expect(result.exitCode).not.toBe(6)
-          } finally {
-            await sandbox.destroy()
-          }
-        })
-
-        test("blocks an origin not on the allow list", async () => {
-          const sandbox = await factory.create({ network: restricted })
-          try {
-            const result = await sandbox.runCommand("curl", [
-              "-sS",
-              "--max-time",
-              "5",
-              blockedOrigin,
-            ])
-            expect(result.exitCode).not.toBe(0)
-          } finally {
-            await sandbox.destroy()
-          }
-        })
-      })
-    }
+    // Restricted per-origin egress is intentionally NOT covered here: the only provider that enforces
+    // it (smolvm) can be verified only by a live in-VM network call, which needs a network-capable
+    // guest image and outbound internet — infrastructure this suite deliberately avoids so it stays
+    // hermetic. smolvm's allow-list flag construction is unit-tested in its network-argv tests
+    // instead. Add a conformance slice here once a provider can enforce egress under hermetic tests.
 
     if (capabilities.readOnlyEnforcement) {
       describe("filesystem isolation", () => {

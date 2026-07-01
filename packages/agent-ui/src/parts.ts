@@ -43,7 +43,13 @@ export function normalizeDurableParts(parts: readonly AgentMessagePart[]): Norma
                   errorText: part.errorText,
                 },
         }
+      case "step-start":
+        return { kind: "step-start" }
       default:
+        // Compile error if the core message part union grows: handle the new kind above rather than
+        // letting a durable message render as an invisible step boundary. Still degrades gracefully
+        // at runtime for an unexpected payload.
+        part satisfies never
         return { kind: "step-start" }
     }
   })

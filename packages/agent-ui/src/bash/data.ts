@@ -5,6 +5,10 @@
 import { formatRelativeTime } from "../format"
 import { isRecord } from "./interpret"
 
+// `numberField` lives in the interpreter (the leaf module that owns `isRecord`); re-export it here so
+// data-helper consumers keep a single import site and there is one definition.
+export { numberField } from "./interpret"
+
 const MAX_COLUMNS = 5
 // Property keys that just echo the row's identity — never worth a column of their own.
 const REDUNDANT_KEYS = new Set(["id", "primaryId", "objectTypeId"])
@@ -106,10 +110,6 @@ export function metaLine(parts: ReadonlyArray<readonly [number, string, string]>
 
 export function stringField(value: Record<string, unknown>, field: string): string | undefined {
   return typeof value[field] === "string" ? (value[field] as string) : undefined
-}
-
-export function numberField(value: unknown, field: string): number | null {
-  return isRecord(value) && typeof value[field] === "number" ? (value[field] as number) : null
 }
 
 export function numberOr(value: unknown, fallback: number): number {

@@ -244,20 +244,18 @@ export class SmolvmSandbox implements Sandbox {
   }
 }
 
-let warnedLoopbackGateway = false
-
 /**
- * A microVM has its own network stack, so a gateway advertised on localhost is
- * unreachable from inside it under restricted egress. Warn once with the fix
- * rather than letting the agent fail silently with connection-refused.
+ * A microVM has its own network stack, so a gateway advertised on localhost is unreachable from
+ * inside it under restricted egress. Warn on every affected sandbox with the fix rather than letting
+ * the agent fail silently with connection-refused. (Per-sandbox on purpose: a module-level once-flag
+ * would silence every sandbox after the first and leak state across tests.)
  */
 function warnIfLoopbackGateway(policy: SandboxNetworkPolicy): void {
-  if (warnedLoopbackGateway || policy.mode !== "restricted") {
+  if (policy.mode !== "restricted") {
     return
   }
   const loopback = policy.allow.find((target) => isLoopbackOrigin(target.origin))
   if (loopback) {
-    warnedLoopbackGateway = true
     console.warn(
       `[Sandbox] smolvm runs in a VM and cannot reach the gateway at ${loopback.origin} over localhost. ` +
         "Set the API public origin to the host's LAN IP (e.g. SIXB_API_PUBLIC_ORIGIN=http://<lan-ip>:<port>)."
@@ -280,7 +278,7 @@ function isLoopbackOrigin(origin: string): boolean {
  * base64-decode the payload into place (base64 keeps binary/quoting safe), honoring an optional
  * mode. `set -e` aborts on the first failure so a partial write surfaces a non-zero exit.
  */
-function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
+export function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
   const lines = ["set -e"]
   for (const file of files) {
     const encoded = Buffer.from(file.contents).toString("base64")
@@ -295,7 +293,7 @@ function buildWriteFilesScript(files: readonly SandboxFileRecord[]): string {
 }
 
 /** Single-quote a value for safe interpolation into a POSIX shell script. */
-function shellQuote(value: string): string {
+export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`
 }
 

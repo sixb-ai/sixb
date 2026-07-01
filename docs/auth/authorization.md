@@ -77,7 +77,7 @@ are the union of every role whose `grantedTo` group it belongs to.
 ## Grants
 
 A grant pairs a capability with the definitions it covers. Three capability builders —
-`can.view`, `can.apply`, and `can.run` — resolve to **six grant kinds**, one per protected target
+`can.view`, `can.apply`, and `can.run` — resolve to **seven grant kinds**, one per protected target
 family.
 
 | Grant kind | Builder | Allows | Targets |
@@ -88,11 +88,12 @@ family.
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
+| `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
 
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
-picks between `run:workflow`, `run:sync`, and `run:pipeline` the same way. Each is type-checked, so
-mixing target families in one call does not compile. `can.view(Type)` also covers the type's
-subtypes.
+picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
+type-checked, so mixing target families in one call does not compile. `can.view(Type)` also covers
+the type's subtypes.
 
 ### Selecting definitions
 
@@ -108,6 +109,7 @@ Each builder takes one definition, a list, or a breadth selector.
 | Every workflow | `can.run(workflows())` |
 | Every sync | `can.run(syncs())` |
 | Every pipeline | `can.run(pipelines())` |
+| Every agent | `can.run(agents())` |
 | Everything but a few | `can.view(ontology.objects().except([Customer]))` |
 
 The breadth selectors are exported from `@sixb/core`: `ontology.objects()`, `datasets()`,
