@@ -73,6 +73,18 @@ The signed upload includes an `x-amz-checksum-sha256` header so the storage prov
 bytes uploaded by the browser. Bucket CORS must allow `PUT`, `x-amz-checksum-sha256`, and
 `content-type` for browser direct uploads.
 
+`completeUpload` fails closed on integrity: it issues a signed `HEAD` with
+`x-amz-checksum-mode: ENABLED` and refuses to promote the staged object unless the backend reports
+the same `x-amz-checksum-sha256` it verified on upload. Backends that do not store/return object
+checksums cannot be used for direct uploads.
+
+### Staging cleanup
+
+Direct uploads land under `<basePath>/uploads/<uploadId>/object` before being promoted to the
+content-addressed `blobs/sha256/` prefix. A crashed or abandoned upload can leave bytes under
+`uploads/`, so configure an S3 lifecycle rule to expire objects under that prefix (there is no
+in-repo sweeper).
+
 For S3-compatible providers, pass an `endpoint`:
 
 ```ts

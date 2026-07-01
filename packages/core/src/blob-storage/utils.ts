@@ -45,14 +45,6 @@ export function computeBlobDigest(bytes: Uint8Array): BlobDigest {
   return `sha256:${hash}`
 }
 
-export function blobDigestHex(digest: BlobDigest): string {
-  return digest.slice("sha256:".length)
-}
-
-export function blobIdFromDigest(digest: BlobDigest): string {
-  return `blob_${blobDigestHex(digest)}`
-}
-
 export function createFileRef(input: PutBlobInput, info: BlobInfo): FileRef {
   return {
     blobId: info.blobId,

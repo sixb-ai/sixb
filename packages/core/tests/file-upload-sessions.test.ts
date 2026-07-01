@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { FileRef, Principal } from "../src"
+import type { FileRef, FileUploadSessionErrorReason, Principal } from "../src"
 import {
   DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
   FileUploadSessionError,
@@ -23,14 +23,14 @@ function futureDate(ms: number): Date {
 
 async function expectSessionError(
   promise: Promise<unknown>,
-  expected: { readonly status: number; readonly message: string }
+  expected: { readonly reason: FileUploadSessionErrorReason; readonly message: string }
 ) {
   try {
     await promise
     throw new Error("Expected FileUploadSessionError.")
   } catch (error) {
     expect(error).toBeInstanceOf(FileUploadSessionError)
-    expect((error as FileUploadSessionError).status).toBe(expected.status)
+    expect((error as FileUploadSessionError).reason).toBe(expected.reason)
     expect((error as Error).message).toBe(expected.message)
   }
 }
@@ -47,7 +47,7 @@ describe("InMemoryFileUploadSessions", () => {
     })
 
     await expectSessionError(sessions.getForPrincipal(expired.id, principal), {
-      status: 410,
+      reason: "expired",
       message: "File upload session has expired.",
     })
 
@@ -62,7 +62,7 @@ describe("InMemoryFileUploadSessions", () => {
 
     expect(deleted).toBe(1)
     await expectSessionError(sessions.getForPrincipal(stale.id, principal), {
-      status: 404,
+      reason: "not_found",
       message: "File upload session not found.",
     })
   })
@@ -94,7 +94,7 @@ describe("InMemoryFileUploadSessions", () => {
     )
     expect(deletedAfterTtl).toBe(1)
     await expectSessionError(sessions.getForPrincipal(session.id, principal), {
-      status: 404,
+      reason: "not_found",
       message: "File upload session not found.",
     })
   })
@@ -117,7 +117,7 @@ describe("InMemoryFileUploadSessions", () => {
     )
     expect(deleted).toBe(1)
     await expectSessionError(sessions.getForPrincipal(session.id, principal), {
-      status: 404,
+      reason: "not_found",
       message: "File upload session not found.",
     })
   })
@@ -135,7 +135,7 @@ describe("InMemoryFileUploadSessions", () => {
     await sessions.complete(session.id, fileRef)
 
     await expectSessionError(sessions.complete(session.id, fileRef), {
-      status: 409,
+      reason: "already_completed",
       message: "File upload session is already completed.",
     })
   })
@@ -159,7 +159,7 @@ describe("InMemoryFileUploadSessions", () => {
     await expectSessionError(
       storage.fileUploadSessions.getForPrincipal("upload_rollback", principal),
       {
-        status: 404,
+        reason: "not_found",
         message: "File upload session not found.",
       }
     )

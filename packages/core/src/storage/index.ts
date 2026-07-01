@@ -151,6 +151,7 @@ export {
 export type {
   CreateFileUploadSessionInput,
   FileUploadSession,
+  FileUploadSessionErrorReason,
   FileUploadSessionStore,
   FileUploadStatus,
   FileUploadStrategy,
@@ -162,7 +163,6 @@ export {
   DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
   FileUploadSessionError,
   InMemoryFileUploadSessions,
-  principalKey,
 } from "./file-upload-sessions"
 export type {
   DefineMigrationsOptions,

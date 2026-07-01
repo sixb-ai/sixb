@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { BlobStorageError, computeBlobDigest } from "@sixb/core"
+import { S3Client } from "bun"
 import { S3BlobStorage } from "../src"
 
 const encoder = new TextEncoder()
@@ -13,6 +14,16 @@ function createStorage(): S3BlobStorage {
     secretAccessKey: process.env.SIXB_S3_SECRET_ACCESS_KEY,
     region: "us-east-1",
     basePath: `test-${randomUUID()}`,
+  })
+}
+
+function rawS3Client(): S3Client {
+  return new S3Client({
+    bucket: process.env.SIXB_S3_BUCKET,
+    endpoint: process.env.SIXB_S3_ENDPOINT,
+    accessKeyId: process.env.SIXB_S3_ACCESS_KEY_ID,
+    secretAccessKey: process.env.SIXB_S3_SECRET_ACCESS_KEY,
+    region: "us-east-1",
   })
 }
 
@@ -116,5 +127,42 @@ describe("S3BlobStorage", () => {
 
     const stream = await storage.open(fileRef.blobId)
     expect(await new Response(stream).text()).toBe("staged s3")
+  })
+
+  test("refuses to complete a staged upload the backend never checksum-verified", async () => {
+    const storage = createStorage()
+    const uploadId = `upload_${randomUUID().replaceAll("-", "")}`
+    const body = encoder.encode("unverified bytes")
+    const digest = computeBlobDigest(body)
+    const upload = await storage.createUpload({
+      uploadId,
+      sizeBytes: body.byteLength,
+      expectedDigest: digest,
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    if (upload.strategy !== "direct-put") {
+      throw new Error("Expected direct-put upload strategy.")
+    }
+
+    // Stage the bytes with a plain PUT (no x-amz-checksum-sha256), so the backend stores no
+    // verified checksum. Completion must fail closed rather than trust the client-declared digest.
+    await rawS3Client().write(upload.stagingKey, body)
+
+    await expect(
+      storage.completeUpload({
+        uploadId,
+        stagingKey: upload.stagingKey,
+        expectedSizeBytes: body.byteLength,
+        expectedDigest: digest,
+      })
+    ).rejects.toBeInstanceOf(BlobStorageError)
+    await expect(
+      storage.completeUpload({
+        uploadId,
+        stagingKey: upload.stagingKey,
+        expectedSizeBytes: body.byteLength,
+        expectedDigest: digest,
+      })
+    ).rejects.toThrow("no backend-verified sha256 checksum")
   })
 })

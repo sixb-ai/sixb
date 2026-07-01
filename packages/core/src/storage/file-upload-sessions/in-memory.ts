@@ -1,5 +1,5 @@
 import type { Principal } from "../../auth"
-import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
+import type { FileRef } from "../../blob-storage"
 import { FileUploadSessionError } from "./errors"
 import type {
   CreateFileUploadSessionInput,
@@ -16,6 +16,15 @@ import {
 
 export type InMemoryFileUploadSessionsSnapshot = Map<string, FileUploadSession>
 
+/**
+ * In-memory {@link FileUploadSessionStore}.
+ *
+ * Sessions live only in this process's memory: they do not survive a restart and
+ * are not shared across instances. Staged/direct-put uploads therefore require a
+ * single-instance deployment for now; a durable (Pg/Sqlite) store is a follow-up.
+ * Expired sessions are reaped opportunistically on `create` and on demand via
+ * `cleanupExpired` (there is no background sweeper).
+ */
 export class InMemoryFileUploadSessions implements FileUploadSessionStore {
   private readonly sessionsById = new Map<string, FileUploadSession>()
 
@@ -47,7 +56,6 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
         : { expectedSizeBytes: input.expectedSizeBytes }),
       ...(input.expectedDigest === undefined ? {} : { expectedDigest: input.expectedDigest }),
       ...(input.providerUpload === undefined ? {} : { providerUpload: input.providerUpload }),
-      signedParts: [],
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     }
@@ -59,18 +67,18 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
   async getForPrincipal(uploadId: string, principal: Principal): Promise<FileUploadSession> {
     const session = this.sessionsById.get(uploadId)
     if (!session || session.principalKey !== principalKey(principal)) {
-      throw new FileUploadSessionError("File upload session not found.", 404)
+      throw new FileUploadSessionError("not_found", "File upload session not found.")
     }
 
     const nowMs = Date.now()
     if (isFileUploadSessionExpired(session, nowMs)) {
       this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("File upload session has expired.", 410)
+      throw new FileUploadSessionError("expired", "File upload session has expired.")
     }
 
     if (isTerminalFileUploadSessionExpired(session, nowMs)) {
       this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("File upload session not found.", 404)
+      throw new FileUploadSessionError("not_found", "File upload session not found.")
     }
 
     return session
@@ -81,19 +89,6 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
     const updated = {
       ...session,
       fileRef,
-    }
-    this.sessionsById.set(uploadId, updated)
-    return updated
-  }
-
-  async addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
-    const session = this.requirePending(uploadId)
-    const updated = {
-      ...session,
-      signedParts: [
-        ...session.signedParts.filter((candidate) => candidate.partNumber !== part.partNumber),
-        part,
-      ].sort((left, right) => left.partNumber - right.partNumber),
     }
     this.sessionsById.set(uploadId, updated)
     return updated
@@ -137,11 +132,14 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
   private requirePending(uploadId: string): FileUploadSession {
     const session = this.sessionsById.get(uploadId)
     if (!session) {
-      throw new FileUploadSessionError("File upload session not found.", 404)
+      throw new FileUploadSessionError("not_found", "File upload session not found.")
     }
 
     if (session.status !== "pending") {
-      throw new FileUploadSessionError(`File upload session is already ${session.status}.`, 409)
+      throw new FileUploadSessionError(
+        session.status === "completed" ? "already_completed" : "already_aborted",
+        `File upload session is already ${session.status}.`
+      )
     }
 
     return session

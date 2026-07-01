@@ -1,3 +1,4 @@
+import { blobIdFromDigest } from "./derive"
 import type {
   BlobDigest,
   BlobStorage,
@@ -25,6 +26,9 @@ export function isFileRef(value: unknown): value is FileRef {
     typeof value.blobId === "string" &&
     value.blobId.trim().length > 0 &&
     isBlobDigest(value.digest) &&
+    // Blob identity is content-addressed: the id must be derivable from the digest.
+    // Rejecting a mismatch guards against tampered or malformed references.
+    value.blobId === blobIdFromDigest(value.digest) &&
     typeof value.sizeBytes === "number" &&
     Number.isInteger(value.sizeBytes) &&
     value.sizeBytes >= 0 &&
@@ -40,7 +44,6 @@ export function supportsDirectUpload(
   const candidate = storage as Partial<DirectUploadBlobStorage>
   return (
     typeof candidate.createUpload === "function" &&
-    typeof candidate.signUploadPart === "function" &&
     typeof candidate.completeUpload === "function" &&
     typeof candidate.abortUpload === "function"
   )

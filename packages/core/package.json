@@ -41,6 +41,12 @@
       "import": "./dist/agents/streams.js",
       "default": "./dist/agents/streams.js"
     },
+    "./blob-storage": {
+      "types": "./dist/blob-storage/browser.d.ts",
+      "bun": "./src/blob-storage/browser.ts",
+      "import": "./dist/blob-storage/browser.js",
+      "default": "./dist/blob-storage/browser.js"
+    },
     "./testing": {
       "types": "./dist/testing/index.d.ts",
       "bun": "./src/testing/index.ts",

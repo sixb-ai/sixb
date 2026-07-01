@@ -1,5 +1,4 @@
 import { Buffer } from "node:buffer"
-import { createHash, createHmac } from "node:crypto"
 import {
   type AbortBlobUploadInput,
   type BlobByteRange,
@@ -19,13 +18,13 @@ import {
   type PutBlobInput,
   type RangeReadableBlobStorage,
   readBlobBody,
-  type SignBlobUploadPartInput,
-  type SignedBlobUploadPart,
 } from "@sixb/core"
 import { S3Client } from "bun"
+import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
 import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
 
 const MAX_PRESIGNED_URL_EXPIRES_SECONDS = 7 * 24 * 60 * 60 // 7 days
+const READ_URL_EXPIRES_SECONDS = 60
 
 export function normalizeS3BlobBasePath(basePath: string): string {
   return basePath
@@ -103,66 +102,6 @@ function defaultPathStyle(endpoint: string | undefined): boolean {
   } catch {
     return false
   }
-}
-
-function encodeRfc3986(value: string): string {
-  return encodeURIComponent(value).replace(
-    /[!'()*]/g,
-    (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`
-  )
-}
-
-function encodeS3Path(value: string): string {
-  return value.split("/").map(encodeRfc3986).join("/")
-}
-
-function canonicalQueryString(params: Record<string, string>): string {
-  return Object.entries(params)
-    .map(([key, value]) => [encodeRfc3986(key), encodeRfc3986(value)] as const)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, value]) => `${key}=${value}`)
-    .join("&")
-}
-
-function normalizeHeaderValue(value: string): string {
-  return value.trim().replace(/\s+/g, " ")
-}
-
-function canonicalSignedHeaders(headers: Readonly<Record<string, string>>): {
-  readonly canonicalHeaders: string
-  readonly signedHeaders: string
-} {
-  const entries = Object.entries(headers)
-    .map(([name, value]) => [name.toLowerCase(), normalizeHeaderValue(value)] as const)
-    .sort(([left], [right]) => left.localeCompare(right))
-
-  return {
-    canonicalHeaders: entries.map(([name, value]) => `${name}:${value}\n`).join(""),
-    signedHeaders: entries.map(([name]) => name).join(";"),
-  }
-}
-
-function formatAmzDate(date: Date): string {
-  return date.toISOString().replace(/[:-]|\.\d{3}/g, "")
-}
-
-function hmac(key: Buffer | string, value: string): Buffer {
-  return createHmac("sha256", key).update(value).digest()
-}
-
-function signingKey(input: {
-  readonly secretAccessKey: string
-  readonly dateStamp: string
-  readonly region: string
-}): Buffer {
-  const dateKey = hmac(`AWS4${input.secretAccessKey}`, input.dateStamp)
-  const regionKey = hmac(dateKey, input.region)
-  const serviceKey = hmac(regionKey, "s3")
-  return hmac(serviceKey, "aws4_request")
-}
-
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex")
 }
 
 function checksumBase64(digest: BlobDigest): string {
@@ -245,32 +184,40 @@ export class S3BlobStorage
       strategy: "direct-put",
       uploadId: input.uploadId,
       method: "PUT",
-      url: this.presignS3Request("PUT", stagingKey, headers, expiresIn),
+      url: this.presignUrl("PUT", stagingKey, headers, expiresIn),
       headers,
       expiresAt: input.expiresAt,
       stagingKey,
     }
   }
 
-  async signUploadPart(_input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart> {
-    throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
-  }
-
   async completeUpload(input: CompleteBlobUploadInput): Promise<FileRef> {
-    if (input.parts && input.parts.length > 0) {
-      throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
-    }
-
     if (!input.expectedDigest || input.expectedSizeBytes === undefined) {
       throw new BlobStorageError(
         "[BlobS3] Completing a direct staged upload requires an expected digest and size."
       )
     }
 
-    const stat = await this.client.stat(input.stagingKey)
-    if (stat.size !== input.expectedSizeBytes) {
+    const staged = await this.headStagedObject(input.stagingKey)
+    if (staged.sizeBytes !== input.expectedSizeBytes) {
       throw new BlobStorageError(
-        `[BlobS3] Staged upload '${input.uploadId}' size mismatch: expected ${input.expectedSizeBytes} bytes, received ${stat.size}.`
+        `[BlobS3] Staged upload '${input.uploadId}' size mismatch: expected ${input.expectedSizeBytes} bytes, received ${staged.sizeBytes}.`
+      )
+    }
+
+    // Fail closed on integrity: the presigned PUT required an x-amz-checksum-sha256, so the backend
+    // must report the same value it verified against the stored bytes. The bytes never transit Sixb,
+    // so this HEAD is the only proof they match the client-declared digest — without it we would be
+    // trusting unverified client input, which defeats the point of a content-addressed store.
+    const expectedChecksum = checksumBase64(input.expectedDigest)
+    if (staged.checksumSha256 === null) {
+      throw new BlobStorageError(
+        `[BlobS3] Staged upload '${input.uploadId}' has no backend-verified sha256 checksum; refusing to promote unverified bytes.`
+      )
+    }
+    if (staged.checksumSha256 !== expectedChecksum) {
+      throw new BlobStorageError(
+        `[BlobS3] Staged upload '${input.uploadId}' checksum mismatch: the stored object does not match the expected digest.`
       )
     }
 
@@ -304,12 +251,7 @@ export class S3BlobStorage
       throw new BlobStorageError(`[BlobS3] Invalid blob id '${blobId}'`)
     }
 
-    const key = this.contentKeyForHex(hex)
-    if (!(await this.stat(blobId))) {
-      throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
-    }
-
-    return this.client.file(key).stream()
+    return this.streamObject(blobId, this.contentKeyForHex(hex))
   }
 
   async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
@@ -318,15 +260,7 @@ export class S3BlobStorage
       throw new BlobStorageError(`[BlobS3] Invalid blob id '${blobId}'`)
     }
 
-    const key = this.contentKeyForHex(hex)
-    if (!(await this.stat(blobId))) {
-      throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
-    }
-
-    return this.client
-      .file(key)
-      .slice(range.start, range.endInclusive + 1)
-      .stream()
+    return this.streamObject(blobId, this.contentKeyForHex(hex), range)
   }
 
   async stat(blobId: string): Promise<BlobInfo | null> {
@@ -351,6 +285,53 @@ export class S3BlobStorage
     }
   }
 
+  // Single-request read: a signed GET (plus an optional, unsigned Range header) whose 404 maps to a
+  // clean not-found before any body is streamed, avoiding the extra HEAD round-trip a pre-stat adds.
+  private async streamObject(
+    blobId: string,
+    key: string,
+    range?: BlobByteRange
+  ): Promise<ReadableStream<Uint8Array>> {
+    const url = this.presignUrl("GET", key, {}, READ_URL_EXPIRES_SECONDS)
+    const response = await fetch(url, {
+      headers: range ? { range: `bytes=${range.start}-${range.endInclusive}` } : {},
+    })
+
+    if (response.status === 404) {
+      throw new BlobStorageError(`[BlobS3] Unknown blob '${blobId}'`)
+    }
+    if (!response.ok || !response.body) {
+      throw new BlobStorageError(
+        `[BlobS3] Failed to read blob '${blobId}': HTTP ${response.status}.`
+      )
+    }
+
+    return response.body
+  }
+
+  private async headStagedObject(
+    stagingKey: string
+  ): Promise<{ readonly sizeBytes: number; readonly checksumSha256: string | null }> {
+    const headers = { "x-amz-checksum-mode": "ENABLED" }
+    const url = this.presignUrl("HEAD", stagingKey, headers, READ_URL_EXPIRES_SECONDS)
+    const response = await fetch(url, { method: "HEAD", headers })
+
+    if (response.status === 404) {
+      throw new BlobStorageError(`[BlobS3] Staged upload object '${stagingKey}' was not found.`)
+    }
+    if (!response.ok) {
+      throw new BlobStorageError(
+        `[BlobS3] Failed to inspect staged upload '${stagingKey}': HTTP ${response.status}.`
+      )
+    }
+
+    const contentLength = response.headers.get("content-length")
+    return {
+      sizeBytes: contentLength === null ? Number.NaN : Number(contentLength),
+      checksumSha256: response.headers.get("x-amz-checksum-sha256"),
+    }
+  }
+
   private contentKeyForHex(hex: string): string {
     return s3BlobKeyForHex(this.basePath, hex)
   }
@@ -366,7 +347,7 @@ export class S3BlobStorage
       "x-amz-copy-source": this.copySourceHeader(sourceKey),
       ...(this.acl === undefined ? {} : { "x-amz-acl": this.acl }),
     }
-    const url = this.presignS3Request("PUT", destinationKey, headers, 60)
+    const url = this.presignUrl("PUT", destinationKey, headers, 60)
     const response = await fetch(url, {
       method: "PUT",
       headers,
@@ -392,74 +373,27 @@ export class S3BlobStorage
     )
   }
 
-  private presignS3Request(
-    method: "PUT",
+  private presignUrl(
+    method: string,
     key: string,
     headers: Readonly<Record<string, string>>,
-    expiresIn: number
+    expiresInSeconds: number
   ): string {
     const config = this.requireSigningConfig()
-    const url = this.objectUrl(key, config.bucket)
-    const amzDate = formatAmzDate(new Date())
-    const dateStamp = amzDate.slice(0, 8)
-    const scope = `${dateStamp}/${this.region}/s3/aws4_request`
-    const signingHeaders = {
-      ...headers,
-      host: url.host,
-    }
-    const { canonicalHeaders, signedHeaders } = canonicalSignedHeaders(signingHeaders)
-    const query: Record<string, string> = {
-      "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
-      "X-Amz-Credential": `${config.accessKeyId}/${scope}`,
-      "X-Amz-Date": amzDate,
-      "X-Amz-Expires": expiresIn.toString(),
-      "X-Amz-SignedHeaders": signedHeaders,
-      ...(this.sessionToken === undefined ? {} : { "X-Amz-Security-Token": this.sessionToken }),
-    }
-    const canonicalRequest = [
+    return presignS3Url({
       method,
-      url.pathname,
-      canonicalQueryString(query),
-      canonicalHeaders,
-      signedHeaders,
-      "UNSIGNED-PAYLOAD",
-    ].join("\n")
-    const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256Hex(canonicalRequest)].join(
-      "\n"
-    )
-    const signature = createHmac(
-      "sha256",
-      signingKey({
-        secretAccessKey: config.secretAccessKey,
-        dateStamp,
-        region: this.region,
-      })
-    )
-      .update(stringToSign)
-      .digest("hex")
-
-    url.search = canonicalQueryString({
-      ...query,
-      "X-Amz-Signature": signature,
+      key,
+      headers,
+      expiresInSeconds,
+      bucket: config.bucket,
+      accessKeyId: config.accessKeyId,
+      secretAccessKey: config.secretAccessKey,
+      region: this.region,
+      endpoint: this.endpoint,
+      pathStyle: this.pathStyle,
+      ...(this.sessionToken === undefined ? {} : { sessionToken: this.sessionToken }),
+      now: new Date(),
     })
-    return url.toString()
-  }
-
-  private objectUrl(key: string, bucket: string): URL {
-    const encodedKey = encodeS3Path(key)
-    if (!this.endpoint) {
-      return new URL(`https://${bucket}.s3.${this.region}.amazonaws.com/${encodedKey}`)
-    }
-
-    const base = new URL(this.endpoint.endsWith("/") ? this.endpoint : `${this.endpoint}/`)
-    if (this.pathStyle) {
-      return new URL(`${encodeRfc3986(bucket)}/${encodedKey}`, base)
-    }
-
-    base.hostname = `${bucket}.${base.hostname}`
-    base.pathname = `/${encodedKey}`
-    base.search = ""
-    return base
   }
 
   private requireSigningConfig(): {
