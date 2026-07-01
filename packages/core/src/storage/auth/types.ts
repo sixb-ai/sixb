@@ -553,6 +553,15 @@ export interface AuthInvitationStore {
 
 export interface AuthGroupMembershipStore {
   upsert(input: UpsertAuthGroupMembershipInput): Promise<GroupMembershipRecord>
+  /**
+   * Removes a single group membership. Returns the removed record, or `null` when
+   * no matching membership exists (including for a missing user). Idempotent.
+   */
+  remove(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly groupId: string
+  }): Promise<GroupMembershipRecord | null>
   listForUser(params: {
     readonly projectId: string
     readonly userId: string

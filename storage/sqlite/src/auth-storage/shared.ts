@@ -567,6 +567,31 @@ export function upsertGroupMembership(
   }
 }
 
+export function removeGroupMembership(
+  db: Database,
+  params: { readonly projectId: string; readonly userId: string; readonly groupId: string }
+): GroupMembershipRecord | null {
+  const projectId = assertNonEmpty(params.projectId, "Project id")
+  const userId = assertNonEmpty(params.userId, "User id")
+  const groupId = assertNonEmpty(params.groupId, "Group id")
+
+  const existing = getGroupMembership(db, { projectId, userId, groupId })
+  if (!existing) {
+    return null
+  }
+
+  db.query(
+    `
+    DELETE FROM auth_group_memberships
+    WHERE project_id = ?
+      AND user_id = ?
+      AND group_id = ?
+  `
+  ).run(projectId, userId, groupId)
+
+  return existing
+}
+
 export function getGroupMembership(
   db: Database,
   params: { readonly projectId: string; readonly userId: string; readonly groupId: string }

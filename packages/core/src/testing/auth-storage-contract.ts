@@ -485,6 +485,52 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
+    test("removes group memberships and is idempotent for missing rows", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "commercial",
+          source: "manual",
+          createdAt: at("2026-05-14T10:00:00.000Z"),
+        })
+
+        const removed = await storage.groupMemberships.remove({
+          projectId,
+          userId: "usr_1",
+          groupId: "commercial",
+        })
+        expect(removed).toMatchObject({
+          projectId,
+          userId: "usr_1",
+          groupId: "commercial",
+          source: "manual",
+        })
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toHaveLength(0)
+
+        // Removing an already-removed membership is a no-op that returns null.
+        await expect(
+          storage.groupMemberships.remove({ projectId, userId: "usr_1", groupId: "commercial" })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("returns null when removing a membership for a missing user", async () => {
+      await withStorage(async (storage) => {
+        await expect(
+          storage.groupMemberships.remove({
+            projectId,
+            userId: "usr_missing",
+            groupId: "commercial",
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
     test("manages service accounts and their group memberships", async () => {
       await withStorage(async (storage) => {
         const serviceAccount = await storage.serviceAccounts.create({

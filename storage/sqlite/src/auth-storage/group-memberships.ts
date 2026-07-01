@@ -7,13 +7,21 @@ import type {
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthGroupMembershipRow } from "./rows"
 import { rowToGroupMembershipRecord } from "./rows"
-import { listMembershipsForUser, upsertGroupMembership } from "./shared"
+import { listMembershipsForUser, removeGroupMembership, upsertGroupMembership } from "./shared"
 
 export class SqliteAuthGroupMembershipStore implements AuthGroupMembershipStore {
   constructor(private readonly db: Database) {}
 
   async upsert(input: UpsertAuthGroupMembershipInput): Promise<GroupMembershipRecord> {
     return runImmediateTransaction(this.db, () => upsertGroupMembership(this.db, input))
+  }
+
+  async remove(params: {
+    readonly projectId: string
+    readonly userId: string
+    readonly groupId: string
+  }): Promise<GroupMembershipRecord | null> {
+    return runImmediateTransaction(this.db, () => removeGroupMembership(this.db, params))
   }
 
   async listForUser(params: {
