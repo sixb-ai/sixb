@@ -11,6 +11,7 @@ import {
   erpProjectsDataset,
   erpTasksDataset,
 } from "../datasets/erp"
+import { createSampleAttachmentForDocument } from "../lib/sample-files"
 import { hourlyErpSync } from "../schedules/erp"
 
 const demoSyncDelayMs = parseDemoSyncDelayMs(process.env.ACME_SYNC_DELAY_MS)
@@ -65,7 +66,15 @@ export const syncErpProjectMembers = defineSync("sync-erp-project-members")
 export const syncErpDocuments = defineSync("sync-erp-documents")
   .when(syncFinished(syncErpProjectMembers.id))
   .from(acmeErpConnector)
-  .read((client) => readWithDemoDelay("documents", () => client.listDocuments()))
+  .read(async (client, context) => {
+    const rows = await readWithDemoDelay("documents", () => client.listDocuments())
+    return Promise.all(
+      rows.map(async (row) => {
+        const attachment = await createSampleAttachmentForDocument(context.blobs, row.id)
+        return attachment ? { ...row, attachment } : row
+      })
+    )
+  })
   .intoDataset(erpDocumentsDataset)
 
 export const syncErpInvoices = defineSync("sync-erp-invoices")

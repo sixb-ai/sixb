@@ -32,12 +32,14 @@ import { Fragment, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { ActionButton } from "../components/ActionButton"
 import { BackNav, LetterAvatar, LoadingState, Section } from "../components/common"
+import { FileRefAttachment } from "../components/objects/FileRefAttachment"
 import { TelemetryChart } from "../components/TelemetryChart"
 import { TelemetryValue } from "../components/TelemetryValue"
 import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
 import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
 import { useObjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
+import { type FileValueContext, isFileRefDisplayValue, isFileRefValue } from "../lib/files"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
@@ -782,7 +784,11 @@ export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPage
 
       {Object.keys(properties).length > 0 ? (
         <Section title="Details">
-          <DetailsList properties={properties} />
+          <DetailsList
+            objectTypeId={object.objectTypeId}
+            primaryId={object.primaryId}
+            properties={properties}
+          />
         </Section>
       ) : null}
 
@@ -877,7 +883,15 @@ function TelemetryDatePicker({
   )
 }
 
-function DetailsList({ properties }: { properties: Record<string, unknown> }) {
+function DetailsList({
+  objectTypeId,
+  primaryId,
+  properties,
+}: {
+  objectTypeId: string
+  primaryId: string
+  properties: Record<string, unknown>
+}) {
   const rows = useMemo(() => {
     const list: Array<{
       key: string
@@ -903,24 +917,36 @@ function DetailsList({ properties }: { properties: Record<string, unknown> }) {
   return (
     <Card className="p-4 sm:p-5">
       <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2.5 text-sm">
-        {rows.map((row) => (
-          <Fragment key={row.key}>
-            <dt className="flex items-baseline gap-1.5 text-xs text-muted-foreground">
-              <span>{row.label}</span>
-              {row.kind === "primary" ? (
-                <Badge
-                  variant="secondary"
-                  className="h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[9px] font-medium text-emerald-700 dark:text-emerald-400"
-                >
-                  id
-                </Badge>
-              ) : null}
-            </dt>
-            <dd className="min-w-0 text-foreground">
-              <FormattedValue value={row.value} />
-            </dd>
-          </Fragment>
-        ))}
+        {rows.map((row) => {
+          const fileValue = isFileRefDisplayValue(row.value)
+
+          return (
+            <Fragment key={row.key}>
+              <dt
+                className={cn(
+                  "flex gap-1.5 text-xs text-muted-foreground",
+                  fileValue ? "self-start items-start pt-2" : "items-baseline"
+                )}
+              >
+                <span>{row.label}</span>
+                {row.kind === "primary" ? (
+                  <Badge
+                    variant="secondary"
+                    className="h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[9px] font-medium text-emerald-700 dark:text-emerald-400"
+                  >
+                    id
+                  </Badge>
+                ) : null}
+              </dt>
+              <dd className={cn("min-w-0 text-foreground", fileValue && "self-start")}>
+                <FormattedValue
+                  value={row.value}
+                  fileContext={{ objectTypeId, primaryId, pathSegments: [row.key] }}
+                />
+              </dd>
+            </Fragment>
+          )
+        })}
       </dl>
     </Card>
   )
@@ -1021,7 +1047,33 @@ function RelatedObjectLink({
   )
 }
 
-function FormattedValue({ value }: { value: unknown }) {
+function FormattedValue({
+  value,
+  fileContext,
+}: {
+  value: unknown
+  fileContext?: FileValueContext
+}) {
+  if (fileContext && isFileRefValue(value)) {
+    return <FileRefAttachment fileRef={value} {...fileContext} />
+  }
+
+  if (fileContext && Array.isArray(value) && value.length > 0 && value.every(isFileRefValue)) {
+    return (
+      <div className="flex min-w-0 flex-col gap-2">
+        {value.map((fileRef, index) => (
+          <FileRefAttachment
+            key={`${fileRef.blobId}:${index}`}
+            fileRef={fileRef}
+            objectTypeId={fileContext.objectTypeId}
+            primaryId={fileContext.primaryId}
+            pathSegments={[...fileContext.pathSegments, String(index)]}
+          />
+        ))}
+      </div>
+    )
+  }
+
   if (isIsoDateString(value)) {
     return <span title={value}>{formatIsoDate(value)}</span>
   }
