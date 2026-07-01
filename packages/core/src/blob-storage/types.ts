@@ -76,11 +76,37 @@ export interface DirectPutBlobUploadSession {
   readonly providerUploadId?: string
 }
 
-// Only the direct-PUT staged upload strategy is supported. A multipart capability
-// (mirroring RangeReadableBlobStorage/supportsRangeRead) can be reintroduced as its
-// own interface once a provider backs it; keeping the union alias makes that a
-// one-line change without churning every consumer.
-export type BlobUploadSession = DirectPutBlobUploadSession
+export interface MultipartBlobUploadSession {
+  readonly strategy: "multipart"
+  readonly uploadId: string
+  readonly partSizeBytes: number
+  readonly expiresAt: Date
+  readonly stagingKey: string
+  readonly providerUploadId: string
+}
+
+export type BlobUploadSession = DirectPutBlobUploadSession | MultipartBlobUploadSession
+
+export interface SignBlobUploadPartInput {
+  readonly uploadId: string
+  readonly stagingKey: string
+  readonly providerUploadId?: string
+  readonly partNumber: number
+  readonly expiresAt: Date
+}
+
+export interface SignedBlobUploadPart {
+  readonly partNumber: number
+  readonly method: "PUT"
+  readonly url: string
+  readonly headers: Readonly<Record<string, string>>
+  readonly expiresAt: Date
+}
+
+export interface BlobUploadPart {
+  readonly partNumber: number
+  readonly etag: string
+}
 
 export interface CompleteBlobUploadInput {
   readonly uploadId: string
@@ -91,6 +117,7 @@ export interface CompleteBlobUploadInput {
   readonly logicalPath?: string
   readonly expectedSizeBytes?: number
   readonly expectedDigest?: BlobDigest
+  readonly parts?: readonly BlobUploadPart[]
 }
 
 export interface AbortBlobUploadInput {
@@ -101,6 +128,7 @@ export interface AbortBlobUploadInput {
 
 export interface DirectUploadBlobStorage {
   createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession>
+  signUploadPart(input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart>
   completeUpload(input: CompleteBlobUploadInput): Promise<FileRef>
   abortUpload(input: AbortBlobUploadInput): Promise<void>
 }

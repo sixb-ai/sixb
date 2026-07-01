@@ -18,6 +18,8 @@ import {
   type PutBlobInput,
   type RangeReadableBlobStorage,
   readBlobBody,
+  type SignBlobUploadPartInput,
+  type SignedBlobUploadPart,
 } from "@sixb/core"
 import { S3Client } from "bun"
 import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
@@ -191,7 +193,15 @@ export class S3BlobStorage
     }
   }
 
+  async signUploadPart(_input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart> {
+    throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
+  }
+
   async completeUpload(input: CompleteBlobUploadInput): Promise<FileRef> {
+    if (input.parts && input.parts.length > 0) {
+      throw new BlobStorageError("[BlobS3] Multipart staged uploads are not supported yet.")
+    }
+
     if (!input.expectedDigest || input.expectedSizeBytes === undefined) {
       throw new BlobStorageError(
         "[BlobS3] Completing a direct staged upload requires an expected digest and size."

@@ -13,13 +13,17 @@ export type {
   AbortBlobUploadInput,
   BlobByteRange,
   BlobStorage,
+  BlobUploadPart,
   BlobUploadSession,
   CompleteBlobUploadInput,
   CreateBlobUploadInput,
   DirectPutBlobUploadSession,
   DirectUploadBlobStorage,
+  MultipartBlobUploadSession,
   PutBlobInput,
   RangeReadableBlobStorage,
+  SignBlobUploadPartInput,
+  SignedBlobUploadPart,
 } from "./types"
 export { computeBlobDigest, createFileRef, readBlobBody } from "./utils"
 export { supportsDirectUpload, supportsRangeRead } from "./validation"

@@ -889,14 +889,18 @@ export type {
   BlobDigest,
   BlobInfo,
   BlobStorage,
+  BlobUploadPart,
   BlobUploadSession,
   CompleteBlobUploadInput,
   CreateBlobUploadInput,
   DirectPutBlobUploadSession,
   DirectUploadBlobStorage,
   FileRef,
+  MultipartBlobUploadSession,
   PutBlobInput,
   RangeReadableBlobStorage,
+  SignBlobUploadPartInput,
+  SignedBlobUploadPart,
 } from "./blob-storage"
 export {
   BlobStorageError,

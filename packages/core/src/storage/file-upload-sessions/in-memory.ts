@@ -1,5 +1,5 @@
 import type { Principal } from "../../auth"
-import type { FileRef } from "../../blob-storage"
+import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
 import { FileUploadSessionError } from "./errors"
 import type {
   CreateFileUploadSessionInput,
@@ -56,6 +56,7 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
         : { expectedSizeBytes: input.expectedSizeBytes }),
       ...(input.expectedDigest === undefined ? {} : { expectedDigest: input.expectedDigest }),
       ...(input.providerUpload === undefined ? {} : { providerUpload: input.providerUpload }),
+      signedParts: [],
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     }
@@ -89,6 +90,19 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
     const updated = {
       ...session,
       fileRef,
+    }
+    this.sessionsById.set(uploadId, updated)
+    return updated
+  }
+
+  async addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
+    const session = this.requirePending(uploadId)
+    const updated = {
+      ...session,
+      signedParts: [
+        ...session.signedParts.filter((candidate) => candidate.partNumber !== part.partNumber),
+        part,
+      ].sort((left, right) => left.partNumber - right.partNumber),
     }
     this.sessionsById.set(uploadId, updated)
     return updated

@@ -44,6 +44,7 @@ export function supportsDirectUpload(
   const candidate = storage as Partial<DirectUploadBlobStorage>
   return (
     typeof candidate.createUpload === "function" &&
+    typeof candidate.signUploadPart === "function" &&
     typeof candidate.completeUpload === "function" &&
     typeof candidate.abortUpload === "function"
   )
