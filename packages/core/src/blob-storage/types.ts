@@ -2,6 +2,12 @@ export type BlobDigest = `sha256:${string}`
 
 /**
  * Dataset-safe reference to immutable blob bytes stored outside lake rows.
+ *
+ * `blobId`, `digest`, and `sizeBytes` are the blob's content-addressed identity:
+ * `blobId` is always `blob_<sha256 hex>` derived from `digest`. `fileName`,
+ * `mediaType`, and `logicalPath` are caller-supplied per-reference metadata (not
+ * part of blob identity) and are untrusted — consumers must sanitize them before
+ * using them for paths, headers, or rendering.
  */
 export interface FileRef {
   readonly blobId: string
@@ -35,6 +41,11 @@ export interface BlobStorage {
   stat(blobId: string): Promise<BlobInfo | null>
 }
 
+/**
+ * Inclusive byte range `[start, endInclusive]` (both offsets are part of the
+ * requested slice), matching HTTP `Range: bytes=start-end` semantics. Callers
+ * validate the bounds against the blob size before requesting a range.
+ */
 export interface BlobByteRange {
   readonly start: number
   readonly endInclusive: number
@@ -65,37 +76,11 @@ export interface DirectPutBlobUploadSession {
   readonly providerUploadId?: string
 }
 
-export interface MultipartBlobUploadSession {
-  readonly strategy: "multipart"
-  readonly uploadId: string
-  readonly partSizeBytes: number
-  readonly expiresAt: Date
-  readonly stagingKey: string
-  readonly providerUploadId: string
-}
-
-export type BlobUploadSession = DirectPutBlobUploadSession | MultipartBlobUploadSession
-
-export interface SignBlobUploadPartInput {
-  readonly uploadId: string
-  readonly stagingKey: string
-  readonly providerUploadId?: string
-  readonly partNumber: number
-  readonly expiresAt: Date
-}
-
-export interface SignedBlobUploadPart {
-  readonly partNumber: number
-  readonly method: "PUT"
-  readonly url: string
-  readonly headers: Readonly<Record<string, string>>
-  readonly expiresAt: Date
-}
-
-export interface BlobUploadPart {
-  readonly partNumber: number
-  readonly etag: string
-}
+// Only the direct-PUT staged upload strategy is supported. A multipart capability
+// (mirroring RangeReadableBlobStorage/supportsRangeRead) can be reintroduced as its
+// own interface once a provider backs it; keeping the union alias makes that a
+// one-line change without churning every consumer.
+export type BlobUploadSession = DirectPutBlobUploadSession
 
 export interface CompleteBlobUploadInput {
   readonly uploadId: string
@@ -106,7 +91,6 @@ export interface CompleteBlobUploadInput {
   readonly logicalPath?: string
   readonly expectedSizeBytes?: number
   readonly expectedDigest?: BlobDigest
-  readonly parts?: readonly BlobUploadPart[]
 }
 
 export interface AbortBlobUploadInput {
@@ -117,7 +101,6 @@ export interface AbortBlobUploadInput {
 
 export interface DirectUploadBlobStorage {
   createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession>
-  signUploadPart(input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart>
   completeUpload(input: CompleteBlobUploadInput): Promise<FileRef>
   abortUpload(input: AbortBlobUploadInput): Promise<void>
 }

@@ -1,3 +1,4 @@
+import { blobIdFromDigest } from "./derive"
 import { BlobStorageError } from "./errors"
 import type {
   BlobByteRange,
@@ -7,7 +8,7 @@ import type {
   PutBlobInput,
   RangeReadableBlobStorage,
 } from "./types"
-import { blobIdFromDigest, computeBlobDigest, createFileRef, readBlobBody } from "./utils"
+import { computeBlobDigest, createFileRef, readBlobBody } from "./utils"
 
 type StoredBlob = {
   readonly bytes: Uint8Array

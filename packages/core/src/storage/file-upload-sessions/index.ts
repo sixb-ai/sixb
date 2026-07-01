@@ -1,3 +1,4 @@
+export type { FileUploadSessionErrorReason } from "./errors"
 export { FileUploadSessionError } from "./errors"
 export { InMemoryFileUploadSessions } from "./in-memory"
 export type {
@@ -14,6 +15,5 @@ export {
   DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
   isFileUploadSessionExpired,
   isTerminalFileUploadSessionExpired,
-  principalKey,
   shouldDeleteFileUploadSession,
 } from "./utils"

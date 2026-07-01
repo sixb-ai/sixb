@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { createReadStream } from "node:fs"
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises"
+import { mkdir, rename, stat, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { Readable } from "node:stream"
 import {
@@ -67,8 +67,8 @@ export class LocalBlobStorage implements BlobStorage, RangeReadableBlobStorage {
 
   async open(blobId: string): Promise<ReadableStream<Uint8Array>> {
     const contentPath = await this.requireContentPath(blobId)
-    const bytes = await readFile(contentPath)
-    return new Blob([new Uint8Array(bytes)]).stream()
+    // Stream from disk rather than buffering the whole blob into memory (mirrors openRange).
+    return Readable.toWeb(createReadStream(contentPath)) as unknown as ReadableStream<Uint8Array>
   }
 
   async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
