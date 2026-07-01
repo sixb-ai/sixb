@@ -43,11 +43,14 @@ export function Composer({
   }, [draftNonce])
 
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
+  // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
+  // render a scrollbar in browsers configured to always show scroll bars.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure whenever the text changes
   useLayoutEffect(() => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = "auto"
+    el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden"
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT_PX)}px`
   }, [value])
 
@@ -98,7 +101,7 @@ export function Composer({
             rows={1}
             placeholder={placeholder ?? "Send a message…"}
             aria-label="Message"
-            className="max-h-[200px] min-h-9 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-0 py-1.5 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
+            className="max-h-[200px] min-h-9 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1.5 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
           />
           <button
             type="button"
