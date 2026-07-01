@@ -87,6 +87,19 @@ export class SessionCache {
     this.entries.delete(sessionId)
   }
 
+  /**
+   * Drop every cached session for a user. Call this after a change that alters how
+   * the user's session resolves (group reassignment, suspension) so the next request
+   * re-reads storage instead of serving a stale principal.
+   */
+  invalidateUser(userId: string): void {
+    for (const [sessionId, entry] of this.entries) {
+      if (entry.session.user.id === userId) {
+        this.entries.delete(sessionId)
+      }
+    }
+  }
+
   clear(): void {
     this.entries.clear()
   }

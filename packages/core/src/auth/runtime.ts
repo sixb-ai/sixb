@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto"
 import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
 import {
   canPerformMembershipOperation,
+  type MembershipOperation,
+  type MembershipPolicyScope,
   missingMembershipGroupIds,
   resolveMembershipPolicyScope,
   type SecurityRegistry,
@@ -14,6 +16,7 @@ import {
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
   type ServiceAccountRecord,
+  type UserRecord,
 } from "../storage/auth"
 import { paginate } from "../storage/pagination"
 import {
@@ -47,7 +50,9 @@ import type {
   DisableServiceAccountInput,
   DisableServiceAccountResult,
   GetInvitationOptionsResult,
+  GetMembershipOptionsResult,
   InvitationDeliveryAuthStrategy,
+  InvitationGroupOption,
   InvitationRecipientStatus,
   InviteDeliveryResult,
   InviteDeliveryStatus,
@@ -56,11 +61,16 @@ import type {
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
+  ListMembersInput,
+  ListMembersResult,
   ListPersonalAccessTokensResult,
   ListServiceAccountAccessTokensInput,
   ListServiceAccountAccessTokensResult,
   ListServiceAccountsResult,
+  MemberSummary,
   Principal,
+  ReactivateMemberInput,
+  ReactivateMemberResult,
   ResolvedAuthConfig,
   RevokeAccessTokenResult,
   RevokeInvitationInput,
@@ -70,6 +80,10 @@ import type {
   RevokeServiceAccountAccessTokenResult,
   SecurityContext,
   SixbAuthConfig,
+  SuspendMemberInput,
+  SuspendMemberResult,
+  UpdateMemberGroupsInput,
+  UpdateMemberGroupsResult,
 } from "./types"
 import {
   assertNonEmpty,
@@ -845,14 +859,7 @@ export class AuthRuntime {
     const session = await this.requireUser(request, options)
     const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
     const inviteScope = scope.operations.invite
-    const groups = this.security
-      .getGroupDefinitions()
-      .filter((group) => inviteScope.groupIds.has(group.id))
-      .map((group) => ({
-        id: group.id,
-        ...(group.label !== undefined ? { label: group.label } : {}),
-        ...(group.description !== undefined ? { description: group.description } : {}),
-      }))
+    const groups = this.scopedGroupOptions(inviteScope.groupIds)
     const hasInviteMembershipPolicy = inviteScope.policyIds.length > 0
 
     return {
@@ -864,6 +871,257 @@ export class AuthRuntime {
         }),
       },
     }
+  }
+
+  async getMembershipOptions(
+    request: Request,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<GetMembershipOptionsResult> {
+    const session = await this.requireUser(request, options)
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+
+    return {
+      // The member-admin edit-groups dialog assigns from the `assignGroups` scope.
+      groups: this.scopedGroupOptions(scope.operations.assignGroups.groupIds),
+      capabilities: {
+        invite: scope.operations.invite.policyIds.length > 0,
+        assignGroups: scope.operations.assignGroups.policyIds.length > 0,
+        suspend: scope.operations.suspend.policyIds.length > 0,
+      },
+    }
+  }
+
+  async listMembers(
+    request: Request,
+    input: ListMembersInput = {},
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<ListMembersResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const { limit, offset } = normalizePagination(input)
+
+    // First slice loads all users, attaches groups, then filters and paginates in
+    // memory. Adequate for expected member counts; revisit with indexed queries if
+    // projects grow large.
+    const result = await storage.users.list({ projectId: this.projectId, order: input.order })
+
+    const members: MemberSummary[] = []
+    for (const user of result.users) {
+      const groupIds = (
+        await storage.groupMemberships.listForUser({ projectId: this.projectId, userId: user.id })
+      ).map((membership) => membership.groupId)
+
+      // Visibility is scope-based: a member is listed when the caller can assign
+      // groups or suspend over the member's current groups. This keeps out-of-scope
+      // users' emails, status, and group shape hidden.
+      const canAssignGroups = canPerformMembershipOperation(scope, "assignGroups", groupIds)
+      const canSuspendScope = canPerformMembershipOperation(scope, "suspend", groupIds)
+      if (!canAssignGroups && !canSuspendScope) {
+        continue
+      }
+
+      const isSelf = user.id === session.user.id
+      members.push({
+        user,
+        groupIds,
+        capabilities: {
+          assignGroups: canAssignGroups,
+          // A caller cannot suspend themselves; reactivation only applies to a
+          // suspended member and never restores sessions.
+          suspend: canSuspendScope && !isSelf && user.status === "active",
+          reactivate: canSuspendScope && user.status === "suspended",
+        },
+      })
+    }
+
+    const page = paginate(members, { limit, offset })
+    return { members: page.page, hasMore: page.hasMore, total: page.total }
+  }
+
+  async updateMemberGroups(
+    request: Request,
+    input: UpdateMemberGroupsInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<UpdateMemberGroupsResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const userId = assertNonEmpty(input.userId, "User id")
+
+    // The target must exist and every group it currently holds must be assignable
+    // by the caller. Missing and out-of-scope targets raise the same error so a
+    // caller cannot probe which users exist.
+    const { user, groupIds: currentGroupIds } = await this.requireManageableMember(
+      storage,
+      scope,
+      "assignGroups",
+      userId
+    )
+
+    const requestedGroupIds = this.resolveMemberGroupIds(input.groupIds)
+    // Every requested group must fall within the caller's assign scope.
+    const missing = missingMembershipGroupIds(scope, "assignGroups", requestedGroupIds)
+    if (missing.length > 0) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        `[Sixb] The current user is not allowed to assign group(s): ${missing.join(", ")}.`
+      )
+    }
+
+    const current = new Set(currentGroupIds)
+    const requested = new Set(requestedGroupIds)
+    const additions = requestedGroupIds.filter((groupId) => !current.has(groupId))
+    const removals = currentGroupIds.filter((groupId) => !requested.has(groupId))
+
+    // Self-protection: a caller may add in-scope groups to themselves but may not
+    // remove any of their own current groups, so they cannot lock themselves out.
+    if (user.id === session.user.id && removals.length > 0) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        "[Sixb] The current user cannot remove their own groups."
+      )
+    }
+
+    const now = new Date()
+    for (const groupId of additions) {
+      await storage.groupMemberships.upsert({
+        projectId: this.projectId,
+        userId: user.id,
+        groupId,
+        source: "manual",
+        createdAt: now,
+      })
+    }
+    for (const groupId of removals) {
+      await storage.groupMemberships.remove({
+        projectId: this.projectId,
+        userId: user.id,
+        groupId,
+      })
+    }
+
+    // The user's cached session carries its old groups; drop it so the next
+    // request resolves the updated membership.
+    this.invalidateUserSessions(user.id)
+
+    const groupIds = (
+      await storage.groupMemberships.listForUser({ projectId: this.projectId, userId: user.id })
+    ).map((membership) => membership.groupId)
+
+    return { user, groupIds }
+  }
+
+  async suspendMember(
+    request: Request,
+    input: SuspendMemberInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<SuspendMemberResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const userId = assertNonEmpty(input.userId, "User id")
+    const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
+
+    if (user.id === session.user.id) {
+      throw new AuthRuntimeError(
+        "authorization_denied",
+        "[Sixb] The current user cannot suspend themselves."
+      )
+    }
+
+    const suspended = await storage.suspendUserAndRevokeSessions({
+      projectId: this.projectId,
+      userId: user.id,
+      suspendedAt: new Date(),
+    })
+    // Storage revoked the user's sessions; drop cached copies so the suspended
+    // user stops authenticating immediately.
+    this.invalidateUserSessions(user.id)
+
+    return { user: suspended, groupIds }
+  }
+
+  async reactivateMember(
+    request: Request,
+    input: ReactivateMemberInput,
+    options: AuthSessionResolutionOptions = {}
+  ): Promise<ReactivateMemberResult> {
+    const session = await this.requireUser(request, options)
+    const storage = this.requireAuthStorage()
+    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const userId = assertNonEmpty(input.userId, "User id")
+    const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
+
+    // Reactivation restores access but not sessions; the user signs in again.
+    const reactivated = await storage.users.updateStatus({
+      projectId: this.projectId,
+      id: user.id,
+      status: "active",
+      updatedAt: new Date(),
+    })
+
+    return { user: reactivated, groupIds }
+  }
+
+  /** Drop cached sessions for a user after a membership or status change. */
+  invalidateUserSessions(userId: string): void {
+    this.sessionCache?.invalidateUser(userId)
+  }
+
+  private scopedGroupOptions(groupIds: ReadonlySet<string>): InvitationGroupOption[] {
+    return this.security
+      .getGroupDefinitions()
+      .filter((group) => groupIds.has(group.id))
+      .map((group) => ({
+        id: group.id,
+        ...(group.label !== undefined ? { label: group.label } : {}),
+        ...(group.description !== undefined ? { description: group.description } : {}),
+      }))
+  }
+
+  /**
+   * Resolve a member the caller may act on for the given operation.
+   *
+   * A member is manageable only when every group they currently hold is within
+   * the caller's scope for that operation (a group-less member is manageable by
+   * any holder of the operation). Missing and out-of-scope members raise the same
+   * error so callers cannot probe which users exist or how they are grouped.
+   */
+  private async requireManageableMember(
+    storage: AuthStorage,
+    scope: MembershipPolicyScope,
+    operation: MembershipOperation,
+    userId: string
+  ): Promise<{ readonly user: UserRecord; readonly groupIds: readonly string[] }> {
+    const user = await storage.users.getById({ projectId: this.projectId, id: userId })
+    const groupIds = user
+      ? (await storage.groupMemberships.listForUser({ projectId: this.projectId, userId })).map(
+          (membership) => membership.groupId
+        )
+      : []
+
+    if (!user || !canPerformMembershipOperation(scope, operation, groupIds)) {
+      throw new AuthStorageError(
+        "missing_user",
+        `[Sixb] User '${userId}' not found for project '${this.projectId}'.`
+      )
+    }
+
+    return { user, groupIds }
+  }
+
+  private resolveMemberGroupIds(input: readonly string[]): readonly string[] {
+    const groupIds = [...new Set(input.map((groupId) => assertNonEmpty(groupId, "Group id")))]
+    for (const groupId of groupIds) {
+      if (!this.security.getGroupById(groupId)) {
+        throw new AuthRuntimeError(
+          "invalid_auth_input",
+          `[Sixb] Unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
+        )
+      }
+    }
+    return groupIds
   }
 
   async invite(

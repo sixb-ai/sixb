@@ -223,6 +223,77 @@ export interface GetInvitationOptionsResult {
   }
 }
 
+/**
+ * Which membership operations the caller holds at least one policy for. Coarse,
+ * caller-wide capabilities used to gate top-level UI affordances; per-target
+ * checks (scope over a member's current groups, self-protection) are finer.
+ */
+export interface MembershipOperationCapabilities {
+  readonly invite: boolean
+  readonly assignGroups: boolean
+  readonly suspend: boolean
+}
+
+export interface GetMembershipOptionsResult {
+  /** Groups the caller may assign to a member (the `assignGroups` scope). */
+  readonly groups: readonly InvitationGroupOption[]
+  readonly capabilities: MembershipOperationCapabilities
+}
+
+export interface ListMembersInput {
+  readonly limit?: number
+  readonly offset?: number
+  readonly order?: "asc" | "desc"
+}
+
+/** Per-target actions the caller may take on a member, after self-protection. */
+export interface MemberCapabilities {
+  readonly assignGroups: boolean
+  readonly suspend: boolean
+  readonly reactivate: boolean
+}
+
+export interface MemberSummary {
+  readonly user: UserRecord
+  readonly groupIds: readonly string[]
+  readonly capabilities: MemberCapabilities
+}
+
+export interface ListMembersResult {
+  readonly members: readonly MemberSummary[]
+  readonly hasMore: boolean
+  readonly total: number
+}
+
+export interface UpdateMemberGroupsInput {
+  readonly userId: string
+  /** The desired full set of groups; additions and removals are derived from it. */
+  readonly groupIds: readonly string[]
+}
+
+export interface UpdateMemberGroupsResult {
+  readonly user: UserRecord
+  readonly groupIds: readonly string[]
+}
+
+export interface SuspendMemberInput {
+  readonly userId: string
+}
+
+export interface SuspendMemberResult {
+  readonly user: UserRecord
+  readonly groupIds: readonly string[]
+}
+
+export interface ReactivateMemberInput {
+  readonly userId: string
+}
+
+export interface ReactivateMemberResult {
+  readonly user: UserRecord
+  readonly groupIds: readonly string[]
+}
+
 export type AuthCredentialSource = "session" | "accessToken" | "any"
 
 export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
