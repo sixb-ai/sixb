@@ -1,11 +1,4 @@
-export interface FileRefValue {
-  readonly blobId: string
-  readonly digest: string
-  readonly sizeBytes: number
-  readonly fileName?: string
-  readonly mediaType?: string
-  readonly logicalPath?: string
-}
+import { type FileRef, isFileRef } from "@sixb/core/blob-storage"
 
 export interface FileValueContext {
   readonly objectTypeId: string
@@ -13,34 +6,33 @@ export interface FileValueContext {
   readonly pathSegments: readonly string[]
 }
 
-export function isFileRefValue(value: unknown): value is FileRefValue {
-  return (
-    isRecord(value) &&
-    typeof value.blobId === "string" &&
-    typeof value.digest === "string" &&
-    typeof value.sizeBytes === "number" &&
-    Number.isFinite(value.sizeBytes) &&
-    (value.fileName === undefined || typeof value.fileName === "string") &&
-    (value.mediaType === undefined || typeof value.mediaType === "string") &&
-    (value.logicalPath === undefined || typeof value.logicalPath === "string")
-  )
-}
+/**
+ * How an object property value should render as file attachments. This is the
+ * single source of truth shared by the detail layout (does this row need
+ * attachment spacing?) and the value renderer (one attachment vs. a list), so
+ * the two can never disagree about what counts as a file. It also carries the
+ * narrowed `FileRef`(s) so callers render without re-checking or casting.
+ */
+export type FileValueClassification =
+  | { readonly kind: "single"; readonly fileRef: FileRef }
+  | { readonly kind: "array"; readonly fileRefs: readonly FileRef[] }
+  | { readonly kind: "none" }
 
-export function isFileRefDisplayValue(value: unknown): boolean {
-  return (
-    isFileRefValue(value) ||
-    (Array.isArray(value) && value.length > 0 && value.every(isFileRefValue))
-  )
-}
-
-export function fileRefName(fileRef: FileRefValue): string {
-  const fileName = pathTail(fileRef.fileName)
-  if (fileName) return fileName
-
-  const logicalPathName = pathTail(fileRef.logicalPath)
-  if (logicalPathName) return logicalPathName
-
-  return `${fileRef.blobId}.bin`
+export function classifyFileValue(value: unknown): FileValueClassification {
+  if (isFileRef(value)) {
+    return { kind: "single", fileRef: value }
+  }
+  // Bind to `unknown[]` (not the `any[]` that `Array.isArray` yields) so
+  // `every(isFileRef)` genuinely narrows `items` to `FileRef[]`. This makes the
+  // runtime guard load-bearing at the type level too: dropping it would fail to
+  // compile rather than silently letting non-FileRef elements through.
+  if (Array.isArray(value)) {
+    const items: readonly unknown[] = value
+    if (items.length > 0 && items.every(isFileRef)) {
+      return { kind: "array", fileRefs: items }
+    }
+  }
+  return { kind: "none" }
 }
 
 export function fileMediaLabel(mediaType: string | undefined, fileName: string): string {
@@ -93,16 +85,6 @@ export function objectFileContentUrl(input: {
   return url.toString()
 }
 
-function pathTail(value: string | undefined): string | null {
-  const trimmed = value?.trim()
-  if (!trimmed) return null
-  return trimmed.split(/[\\/]/).filter(Boolean).at(-1) ?? null
-}
-
 function jsonPointerSegment(value: string): string {
   return value.replace(/~/g, "~0").replace(/\//g, "~1")
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { type FileRef, fileNameFor } from "@sixb/core/blob-storage"
 import {
-  type FileRefValue,
+  classifyFileValue,
   fileMediaLabel,
-  fileRefName,
   formatFileSize,
-  isFileRefDisplayValue,
   objectFileContentUrl,
 } from "../src/lib/files"
 
-const fileRef: FileRefValue = {
+const fileRef: FileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   sizeBytes: 7789,
@@ -18,11 +17,15 @@ const fileRef: FileRefValue = {
 }
 
 describe("Atlas file helpers", () => {
-  test("detects FileRef display values", () => {
-    expect(isFileRefDisplayValue(fileRef)).toBe(true)
-    expect(isFileRefDisplayValue([fileRef])).toBe(true)
-    expect(isFileRefDisplayValue([])).toBe(false)
-    expect(isFileRefDisplayValue({ ...fileRef, sizeBytes: "7789" })).toBe(false)
+  test("classifies single, array, and non-file values with narrowed refs", () => {
+    expect(classifyFileValue(fileRef)).toEqual({ kind: "single", fileRef })
+    expect(classifyFileValue([fileRef])).toEqual({ kind: "array", fileRefs: [fileRef] })
+    expect(classifyFileValue([]).kind).toBe("none")
+    expect(classifyFileValue({ ...fileRef, sizeBytes: "7789" }).kind).toBe("none")
+    // A blobId that is not derivable from the digest is not a valid reference.
+    expect(classifyFileValue({ ...fileRef, blobId: "blob_tampered" }).kind).toBe("none")
+    // A mixed array is not treated as a file list.
+    expect(classifyFileValue([fileRef, "not-a-file"]).kind).toBe("none")
   })
 
   test("builds object-bound file content URLs with JSON pointer escaping", () => {
@@ -42,8 +45,8 @@ describe("Atlas file helpers", () => {
   })
 
   test("formats file names, media labels, and sizes", () => {
-    expect(fileRefName(fileRef)).toBe("download.jpeg")
-    expect(fileRefName({ ...fileRef, fileName: undefined, logicalPath: "reports/q3.pdf" })).toBe(
+    expect(fileNameFor(fileRef)).toBe("download.jpeg")
+    expect(fileNameFor({ ...fileRef, fileName: undefined, logicalPath: "reports/q3.pdf" })).toBe(
       "q3.pdf"
     )
     expect(fileMediaLabel("application/pdf", "q3.pdf")).toBe("PDF")
