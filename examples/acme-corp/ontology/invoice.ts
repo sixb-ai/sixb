@@ -36,6 +36,9 @@ export const Invoice = defineObjectType({
     prop("reminderReviewRequestedAt", "timestamp"),
     prop("reminderReviewedAt", "timestamp"),
     prop("reminderReviewerNote", "string"),
+    prop("sourceFile", "fileRef"),
+    prop("sourceFileAttachedAt", "timestamp"),
+    prop("sourceFileNote", "string"),
     prop("paymentInfo", {
       type: "object",
       properties: {

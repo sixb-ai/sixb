@@ -27,6 +27,7 @@ import {
   facetObjects,
   getAction,
   getActionRun,
+  getActionRunFileContent,
   getAgent,
   getAgentRun,
   getAgentThread,
@@ -53,7 +54,9 @@ import {
   getTelemetryHistory,
   getWorkflow,
   getWorkflowIntervention,
+  getWorkflowNodeRunFileContent,
   getWorkflowRun,
+  getWorkflowRunFileContent,
   listActionRuns,
   listActions,
   listAgents,
@@ -160,6 +163,9 @@ import type {
   GetActionResponse,
   GetActionRunData,
   GetActionRunError,
+  GetActionRunFileContentData,
+  GetActionRunFileContentError,
+  GetActionRunFileContentResponse,
   GetActionRunResponse,
   GetAgentData,
   GetAgentError,
@@ -235,9 +241,15 @@ import type {
   GetWorkflowInterventionData,
   GetWorkflowInterventionError,
   GetWorkflowInterventionResponse,
+  GetWorkflowNodeRunFileContentData,
+  GetWorkflowNodeRunFileContentError,
+  GetWorkflowNodeRunFileContentResponse,
   GetWorkflowResponse,
   GetWorkflowRunData,
   GetWorkflowRunError,
+  GetWorkflowRunFileContentData,
+  GetWorkflowRunFileContentError,
+  GetWorkflowRunFileContentResponse,
   GetWorkflowRunResponse,
   ListActionRunsData,
   ListActionRunsError,
@@ -2047,6 +2059,60 @@ export const getWorkflowRunOptions = (options: Options<GetWorkflowRunData>) =>
     queryKey: getWorkflowRunQueryKey(options),
   })
 
+export const getWorkflowRunFileContentQueryKey = (
+  options: Options<GetWorkflowRunFileContentData>
+) => createQueryKey("getWorkflowRunFileContent", options)
+
+/**
+ * Get workflow run file content
+ */
+export const getWorkflowRunFileContentOptions = (options: Options<GetWorkflowRunFileContentData>) =>
+  queryOptions<
+    GetWorkflowRunFileContentResponse,
+    GetWorkflowRunFileContentError,
+    GetWorkflowRunFileContentResponse,
+    ReturnType<typeof getWorkflowRunFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflowRunFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowRunFileContentQueryKey(options),
+  })
+
+export const getWorkflowNodeRunFileContentQueryKey = (
+  options: Options<GetWorkflowNodeRunFileContentData>
+) => createQueryKey("getWorkflowNodeRunFileContent", options)
+
+/**
+ * Get workflow node run file content
+ */
+export const getWorkflowNodeRunFileContentOptions = (
+  options: Options<GetWorkflowNodeRunFileContentData>
+) =>
+  queryOptions<
+    GetWorkflowNodeRunFileContentResponse,
+    GetWorkflowNodeRunFileContentError,
+    GetWorkflowNodeRunFileContentResponse,
+    ReturnType<typeof getWorkflowNodeRunFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getWorkflowNodeRunFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getWorkflowNodeRunFileContentQueryKey(options),
+  })
+
 /**
  * Request a workflow run
  */
@@ -2791,6 +2857,31 @@ export const getActionRunOptions = (options: Options<GetActionRunData>) =>
       return data
     },
     queryKey: getActionRunQueryKey(options),
+  })
+
+export const getActionRunFileContentQueryKey = (options: Options<GetActionRunFileContentData>) =>
+  createQueryKey("getActionRunFileContent", options)
+
+/**
+ * Get action run file content
+ */
+export const getActionRunFileContentOptions = (options: Options<GetActionRunFileContentData>) =>
+  queryOptions<
+    GetActionRunFileContentResponse,
+    GetActionRunFileContentError,
+    GetActionRunFileContentResponse,
+    ReturnType<typeof getActionRunFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getActionRunFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getActionRunFileContentQueryKey(options),
   })
 
 export const listAgentsQueryKey = (options?: Options<ListAgentsData>) =>

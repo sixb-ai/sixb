@@ -69,16 +69,70 @@ export function objectFileContentUrl(input: {
   readonly context: FileValueContext
   readonly disposition?: "attachment" | "inline"
 }): string {
-  const url = new URL(
-    `/api/objects/${encodeURIComponent(input.context.objectTypeId)}/${encodeURIComponent(
+  return contextualFileContentUrl({
+    baseUrl: input.baseUrl,
+    routePath: `/api/objects/${encodeURIComponent(input.context.objectTypeId)}/${encodeURIComponent(
       input.context.primaryId
     )}/files/content`,
-    input.baseUrl
-  )
-  url.searchParams.set(
-    "path",
-    `/properties/${input.context.pathSegments.map(jsonPointerSegment).join("/")}`
-  )
+    jsonPointerPath: ["properties", ...input.context.pathSegments],
+    disposition: input.disposition,
+  })
+}
+
+export function actionRunFileContentUrl(input: {
+  readonly baseUrl: string
+  readonly runId: string
+  readonly pathSegments: readonly string[]
+  readonly disposition?: "attachment" | "inline"
+}): string {
+  return contextualFileContentUrl({
+    baseUrl: input.baseUrl,
+    routePath: `/api/action-runs/${encodeURIComponent(input.runId)}/files/content`,
+    jsonPointerPath: ["params", ...input.pathSegments],
+    disposition: input.disposition,
+  })
+}
+
+export function workflowRunFileContentUrl(input: {
+  readonly baseUrl: string
+  readonly runId: string
+  readonly pathSegments: readonly string[]
+  readonly disposition?: "attachment" | "inline"
+}): string {
+  return contextualFileContentUrl({
+    baseUrl: input.baseUrl,
+    routePath: `/api/workflow-runs/${encodeURIComponent(input.runId)}/files/content`,
+    jsonPointerPath: ["input", ...input.pathSegments],
+    disposition: input.disposition,
+  })
+}
+
+export function workflowNodeFileContentUrl(input: {
+  readonly baseUrl: string
+  readonly runId: string
+  readonly nodeKey: string
+  readonly root: "input" | "output"
+  readonly pathSegments: readonly string[]
+  readonly disposition?: "attachment" | "inline"
+}): string {
+  return contextualFileContentUrl({
+    baseUrl: input.baseUrl,
+    routePath: `/api/workflow-runs/${encodeURIComponent(input.runId)}/nodes/${encodeURIComponent(
+      input.nodeKey
+    )}/files/content`,
+    jsonPointerPath: [input.root, ...input.pathSegments],
+    disposition: input.disposition,
+  })
+}
+
+function contextualFileContentUrl(input: {
+  readonly baseUrl: string
+  readonly routePath: string
+  readonly jsonPointerPath: readonly string[]
+  readonly disposition?: "attachment" | "inline"
+}): string {
+  const url = new URL(input.routePath, input.baseUrl)
+  url.searchParams.set("path", `/${input.jsonPointerPath.map(jsonPointerSegment).join("/")}`)
   if (input.disposition) {
     url.searchParams.set("disposition", input.disposition)
   }

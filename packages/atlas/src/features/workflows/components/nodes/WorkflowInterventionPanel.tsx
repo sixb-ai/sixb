@@ -12,7 +12,7 @@ import {
 import { Alert, AlertDescription, AlertTitle, Button, CardTitle } from "@sixb/ui/components"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Loader2, Send, UserCheck } from "lucide-react"
-import { type SubmitEvent, useEffect, useState } from "react"
+import { type SubmitEvent, useCallback, useEffect, useState } from "react"
 import { formatDate, type WorkflowRunNode } from "../../utils/workflows"
 import {
   buildWorkflowInput,
@@ -31,6 +31,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
   const [fieldErrors, setFieldErrors] = useState<WorkflowInputFormErrors>({})
   const [resultMessage, setResultMessage] = useState("")
   const [initializedInterventionId, setInitializedInterventionId] = useState<string | null>(null)
+  const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
 
   const interventionQueryOptions = {
     query: {
@@ -56,6 +57,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
   const responseFieldCount = Object.keys(responseFields).length
   const schemaReady = Boolean(workflowNode)
   const apiErrorMessage = errorToMessage(interventionsQuery.error ?? workflowQuery.error)
+  const hasPendingFileUploads = pendingFileUploads.size > 0
 
   const submitResponse = useMutation({
     ...submitWorkflowInterventionMutation(),
@@ -85,9 +87,22 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
     setValues(createInitialWorkflowInputFormValues(responseFields, intervention.defaultResponse))
     setFieldErrors({})
     setResultMessage("")
+    setPendingFileUploads(new Set())
     submitResponse.reset()
     setInitializedInterventionId(intervention.id)
   }, [initializedInterventionId, intervention, responseFields, schemaReady, submitResponse.reset])
+
+  const handleFileUploadPendingChange = useCallback((key: string, pending: boolean) => {
+    setPendingFileUploads((current) => {
+      const hasKey = current.has(key)
+      if (hasKey === pending) return current
+
+      const next = new Set(current)
+      if (pending) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
 
   function setFieldValue(path: readonly string[], value: string) {
     const key = workflowInputPathKey(path)
@@ -102,7 +117,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!intervention || !schemaReady) return
+    if (!intervention || !schemaReady || hasPendingFileUploads) return
 
     submitResponse.reset()
     setResultMessage("")
@@ -128,6 +143,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
     intervention?.status === "pending" &&
     schemaReady &&
     !submitResponse.isPending &&
+    !hasPendingFileUploads &&
     !interventionsQuery.isError
 
   return (
@@ -183,6 +199,7 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
             errors={fieldErrors}
             emptyLabel="This intervention does not require a structured response."
             onChange={setFieldValue}
+            onFileUploadPendingChange={handleFileUploadPendingChange}
           />
 
           {resultMessage ? (
@@ -205,12 +222,16 @@ export function WorkflowInterventionPanel({ node }: { node: WorkflowRunNode }) {
 
           <div className="flex justify-end">
             <Button type="submit" disabled={!canSubmit}>
-              {submitResponse.isPending ? (
+              {submitResponse.isPending || hasPendingFileUploads ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Send className="h-4 w-4" />
               )}
-              {submitResponse.isPending ? "Submitting..." : "Submit response"}
+              {hasPendingFileUploads
+                ? "Uploading..."
+                : submitResponse.isPending
+                  ? "Submitting..."
+                  : "Submit response"}
             </Button>
           </div>
         </form>

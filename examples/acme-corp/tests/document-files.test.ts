@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBlobStorage } from "@sixb/core"
+import { attachInvoiceSourceFile } from "../actions/attachInvoiceSourceFile"
 import { erpDocumentsDataset } from "../datasets/erp"
 import { createSampleAttachmentForDocument } from "../lib/sample-files"
 import { documentProjection } from "../projections/document-projection"
+import { documentIntakeWorkflow } from "../workflows/document-intake"
 
 describe("Acme document file attachments", () => {
   test("stores sample ERP document attachments as FileRefs", async () => {
@@ -42,5 +44,27 @@ describe("Acme document file attachments", () => {
     expect(documentProjection.properties).toMatchObject({
       attachment: "attachment",
     })
+  })
+
+  test("exposes manual action and workflow file inputs for Atlas testing", () => {
+    expect(attachInvoiceSourceFile.params.sourceFile).toMatchObject({
+      schema: "fileRef",
+      required: true,
+    })
+    expect(documentIntakeWorkflow.input).toMatchObject({
+      title: "string",
+      sourceFile: "fileRef",
+    })
+    expect(documentIntakeWorkflow.nodes.map((node) => node.key)).toEqual([
+      "classifyUploadedDocument",
+      "registerUploadedDocument",
+    ])
+    const [classifyNode, registerNode] = documentIntakeWorkflow.nodes
+    expect(classifyNode?.type === "step" ? classifyNode.step.output.sourceFile : undefined).toBe(
+      "fileRef"
+    )
+    expect(registerNode?.type === "step" ? registerNode.step.output.sourceFile : undefined).toBe(
+      "fileRef"
+    )
   })
 })

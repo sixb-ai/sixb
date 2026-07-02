@@ -1,3 +1,4 @@
+import { client } from "@sixb/client"
 import { getWorkflowOptions, getWorkflowRunOptions } from "@sixb/client/hooks"
 import { Badge, Button, Card, CardContent, CardTitle, EmptyState } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
@@ -18,6 +19,7 @@ import {
   runTimeLabel,
   type WorkflowRunDetail,
 } from "../features/workflows/utils/workflows"
+import { workflowRunFileContentUrl } from "../lib/files"
 
 export function RunDetailPage() {
   const { runId = "" } = useParams()
@@ -79,7 +81,7 @@ export function RunDetailPage() {
             <RunProgress status={run.status} nodes={nodes} totalSteps={totalSteps} />
           </div>
 
-          <RunInputCard value={run.input} />
+          <RunInputCard value={run.input} runId={run.id} />
 
           {nodes.length === 0 ? (
             <Card className="p-8 text-center">
@@ -236,7 +238,18 @@ function RunStat({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function RunInputCard({ value }: { value: unknown }) {
+function RunInputCard({ value, runId }: { value: unknown; runId: string }) {
+  const baseUrl = client.getConfig().baseUrl ?? window.location.origin
+  const fileLinkForPath = (pathSegments: readonly string[]) => ({
+    inlineUrl: workflowRunFileContentUrl({ baseUrl, runId, pathSegments }),
+    downloadUrl: workflowRunFileContentUrl({
+      baseUrl,
+      runId,
+      pathSegments,
+      disposition: "attachment",
+    }),
+  })
+
   return (
     <Card className="gap-0 overflow-hidden py-0">
       <CardContent className="p-0">
@@ -255,7 +268,7 @@ function RunInputCard({ value }: { value: unknown }) {
           </div>
         </div>
         <div className="border-t border-border/60 bg-muted/20 p-4">
-          <StructuredValue value={value} />
+          <StructuredValue value={value} fileLinkForPath={fileLinkForPath} />
         </div>
       </CardContent>
     </Card>

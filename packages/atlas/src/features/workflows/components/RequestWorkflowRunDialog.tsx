@@ -21,7 +21,7 @@ import {
 } from "@sixb/ui/components"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { AlertCircle, Loader2, Play } from "lucide-react"
-import { type SubmitEvent, useState } from "react"
+import { type SubmitEvent, useCallback, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import type { WorkflowDetail } from "../utils/workflows"
 import {
@@ -39,6 +39,7 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
   const [open, setOpen] = useState(false)
   const [values, setValues] = useState<WorkflowInputFormValues>({})
   const [fieldErrors, setFieldErrors] = useState<WorkflowInputFormErrors>({})
+  const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
 
   const requestRun = useMutation({
     ...requestWorkflowRunMutation(),
@@ -62,13 +63,29 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
   const inputFields = workflow.input ?? {}
   const inputFieldCount = Object.keys(inputFields).length
   const apiErrorMessage = errorToMessage(requestRun.error)
+  const hasPendingFileUploads = pendingFileUploads.size > 0
 
   function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && hasPendingFileUploads) return
+
     setOpen(nextOpen)
     setValues(nextOpen ? createInitialWorkflowInputFormValues(inputFields) : {})
     setFieldErrors({})
+    setPendingFileUploads(new Set())
     requestRun.reset()
   }
+
+  const handleFileUploadPendingChange = useCallback((key: string, pending: boolean) => {
+    setPendingFileUploads((current) => {
+      const hasKey = current.has(key)
+      if (hasKey === pending) return current
+
+      const next = new Set(current)
+      if (pending) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }, [])
 
   function setFieldValue(path: readonly string[], value: string) {
     const key = workflowInputPathKey(path)
@@ -83,6 +100,7 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
 
   function handleSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (hasPendingFileUploads) return
     requestRun.reset()
 
     const result = buildWorkflowInput(inputFields, values)
@@ -127,6 +145,7 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
               values={values}
               errors={fieldErrors}
               onChange={setFieldValue}
+              onFileUploadPendingChange={handleFileUploadPendingChange}
             />
           </section>
 
@@ -143,13 +162,19 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
               type="button"
               variant="outline"
               onClick={() => handleOpenChange(false)}
-              disabled={requestRun.isPending}
+              disabled={requestRun.isPending || hasPendingFileUploads}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={requestRun.isPending}>
-              {requestRun.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {requestRun.isPending ? "Requesting..." : "Run workflow"}
+            <Button type="submit" disabled={requestRun.isPending || hasPendingFileUploads}>
+              {requestRun.isPending || hasPendingFileUploads ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {hasPendingFileUploads
+                ? "Uploading..."
+                : requestRun.isPending
+                  ? "Requesting..."
+                  : "Run workflow"}
             </Button>
           </DialogFooter>
         </form>
