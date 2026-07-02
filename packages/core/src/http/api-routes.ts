@@ -181,6 +181,24 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: true,
   },
   {
+    operationId: "getObjectFileContent",
+    method: "GET",
+    path: "/api/objects/:objectTypeId/:objectId/files/content",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    // Bearer-capable (CLI/programmatic existence + range probes) but NOT agent-proxied: the agent
+    // API gateway only forwards GET/POST, and an agent gains nothing from HEAD over GET (a file's
+    // size already travels in its FileRef). Keeping this agentApi:true would throw at gateway
+    // registration ("Unsupported agent API gateway method 'HEAD'") and stop the server booting.
+    operationId: "headObjectFileContent",
+    method: "HEAD",
+    path: "/api/objects/:objectTypeId/:objectId/files/content",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "listActions",
     method: "GET",
     path: "/api/actions",
