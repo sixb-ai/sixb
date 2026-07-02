@@ -142,7 +142,50 @@ function requireJson(value: unknown, label: string): JsonValue {
 }
 
 function optionalJson(value: unknown, label: string): JsonValue | undefined {
-  return value === undefined ? undefined : requireJson(value, label)
+  if (value === undefined) return undefined
+  return requireJson(omitUndefinedObjectProperties(value), label)
+}
+
+/**
+ * Provider metadata is opaque SDK-owned data that can contain optional object keys with
+ * `undefined` values. `undefined` is not JSON, but on an object property it means the same thing as
+ * "field absent", so omit those properties before validating/persisting the metadata.
+ *
+ * Keep the scope deliberately narrow: arrays, tool inputs/outputs, Dates, functions, bigint, cycles,
+ * and every other non-JSON shape are left for `requireJson` to accept or reject. This helper only
+ * turns `{ key: undefined }` into `{}` for metadata compatibility with SDK output.
+ */
+function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>()): unknown {
+  if (typeof value !== "object" || value === null) return value
+
+  // Avoid recursing forever on a malformed/cyclic metadata object. Leaving the cycle in place lets
+  // `requireJson` below report the canonical JSON-contract error.
+  if (seen.has(value)) return value
+
+  seen.add(value)
+  try {
+    if (Array.isArray(value)) {
+      return value.map((entry) => omitUndefinedObjectProperties(entry, seen))
+    }
+
+    if (!isPlainRecord(value)) return value
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, omitUndefinedObjectProperties(entry, seen)])
+    )
+  } finally {
+    seen.delete(value)
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 function isToolType(type: string): boolean {

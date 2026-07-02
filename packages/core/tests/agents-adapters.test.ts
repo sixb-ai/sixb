@@ -88,6 +88,43 @@ describe("fromAiSdk", () => {
     ])
   })
 
+  test("strips undefined provider metadata object fields", () => {
+    const message = {
+      role: "assistant",
+      metadata: { traceId: "t1", omitted: undefined },
+      parts: [
+        {
+          type: "tool-bash",
+          toolCallId: "call_1",
+          state: "output-available",
+          input: { cmd: "ls" },
+          output: "file.txt",
+          callProviderMetadata: {
+            anthropic: { caller: { toolId: undefined, toolName: "bash" } },
+          },
+        },
+      ],
+    } as unknown as AgentInboundUiMessage
+
+    expect(fromAiSdk(message)).toEqual({
+      role: "assistant",
+      metadata: { traceId: "t1" },
+      parts: [
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "bash",
+          input: { cmd: "ls" },
+          state: "output-available",
+          output: "file.txt",
+          providerMetadata: {
+            anthropic: { caller: { toolName: "bash" } },
+          },
+        },
+      ],
+    })
+  })
+
   test("is total: throws on unmodeled part kinds", () => {
     const message = {
       role: "assistant",
