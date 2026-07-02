@@ -39,7 +39,7 @@ import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
 import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
 import { useObjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
-import { type FileValueContext, isFileRefDisplayValue, isFileRefValue } from "../lib/files"
+import { classifyFileValue, type FileValueContext } from "../lib/files"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
@@ -918,7 +918,7 @@ function DetailsList({
     <Card className="p-4 sm:p-5">
       <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2.5 text-sm">
         {rows.map((row) => {
-          const fileValue = isFileRefDisplayValue(row.value)
+          const fileValue = classifyFileValue(row.value).kind !== "none"
 
           return (
             <Fragment key={row.key}>
@@ -1054,24 +1054,26 @@ function FormattedValue({
   value: unknown
   fileContext?: FileValueContext
 }) {
-  if (fileContext && isFileRefValue(value)) {
-    return <FileRefAttachment fileRef={value} {...fileContext} />
-  }
-
-  if (fileContext && Array.isArray(value) && value.length > 0 && value.every(isFileRefValue)) {
-    return (
-      <div className="flex min-w-0 flex-col gap-2">
-        {value.map((fileRef, index) => (
-          <FileRefAttachment
-            key={`${fileRef.blobId}:${index}`}
-            fileRef={fileRef}
-            objectTypeId={fileContext.objectTypeId}
-            primaryId={fileContext.primaryId}
-            pathSegments={[...fileContext.pathSegments, String(index)]}
-          />
-        ))}
-      </div>
-    )
+  if (fileContext) {
+    const file = classifyFileValue(value)
+    if (file.kind === "single") {
+      return <FileRefAttachment fileRef={file.fileRef} {...fileContext} />
+    }
+    if (file.kind === "array") {
+      return (
+        <div className="flex min-w-0 flex-col gap-2">
+          {file.fileRefs.map((fileRef, index) => (
+            <FileRefAttachment
+              key={`${fileRef.blobId}:${index}`}
+              fileRef={fileRef}
+              objectTypeId={fileContext.objectTypeId}
+              primaryId={fileContext.primaryId}
+              pathSegments={[...fileContext.pathSegments, String(index)]}
+            />
+          ))}
+        </div>
+      )
+    }
   }
 
   if (isIsoDateString(value)) {

@@ -1,3 +1,4 @@
+import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import {
   Button,
   DataTable,
@@ -13,13 +14,7 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Copy, Database } from "lucide-react"
 import { useMemo, useState } from "react"
-import {
-  type FileRefValue,
-  fileMediaLabel,
-  fileRefName,
-  formatFileSize,
-  isFileRefValue,
-} from "../../lib/files"
+import { fileMediaLabel, formatFileSize } from "../../lib/files"
 import { formatValue } from "../../lib/formatValue"
 
 export type DatasetGridColumnMeta = {
@@ -99,7 +94,7 @@ export function DatasetTableGrid({
           size: defaultColumnWidth(meta),
           cell: (value) => {
             const nullish = isNullish(value)
-            if (isFileRefValue(value)) {
+            if (isFileRef(value)) {
               return <FileRefCell fileRef={value} />
             }
 
@@ -168,7 +163,7 @@ function CellDetailDialog({
 }) {
   const [copied, setCopied] = useState(false)
   const text = cell ? prettyValue(cell.value) : ""
-  const fileRef = cell && isFileRefValue(cell.value) ? cell.value : null
+  const fileRef = cell && isFileRef(cell.value) ? cell.value : null
 
   const handleCopy = async () => {
     try {
@@ -213,8 +208,12 @@ function CellDetailDialog({
   )
 }
 
-function FileRefCell({ fileRef }: { fileRef: FileRefValue }) {
-  const fileName = fileRefName(fileRef)
+// Dataset rows are raw lake data, not grant-scoped objects, so there is
+// intentionally no View/Download here: blob reads must go through the object
+// file-content route, which enforces grants. Do not add an unscoped dataset-blob
+// route to make these cells clickable.
+function FileRefCell({ fileRef }: { fileRef: FileRef }) {
+  const fileName = fileNameFor(fileRef)
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
   const summary = `${fileName} · ${mediaLabel} · ${formatFileSize(fileRef.sizeBytes)}`
 
@@ -225,8 +224,8 @@ function FileRefCell({ fileRef }: { fileRef: FileRefValue }) {
   )
 }
 
-function FileRefDetail({ fileRef }: { fileRef: FileRefValue }) {
-  const fileName = fileRefName(fileRef)
+function FileRefDetail({ fileRef }: { fileRef: FileRef }) {
+  const fileName = fileNameFor(fileRef)
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
 
   const rows = [
