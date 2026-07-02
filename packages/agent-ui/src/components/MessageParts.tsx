@@ -1,127 +1,151 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { AlertTriangle, ChevronRight, Wrench } from "lucide-react"
+import { ChevronRight, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 
 /**
- * Render an assistant body from normalized parts. Adjacent text parts are merged into a single
- * readable block; reasoning collapses away from the main reading path; tool calls render as
- * structured rows. `step-start` markers are intentionally skipped.
+ * Render an assistant body from normalized parts. Narration text stays on the main reading path;
+ * every run of consecutive reasoning + tool parts collapses into a single "work" disclosure, so a
+ * long chain of thinking and tool calls reads as one quiet line above the answer instead of a stack
+ * of separate dropdowns. `step-start` markers are intentionally skipped.
  */
-export function AssistantBody({ parts }: { parts: readonly NormalizedPart[] }) {
+export function AssistantBody({
+  parts,
+  live = false,
+}: {
+  parts: readonly NormalizedPart[]
+  /** True while this body is driven by an in-flight run, so the trailing work group stays open. */
+  live?: boolean
+}) {
   const blocks: React.ReactNode[] = []
   let textBuffer: string[] = []
+  let workBuffer: NormalizedPart[] = []
+  let key = 0
 
-  const flushText = (key: string) => {
+  const flushText = () => {
     if (textBuffer.length === 0) return
     const text = textBuffer.join("")
     textBuffer = []
     if (!text.trim()) return
-    blocks.push(<TextBlock key={key} text={text} />)
+    blocks.push(<TextBlock key={`block-${key++}`} text={text} />)
   }
 
-  parts.forEach((part, index) => {
+  const flushWork = (inProgress: boolean) => {
+    if (workBuffer.length === 0) return
+    const work = workBuffer
+    workBuffer = []
+    // A run of only step boundaries has nothing to show.
+    if (work.every((part) => part.kind === "step-start")) return
+    blocks.push(<WorkGroup key={`block-${key++}`} parts={work} inProgress={inProgress} />)
+  }
+
+  parts.forEach((part) => {
     if (part.kind === "text") {
       textBuffer.push(part.text)
+      // Only real narration ends a work run. Whitespace-only text parts (the model emits one per
+      // step boundary) must not fragment a chain into a stack of separate "Worked" groups. A group
+      // flushed here has narration after it, so it is settled — never the in-progress trailing run.
+      if (part.text.trim()) flushWork(false)
       return
     }
-    flushText(`text-${index}`)
-    if (part.kind === "reasoning") {
-      blocks.push(
-        <ReasoningBlock key={`reasoning-${index}`} text={part.text} streaming={part.streaming} />
-      )
-    } else if (part.kind === "tool") {
-      blocks.push(<ToolCallRow key={`tool-${index}`} tool={part.tool} />)
-    }
+    // reasoning | tool | step-start — buffered together into one work run.
+    flushText()
+    workBuffer.push(part)
   })
-  flushText("text-final")
+  flushText()
+  // The final work run is the only one that can still be receiving steps: keep it open while live.
+  flushWork(live)
 
   return <div className="flex flex-col gap-3">{blocks}</div>
 }
 
 function TextBlock({ text }: { text: string }) {
-  return <Markdown>{text}</Markdown>
+  return <Markdown className="prose-chat">{text}</Markdown>
 }
 
-function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
-  const [open, setOpen] = useState(streaming)
-  const wasStreamingRef = useRef(streaming)
+/**
+ * A consecutive run of reasoning + tool parts, folded into a single disclosure. It stays open while
+ * `inProgress` — i.e. this is the trailing run of a live turn still receiving steps — and collapses
+ * once it settles (the run finishes, or narration text moves past it). Open/close is keyed off that
+ * single signal, never per-part streaming, so it doesn't flicker as each step settles before the
+ * next begins. Inside, items flow in a single indented column — reasoning as plain text, tools as
+ * their own quiet markers that expand inline — never as dropdowns stacked inside this dropdown.
+ */
+function WorkGroup({
+  parts,
+  inProgress,
+}: {
+  parts: readonly NormalizedPart[]
+  inProgress: boolean
+}) {
+  const [open, setOpen] = useState(inProgress)
+  const wasInProgressRef = useRef(inProgress)
 
   useEffect(() => {
-    if (streaming && !wasStreamingRef.current) {
+    if (inProgress && !wasInProgressRef.current) {
       setOpen(true)
-    } else if (!streaming && wasStreamingRef.current) {
+    } else if (!inProgress && wasInProgressRef.current) {
       setOpen(false)
     }
+    wasInProgressRef.current = inProgress
+  }, [inProgress])
 
-    wasStreamingRef.current = streaming
-  }, [streaming])
+  const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
+  const hasTools = toolCount > 0
+  const label = inProgress
+    ? hasTools
+      ? "Working…"
+      : "Reasoning…"
+    : hasTools
+      ? "Worked"
+      : "Reasoning"
+  const detail =
+    !inProgress && hasTools ? `${toolCount} ${toolCount === 1 ? "step" : "steps"}` : undefined
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="w-fit max-w-full">
-      <CollapsibleTrigger className="group mb-1 flex items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
-        <span className={cn(streaming && "shimmer")}>{streaming ? "Reasoning…" : "Reasoning"}</span>
+    <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
+      <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
+        <span className={cn(inProgress && "shimmer")}>{label}</span>
+        {detail ? <span className="text-muted-foreground/60">· {detail}</span> : null}
         <ChevronRight className="size-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ReasoningPreview text={text} streaming={streaming} />
+        <div className="mt-2 ml-1.5 flex flex-col gap-3 border-l-2 border-border pl-3">
+          {parts.map((part, index) => {
+            if (part.kind === "reasoning") {
+              return <GroupReasoning key={index} text={part.text} streaming={part.streaming} />
+            }
+            if (part.kind === "tool") {
+              return <ToolCallRow key={index} tool={part.tool} />
+            }
+            return null
+          })}
+        </div>
       </CollapsibleContent>
     </Collapsible>
   )
 }
 
-function ReasoningPreview({ text, streaming }: { text: string; streaming: boolean }) {
-  const viewportRef = useRef<HTMLDivElement | null>(null)
-  const stickToBottomRef = useRef(true)
-  const [showTopFade, setShowTopFade] = useState(false)
-  const textLength = text.length
-
-  useEffect(() => {
-    if (textLength === 0) {
-      setShowTopFade(false)
-      return
-    }
-
-    const viewport = viewportRef.current
-    if (!viewport || !streaming || !stickToBottomRef.current) {
-      return
-    }
-
-    const frame = requestAnimationFrame(() => {
-      viewport.scrollTop = viewport.scrollHeight
-      setShowTopFade(viewport.scrollTop > 4)
-    })
-
-    return () => cancelAnimationFrame(frame)
-  }, [streaming, textLength])
-
+/** Reasoning inside a work group: plain, quiet text that flows with the rest of the chain. */
+function GroupReasoning({ text, streaming }: { text: string; streaming: boolean }) {
+  if (!text.trim()) return null
   return (
-    <div className="relative mt-1.5 ml-1.5 max-w-full border-l-2 border-border pl-3">
-      {showTopFade ? (
-        <div className="pointer-events-none absolute top-0 right-0 left-3 z-10 h-7 bg-gradient-to-b from-background via-background/85 to-transparent" />
-      ) : null}
-      <div
-        ref={viewportRef}
-        className="scrollbar-thin max-h-52 overflow-y-auto pr-3 text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground overscroll-contain sm:max-h-64"
-        onScroll={(event) => {
-          const viewport = event.currentTarget
-          const distanceFromBottom =
-            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
-          stickToBottomRef.current = distanceFromBottom < 24
-          setShowTopFade(viewport.scrollTop > 4)
-        }}
-      >
-        {text}
-      </div>
-    </div>
+    <p className="text-xs leading-relaxed whitespace-pre-wrap text-muted-foreground/80">
+      {text}
+      {streaming ? <span className="shimmer">▍</span> : null}
+    </p>
   )
 }
 
+/**
+ * A single tool call within a work group. `bash` — the agent's one tool — renders through its
+ * intent-aware view; anything else falls back to the generic inspector. Both keep their bodies
+ * borderless and inline so an expanded result flows within the group rather than reading as a
+ * nested dropdown.
+ */
 function ToolCallRow({ tool }: { tool: NormalizedTool }) {
-  // The agent's one tool is `bash`; render it through the friendly, intent-aware view. Any other
-  // tool falls back to the generic input/output inspector below.
   if (tool.toolName === "bash") {
     return (
       <BashToolView
@@ -139,52 +163,43 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
+  const hasErrorDetail = isError && Boolean(tool.errorText)
+  const expandable = hasInput || hasOutput || hasErrorDetail
 
+  // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
+  // detail lives inside the disclosure for anyone who wants to expand and debug it.
   return (
-    <div
-      className={cn(
-        "w-full max-w-full overflow-hidden rounded-md border text-xs",
-        isError ? "border-destructive/30 bg-destructive/5" : "border-border bg-muted/30"
-      )}
-    >
+    <div className="min-w-0">
       <Collapsible>
-        <CollapsibleTrigger className="group flex w-full items-center gap-2 px-2.5 py-1.5 text-left">
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-          {isError ? (
-            <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
-          ) : (
-            <Wrench className="size-3.5 shrink-0 text-muted-foreground" />
-          )}
-          <span className="min-w-0 truncate font-medium text-foreground">{tool.toolName}</span>
+        <CollapsibleTrigger
+          disabled={!expandable}
+          className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground disabled:cursor-default disabled:hover:text-muted-foreground"
+        >
+          <Wrench className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate font-medium">{tool.toolName}</span>
           <ToolStatus state={tool.state} />
+          {expandable ? (
+            <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+          ) : null}
         </CollapsibleTrigger>
-        <CollapsibleContent className="space-y-2 px-2.5 pb-2.5">
+        <CollapsibleContent className="mt-2 space-y-2">
           {hasInput ? <JsonViewer label="Input" value={tool.input ?? tool.inputText} /> : null}
           {hasOutput ? <JsonViewer label="Output" value={tool.output} /> : null}
+          {hasErrorDetail ? <JsonViewer label="Details" value={tool.errorText} /> : null}
         </CollapsibleContent>
       </Collapsible>
-      {isError && tool.errorText ? (
-        <p className="whitespace-pre-wrap border-t border-destructive/20 px-2.5 py-1.5 text-destructive">
-          {tool.errorText}
-        </p>
-      ) : null}
     </div>
   )
 }
 
 function ToolStatus({ state }: { state: NormalizedTool["state"] }) {
+  // Only the in-flight state is worth a badge; a finished call (done or errored) reads from the
+  // marker itself, keeping failures from flashing red in the transcript.
   const running = state === "input-streaming" || state === "input-available"
-  const label =
-    state === "output-error" ? "error" : state === "output-available" ? "done" : "running"
+  if (!running) return null
   return (
-    <span
-      className={cn(
-        "ml-auto shrink-0 text-[10px] font-medium uppercase tracking-wide",
-        state === "output-error" ? "text-destructive" : "text-muted-foreground",
-        running && "shimmer"
-      )}
-    >
-      {label}
+    <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60 shimmer">
+      running
     </span>
   )
 }
@@ -195,7 +210,7 @@ function JsonViewer({ label, value }: { label: string; value: unknown }) {
       <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
-      <pre className="scrollbar-thin max-h-60 overflow-auto rounded bg-background/60 p-2 text-[11px] leading-relaxed text-foreground">
+      <pre className="scrollbar-thin max-h-60 overflow-auto rounded bg-muted/50 p-2 text-[11px] leading-relaxed text-foreground">
         {formatValue(value)}
       </pre>
     </div>

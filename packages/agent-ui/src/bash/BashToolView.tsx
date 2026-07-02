@@ -78,15 +78,25 @@ export function BashToolView({ tool }: { tool: BashTool }) {
   const Icon = ICONS[description.icon]
   const label = running ? description.runningTitle : description.title
 
-  // Failures surface inline — never hidden behind a disclosure.
+  // A failed command reads as a quiet, neutral step — same calm marker as any other tool line, no
+  // alarming red in the transcript. The error itself is tucked behind the disclosure so advanced
+  // users can still expand and debug it. (Exploratory commands often fail and the agent recovers;
+  // surfacing that in red just makes a working run look broken.)
   if (isError && !running) {
     return (
-      <div>
-        <ToolLine icon={Terminal} label={label} tone="error" />
-        <p className="mt-1.5 border-l-2 border-destructive/30 pl-3 text-xs whitespace-pre-wrap text-destructive">
-          {errorMessage(parsed, tool.errorText)}
-        </p>
-      </div>
+      <Collapsible>
+        <CollapsibleTrigger className="group flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground transition-colors hover:text-foreground">
+          <Icon className="size-3.5 shrink-0" />
+          <span className="min-w-0 truncate font-medium">{label}</span>
+          <ChevronRight className="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-3 space-y-2 text-xs">
+            {command ? <RawBlock label="Command" value={command} /> : null}
+            <RawBlock label="Details" value={errorMessage(parsed, tool.errorText)} />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
     )
   }
 
@@ -130,22 +140,15 @@ function ToolLine({
   icon: Icon,
   label,
   detail,
-  tone = "default",
   running,
 }: {
   icon: LucideIcon
   label: string
   detail?: string
-  tone?: "default" | "error"
   running?: boolean
 }) {
   return (
-    <div
-      className={cn(
-        "flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal",
-        tone === "error" ? "text-destructive" : "text-muted-foreground"
-      )}
-    >
+    <div className="flex w-fit max-w-full items-center gap-1.5 text-[13px] leading-normal text-muted-foreground">
       <Icon className="size-3.5 shrink-0" />
       <span className={cn("min-w-0 truncate font-medium", running && "shimmer")}>{label}</span>
       {detail ? (

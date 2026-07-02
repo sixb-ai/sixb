@@ -271,7 +271,8 @@ export function describeBash(intent: BashIntent, parsed: ParsedBashOutput | null
     }
     case "api-count": {
       const value = numberField(parsed?.json, "count")
-      const label = humanize(intent.objectTypeId) || "objects"
+      // Singular base — `plural()` adds the suffix, so "objects" here would become "objectses".
+      const label = humanize(intent.objectTypeId) || "object"
       return icon(
         "count",
         `Counted ${plural(label)}`,
