@@ -1,4 +1,5 @@
 import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { Toaster } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { useState } from "react"
 import { Outlet, useLocation, useNavigate } from "react-router-dom"
@@ -26,7 +27,7 @@ export function AppLayout() {
       return
     }
     if (mode === "settings") {
-      navigate("/settings/invitations")
+      navigate("/settings/members")
       return
     }
     navigate(`/${mode}`)
@@ -56,6 +57,7 @@ export function AppLayout() {
       <AppShell sidebar={sidebar} currentProjectName={selectedProject?.name ?? null}>
         <Outlet />
       </AppShell>
+      <Toaster position="bottom-right" />
     </SidebarDataContext.Provider>
   )
 }

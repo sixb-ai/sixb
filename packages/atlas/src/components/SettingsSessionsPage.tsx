@@ -5,10 +5,24 @@ import {
   revokeAuthSessionMutation,
   signOutAllMutation,
 } from "@sixb/client/hooks"
-import { Badge, EmptyState } from "@sixb/ui/components"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+  Badge,
+  Button,
+  EmptyState,
+  toast,
+} from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AlertCircle, LogOut, MonitorSmartphone, RefreshCw } from "lucide-react"
+import { AlertCircle, Loader2, LogOut, MonitorSmartphone } from "lucide-react"
 import { useState } from "react"
 import { humanizeIdentifier } from "../lib/labels"
 import { formatRelativeTime } from "../lib/time"
@@ -53,8 +67,6 @@ function describeDevice(userAgent?: string): string {
 
 export function SettingsSessionsPage() {
   const queryClient = useQueryClient()
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
 
   const sessionsQuery = useQuery({
@@ -69,13 +81,11 @@ export function SettingsSessionsPage() {
   const revokeSession = useMutation({
     ...revokeAuthSessionMutation(),
     onSuccess: async () => {
-      setError(null)
-      setMessage("Device signed out.")
+      toast.success("Device signed out.")
       await refreshSessions()
     },
     onError: (mutationError) => {
-      setMessage(null)
-      setError(apiErrorMessage(mutationError, "Could not sign out that device."))
+      toast.error(apiErrorMessage(mutationError, "Could not sign out that device."))
     },
   })
 
@@ -86,88 +96,70 @@ export function SettingsSessionsPage() {
       window.location.reload()
     },
     onError: (mutationError) => {
-      setMessage(null)
-      setError(apiErrorMessage(mutationError, "Could not sign out everywhere."))
+      toast.error(apiErrorMessage(mutationError, "Could not sign out everywhere."))
     },
   })
 
   const revoke = (sessionId: string) => {
-    setMessage(null)
-    setError(null)
     setRevokingId(sessionId)
     revokeSession.mutate({ path: { sessionId } }, { onSettled: () => setRevokingId(null) })
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-5xl space-y-5">
       <SettingsTabs />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Settings
           </p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-normal text-foreground">Sessions</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight text-foreground">Sessions</h1>
+          <p className="mt-1.5 max-w-[52ch] text-sm text-muted-foreground">
+            Browsers and devices signed in to your account.
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => sessionsQuery.refetch()}
-          className="inline-flex h-9 items-center gap-2 rounded-lg border border-border/60 bg-card px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Refresh
-        </button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={signOutEverywhere.isPending}
+              className="shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              {signOutEverywhere.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <LogOut className="h-4 w-4" />
+              )}
+              Sign out everywhere
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Sign out everywhere?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Ends every active session for your account, on all devices and apps — including this
+                one. You'll need to sign in again.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-white hover:bg-destructive/90"
+                onClick={() => signOutEverywhere.mutate({})}
+              >
+                Sign out everywhere
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
 
-      <section className="rounded-xl border border-border/60 bg-card">
-        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground">
-              <LogOut className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-foreground">Sign out everywhere</h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Ends every active session for your account, on all devices and apps. You'll need to
-                sign in again.
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => signOutEverywhere.mutate({})}
-            disabled={signOutEverywhere.isPending}
-            className="inline-flex h-9 shrink-0 items-center justify-center gap-2 self-start rounded-lg border border-destructive/30 bg-destructive/10 px-3 text-sm font-medium text-destructive transition-colors hover:bg-destructive/20 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
-          >
-            {signOutEverywhere.isPending ? (
-              <LoadingSpinner size="sm" />
-            ) : (
-              <LogOut className="h-4 w-4" />
-            )}
-            Sign out everywhere
-          </button>
-        </div>
-
-        {(message || error) && (
-          <p
-            className={cn(
-              "mx-4 mb-4 rounded-lg px-3 py-2 text-sm",
-              error
-                ? "border border-destructive/30 bg-destructive/10 text-destructive"
-                : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            )}
-          >
-            {error ?? message}
-          </p>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-border/60 bg-card">
-        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Active sessions</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{sessions.length} active</p>
-          </div>
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="flex items-baseline justify-between border-b border-border/60 px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">Active sessions</h2>
+          <span className="text-xs text-muted-foreground">{sessions.length} active</span>
         </div>
 
         {sessionsQuery.isLoading ? (

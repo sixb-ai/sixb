@@ -2,6 +2,7 @@ import { type ActionRunRecord, canViewActionRun, type OntologySource, type Sixb 
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionRunDetailSchema,
   ActionRunIdParamsSchema,
@@ -107,7 +108,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         response: { 200: ActionRunListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List action run history",
-          tags: ["Actions"],
+          tags: [OPENAPI_TAGS.actionRuns.name],
           operationId: "listActionRuns",
         },
       }
@@ -144,7 +145,7 @@ export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
         detail: {
           summary: "Get action run detail",
-          tags: ["Actions"],
+          tags: [OPENAPI_TAGS.actionRuns.name],
           operationId: "getActionRun",
           security: bearerSecurityRequirement("getActionRun"),
         },

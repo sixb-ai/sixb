@@ -9,7 +9,7 @@ Sixb assembles authentication from a few small pieces, all configured through th
 - **Strategy** — how a user proves who they are: a magic link, an OIDC provider, or none.
 - **Sessions** — the signed-in state carried in a cookie and resolved on every request.
 - **Allowed domains and bootstrap** — who may sign in, and who gets the very first account.
-- **Invitations** — how the team grows once the first user is in.
+- **Invitations and members** — how the team grows and how admins manage existing users.
 
 The server ships the sign-in, callback, and sign-out endpoints, so you rarely write request
 handling yourself. See [Auth overview](./overview.md) for how the two layers fit together.
@@ -153,19 +153,21 @@ auth: magicLink({
 ```
 
 The first sign-in as `admin@acme-corp.com` lands in `finance-admins`. That group's
-[role grants](./authorization.md) are what let it run invoice actions and invite the rest of the
-team. `bootstrapGroups` must reference groups registered with the runtime, or startup fails — define
-them with `defineGroup` (see [Authorization](./authorization.md)).
+[role grants](./authorization.md) and membership policies are what let it run invoice actions,
+invite teammates, and manage users. `bootstrapGroups` must reference groups registered with the
+runtime, or startup fails — define them with `defineGroup` (see
+[Authorization](./authorization.md)).
 
-## Invitations
+## Invitations and members
 
 After bootstrap, the team grows through invitations rather than more bootstrap users. Who can invite
-whom into which groups is governed by [membership policies](./authorization.md). The active strategy
-must support invitation delivery — magic link always does; OIDC does when `sendInvitation` is set.
+whom into which groups — and who can edit, suspend, or reactivate existing users — is governed by
+[membership policies](./authorization.md). The active strategy must support invitation delivery:
+magic link always does; OIDC does when `sendInvitation` is set.
 
-The server exposes invitation management under `/api/auth/invitations`, and the built-in admin UI
-uses it, so you usually do not call it directly. Programmatically, the runtime exposes it on
-`sixb.auth`:
+The server exposes invitation and member management under `/api/auth/...`, and the built-in admin UI
+uses those routes in **Settings → Members**, so you usually do not call them directly.
+Programmatically, the runtime exposes them on `sixb.auth`:
 
 ```ts
 const { invitation, delivery } = await sixb.auth.invite(request, {
@@ -177,6 +179,22 @@ const { invitation, delivery } = await sixb.auth.invite(request, {
 `invite(request, input, options)` takes an `input` of `email` plus optional `groups` / `groupIds`,
 `expiresAt`, and `returnTo`. The companion methods are `listInvitations`, `revokeInvitation`, and
 `getInvitationOptions`.
+
+For existing users, the runtime exposes the same policy boundary through member-management methods:
+
+```ts
+const { members } = await sixb.auth.listMembers(request)
+await sixb.auth.updateMemberGroups(request, {
+  userId: "usr_123",
+  groupIds: [teamMembers.id],
+})
+await sixb.auth.suspendMember(request, { userId: "usr_123" })
+await sixb.auth.reactivateMember(request, { userId: "usr_123" })
+```
+
+`listMembers` returns only users inside the caller's membership-policy scope. Group assignment
+requires both the user's current groups and the requested groups to be in scope. Suspending revokes
+active sessions immediately; reactivation keeps old sessions revoked, so the user signs in again.
 
 ## Sessions and cookies
 
@@ -226,6 +244,11 @@ When you serve the runtime, these endpoints are registered for you:
 | `POST /api/auth/invitations` | Create an invitation |
 | `POST /api/auth/invitations/:invitationId/revoke` | Revoke an invitation |
 | `GET /api/auth/invitation-options` | Groups and capabilities for the invite form |
+| `GET /api/auth/membership-options` | Groups and capabilities for member management |
+| `GET /api/auth/members` | List visible members with per-member capabilities |
+| `PATCH /api/auth/members/:userId/groups` | Replace a member's groups |
+| `POST /api/auth/members/:userId/suspend` | Suspend a member and revoke active sessions |
+| `POST /api/auth/members/:userId/reactivate` | Reactivate a suspended member |
 
 See [Server](../server/overview.md) for how routes are mounted.
 
@@ -257,6 +280,6 @@ A few things worth remembering:
 
 ## Next
 
-- [Authorization](./authorization.md) — groups, roles, and the six grant kinds.
+- [Authorization](./authorization.md) — groups, roles, grants, and membership policies.
 - [Auth overview](./overview.md) — how authentication and authorization fit together.
 - [Server](../server/overview.md) — how the auth routes are mounted.

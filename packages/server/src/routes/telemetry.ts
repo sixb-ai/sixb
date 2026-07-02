@@ -3,6 +3,7 @@ import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   AppendTelemetryBodySchema,
@@ -64,7 +65,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
         detail: {
           summary: "Append telemetry point",
-          tags: ["Telemetry"],
+          tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "appendTelemetry",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -110,7 +111,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
         detail: {
           summary: "Get bulk telemetry history",
-          tags: ["Telemetry"],
+          tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getBulkTelemetryHistory",
           security: bearerSecurityRequirement("getBulkTelemetryHistory"),
         },
@@ -154,7 +155,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
         detail: {
           summary: "Get telemetry history",
-          tags: ["Telemetry"],
+          tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getTelemetryHistory",
           security: bearerSecurityRequirement("getTelemetryHistory"),
         },
@@ -197,7 +198,7 @@ export function registerTelemetryRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         },
         detail: {
           summary: "Get latest telemetry point",
-          tags: ["Telemetry"],
+          tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getLatestTelemetry",
           security: bearerSecurityRequirement("getLatestTelemetry"),
         },

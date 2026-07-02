@@ -115,7 +115,7 @@ Beyond sign-in, the `security/` folder shows the full access-control model:
 | File | Demonstrates |
 | --- | --- |
 | `security/groups/` | The `security-admins` and `team-members` groups |
-| `security/policies/` | Security admins can invite people into `team-members` |
+| `security/policies/` | Security admins can invite, assign groups, suspend, and reactivate users in `team-members` and `security-admins` |
 | `security/roles/` | Scoped grants per group — `team-members` get `can.view(Note)`, view on the team-notes dataset, and `can.apply(acknowledgeNote)`; `security-admins` get wildcard grants over all objects, datasets, actions, and workflows |
 
 Because grants are scoped, the same UI shows different objects, datasets, and actions depending on

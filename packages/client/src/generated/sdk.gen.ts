@@ -74,6 +74,9 @@ import type {
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsErrors,
   GetAuthInvitationOptionsResponses,
+  GetAuthMembershipOptionsData,
+  GetAuthMembershipOptionsErrors,
+  GetAuthMembershipOptionsResponses,
   GetAuthSessionData,
   GetAuthSessionResponses,
   GetBulkTelemetryHistoryData,
@@ -156,6 +159,9 @@ import type {
   ListAuthInvitationsData,
   ListAuthInvitationsErrors,
   ListAuthInvitationsResponses,
+  ListAuthMembersData,
+  ListAuthMembersErrors,
+  ListAuthMembersResponses,
   ListAuthServiceAccountAccessTokensData,
   ListAuthServiceAccountAccessTokensErrors,
   ListAuthServiceAccountAccessTokensResponses,
@@ -224,6 +230,9 @@ import type {
   QueryObjectsData,
   QueryObjectsErrors,
   QueryObjectsResponses,
+  ReactivateAuthMemberData,
+  ReactivateAuthMemberErrors,
+  ReactivateAuthMemberResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -263,6 +272,12 @@ import type {
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionErrors,
   SubmitWorkflowInterventionResponses,
+  SuspendAuthMemberData,
+  SuspendAuthMemberErrors,
+  SuspendAuthMemberResponses,
+  UpdateAuthMemberGroupsData,
+  UpdateAuthMemberGroupsErrors,
+  UpdateAuthMemberGroupsResponses,
   UploadFileContentData,
   UploadFileContentErrors,
   UploadFileContentResponses,
@@ -603,6 +618,81 @@ export const revokeAuthInvitation = <ThrowOnError extends boolean = false>(
   >({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/auth/invitations/{invitationId}/revoke",
+    ...options,
+  })
+
+/**
+ * Get auth membership management options
+ */
+export const getAuthMembershipOptions = <ThrowOnError extends boolean = false>(
+  options?: Options<GetAuthMembershipOptionsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<
+    GetAuthMembershipOptionsResponses,
+    GetAuthMembershipOptionsErrors,
+    ThrowOnError
+  >({ url: "/api/auth/membership-options", ...options })
+
+/**
+ * List auth members
+ */
+export const listAuthMembers = <ThrowOnError extends boolean = false>(
+  options?: Options<ListAuthMembersData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListAuthMembersResponses, ListAuthMembersErrors, ThrowOnError>({
+    url: "/api/auth/members",
+    ...options,
+  })
+
+/**
+ * Update an auth member's groups
+ */
+export const updateAuthMemberGroups = <ThrowOnError extends boolean = false>(
+  options: Options<UpdateAuthMemberGroupsData, ThrowOnError>
+) =>
+  (options.client ?? client).patch<
+    UpdateAuthMemberGroupsResponses,
+    UpdateAuthMemberGroupsErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/members/{userId}/groups",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Suspend an auth member
+ */
+export const suspendAuthMember = <ThrowOnError extends boolean = false>(
+  options: Options<SuspendAuthMemberData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    SuspendAuthMemberResponses,
+    SuspendAuthMemberErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/members/{userId}/suspend",
+    ...options,
+  })
+
+/**
+ * Reactivate an auth member
+ */
+export const reactivateAuthMember = <ThrowOnError extends boolean = false>(
+  options: Options<ReactivateAuthMemberData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    ReactivateAuthMemberResponses,
+    ReactivateAuthMemberErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/auth/members/{userId}/reactivate",
     ...options,
   })
 

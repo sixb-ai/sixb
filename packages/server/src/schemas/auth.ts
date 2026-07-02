@@ -30,6 +30,7 @@ export const AuthAccessTokenKindSchema = z.enum(["personal", "serviceAccount"])
 export const AuthAccessTokenSubjectTypeSchema = z.enum(["user", "serviceAccount"])
 export const AuthAccessTokenStatusSchema = z.enum(["active", "expired", "revoked"])
 export const AuthServiceAccountStatusSchema = z.enum(["active", "suspended"])
+export const AuthUserStatusSchema = z.enum(["active", "suspended"])
 
 export const AuthAccessTokenSchema = z.object({
   id: z.string(),
@@ -56,6 +57,31 @@ export const AuthServiceAccountSchema = z.object({
   groupIds: z.array(z.string()),
   createdAt: z.string(),
   updatedAt: z.string(),
+})
+
+export const AuthMemberUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  displayName: z.string().optional(),
+  avatarUrl: z.string().optional(),
+  status: AuthUserStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+})
+
+export const AuthManagedMemberSchema = z.object({
+  user: AuthMemberUserSchema,
+  groupIds: z.array(z.string()),
+})
+
+export const AuthMemberCapabilitiesSchema = z.object({
+  assignGroups: z.boolean(),
+  suspend: z.boolean(),
+  reactivate: z.boolean(),
+})
+
+export const AuthMemberSchema = AuthManagedMemberSchema.extend({
+  capabilities: AuthMemberCapabilitiesSchema,
 })
 
 export const GetAuthAccessManagementOptionsResponseSchema = z.object({
@@ -148,6 +174,47 @@ export const GetAuthInvitationOptionsResponseSchema = z.object({
   capabilities: z.object({
     createInvitation: AuthCreateInvitationCapabilitySchema,
   }),
+})
+
+export const GetAuthMembershipOptionsResponseSchema = z.object({
+  groups: z.array(AuthGroupOptionSchema),
+  capabilities: z.object({
+    invite: z.boolean(),
+    assignGroups: z.boolean(),
+    suspend: z.boolean(),
+  }),
+})
+
+export const ListAuthMembersQuerySchema = z.object({
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+})
+
+export const ListAuthMembersResponseSchema = z.object({
+  members: z.array(AuthMemberSchema),
+  hasMore: z.boolean(),
+  total: z.number(),
+})
+
+export const AuthMemberParamsSchema = z.object({
+  userId: z.string().min(1),
+})
+
+export const UpdateAuthMemberGroupsBodySchema = z.object({
+  groupIds: z.array(z.string().min(1)),
+})
+
+export const UpdateAuthMemberGroupsResponseSchema = z.object({
+  member: AuthManagedMemberSchema,
+})
+
+export const SuspendAuthMemberResponseSchema = z.object({
+  member: AuthManagedMemberSchema,
+})
+
+export const ReactivateAuthMemberResponseSchema = z.object({
+  member: AuthManagedMemberSchema,
 })
 
 export const CreateAuthInvitationBodySchema = z.object({

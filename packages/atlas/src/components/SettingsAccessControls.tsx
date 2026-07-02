@@ -330,11 +330,13 @@ export function GroupPicker({
   groups,
   selectedGroupIds,
   onChange,
+  emptyMessage = "Your account has no assignable groups, so this credential carries no extra scopes.",
 }: {
   readonly disabled?: boolean
   readonly groups: readonly AuthGroupOption[]
   readonly selectedGroupIds: readonly string[]
   readonly onChange: (groupIds: string[]) => void
+  readonly emptyMessage?: string
 }) {
   const selected = useMemo(() => new Set(selectedGroupIds), [selectedGroupIds])
 
@@ -347,11 +349,7 @@ export function GroupPicker({
   }
 
   if (groups.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Your account has no assignable groups, so this credential carries no extra scopes.
-      </p>
-    )
+    return <p className="text-xs text-muted-foreground">{emptyMessage}</p>
   }
 
   return (

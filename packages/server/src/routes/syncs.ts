@@ -9,6 +9,7 @@ import {
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RequestSyncRunBodySchema,
@@ -113,7 +114,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: SyncSchema.array() },
         detail: {
           summary: "List registered syncs",
-          tags: ["Syncs"],
+          tags: [OPENAPI_TAGS.syncs.name],
           operationId: "listSyncs",
         },
       }
@@ -136,7 +137,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: SyncSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get sync metadata",
-          tags: ["Syncs"],
+          tags: [OPENAPI_TAGS.syncs.name],
           operationId: "getSync",
         },
       }
@@ -189,7 +190,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: SyncRunListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List sync run history",
-          tags: ["Syncs"],
+          tags: [OPENAPI_TAGS.syncRuns.name],
           operationId: "listSyncRuns",
         },
       }
@@ -256,7 +257,7 @@ export function registerSyncRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Request a sync run",
-          tags: ["Syncs"],
+          tags: [OPENAPI_TAGS.syncRuns.name],
           operationId: "requestSyncRun",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },

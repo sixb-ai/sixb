@@ -8,6 +8,7 @@ import {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   RuleParamsSchema,
@@ -40,7 +41,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: RuleSchema.array() },
         detail: {
           summary: "List registered rules",
-          tags: ["Rules"],
+          tags: [OPENAPI_TAGS.rules.name],
           operationId: "listRules",
         },
       }
@@ -61,7 +62,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: RuleSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get rule metadata",
-          tags: ["Rules"],
+          tags: [OPENAPI_TAGS.rules.name],
           operationId: "getRule",
         },
       }
@@ -120,7 +121,7 @@ export function registerRuleRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         response: { 200: RuleStateListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List active rule states",
-          tags: ["Rules"],
+          tags: [OPENAPI_TAGS.ruleStates.name],
           operationId: "listRuleStates",
         },
       }

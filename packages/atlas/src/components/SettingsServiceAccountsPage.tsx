@@ -37,6 +37,7 @@ import {
   SheetContent,
   SheetDescription,
   SheetTitle,
+  toast,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -48,7 +49,6 @@ import {
   Loader2,
   Plus,
   Power,
-  RefreshCw,
   Terminal,
 } from "lucide-react"
 import { type SubmitEvent, useEffect, useMemo, useState } from "react"
@@ -113,8 +113,6 @@ export function SettingsServiceAccountsPage() {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false)
   const [createdToken, setCreatedToken] = useState<CreatedTokenState | null>(null)
   const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const optionsQuery = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const serviceAccountsQuery = useQuery({
@@ -160,12 +158,6 @@ export function SettingsServiceAccountsPage() {
     return selectedAccount.groupIds.map((id) => groupOptionsById.get(id) ?? { id })
   }, [selectedAccount, groupOptionsById])
 
-  const refresh = () => {
-    optionsQuery.refetch()
-    serviceAccountsQuery.refetch()
-    for (const query of tokenQueries) query.refetch()
-  }
-
   const invalidateAccountTokens = (serviceAccountId: string) =>
     queryClient.invalidateQueries({
       queryKey: listAuthServiceAccountAccessTokensQueryKey({ path: { serviceAccountId } }),
@@ -185,13 +177,11 @@ export function SettingsServiceAccountsPage() {
   const disableAccount = useMutation({
     ...disableAuthServiceAccountMutation(),
     onSuccess: async () => {
-      setError(null)
-      setMessage("Service account disabled.")
+      toast.success("Service account disabled.")
       await queryClient.invalidateQueries({ queryKey: listAuthServiceAccountsQueryKey() })
     },
     onError: (mutationError) => {
-      setMessage(null)
-      setError(apiErrorMessage(mutationError, "Could not disable the service account."))
+      toast.error(apiErrorMessage(mutationError, "Could not disable the service account."))
     },
   })
 
@@ -206,13 +196,11 @@ export function SettingsServiceAccountsPage() {
   const revokeToken = useMutation({
     ...revokeAuthServiceAccountAccessTokenMutation(),
     onSuccess: async () => {
-      setError(null)
-      setMessage("Token revoked.")
+      toast.success("Token revoked.")
       if (selectedAccountId) await invalidateAccountTokens(selectedAccountId)
     },
     onError: (mutationError) => {
-      setMessage(null)
-      setError(apiErrorMessage(mutationError, "Could not revoke the token."))
+      toast.error(apiErrorMessage(mutationError, "Could not revoke the token."))
     },
   })
 
@@ -232,20 +220,14 @@ export function SettingsServiceAccountsPage() {
     setSelectedAccountId(null)
     setTokenDialogOpen(false)
     setCreatedToken(null)
-    setMessage(null)
-    setError(null)
   }
 
   const openAccount = (accountId: string) => {
-    setMessage(null)
-    setError(null)
     setSelectedAccountId(accountId)
   }
 
   const revoke = (tokenId: string) => {
     if (!selectedAccountId) return
-    setMessage(null)
-    setError(null)
     setRevokingTokenId(tokenId)
     revokeToken.mutate(
       { path: { serviceAccountId: selectedAccountId, tokenId } },
@@ -263,7 +245,7 @@ export function SettingsServiceAccountsPage() {
 
   if (optionsQuery.isError) {
     return (
-      <div className="space-y-4">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
         <SettingsTabs />
         <AccessErrorState
           title="Service-account settings unavailable"
@@ -277,7 +259,7 @@ export function SettingsServiceAccountsPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-5xl space-y-5">
       <SettingsTabs />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -293,21 +275,13 @@ export function SettingsServiceAccountsPage() {
             scopes, independent of any person.
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="outline" size="icon" onClick={refresh} title="Refresh">
-            <RefreshCw
-              className={cn("h-4 w-4", serviceAccountsQuery.isFetching && "animate-spin")}
-            />
-            <span className="sr-only">Refresh</span>
-          </Button>
-          <Button type="button" onClick={() => setCreateAccountOpen(true)}>
-            <Plus className="h-4 w-4" />
-            New service account
-          </Button>
-        </div>
+        <Button type="button" className="shrink-0" onClick={() => setCreateAccountOpen(true)}>
+          <Plus className="h-4 w-4" />
+          New service account
+        </Button>
       </div>
 
-      <section className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="flex items-baseline justify-between border-b border-border/60 px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">Accounts</h2>
           <span className="text-xs text-muted-foreground">
@@ -434,19 +408,6 @@ export function SettingsServiceAccountsPage() {
                   </p>
                 ) : null}
 
-                {(message || error) && (
-                  <p
-                    className={cn(
-                      "mb-3 rounded-lg px-3 py-2 text-sm",
-                      error
-                        ? "border border-destructive/30 bg-destructive/10 text-destructive"
-                        : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                    )}
-                  >
-                    {error ?? message}
-                  </p>
-                )}
-
                 <div className="overflow-hidden rounded-xl border border-border/60">
                   {selectedTokensState?.isLoading ? (
                     <div className="flex min-h-40 items-center justify-center">
@@ -498,13 +459,11 @@ export function SettingsServiceAccountsPage() {
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction
                             className="bg-destructive text-white hover:bg-destructive/90"
-                            onClick={() => {
-                              setMessage(null)
-                              setError(null)
+                            onClick={() =>
                               disableAccount.mutate({
                                 path: { serviceAccountId: selectedAccount.id },
                               })
-                            }}
+                            }
                           >
                             Disable account
                           </AlertDialogAction>

@@ -32,6 +32,7 @@ import {
   getAgentThread,
   getAuthAccessManagementOptions,
   getAuthInvitationOptions,
+  getAuthMembershipOptions,
   getAuthSession,
   getBulkTelemetryHistory,
   getConnector,
@@ -60,6 +61,7 @@ import {
   listAgentThreads,
   listAuthAccessTokens,
   listAuthInvitations,
+  listAuthMembers,
   listAuthServiceAccountAccessTokens,
   listAuthServiceAccounts,
   listAuthSessions,
@@ -86,6 +88,7 @@ import {
   type Options,
   postAgentThreadMessage,
   queryObjects,
+  reactivateAuthMember,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -99,6 +102,8 @@ import {
   signOut,
   signOutAll,
   submitWorkflowIntervention,
+  suspendAuthMember,
+  updateAuthMemberGroups,
   uploadFileContent,
   uploadFileRaw,
   upsertObject,
@@ -171,6 +176,9 @@ import type {
   GetAuthInvitationOptionsData,
   GetAuthInvitationOptionsError,
   GetAuthInvitationOptionsResponse,
+  GetAuthMembershipOptionsData,
+  GetAuthMembershipOptionsError,
+  GetAuthMembershipOptionsResponse,
   GetAuthSessionData,
   GetAuthSessionResponse,
   GetBulkTelemetryHistoryData,
@@ -250,6 +258,9 @@ import type {
   ListAuthInvitationsData,
   ListAuthInvitationsError,
   ListAuthInvitationsResponse,
+  ListAuthMembersData,
+  ListAuthMembersError,
+  ListAuthMembersResponse,
   ListAuthServiceAccountAccessTokensData,
   ListAuthServiceAccountAccessTokensError,
   ListAuthServiceAccountAccessTokensResponse,
@@ -318,6 +329,9 @@ import type {
   QueryObjectsData,
   QueryObjectsError,
   QueryObjectsResponse,
+  ReactivateAuthMemberData,
+  ReactivateAuthMemberError,
+  ReactivateAuthMemberResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -357,6 +371,12 @@ import type {
   SubmitWorkflowInterventionData,
   SubmitWorkflowInterventionError,
   SubmitWorkflowInterventionResponse,
+  SuspendAuthMemberData,
+  SuspendAuthMemberError,
+  SuspendAuthMemberResponse,
+  UpdateAuthMemberGroupsData,
+  UpdateAuthMemberGroupsError,
+  UpdateAuthMemberGroupsResponse,
   UploadFileContentData,
   UploadFileContentError,
   UploadFileContentResponse,
@@ -970,6 +990,180 @@ export const revokeAuthInvitationMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await revokeAuthInvitation({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const getAuthMembershipOptionsQueryKey = (options?: Options<GetAuthMembershipOptionsData>) =>
+  createQueryKey("getAuthMembershipOptions", options)
+
+/**
+ * Get auth membership management options
+ */
+export const getAuthMembershipOptionsOptions = (options?: Options<GetAuthMembershipOptionsData>) =>
+  queryOptions<
+    GetAuthMembershipOptionsResponse,
+    GetAuthMembershipOptionsError,
+    GetAuthMembershipOptionsResponse,
+    ReturnType<typeof getAuthMembershipOptionsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAuthMembershipOptions({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAuthMembershipOptionsQueryKey(options),
+  })
+
+export const listAuthMembersQueryKey = (options?: Options<ListAuthMembersData>) =>
+  createQueryKey("listAuthMembers", options)
+
+/**
+ * List auth members
+ */
+export const listAuthMembersOptions = (options?: Options<ListAuthMembersData>) =>
+  queryOptions<
+    ListAuthMembersResponse,
+    ListAuthMembersError,
+    ListAuthMembersResponse,
+    ReturnType<typeof listAuthMembersQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAuthMembers({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAuthMembersQueryKey(options),
+  })
+
+export const listAuthMembersInfiniteQueryKey = (
+  options?: Options<ListAuthMembersData>
+): QueryKey<Options<ListAuthMembersData>> => createQueryKey("listAuthMembers", options, true)
+
+/**
+ * List auth members
+ */
+export const listAuthMembersInfiniteOptions = (options?: Options<ListAuthMembersData>) =>
+  infiniteQueryOptions<
+    ListAuthMembersResponse,
+    ListAuthMembersError,
+    InfiniteData<ListAuthMembersResponse>,
+    QueryKey<Options<ListAuthMembersData>>,
+    string | Pick<QueryKey<Options<ListAuthMembersData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAuthMembersData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAuthMembers({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAuthMembersInfiniteQueryKey(options),
+    }
+  )
+
+/**
+ * Update an auth member's groups
+ */
+export const updateAuthMemberGroupsMutation = (
+  options?: Partial<Options<UpdateAuthMemberGroupsData>>
+): UseMutationOptions<
+  UpdateAuthMemberGroupsResponse,
+  UpdateAuthMemberGroupsError,
+  Options<UpdateAuthMemberGroupsData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    UpdateAuthMemberGroupsResponse,
+    UpdateAuthMemberGroupsError,
+    Options<UpdateAuthMemberGroupsData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await updateAuthMemberGroups({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Suspend an auth member
+ */
+export const suspendAuthMemberMutation = (
+  options?: Partial<Options<SuspendAuthMemberData>>
+): UseMutationOptions<
+  SuspendAuthMemberResponse,
+  SuspendAuthMemberError,
+  Options<SuspendAuthMemberData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    SuspendAuthMemberResponse,
+    SuspendAuthMemberError,
+    Options<SuspendAuthMemberData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await suspendAuthMember({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Reactivate an auth member
+ */
+export const reactivateAuthMemberMutation = (
+  options?: Partial<Options<ReactivateAuthMemberData>>
+): UseMutationOptions<
+  ReactivateAuthMemberResponse,
+  ReactivateAuthMemberError,
+  Options<ReactivateAuthMemberData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    ReactivateAuthMemberResponse,
+    ReactivateAuthMemberError,
+    Options<ReactivateAuthMemberData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await reactivateAuthMember({
         ...options,
         ...fnOptions,
         throwOnError: true,

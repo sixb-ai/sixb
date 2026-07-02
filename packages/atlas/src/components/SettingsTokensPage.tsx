@@ -6,10 +6,10 @@ import {
   listAuthAccessTokensQueryKey,
   revokeAuthAccessTokenMutation,
 } from "@sixb/client/hooks"
-import { Button } from "@sixb/ui/components"
+import { Button, toast } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Plus, RefreshCw, Search } from "lucide-react"
+import { Plus, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import {
   AccessErrorState,
@@ -36,8 +36,6 @@ export function SettingsTokensPage() {
   const [query, setQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [revokingTokenId, setRevokingTokenId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   const optionsQuery = useQuery({ ...getAuthAccessManagementOptionsOptions(), retry: false })
   const tokensQuery = useQuery({
@@ -83,13 +81,11 @@ export function SettingsTokensPage() {
   const revokeToken = useMutation({
     ...revokeAuthAccessTokenMutation(),
     onSuccess: async () => {
-      setError(null)
-      setMessage("Token revoked.")
+      toast.success("Token revoked.")
       await refresh()
     },
     onError: (mutationError) => {
-      setMessage(null)
-      setError(apiErrorMessage(mutationError, "Could not revoke the token."))
+      toast.error(apiErrorMessage(mutationError, "Could not revoke the token."))
     },
   })
 
@@ -106,8 +102,6 @@ export function SettingsTokensPage() {
   }
 
   const revoke = (tokenId: string) => {
-    setMessage(null)
-    setError(null)
     setRevokingTokenId(tokenId)
     revokeToken.mutate({ path: { tokenId } }, { onSettled: () => setRevokingTokenId(null) })
   }
@@ -122,7 +116,7 @@ export function SettingsTokensPage() {
 
   if (optionsQuery.isError) {
     return (
-      <div className="space-y-4">
+      <div className="mx-auto w-full max-w-5xl space-y-4">
         <SettingsTabs />
         <AccessErrorState
           title="Token settings unavailable"
@@ -133,7 +127,7 @@ export function SettingsTokensPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-5xl space-y-5">
       <SettingsTabs />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -149,25 +143,10 @@ export function SettingsTokensPage() {
             like passwords.
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={() => {
-              tokensQuery.refetch()
-              optionsQuery.refetch()
-            }}
-            title="Refresh"
-          >
-            <RefreshCw className={cn("h-4 w-4", tokensQuery.isFetching && "animate-spin")} />
-            <span className="sr-only">Refresh</span>
-          </Button>
-          <Button type="button" onClick={() => handleDialogChange(true)}>
-            <Plus className="h-4 w-4" />
-            New token
-          </Button>
-        </div>
+        <Button type="button" className="shrink-0" onClick={() => handleDialogChange(true)}>
+          <Plus className="h-4 w-4" />
+          New token
+        </Button>
       </div>
 
       {tokens.length > 0 && (
@@ -203,26 +182,13 @@ export function SettingsTokensPage() {
         </div>
       )}
 
-      <section className="overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm">
+      <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="flex items-baseline justify-between border-b border-border/60 px-4 py-3">
           <h2 className="text-sm font-semibold text-foreground">Your tokens</h2>
           <span className="text-xs text-muted-foreground">
             {tokens.length} {tokens.length === 1 ? "token" : "tokens"}
           </span>
         </div>
-
-        {(message || error) && (
-          <p
-            className={cn(
-              "mx-4 mt-4 rounded-lg px-3 py-2 text-sm",
-              error
-                ? "border border-destructive/30 bg-destructive/10 text-destructive"
-                : "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            )}
-          >
-            {error ?? message}
-          </p>
-        )}
 
         {tokensQuery.isLoading ? (
           <div className="flex min-h-50 items-center justify-center">

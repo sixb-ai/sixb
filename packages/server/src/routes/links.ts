@@ -2,6 +2,7 @@ import { isAllowed, type ObjectLinkRow, type OntologySource, type Sixb } from "@
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   LinkParamsSchema,
@@ -64,7 +65,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "List object links",
-          tags: ["Links"],
+          tags: [OPENAPI_TAGS.links.name],
           operationId: "listObjectLinks",
         },
       }
@@ -95,7 +96,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Create or update object link",
-          tags: ["Links"],
+          tags: [OPENAPI_TAGS.links.name],
           operationId: "upsertObjectLink",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -126,7 +127,7 @@ export function registerLinkRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Remove object link",
-          tags: ["Links"],
+          tags: [OPENAPI_TAGS.links.name],
           operationId: "removeObjectLink",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },

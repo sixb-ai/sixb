@@ -2,6 +2,7 @@ import type { ActionDefinition, OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   ActionCatalogItemSchema,
   ActionIdParamsSchema,
@@ -49,7 +50,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         response: { 200: ActionCatalogItemSchema.array() },
         detail: {
           summary: "List registered actions",
-          tags: ["Actions"],
+          tags: [OPENAPI_TAGS.actions.name],
           operationId: "listActions",
           security: bearerSecurityRequirement("listActions"),
         },
@@ -75,7 +76,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         response: { 200: ActionCatalogItemSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get action metadata",
-          tags: ["Actions"],
+          tags: [OPENAPI_TAGS.actions.name],
           operationId: "getAction",
           security: bearerSecurityRequirement("getAction"),
         },
@@ -115,7 +116,7 @@ export function registerActionRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         },
         detail: {
           summary: "Request an action",
-          tags: ["Actions"],
+          tags: [OPENAPI_TAGS.actions.name],
           operationId: "requestAction",
           security: bearerSecurityRequirement("requestAction"),
         },

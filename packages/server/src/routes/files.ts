@@ -16,6 +16,7 @@ import {
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
   CompleteFileUploadBodySchema,
@@ -28,7 +29,6 @@ import {
 } from "../schemas/files"
 import { handleRouteError } from "../utils/http"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
-
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
 // adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
@@ -99,7 +99,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Upload a file",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileRaw",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
           requestBody: {
@@ -179,7 +179,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Create a staged file upload",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "createFileUpload",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -257,7 +257,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Upload staged file content through Sixb",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileContent",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
           requestBody: {
@@ -327,7 +327,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Sign a staged multipart upload part",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "signFileUploadPart",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -397,7 +397,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Complete a staged file upload",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "completeFileUpload",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -452,7 +452,7 @@ export function registerFileRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
         },
         detail: {
           summary: "Abort a staged file upload",
-          tags: ["Files"],
+          tags: [OPENAPI_TAGS.files.name],
           operationId: "abortFileUpload",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },

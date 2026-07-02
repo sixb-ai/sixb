@@ -1,5 +1,6 @@
 import type { OntologySource, Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 
@@ -39,7 +40,7 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         response: { 200: ConnectorSchema.array() },
         detail: {
           summary: "List registered connectors",
-          tags: ["Connectors"],
+          tags: [OPENAPI_TAGS.connectors.name],
           operationId: "listConnectors",
         },
       }
@@ -60,7 +61,7 @@ export function registerConnectorRoutes(app: Elysia, sixb: Sixb<readonly Ontolog
         response: { 200: ConnectorSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get connector metadata",
-          tags: ["Connectors"],
+          tags: [OPENAPI_TAGS.connectors.name],
           operationId: "getConnector",
         },
       }

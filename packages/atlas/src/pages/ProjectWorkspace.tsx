@@ -29,7 +29,7 @@ import {
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
-import { SettingsInvitationsPage } from "../components/SettingsInvitationsPage"
+import { SettingsMembersPage } from "../components/SettingsMembersPage"
 import { SettingsServiceAccountsPage } from "../components/SettingsServiceAccountsPage"
 import { SettingsSessionsPage } from "../components/SettingsSessionsPage"
 import { SettingsTokensPage } from "../components/SettingsTokensPage"
@@ -384,10 +384,10 @@ export function ProjectWorkspace() {
             <Route path="pipelines" element={<PipelinesPage />} />
             <Route path="rules" element={<RulesPage />} />
             <Route path="rules/:ruleId" element={<RuleDetailPage />} />
-            <Route path="settings" element={<Navigate to="/settings/tokens" replace />} />
+            <Route path="settings" element={<Navigate to="/settings/members" replace />} />
             <Route path="settings/tokens" element={<SettingsTokensPage />} />
+            <Route path="settings/members" element={<SettingsMembersPage />} />
             <Route path="settings/service-accounts" element={<SettingsServiceAccountsPage />} />
-            <Route path="settings/invitations" element={<SettingsInvitationsPage />} />
             <Route path="settings/sessions" element={<SettingsSessionsPage />} />
             <Route
               path="ontology"

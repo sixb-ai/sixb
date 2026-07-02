@@ -11,7 +11,7 @@ A request first resolves an identity (authentication), then resolves that identi
 
 | Layer | Answers | Covers | Page |
 | --- | --- | --- | --- |
-| Authentication | Who you are | Login strategies (magic link, OIDC), sessions, cookies, bootstrap, invitations | [Authentication](./authentication.md) |
+| Authentication | Who you are | Login strategies (magic link, OIDC), sessions, cookies, bootstrap, invitations, member lifecycle | [Authentication](./authentication.md) |
 | Authorization | What you may do | Groups, roles, grants (`can.view` / `can.apply` / `can.run`), membership policies, the scoped runtime | [Authorization](./authorization.md) |
 
 ## How they connect
@@ -53,6 +53,6 @@ Bootstrap is where the two layers meet. The auth strategy's `bootstrapUsers` and
 
 ## Next
 
-- [Authentication](./authentication.md) — pick a strategy, set allowed domains and bootstrap, manage sessions and invitations.
+- [Authentication](./authentication.md) — pick a strategy, set allowed domains and bootstrap, manage sessions, invitations, and members.
 - [Authorization](./authorization.md) — define groups, roles, and grants, and enforce them with the scoped runtime.
 - [Server](../server/overview.md) — how the server resolves sessions and applies the authorization context per request.
