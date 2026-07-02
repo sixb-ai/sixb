@@ -240,9 +240,13 @@ describe("custom app Tailwind build (e2e)", () => {
     }
 
     // The compiled stylesheet lands under .sixb/generated, not app/.
+    // Canary classes, one per scanned source — proves Tailwind compiled the app's own page plus the
+    // linked component libraries, not just one of them. `line-through` is the app page, `max-h-60`
+    // comes only from @sixb/agent-ui, `h-dvh` only from @sixb/app. (Repoint these if a class is
+    // removed from its source rather than asserting a class that no longer exists.)
     const generatedCss = await readFile(join(tempRoot, ".sixb", "generated", "app.css"), "utf-8")
     expect(generatedCss).toContain("line-through")
-    expect(generatedCss).toContain("max-h-52")
+    expect(generatedCss).toContain("max-h-60")
     expect(generatedCss).toContain("h-dvh")
     expect(generatedCss.lastIndexOf("--background: #123456")).toBeGreaterThan(
       generatedCss.lastIndexOf("--background: #fafafa")
