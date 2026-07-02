@@ -148,13 +148,20 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   let drainError: unknown
   let chunkIndex = 0
   try {
-    // Draining the UI stream drives the model loop and fires `onFinish`. Chunks are live UI state:
-    // publish them to the broker stream, but keep durable messages final-only.
-    for await (const chunk of uiStream) {
+    // Draining the UI stream drives the model loop and fires `onEnd`. Chunks are live UI state:
+    // publish them to the broker stream, but keep durable messages final-only. The standalone
+    // `toUIMessageStream` returns a plain `ReadableStream`, so read it with a reader rather than
+    // `for await` (which needs `Symbol.asyncIterator`, absent under the CI lib config).
+    const reader = uiStream.getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) {
+        break
+      }
       await context.streamSink.publishUiChunk({
         run,
         chunkIndex: chunkIndex++,
-        chunk,
+        chunk: value,
       })
     }
   } catch (error) {
