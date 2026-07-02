@@ -1,8 +1,10 @@
+import { client } from "@sixb/client"
 import { Badge, Card, CardContent } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, UserCheck, Workflow, Zap } from "lucide-react"
 import { useState } from "react"
 import { StructuredValue } from "../../../../components/StructuredValue"
+import { workflowNodeFileContentUrl } from "../../../../lib/files"
 import { formatNodeDuration, formatRelativeTime, type WorkflowRunNode } from "../../utils/workflows"
 import { NodeStatusBadge } from "../runs/StatusBadge"
 import { WorkflowInterventionPanel } from "./WorkflowInterventionPanel"
@@ -66,8 +68,13 @@ export function RunNodeRow({
             ) : null}
 
             <div className="grid gap-px border-t border-border/60 bg-border/40 lg:grid-cols-2">
-              <JsonPanel label="Input" value={node.input} />
-              <JsonPanel label={outputLabel} value={node.output ?? node.error ?? null} />
+              <JsonPanel label="Input" value={node.input} node={node} root="input" />
+              <JsonPanel
+                label={outputLabel}
+                value={node.output ?? node.error ?? null}
+                node={node}
+                root="output"
+              />
             </div>
           </>
         ) : null}
@@ -82,13 +89,41 @@ function NodeTypeIcon({ type }: { type: WorkflowRunNode["nodeType"] }) {
   return <Zap className="h-3 w-3" />
 }
 
-function JsonPanel({ label, value }: { label: string; value: unknown }) {
+function JsonPanel({
+  label,
+  value,
+  node,
+  root,
+}: {
+  label: string
+  value: unknown
+  node: WorkflowRunNode
+  root: "input" | "output"
+}) {
+  const baseUrl = client.getConfig().baseUrl ?? window.location.origin
+  const fileLinkForPath = (pathSegments: readonly string[]) => ({
+    inlineUrl: workflowNodeFileContentUrl({
+      baseUrl,
+      runId: node.workflowRunId,
+      nodeKey: node.nodeKey,
+      root,
+      pathSegments,
+    }),
+    downloadUrl: workflowNodeFileContentUrl({
+      baseUrl,
+      runId: node.workflowRunId,
+      nodeKey: node.nodeKey,
+      root,
+      pathSegments,
+      disposition: "attachment",
+    }),
+  })
   return (
     <div className="min-w-0 bg-card p-4">
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
-      <StructuredValue value={value} />
+      <StructuredValue value={value} fileLinkForPath={fileLinkForPath} />
     </div>
   )
 }

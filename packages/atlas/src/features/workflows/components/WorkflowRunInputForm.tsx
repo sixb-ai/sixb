@@ -1,4 +1,5 @@
 import { listObjectsInfiniteOptions } from "@sixb/client/hooks"
+import { isFileRef } from "@sixb/core/blob-storage"
 import {
   Combobox,
   Input,
@@ -10,6 +11,11 @@ import {
   SelectValue,
 } from "@sixb/ui/components"
 import { useInfiniteQuery } from "@tanstack/react-query"
+import {
+  FileRefUploadField,
+  parseFileRefFormValue,
+  stringifyFileRefFormValue,
+} from "../../../components/FileRefUploadField"
 import { SchemaChip } from "./nodes/SchemaShape"
 
 export type WorkflowInputFormValues = Record<string, string>
@@ -30,12 +36,14 @@ export function WorkflowRunInputFields({
   values,
   errors,
   onChange,
+  onFileUploadPendingChange,
   emptyLabel = "This workflow does not require any input.",
 }: {
   fields: Readonly<Record<string, unknown>>
   values: WorkflowInputFormValues
   errors: WorkflowInputFormErrors
   onChange: (path: readonly string[], value: string) => void
+  onFileUploadPendingChange?: (key: string, pending: boolean) => void
   emptyLabel?: string
 }) {
   const entries = Object.entries(fields)
@@ -59,6 +67,7 @@ export function WorkflowRunInputFields({
           values={values}
           errors={errors}
           onChange={onChange}
+          onFileUploadPendingChange={onFileUploadPendingChange}
         />
       ))}
     </div>
@@ -107,6 +116,7 @@ function WorkflowInputField({
   values,
   errors,
   onChange,
+  onFileUploadPendingChange,
 }: {
   name: string
   path: readonly string[]
@@ -115,6 +125,7 @@ function WorkflowInputField({
   values: WorkflowInputFormValues
   errors: WorkflowInputFormErrors
   onChange: (path: readonly string[], value: string) => void
+  onFileUploadPendingChange?: (key: string, pending: boolean) => void
 }) {
   const spec = unwrapFieldDescriptor(descriptor, defaultRequired)
   const key = pathKey(path)
@@ -148,6 +159,7 @@ function WorkflowInputField({
                 values={values}
                 errors={errors}
                 onChange={onChange}
+                onFileUploadPendingChange={onFileUploadPendingChange}
               />
             ))}
           </div>
@@ -176,6 +188,7 @@ function WorkflowInputField({
         value={values[key] ?? ""}
         errorId={error ? `${controlId}-error` : undefined}
         onChange={onChange}
+        onFileUploadPendingChange={onFileUploadPendingChange}
       />
       {error ? <FieldError id={`${controlId}-error`} message={error} /> : null}
     </div>
@@ -189,6 +202,7 @@ function WorkflowInputControl({
   value,
   errorId,
   onChange,
+  onFileUploadPendingChange,
 }: {
   id: string
   path: readonly string[]
@@ -196,6 +210,7 @@ function WorkflowInputControl({
   value: string
   errorId?: string
   onChange: (path: readonly string[], value: string) => void
+  onFileUploadPendingChange?: (key: string, pending: boolean) => void
 }) {
   const schema = resolveRenderableSchema(spec.schema)
 
@@ -219,6 +234,19 @@ function WorkflowInputControl({
 
   if (schema === "boolean") {
     return <BooleanInput path={path} value={value} errorId={errorId} onChange={onChange} />
+  }
+
+  if (schema === "fileRef") {
+    return (
+      <FileRefUploadField
+        id={id}
+        value={parseFileRefFormValue(value)}
+        onChange={(fileRef) => onChange(path, fileRef ? stringifyFileRefFormValue(fileRef) : "")}
+        errorId={errorId}
+        logicalPathPrefix={`workflow-input/${path.join("/")}`}
+        onPendingChange={(pending) => onFileUploadPendingChange?.(pathKey(path), pending)}
+      />
+    )
   }
 
   if (isPrimitiveSchema(schema) && schema !== "fileRef") {
@@ -513,6 +541,22 @@ function parseFieldValue({
     return { present: true, value: trimmed === "true" }
   }
 
+  if (schema === "fileRef") {
+    if (!trimmed) return missingField(spec, path, errors)
+
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      if (!isFileRef(parsed)) {
+        errors[key] = `${fieldLabel(path)} must be an uploaded file.`
+        return { present: false }
+      }
+      return { present: true, value: parsed }
+    } catch {
+      errors[key] = `${fieldLabel(path)} must be an uploaded file.`
+      return { present: false }
+    }
+  }
+
   if (isPrimitiveSchema(schema) && schema !== "fileRef") {
     if (!trimmed) return missingField(spec, path, errors)
 
@@ -661,6 +705,10 @@ function initialFormValueForSchema(schema: unknown, value: unknown): string | nu
 
   if (schema === "boolean") {
     return typeof value === "boolean" ? String(value) : null
+  }
+
+  if (schema === "fileRef") {
+    return isFileRef(value) ? JSON.stringify(value) : null
   }
 
   if (schema === "date" && typeof value === "string") {

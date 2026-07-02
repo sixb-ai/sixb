@@ -17,6 +17,76 @@ export interface FileContentResponseInput {
   readonly rangeHeader?: string | null
 }
 
+export function fileContentGetResponses() {
+  return {
+    200: {
+      description: "File content",
+      content: {
+        "application/octet-stream": {
+          schema: { type: "string", format: "binary" },
+        },
+      },
+    },
+    206: {
+      description: "Partial file content",
+      content: {
+        "application/octet-stream": {
+          schema: { type: "string", format: "binary" },
+        },
+      },
+    },
+    400: {
+      description: "Response for status 400",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ErrorResponse" },
+        },
+      },
+    },
+    404: {
+      description: "Response for status 404",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ErrorResponse" },
+        },
+      },
+    },
+    416: {
+      description: "Requested byte range is not satisfiable",
+    },
+  } as const
+}
+
+export function fileContentHeadResponses() {
+  return {
+    200: {
+      description: "File content headers",
+    },
+    206: {
+      description: "Partial file content headers",
+    },
+    400: {
+      description: "Response for status 400",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ErrorResponse" },
+        },
+      },
+    },
+    404: {
+      description: "Response for status 404",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/ErrorResponse" },
+        },
+      },
+    },
+    416: {
+      description: "Requested byte range is not satisfiable",
+    },
+  } as const
+}
+
 export async function createFileContentResponse(
   input: FileContentResponseInput
 ): Promise<Response | null> {

@@ -18,7 +18,12 @@ import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
-import { createFileContentResponse, resolveFileRefAtPath } from "../files/content"
+import {
+  createFileContentResponse,
+  fileContentGetResponses,
+  fileContentHeadResponses,
+  resolveFileRefAtPath,
+} from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -625,43 +630,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "getObjectFileContent",
           security: bearerSecurityRequirement("getObjectFileContent"),
-          responses: {
-            200: {
-              description: "File content",
-              content: {
-                "application/octet-stream": {
-                  schema: { type: "string", format: "binary" },
-                },
-              },
-            },
-            206: {
-              description: "Partial file content",
-              content: {
-                "application/octet-stream": {
-                  schema: { type: "string", format: "binary" },
-                },
-              },
-            },
-            400: {
-              description: "Response for status 400",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" },
-                },
-              },
-            },
-            404: {
-              description: "Response for status 404",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" },
-                },
-              },
-            },
-            416: {
-              description: "Requested byte range is not satisfiable",
-            },
-          },
+          responses: fileContentGetResponses(),
         },
       }
     )
@@ -680,33 +649,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "headObjectFileContent",
           security: bearerSecurityRequirement("headObjectFileContent"),
-          responses: {
-            200: {
-              description: "File content headers",
-            },
-            206: {
-              description: "Partial file content headers",
-            },
-            400: {
-              description: "Response for status 400",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" },
-                },
-              },
-            },
-            404: {
-              description: "Response for status 404",
-              content: {
-                "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" },
-                },
-              },
-            },
-            416: {
-              description: "Requested byte range is not satisfiable",
-            },
-          },
+          responses: fileContentHeadResponses(),
         },
       }
     )

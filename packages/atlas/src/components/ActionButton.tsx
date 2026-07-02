@@ -20,10 +20,15 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Loader2 } from "lucide-react"
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import {
+  FileRefUploadField,
+  parseFileRefFormValue,
+  stringifyFileRefFormValue,
+} from "./FileRefUploadField"
 
-type ActionParams = Record<string, string | number | boolean>
+type ActionParams = Record<string, unknown>
 
 interface ActionButtonProps {
   objectId: string
@@ -52,27 +57,81 @@ function ActionParamsDialog({
   submitting = false,
 }: ActionParamsDialogProps) {
   const [values, setValues] = useState<Record<string, string>>({})
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
+  const hasPendingFileUploads = pendingFileUploads.size > 0
+
+  useEffect(() => {
+    if (!open) {
+      setValues({})
+      setErrors({})
+      setPendingFileUploads(new Set())
+    }
+  }, [open])
+
+  function setParamValue(key: string, value: string) {
+    setValues((current) => ({ ...current, [key]: value }))
+    setErrors(({ [key]: _removed, ...rest }) => rest)
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && hasPendingFileUploads) return
+
+    if (!nextOpen) {
+      setValues({})
+      setErrors({})
+      setPendingFileUploads(new Set())
+    }
+    onOpenChange(nextOpen)
+  }
+
+  const handleFileUploadPendingChange = useCallback((paramId: string, pending: boolean) => {
+    setPendingFileUploads((current) => {
+      const hasParam = current.has(paramId)
+      if (hasParam === pending) return current
+
+      const next = new Set(current)
+      if (pending) next.add(paramId)
+      else next.delete(paramId)
+      return next
+    })
+  }, [])
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
+    if (hasPendingFileUploads) return
     const params: ActionParams = {}
+    const nextErrors: Record<string, string> = {}
     for (const [key, def] of Object.entries(action.params ?? {})) {
-      const value = values[key]
-      if (value !== undefined && value !== "") {
-        if (def.type === "number") {
-          params[key] = Number(value)
-        } else if (def.type === "boolean") {
-          params[key] = value === "true"
-        } else {
-          params[key] = value
+      const value = values[key]?.trim() ?? ""
+      if (!value) {
+        if (def.required) nextErrors[key] = "Required."
+        continue
+      }
+
+      if (def.type === "number") {
+        params[key] = Number(value)
+      } else if (def.type === "boolean") {
+        params[key] = value === "true"
+      } else if (def.type === "fileRef") {
+        const fileRef = parseFileRefFormValue(value)
+        if (!fileRef) {
+          nextErrors[key] = "Expected an uploaded file."
+          continue
         }
+        params[key] = fileRef
+      } else {
+        params[key] = value
       }
     }
+
+    setErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) return
     onSubmit(params)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="capitalize">{actionId.replace(/-/g, " ")}</DialogTitle>
@@ -98,7 +157,7 @@ function ActionParamsDialog({
               {def.enum ? (
                 <Select
                   value={values[key] ?? ""}
-                  onValueChange={(value) => setValues({ ...values, [key]: value })}
+                  onValueChange={(value) => setParamValue(key, value)}
                   required={def.required}
                 >
                   <SelectTrigger id={`action-param-${key}`} className="w-full">
@@ -115,7 +174,7 @@ function ActionParamsDialog({
               ) : def.type === "boolean" ? (
                 <Select
                   value={values[key] ?? ""}
-                  onValueChange={(value) => setValues({ ...values, [key]: value })}
+                  onValueChange={(value) => setParamValue(key, value)}
                   required={def.required}
                 >
                   <SelectTrigger id={`action-param-${key}`} className="w-full">
@@ -126,16 +185,33 @@ function ActionParamsDialog({
                     <SelectItem value="false">false</SelectItem>
                   </SelectContent>
                 </Select>
+              ) : def.type === "fileRef" ? (
+                <FileRefUploadField
+                  id={`action-param-${key}`}
+                  value={parseFileRefFormValue(values[key])}
+                  onChange={(fileRef) =>
+                    setParamValue(key, fileRef ? stringifyFileRefFormValue(fileRef) : "")
+                  }
+                  errorId={errors[key] ? `action-param-${key}-error` : undefined}
+                  logicalPathPrefix={`actions/${actionId}/${key}`}
+                  disabled={submitting}
+                  onPendingChange={(pending) => handleFileUploadPendingChange(key, pending)}
+                />
               ) : (
                 <Input
                   id={`action-param-${key}`}
                   type={def.type === "number" ? "number" : "text"}
                   value={values[key] ?? ""}
-                  onChange={(event) => setValues({ ...values, [key]: event.target.value })}
+                  onChange={(event) => setParamValue(key, event.target.value)}
                   required={def.required}
                   placeholder={`Enter ${key}...`}
                 />
               )}
+              {errors[key] ? (
+                <p id={`action-param-${key}-error`} className="text-xs text-destructive">
+                  {errors[key]}
+                </p>
+              ) : null}
             </div>
           ))}
 
@@ -143,14 +219,16 @@ function ActionParamsDialog({
             <Button
               type="button"
               variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={submitting}
+              onClick={() => handleOpenChange(false)}
+              disabled={submitting || hasPendingFileUploads}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
-              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Run
+            <Button type="submit" disabled={submitting || hasPendingFileUploads}>
+              {submitting || hasPendingFileUploads ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {hasPendingFileUploads ? "Uploading..." : "Run"}
             </Button>
           </DialogFooter>
         </form>
@@ -187,7 +265,9 @@ export function ActionButton({
     },
   })
 
-  const hasRequiredParams = Object.values(action.params ?? {}).some((p: ActionParam) => p.required)
+  const params = Object.values(action.params ?? {})
+  const hasRequiredParams = params.some((p: ActionParam) => p.required)
+  const hasFileParams = params.some((p: ActionParam) => p.type === "fileRef")
   const shouldConfirm = requireConfirm ?? tone === "danger"
 
   const runAction = (params?: ActionParams) => {
@@ -223,7 +303,7 @@ export function ActionButton({
   }
 
   const handleClick = () => {
-    if (hasRequiredParams) {
+    if (hasRequiredParams || hasFileParams) {
       setShowParams(true)
     } else {
       runAction()

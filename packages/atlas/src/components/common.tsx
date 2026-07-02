@@ -3,7 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { AlertCircle, ChevronLeft, Loader2 } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { StructuredValue } from "./StructuredValue"
+import { type FileLinkForPath, StructuredValue } from "./StructuredValue"
 
 type AvatarSize = "xs" | "sm" | "md" | "lg"
 
@@ -165,10 +165,12 @@ export function DataPanel({
   label,
   value,
   emptyLabel = "Not recorded",
+  fileLinkForPath,
 }: {
   label?: string
   value: unknown
   emptyLabel?: string
+  fileLinkForPath?: FileLinkForPath
 }) {
   const [mode, setMode] = useState<DataPanelMode>("structured")
   const isEmpty = value === null || value === undefined
@@ -207,7 +209,7 @@ export function DataPanel({
       {isEmpty ? (
         <p className="text-sm text-muted-foreground">{emptyLabel}</p>
       ) : mode === "structured" ? (
-        <StructuredValue value={value} emptyLabel={emptyLabel} />
+        <StructuredValue value={value} emptyLabel={emptyLabel} fileLinkForPath={fileLinkForPath} />
       ) : (
         <pre className="max-h-72 overflow-auto text-xs leading-relaxed text-muted-foreground scrollbar-auto-hide">
           {JSON.stringify(value, null, 2)}

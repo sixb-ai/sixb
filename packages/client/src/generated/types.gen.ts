@@ -3345,6 +3345,178 @@ export type GetWorkflowRunResponses = {
 
 export type GetWorkflowRunResponse = GetWorkflowRunResponses[keyof GetWorkflowRunResponses]
 
+export type GetWorkflowRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/workflow-runs/{runId}/files/content"
+}
+
+export type GetWorkflowRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetWorkflowRunFileContentError =
+  GetWorkflowRunFileContentErrors[keyof GetWorkflowRunFileContentErrors]
+
+export type GetWorkflowRunFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetWorkflowRunFileContentResponse =
+  GetWorkflowRunFileContentResponses[keyof GetWorkflowRunFileContentResponses]
+
+export type HeadWorkflowRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/workflow-runs/{runId}/files/content"
+}
+
+export type HeadWorkflowRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadWorkflowRunFileContentError =
+  HeadWorkflowRunFileContentErrors[keyof HeadWorkflowRunFileContentErrors]
+
+export type HeadWorkflowRunFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
+export type GetWorkflowNodeRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+    nodeKey: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
+}
+
+export type GetWorkflowNodeRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetWorkflowNodeRunFileContentError =
+  GetWorkflowNodeRunFileContentErrors[keyof GetWorkflowNodeRunFileContentErrors]
+
+export type GetWorkflowNodeRunFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetWorkflowNodeRunFileContentResponse =
+  GetWorkflowNodeRunFileContentResponses[keyof GetWorkflowNodeRunFileContentResponses]
+
+export type HeadWorkflowNodeRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+    nodeKey: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
+}
+
+export type HeadWorkflowNodeRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadWorkflowNodeRunFileContentError =
+  HeadWorkflowNodeRunFileContentErrors[keyof HeadWorkflowNodeRunFileContentErrors]
+
+export type HeadWorkflowNodeRunFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
+
 export type RequestWorkflowRunData = {
   body: {
     input?: {
@@ -4957,6 +5129,91 @@ export type GetActionRunResponses = {
 }
 
 export type GetActionRunResponse = GetActionRunResponses[keyof GetActionRunResponses]
+
+export type GetActionRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/action-runs/{runId}/files/content"
+}
+
+export type GetActionRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetActionRunFileContentError =
+  GetActionRunFileContentErrors[keyof GetActionRunFileContentErrors]
+
+export type GetActionRunFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetActionRunFileContentResponse =
+  GetActionRunFileContentResponses[keyof GetActionRunFileContentResponses]
+
+export type HeadActionRunFileContentData = {
+  body?: never
+  path: {
+    runId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/action-runs/{runId}/files/content"
+}
+
+export type HeadActionRunFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadActionRunFileContentError =
+  HeadActionRunFileContentErrors[keyof HeadActionRunFileContentErrors]
+
+export type HeadActionRunFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
 
 export type ListAgentsData = {
   body?: never

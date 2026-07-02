@@ -49,9 +49,14 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Play, SquareActivity } from "lucide-react"
-import { type SyntheticEvent, useMemo, useState } from "react"
+import { type SyntheticEvent, useCallback, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ErrorPage, LoadingPage, PageFrame } from "../components/common"
+import {
+  FileRefUploadField,
+  parseFileRefFormValue,
+  stringifyFileRefFormValue,
+} from "../components/FileRefUploadField"
 import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { formatDate, formatRelativeTime } from "../features/workflows/utils/workflows"
 import {
@@ -296,6 +301,7 @@ function ActionRequestDialog({
   const [values, setValues] = useState<Record<string, string>>({})
   const [subjectPrimaryId, setSubjectPrimaryId] = useState(subject?.primaryId ?? "")
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  const [pendingFileUploads, setPendingFileUploads] = useState<ReadonlySet<string>>(() => new Set())
   const requestAction = useActionRunMutation({
     invalidateOnCommit: true,
     onSuccess: (run) => {
@@ -305,6 +311,7 @@ function ActionRequestDialog({
   })
 
   const apiErrorMessage = errorToMessage(requestAction.error)
+  const hasPendingFileUploads = pendingFileUploads.size > 0
   const defaultSubject =
     subject ??
     (action.objectTypeId && subjectPrimaryId
@@ -324,12 +331,27 @@ function ActionRequestDialog({
   }
 
   function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && hasPendingFileUploads) return
+
     setOpen(nextOpen)
     setValues({})
     setFieldErrors({})
+    setPendingFileUploads(new Set())
     requestAction.reset()
     setSubjectPrimaryId(subject?.primaryId ?? "")
   }
+
+  const handleFileUploadPendingChange = useCallback((paramId: string, pending: boolean) => {
+    setPendingFileUploads((current) => {
+      const hasParam = current.has(paramId)
+      if (hasParam === pending) return current
+
+      const next = new Set(current)
+      if (pending) next.add(paramId)
+      else next.delete(paramId)
+      return next
+    })
+  }, [])
 
   function buildRequestPayload(options: { updateErrors: boolean }): ActionRequestPayload | null {
     const paramsResult = buildActionParams(action, values)
@@ -354,6 +376,7 @@ function ActionRequestDialog({
 
   function handleSubmit(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (hasPendingFileUploads) return
     requestAction.reset()
     const payload = buildRequestPayload({ updateErrors: true })
     if (!payload) return
@@ -403,6 +426,7 @@ function ActionRequestDialog({
               values={values}
               errors={fieldErrors}
               onChange={handleParamChange}
+              onFileUploadPendingChange={handleFileUploadPendingChange}
             />
           </section>
 
@@ -419,13 +443,19 @@ function ActionRequestDialog({
               type="button"
               variant="outline"
               onClick={() => handleOpenChange(false)}
-              disabled={requestAction.isPending}
+              disabled={requestAction.isPending || hasPendingFileUploads}
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={requestAction.isPending}>
-              {requestAction.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {requestAction.isPending ? "Running action..." : "Request action"}
+            <Button type="submit" disabled={requestAction.isPending || hasPendingFileUploads}>
+              {requestAction.isPending || hasPendingFileUploads ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {hasPendingFileUploads
+                ? "Uploading..."
+                : requestAction.isPending
+                  ? "Running action..."
+                  : "Request action"}
             </Button>
           </DialogFooter>
         </form>
@@ -439,11 +469,13 @@ function ActionParamFields({
   values,
   errors,
   onChange,
+  onFileUploadPendingChange,
 }: {
   action: ActionCatalogItem
   values: Record<string, string>
   errors: Record<string, string>
   onChange: (paramId: string, value: string) => void
+  onFileUploadPendingChange?: (paramId: string, pending: boolean) => void
 }) {
   if (action.params.length === 0) {
     return <p className="text-sm text-muted-foreground">This action does not require params.</p>
@@ -478,6 +510,17 @@ function ActionParamFields({
                 value={value}
                 onChange={(next) => onChange(param.id, next)}
                 fieldId={fieldId}
+              />
+            ) : input.kind === "fileRef" ? (
+              <FileRefUploadField
+                id={fieldId}
+                value={parseFileRefFormValue(value)}
+                onChange={(fileRef) =>
+                  onChange(param.id, fileRef ? stringifyFileRefFormValue(fileRef) : "")
+                }
+                errorId={errors[param.id] ? `${fieldId}-error` : undefined}
+                logicalPathPrefix={`actions/${action.id}/${param.id}`}
+                onPendingChange={(pending) => onFileUploadPendingChange?.(param.id, pending)}
               />
             ) : input.kind === "enum" ? (
               <Select value={value} onValueChange={(next) => onChange(param.id, next)}>
@@ -522,7 +565,9 @@ function ActionParamFields({
             )}
 
             {errors[param.id] ? (
-              <p className="text-xs text-destructive">{errors[param.id]}</p>
+              <p id={`${fieldId}-error`} className="text-xs text-destructive">
+                {errors[param.id]}
+              </p>
             ) : null}
           </div>
         )

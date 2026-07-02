@@ -24,7 +24,7 @@ export interface RelationshipEdge {
 }
 
 export interface ActionParam {
-  type: "string" | "number" | "boolean"
+  type: "string" | "number" | "boolean" | "fileRef"
   required?: boolean
   description?: string
   enum?: Array<string | number | boolean>
@@ -188,11 +188,19 @@ function parseLocation(
   return undefined
 }
 
-function inferPrimitiveType(schema: unknown): "string" | "number" | "boolean" {
+function inferPrimitiveType(schema: unknown): "string" | "number" | "boolean" | "fileRef" {
+  if (typeof schema === "string") {
+    if (schema === "integer" || schema === "double" || schema === "decimal") return "number"
+    if (schema === "boolean") return "boolean"
+    if (schema === "fileRef") return "fileRef"
+    return "string"
+  }
+
   if (!schema || typeof schema !== "object") return "string"
   const type = (schema as { type?: unknown }).type
   if (type === "number" || type === "integer") return "number"
   if (type === "boolean") return "boolean"
+  if (type === "fileRef") return "fileRef"
   return "string"
 }
 

@@ -58,6 +58,9 @@ import type {
   GetActionResponses,
   GetActionRunData,
   GetActionRunErrors,
+  GetActionRunFileContentData,
+  GetActionRunFileContentErrors,
+  GetActionRunFileContentResponses,
   GetActionRunResponses,
   GetAgentData,
   GetAgentErrors,
@@ -133,13 +136,28 @@ import type {
   GetWorkflowInterventionData,
   GetWorkflowInterventionErrors,
   GetWorkflowInterventionResponses,
+  GetWorkflowNodeRunFileContentData,
+  GetWorkflowNodeRunFileContentErrors,
+  GetWorkflowNodeRunFileContentResponses,
   GetWorkflowResponses,
   GetWorkflowRunData,
   GetWorkflowRunErrors,
+  GetWorkflowRunFileContentData,
+  GetWorkflowRunFileContentErrors,
+  GetWorkflowRunFileContentResponses,
   GetWorkflowRunResponses,
+  HeadActionRunFileContentData,
+  HeadActionRunFileContentErrors,
+  HeadActionRunFileContentResponses,
   HeadObjectFileContentData,
   HeadObjectFileContentErrors,
   HeadObjectFileContentResponses,
+  HeadWorkflowNodeRunFileContentData,
+  HeadWorkflowNodeRunFileContentErrors,
+  HeadWorkflowNodeRunFileContentResponses,
+  HeadWorkflowRunFileContentData,
+  HeadWorkflowRunFileContentErrors,
+  HeadWorkflowRunFileContentResponses,
   ListActionRunsData,
   ListActionRunsErrors,
   ListActionRunsResponses,
@@ -1016,6 +1034,70 @@ export const getWorkflowRun = <ThrowOnError extends boolean = false>(
   })
 
 /**
+ * Get workflow run file content
+ */
+export const getWorkflowRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetWorkflowRunFileContentResponses,
+    GetWorkflowRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-runs/{runId}/files/content",
+    ...options,
+  })
+
+/**
+ * Head workflow run file content
+ */
+export const headWorkflowRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadWorkflowRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadWorkflowRunFileContentResponses,
+    HeadWorkflowRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-runs/{runId}/files/content",
+    ...options,
+  })
+
+/**
+ * Get workflow node run file content
+ */
+export const getWorkflowNodeRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetWorkflowNodeRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetWorkflowNodeRunFileContentResponses,
+    GetWorkflowNodeRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
+    ...options,
+  })
+
+/**
+ * Head workflow node run file content
+ */
+export const headWorkflowNodeRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadWorkflowNodeRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadWorkflowNodeRunFileContentResponses,
+    HeadWorkflowNodeRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
+    ...options,
+  })
+
+/**
  * Request a workflow run
  */
 export const requestWorkflowRun = <ThrowOnError extends boolean = false>(
@@ -1406,6 +1488,38 @@ export const getActionRun = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/action-runs/{runId}",
+    ...options,
+  })
+
+/**
+ * Get action run file content
+ */
+export const getActionRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetActionRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetActionRunFileContentResponses,
+    GetActionRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/action-runs/{runId}/files/content",
+    ...options,
+  })
+
+/**
+ * Head action run file content
+ */
+export const headActionRunFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadActionRunFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadActionRunFileContentResponses,
+    HeadActionRunFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/action-runs/{runId}/files/content",
     ...options,
   })
 

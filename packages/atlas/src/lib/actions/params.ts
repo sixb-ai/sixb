@@ -1,4 +1,5 @@
 import type { ListActionsResponse } from "@sixb/client"
+import { isFileRef } from "@sixb/core/blob-storage"
 
 type ActionCatalogItem = ListActionsResponse[number]
 type ActionParam = ActionCatalogItem["params"][number]
@@ -16,6 +17,7 @@ export type ActionParamInputDescriptor =
   | { kind: "text" }
   | { kind: "number"; integer?: boolean }
   | { kind: "boolean" }
+  | { kind: "fileRef" }
   | { kind: "json" }
   | { kind: "enum"; values: readonly unknown[]; valueType: "string" | "integer" }
   | { kind: "objectRef"; objectTypeId: string }
@@ -55,6 +57,9 @@ export function describeActionParamInput(schema: unknown): ActionParamInputDescr
   if (resolved === "boolean") {
     return { kind: "boolean" }
   }
+  if (resolved === "fileRef") {
+    return { kind: "fileRef" }
+  }
   if (isRecord(resolved)) {
     if (resolved.type === "objectRef" && typeof resolved.objectTypeId === "string") {
       return { kind: "objectRef", objectTypeId: resolved.objectTypeId }
@@ -89,6 +94,13 @@ function parseActionParamValue(param: ActionParam, rawValue: string): unknown {
     }
     case "boolean":
       return rawValue === "true"
+    case "fileRef": {
+      const parsed = JSON.parse(rawValue) as unknown
+      if (!isFileRef(parsed)) {
+        throw new Error("Expected an uploaded file.")
+      }
+      return parsed
+    }
     case "json":
       return JSON.parse(rawValue)
     case "enum":

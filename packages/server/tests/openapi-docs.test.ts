@@ -172,29 +172,37 @@ describe("OpenAPI docs", () => {
     expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()
   })
 
-  test("documents object file content responses", async () => {
+  test("documents contextual file content responses", async () => {
     const app = createDocsApi()
     const spec = await fetchDocsJsonWithoutWarnings(app)
-    const operations = spec.paths?.["/api/objects/{objectTypeId}/{objectId}/files/content"]
+    const paths = [
+      "/api/objects/{objectTypeId}/{objectId}/files/content",
+      "/api/action-runs/{runId}/files/content",
+      "/api/workflow-runs/{runId}/files/content",
+      "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
+    ]
 
-    for (const method of ["get", "head"] as const) {
-      const responses = operations?.[method]?.responses as
-        | Record<string, { content?: Record<string, { schema?: unknown }> }>
-        | undefined
-      expect(responses).toBeDefined()
-      for (const status of ["200", "206", "400", "404", "416"]) {
-        expect(responses).toHaveProperty(status)
+    for (const path of paths) {
+      const operations = spec.paths?.[path]
+      for (const method of ["get", "head"] as const) {
+        const responses = operations?.[method]?.responses as
+          | Record<string, { content?: Record<string, { schema?: unknown }> }>
+          | undefined
+        expect(responses, `${method.toUpperCase()} ${path}`).toBeDefined()
+        for (const status of ["200", "206", "400", "404", "416"]) {
+          expect(responses, `${method.toUpperCase()} ${path}`).toHaveProperty(status)
+        }
       }
-    }
 
-    // The success bodies must be documented as binary octet-stream, not JSON.
-    const getResponses = operations?.get?.responses as Record<
-      string,
-      { content?: Record<string, { schema?: { type?: string; format?: string } }> }
-    >
-    for (const status of ["200", "206"]) {
-      const schema = getResponses[status]?.content?.["application/octet-stream"]?.schema
-      expect(schema).toEqual({ type: "string", format: "binary" })
+      // The success bodies must be documented as binary octet-stream, not JSON.
+      const getResponses = operations?.get?.responses as Record<
+        string,
+        { content?: Record<string, { schema?: { type?: string; format?: string } }> }
+      >
+      for (const status of ["200", "206"]) {
+        const schema = getResponses[status]?.content?.["application/octet-stream"]?.schema
+        expect(schema, `GET ${path} ${status}`).toEqual({ type: "string", format: "binary" })
+      }
     }
   })
 })

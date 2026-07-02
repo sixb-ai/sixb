@@ -11,11 +11,19 @@ import {
   type WorkflowRunRecord,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
+import {
+  createFileContentResponse,
+  fileContentGetResponses,
+  fileContentHeadResponses,
+  resolveFileRefAtPath,
+} from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
+import { FileContentQuerySchema } from "../schemas/files"
 import {
   CancelWorkflowInterventionBodySchema,
   CancelWorkflowInterventionResponseSchema,
@@ -35,6 +43,27 @@ import {
   WorkflowSchema,
 } from "../schemas/workflows"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+
+const WorkflowRunFileContentQuerySchema = FileContentQuerySchema.extend({
+  path: z
+    .string()
+    .min(1)
+    .regex(/^\/input(?:\/|$)/, "Workflow run file content paths must start with /input/"),
+})
+
+const WorkflowNodeFileContentQuerySchema = FileContentQuerySchema.extend({
+  path: z
+    .string()
+    .min(1)
+    .regex(
+      /^\/(?:input|output)(?:\/|$)/,
+      "Workflow node file content paths must start with /input/ or /output/"
+    ),
+})
+
+const WorkflowNodeFileContentParamsSchema = WorkflowRunParamsSchema.extend({
+  nodeKey: z.string().min(1),
+})
 
 function serializeWorkflowRun(run: WorkflowRunRecord) {
   return {
@@ -93,6 +122,129 @@ function serializeWorkflowIntervention(intervention: WorkflowInterventionRecord)
     cancelledAt: intervention.cancelledAt ? toIsoString(intervention.cancelledAt) : undefined,
     cancelledBy: intervention.cancelledBy,
     expiredAt: intervention.expiredAt ? toIsoString(intervention.expiredAt) : undefined,
+  }
+}
+
+async function workflowRunFileContentResponse(
+  sixb: Sixb<readonly OntologySource[]>,
+  context: {
+    readonly params: { readonly runId: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: { status?: number | string }
+  },
+  options: { readonly head?: boolean } = {}
+) {
+  const { authz } = requestAuthState(context)
+
+  try {
+    const storage = sixb.storage.workflowRuns
+    if (!storage) {
+      context.set.status = 400
+      return { error: "Workflow run storage is not configured" }
+    }
+
+    const parsed = WorkflowRunFileContentQuerySchema.parse(context.query)
+    const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
+    if (!run || !canViewWorkflowRun(authz, run)) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const fileRef = resolveFileRefAtPath(serializeWorkflowRun(run), parsed.path)
+    if (!fileRef) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const response = await createFileContentResponse({
+      blobStorage: sixb.blobStorage,
+      fileRef,
+      disposition: parsed.disposition,
+      head: options.head,
+      rangeHeader: context.request.headers.get("range"),
+    })
+    if (!response) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof ZodError) {
+      context.set.status = 400
+      return { error: "Invalid file content query" }
+    }
+
+    throw error
+  }
+}
+
+async function workflowNodeFileContentResponse(
+  sixb: Sixb<readonly OntologySource[]>,
+  context: {
+    readonly params: { readonly runId: string; readonly nodeKey: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: { status?: number | string }
+  },
+  options: { readonly head?: boolean } = {}
+) {
+  const { authz } = requestAuthState(context)
+
+  try {
+    const storage = sixb.storage.workflowRuns
+    if (!storage) {
+      context.set.status = 400
+      return { error: "Workflow run storage is not configured" }
+    }
+
+    const parsed = WorkflowNodeFileContentQuerySchema.parse(context.query)
+    const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
+    if (!run || !canViewWorkflowRun(authz, run)) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const result = await storage.nodes.list({
+      projectId: sixb.id,
+      workflowRunId: run.id,
+      nodeKey: context.params.nodeKey,
+      limit: 1,
+      order: "asc",
+    })
+    const [node] = result.nodes
+    if (!node) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const fileRef = resolveFileRefAtPath(serializeWorkflowNodeRun(node), parsed.path)
+    if (!fileRef) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const response = await createFileContentResponse({
+      blobStorage: sixb.blobStorage,
+      fileRef,
+      disposition: parsed.disposition,
+      head: options.head,
+      rangeHeader: context.request.headers.get("range"),
+    })
+    if (!response) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof ZodError) {
+      context.set.status = 400
+      return { error: "Invalid file content query" }
+    }
+
+    throw error
   }
 }
 
@@ -716,6 +868,66 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
           summary: "Get workflow run detail",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowRun",
+        },
+      }
+    )
+    .get(
+      "/api/workflow-runs/:runId/files/content",
+      (context) => workflowRunFileContentResponse(sixb, context),
+      {
+        params: WorkflowRunParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Get workflow run file content",
+          tags: ["Workflows"],
+          operationId: "getWorkflowRunFileContent",
+          security: bearerSecurityRequirement("getWorkflowRunFileContent"),
+          responses: fileContentGetResponses(),
+        },
+      }
+    )
+    .head(
+      "/api/workflow-runs/:runId/files/content",
+      (context) => workflowRunFileContentResponse(sixb, context, { head: true }),
+      {
+        params: WorkflowRunParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Head workflow run file content",
+          tags: ["Workflows"],
+          operationId: "headWorkflowRunFileContent",
+          security: bearerSecurityRequirement("headWorkflowRunFileContent"),
+          responses: fileContentHeadResponses(),
+        },
+      }
+    )
+    .get(
+      "/api/workflow-runs/:runId/nodes/:nodeKey/files/content",
+      (context) => workflowNodeFileContentResponse(sixb, context),
+      {
+        params: WorkflowNodeFileContentParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Get workflow node run file content",
+          tags: ["Workflows"],
+          operationId: "getWorkflowNodeRunFileContent",
+          security: bearerSecurityRequirement("getWorkflowNodeRunFileContent"),
+          responses: fileContentGetResponses(),
+        },
+      }
+    )
+    .head(
+      "/api/workflow-runs/:runId/nodes/:nodeKey/files/content",
+      (context) => workflowNodeFileContentResponse(sixb, context, { head: true }),
+      {
+        params: WorkflowNodeFileContentParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Head workflow node run file content",
+          tags: ["Workflows"],
+          operationId: "headWorkflowNodeRunFileContent",
+          security: bearerSecurityRequirement("headWorkflowNodeRunFileContent"),
+          responses: fileContentHeadResponses(),
         },
       }
     )

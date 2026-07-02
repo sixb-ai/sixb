@@ -1,9 +1,11 @@
+import { client } from "@sixb/client"
 import { getActionRunOptions } from "@sixb/client/hooks"
 import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
+import { actionRunFileContentUrl } from "../lib/files"
 import {
   ActionRunDiffSummary,
   ActionRunMetaGrid,
@@ -37,6 +39,16 @@ export function ActionRunDetailPage() {
   }
 
   const run = runQuery.data
+  const baseUrl = client.getConfig().baseUrl ?? window.location.origin
+  const paramFileLinkForPath = (pathSegments: readonly string[]) => ({
+    inlineUrl: actionRunFileContentUrl({ baseUrl, runId: run.id, pathSegments }),
+    downloadUrl: actionRunFileContentUrl({
+      baseUrl,
+      runId: run.id,
+      pathSegments,
+      disposition: "attachment",
+    }),
+  })
 
   return (
     <PageFrame
@@ -68,7 +80,7 @@ export function ActionRunDetailPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="p-0">
           <CardContent className="p-5">
-            <DataPanel label="Params" value={run.params} />
+            <DataPanel label="Params" value={run.params} fileLinkForPath={paramFileLinkForPath} />
           </CardContent>
         </Card>
 

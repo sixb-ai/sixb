@@ -1,13 +1,38 @@
+import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import { cn } from "@sixb/ui/lib/utils"
-import { Box, Braces, Brackets, Check, Copy, Hash, Minus, Type } from "lucide-react"
+import {
+  Box,
+  Braces,
+  Brackets,
+  Check,
+  Copy,
+  Download,
+  Eye,
+  FileIcon,
+  Hash,
+  Minus,
+  Type,
+} from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { fileMediaLabel, formatFileSize } from "../lib/files"
+
+export interface FileContentLinks {
+  readonly inlineUrl: string
+  readonly downloadUrl: string
+}
+
+export type FileLinkForPath = (path: readonly string[]) => FileContentLinks | null
 
 export function StructuredValue({
   value,
   emptyLabel = "No data",
+  fileLinkForPath,
+  path = [],
 }: {
   value: unknown
   emptyLabel?: string
+  fileLinkForPath?: FileLinkForPath
+  path?: readonly string[]
 }) {
   if (value === null || value === undefined) {
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
@@ -17,13 +42,22 @@ export function StructuredValue({
     return <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
   }
 
+  if (isFileRef(value)) {
+    return <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} />
+  }
+
   if (Array.isArray(value)) {
     if (value.length === 0) return <p className="text-sm text-muted-foreground">Empty array</p>
     return (
       <ul className="divide-y divide-border/60 text-sm">
         {value.map((item, index) => (
           <li key={index} className="py-2 first:pt-0 last:pb-0">
-            <RunValue value={item} label={`${index + 1}`} />
+            <RunValue
+              value={item}
+              label={`${index + 1}`}
+              path={[...path, String(index)]}
+              fileLinkForPath={fileLinkForPath}
+            />
           </li>
         ))}
       </ul>
@@ -37,22 +71,46 @@ export function StructuredValue({
       <ul className="divide-y divide-border/60 text-sm">
         {entries.map(([name, item]) => (
           <li key={name} className="py-2 first:pt-0 last:pb-0">
-            <RunValue value={item} label={name} />
+            <RunValue
+              value={item}
+              label={name}
+              path={[...path, name]}
+              fileLinkForPath={fileLinkForPath}
+            />
           </li>
         ))}
       </ul>
     )
   }
 
-  return <RunValue value={value} />
+  return <RunValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
 }
 
-function RunValue({ label, value }: { label?: string; value: unknown }) {
+function RunValue({
+  label,
+  value,
+  path,
+  fileLinkForPath,
+}: {
+  label?: string
+  value: unknown
+  path: readonly string[]
+  fileLinkForPath?: FileLinkForPath
+}) {
   if (isObjectRef(value)) {
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {label ? <FieldLabel>{label}</FieldLabel> : null}
         <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+      </div>
+    )
+  }
+
+  if (isFileRef(value)) {
+    return (
+      <div className="space-y-2">
+        {label ? <FieldLabel>{label}</FieldLabel> : null}
+        <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} />
       </div>
     )
   }
@@ -66,7 +124,7 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
         </div>
         {value.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <StructuredValue value={value} />
+            <StructuredValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
           </div>
         ) : null}
       </div>
@@ -83,7 +141,7 @@ function RunValue({ label, value }: { label?: string; value: unknown }) {
         </div>
         {entries.length > 0 ? (
           <div className="border-l border-border pl-3">
-            <StructuredValue value={value} />
+            <StructuredValue value={value} path={path} fileLinkForPath={fileLinkForPath} />
           </div>
         ) : null}
       </div>
@@ -121,6 +179,46 @@ function ObjectRefChip({ objectTypeId, primaryId }: { objectTypeId: string; prim
       </span>
       <span className="truncate font-mono text-xs text-muted-foreground">{primaryId}</span>
     </span>
+  )
+}
+
+function FileRefValue({ fileRef, links }: { fileRef: FileRef; links: FileContentLinks | null }) {
+  const fileName = fileNameFor(fileRef)
+  const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-border bg-background px-3 py-2.5 text-xs">
+      <span className="inline-flex min-w-0 flex-1 items-center gap-2.5">
+        <FileIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate font-medium text-foreground" title={fileName}>
+          {fileName}
+        </span>
+        <span className="shrink-0 text-muted-foreground">
+          {mediaLabel} · {formatFileSize(fileRef.sizeBytes)}
+        </span>
+      </span>
+      {links ? (
+        <span className="inline-flex shrink-0 items-center gap-2">
+          <a
+            href={links.inlineUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View
+          </a>
+          <a
+            href={links.downloadUrl}
+            download={fileName}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download
+          </a>
+        </span>
+      ) : null}
+    </div>
   )
 }
 
