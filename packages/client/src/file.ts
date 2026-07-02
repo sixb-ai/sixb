@@ -1,6 +1,6 @@
 import type { FileRef } from "@sixb/core"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
-import type { SixbClient } from "./api"
+import { isSixbApiError, type SixbClient } from "./api"
 import {
   abortFileUpload,
   completeFileUpload,
@@ -289,11 +289,13 @@ function toSixbFileUploadError(
     })
   }
 
-  const message =
-    error && typeof error === "object" && "error" in error
-      ? `[SixbClient] ${String((error as { error: unknown }).error)}`
-      : "[SixbClient] File upload request failed."
-  return new SixbFileUploadError(message, { stage, status, cause: error })
+  const detail = uploadErrorDetail(error)
+  const message = detail ? `[SixbClient] ${detail}` : "[SixbClient] File upload request failed."
+  return new SixbFileUploadError(message, {
+    stage,
+    status: status ?? (isSixbApiError(error) ? error.status : undefined),
+    cause: error,
+  })
 }
 
 function isAbortError(error: unknown): boolean {
@@ -303,6 +305,25 @@ function isAbortError(error: unknown): boolean {
     "name" in error &&
     (error as { name?: unknown }).name === "AbortError"
   )
+}
+
+function uploadErrorDetail(error: unknown): string | undefined {
+  const body = isSixbApiError(error) ? error.body : error
+
+  if (typeof body === "string") {
+    return body.trim() || undefined
+  }
+
+  if (body && typeof body === "object" && "error" in body) {
+    const message = (body as { readonly error?: unknown }).error
+    return typeof message === "string" && message.trim() ? message : undefined
+  }
+
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  return undefined
 }
 
 function resolveUploadFile(file: File | Blob, fileName: string | undefined): File | Blob {
