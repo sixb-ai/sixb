@@ -167,6 +167,14 @@ export const PostAgentMessageResponseSchema = z.object({
   streamId: z.string(),
 })
 
+export const CancelAgentRunBodySchema = z.object({
+  runId: z.string().trim().min(1),
+})
+
+export const CancelAgentRunResponseSchema = z.object({
+  runId: z.string(),
+})
+
 export const AgentRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
 
 export const AgentRunFinishReasonSchema = z.enum([

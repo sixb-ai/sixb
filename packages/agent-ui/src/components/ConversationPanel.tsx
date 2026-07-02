@@ -45,6 +45,11 @@ export interface ConversationPanelProps {
   readonly onSelectThread: (threadId: string) => void
   readonly composerDisabled: boolean
   readonly composerPending: boolean
+  /** A run is in flight: the composer shows a stop button wired to {@link onStop}. */
+  readonly composerRunning: boolean
+  /** A stop has been requested and we're waiting for the run to end. */
+  readonly composerStopping: boolean
+  readonly onStop: () => void
   readonly composerPlaceholder?: string
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
@@ -72,6 +77,9 @@ export function ConversationPanel({
   onSelectThread,
   composerDisabled,
   composerPending,
+  composerRunning,
+  composerStopping,
+  onStop,
   composerPlaceholder,
   composerDraft,
   composerDraftNonce,
@@ -174,6 +182,9 @@ export function ConversationPanel({
         onSend={onSend}
         disabled={composerDisabled}
         pending={composerPending}
+        running={composerRunning}
+        stopping={composerStopping}
+        onStop={onStop}
         placeholder={composerPlaceholder}
         draft={composerDraft}
         draftNonce={composerDraftNonce}

@@ -2,6 +2,7 @@
 
 export {
   appendTelemetry,
+  cancelAgentRun,
   cancelWorkflowIntervention,
   countObjects,
   createAgentThread,
@@ -93,6 +94,11 @@ export type {
   AppendTelemetryErrors,
   AppendTelemetryResponse,
   AppendTelemetryResponses,
+  CancelAgentRunData,
+  CancelAgentRunError,
+  CancelAgentRunErrors,
+  CancelAgentRunResponse,
+  CancelAgentRunResponses,
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionError,
   CancelWorkflowInterventionErrors,

@@ -11,6 +11,7 @@ import {
   createAgentThreadId,
   type OntologySource,
   type Principal,
+  publishAgentRunCancel,
   type ScopedSixb,
   type Sixb,
   SYSTEM_PRINCIPAL,
@@ -30,6 +31,8 @@ import {
   AgentThreadListResponseSchema,
   AgentThreadParamsSchema,
   AgentThreadSchema,
+  CancelAgentRunBodySchema,
+  CancelAgentRunResponseSchema,
   CreateAgentThreadBodySchema,
   CreateAgentThreadResponseSchema,
   PostAgentMessageBodySchema,
@@ -454,6 +457,67 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           summary: "Post an agent thread message",
           tags: ["Agents"],
           operationId: "postAgentThreadMessage",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/agent-threads/:threadId/cancel",
+      async (context) => {
+        const { params, body, set } = context
+        const { scoped } = requestAuthState(context)
+        try {
+          const storage = sixb.storage.agents
+          if (!storage) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const thread = await getAccessibleThread({
+            scoped,
+            storage,
+            projectId: sixb.id,
+            threadId: params.threadId,
+          })
+          if (!thread) {
+            set.status = 404
+            return { error: "Agent thread not found" }
+          }
+
+          const parsed = CancelAgentRunBodySchema.parse(body)
+          // A run row exists only once the worker has reserved it. When it does, fence the cancel to
+          // this thread and reject an already-finished run; a run still queued (no row yet) is
+          // accepted — the worker sees the retained cancel signal when it picks the job up.
+          const run = await storage.runs.getById({ projectId: sixb.id, id: parsed.runId })
+          if (run && run.threadId !== thread.id) {
+            set.status = 404
+            return { error: "Agent run not found" }
+          }
+          if (run && run.status !== "running") {
+            set.status = 409
+            return { error: "Agent run is not running" }
+          }
+
+          await publishAgentRunCancel(sixb.broker, { projectId: sixb.id, runId: parsed.runId })
+
+          set.status = 202
+          return CancelAgentRunResponseSchema.parse({ runId: parsed.runId })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        body: CancelAgentRunBodySchema,
+        response: {
+          202: CancelAgentRunResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Cancel an agent thread's active run",
+          tags: ["Agents"],
+          operationId: "cancelAgentRun",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
