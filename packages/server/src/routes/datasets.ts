@@ -8,6 +8,7 @@ import type {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   DatasetCatalogItemSchema,
@@ -235,7 +236,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         response: { 200: DatasetCatalogItemSchema.array(), 400: ErrorResponseSchema },
         detail: {
           summary: "List registered datasets",
-          tags: ["Datasets"],
+          tags: [OPENAPI_TAGS.datasets.name],
           operationId: "listDatasets",
         },
       }
@@ -263,7 +264,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         },
         detail: {
           summary: "Get dataset metadata",
-          tags: ["Datasets"],
+          tags: [OPENAPI_TAGS.datasets.name],
           operationId: "getDataset",
         },
       }
@@ -297,7 +298,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         },
         detail: {
           summary: "List dataset versions",
-          tags: ["Datasets"],
+          tags: [OPENAPI_TAGS.datasetVersions.name],
           operationId: "listDatasetVersions",
         },
       }
@@ -329,7 +330,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         },
         detail: {
           summary: "Get dataset version",
-          tags: ["Datasets"],
+          tags: [OPENAPI_TAGS.datasetVersions.name],
           operationId: "getDatasetVersion",
         },
       }
@@ -395,7 +396,7 @@ export function registerDatasetRoutes(app: Elysia, sixb: Sixb<readonly OntologyS
         },
         detail: {
           summary: "Preview dataset rows",
-          tags: ["Datasets"],
+          tags: [OPENAPI_TAGS.datasetRows.name],
           operationId: "listDatasetRows",
         },
       }

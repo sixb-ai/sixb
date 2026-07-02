@@ -1274,6 +1274,306 @@ export type RevokeAuthInvitationResponses = {
 export type RevokeAuthInvitationResponse =
   RevokeAuthInvitationResponses[keyof RevokeAuthInvitationResponses]
 
+export type GetAuthMembershipOptionsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/auth/membership-options"
+}
+
+export type GetAuthMembershipOptionsErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type GetAuthMembershipOptionsError =
+  GetAuthMembershipOptionsErrors[keyof GetAuthMembershipOptionsErrors]
+
+export type GetAuthMembershipOptionsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    groups: Array<{
+      id: string
+      label?: string
+      description?: string
+    }>
+    capabilities: {
+      invite: boolean
+      assignGroups: boolean
+      suspend: boolean
+    }
+  }
+}
+
+export type GetAuthMembershipOptionsResponse =
+  GetAuthMembershipOptionsResponses[keyof GetAuthMembershipOptionsResponses]
+
+export type ListAuthMembersData = {
+  body?: never
+  path?: never
+  query?: {
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/auth/members"
+}
+
+export type ListAuthMembersErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type ListAuthMembersError = ListAuthMembersErrors[keyof ListAuthMembersErrors]
+
+export type ListAuthMembersResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    members: Array<{
+      user: {
+        id: string
+        email: string
+        displayName?: string
+        avatarUrl?: string
+        status: "active" | "suspended"
+        createdAt: string
+        updatedAt: string
+      }
+      groupIds: Array<string>
+      capabilities: {
+        assignGroups: boolean
+        suspend: boolean
+        reactivate: boolean
+      }
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAuthMembersResponse = ListAuthMembersResponses[keyof ListAuthMembersResponses]
+
+export type UpdateAuthMemberGroupsData = {
+  body: {
+    groupIds: Array<string>
+  }
+  path: {
+    userId: string
+  }
+  query?: never
+  url: "/api/auth/members/{userId}/groups"
+}
+
+export type UpdateAuthMemberGroupsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type UpdateAuthMemberGroupsError =
+  UpdateAuthMemberGroupsErrors[keyof UpdateAuthMemberGroupsErrors]
+
+export type UpdateAuthMemberGroupsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    member: {
+      user: {
+        id: string
+        email: string
+        displayName?: string
+        avatarUrl?: string
+        status: "active" | "suspended"
+        createdAt: string
+        updatedAt: string
+      }
+      groupIds: Array<string>
+    }
+  }
+}
+
+export type UpdateAuthMemberGroupsResponse =
+  UpdateAuthMemberGroupsResponses[keyof UpdateAuthMemberGroupsResponses]
+
+export type SuspendAuthMemberData = {
+  body?: never
+  path: {
+    userId: string
+  }
+  query?: never
+  url: "/api/auth/members/{userId}/suspend"
+}
+
+export type SuspendAuthMemberErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type SuspendAuthMemberError = SuspendAuthMemberErrors[keyof SuspendAuthMemberErrors]
+
+export type SuspendAuthMemberResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    member: {
+      user: {
+        id: string
+        email: string
+        displayName?: string
+        avatarUrl?: string
+        status: "active" | "suspended"
+        createdAt: string
+        updatedAt: string
+      }
+      groupIds: Array<string>
+    }
+  }
+}
+
+export type SuspendAuthMemberResponse = SuspendAuthMemberResponses[keyof SuspendAuthMemberResponses]
+
+export type ReactivateAuthMemberData = {
+  body?: never
+  path: {
+    userId: string
+  }
+  query?: never
+  url: "/api/auth/members/{userId}/reactivate"
+}
+
+export type ReactivateAuthMemberErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 500
+   */
+  500: {
+    error: string
+  }
+}
+
+export type ReactivateAuthMemberError = ReactivateAuthMemberErrors[keyof ReactivateAuthMemberErrors]
+
+export type ReactivateAuthMemberResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    member: {
+      user: {
+        id: string
+        email: string
+        displayName?: string
+        avatarUrl?: string
+        status: "active" | "suspended"
+        createdAt: string
+        updatedAt: string
+      }
+      groupIds: Array<string>
+    }
+  }
+}
+
+export type ReactivateAuthMemberResponse =
+  ReactivateAuthMemberResponses[keyof ReactivateAuthMemberResponses]
+
 export type GetProjectInfoData = {
   body?: never
   path?: never

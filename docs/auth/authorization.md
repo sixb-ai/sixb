@@ -157,19 +157,32 @@ import { teamMembers } from "../groups/team-members"
 export const memberAdministration = defineMembershipPolicy("member-administration", {
   grantedTo: [financeAdmins],
   scope: [teamMembers],
-  can: ["invite"],
+  can: ["invite", "assignGroups", "suspend"],
 })
 ```
 
-Finance admins can now invite people into `team-members`. A group-less invitation is also allowed
-when a caller has the `invite` operation; the resulting user can authenticate but receives no
+Finance admins can now invite people into `team-members`, edit existing `team-members` users'
+groups, and suspend or reactivate those users. A group-less invitation is also allowed when a
+caller has the `invite` operation; the resulting user can authenticate but receives no
 group-derived grants.
 
 | Option | Meaning |
 | --- | --- |
 | `grantedTo` | Groups whose members hold the policy |
-| `scope` | Groups those members may administer |
+| `scope` | Groups those members may administer. Existing-member operations require every current target group to be in scope; group-less targets are allowed when the operation exists. |
 | `can` | Membership operations: `invite`, `assignGroups`, `suspend` |
+
+Membership operations are intentionally scoped:
+
+| Operation | Allows |
+| --- | --- |
+| `invite` | Create, list, and revoke invitations whose requested groups are all in scope. Empty group invitations are allowed when the caller has the operation. |
+| `assignGroups` | Replace an existing user's groups when every current group and every requested group is in scope. A user cannot remove any of their own current groups. |
+| `suspend` | Suspend active users and reactivate suspended users when every current group is in scope. A user cannot suspend themself. Suspending revokes active sessions immediately; reactivation does not restore old sessions. |
+
+The server and Atlas use the same scope for visibility. Existing users are listed only when the
+caller can assign groups or suspend/reactivate over the user's current groups, so out-of-scope
+emails, statuses, and group membership are not exposed.
 
 ## How principals join groups
 
@@ -177,8 +190,8 @@ Roles and membership policies act on group membership, so principals need a way 
 
 - **Bootstrap** — the auth strategy's `bootstrapGroups` are applied to the first allowed user to
   sign in. This seeds the initial admins.
-- **Invitations** — after that, members covered by a membership policy invite teammates into the
-  groups that policy allows.
+- **Invitations and member management** — after that, members covered by a membership policy invite
+  teammates, assign groups, and suspend or reactivate users inside the policy's scope.
 
 ```ts
 import { magicLink } from "@sixb/auth-magic-link"
@@ -191,9 +204,9 @@ auth: magicLink({
 })
 ```
 
-The first user to sign in as `admin@acme.com` lands in `finance-admins`, which (via the role
-above) can then invite the rest of the team. See [Authentication](authentication.md) for how
-strategies and bootstrapping work.
+The first user to sign in as `admin@acme.com` lands in `finance-admins`, which (via the role and
+membership policy above) can then invite and manage the rest of the team. See
+[Authentication](authentication.md) for how strategies and bootstrapping work.
 
 ## How grants are enforced
 
@@ -315,7 +328,7 @@ Start from the people, not the permissions.
 2. For each group, write one role describing what it can view, apply, and run.
 3. Start narrow with explicit grants; widen to a breadth selector or `.except([...])` only when a
    group really needs broad reach.
-4. Add a membership policy so the right group can grow the others.
+4. Add a membership policy so the right group can grow and manage the others.
 5. Set `bootstrapGroups` so the first sign-in can administer everything else.
 
 Name groups and roles after the people and their access: `team-members`, `finance-admins`,

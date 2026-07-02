@@ -12,6 +12,7 @@ import {
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   PipelineParamsSchema,
@@ -154,7 +155,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: PipelineSchema.array() },
         detail: {
           summary: "List registered pipelines",
-          tags: ["Pipelines"],
+          tags: [OPENAPI_TAGS.pipelines.name],
           operationId: "listPipelines",
         },
       }
@@ -179,7 +180,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: PipelineSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get pipeline metadata",
-          tags: ["Pipelines"],
+          tags: [OPENAPI_TAGS.pipelines.name],
           operationId: "getPipeline",
         },
       }
@@ -231,7 +232,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: PipelineRunListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List pipeline run history",
-          tags: ["Pipelines"],
+          tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "listPipelineRuns",
         },
       }
@@ -282,7 +283,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Get pipeline run detail",
-          tags: ["Pipelines"],
+          tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "getPipelineRun",
         },
       }
@@ -345,7 +346,7 @@ export function registerPipelineRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Request a pipeline run",
-          tags: ["Pipelines"],
+          tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "requestPipelineRun",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },

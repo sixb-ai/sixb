@@ -11,6 +11,7 @@ import {
 } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   ProjectionListResponseSchema,
@@ -119,7 +120,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         response: { 200: ProjectionListResponseSchema },
         detail: {
           summary: "List all projection definitions",
-          tags: ["Projections"],
+          tags: [OPENAPI_TAGS.projections.name],
           operationId: "listProjections",
         },
       }
@@ -143,7 +144,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         response: { 200: ProjectionResponseSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get a projection definition by id",
-          tags: ["Projections"],
+          tags: [OPENAPI_TAGS.projections.name],
           operationId: "getProjection",
         },
       }
@@ -190,7 +191,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         response: { 200: ProjectionRunListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List projection run history",
-          tags: ["Projections"],
+          tags: [OPENAPI_TAGS.projectionRuns.name],
           operationId: "listProjectionRuns",
         },
       }
@@ -227,7 +228,7 @@ export function registerProjectionRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
         },
         detail: {
           summary: "Get a projection run by id",
-          tags: ["Projections"],
+          tags: [OPENAPI_TAGS.projectionRuns.name],
           operationId: "getProjectionRun",
         },
       }

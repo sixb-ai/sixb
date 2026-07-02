@@ -2,6 +2,7 @@ import { type AuthorizationContext, isAllowed, type OntologySource, type Sixb } 
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { ObjectTypeParamsSchema, ObjectTypeSchema } from "../schemas/ontology"
 
@@ -100,7 +101,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: ObjectTypeSchema.array() },
         detail: {
           summary: "List registered object types",
-          tags: ["Ontology"],
+          tags: [OPENAPI_TAGS.ontology.name],
           operationId: "listObjectTypes",
           security: bearerSecurityRequirement("listObjectTypes"),
         },
@@ -127,7 +128,7 @@ export function registerOntologyRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: ObjectTypeSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get object type definition",
-          tags: ["Ontology"],
+          tags: [OPENAPI_TAGS.ontology.name],
           operationId: "getObjectType",
           security: bearerSecurityRequirement("getObjectType"),
         },

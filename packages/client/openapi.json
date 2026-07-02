@@ -760,39 +760,87 @@
     },
     {
       "name": "Datasets",
-      "description": "Dataset definitions, versions, and row previews"
+      "description": "Dataset definitions"
+    },
+    {
+      "name": "Dataset Versions",
+      "description": "Dataset version history"
+    },
+    {
+      "name": "Dataset Rows",
+      "description": "Dataset row previews"
     },
     {
       "name": "Syncs",
-      "description": "Sync metadata and run history"
+      "description": "Sync metadata"
+    },
+    {
+      "name": "Sync Runs",
+      "description": "Sync run history and requests"
     },
     {
       "name": "Pipelines",
-      "description": "Pipeline metadata and run history"
+      "description": "Pipeline metadata"
+    },
+    {
+      "name": "Pipeline Runs",
+      "description": "Pipeline run history and requests"
     },
     {
       "name": "Workflows",
-      "description": "Workflow metadata and run history"
+      "description": "Workflow metadata"
+    },
+    {
+      "name": "Workflow Runs",
+      "description": "Workflow run history and requests"
+    },
+    {
+      "name": "Workflow Interventions",
+      "description": "Workflow intervention tasks"
     },
     {
       "name": "Rules",
-      "description": "Rule definitions and active states"
+      "description": "Rule definitions"
+    },
+    {
+      "name": "Rule States",
+      "description": "Active rule states"
     },
     {
       "name": "Projections",
       "description": "Projection definitions"
     },
     {
+      "name": "Projection Runs",
+      "description": "Projection run history"
+    },
+    {
       "name": "Objects",
       "description": "Twin objects and state"
     },
     {
+      "name": "Object Files",
+      "description": "Object-backed file content"
+    },
+    {
       "name": "Actions",
-      "description": "Global and object action requests"
+      "description": "Action metadata and requests"
+    },
+    {
+      "name": "Action Runs",
+      "description": "Action run history"
     },
     {
       "name": "Agents",
-      "description": "Agent catalog, threads, messages, and run state"
+      "description": "Agent catalog"
+    },
+    {
+      "name": "Agent Threads",
+      "description": "Agent conversation threads and messages"
+    },
+    {
+      "name": "Agent Runs",
+      "description": "Agent run state and cancellation"
     },
     {
       "name": "Files",
@@ -811,15 +859,31 @@
       "description": "Domain event stream"
     },
     {
-      "name": "Auth",
-      "description": "Authentication session routes"
+      "name": "Auth Sessions",
+      "description": "Authentication sessions and sign-out"
+    },
+    {
+      "name": "Auth Members",
+      "description": "User membership administration"
+    },
+    {
+      "name": "Auth Invitations",
+      "description": "User invitations"
+    },
+    {
+      "name": "Auth Access Tokens",
+      "description": "Personal access-token management"
+    },
+    {
+      "name": "Auth Service Accounts",
+      "description": "Service accounts and service-account access tokens"
     }
   ],
   "paths": {
     "/api/auth/session": {
       "get": {
         "summary": "Get current auth session",
-        "tags": ["Auth"],
+        "tags": ["Auth Sessions"],
         "operationId": "getAuthSession",
         "responses": {
           "200": {
@@ -902,7 +966,7 @@
     "/api/auth/sign-out": {
       "post": {
         "summary": "Sign out current auth session",
-        "tags": ["Auth"],
+        "tags": ["Auth Sessions"],
         "operationId": "signOut",
         "security": [
           {
@@ -950,7 +1014,7 @@
     "/api/auth/sessions": {
       "get": {
         "summary": "List active sessions for the current user",
-        "tags": ["Auth"],
+        "tags": ["Auth Sessions"],
         "operationId": "listAuthSessions",
         "responses": {
           "200": {
@@ -1024,7 +1088,7 @@
     "/api/auth/sessions/{sessionId}/revoke": {
       "post": {
         "summary": "Revoke one of the current user's sessions",
-        "tags": ["Auth"],
+        "tags": ["Auth Sessions"],
         "operationId": "revokeAuthSession",
         "security": [
           {
@@ -1117,7 +1181,7 @@
     "/api/auth/sign-out-all": {
       "post": {
         "summary": "Sign out the current user everywhere (all devices and apps)",
-        "tags": ["Auth"],
+        "tags": ["Auth Sessions"],
         "operationId": "signOutAll",
         "security": [
           {
@@ -1185,7 +1249,7 @@
     "/api/auth/access-management-options": {
       "get": {
         "summary": "Get auth access-token management options",
-        "tags": ["Auth"],
+        "tags": ["Auth Access Tokens"],
         "operationId": "getAuthAccessManagementOptions",
         "security": [
           {
@@ -1266,7 +1330,7 @@
     "/api/auth/access-tokens": {
       "get": {
         "summary": "List personal access tokens for the current user",
-        "tags": ["Auth"],
+        "tags": ["Auth Access Tokens"],
         "operationId": "listAuthAccessTokens",
         "security": [
           {
@@ -1393,7 +1457,7 @@
       },
       "post": {
         "summary": "Create a personal access token",
-        "tags": ["Auth"],
+        "tags": ["Auth Access Tokens"],
         "operationId": "createAuthPersonalAccessToken",
         "security": [
           {
@@ -1636,7 +1700,7 @@
     "/api/auth/access-tokens/{tokenId}/revoke": {
       "post": {
         "summary": "Revoke one of the current user's personal access tokens",
-        "tags": ["Auth"],
+        "tags": ["Auth Access Tokens"],
         "operationId": "revokeAuthAccessToken",
         "security": [
           {
@@ -1810,7 +1874,7 @@
     "/api/auth/service-accounts": {
       "get": {
         "summary": "List auth service accounts",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "listAuthServiceAccounts",
         "security": [
           {
@@ -1922,7 +1986,7 @@
       },
       "post": {
         "summary": "Create an auth service account",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "createAuthServiceAccount",
         "security": [
           {
@@ -2139,7 +2203,7 @@
     "/api/auth/service-accounts/{serviceAccountId}/disable": {
       "post": {
         "summary": "Disable an auth service account",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "disableAuthServiceAccount",
         "security": [
           {
@@ -2281,7 +2345,7 @@
     "/api/auth/service-accounts/{serviceAccountId}/access-tokens": {
       "get": {
         "summary": "List access tokens for an auth service account",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "listAuthServiceAccountAccessTokens",
         "security": [
           {
@@ -2453,7 +2517,7 @@
       },
       "post": {
         "summary": "Create an access token for an auth service account",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "createAuthServiceAccountAccessToken",
         "security": [
           {
@@ -2724,7 +2788,7 @@
     "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke": {
       "post": {
         "summary": "Revoke an access token for an auth service account",
-        "tags": ["Auth"],
+        "tags": ["Auth Service Accounts"],
         "operationId": "revokeAuthServiceAccountAccessToken",
         "security": [
           {
@@ -2907,7 +2971,7 @@
     "/api/auth/invitations": {
       "post": {
         "summary": "Create an auth invitation",
-        "tags": ["Auth"],
+        "tags": ["Auth Invitations"],
         "operationId": "createAuthInvitation",
         "security": [
           {
@@ -3175,7 +3239,7 @@
       },
       "get": {
         "summary": "List auth invitations",
-        "tags": ["Auth"],
+        "tags": ["Auth Invitations"],
         "operationId": "listAuthInvitations",
         "parameters": [
           {
@@ -3382,7 +3446,7 @@
     "/api/auth/invitation-options": {
       "get": {
         "summary": "Get auth invitation options",
-        "tags": ["Auth"],
+        "tags": ["Auth Invitations"],
         "operationId": "getAuthInvitationOptions",
         "responses": {
           "200": {
@@ -3501,7 +3565,7 @@
     "/api/auth/invitations/{invitationId}/revoke": {
       "post": {
         "summary": "Revoke an auth invitation",
-        "tags": ["Auth"],
+        "tags": ["Auth Invitations"],
         "operationId": "revokeAuthInvitation",
         "security": [
           {
@@ -3592,6 +3656,783 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/membership-options": {
+      "get": {
+        "summary": "Get auth membership management options",
+        "tags": ["Auth Members"],
+        "operationId": "getAuthMembershipOptions",
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "groups": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "label": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["id"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "invite": {
+                          "type": "boolean"
+                        },
+                        "assignGroups": {
+                          "type": "boolean"
+                        },
+                        "suspend": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["invite", "assignGroups", "suspend"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["groups", "capabilities"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/members": {
+      "get": {
+        "summary": "List auth members",
+        "tags": ["Auth Members"],
+        "operationId": "listAuthMembers",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "members": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "user": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "email": {
+                                "type": "string"
+                              },
+                              "displayName": {
+                                "type": "string"
+                              },
+                              "avatarUrl": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["active", "suspended"]
+                              },
+                              "createdAt": {
+                                "type": "string"
+                              },
+                              "updatedAt": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["id", "email", "status", "createdAt", "updatedAt"],
+                            "additionalProperties": false
+                          },
+                          "groupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "capabilities": {
+                            "type": "object",
+                            "properties": {
+                              "assignGroups": {
+                                "type": "boolean"
+                              },
+                              "suspend": {
+                                "type": "boolean"
+                              },
+                              "reactivate": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["assignGroups", "suspend", "reactivate"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": ["user", "groupIds", "capabilities"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["members", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/members/{userId}/groups": {
+      "patch": {
+        "summary": "Update an auth member's groups",
+        "tags": ["Auth Members"],
+        "operationId": "updateAuthMemberGroups",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["groupIds"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["groupIds"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "groupIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  }
+                },
+                "required": ["groupIds"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "member": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            },
+                            "displayName": {
+                              "type": "string"
+                            },
+                            "avatarUrl": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["active", "suspended"]
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "email", "status", "createdAt", "updatedAt"],
+                          "additionalProperties": false
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["user", "groupIds"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["member"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/members/{userId}/suspend": {
+      "post": {
+        "summary": "Suspend an auth member",
+        "tags": ["Auth Members"],
+        "operationId": "suspendAuthMember",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "member": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            },
+                            "displayName": {
+                              "type": "string"
+                            },
+                            "avatarUrl": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["active", "suspended"]
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "email", "status", "createdAt", "updatedAt"],
+                          "additionalProperties": false
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["user", "groupIds"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["member"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/members/{userId}/reactivate": {
+      "post": {
+        "summary": "Reactivate an auth member",
+        "tags": ["Auth Members"],
+        "operationId": "reactivateAuthMember",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "member": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            },
+                            "displayName": {
+                              "type": "string"
+                            },
+                            "avatarUrl": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["active", "suspended"]
+                            },
+                            "createdAt": {
+                              "type": "string"
+                            },
+                            "updatedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["id", "email", "status", "createdAt", "updatedAt"],
+                          "additionalProperties": false
+                        },
+                        "groupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": ["user", "groupIds"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["member"],
                   "additionalProperties": false
                 }
               }
@@ -4249,7 +5090,7 @@
     "/api/datasets/{datasetId}/versions": {
       "get": {
         "summary": "List dataset versions",
-        "tags": ["Datasets"],
+        "tags": ["Dataset Versions"],
         "operationId": "listDatasetVersions",
         "parameters": [
           {
@@ -4430,7 +5271,7 @@
     "/api/datasets/{datasetId}/versions/{versionId}": {
       "get": {
         "summary": "Get dataset version",
-        "tags": ["Datasets"],
+        "tags": ["Dataset Versions"],
         "operationId": "getDatasetVersion",
         "parameters": [
           {
@@ -4599,7 +5440,7 @@
     "/api/datasets/{datasetId}/rows": {
       "get": {
         "summary": "Preview dataset rows",
-        "tags": ["Datasets"],
+        "tags": ["Dataset Rows"],
         "operationId": "listDatasetRows",
         "parameters": [
           {
@@ -5389,7 +6230,7 @@
     "/api/sync-runs": {
       "get": {
         "summary": "List sync run history",
-        "tags": ["Syncs"],
+        "tags": ["Sync Runs"],
         "operationId": "listSyncRuns",
         "parameters": [
           {
@@ -5582,7 +6423,7 @@
     "/api/syncs/{syncId}/runs": {
       "post": {
         "summary": "Request a sync run",
-        "tags": ["Syncs"],
+        "tags": ["Sync Runs"],
         "operationId": "requestSyncRun",
         "security": [
           {
@@ -6450,7 +7291,7 @@
     "/api/pipeline-runs": {
       "get": {
         "summary": "List pipeline run history",
-        "tags": ["Pipelines"],
+        "tags": ["Pipeline Runs"],
         "operationId": "listPipelineRuns",
         "parameters": [
           {
@@ -6611,7 +7452,7 @@
     "/api/pipeline-runs/{runId}": {
       "get": {
         "summary": "Get pipeline run detail",
-        "tags": ["Pipelines"],
+        "tags": ["Pipeline Runs"],
         "operationId": "getPipelineRun",
         "parameters": [
           {
@@ -6829,7 +7670,7 @@
     "/api/pipelines/{pipelineId}/runs": {
       "post": {
         "summary": "Request a pipeline run",
-        "tags": ["Pipelines"],
+        "tags": ["Pipeline Runs"],
         "operationId": "requestPipelineRun",
         "security": [
           {
@@ -7329,7 +8170,7 @@
     "/api/workflow-interventions": {
       "get": {
         "summary": "List workflow interventions",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Interventions"],
         "operationId": "listWorkflowInterventions",
         "parameters": [
           {
@@ -7587,7 +8428,7 @@
     "/api/workflow-interventions/{interventionId}": {
       "get": {
         "summary": "Get workflow intervention detail",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Interventions"],
         "operationId": "getWorkflowIntervention",
         "parameters": [
           {
@@ -7757,7 +8598,7 @@
     "/api/workflow-interventions/{interventionId}/submit": {
       "post": {
         "summary": "Submit a workflow intervention response",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Interventions"],
         "operationId": "submitWorkflowIntervention",
         "security": [
           {
@@ -8031,7 +8872,7 @@
     "/api/workflow-interventions/{interventionId}/cancel": {
       "post": {
         "summary": "Cancel a workflow intervention",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Interventions"],
         "operationId": "cancelWorkflowIntervention",
         "security": [
           {
@@ -8290,7 +9131,7 @@
     "/api/workflow-runs": {
       "get": {
         "summary": "List workflow run history",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Runs"],
         "operationId": "listWorkflowRuns",
         "parameters": [
           {
@@ -8449,7 +9290,7 @@
     "/api/workflow-runs/{runId}": {
       "get": {
         "summary": "Get workflow run detail",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Runs"],
         "operationId": "getWorkflowRun",
         "parameters": [
           {
@@ -8628,7 +9469,7 @@
     "/api/workflows/{workflowId}/runs": {
       "post": {
         "summary": "Request a workflow run",
-        "tags": ["Workflows"],
+        "tags": ["Workflow Runs"],
         "operationId": "requestWorkflowRun",
         "security": [
           {
@@ -9840,7 +10681,7 @@
     "/api/rule-states": {
       "get": {
         "summary": "List active rule states",
-        "tags": ["Rules"],
+        "tags": ["Rule States"],
         "operationId": "listRuleStates",
         "parameters": [
           {
@@ -11056,7 +11897,7 @@
     "/api/objects/{objectTypeId}/{objectId}/files/content": {
       "get": {
         "summary": "Get object file content",
-        "tags": ["Objects"],
+        "tags": ["Object Files"],
         "operationId": "getObjectFileContent",
         "security": [
           {
@@ -11151,7 +11992,7 @@
       },
       "head": {
         "summary": "Head object file content",
-        "tags": ["Objects"],
+        "tags": ["Object Files"],
         "operationId": "headObjectFileContent",
         "security": [
           {
@@ -12814,7 +13655,7 @@
     "/api/action-runs": {
       "get": {
         "summary": "List action run history",
-        "tags": ["Actions"],
+        "tags": ["Action Runs"],
         "operationId": "listActionRuns",
         "parameters": [
           {
@@ -13048,7 +13889,7 @@
     "/api/action-runs/{runId}": {
       "get": {
         "summary": "Get action run detail",
-        "tags": ["Actions"],
+        "tags": ["Action Runs"],
         "operationId": "getActionRun",
         "security": [
           {
@@ -13571,7 +14412,7 @@
     "/api/agent-threads": {
       "get": {
         "summary": "List agent threads",
-        "tags": ["Agents"],
+        "tags": ["Agent Threads"],
         "operationId": "listAgentThreads",
         "parameters": [
           {
@@ -13726,7 +14567,7 @@
       },
       "post": {
         "summary": "Create an agent thread",
-        "tags": ["Agents"],
+        "tags": ["Agent Threads"],
         "operationId": "createAgentThread",
         "security": [
           {
@@ -13937,7 +14778,7 @@
     "/api/agent-threads/{threadId}": {
       "get": {
         "summary": "Get agent thread",
-        "tags": ["Agents"],
+        "tags": ["Agent Threads"],
         "operationId": "getAgentThread",
         "parameters": [
           {
@@ -14062,7 +14903,7 @@
     "/api/agent-threads/{threadId}/messages": {
       "get": {
         "summary": "List agent thread messages",
-        "tags": ["Agents"],
+        "tags": ["Agent Threads"],
         "operationId": "listAgentThreadMessages",
         "parameters": [
           {
@@ -14533,7 +15374,7 @@
       },
       "post": {
         "summary": "Post an agent thread message",
-        "tags": ["Agents"],
+        "tags": ["Agent Threads"],
         "operationId": "postAgentThreadMessage",
         "security": [
           {
@@ -14720,7 +15561,7 @@
     "/api/agent-threads/{threadId}/cancel": {
       "post": {
         "summary": "Cancel an agent thread's active run",
-        "tags": ["Agents"],
+        "tags": ["Agent Runs"],
         "operationId": "cancelAgentRun",
         "security": [
           {
@@ -14857,7 +15698,7 @@
     "/api/agent-runs/{runId}": {
       "get": {
         "summary": "Get agent run",
-        "tags": ["Agents"],
+        "tags": ["Agent Runs"],
         "operationId": "getAgentRun",
         "parameters": [
           {
@@ -17246,7 +18087,7 @@
     "/api/projection-runs": {
       "get": {
         "summary": "List projection run history",
-        "tags": ["Projections"],
+        "tags": ["Projection Runs"],
         "operationId": "listProjectionRuns",
         "parameters": [
           {
@@ -17465,7 +18306,7 @@
     "/api/projection-runs/{runId}": {
       "get": {
         "summary": "Get a projection run by id",
-        "tags": ["Projections"],
+        "tags": ["Projection Runs"],
         "operationId": "getProjectionRun",
         "parameters": [
           {

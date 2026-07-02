@@ -17,9 +17,11 @@ import {
   type InvitationRecord,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
+  type MemberSummary,
   type OntologySource,
   type ServiceAccountRecord,
   type Sixb,
+  type UserRecord,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core"
 import { type Elysia, t } from "elysia"
@@ -31,7 +33,9 @@ import {
   type ResolveRequestAuthContext,
 } from "../auth/browser-origin"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import {
+  AuthMemberParamsSchema,
   AuthServiceAccountParamsSchema,
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
@@ -46,12 +50,16 @@ import {
   DisableAuthServiceAccountResponseSchema,
   GetAuthAccessManagementOptionsResponseSchema,
   GetAuthInvitationOptionsResponseSchema,
+  GetAuthMembershipOptionsResponseSchema,
   ListAuthAccessTokensResponseSchema,
   ListAuthInvitationsQuerySchema,
   ListAuthInvitationsResponseSchema,
+  ListAuthMembersQuerySchema,
+  ListAuthMembersResponseSchema,
   ListAuthServiceAccountAccessTokensResponseSchema,
   ListAuthServiceAccountsResponseSchema,
   ListAuthSessionsResponseSchema,
+  ReactivateAuthMemberResponseSchema,
   RevokeAuthAccessTokenParamsSchema,
   RevokeAuthAccessTokenResponseSchema,
   RevokeAuthInvitationParamsSchema,
@@ -61,6 +69,9 @@ import {
   RevokeAuthSessionParamsSchema,
   RevokeAuthSessionResponseSchema,
   SignOutAllResponseSchema,
+  SuspendAuthMemberResponseSchema,
+  UpdateAuthMemberGroupsBodySchema,
+  UpdateAuthMemberGroupsResponseSchema,
 } from "../schemas/auth"
 import { ErrorResponseSchema } from "../schemas/common"
 import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
@@ -128,7 +139,7 @@ export function registerAuthRoutes(
         response: { 200: AuthSessionResponseSchema },
         detail: {
           summary: "Get current auth session",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "getAuthSession",
         },
       }
@@ -174,7 +185,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Sign out current auth session",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOut",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -218,7 +229,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "List active sessions for the current user",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "listAuthSessions",
         },
       }
@@ -270,7 +281,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Revoke one of the current user's sessions",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "revokeAuthSession",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -318,7 +329,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Sign out the current user everywhere (all devices and apps)",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOutAll",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -365,7 +376,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Get auth access-token management options",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "getAuthAccessManagementOptions",
           security: bearerSecurityRequirement("getAuthAccessManagementOptions"),
         },
@@ -408,7 +419,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "List personal access tokens for the current user",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "listAuthAccessTokens",
           security: bearerSecurityRequirement("listAuthAccessTokens"),
         },
@@ -463,7 +474,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Create a personal access token",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "createAuthPersonalAccessToken",
           security: bearerSecurityRequirement("createAuthPersonalAccessToken"),
         },
@@ -513,7 +524,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Revoke one of the current user's personal access tokens",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "revokeAuthAccessToken",
           security: bearerSecurityRequirement("revokeAuthAccessToken"),
         },
@@ -552,7 +563,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "List auth service accounts",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "listAuthServiceAccounts",
           security: bearerSecurityRequirement("listAuthServiceAccounts"),
         },
@@ -604,7 +615,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Create an auth service account",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "createAuthServiceAccount",
           security: bearerSecurityRequirement("createAuthServiceAccount"),
         },
@@ -648,7 +659,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Disable an auth service account",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "disableAuthServiceAccount",
           security: bearerSecurityRequirement("disableAuthServiceAccount"),
         },
@@ -694,7 +705,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "List access tokens for an auth service account",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "listAuthServiceAccountAccessTokens",
           security: bearerSecurityRequirement("listAuthServiceAccountAccessTokens"),
         },
@@ -750,7 +761,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Create an access token for an auth service account",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "createAuthServiceAccountAccessToken",
           security: bearerSecurityRequirement("createAuthServiceAccountAccessToken"),
         },
@@ -796,7 +807,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Revoke an access token for an auth service account",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "revokeAuthServiceAccountAccessToken",
           security: bearerSecurityRequirement("revokeAuthServiceAccountAccessToken"),
         },
@@ -859,7 +870,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Create an auth invitation",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "createAuthInvitation",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -883,7 +894,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Get auth invitation options",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "getAuthInvitationOptions",
         },
       }
@@ -930,7 +941,7 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "List auth invitations",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "listAuthInvitations",
         },
       }
@@ -971,8 +982,179 @@ export function registerAuthRoutes(
         },
         detail: {
           summary: "Revoke an auth invitation",
-          tags: ["Auth"],
+          tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "revokeAuthInvitation",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/membership-options",
+      async ({ request }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          return jsonResponse(await sixb.auth.getMembershipOptions(request, authOptions), 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        response: {
+          200: GetAuthMembershipOptionsResponseSchema,
+          401: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Get auth membership management options",
+          tags: [OPENAPI_TAGS.authMembers.name],
+          operationId: "getAuthMembershipOptions",
+        },
+      }
+    )
+    .get(
+      "/api/auth/members",
+      async ({ request, query }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          const parsed = ListAuthMembersQuerySchema.parse(query)
+          const result = await sixb.auth.listMembers(
+            request,
+            {
+              limit: parseOptionalInt(parsed.limit),
+              offset: parseOptionalInt(parsed.offset),
+              order: parsed.order,
+            },
+            authOptions
+          )
+
+          return jsonResponse(
+            {
+              members: result.members.map(serializeMemberSummary),
+              hasMore: result.hasMore,
+              total: result.total,
+            },
+            200
+          )
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        query: ListAuthMembersQuerySchema,
+        response: {
+          200: ListAuthMembersResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "List auth members",
+          tags: [OPENAPI_TAGS.authMembers.name],
+          operationId: "listAuthMembers",
+        },
+      }
+    )
+    .patch(
+      "/api/auth/members/:userId/groups",
+      async ({ request, params, body }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          const parsedParams = AuthMemberParamsSchema.parse(params)
+          const parsed = UpdateAuthMemberGroupsBodySchema.parse(body)
+          const result = await sixb.auth.updateMemberGroups(
+            request,
+            { userId: parsedParams.userId, groupIds: parsed.groupIds },
+            authOptions
+          )
+
+          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        params: AuthMemberParamsSchema,
+        body: UpdateAuthMemberGroupsBodySchema,
+        response: {
+          200: UpdateAuthMemberGroupsResponseSchema,
+          400: ErrorResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Update an auth member's groups",
+          tags: [OPENAPI_TAGS.authMembers.name],
+          operationId: "updateAuthMemberGroups",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/auth/members/:userId/suspend",
+      async ({ request, params }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          const parsed = AuthMemberParamsSchema.parse(params)
+          const result = await sixb.auth.suspendMember(
+            request,
+            { userId: parsed.userId },
+            authOptions
+          )
+
+          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        params: AuthMemberParamsSchema,
+        response: {
+          200: SuspendAuthMemberResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Suspend an auth member",
+          tags: [OPENAPI_TAGS.authMembers.name],
+          operationId: "suspendAuthMember",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .post(
+      "/api/auth/members/:userId/reactivate",
+      async ({ request, params }) => {
+        try {
+          const authOptions = resolveAuthOptions(options, request)
+          const parsed = AuthMemberParamsSchema.parse(params)
+          const result = await sixb.auth.reactivateMember(
+            request,
+            { userId: parsed.userId },
+            authOptions
+          )
+
+          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+      },
+      {
+        params: AuthMemberParamsSchema,
+        response: {
+          200: ReactivateAuthMemberResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          500: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Reactivate an auth member",
+          tags: [OPENAPI_TAGS.authMembers.name],
+          operationId: "reactivateAuthMember",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
@@ -1613,6 +1795,32 @@ function serializeInvitation(invitation: InvitationRecord) {
   }
 }
 
+function serializeMemberSummary(member: MemberSummary) {
+  return {
+    ...serializeManagedMember(member.user, member.groupIds),
+    capabilities: member.capabilities,
+  }
+}
+
+function serializeManagedMember(user: UserRecord, groupIds: readonly string[]) {
+  return {
+    user: serializeMemberUser(user),
+    groupIds: [...groupIds],
+  }
+}
+
+function serializeMemberUser(user: UserRecord) {
+  return {
+    id: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    avatarUrl: user.avatarUrl,
+    status: user.status,
+    createdAt: toIsoString(user.createdAt),
+    updatedAt: toIsoString(user.updatedAt),
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -1646,7 +1854,8 @@ function authRouteErrorResponse(error: unknown): Response {
     if (
       error.code === "missing_invitation" ||
       error.code === "missing_access_token" ||
-      error.code === "missing_service_account"
+      error.code === "missing_service_account" ||
+      error.code === "missing_user"
     ) {
       return jsonResponse({ error: error.message }, 404)
     }

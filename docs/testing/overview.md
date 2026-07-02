@@ -217,11 +217,11 @@ await expect(
 expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-There are six grant kinds, each gated by its own scoped method: `view:object`
+There are seven grant kinds, each gated by its own scoped method: `view:object`
 (`list`/`getObject`), `view:dataset` (`listDatasets`), `apply:action`
-(`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, and
-`run:pipeline`. See [authorization](../auth/authorization.md) for how roles,
-grants, and groups resolve; the full pattern lives in
+(`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, `run:pipeline`,
+and `run:agent`. See [authorization](../auth/authorization.md) for how roles,
+grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
 
 ## Client/server e2e

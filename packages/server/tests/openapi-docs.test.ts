@@ -27,6 +27,7 @@ const Device = defineObjectType({
 interface OpenApiOperation {
   readonly responses?: Record<string, unknown>
   readonly security?: unknown
+  readonly tags?: readonly string[]
 }
 
 interface OpenApiDocument {
@@ -34,6 +35,7 @@ interface OpenApiDocument {
     readonly securitySchemes?: Record<string, unknown>
   }
   readonly paths?: Record<string, Record<string, OpenApiOperation>>
+  readonly tags?: readonly { readonly name?: string; readonly description?: string }[]
 }
 
 function createDocsApi() {
@@ -90,10 +92,33 @@ describe("OpenAPI docs", () => {
         "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme.",
     })
 
+    const declaredTags = new Set((spec.tags ?? []).map((tag) => tag.name).filter(Boolean))
+    const httpMethods = new Set(["get", "post", "put", "patch", "delete", "head", "options"])
+    for (const [path, operations] of Object.entries(spec.paths ?? {})) {
+      for (const [method, operation] of Object.entries(operations)) {
+        if (!httpMethods.has(method)) continue
+        expect(operation.tags, `${method} ${path}`).toHaveLength(1)
+        expect(declaredTags.has(operation.tags?.[0] ?? ""), `${method} ${path}`).toBe(true)
+      }
+    }
+    expect(spec.paths?.["/api/auth/session"]?.get?.tags).toEqual(["Auth Sessions"])
+    expect(spec.paths?.["/api/auth/members"]?.get?.tags).toEqual(["Auth Members"])
+    expect(spec.paths?.["/api/auth/invitations"]?.post?.tags).toEqual(["Auth Invitations"])
+    expect(spec.paths?.["/api/auth/access-tokens"]?.get?.tags).toEqual(["Auth Access Tokens"])
+    expect(spec.paths?.["/api/auth/service-accounts"]?.get?.tags).toEqual(["Auth Service Accounts"])
+    expect(spec.paths?.["/api/workflow-runs"]?.get?.tags).toEqual(["Workflow Runs"])
+    expect(spec.paths?.["/api/workflow-interventions"]?.get?.tags).toEqual([
+      "Workflow Interventions",
+    ])
+    expect(spec.paths?.["/api/agent-threads"]?.get?.tags).toEqual(["Agent Threads"])
+
     const csrfOnlyRoutes = [
       ["post", "/api/auth/sign-out"],
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
+      ["patch", "/api/auth/members/{userId}/groups"],
+      ["post", "/api/auth/members/{userId}/suspend"],
+      ["post", "/api/auth/members/{userId}/reactivate"],
       ["post", "/api/files"],
       ["post", "/api/files/uploads"],
       ["put", "/api/files/uploads/{uploadId}/content"],

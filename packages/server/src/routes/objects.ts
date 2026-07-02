@@ -20,6 +20,7 @@ import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { createFileContentResponse, resolveFileRefAtPath } from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
@@ -276,7 +277,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         },
         detail: {
           summary: "List objects",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "listObjects",
           security: bearerSecurityRequirement("listObjects"),
         },
@@ -318,7 +319,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       {
         detail: {
           summary: "Query objects",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "queryObjects",
           security: bearerSecurityRequirement("queryObjects"),
           requestBody: {
@@ -397,7 +398,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       {
         detail: {
           summary: "Count objects",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "countObjects",
           security: bearerSecurityRequirement("countObjects"),
           requestBody: {
@@ -476,7 +477,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       {
         detail: {
           summary: "Check object existence",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "existsObjects",
           security: bearerSecurityRequirement("existsObjects"),
           requestBody: {
@@ -557,7 +558,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
       {
         detail: {
           summary: "Facet objects",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "facetObjects",
           security: bearerSecurityRequirement("facetObjects"),
           requestBody: {
@@ -621,7 +622,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         // `detail.responses` keeps the binary content in the spec.
         detail: {
           summary: "Get object file content",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "getObjectFileContent",
           security: bearerSecurityRequirement("getObjectFileContent"),
           responses: {
@@ -676,7 +677,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         // declared in `detail.responses` survive into the spec.
         detail: {
           summary: "Head object file content",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "headObjectFileContent",
           security: bearerSecurityRequirement("headObjectFileContent"),
           responses: {
@@ -738,7 +739,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         response: { 200: TwinObjectSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get object by id",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "getObject",
           security: bearerSecurityRequirement("getObject"),
         },
@@ -765,7 +766,7 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         response: { 200: TwinObjectSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Create or update object",
-          tags: ["Objects"],
+          tags: [OPENAPI_TAGS.objects.name],
           operationId: "upsertObject",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },

@@ -25,6 +25,7 @@ import {
   SIXB_CSRF_SECURITY_SCHEME,
   SIXB_CSRF_SECURITY_SCHEME_ID,
 } from "./openapi/security"
+import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
 import { registerWebhookRoutes } from "./routes/webhooks"
@@ -194,27 +195,7 @@ export function createSixbApi(server: SixbServer) {
           },
           schemas: ObjectQueryOpenApiSchemas,
         },
-        tags: [
-          { name: "Project", description: "Current project metadata" },
-          { name: "Status", description: "Runtime status" },
-          { name: "Ontology", description: "Object type definitions" },
-          { name: "Connectors", description: "Connector metadata and webhook routes" },
-          { name: "Webhooks", description: "Webhook run history" },
-          { name: "Datasets", description: "Dataset definitions, versions, and row previews" },
-          { name: "Syncs", description: "Sync metadata and run history" },
-          { name: "Pipelines", description: "Pipeline metadata and run history" },
-          { name: "Workflows", description: "Workflow metadata and run history" },
-          { name: "Rules", description: "Rule definitions and active states" },
-          { name: "Projections", description: "Projection definitions" },
-          { name: "Objects", description: "Twin objects and state" },
-          { name: "Actions", description: "Global and object action requests" },
-          { name: "Agents", description: "Agent catalog, threads, messages, and run state" },
-          { name: "Files", description: "File uploads and file references" },
-          { name: "Links", description: "Object relationship links" },
-          { name: "Telemetry", description: "Telemetry history and appends" },
-          { name: "Events", description: "Domain event stream" },
-          { name: "Auth", description: "Authentication session routes" },
-        ],
+        tags: OPENAPI_TAG_METADATA,
       },
       swagger: {
         withCredentials: true,

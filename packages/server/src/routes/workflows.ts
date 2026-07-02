@@ -14,6 +14,7 @@ import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
   CancelWorkflowInterventionBodySchema,
@@ -305,7 +306,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: WorkflowSchema.array() },
         detail: {
           summary: "List registered workflows",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflows.name],
           operationId: "listWorkflows",
           security: bearerSecurityRequirement("listWorkflows"),
         },
@@ -333,7 +334,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: WorkflowSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get workflow metadata",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflows.name],
           operationId: "getWorkflow",
           security: bearerSecurityRequirement("getWorkflow"),
         },
@@ -385,7 +386,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: WorkflowInterventionListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List workflow interventions",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "listWorkflowInterventions",
         },
       }
@@ -425,7 +426,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Get workflow intervention detail",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "getWorkflowIntervention",
         },
       }
@@ -507,7 +508,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Submit a workflow intervention response",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "submitWorkflowIntervention",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -620,7 +621,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Cancel a workflow intervention",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "cancelWorkflowIntervention",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -667,7 +668,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         response: { 200: WorkflowRunListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List workflow run history",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "listWorkflowRuns",
         },
       }
@@ -713,7 +714,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Get workflow run detail",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowRun",
         },
       }
@@ -767,7 +768,7 @@ export function registerWorkflowRoutes(app: Elysia, sixb: Sixb<readonly Ontology
         },
         detail: {
           summary: "Request a workflow run",
-          tags: ["Workflows"],
+          tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "requestWorkflowRun",
           security: bearerSecurityRequirement("requestWorkflowRun"),
         },

@@ -1,5 +1,6 @@
 import type { OntologySource, Sixb, WebhookRunRecord } from "@sixb/core"
 import type { Elysia } from "elysia"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { WebhookRunListResponseSchema, WebhookRunsQuerySchema } from "../schemas/webhook-runs"
 import { handleRouteError, parseDate, parseOptionalInt, toIsoString } from "../utils/http"
@@ -65,7 +66,7 @@ export function registerWebhookRunRoutes(app: Elysia, sixb: Sixb<readonly Ontolo
       response: { 200: WebhookRunListResponseSchema, 400: ErrorResponseSchema },
       detail: {
         summary: "List webhook run history",
-        tags: ["Webhooks"],
+        tags: [OPENAPI_TAGS.webhooks.name],
         operationId: "listWebhookRuns",
       },
     }

@@ -71,7 +71,7 @@ a definition picked up depends on where it lives, not what the file is named.
 | `agents/` | Agent definitions | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
-| `security/policies/` | Membership-policy definitions | [Authentication](../auth/authentication.md) |
+| `security/policies/` | Membership-policy definitions | [Authorization](../auth/authorization.md) |
 
 Discovery matches exported *values*, not filenames. One file can export several definitions,
 a definition can be split across files, and an array export is flattened — so

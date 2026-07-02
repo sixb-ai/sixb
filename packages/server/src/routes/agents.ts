@@ -19,6 +19,7 @@ import {
 import type { Elysia } from "elysia"
 import { requestAuthState } from "../auth/scope"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AgentCatalogItemSchema,
   AgentIdParamsSchema,
@@ -177,7 +178,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: { 200: AgentCatalogItemSchema.array() },
         detail: {
           summary: "List registered agents",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agents.name],
           operationId: "listAgents",
         },
       }
@@ -202,7 +203,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: { 200: AgentCatalogItemSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get agent metadata",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agents.name],
           operationId: "getAgent",
         },
       }
@@ -246,7 +247,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: { 200: AgentThreadListResponseSchema, 400: ErrorResponseSchema },
         detail: {
           summary: "List agent threads",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "listAgentThreads",
         },
       }
@@ -299,7 +300,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
         detail: {
           summary: "Create an agent thread",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "createAgentThread",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -337,7 +338,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: { 200: AgentThreadSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get agent thread",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "getAgentThread",
         },
       }
@@ -395,7 +396,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
         detail: {
           summary: "List agent thread messages",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "listAgentThreadMessages",
         },
       }
@@ -455,7 +456,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
         detail: {
           summary: "Post an agent thread message",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "postAgentThreadMessage",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -516,7 +517,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
         detail: {
           summary: "Cancel an agent thread's active run",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "cancelAgentRun",
           security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
@@ -560,7 +561,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         response: { 200: AgentRunSchema, 400: ErrorResponseSchema, 404: ErrorResponseSchema },
         detail: {
           summary: "Get agent run",
-          tags: ["Agents"],
+          tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "getAgentRun",
         },
       }
