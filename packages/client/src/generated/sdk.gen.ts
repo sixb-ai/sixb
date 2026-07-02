@@ -14,6 +14,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryErrors,
   AppendTelemetryResponses,
+  CancelAgentRunData,
+  CancelAgentRunErrors,
+  CancelAgentRunResponses,
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionErrors,
   CancelWorkflowInterventionResponses,
@@ -1405,6 +1408,22 @@ export const postAgentThreadMessage = <ThrowOnError extends boolean = false>(
   >({
     security: [{ name: "x-sixb-csrf", type: "apiKey" }],
     url: "/api/agent-threads/{threadId}/messages",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Cancel an agent thread's active run
+ */
+export const cancelAgentRun = <ThrowOnError extends boolean = false>(
+  options: Options<CancelAgentRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<CancelAgentRunResponses, CancelAgentRunErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/agent-threads/{threadId}/cancel",
     ...options,
     headers: {
       "Content-Type": "application/json",

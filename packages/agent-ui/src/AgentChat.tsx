@@ -1,4 +1,5 @@
 import {
+  cancelAgentRunMutation,
   createAgentThreadMutation,
   getAgentThreadOptions,
   getAgentThreadQueryKey,
@@ -99,6 +100,9 @@ export function AgentChat({
     text: "",
     nonce: 0,
   })
+  // The run a stop was requested for. Held until that run leaves the active slot so the composer can
+  // show "stopping" from the click until the cancelled run actually ends.
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null)
 
   const activeRunId =
     threadId !== null
@@ -140,9 +144,29 @@ export function AgentChat({
 
   const createThread = useMutation(createAgentThreadMutation())
   const postMessage = useMutation(postAgentThreadMessageMutation())
+  const cancelRun = useMutation(cancelAgentRunMutation())
 
   const isRunning =
     activeRunId !== null && !(live.runId === activeRunId && live.finishStatus !== null)
+
+  // Clear the stop request once the run it targeted is no longer the active one (it ended, or we
+  // navigated away), so a fresh run never starts already showing "stopping".
+  useEffect(() => {
+    setStoppingRunId((current) => (current === activeRunId ? current : null))
+  }, [activeRunId])
+
+  const stopping = stoppingRunId !== null && stoppingRunId === activeRunId
+
+  const handleStop = () => {
+    if (threadId === null || activeRunId === null) return
+    setStoppingRunId(activeRunId)
+    cancelRun.mutate(
+      { path: { threadId }, body: { runId: activeRunId } },
+      // A failed cancel (e.g. the run just finished) clears the pending state so the user isn't stuck
+      // on a spinner; the run's own terminal event still resolves the UI.
+      { onError: () => setStoppingRunId(null) }
+    )
+  }
 
   // Prefer the thread's own agent; fall back to the just-picked agent so a brand-new thread (not yet
   // in cache) keeps its identity instead of flashing a generic header while it loads.
@@ -311,6 +335,9 @@ export function AgentChat({
           onSelectThread={onNavigateThread}
           composerDisabled={isRunning}
           composerPending={postMessage.isPending || createThread.isPending}
+          composerRunning={isRunning}
+          composerStopping={stopping}
+          onStop={handleStop}
           composerPlaceholder={
             currentAgent ? `Message ${currentAgent.name}...` : "Send a message..."
           }

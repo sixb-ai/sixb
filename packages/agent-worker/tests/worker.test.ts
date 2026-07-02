@@ -27,6 +27,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  publishAgentRunCancel,
   type Queues,
   type RunCommandOptions,
   type Sandbox,
@@ -236,6 +237,43 @@ function controlledBlockingAnswerModel(): {
       for (const release of releases.splice(0)) {
         release()
       }
+    },
+  }
+}
+
+// Streams `partial` text and then blocks until the turn is aborted, so a cancel lands mid-response
+// with real streamed content to persist.
+function partialTextThenBlockingModel(partial: string): {
+  readonly model: MockLanguageModelV4
+  waitForStarted(): Promise<void>
+} {
+  let started = 0
+  const waiters: Array<() => void> = []
+  return {
+    model: new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async (options) => ({
+        stream: new ReadableStream<LanguageModelV4StreamPart>({
+          start(controller) {
+            started += 1
+            for (const resolve of waiters.splice(0)) resolve()
+            controller.enqueue({ type: "stream-start", warnings: [] })
+            controller.enqueue({ type: "text-start", id: "t1" })
+            controller.enqueue({ type: "text-delta", id: "t1", delta: partial })
+            // No text-end / finish: the turn hangs here until the abort signal errors the stream.
+            const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
+            if (options.abortSignal?.aborted) {
+              abort()
+            } else {
+              options.abortSignal?.addEventListener("abort", abort, { once: true })
+            }
+          },
+        }),
+      }),
+    }),
+    waitForStarted() {
+      if (started >= 1) return Promise.resolve()
+      return new Promise((resolve) => waiters.push(resolve))
     },
   }
 }
@@ -1340,6 +1378,100 @@ describe("AgentWorker", () => {
       ).resolves.toBeDefined()
     } finally {
       controlled.releaseAll()
+      await worker.stop()
+    }
+  })
+
+  test("cancels an in-flight run, records it cancelled, and frees the thread", async () => {
+    const controlled = controlledBlockingAnswerModel()
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+
+    const request = await sixb.agents.request({ agentId: "assistant", text: "go" })
+
+    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10, tools: echoTool }))
+    await worker.start()
+    try {
+      await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
+        label: "model stream started",
+      })
+
+      // Exactly what POST /api/agent-threads/:threadId/cancel publishes.
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: request.runId })
+
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          return record && record.status !== "running" ? record : null
+        },
+        { label: "run terminal after cancel" }
+      )
+      expect(run.status).toBe("cancelled")
+
+      // The thread is released, so the user can immediately steer with a new message.
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: request.threadId })
+      expect(thread?.activeRunId).toBeNull()
+
+      // A cancelled turn persists no partial assistant message (messages are finalized-only).
+      const persisted = await listMessages(storage, request.threadId)
+      expect(persisted.some((message) => message.role === "assistant")).toBe(false)
+
+      // The client learns of the stop through the run's terminal stream event.
+      const records = await listRunStreamRecords(sixb.broker, request.runId)
+      const finished = records.find((record) => record.name === "agent.run.finished")
+      expect((finished?.payload as { status?: string } | undefined)?.status).toBe("cancelled")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("persists the partial assistant message when a mid-response run is cancelled", async () => {
+    const partial = "Let me start by checking the pipeline logs"
+    const controlled = partialTextThenBlockingModel(partial)
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+
+    const request = await sixb.agents.request({ agentId: "assistant", text: "go" })
+
+    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10, tools: echoTool }))
+    await worker.start()
+    try {
+      await controlled.waitForStarted()
+      // Wait until the streamed text has actually been processed and published (a real model delivers
+      // tokens over time); cancelling before then would race the SDK reading the buffered chunk.
+      await waitFor(
+        async () => {
+          const records = await listRunStreamRecords(sixb.broker, request.runId)
+          return JSON.stringify(records).includes(partial) ? true : null
+        },
+        { label: "partial text streamed" }
+      )
+
+      await publishAgentRunCancel(sixb.broker, { projectId: PROJECT_ID, runId: request.runId })
+
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          return record && record.status !== "running" ? record : null
+        },
+        { label: "run terminal after cancel" }
+      )
+      expect(run.status).toBe("cancelled")
+
+      // The half-streamed answer is kept, so the next (steering) turn sees what the agent was doing.
+      const messages = await listMessages(storage, request.threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      expect(assistant).toBeDefined()
+      const text = assistant?.parts
+        .filter((part): part is { type: "text"; text: string } => part.type === "text")
+        .map((part) => part.text)
+        .join("")
+      expect(text).toBe(partial)
+
+      // The thread is freed for the steering message.
+      const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: request.threadId })
+      expect(thread?.activeRunId).toBeNull()
+    } finally {
       await worker.stop()
     }
   })

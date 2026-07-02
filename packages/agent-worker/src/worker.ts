@@ -13,6 +13,7 @@ import {
   isAbortError,
   QueueWorker,
   SYSTEM_PRINCIPAL,
+  subscribeAgentRunCancel,
 } from "@sixb/core"
 import { normalizeApiBaseUrl } from "./api-url"
 import {
@@ -166,6 +167,9 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     const run = reservation.run
     const leaseId = run.lease?.id
     let environment: AgentRunEnvironment | null = null
+    // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
+    // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
+    const cancel = await this.watchForCancel(run.id)
 
     try {
       await context.streamSink.publishStarted(run)
@@ -179,7 +183,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         context: environment.turnContext,
         agent,
         run,
-        signal,
+        signal: AbortSignal.any([signal, cancel.signal]),
       })
     } catch (error) {
       // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
@@ -196,8 +200,9 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       }
       // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
       // record the fate at all it raises `AgentFinalizationError`, which propagates here so the job
-      // is redelivered rather than acked with the thread left silently locked.
-      const aborted = signal.aborted || isAbortError(error)
+      // is redelivered rather than acked with the thread left silently locked. A user cancel is
+      // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
+      const aborted = signal.aborted || cancel.signal.aborted || isAbortError(error)
       const finalized = await this.recordFate(
         context,
         run.id,
@@ -208,12 +213,13 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       if (finalized) {
         await context.streamSink.publishRunFinished(finalized)
       }
-      // Shutdown abort: rethrow so `onAbortError` fails the job (the run is already `cancelled`).
-      // Model/tool failure or turn timeout: fate is on the record, so we ack by returning.
-      if (aborted) {
+      // Shutdown abort: rethrow so `onAbortError` releases the job for another process. A user cancel
+      // or a recorded model/tool failure keeps its fate on the record, so we ack by returning.
+      if (signal.aborted) {
         throw error
       }
     } finally {
+      cancel.stop()
       await environment?.dispose()
     }
   }
@@ -344,6 +350,29 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       }
       throw error
     }
+  }
+
+  /**
+   * Subscribe to a run's cancel signal for the duration of its turn. Failing to attach the watch
+   * only costs cancellability for this run (it still runs to completion), so it is best-effort and
+   * never fails the turn. The returned `stop` unsubscribes.
+   */
+  private async watchForCancel(runId: string): Promise<{
+    readonly signal: AbortSignal
+    readonly stop: () => void
+  }> {
+    const controller = new AbortController()
+    let unsubscribe: (() => void) | undefined
+    try {
+      unsubscribe = await subscribeAgentRunCancel(
+        this.sixb.broker,
+        { projectId: this.sixb.id, runId },
+        () => controller.abort()
+      )
+    } catch (error) {
+      console.error(`[SixbAgentWorker] Agent run '${runId}' cancel watch failed to start:`, error)
+    }
+    return { signal: controller.signal, stop: () => unsubscribe?.() }
   }
 
   private async recordFate(

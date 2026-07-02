@@ -5134,6 +5134,51 @@ export type PostAgentThreadMessageResponses = {
 export type PostAgentThreadMessageResponse =
   PostAgentThreadMessageResponses[keyof PostAgentThreadMessageResponses]
 
+export type CancelAgentRunData = {
+  body: {
+    runId: string
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/cancel"
+}
+
+export type CancelAgentRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type CancelAgentRunError = CancelAgentRunErrors[keyof CancelAgentRunErrors]
+
+export type CancelAgentRunResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    runId: string
+  }
+}
+
+export type CancelAgentRunResponse = CancelAgentRunResponses[keyof CancelAgentRunResponses]
+
 export type GetAgentRunData = {
   body?: never
   path: {

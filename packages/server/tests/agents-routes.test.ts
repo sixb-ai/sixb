@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  agentRunControlStreamId,
   agents as agentScope,
   can,
   createAgentRunLeaseId,
@@ -407,6 +408,70 @@ describe("agent routes", () => {
       startedAt: "2026-06-27T10:00:01.000Z",
     })
     expect("lease" in body).toBe(false)
+  })
+
+  test("cancel publishes a stop signal, rejects a finished run, and fences to the thread", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thread-cancel",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const run = await storage.agents.runs.reserve({
+      id: "run-cancel",
+      projectId: sixb.id,
+      threadId: thread.id,
+      agentId: "assistant",
+      triggerMessageId: "msg-user",
+      requestedByPrincipal: { type: "system", id: "system" },
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+    })
+
+    // A running run: 202, and the stop signal lands on the run's control stream for the worker.
+    const ok = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: run.id })
+    )
+    expect(ok.status).toBe(202)
+    expect(await ok.json()).toEqual({ runId: run.id })
+    const control = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: agentRunControlStreamId(run.id),
+    })
+    expect(control.some((record) => record.name === "agent.run.cancel")).toBe(true)
+
+    // Cancelling a run that has already finished is a 409, not a silent no-op.
+    await storage.agents.runs.finish({
+      projectId: sixb.id,
+      id: run.id,
+      leaseId: run.lease?.id ?? "",
+      status: "cancelled",
+    })
+    const finished = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: run.id })
+    )
+    expect(finished.status).toBe(409)
+
+    // A run that belongs to another thread cannot be cancelled through this one.
+    const otherThread = await storage.agents.threads.create({
+      id: "thread-other",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const otherRun = await storage.agents.runs.reserve({
+      id: "run-other",
+      projectId: sixb.id,
+      threadId: otherThread.id,
+      agentId: "assistant",
+      triggerMessageId: "msg-other",
+      requestedByPrincipal: { type: "system", id: "system" },
+      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+    })
+    const crossThread = await app.fetch(
+      jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: otherRun.id })
+    )
+    expect(crossThread.status).toBe(404)
   })
 
   test("owner-scopes threads, messages, and runs when auth is enabled", async () => {

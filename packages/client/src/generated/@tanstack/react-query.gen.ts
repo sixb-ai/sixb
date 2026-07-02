@@ -12,6 +12,7 @@ import { client } from "../client.gen"
 import {
   abortFileUpload,
   appendTelemetry,
+  cancelAgentRun,
   cancelWorkflowIntervention,
   completeFileUpload,
   countObjects,
@@ -110,6 +111,9 @@ import type {
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryResponse,
+  CancelAgentRunData,
+  CancelAgentRunError,
+  CancelAgentRunResponse,
   CancelWorkflowInterventionData,
   CancelWorkflowInterventionError,
   CancelWorkflowInterventionResponse,
@@ -2854,6 +2858,29 @@ export const postAgentThreadMessageMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await postAgentThreadMessage({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Cancel an agent thread's active run
+ */
+export const cancelAgentRunMutation = (
+  options?: Partial<Options<CancelAgentRunData>>
+): UseMutationOptions<CancelAgentRunResponse, CancelAgentRunError, Options<CancelAgentRunData>> => {
+  const mutationOptions: UseMutationOptions<
+    CancelAgentRunResponse,
+    CancelAgentRunError,
+    Options<CancelAgentRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await cancelAgentRun({
         ...options,
         ...fnOptions,
         throwOnError: true,

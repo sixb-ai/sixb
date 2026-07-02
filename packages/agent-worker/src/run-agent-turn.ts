@@ -1,14 +1,26 @@
 import type {
   AgentDefinition,
+  AgentInboundUiMessagePart,
   AgentMessage,
   AgentRunRecord,
   AgentRunUsage,
   AgentStorage,
+  Storage,
 } from "@sixb/core"
-import { createAgentMessageId, fromAiSdk, toModelMessages } from "@sixb/core"
-import { type LanguageModelUsage, type ModelMessage, stepCountIs, streamText } from "ai"
+import { createAgentMessageId, fromAiSdk, isAbortError, toModelMessages } from "@sixb/core"
+import {
+  type LanguageModelUsage,
+  type ModelMessage,
+  stepCountIs,
+  streamText,
+  toUIMessageStream,
+} from "ai"
 import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
-import { appendMessageAndFinishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
+import {
+  appendMessageAndFinishRunOrThrow,
+  finishRunOrThrow,
+  isTerminalOrLeaseGone,
+} from "./finalize"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -105,10 +117,17 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     abortSignal,
   })
 
+  // `onFinish` fires even when the stream is aborted — the SDK ends the UI stream gracefully with an
+  // `abort` chunk rather than erroring it. `isAborted` distinguishes a stop from a clean finish, and
+  // `responseMessage` holds whatever streamed so far, so a cancelled turn can still be persisted.
   let responseMessage: AgentInboundLike | undefined
-  const uiStream = result.toUIMessageStream({
-    onFinish: (event) => {
+  let streamAborted = false
+  const uiStream = toUIMessageStream({
+    stream: result.stream,
+    tools,
+    onEnd: (event) => {
       responseMessage = event.responseMessage
+      streamAborted = streamAborted || event.isAborted
     },
   })
 
@@ -158,6 +177,25 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   if (timedOut) {
     throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
   }
+  // A user cancel (or worker shutdown) aborts the stream, which the SDK ends gracefully — so we reach
+  // here with no drain error, only the `isAborted`/signal flags. Persist whatever streamed so far as a
+  // `cancelled` turn — the agent's tool calls and partial text — so the next (steering) turn keeps the
+  // context of what it was doing, instead of throwing the whole response away.
+  const wasAborted =
+    streamAborted || abortSignal.aborted || (drainError !== undefined && isAbortError(drainError))
+  if (wasAborted) {
+    return await finalizeCancelledTurn({
+      storage,
+      agents,
+      context,
+      run,
+      leaseId,
+      leaseMs,
+      projectId,
+      modelId: agent.model.modelId,
+      partial: responseMessage,
+    })
+  }
   if (drainError !== undefined) {
     throw drainError
   }
@@ -171,7 +209,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
   await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
 
-  const usage = mapUsage(await result.totalUsage)
+  const usage = mapUsage(await result.usage)
   const finishReason = await result.finishReason
   const assistantMessageId = createAgentMessageId()
 
@@ -207,6 +245,128 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   await context.streamSink.publishRunFinished(finalizedRun)
 
   return finalizedRun
+}
+
+/**
+ * Persist an aborted turn as `cancelled`, keeping whatever coherently streamed. When the partial has
+ * usable content it is written as the assistant message in the same transaction as the run finish
+ * (mirroring the success path); otherwise the run is just finalized with no message.
+ */
+async function finalizeCancelledTurn(input: {
+  readonly storage: Storage
+  readonly agents: AgentStorage
+  readonly context: AgentTurnContext
+  readonly run: AgentRunRecord
+  readonly leaseId: string
+  readonly leaseMs: number
+  readonly projectId: string
+  readonly modelId?: string
+  readonly partial: AgentInboundLike | undefined
+}): Promise<AgentRunRecord> {
+  const { storage, agents, context, run, leaseId, leaseMs, projectId, modelId, partial } = input
+
+  // A malformed partial must not turn a cancel into a failure: fall back to a message-less cancel.
+  let assistant: AgentMessage | null = null
+  try {
+    assistant = partial ? coercePartialAssistantMessage(partial) : null
+  } catch {
+    assistant = null
+  }
+
+  // Prove we still hold the lease right before writing (mirrors the success path).
+  await renewOrLost({ storage: agents, projectId, runId: run.id, leaseId, leaseMs })
+
+  if (!assistant) {
+    const finalizedRun = await finishRunOrThrow(agents, {
+      projectId,
+      id: run.id,
+      leaseId,
+      status: "cancelled",
+    })
+    await context.streamSink.publishRunFinished(finalizedRun)
+    return finalizedRun
+  }
+
+  const assistantMessageId = createAgentMessageId()
+  const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
+    message: {
+      id: assistantMessageId,
+      projectId,
+      threadId: run.threadId,
+      runId: run.id,
+      role: assistant.role,
+      parts: assistant.parts,
+      ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
+      ...(run.executionPrincipal === undefined ? {} : { authorPrincipal: run.executionPrincipal }),
+    },
+    finish: {
+      projectId,
+      id: run.id,
+      leaseId,
+      status: "cancelled",
+      ...(modelId === undefined ? {} : { modelId }),
+    },
+  })
+  await context.streamSink.publishMessageFinalized({ run, messageId: assistantMessageId })
+  await context.streamSink.publishRunFinished(finalizedRun)
+  return finalizedRun
+}
+
+function isToolUiPart(type: string): boolean {
+  return type === "dynamic-tool" || type.startsWith("tool-")
+}
+
+/**
+ * Coerce a partially-streamed assistant message into a coherent, persistable one: finalize the
+ * trailing (still-streaming) text so the partial answer is kept, keep completed tool calls, mark a
+ * tool call that had its full input but never resolved as a cancelled error (so replay stays paired),
+ * and drop still-streaming reasoning or tool input that never finished. Returns null when nothing
+ * coherent streamed, so the caller finalizes the run without a message.
+ */
+function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage | null {
+  const parts: AgentInboundUiMessagePart[] = []
+  for (const part of message.parts) {
+    if (part.type === "text") {
+      if (typeof part.text === "string" && part.text.length > 0) {
+        parts.push({
+          type: "text",
+          text: part.text,
+          ...(part.providerMetadata === undefined
+            ? {}
+            : { providerMetadata: part.providerMetadata }),
+        })
+      }
+    } else if (part.type === "reasoning") {
+      // Only keep reasoning that finished streaming — it carries the provider signature needed on the
+      // next turn; a half-streamed thinking block is dropped rather than replayed.
+      if (part.state !== "streaming" && typeof part.text === "string" && part.text.length > 0) {
+        parts.push({
+          type: "reasoning",
+          text: part.text,
+          ...(part.providerMetadata === undefined
+            ? {}
+            : { providerMetadata: part.providerMetadata }),
+        })
+      }
+    } else if (part.type === "step-start") {
+      parts.push({ type: "step-start" })
+    } else if (isToolUiPart(part.type)) {
+      if (part.state === "output-available" || part.state === "output-error") {
+        parts.push(part)
+      } else if (part.state === "input-available") {
+        parts.push({ ...part, state: "output-error", errorText: "Tool execution was cancelled." })
+      }
+      // `input-streaming` (input never finished) is dropped: its input is not valid JSON yet.
+    }
+  }
+  if (parts.length === 0) {
+    return null
+  }
+  return fromAiSdk({
+    role: message.role,
+    parts,
+    ...(message.metadata === undefined ? {} : { metadata: message.metadata }),
+  })
 }
 
 function systemInstructions(instructions: string, addendum: string | undefined): string {

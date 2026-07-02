@@ -1,12 +1,17 @@
 import { Spinner, Textarea } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ArrowUp } from "lucide-react"
+import { ArrowUp, Square } from "lucide-react"
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 export interface ComposerProps {
   readonly onSend: (text: string) => void
   readonly disabled?: boolean
   readonly pending?: boolean
+  /** A run is in flight: the send button becomes a stop button that calls {@link onStop}. */
+  readonly running?: boolean
+  /** A stop has been requested and we're waiting for the run to end. */
+  readonly stopping?: boolean
+  readonly onStop?: () => void
   readonly placeholder?: string
   /** Optional status line shown under the input, e.g. while a run is active. */
   readonly hint?: string
@@ -24,6 +29,9 @@ export function Composer({
   onSend,
   disabled,
   pending,
+  running,
+  stopping,
+  onStop,
   placeholder,
   hint,
   draft,
@@ -103,19 +111,39 @@ export function Composer({
             aria-label="Message"
             className="max-h-[200px] min-h-9 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1.5 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
           />
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSend}
-            aria-label="Send message"
-            className={cn(
-              "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
-              "bg-primary text-primary-foreground hover:bg-primary/90",
-              "disabled:bg-muted disabled:text-muted-foreground"
-            )}
-          >
-            {pending ? <Spinner className="size-4" /> : <ArrowUp className="size-[18px]" />}
-          </button>
+          {running ? (
+            <button
+              type="button"
+              onClick={onStop}
+              disabled={stopping}
+              aria-label="Stop generating"
+              className={cn(
+                "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
+                "bg-primary text-primary-foreground hover:bg-primary/90",
+                "disabled:bg-muted disabled:text-muted-foreground"
+              )}
+            >
+              {stopping ? (
+                <Spinner className="size-4" />
+              ) : (
+                <Square className="size-3.5 fill-current" />
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={submit}
+              disabled={!canSend}
+              aria-label="Send message"
+              className={cn(
+                "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
+                "bg-primary text-primary-foreground hover:bg-primary/90",
+                "disabled:bg-muted disabled:text-muted-foreground"
+              )}
+            >
+              {pending ? <Spinner className="size-4" /> : <ArrowUp className="size-[18px]" />}
+            </button>
+          )}
         </div>
         {hint ? <p className="mt-1.5 px-1 text-[11px] text-muted-foreground">{hint}</p> : null}
       </div>
