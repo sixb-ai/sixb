@@ -43,6 +43,7 @@
     },
     "./blob-storage": {
       "types": "./dist/blob-storage/browser.d.ts",
+      "browser": "./src/blob-storage/browser.ts",
       "bun": "./src/blob-storage/browser.ts",
       "import": "./dist/blob-storage/browser.js",
       "default": "./dist/blob-storage/browser.js"
