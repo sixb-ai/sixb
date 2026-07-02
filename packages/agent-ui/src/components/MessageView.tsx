@@ -36,7 +36,7 @@ export function LiveAssistant({ live }: { live: LiveRunState }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <AssistantBody parts={live.parts} />
+      <AssistantBody parts={live.parts} live={live.active} />
       {live.finishStatus === "failed" ? (
         <RunErrorMarker message={live.finishError ?? "The agent run failed."} />
       ) : null}
