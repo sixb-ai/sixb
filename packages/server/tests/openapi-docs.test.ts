@@ -178,6 +178,7 @@ describe("OpenAPI docs", () => {
     const paths = [
       "/api/objects/{objectTypeId}/{objectId}/files/content",
       "/api/action-runs/{runId}/files/content",
+      "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
       "/api/workflow-runs/{runId}/files/content",
       "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
     ]

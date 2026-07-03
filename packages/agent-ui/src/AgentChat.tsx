@@ -18,6 +18,7 @@ import { useEffect, useMemo, useState } from "react"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { installAgentResizeObserverGuard } from "./resizeObserver"
+import type { AgentFileRef } from "./types"
 import { useThreadStream } from "./useThreadStream"
 
 interface PendingSend {
@@ -28,6 +29,7 @@ interface PendingSend {
 interface PendingUser {
   readonly threadId: string
   readonly text: string
+  readonly attachments: readonly AgentFileRef[]
   messageId: string | null
 }
 
@@ -96,8 +98,13 @@ export function AgentChat({
   )
   // Text handed back to the composer after a failed send. The nonce makes the reseed fire even when
   // the same text is restored twice.
-  const [draftReseed, setDraftReseed] = useState<{ text: string; nonce: number }>({
+  const [draftReseed, setDraftReseed] = useState<{
+    text: string
+    attachments: readonly AgentFileRef[]
+    nonce: number
+  }>({
     text: "",
+    attachments: [],
     nonce: 0,
   })
   // The run a stop was requested for. Held until that run leaves the active slot so the composer can
@@ -198,7 +205,7 @@ export function AgentChat({
     onNavigateHome()
   }
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, attachments: readonly AgentFileRef[]) => {
     if (isRunning) return
     setSendError(null)
     const targetThreadId = threadId
@@ -206,10 +213,10 @@ export function AgentChat({
     let createdThreadId: string | null = null
     try {
       if (targetThreadId !== null) {
-        setPendingUser({ threadId: targetThreadId, text, messageId: null })
+        setPendingUser({ threadId: targetThreadId, text, attachments, messageId: null })
         const response = await postMessage.mutateAsync({
           path: { threadId: targetThreadId },
-          body: { text },
+          body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
         })
         setPendingSend({ threadId: response.threadId, runId: response.runId })
         setPendingUser((current) =>
@@ -233,10 +240,10 @@ export function AgentChat({
       })
       createdThreadId = created.thread.id
       const newThreadId = created.thread.id
-      setPendingUser({ threadId: newThreadId, text, messageId: null })
+      setPendingUser({ threadId: newThreadId, text, attachments, messageId: null })
       const response = await postMessage.mutateAsync({
         path: { threadId: newThreadId },
-        body: { text },
+        body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
       })
       setPendingSend({ threadId: newThreadId, runId: response.runId })
       setPendingUser((current) =>
@@ -251,7 +258,7 @@ export function AgentChat({
       // echo, hand the text back to the composer so nothing is lost, and surface the failure. If a
       // thread was created before the failure, move to it so the retry (and error) land there.
       setPendingUser(null)
-      setDraftReseed((current) => ({ text, nonce: current.nonce + 1 }))
+      setDraftReseed((current) => ({ text, attachments, nonce: current.nonce + 1 }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
         message: "Couldn't send your message. Please try again.",
@@ -291,11 +298,11 @@ export function AgentChat({
   }
 
   const home = threadId === null && draftAgentId === null
-  const pendingUserText =
+  const pendingUserForThread =
     pendingUser &&
     pendingUser.threadId === threadId &&
     !(pendingUser.messageId && messages.some((message) => message.id === pendingUser.messageId))
-      ? pendingUser.text
+      ? pendingUser
       : null
 
   return (
@@ -319,7 +326,8 @@ export function AgentChat({
             threadId !== null && messagesQuery.isError ? "Could not load this conversation." : null
           }
           streaming={live.active && live.runId === activeRunId}
-          pendingUserText={pendingUserText}
+          pendingUserText={pendingUserForThread?.text ?? null}
+          pendingUserAttachments={pendingUserForThread?.attachments ?? []}
           awaitingResponse={isRunning}
           reconnecting={reconnecting}
           sendError={sendError && sendError.threadId === threadId ? sendError.message : null}
@@ -338,10 +346,9 @@ export function AgentChat({
           composerRunning={isRunning}
           composerStopping={stopping}
           onStop={handleStop}
-          composerPlaceholder={
-            currentAgent ? `Message ${currentAgent.name}...` : "Send a message..."
-          }
+          composerPlaceholder="Ask anything"
           composerDraft={draftReseed.text}
+          composerDraftAttachments={draftReseed.attachments}
           composerDraftNonce={draftReseed.nonce}
         />
       )}

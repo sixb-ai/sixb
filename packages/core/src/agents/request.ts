@@ -1,6 +1,7 @@
 import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
+import type { FileRef } from "../blob-storage"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
 import { AgentRequestError } from "./errors"
@@ -10,8 +11,10 @@ import type { AgentDefinition } from "./types"
 export interface RequestAgentRunInput {
   /** The agent to run. */
   readonly agentId: string
-  /** The user's message that triggers the turn. V1 input is plain text. */
+  /** The user's message that triggers the turn. */
   readonly text: string
+  /** Blob-backed files attached to the trigger message. */
+  readonly attachments?: readonly FileRef[]
   /** Continue an existing thread. Omitted → a fresh thread is created for this agent. */
   readonly threadId?: string
   /** Title to stamp on the thread when one is created. */
@@ -82,7 +85,10 @@ export async function requestAgentRun(
     threadId: thread.id,
     runId: null,
     role: "user",
-    parts: [{ type: "text", text: input.text }],
+    parts: [
+      { type: "text", text: input.text },
+      ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
+    ],
     authorPrincipal: principal,
   })
 

@@ -1,4 +1,4 @@
-import type { AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/core"
+import type { AgentRunRecord, AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/core"
 
 /**
  * Per-request authorization state attached by the server's auth derive.
@@ -27,6 +27,8 @@ import type { AuthorizationContext, OntologySource, ScopedSixb } from "@sixb/cor
 export interface RequestAuthState {
   readonly authz: AuthorizationContext | null
   readonly scoped: ScopedSixb<readonly OntologySource[]> | null
+  /** Present for requests proxied through the run-scoped agent API gateway. */
+  readonly agentRun?: AgentRunRecord
 }
 
 const internalRequestAuthState = new WeakMap<Request, RequestAuthState>()
@@ -54,6 +56,6 @@ export function consumeInternalRequestAuthState(request: Request): RequestAuthSt
  * point until route registration carries the derived context type.
  */
 export function requestAuthState(context: unknown): RequestAuthState {
-  const { authz = null, scoped = null } = context as Partial<RequestAuthState>
-  return { authz, scoped }
+  const { authz = null, scoped = null, agentRun } = context as Partial<RequestAuthState>
+  return { authz, scoped, ...(agentRun === undefined ? {} : { agentRun }) }
 }

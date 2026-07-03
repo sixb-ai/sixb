@@ -5,6 +5,7 @@ import {
   AgentMessageAdapterError,
   type AgentMessagePart,
   type AgentMessageRole,
+  type FileRef,
   fromAiSdk,
   toModelMessages,
   toUiMessage,
@@ -12,6 +13,14 @@ import {
 
 function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }
+}
+
+const fileRef: FileRef = {
+  blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  sizeBytes: 12,
+  fileName: "invoice.pdf",
+  mediaType: "application/pdf",
 }
 
 describe("fromAiSdk", () => {
@@ -125,10 +134,21 @@ describe("fromAiSdk", () => {
     })
   })
 
+  test("maps file parts backed by Sixb FileRefs", () => {
+    const message: AgentInboundUiMessage = {
+      role: "user",
+      parts: [{ type: "file", fileRef, providerMetadata: { openai: { purpose: "assistants" } } }],
+    }
+    expect(fromAiSdk(message)).toEqual({
+      role: "user",
+      parts: [{ type: "file", fileRef, providerMetadata: { openai: { purpose: "assistants" } } }],
+    })
+  })
+
   test("is total: throws on unmodeled part kinds", () => {
     const message = {
       role: "assistant",
-      parts: [{ type: "file", url: "https://x", mediaType: "image/png" }],
+      parts: [{ type: "source", url: "https://x" }],
     } as unknown as AgentInboundUiMessage
     expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
   })
@@ -195,6 +215,7 @@ describe("envelope round-trip (fromAiSdk ∘ toUiMessage)", () => {
       { type: "step-start" },
       { type: "text", text: "b" },
     ]),
+    "file attachment": sixbMessage("user", [{ type: "file", fileRef }]),
     "static tool ok": sixbMessage("assistant", [
       {
         type: "tool-call",
@@ -231,6 +252,73 @@ describe("toModelMessages", () => {
   test("projects a user message", () => {
     expect(toModelMessages([sixbMessage("user", [{ type: "text", text: "hi" }])])).toEqual([
       { role: "user", content: [{ type: "text", text: "hi" }] },
+    ])
+  })
+
+  test("projects user file parts with a caller-provided data resolver", () => {
+    const url = new URL("https://sixb.example/files/invoice.pdf")
+    expect(
+      toModelMessages(
+        [
+          {
+            role: "user",
+            parts: [{ type: "file", fileRef }],
+            id: "msg_1",
+          },
+        ],
+        { fileData: ({ message }) => (message.id === "msg_1" ? url : undefined) }
+      )
+    ).toEqual([
+      {
+        role: "user",
+        content: [
+          {
+            type: "file",
+            data: url,
+            filename: "invoice.pdf",
+            mediaType: "application/pdf",
+          },
+        ],
+      },
+    ])
+  })
+
+  test("projects user file parts with caller-provided text context before data", () => {
+    const url = new URL("data:image/png;base64,aGVsbG8=")
+    expect(
+      toModelMessages(
+        [
+          {
+            role: "user",
+            parts: [{ type: "file", fileRef: { ...fileRef, mediaType: "image/png" } }],
+            id: "msg_1",
+          },
+        ],
+        {
+          fileText: ({ message }) =>
+            message.id === "msg_1" ? "Attached file: invoice.pdf" : undefined,
+          fileData: ({ message }) => (message.id === "msg_1" ? url : undefined),
+        }
+      )
+    ).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Attached file: invoice.pdf" },
+          {
+            type: "file",
+            data: url,
+            filename: "invoice.pdf",
+            mediaType: "image/png",
+          },
+        ],
+      },
+    ])
+  })
+
+  test("skips user file parts when no file projection resolvers are provided", () => {
+    expect(toModelMessages([sixbMessage("user", [{ type: "file", fileRef }])])).toEqual([
+      { role: "user", content: [] },
     ])
   })
 

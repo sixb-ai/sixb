@@ -10,14 +10,21 @@ import {
 } from "@sixb/ui/components"
 import { useMemo } from "react"
 import { hasLiveContent, type LiveRunState } from "../liveRun"
-import type { AgentMessage } from "../types"
-import { LiveAssistant, MessageView, ReconnectingMarker, ThinkingMarker } from "./MessageView"
+import type { AgentFileRef, AgentMessage } from "../types"
+import {
+  LiveAssistant,
+  MessageView,
+  ReconnectingMarker,
+  ThinkingMarker,
+  UserFileAttachment,
+} from "./MessageView"
 
 export interface TranscriptProps {
   readonly messages: readonly AgentMessage[]
   readonly live: LiveRunState
   /** A just-sent user message echoed locally until durable state catches up. */
   readonly pendingUserText?: string | null
+  readonly pendingUserAttachments?: readonly AgentFileRef[]
   /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
   readonly awaitingResponse?: boolean
   /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
@@ -28,6 +35,7 @@ export function Transcript({
   messages,
   live,
   pendingUserText,
+  pendingUserAttachments = [],
   awaitingResponse,
   reconnecting,
 }: TranscriptProps) {
@@ -46,12 +54,12 @@ export function Transcript({
   // the durable message (the primitive re-targets the first not-yet-handled anchor on equal-count
   // updates). While the optimistic echo is showing, it is the live turn, so no durable row anchors.
   const lastUserMessageId = useMemo(() => {
-    if (pendingUserText) return null
+    if (pendingUserText || pendingUserAttachments.length > 0) return null
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") return messages[i].id
     }
     return null
-  }, [messages, pendingUserText])
+  }, [messages, pendingUserText, pendingUserAttachments.length])
 
   return (
     // A turn begins at its user message: anchoring it lifts the new turn to the top of the viewport
@@ -79,12 +87,23 @@ export function Transcript({
                 <MessageView message={message} />
               </MessageScrollerItem>
             ))}
-            {pendingUserText ? (
+            {pendingUserText || pendingUserAttachments.length > 0 ? (
               <MessageScrollerItem messageId="pending-user" scrollAnchor>
-                <div className="flex flex-col items-end">
-                  <Bubble variant="secondary" align="end">
-                    <BubbleContent className="whitespace-pre-wrap">{pendingUserText}</BubbleContent>
-                  </Bubble>
+                <div className="flex flex-col items-end gap-1.5">
+                  {pendingUserAttachments.length > 0 ? (
+                    <div className="flex max-w-[min(80%,32rem)] flex-col items-end gap-1.5">
+                      {pendingUserAttachments.map((fileRef, index) => (
+                        <UserFileAttachment key={`${fileRef.blobId}-${index}`} fileRef={fileRef} />
+                      ))}
+                    </div>
+                  ) : null}
+                  {pendingUserText ? (
+                    <Bubble variant="secondary" align="end">
+                      <BubbleContent className="whitespace-pre-wrap">
+                        {pendingUserText}
+                      </BubbleContent>
+                    </Bubble>
+                  ) : null}
                 </div>
               </MessageScrollerItem>
             ) : null}

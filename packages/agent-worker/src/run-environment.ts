@@ -1,6 +1,7 @@
 import type { AgentDefinition, AgentRunRecord, Sandbox } from "@sixb/core"
 import { renderAgentSkillCatalog } from "./agent-skills"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
+import { modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { type BashSandboxHandle, createBashTool } from "./bash-tool"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import type { AgentTurnContext, AgentWorkerContext } from "./types"
@@ -25,12 +26,10 @@ export interface CreateAgentRunEnvironmentInput {
 /**
  * Build the per-run turn context.
  *
- * Sandbox creation (boot + writing the run's API context) is the slow part, but
- * it is only needed once the bash tool first runs — not to start the turn. So we
- * kick it off here and return immediately: the system prompt (a static skill
- * catalog) and tool set are ready synchronously, and the ~boot latency overlaps
- * the model's first response instead of blocking it. The bash tool awaits the
- * sandbox on first use; dispose() awaits it before teardown.
+ * Attachment preparation runs first so the same manifest drives both model projection and sandbox
+ * files. Sandbox creation (boot + writing the run's API context) is still kicked off here without
+ * awaiting: the bash tool awaits the sandbox on first use, while the ~boot latency overlaps the
+ * model's first response when bash is not immediately needed. dispose() awaits or tracks teardown.
  */
 export async function createAgentRunEnvironment(
   input: CreateAgentRunEnvironmentInput
@@ -44,8 +43,22 @@ export async function createAgentRunEnvironment(
   })
   const apiOrigin = new URL(apiBaseUrl).origin
 
+  const history = await context.storage.agents.messages.list({
+    projectId: context.id,
+    threadId: run.threadId,
+    order: "asc",
+  })
+  const attachmentContext = await prepareAgentAttachments({
+    projectId: context.id,
+    threadId: run.threadId,
+    messages: history.messages,
+    blobStorage: context.blobStorage,
+    apiBaseUrl,
+    inlineImages: await modelSupportsInlineImages(agent.model),
+  })
+
   // Provision concurrently; do NOT await. The bash tool, the turn, and dispose() await this.
-  const ready = provisionSandbox({ context, agent, run, apiBaseUrl, apiOrigin })
+  const ready = provisionSandbox({ context, agent, run, apiBaseUrl, apiOrigin, attachmentContext })
   // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
@@ -60,6 +73,9 @@ export async function createAgentRunEnvironment(
     turnContext: {
       id: context.id,
       storage: context.storage,
+      blobStorage: context.blobStorage,
+      apiBaseUrl,
+      attachmentContext,
       tools: {
         ...context.baseTools,
         bash: createBashTool(() => ready),
@@ -82,6 +98,7 @@ interface ProvisionSandboxInput {
   readonly run: AgentRunRecord
   readonly apiBaseUrl: string
   readonly apiOrigin: string
+  readonly attachmentContext: Awaited<ReturnType<typeof prepareAgentAttachments>>
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandboxHandle> {
@@ -98,6 +115,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
       agentId: agent.id,
       threadId: run.threadId,
       runId: run.id,
+      attachments: input.attachmentContext,
     })
     return { sandbox, env: apiContext.env }
   } catch (error) {

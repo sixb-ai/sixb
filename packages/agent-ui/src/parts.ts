@@ -16,6 +16,10 @@ export type NormalizedPart =
   | { readonly kind: "text"; readonly text: string }
   | { readonly kind: "reasoning"; readonly text: string; readonly streaming: boolean }
   | { readonly kind: "tool"; readonly tool: NormalizedTool }
+  | {
+      readonly kind: "file"
+      readonly fileRef: Extract<AgentMessagePart, { type: "file" }>["fileRef"]
+    }
   | { readonly kind: "step-start" }
 
 export function normalizeDurableParts(parts: readonly AgentMessagePart[]): NormalizedPart[] {
@@ -43,6 +47,8 @@ export function normalizeDurableParts(parts: readonly AgentMessagePart[]): Norma
                   errorText: part.errorText,
                 },
         }
+      case "file":
+        return { kind: "file", fileRef: part.fileRef }
       case "step-start":
         return { kind: "step-start" }
       default:

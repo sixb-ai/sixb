@@ -130,7 +130,7 @@ async function resolveAgentRunAuthState(
   }
 
   if (!sixb.auth.isEnabled()) {
-    return { authz: null, scoped: null }
+    return { authz: null, scoped: null, agentRun: run }
   }
 
   const auth = sixb.storage.auth
@@ -156,7 +156,7 @@ async function resolveAgentRunAuthState(
     roles: sixb.security.getResolvedRoles(),
   })
 
-  return { authz, scoped: sixb.as(authz) }
+  return { authz, scoped: sixb.as(authz), agentRun: run }
 }
 
 function gatewayUpstreamPath(pathname: string): string {

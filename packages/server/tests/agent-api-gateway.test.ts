@@ -80,6 +80,38 @@ describe("agent API gateway", () => {
     await expect(count.json()).resolves.toMatchObject({ count: 1 })
   })
 
+  test("can fetch file attachments from the active run thread", async () => {
+    const { app, gatewayBaseUrl, sixb, storage } = await createGatewayRuntime()
+    const fileRef = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("agent attachment"),
+      fileName: "attachment.txt",
+      mediaType: "text/plain",
+    })
+    await storage.agents.messages.append({
+      id: "msg-1",
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      runId: null,
+      role: "user",
+      parts: [
+        { type: "text", text: "read this" },
+        { type: "file", fileRef },
+      ],
+      authorPrincipal: { type: "user", id: "usr_requester" },
+      createdAt: NOW,
+    })
+
+    const response = await app.fetch(
+      new Request(
+        `${gatewayBaseUrl}/api/agent-threads/thread-1/messages/msg-1/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+      )
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("text/plain")
+    expect(await response.text()).toBe("agent attachment")
+  })
+
   test("rejects invalid capabilities and undocumented routes", async () => {
     const { app, gatewayBaseUrl, leaseId, runId, storage } = await createGatewayRuntime()
 
@@ -111,6 +143,7 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
   readonly leaseId: string
   readonly runId: string
   readonly storage: InMemoryStorage
+  readonly sixb: Sixb<readonly OntologySource[]>
 }> {
   const storage = new InMemoryStorage()
   const sixb = new Sixb<readonly OntologySource[]>({
@@ -187,5 +220,6 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
     leaseId: lease.id,
     runId,
     storage,
+    sixb,
   }
 }

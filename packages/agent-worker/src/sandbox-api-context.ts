@@ -1,6 +1,7 @@
 import { join } from "node:path"
 import type { Sandbox } from "@sixb/core"
 import { buildAgentSkillFiles } from "./agent-skills"
+import type { PreparedAgentAttachmentContext } from "./attachments"
 
 export interface AgentSandboxApiContext {
   readonly env: Readonly<Record<string, string>>
@@ -13,6 +14,7 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly agentId: string
   readonly threadId: string
   readonly runId: string
+  readonly attachments?: PreparedAgentAttachmentContext
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -21,6 +23,8 @@ export async function prepareAgentSandboxApiContext(
   const contextDir = join(input.sandbox.workingDirectory, ".sixb", "agent")
   const skillsDir = join(contextDir, "skills")
   const runContextPath = join(contextDir, "context", "run.json")
+  const attachmentsManifestPath = join(contextDir, "context", "attachments.json")
+  const attachmentsDir = join(contextDir, "attachments")
 
   // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
   // api-url.ts), so it is used verbatim — no second normalization pass here.
@@ -31,6 +35,8 @@ export async function prepareAgentSandboxApiContext(
       threadId: input.threadId,
       runId: input.runId,
       apiBaseUrl: input.apiBaseUrl,
+      attachmentsManifestPath,
+      attachmentsDir,
     },
     null,
     2
@@ -42,6 +48,14 @@ export async function prepareAgentSandboxApiContext(
   await input.sandbox.writeFiles([
     ...(await buildAgentSkillFiles(skillsDir)),
     { path: runContextPath, contents: runContext },
+    {
+      path: attachmentsManifestPath,
+      contents: input.attachments?.manifestJson ?? emptyManifestJson(),
+    },
+    ...(input.attachments?.sandboxFiles.map((file) => ({
+      path: join(input.sandbox.workingDirectory, file.path),
+      contents: file.bytes,
+    })) ?? []),
   ])
 
   return {
@@ -50,10 +64,16 @@ export async function prepareAgentSandboxApiContext(
       SIXB_CONTEXT_DIR: contextDir,
       SIXB_SKILLS_DIR: skillsDir,
       SIXB_RUN_CONTEXT: runContextPath,
+      SIXB_ATTACHMENTS: attachmentsManifestPath,
+      SIXB_ATTACHMENT_DIR: attachmentsDir,
       SIXB_PROJECT_ID: input.projectId,
       SIXB_AGENT_ID: input.agentId,
       SIXB_THREAD_ID: input.threadId,
       SIXB_RUN_ID: input.runId,
     },
   }
+}
+
+function emptyManifestJson(): string {
+  return JSON.stringify({ attachments: [] }, null, 2)
 }

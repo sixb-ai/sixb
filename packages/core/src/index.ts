@@ -1339,6 +1339,9 @@ export type {
   AgentApiGatewayCapabilityInput,
   AgentApiRoute,
   AgentDefinition,
+  AgentFileDataProjection,
+  AgentFileDataResolverInput,
+  AgentFilePart,
   AgentInboundUiMessage,
   AgentInboundUiMessagePart,
   AgentLoopConfig,
@@ -1347,6 +1350,7 @@ export type {
   AgentMessagePartType,
   AgentMessageRole,
   AgentModelAssistantPart,
+  AgentModelFilePart,
   AgentModelMessage,
   AgentModelReasoningPart,
   AgentModelTextPart,
@@ -1369,6 +1373,7 @@ export type {
   DefineAgentConfig,
   RequestAgentRunInput,
   RequestAgentRunResult,
+  ToModelMessagesOptions,
 } from "./agents"
 export {
   AGENT_API_GATEWAY_PREFIX,

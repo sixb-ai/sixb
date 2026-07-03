@@ -29,6 +29,7 @@ import {
   getActionRun,
   getActionRunFileContent,
   getAgent,
+  getAgentMessageFileContent,
   getAgentRun,
   getAgentThread,
   getAuthAccessManagementOptions,
@@ -169,6 +170,9 @@ import type {
   GetActionRunResponse,
   GetAgentData,
   GetAgentError,
+  GetAgentMessageFileContentData,
+  GetAgentMessageFileContentError,
+  GetAgentMessageFileContentResponse,
   GetAgentResponse,
   GetAgentRunData,
   GetAgentRunError,
@@ -3152,6 +3156,34 @@ export const postAgentThreadMessageMutation = (
   }
   return mutationOptions
 }
+
+export const getAgentMessageFileContentQueryKey = (
+  options: Options<GetAgentMessageFileContentData>
+) => createQueryKey("getAgentMessageFileContent", options)
+
+/**
+ * Get agent message file content
+ */
+export const getAgentMessageFileContentOptions = (
+  options: Options<GetAgentMessageFileContentData>
+) =>
+  queryOptions<
+    GetAgentMessageFileContentResponse,
+    GetAgentMessageFileContentError,
+    GetAgentMessageFileContentResponse,
+    ReturnType<typeof getAgentMessageFileContentQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getAgentMessageFileContent({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getAgentMessageFileContentQueryKey(options),
+  })
 
 /**
  * Cancel an agent thread's active run

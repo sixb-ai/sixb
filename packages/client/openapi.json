@@ -15584,6 +15584,67 @@
                                   "properties": {
                                     "type": {
                                       "type": "string",
+                                      "enum": ["file"]
+                                    },
+                                    "fileRef": {
+                                      "type": "object",
+                                      "properties": {
+                                        "blobId": {
+                                          "type": "string"
+                                        },
+                                        "digest": {
+                                          "type": "string",
+                                          "pattern": "^sha256:[a-f0-9]{64}$"
+                                        },
+                                        "sizeBytes": {
+                                          "type": "integer",
+                                          "minimum": 0
+                                        },
+                                        "fileName": {
+                                          "type": "string"
+                                        },
+                                        "mediaType": {
+                                          "type": "string"
+                                        },
+                                        "logicalPath": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["blobId", "digest", "sizeBytes"],
+                                      "additionalProperties": false
+                                    },
+                                    "providerMetadata": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "fileRef"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
                                       "enum": ["tool-call"]
                                     },
                                     "toolCallId": {
@@ -15895,6 +15956,36 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  },
                   "messageId": {
                     "type": "string",
                     "minLength": 1
@@ -15912,6 +16003,36 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
+                  },
                   "messageId": {
                     "type": "string",
                     "minLength": 1
@@ -15928,6 +16049,36 @@
                   "text": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "attachments": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "blobId": {
+                          "type": "string"
+                        },
+                        "digest": {
+                          "type": "string",
+                          "pattern": "^sha256:[a-f0-9]{64}$"
+                        },
+                        "sizeBytes": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fileName": {
+                          "type": "string"
+                        },
+                        "mediaType": {
+                          "type": "string"
+                        },
+                        "logicalPath": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["blobId", "digest", "sizeBytes"],
+                      "additionalProperties": false
+                    }
                   },
                   "messageId": {
                     "type": "string",
@@ -16048,6 +16199,182 @@
             }
           }
         }
+      }
+    },
+    "/api/agent-threads/{threadId}/messages/{messageId}/files/content": {
+      "get": {
+        "summary": "Get agent message file content",
+        "tags": ["Agents"],
+        "operationId": "getAgentMessageFileContent",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "Partial file content",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          }
+        ]
+      },
+      "head": {
+        "summary": "Head agent message file content",
+        "tags": ["Agents"],
+        "operationId": "headAgentMessageFileContent",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "File content headers"
+          },
+          "206": {
+            "description": "Partial file content headers"
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "Requested byte range is not satisfiable"
+          }
+        },
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "disposition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["inline", "attachment"]
+            }
+          }
+        ]
       }
     },
     "/api/agent-threads/{threadId}/cancel": {

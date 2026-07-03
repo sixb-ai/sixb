@@ -421,6 +421,7 @@ function buildAgentContext(
   return {
     id: sixb.id,
     storage: storage as AgentWorkerStorage,
+    blobStorage: sixb.blobStorage,
     sandboxes: sixb.sandboxes,
     baseTools: options.tools ?? {},
     // Normalize the server base URL once here, at the boundary. Everything downstream (the gateway

@@ -64,6 +64,9 @@ import type {
   GetActionRunResponses,
   GetAgentData,
   GetAgentErrors,
+  GetAgentMessageFileContentData,
+  GetAgentMessageFileContentErrors,
+  GetAgentMessageFileContentResponses,
   GetAgentResponses,
   GetAgentRunData,
   GetAgentRunErrors,
@@ -149,6 +152,9 @@ import type {
   HeadActionRunFileContentData,
   HeadActionRunFileContentErrors,
   HeadActionRunFileContentResponses,
+  HeadAgentMessageFileContentData,
+  HeadAgentMessageFileContentErrors,
+  HeadAgentMessageFileContentResponses,
   HeadObjectFileContentData,
   HeadObjectFileContentErrors,
   HeadObjectFileContentResponses,
@@ -1617,6 +1623,38 @@ export const postAgentThreadMessage = <ThrowOnError extends boolean = false>(
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Get agent message file content
+ */
+export const getAgentMessageFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<GetAgentMessageFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    GetAgentMessageFileContentResponses,
+    GetAgentMessageFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
+    ...options,
+  })
+
+/**
+ * Head agent message file content
+ */
+export const headAgentMessageFileContent = <ThrowOnError extends boolean = false>(
+  options: Options<HeadAgentMessageFileContentData, ThrowOnError>
+) =>
+  (options.client ?? client).head<
+    HeadAgentMessageFileContentResponses,
+    HeadAgentMessageFileContentErrors,
+    ThrowOnError
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
+    ...options,
   })
 
 /**

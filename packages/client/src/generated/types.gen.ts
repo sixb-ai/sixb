@@ -5531,6 +5531,29 @@ export type ListAgentThreadMessagesResponses = {
             type: "step-start"
           }
         | {
+            type: "file"
+            fileRef: {
+              blobId: string
+              digest: string
+              sizeBytes: number
+              fileName?: string
+              mediaType?: string
+              logicalPath?: string
+            }
+            /**
+             * Any JSON-compatible value.
+             */
+            providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
             type: "tool-call"
             toolCallId: string
             toolName: string
@@ -5635,6 +5658,14 @@ export type ListAgentThreadMessagesResponse =
 export type PostAgentThreadMessageData = {
   body: {
     text: string
+    attachments?: Array<{
+      blobId: string
+      digest: string
+      sizeBytes: number
+      fileName?: string
+      mediaType?: string
+      logicalPath?: string
+    }>
     messageId?: string
   }
   path: {
@@ -5690,6 +5721,93 @@ export type PostAgentThreadMessageResponses = {
 
 export type PostAgentThreadMessageResponse =
   PostAgentThreadMessageResponses[keyof PostAgentThreadMessageResponses]
+
+export type GetAgentMessageFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+    messageId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
+}
+
+export type GetAgentMessageFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type GetAgentMessageFileContentError =
+  GetAgentMessageFileContentErrors[keyof GetAgentMessageFileContentErrors]
+
+export type GetAgentMessageFileContentResponses = {
+  /**
+   * File content
+   */
+  200: Blob | File
+  /**
+   * Partial file content
+   */
+  206: Blob | File
+}
+
+export type GetAgentMessageFileContentResponse =
+  GetAgentMessageFileContentResponses[keyof GetAgentMessageFileContentResponses]
+
+export type HeadAgentMessageFileContentData = {
+  body?: never
+  path: {
+    threadId: string
+    messageId: string
+  }
+  query: {
+    path: string
+    disposition?: "inline" | "attachment"
+  }
+  url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
+}
+
+export type HeadAgentMessageFileContentErrors = {
+  /**
+   * Response for status 400
+   */
+  400: ErrorResponse
+  /**
+   * Response for status 404
+   */
+  404: ErrorResponse
+  /**
+   * Requested byte range is not satisfiable
+   */
+  416: unknown
+}
+
+export type HeadAgentMessageFileContentError =
+  HeadAgentMessageFileContentErrors[keyof HeadAgentMessageFileContentErrors]
+
+export type HeadAgentMessageFileContentResponses = {
+  /**
+   * File content headers
+   */
+  200: unknown
+  /**
+   * Partial file content headers
+   */
+  206: unknown
+}
 
 export type CancelAgentRunData = {
   body: {

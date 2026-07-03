@@ -1,3 +1,4 @@
+import { type FileRef, isFileRef } from "../blob-storage"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { AgentMessageAdapterError } from "./errors"
 import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
@@ -26,6 +27,7 @@ export interface AgentInboundUiMessagePart {
   readonly output?: unknown
   readonly errorText?: string
   readonly callProviderMetadata?: unknown
+  readonly fileRef?: unknown
 }
 
 export interface AgentInboundUiMessage {
@@ -67,6 +69,7 @@ export type AgentUiMessagePart =
   | { readonly type: "text"; readonly text: string; readonly providerMetadata?: JsonValue }
   | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonValue }
   | { readonly type: "step-start" }
+  | { readonly type: "file"; readonly fileRef: FileRef; readonly providerMetadata?: JsonValue }
   | AgentUiToolPart
 
 export interface AgentUiMessage {
@@ -85,6 +88,13 @@ export type AgentModelToolOutput =
 export interface AgentModelTextPart {
   readonly type: "text"
   readonly text: string
+  readonly providerOptions?: JsonValue
+}
+export interface AgentModelFilePart {
+  readonly type: "file"
+  readonly data: URL
+  readonly filename?: string
+  readonly mediaType: string
   readonly providerOptions?: JsonValue
 }
 export interface AgentModelReasoningPart {
@@ -116,9 +126,40 @@ export type AgentModelAssistantPart =
 
 export type AgentModelMessage =
   | { readonly role: "system"; readonly content: string; readonly providerOptions?: JsonValue }
-  | { readonly role: "user"; readonly content: readonly AgentModelTextPart[] }
+  | {
+      readonly role: "user"
+      readonly content: readonly (AgentModelTextPart | AgentModelFilePart)[]
+    }
   | { readonly role: "assistant"; readonly content: readonly AgentModelAssistantPart[] }
   | { readonly role: "tool"; readonly content: readonly AgentModelToolResultPart[] }
+
+export interface AgentFileDataResolverInput<TMessage extends AgentMessage = AgentMessage> {
+  readonly message: TMessage
+  readonly part: Extract<AgentMessagePart, { type: "file" }>
+  readonly partIndex: number
+}
+
+export interface AgentFileDataProjection {
+  readonly data: URL
+  readonly mediaType?: string
+  readonly filename?: string
+}
+
+export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMessage> {
+  /**
+   * Convert a stored file reference into model-readable data. When omitted, file parts are skipped
+   * rather than leaking blob ids or passing an unsupported Sixb-only shape to model providers.
+   */
+  readonly fileData?:
+    | ((input: AgentFileDataResolverInput<TMessage>) => URL | AgentFileDataProjection | undefined)
+    | undefined
+  /**
+   * Convert a stored file reference into model-readable text context. This is appended before any
+   * file data part so metadata, truncation notes, and sandbox/API access hints stay visible even for
+   * models that cannot consume inline files.
+   */
+  readonly fileText?: (input: AgentFileDataResolverInput<TMessage>) => string | undefined
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -248,6 +289,15 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
     }
     case "step-start":
       return { type: "step-start" }
+    case "file": {
+      assertAdapter(isFileRef(part.fileRef), "file part is missing a valid fileRef")
+      const providerMetadata = optionalJson(part.providerMetadata, "file.providerMetadata")
+      return {
+        type: "file",
+        fileRef: part.fileRef,
+        ...(providerMetadata === undefined ? {} : { providerMetadata }),
+      }
+    }
     default: {
       assertAdapter(
         isToolType(part.type),
@@ -318,6 +368,12 @@ function toUiPart(part: AgentMessagePart): AgentUiMessagePart {
       }
     case "step-start":
       return { type: "step-start" }
+    case "file":
+      return {
+        type: "file",
+        fileRef: part.fileRef,
+        ...(part.providerMetadata === undefined ? {} : { providerMetadata: part.providerMetadata }),
+      }
     case "tool-call":
       return toUiToolPart(part)
   }
@@ -351,7 +407,10 @@ function toUiToolPart(part: AgentToolCallPartResult): AgentUiToolPart {
  * else to `json`; this is the documented V1 fidelity scope (a tool's custom `toModelOutput` is not
  * reproduced).
  */
-export function toModelMessages(messages: readonly AgentMessage[]): AgentModelMessage[] {
+export function toModelMessages<TMessage extends AgentMessage>(
+  messages: readonly TMessage[],
+  options: ToModelMessagesOptions<TMessage> = {}
+): AgentModelMessage[] {
   const result: AgentModelMessage[] = []
   for (const message of messages) {
     switch (message.role) {
@@ -359,7 +418,7 @@ export function toModelMessages(messages: readonly AgentMessage[]): AgentModelMe
         result.push(systemModelMessage(message))
         break
       case "user":
-        result.push(userModelMessage(message))
+        result.push(userModelMessage(message, options))
         break
       case "assistant":
         appendAssistantModelMessages(result, message)
@@ -394,14 +453,44 @@ function mergeProviderMetadata(
   return merged
 }
 
-function userModelMessage(message: AgentMessage): AgentModelMessage {
-  const content = message.parts.filter(isTextPart).map(
-    (part): AgentModelTextPart => ({
-      type: "text",
-      text: part.text,
-      ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
-    })
-  )
+function userModelMessage<TMessage extends AgentMessage>(
+  message: TMessage,
+  options: ToModelMessagesOptions<TMessage>
+): AgentModelMessage {
+  const content: (AgentModelTextPart | AgentModelFilePart)[] = []
+  message.parts.forEach((part, partIndex) => {
+    if (part.type === "text") {
+      content.push({
+        type: "text",
+        text: part.text,
+        ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
+      })
+      return
+    }
+    if (part.type === "file") {
+      const fileContext = options.fileText?.({ message, part, partIndex })
+      if (fileContext) {
+        content.push({ type: "text", text: fileContext })
+      }
+      const resolved = options.fileData?.({ message, part, partIndex })
+      if (resolved) {
+        const projection = resolved instanceof URL ? { data: resolved } : resolved
+        content.push({
+          type: "file",
+          data: projection.data,
+          mediaType: projection.mediaType ?? part.fileRef.mediaType ?? "application/octet-stream",
+          ...(projection.filename !== undefined
+            ? { filename: projection.filename }
+            : part.fileRef.fileName === undefined
+              ? {}
+              : { filename: part.fileRef.fileName }),
+          ...(part.providerMetadata === undefined
+            ? {}
+            : { providerOptions: part.providerMetadata }),
+        })
+      }
+    }
+  })
   return { role: "user", content }
 }
 
