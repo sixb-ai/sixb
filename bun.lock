@@ -192,7 +192,7 @@
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
-        "@sixb/sandboxes-apple-container": "workspace:*",
+        "@sixb/sandboxes-local": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",

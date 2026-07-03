@@ -8,7 +8,6 @@
     "check": "bun ../../packages/cli/src/index.tsx check",
     "sync:erp": "bun scripts/sync-erp.ts",
     "webhooks:demo": "bun scripts/send-webhooks.ts",
-    "agent:image": "bun ../../sandboxes/smolvm/scripts/build-agent-image.ts",
     "typecheck": "bun ../../packages/cli/src/index.tsx typegen && tsc --noEmit"
   },
   "dependencies": {
@@ -17,7 +16,7 @@
     "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/lake-local": "workspace:*",
-    "@sixb/sandboxes-smolvm": "workspace:*",
+    "@sixb/sandboxes-local": "workspace:*",
     "@sixb/sqlite": "workspace:*",
     "@sixb/ui": "workspace:*",
     "@tailwindcss/cli": "^4.2.2",
