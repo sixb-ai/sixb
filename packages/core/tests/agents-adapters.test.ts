@@ -322,6 +322,35 @@ describe("toModelMessages", () => {
     ])
   })
 
+  test("projects assistant file parts as caller-provided text context", () => {
+    expect(
+      toModelMessages(
+        [
+          {
+            role: "assistant",
+            parts: [
+              { type: "text", text: "I created the report." },
+              { type: "file", fileRef },
+            ],
+            id: "msg_1",
+          },
+        ],
+        {
+          fileText: ({ message, partIndex }) =>
+            message.id === "msg_1" && partIndex === 1 ? "Generated file: invoice.pdf" : undefined,
+        }
+      )
+    ).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I created the report." },
+          { type: "text", text: "Generated file: invoice.pdf" },
+        ],
+      },
+    ])
+  })
+
   test("joins system text into a single string", () => {
     expect(
       toModelMessages([

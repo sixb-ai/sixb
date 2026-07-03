@@ -25,6 +25,7 @@ export async function prepareAgentSandboxApiContext(
   const runContextPath = join(contextDir, "context", "run.json")
   const attachmentsManifestPath = join(contextDir, "context", "attachments.json")
   const attachmentsDir = join(contextDir, "attachments")
+  const outputDir = join(contextDir, "outputs")
 
   // apiBaseUrl arrives already normalized + wrapped as the run's gateway URL (see worker.ts /
   // api-url.ts), so it is used verbatim — no second normalization pass here.
@@ -37,6 +38,7 @@ export async function prepareAgentSandboxApiContext(
       apiBaseUrl: input.apiBaseUrl,
       attachmentsManifestPath,
       attachmentsDir,
+      outputDir,
     },
     null,
     2
@@ -52,6 +54,7 @@ export async function prepareAgentSandboxApiContext(
       path: attachmentsManifestPath,
       contents: input.attachments?.manifestJson ?? emptyManifestJson(),
     },
+    { path: join(outputDir, ".keep"), contents: "" },
     ...(input.attachments?.sandboxFiles.map((file) => ({
       path: join(input.sandbox.workingDirectory, file.path),
       contents: file.bytes,
@@ -66,6 +69,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_RUN_CONTEXT: runContextPath,
       SIXB_ATTACHMENTS: attachmentsManifestPath,
       SIXB_ATTACHMENT_DIR: attachmentsDir,
+      SIXB_OUTPUT_DIR: outputDir,
       SIXB_PROJECT_ID: input.projectId,
       SIXB_AGENT_ID: input.agentId,
       SIXB_THREAD_ID: input.threadId,

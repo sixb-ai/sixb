@@ -2,6 +2,7 @@ import type {
   AgentDefinition,
   AgentInboundUiMessagePart,
   AgentMessage,
+  AgentMessagePart,
   AgentRunRecord,
   AgentRunUsage,
   AgentStorage,
@@ -22,6 +23,10 @@ import {
   finishRunOrThrow,
   isTerminalOrLeaseGone,
 } from "./finalize"
+import {
+  type AgentOutputAttachmentResult,
+  collectAgentOutputAttachments,
+} from "./output-attachments"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -185,94 +190,137 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   } catch (error) {
     drainError = error
   } finally {
-    heartbeat.stop()
     clearTimeout(timeoutTimer)
   }
 
-  if (leaseLost) {
-    throw new AgentLeaseLostError(runId)
-  }
-  // Sandbox provisioning failed (and likely aborted the stream above): surface the real cause ahead
-  // of the abort-shaped `drainError` it produced, so the run is recorded `failed` with that reason.
-  if (provisionError !== undefined) {
-    throw provisionError
-  }
-  // A timeout aborts the stream, surfacing as `drainError`; check our flag first so a timed-out turn
-  // throws the typed (non-abort) error and is recorded `failed` rather than treated as a shutdown.
-  if (timedOut) {
-    throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
-  }
-  // A user cancel (or worker shutdown) aborts the stream, which the SDK ends gracefully — so we reach
-  // here with no drain error, only the `isAborted`/signal flags. Persist whatever streamed so far as a
-  // `cancelled` turn — the agent's tool calls and partial text — so the next (steering) turn keeps the
-  // context of what it was doing, instead of throwing the whole response away.
-  const wasAborted =
-    streamAborted || abortSignal.aborted || (drainError !== undefined && isAbortError(drainError))
-  if (wasAborted) {
-    return await finalizeCancelledTurn({
-      storage,
-      agents,
-      context,
-      run,
-      leaseId,
-      leaseMs,
-      projectId,
-      modelId: agent.model.modelId,
-      partial: responseMessage,
-    })
-  }
-  if (drainError !== undefined) {
-    throw drainError
-  }
-  if (!responseMessage) {
-    throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
-  }
+  try {
+    if (leaseLost) {
+      throw new AgentLeaseLostError(runId)
+    }
+    // Sandbox provisioning failed (and likely aborted the stream above): surface the real cause ahead
+    // of the abort-shaped `drainError` it produced, so the run is recorded `failed` with that reason.
+    if (provisionError !== undefined) {
+      throw provisionError
+    }
+    // A timeout aborts the stream, surfacing as `drainError`; check our flag first so a timed-out turn
+    // throws the typed (non-abort) error and is recorded `failed` rather than treated as a shutdown.
+    if (timedOut) {
+      throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
+    }
+    // A user cancel (or worker shutdown) aborts the stream, which the SDK ends gracefully — so we reach
+    // here with no drain error, only the `isAborted`/signal flags. Persist whatever streamed so far as a
+    // `cancelled` turn — the agent's tool calls and partial text — so the next (steering) turn keeps the
+    // context of what it was doing, instead of throwing the whole response away.
+    const wasAborted =
+      streamAborted || abortSignal.aborted || (drainError !== undefined && isAbortError(drainError))
+    if (wasAborted) {
+      return await finalizeCancelledTurn({
+        storage,
+        agents,
+        context,
+        run,
+        leaseId,
+        leaseMs,
+        projectId,
+        modelId: agent.model.modelId,
+        partial: responseMessage,
+      })
+    }
+    if (drainError !== undefined) {
+      throw drainError
+    }
+    if (!responseMessage) {
+      throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
+    }
 
-  const finishReason = await result.finishReason
-  const assistant = ensureVisibleAssistantMessage(fromAiSdk(responseMessage), {
-    finishReason,
-    maxSteps,
-  })
-
-  // One last renew right before we write: a successful renew proves we still hold the lease, and it
-  // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
-  await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
-
-  const usage = mapUsage(await result.usage)
-  const assistantMessageId = createAgentMessageId()
-
-  // The assistant append and run finish share one transaction, so redelivery cannot observe a
-  // finalized message without the terminal run state that releases the thread. Transient blips are
-  // retried in place.
-  const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
-    message: {
-      id: assistantMessageId,
-      projectId,
-      threadId: run.threadId,
-      runId,
-      role: assistant.role,
-      parts: assistant.parts,
-      ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
-      ...(run.executionPrincipal === undefined ? {} : { authorPrincipal: run.executionPrincipal }),
-    },
-    finish: {
-      projectId,
-      id: runId,
-      leaseId,
-      status: "succeeded",
-      modelId: agent.model.modelId,
+    const finishReason = await result.finishReason
+    const assistant = ensureVisibleAssistantMessage(fromAiSdk(responseMessage), {
       finishReason,
-      ...(usage === undefined ? {} : { usage }),
-    },
-  })
+      maxSteps,
+    })
+    const outputAttachments = await collectAgentOutputAttachments({
+      sandboxReady: context.sandboxReady,
+      sandboxWasUsed: context.sandboxWasUsed,
+      blobStorage: context.blobStorage,
+      runId,
+    })
+    const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
 
-  await context.streamSink.publishMessageFinalized({
-    run,
-    messageId: assistantMessageId,
-  })
-  await context.streamSink.publishRunFinished(finalizedRun)
+    // One last renew right before we write: a successful renew proves we still hold the lease, and it
+    // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
+    await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
 
-  return finalizedRun
+    const usage = mapUsage(await result.usage)
+    const assistantMessageId = createAgentMessageId()
+
+    // The assistant append and run finish share one transaction, so redelivery cannot observe a
+    // finalized message without the terminal run state that releases the thread. Transient blips are
+    // retried in place.
+    const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
+      message: {
+        id: assistantMessageId,
+        projectId,
+        threadId: run.threadId,
+        runId,
+        role: assistant.role,
+        parts: assistantParts,
+        ...(assistant.metadata === undefined ? {} : { metadata: assistant.metadata }),
+        ...(run.executionPrincipal === undefined
+          ? {}
+          : { authorPrincipal: run.executionPrincipal }),
+      },
+      finish: {
+        projectId,
+        id: runId,
+        leaseId,
+        status: "succeeded",
+        modelId: agent.model.modelId,
+        finishReason,
+        ...(usage === undefined ? {} : { usage }),
+      },
+    })
+
+    await context.streamSink.publishMessageFinalized({
+      run,
+      messageId: assistantMessageId,
+    })
+    await context.streamSink.publishRunFinished(finalizedRun)
+
+    return finalizedRun
+  } finally {
+    heartbeat.stop()
+  }
+}
+
+function assistantPartsWithOutputAttachments(
+  parts: readonly AgentMessagePart[],
+  output: AgentOutputAttachmentResult
+): AgentMessagePart[] {
+  return [
+    ...parts,
+    ...(output.notes.length === 0
+      ? []
+      : [
+          {
+            type: "text" as const,
+            text: generatedFileNotesText(output.notes),
+          },
+        ]),
+    ...output.attachments.map((attachment) => ({
+      type: "file" as const,
+      fileRef: attachment.fileRef,
+    })),
+  ]
+}
+
+function generatedFileNotesText(notes: readonly string[]): string {
+  const visible = notes.slice(0, 3)
+  const remaining = notes.length - visible.length
+  return [
+    "\n\nNote: Some generated files were not attached.",
+    ...visible.map((note) => `- ${note}`),
+    ...(remaining > 0 ? [`- ${remaining} more generated file note(s).`] : []),
+  ].join("\n")
 }
 
 function ensureVisibleAssistantMessage(
