@@ -21,7 +21,7 @@ objects; that path is not an API route.
 curl -sS "$SIXB_API_BASE_URL/api/objects?objectTypeId=customer&limit=20"
 ```
 
-Common query params: `objectTypeId`, `limit`, `cursor`, `includeSubtypes`.
+Common query params: `objectTypeId`, `limit`, `offset`, `orderBy`, `order`, `idPrefix`, `idSuffix`, `createdAfter`, `createdBefore`, `updatedAfter`, `updatedBefore`.
 
 ## Get One Object
 
@@ -59,7 +59,7 @@ curl -sS -H "Content-Type: application/json" \
 
 curl -sS -H "Content-Type: application/json" \
   -X POST "$SIXB_API_BASE_URL/api/objects/query/facets" \
-  --data '{"query":{"kind":"start","objectTypeId":"customer"},"facets":[{"propertyId":"status"}]}'
+  --data '{"query":{"kind":"start","objectTypeId":"customer"},"facets":[{"propertyId":"status","limit":10}]}'
 ```
 
 ## Common Mistakes

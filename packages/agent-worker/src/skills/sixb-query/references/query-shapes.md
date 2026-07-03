@@ -2,6 +2,8 @@
 
 Query payloads use a nested `query` object. Start with an object set, then compose transforms.
 
+Query nodes use `kind`. Filter predicates use `op` instead (see [predicates](predicates.md)).
+
 ## Start
 
 ```json
@@ -14,11 +16,13 @@ Query payloads use a nested `query` object. Start with an object set, then compo
 {
   "kind": "filter",
   "input": { "kind": "start", "objectTypeId": "customer" },
-  "predicate": { "kind": "eq", "propertyId": "status", "value": "active" }
+  "predicate": { "op": "eq", "propertyId": "status", "value": "active" }
 }
 ```
 
 ## Sort And Limit
+
+Sort nodes use `fields`. Each field item must declare whether it is a property sort or relevance sort.
 
 ```json
 {
@@ -26,7 +30,7 @@ Query payloads use a nested `query` object. Start with an object set, then compo
   "input": {
     "kind": "sort",
     "input": { "kind": "start", "objectTypeId": "customer" },
-    "by": [{ "propertyId": "createdAt", "direction": "desc" }]
+    "fields": [{ "kind": "property", "propertyId": "createdAt", "direction": "desc" }]
   },
   "limit": 20
 }
@@ -47,25 +51,27 @@ Use `page` instead of a top-level cursor when continuing through query results.
 
 ## Traverse Links
 
-Use link ids from the ontology.
+Use link ids from the ontology. Direction is `outgoing` or `incoming`.
 
 ```json
 {
   "kind": "traverse",
   "input": { "kind": "start", "objectTypeId": "customer" },
   "linkId": "customerOrders",
-  "direction": "out"
+  "direction": "outgoing"
 }
 ```
 
+For incoming traversals, add `sourceObjectTypeId` when multiple object types may declare the same link id.
+
 ## Expand
 
-Use expand when the answer needs related objects alongside the root objects.
+Use expand when the answer needs related objects alongside the root objects. The query node uses `expansions`.
 
 ```json
 {
   "kind": "expand",
   "input": { "kind": "start", "objectTypeId": "customer" },
-  "links": [{ "linkId": "customerOrders", "direction": "out", "limit": 5 }]
+  "expansions": [{ "linkId": "customerOrders", "direction": "outgoing", "limit": 5 }]
 }
 ```
