@@ -21,7 +21,7 @@ interface SandboxFactory {
 
 interface Sandbox {
   readonly id: string
-  readonly provider: string // "local" | "smolvm" | "vercel"
+  readonly provider: string // "local" | "apple-container" | "smolvm" | "vercel"
   readonly status: "running" | "stopped" | "failed"
   readonly workingDirectory: string
 
@@ -105,6 +105,14 @@ import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
 createSixb({ sandboxes: new VercelSandboxFactory() })
 ```
 
+On Apple silicon Macs, Apple Container is another local option:
+
+```ts
+import { AppleContainerSandboxFactory } from "@sixb/sandboxes-apple-container"
+
+createSixb({ sandboxes: new AppleContainerSandboxFactory() })
+```
+
 ## Network policy
 
 Every provider speaks the same `SandboxNetworkPolicy`. It is set per-run at `create(...)` (or as a
@@ -122,9 +130,9 @@ Each `restricted` entry is a `{ name, origin }` target, for example
 Providers differ in how precisely they can enforce `restricted`. The [smolvm](./smolvm.md) provider
 enforces a real per-host allow list inside the microVM. The [Vercel](./vercel.md) provider maps
 restricted HTTPS origins to Vercel's TLS/SNI firewall and IP origins to CIDR rules. The
-[local](./local.md) provider's isolation backends are all-or-nothing today: `none` blocks outbound
-network, any other mode allows host network. The contract is the same; read each provider page for
-what it actually enforces.
+[local](./local.md) and [Apple Container](./apple-container.md) providers are all-or-nothing today:
+`none` blocks outbound network, any other mode allows host/default network. The contract is the same;
+read each provider page for what it actually enforces.
 
 ## How agents use a sandbox
 
@@ -147,19 +155,20 @@ that gateway — there is no open internet. See
 | Provider | Package | Isolation | Use when |
 | --- | --- | --- | --- |
 | [Local](./local.md) | `@sixb/sandboxes-local` | OS sandboxing (seatbelt / bwrap) or passthrough | Development and local iteration |
+| [Apple Container](./apple-container.md) | `@sixb/sandboxes-apple-container` | Local Apple Container runtime | Local Mac testing with container isolation |
 | [smolvm](./smolvm.md) | `@sixb/sandboxes-smolvm` | Hardware-isolated microVM | Production on hosts where you can run smolvm |
 | [Vercel](./vercel.md) | `@sixb/sandboxes-vercel` | Vercel-hosted Firecracker microVM | Production on Vercel, or hosted workers with Vercel Sandbox credentials |
 
-Rule of thumb: **local for dev, smolvm or Vercel for stronger isolation in prod.** The local provider
-always boots — it falls back to no isolation when OS tooling is missing — so it is friction-free for
-development. smolvm gives each run its own microVM with a true per-host egress allow list, at the
-cost of a one-time binary install and image build. Vercel gives you remote managed microVMs with no
-host hypervisor setup, but the Sixb API gateway must be reachable from Vercel (usually a public HTTPS
-origin, not localhost).
+Rule of thumb: **local or Apple Container for dev, smolvm or Vercel for stronger isolation in prod.**
+The local provider is friction-free and always boots. Apple Container gives Mac users a local
+containerized runtime. smolvm gives each run its own microVM with a true per-host egress allow list.
+Vercel gives you remote managed microVMs, but the Sixb API gateway must be reachable from Vercel
+(usually a public HTTPS origin, not localhost).
 
 ## Related
 
 - [Local sandbox](./local.md) — OS-level isolation backends and auto-detection
+- [Apple Container sandbox](./apple-container.md) — local Apple Container-backed sandboxes
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
 - [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
 - [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the bash tool can reach

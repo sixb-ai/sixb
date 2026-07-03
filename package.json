@@ -24,7 +24,7 @@
     "lint": "biome check auth/*/src packages/*/src connectors/*/src sandboxes/*/src",
     "typecheck": "bun run build:types && bun run typecheck:tests && bun run typecheck:examples",
     "typecheck:tests": "tsc -p tsconfig.tests.json",
-    "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/example-*' --filter '@sixb/sandboxes-local' --filter '@sixb/sandboxes-vercel' typecheck",
+    "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/example-*' --filter '@sixb/sandboxes-local' --filter '@sixb/sandboxes-apple-container' --filter '@sixb/sandboxes-vercel' typecheck",
     "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/sixb && echo 'Linked sixb CLI to ~/.bun/bin/sixb'",
     "sixb": "bun packages/cli/src/index.tsx",
     "create-sixb": "bun packages/cli/src/index.tsx create",

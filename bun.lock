@@ -192,7 +192,7 @@
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
-        "@sixb/sandboxes-smolvm": "workspace:*",
+        "@sixb/sandboxes-apple-container": "workspace:*",
         "@sixb/sqlite": "workspace:*",
         "@sixb/ui": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",
@@ -566,6 +566,17 @@
         "@sixb/core": "workspace:*",
         "bullmq": "^5.34.0",
         "ioredis": "^5.4.1",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
+    "sandboxes/apple-container": {
+      "name": "@sixb/sandboxes-apple-container",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/core": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -1074,6 +1085,8 @@
     "@sixb/queues-bullmq": ["@sixb/queues-bullmq@workspace:queues/bullmq"],
 
     "@sixb/rules-worker": ["@sixb/rules-worker@workspace:packages/rules-worker"],
+
+    "@sixb/sandboxes-apple-container": ["@sixb/sandboxes-apple-container@workspace:sandboxes/apple-container"],
 
     "@sixb/sandboxes-local": ["@sixb/sandboxes-local@workspace:sandboxes/local"],
 
