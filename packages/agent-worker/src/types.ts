@@ -11,6 +11,7 @@ import type {
 } from "@sixb/core"
 import type { ToolSet } from "ai"
 import type { PreparedAgentAttachmentContext } from "./attachments"
+import type { BashSandboxHandle } from "./bash-tool"
 import type { StreamSink } from "./stream-sink"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
@@ -67,7 +68,8 @@ export interface AgentTurnContext {
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
    * value is irrelevant here (the bash tool consumes the handle); only its rejection matters.
    */
-  readonly sandboxReady?: Promise<unknown>
+  readonly sandboxReady?: Promise<BashSandboxHandle>
+  readonly sandboxWasUsed?: () => boolean
   readonly streamSink: StreamSink
   readonly leaseMs: number
   readonly heartbeatMs: number

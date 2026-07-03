@@ -1,9 +1,10 @@
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, Markdown } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronRight, Paperclip, Wrench } from "lucide-react"
+import { ChevronRight, Wrench } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
+import { FileAttachmentCard } from "./FileAttachmentCard"
 
 /**
  * Render an assistant body from normalized parts. Narration text stays on the main reading path;
@@ -53,7 +54,7 @@ export function AssistantBody({
     if (part.kind === "file") {
       flushText()
       flushWork(false)
-      blocks.push(<FileBlock key={`block-${key++}`} fileRef={part.fileRef} />)
+      blocks.push(<FileBlock key={`block-${key++}`} part={part} />)
       return
     }
     // reasoning | tool | step-start — buffered together into one work run.
@@ -71,13 +72,8 @@ function TextBlock({ text }: { text: string }) {
   return <Markdown className="prose-chat">{text}</Markdown>
 }
 
-function FileBlock({ fileRef }: { fileRef: Extract<NormalizedPart, { kind: "file" }>["fileRef"] }) {
-  return (
-    <div className="flex w-fit max-w-full items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground shadow-sm">
-      <Paperclip className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 truncate">{fileRef.fileName?.trim() || "Attached file"}</span>
-    </div>
-  )
+function FileBlock({ part }: { part: Extract<NormalizedPart, { kind: "file" }> }) {
+  return <FileAttachmentCard fileRef={part.fileRef} href={part.href} />
 }
 
 /**

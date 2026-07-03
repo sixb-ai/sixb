@@ -59,6 +59,7 @@ export async function createAgentRunEnvironment(
 
   // Provision concurrently; do NOT await. The bash tool, the turn, and dispose() await this.
   const ready = provisionSandbox({ context, agent, run, apiBaseUrl, apiOrigin, attachmentContext })
+  let sandboxWasUsed = false
   // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
   ready.catch(() => {})
@@ -78,10 +79,14 @@ export async function createAgentRunEnvironment(
       attachmentContext,
       tools: {
         ...context.baseTools,
-        bash: createBashTool(() => ready),
+        bash: createBashTool(() => {
+          sandboxWasUsed = true
+          return ready
+        }),
       },
       systemAddendum: renderAgentSkillCatalog(),
       sandboxReady: ready,
+      sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
       leaseMs: context.leaseMs,
       heartbeatMs: context.heartbeatMs,

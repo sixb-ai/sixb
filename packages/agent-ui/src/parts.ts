@@ -19,11 +19,15 @@ export type NormalizedPart =
   | {
       readonly kind: "file"
       readonly fileRef: Extract<AgentMessagePart, { type: "file" }>["fileRef"]
+      readonly href?: string
     }
   | { readonly kind: "step-start" }
 
-export function normalizeDurableParts(parts: readonly AgentMessagePart[]): NormalizedPart[] {
-  return parts.map((part): NormalizedPart => {
+export function normalizeDurableParts(
+  parts: readonly AgentMessagePart[],
+  options: { readonly fileHref?: (partIndex: number) => string | undefined } = {}
+): NormalizedPart[] {
+  return parts.map((part, index): NormalizedPart => {
     switch (part.type) {
       case "text":
         return { kind: "text", text: part.text }
@@ -48,7 +52,11 @@ export function normalizeDurableParts(parts: readonly AgentMessagePart[]): Norma
                 },
         }
       case "file":
-        return { kind: "file", fileRef: part.fileRef }
+        return {
+          kind: "file",
+          fileRef: part.fileRef,
+          ...(options.fileHref === undefined ? {} : { href: options.fileHref(index) }),
+        }
       case "step-start":
         return { kind: "step-start" }
       default:

@@ -162,6 +162,35 @@ function bashThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
+function outputBashThenAnswerModel(): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "bash-output-call-1",
+            toolName: "bash",
+            input: JSON.stringify({ command: "create-agent-output" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "I created the report." },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
 function apiBashThenAnswerModel(): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
@@ -349,6 +378,7 @@ class RecordingSandbox implements Sandbox {
   status: "running" | "stopped" | "failed" = "running"
   readonly commands: RecordedCommand[] = []
   readonly writtenFiles: SandboxFileRecord[] = []
+  readonly outputFiles = new Map<string, Uint8Array>()
   destroyed = false
 
   constructor(id: string) {
@@ -371,9 +401,66 @@ class RecordingSandbox implements Sandbox {
     this.writtenFiles.push(...files)
   }
 
+  writeOutputFile(relativePath: string, contents: string | Uint8Array): void {
+    this.outputFiles.set(
+      relativePath,
+      typeof contents === "string" ? new TextEncoder().encode(contents) : contents
+    )
+  }
+
   async runCommand(command: string, args: readonly string[] = [], options: RunCommandOptions = {}) {
     this.commands.push({ command, args, options })
     const script = args.at(-1)
+    if (command === "bash" && script === "create-agent-output") {
+      this.writeOutputFile("report.txt", "generated report")
+      return {
+        exitCode: 0,
+        stdout: "created report.txt",
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-list-agent-output-files")
+    ) {
+      return {
+        exitCode: 0,
+        stdout: [...this.outputFiles.entries()]
+          .filter(([relativePath]) => relativePath !== ".keep")
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(
+            ([relativePath, bytes]) =>
+              `${bytes.byteLength}\t${Buffer.from(relativePath, "utf-8").toString("base64")}`
+          )
+          .join("\n"),
+        stderr: "",
+        durationMs: 1,
+      }
+    }
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-read-agent-output-file")
+    ) {
+      const encoded = options.env?.SIXB_OUTPUT_REL_B64
+      const relativePath = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
+      const bytes = this.outputFiles.get(relativePath)
+      return bytes
+        ? {
+            exitCode: 0,
+            stdout: Buffer.from(bytes).toString("base64"),
+            stderr: "",
+            durationMs: 1,
+          }
+        : {
+            exitCode: 2,
+            stdout: "",
+            stderr: "output file not found",
+            durationMs: 1,
+          }
+    }
     if (command === "bash" && script === "print-sixb-env") {
       const env = options.env ?? {}
       return {
@@ -388,6 +475,7 @@ class RecordingSandbox implements Sandbox {
           `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
           `attachments=${env.SIXB_ATTACHMENTS ?? ""}`,
           `attachmentDir=${env.SIXB_ATTACHMENT_DIR ?? ""}`,
+          `outputDir=${env.SIXB_OUTPUT_DIR ?? ""}`,
           `token=${env.SIXB_ACCESS_TOKEN ?? ""}`,
         ].join("\n"),
         stderr: "",
@@ -795,7 +883,7 @@ describe("AgentWorker", () => {
         stdoutValue(secondBash.stdout, "context")
       )
       const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
-      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment env vars")
+      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment/output env vars")
       expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
 
@@ -1356,8 +1444,10 @@ describe("AgentWorker", () => {
       await waitFor(() => (sandbox?.destroyed ? true : null), {
         label: "sandbox destroyed",
       })
-      expect(sandbox?.commands).toHaveLength(1)
-      const command = sandbox?.commands[0]
+      const command = sandbox?.commands.find(
+        (record) =>
+          record.command === "bash" && record.args.at(-1) === "echo 'Hello, world!' | grep Hello"
+      )
       expect(command?.command).toBe("bash")
       expect(command?.args).toEqual(["-lc", "echo 'Hello, world!' | grep Hello"])
       expect(command?.options.cwd).toBe("/workspace")
@@ -1394,6 +1484,55 @@ describe("AgentWorker", () => {
       expect(parts.some((part) => part.type === "text" && part.text.includes("Bash ran"))).toBe(
         true
       )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("attaches files written to the sandbox output directory to the assistant message", async () => {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({
+        agentId: "assistant",
+        text: "create a report",
+      })
+
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "output attachment run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const messages = await listMessages(storage, threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      const filePart = assistant?.parts.find((part) => part.type === "file")
+      expect(filePart).toMatchObject({
+        type: "file",
+        fileRef: {
+          fileName: "report.txt",
+          mediaType: "text/plain",
+          logicalPath: `agent-outputs/${run.id}/report.txt`,
+        },
+      })
+      if (!filePart || filePart.type !== "file") {
+        throw new Error("Expected assistant output file part.")
+      }
+      const stored = await sixb.blobStorage.open(filePart.fileRef.blobId)
+      expect(await new Response(stored).text()).toBe("generated report")
+      expect(
+        sandboxes.sandboxes[0]?.commands.some((command) =>
+          String(command.args.at(-1)).includes("sixb-list-agent-output-files")
+        )
+      ).toBe(true)
     } finally {
       await worker.stop()
     }
@@ -1447,6 +1586,9 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_CONTEXT_DIR).toContain("/.sixb/agent")
       expect(env?.SIXB_SKILLS_DIR).toContain("/.sixb/agent/skills")
       expect(env?.SIXB_RUN_CONTEXT).toContain("/.sixb/agent/context/run.json")
+      expect(env?.SIXB_ATTACHMENTS).toContain("/.sixb/agent/context/attachments.json")
+      expect(env?.SIXB_ATTACHMENT_DIR).toContain("/.sixb/agent/attachments")
+      expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs")
       expect(env?.SIXB_API_GUIDE).toBeUndefined()
       expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
 
@@ -1532,6 +1674,7 @@ describe("AgentWorker", () => {
         threadId,
         runId,
         apiBaseUrl: env.SIXB_API_BASE_URL,
+        outputDir: env.SIXB_OUTPUT_DIR,
       })
 
       const messages = await listMessages(storage, threadId)
@@ -1552,6 +1695,7 @@ describe("AgentWorker", () => {
       expect(stdout).toContain(`base=${env.SIXB_API_BASE_URL}`)
       expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
       expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
+      expect(stdout).toContain(`outputDir=${env.SIXB_OUTPUT_DIR}`)
       expect(stdout).toContain("token=")
       expect(stdout).not.toContain("sixb_sat_")
       expect(

@@ -421,7 +421,7 @@ export function toModelMessages<TMessage extends AgentMessage>(
         result.push(userModelMessage(message, options))
         break
       case "assistant":
-        appendAssistantModelMessages(result, message)
+        appendAssistantModelMessages(result, message, options)
         break
     }
   }
@@ -494,8 +494,12 @@ function userModelMessage<TMessage extends AgentMessage>(
   return { role: "user", content }
 }
 
-function appendAssistantModelMessages(result: AgentModelMessage[], message: AgentMessage): void {
-  let block: AgentMessagePart[] = []
+function appendAssistantModelMessages<TMessage extends AgentMessage>(
+  result: AgentModelMessage[],
+  message: TMessage,
+  options: ToModelMessagesOptions<TMessage>
+): void {
+  let block: Array<{ readonly part: AgentMessagePart; readonly partIndex: number }> = []
   const flush = (): void => {
     if (block.length === 0) {
       return
@@ -504,7 +508,7 @@ function appendAssistantModelMessages(result: AgentModelMessage[], message: Agen
     block = []
 
     const content: AgentModelAssistantPart[] = []
-    for (const part of current) {
+    for (const { part, partIndex } of current) {
       if (part.type === "text") {
         content.push({
           type: "text",
@@ -521,6 +525,11 @@ function appendAssistantModelMessages(result: AgentModelMessage[], message: Agen
             ? {}
             : { providerOptions: part.providerMetadata }),
         })
+      } else if (part.type === "file") {
+        const fileContext = options.fileText?.({ message, part, partIndex })
+        if (fileContext) {
+          content.push({ type: "text", text: fileContext })
+        }
       } else if (part.type === "tool-call") {
         content.push(toolCallModelPart(part))
         if (part.providerExecuted === true) {
@@ -531,6 +540,7 @@ function appendAssistantModelMessages(result: AgentModelMessage[], message: Agen
     result.push({ role: "assistant", content })
 
     const toolResults = current
+      .map(({ part }) => part)
       .filter(isToolCallPart)
       .filter((part) => part.providerExecuted !== true)
       .map((part) => toolResultModelPart(part, "text"))
@@ -539,13 +549,13 @@ function appendAssistantModelMessages(result: AgentModelMessage[], message: Agen
     }
   }
 
-  for (const part of message.parts) {
+  message.parts.forEach((part, partIndex) => {
     if (part.type === "step-start") {
       flush()
     } else {
-      block.push(part)
+      block.push({ part, partIndex })
     }
-  }
+  })
   flush()
 }
 
