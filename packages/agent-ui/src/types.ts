@@ -16,6 +16,8 @@ export type AgentMessage = ListAgentThreadMessagesResponse["messages"][number]
 
 export type AgentMessagePart = AgentMessage["parts"][number]
 
+export type AgentFileRef = Extract<AgentMessagePart, { type: "file" }>["fileRef"]
+
 export type AgentRun = GetAgentRunResponse
 
 export type AgentRunStatus = AgentRun["status"]

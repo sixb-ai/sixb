@@ -9,6 +9,7 @@ import {
   type AuthorizationContext,
   agentRunStreamId,
   createAgentThreadId,
+  type FileRef,
   type OntologySource,
   type Principal,
   publishAgentRunCancel,
@@ -17,12 +18,21 @@ import {
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { requestAuthState } from "../auth/scope"
+import { ZodError, z } from "zod"
+import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { type RequestAuthState, requestAuthState } from "../auth/scope"
+import {
+  createFileContentResponse,
+  fileContentGetResponses,
+  fileContentHeadResponses,
+  resolveFileRefAtPath,
+} from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AgentCatalogItemSchema,
   AgentIdParamsSchema,
+  AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
   AgentMessageSchema,
   AgentMessagesQuerySchema,
@@ -40,7 +50,15 @@ import {
   PostAgentMessageResponseSchema,
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
+import { FileContentQuerySchema } from "../schemas/files"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
+
+const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
+  path: z
+    .string()
+    .min(1)
+    .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
+})
 
 function serializeAgent(agent: AgentDefinition): ReturnType<typeof AgentCatalogItemSchema.parse> {
   return AgentCatalogItemSchema.parse({
@@ -125,6 +143,28 @@ async function getAccessibleThread(params: {
   return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
 }
 
+async function getAgentMessageFileContentThread(params: {
+  readonly authState: RequestAuthState
+  readonly storage: AgentStorage
+  readonly projectId: string
+  readonly threadId: string
+}): Promise<AgentThreadRecord | null> {
+  const { agentRun } = params.authState
+  if (agentRun) {
+    if (agentRun.projectId !== params.projectId || agentRun.threadId !== params.threadId) {
+      return null
+    }
+    return params.storage.threads.getById({ projectId: params.projectId, id: params.threadId })
+  }
+
+  return getAccessibleThread({
+    scoped: params.authState.scoped,
+    storage: params.storage,
+    projectId: params.projectId,
+    threadId: params.threadId,
+  })
+}
+
 function principalForRequest(authz: AuthorizationContext | null): Principal {
   return authz?.principal ?? SYSTEM_PRINCIPAL
 }
@@ -163,6 +203,74 @@ function handleAgentRouteError(
 function missingAgentStorageResponse(set: { status?: number | string }): { error: string } {
   set.status = 400
   return { error: "Agent storage is not configured" }
+}
+
+async function agentMessageFileContentResponse(
+  sixb: Sixb<readonly OntologySource[]>,
+  context: {
+    readonly params: { readonly threadId: string; readonly messageId: string }
+    readonly query: unknown
+    readonly request: Request
+    readonly set: { status?: number | string }
+  },
+  options: { readonly head?: boolean } = {}
+) {
+  const authState = requestAuthState(context)
+
+  try {
+    const storage = sixb.storage.agents
+    if (!storage) {
+      return missingAgentStorageResponse(context.set)
+    }
+
+    const parsed = AgentMessageFileContentQuerySchema.parse(context.query)
+    const thread = await getAgentMessageFileContentThread({
+      authState,
+      storage,
+      projectId: sixb.id,
+      threadId: context.params.threadId,
+    })
+    if (!thread) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const message = await storage.messages.getById({
+      projectId: sixb.id,
+      id: context.params.messageId,
+    })
+    if (!message || message.threadId !== thread.id) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const fileRef = resolveFileRefAtPath(serializeMessage(message), parsed.path)
+    if (!fileRef) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    const response = await createFileContentResponse({
+      blobStorage: sixb.blobStorage,
+      fileRef,
+      disposition: parsed.disposition,
+      head: options.head,
+      rangeHeader: context.request.headers.get("range"),
+    })
+    if (!response) {
+      context.set.status = 404
+      return { error: "File not found" }
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof ZodError) {
+      context.set.status = 400
+      return { error: "Invalid file content query" }
+    }
+
+    throw error
+  }
 }
 
 export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
@@ -401,6 +509,37 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
       }
     )
+    .get(
+      "/api/agent-threads/:threadId/messages/:messageId/files/content",
+      async (context) => agentMessageFileContentResponse(sixb, context),
+      {
+        params: AgentMessageFileContentParamsSchema,
+        // Keep framework validation loose so invalid roots return the compact route-level 400 body.
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Get agent message file content",
+          tags: ["Agents"],
+          operationId: "getAgentMessageFileContent",
+          security: bearerSecurityRequirement("getAgentMessageFileContent"),
+          responses: fileContentGetResponses(),
+        },
+      }
+    )
+    .head(
+      "/api/agent-threads/:threadId/messages/:messageId/files/content",
+      async (context) => agentMessageFileContentResponse(sixb, context, { head: true }),
+      {
+        params: AgentMessageFileContentParamsSchema,
+        query: FileContentQuerySchema,
+        detail: {
+          summary: "Head agent message file content",
+          tags: ["Agents"],
+          operationId: "headAgentMessageFileContent",
+          security: bearerSecurityRequirement("headAgentMessageFileContent"),
+          responses: fileContentHeadResponses(),
+        },
+      }
+    )
     .post(
       "/api/agent-threads/:threadId/messages",
       async (context) => {
@@ -428,6 +567,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             agentId: thread.agentId,
             threadId: thread.id,
             text: parsed.text,
+            attachments: parsed.attachments as readonly FileRef[] | undefined,
             messageId: parsed.messageId,
             principal: principalForRequest(authz),
           }

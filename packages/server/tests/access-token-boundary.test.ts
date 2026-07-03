@@ -41,6 +41,7 @@ describe("access token auth boundary", () => {
       ["GET", "/api/workflows"],
       ["GET", "/api/workflows/renew-contract"],
       ["POST", "/api/workflows/renew-contract/runs"],
+      ["GET", "/api/agent-threads/thr_1/messages/msg_1/files/content?path=/parts/1/fileRef"],
       ["GET", "/api/events"],
     ] as const
 

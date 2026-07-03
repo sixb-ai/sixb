@@ -2,6 +2,7 @@ import type {
   AgentStorage,
   AgentsRuntime,
   AuthStorage,
+  BlobStorage,
   Broker,
   EventsRuntime,
   Queues,
@@ -9,6 +10,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
+import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { StreamSink } from "./stream-sink"
 
 // Keep root storage for transactions while making worker-required stores non-optional after setup.
@@ -29,6 +31,7 @@ export interface AgentWorkerSixb {
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime
+  readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
 }
 
@@ -40,6 +43,7 @@ export interface AgentWorkerSixb {
 export interface AgentWorkerContext {
   readonly id: string
   readonly storage: AgentWorkerStorage
+  readonly blobStorage: BlobStorage
   readonly sandboxes: SandboxFactory
   readonly baseTools: ToolSet
   readonly apiBaseUrl: string
@@ -53,8 +57,12 @@ export interface AgentWorkerContext {
 export interface AgentTurnContext {
   readonly id: string
   readonly storage: AgentWorkerStorage
+  readonly blobStorage: BlobStorage
+  /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
+  readonly apiBaseUrl?: string
   readonly tools: ToolSet
   readonly systemAddendum?: string
+  readonly attachmentContext?: PreparedAgentAttachmentContext
   /**
    * The concurrently provisioning sandbox, exposed so the turn can fail if it rejects. Resolved
    * value is irrelevant here (the bash tool consumes the handle); only its rejection matters.

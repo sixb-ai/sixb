@@ -15,6 +15,7 @@ import {
   type AgentsRuntime,
   type AppendAgentMessageInput,
   agentRunStreamId,
+  type BlobStorage,
   type Broker,
   type CreateSandboxOptions,
   createAgentRunId,
@@ -303,6 +304,7 @@ interface TestSixb {
   readonly storage: Storage
   readonly queues: Queues
   readonly agents: AgentsRuntime
+  readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
 }
 
@@ -364,6 +366,8 @@ class RecordingSandbox implements Sandbox {
           `run=${env.SIXB_RUN_ID ?? ""}`,
           `skills=${env.SIXB_SKILLS_DIR ?? ""}`,
           `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
+          `attachments=${env.SIXB_ATTACHMENTS ?? ""}`,
+          `attachmentDir=${env.SIXB_ATTACHMENT_DIR ?? ""}`,
           `token=${env.SIXB_ACCESS_TOKEN ?? ""}`,
         ].join("\n"),
         stderr: "",
@@ -486,6 +490,7 @@ function buildAgentWorkerContext(
   return {
     id: sixb.id,
     storage: workerStorageOf(sixb.storage),
+    blobStorage: sixb.blobStorage,
     sandboxes: sixb.sandboxes,
     baseTools: input.baseTools ?? {},
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
@@ -770,7 +775,7 @@ describe("AgentWorker", () => {
         stdoutValue(secondBash.stdout, "context")
       )
       const systemAddendum = firstEnvironment.turnContext.systemAddendum ?? ""
-      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR to reference skill file paths")
+      expect(systemAddendum).toContain("Use $SIXB_SKILLS_DIR and attachment env vars")
       expect(systemAddendum).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
       expect(systemAddendum).not.toContain("/tmp/sixb-recording-sandbox")
 
@@ -788,6 +793,223 @@ describe("AgentWorker", () => {
       }
     }
     expect(sandboxes.sandboxes.every((sandbox) => sandbox.destroyed)).toBe(true)
+  })
+
+  test("materializes message attachments and manifest into the sandbox", async () => {
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const agent = sixb.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const fileRef = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("attachment contents"),
+      fileName: "note.txt",
+      mediaType: "text/plain",
+    })
+    const request = await sixb.agents.request({
+      agentId: "assistant",
+      text: "read this",
+      attachments: [fileRef],
+    })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb, { apiBaseUrl: "http://sixb-api.local/api/" })
+
+    const environment = await createAgentRunEnvironment({ context, agent, run })
+    try {
+      await environment.turnContext.sandboxReady
+      const sandbox = sandboxes.sandboxes[0]
+      if (!sandbox) {
+        throw new Error("Expected sandbox.")
+      }
+      const attachmentFile = sandbox.writtenFiles.find((file) => file.path.endsWith("1-note.txt"))
+      expect(attachmentFile).toBeDefined()
+      expect(sandbox.readFileContents(attachmentFile!.path)).toBe("attachment contents")
+
+      const manifestFile = sandbox.writtenFiles.find((file) =>
+        file.path.endsWith(".sixb/agent/context/attachments.json")
+      )
+      expect(manifestFile).toBeDefined()
+      const manifest = JSON.parse(sandbox.readFileContents(manifestFile!.path))
+      expect(manifest.attachments).toHaveLength(1)
+      expect(manifest.attachments[0]).toMatchObject({
+        messageId: request.triggerMessageId,
+        fileName: "note.txt",
+        mediaType: "text/plain",
+        inlineDisposition: "text",
+      })
+      expect(manifest.attachments[0].sandboxPath).toStartWith(".sixb/agent/attachments/")
+      expect(manifest.attachments[0].sandboxPath).toEndWith("1-note.txt")
+      expect(manifest.attachments[0].contentUrl).toContain("/__sixb/agent-api/")
+    } finally {
+      await environment.dispose()
+    }
+  })
+
+  test("adds text attachment context to model prompts", async () => {
+    let capturedPrompt: unknown
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async (options) => {
+        capturedPrompt = options.prompt
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Done" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const fileRef = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("invoice total: 42"),
+      fileName: "invoice.txt",
+      mediaType: "text/plain",
+    })
+    const request = await sixb.agents.request({
+      agentId: "assistant",
+      text: "summarize",
+      attachments: [fileRef],
+    })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb)
+    const environment = await createAgentRunEnvironment({
+      context,
+      agent: sixb.agents.getById("assistant")!,
+      run,
+    })
+    try {
+      await runAgentTurn({
+        context: environment.turnContext,
+        agent: sixb.agents.getById("assistant")!,
+        run,
+        signal: new AbortController().signal,
+      })
+    } finally {
+      await environment.dispose()
+    }
+
+    const promptJson = JSON.stringify(capturedPrompt)
+    expect(promptJson).toContain("<attachment")
+    expect(promptJson).toContain("invoice.txt")
+    expect(promptJson).toContain("invoice total: 42")
+    expect(promptJson).toContain("contentUrl")
+  })
+
+  test("inlines supported image attachments when the model advertises image input", async () => {
+    let capturedPrompt: unknown
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      supportedUrls: { "image/*": [/^data:/] },
+      doStream: async (options) => {
+        capturedPrompt = options.prompt
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Saw image" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const png = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+        "base64"
+      )
+    )
+    const fileRef = await sixb.blobStorage.put({
+      body: png,
+      fileName: "pixel.png",
+      mediaType: "image/png",
+    })
+    const request = await sixb.agents.request({
+      agentId: "assistant",
+      text: "describe",
+      attachments: [fileRef],
+    })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb)
+    const environment = await createAgentRunEnvironment({
+      context,
+      agent: sixb.agents.getById("assistant")!,
+      run,
+    })
+    try {
+      await runAgentTurn({
+        context: environment.turnContext,
+        agent: sixb.agents.getById("assistant")!,
+        run,
+        signal: new AbortController().signal,
+      })
+    } finally {
+      await environment.dispose()
+    }
+
+    const promptJson = JSON.stringify(capturedPrompt)
+    expect(promptJson).toContain("pixel.png")
+    expect(promptJson).toContain('"type":"file"')
+    expect(promptJson).toContain("image/png")
+    expect(promptJson).toContain("iVBORw0KGgo")
+  })
+
+  test("keeps image attachments metadata-only when the model does not advertise images", async () => {
+    let capturedPrompt: unknown
+    const model = new MockLanguageModelV4({
+      modelId: "mock-model",
+      doStream: async (options) => {
+        capturedPrompt = options.prompt
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Done" },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model)
+    const png = Uint8Array.from(
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+        "base64"
+      )
+    )
+    const fileRef = await sixb.blobStorage.put({
+      body: png,
+      fileName: "pixel.png",
+      mediaType: "image/png",
+    })
+    const request = await sixb.agents.request({
+      agentId: "assistant",
+      text: "describe",
+      attachments: [fileRef],
+    })
+    const run = await reserveRequestedRun(sixb, request)
+    const context = buildAgentWorkerContext(sixb)
+    const environment = await createAgentRunEnvironment({
+      context,
+      agent: sixb.agents.getById("assistant")!,
+      run,
+    })
+    try {
+      await runAgentTurn({
+        context: environment.turnContext,
+        agent: sixb.agents.getById("assistant")!,
+        run,
+        signal: new AbortController().signal,
+      })
+    } finally {
+      await environment.dispose()
+    }
+
+    const promptJson = JSON.stringify(capturedPrompt)
+    expect(promptJson).toContain("pixel.png")
+    expect(promptJson).toContain("does not advertise image input support")
+    expect(promptJson).not.toContain('"type":"file"')
+    expect(promptJson).not.toContain("iVBORw0KGgo")
   })
 
   test("provisions the sandbox concurrently without blocking turn start", async () => {
@@ -1501,6 +1723,7 @@ describe("AgentWorker", () => {
       storage: observedStorage,
       queues: sixb.queues,
       agents: sixb.agents,
+      blobStorage: sixb.blobStorage,
       sandboxes: sixb.sandboxes,
     }
 
@@ -1750,6 +1973,7 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
+        blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: NOOP_STREAM_SINK,
         leaseMs: 60_000,
@@ -1793,6 +2017,7 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
+        blobStorage: sixb.blobStorage,
         tools: {},
         systemAddendum: "Extra sandbox context.",
         streamSink: NOOP_STREAM_SINK,
@@ -1840,6 +2065,7 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
+        blobStorage: sixb.blobStorage,
         tools: {},
         streamSink: NOOP_STREAM_SINK,
         leaseMs: 60_000,
@@ -2012,6 +2238,7 @@ describe("AgentWorker", () => {
       storage: withFlakyAgentFinishStorage(sixb.storage, 2),
       queues: sixb.queues,
       agents: sixb.agents,
+      blobStorage: sixb.blobStorage,
       sandboxes: sixb.sandboxes,
     }
 
@@ -2063,6 +2290,7 @@ describe("AgentWorker", () => {
         context: {
           id: PROJECT_ID,
           storage: workerStorageOf(failingStorage),
+          blobStorage: sixb.blobStorage,
           tools: echoTool,
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
@@ -2101,6 +2329,7 @@ describe("AgentWorker", () => {
       context: {
         id: PROJECT_ID,
         storage: workerStorageOf(sixb.storage),
+        blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,

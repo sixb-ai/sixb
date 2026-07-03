@@ -15,6 +15,7 @@ import {
   streamText,
   toUIMessageStream,
 } from "ai"
+import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
 import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
 import {
   appendMessageAndFinishRunOrThrow,
@@ -68,11 +69,28 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   const agents = storage.agents
 
   const history = await agents.messages.list({ projectId, threadId: run.threadId, order: "asc" })
+  const attachmentContext =
+    context.attachmentContext ??
+    (context.apiBaseUrl
+      ? await prepareAgentAttachments({
+          projectId,
+          threadId: run.threadId,
+          messages: history.messages,
+          blobStorage: context.blobStorage,
+          apiBaseUrl: context.apiBaseUrl,
+          inlineImages: await modelSupportsInlineImages(agent.model),
+        })
+      : undefined)
   // `toModelMessages` is core's `ai`-free mirror of `convertToModelMessages`. The only type gap is
   // `providerOptions`, which core types as the wider `JsonValue` (it cannot depend on `ai`); the
   // values originate from the SDK, so the runtime shape is compatible. The worker is where `ai`
   // lives, so this single boundary cast belongs here. Locked by `tests/ai-sdk-compat.types.ts`.
-  const modelMessages = toModelMessages(history.messages) as ModelMessage[]
+  const modelMessages = toModelMessages(history.messages, {
+    fileText: ({ message, partIndex }) =>
+      attachmentContext?.promptTextByPartKey.get(attachmentKey(message.id, partIndex)),
+    fileData: ({ message, partIndex }) =>
+      attachmentContext?.modelFileDataByPartKey.get(attachmentKey(message.id, partIndex)),
+  }) as ModelMessage[]
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
 

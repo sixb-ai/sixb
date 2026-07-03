@@ -72,7 +72,8 @@ export function renderAgentSkillCatalog(): string {
   return [
     "Sixb API access is available from the sandboxed bash tool through a per-run gateway URL.",
     "Agent Skills are installed under $SIXB_SKILLS_DIR.",
-    "Use $SIXB_SKILLS_DIR to reference skill file paths; do not hardcode sandbox directory paths.",
+    "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow.",
+    "Use $SIXB_SKILLS_DIR and attachment env vars to reference file paths; do not hardcode sandbox directory paths.",
     "Before using a matching Sixb ontology API surface, read that skill's SKILL.md with bash/cat.",
     "Use live ontology and object APIs rather than guessing schema or relying on stale context.",
     "Do not add Authorization or Cookie headers. The gateway authenticates allowed requests.",

@@ -1,6 +1,7 @@
 import { AGENT_REASONING_LEVELS } from "@sixb/core"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
+import { FileRefSchema } from "./files"
 
 export const AgentIdParamsSchema = z.object({
   agentId: z.string().min(1),
@@ -12,6 +13,10 @@ export const AgentThreadParamsSchema = z.object({
 
 export const AgentRunParamsSchema = z.object({
   runId: z.string().min(1),
+})
+
+export const AgentMessageFileContentParamsSchema = AgentThreadParamsSchema.extend({
+  messageId: z.string().min(1),
 })
 
 export const AgentPrincipalSchema = z.object({
@@ -97,6 +102,12 @@ const AgentStepStartPartSchema = z.object({
   type: z.literal("step-start"),
 })
 
+const AgentFilePartSchema = z.object({
+  type: z.literal("file"),
+  fileRef: FileRefSchema,
+  providerMetadata: JsonValueSchema.optional(),
+})
+
 const AgentToolCallBaseSchema = z.object({
   type: z.literal("tool-call"),
   toolCallId: z.string(),
@@ -121,6 +132,7 @@ export const AgentMessagePartSchema = z.union([
   AgentTextPartSchema,
   AgentReasoningPartSchema,
   AgentStepStartPartSchema,
+  AgentFilePartSchema,
   AgentToolCallOutputSchema,
   AgentToolCallErrorSchema,
 ])
@@ -155,6 +167,7 @@ export const AgentMessageListResponseSchema = z.object({
 
 export const PostAgentMessageBodySchema = z.object({
   text: z.string().trim().min(1),
+  attachments: z.array(FileRefSchema).optional(),
   messageId: z.string().trim().min(1).optional(),
 })
 

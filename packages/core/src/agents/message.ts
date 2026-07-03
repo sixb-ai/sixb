@@ -1,3 +1,4 @@
+import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
 
 /**
@@ -38,6 +39,14 @@ export interface AgentStepStartPart {
   readonly type: "step-start"
 }
 
+/** A blob-backed file attached to a user message or produced by an agent/tool. */
+export interface AgentFilePart {
+  readonly type: "file"
+  readonly fileRef: FileRef
+  /** Provider passthrough for future model-specific file handling. */
+  readonly providerMetadata?: JsonValue
+}
+
 interface AgentToolCallBase {
   readonly type: "tool-call"
   readonly toolCallId: string
@@ -65,6 +74,7 @@ export type AgentMessagePart =
   | AgentTextPart
   | AgentReasoningPart
   | AgentStepStartPart
+  | AgentFilePart
   | AgentToolCallPart
 
 export type AgentMessagePartType = AgentMessagePart["type"]

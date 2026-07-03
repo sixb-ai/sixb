@@ -290,6 +290,20 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     agentApi: false,
   },
   {
+    operationId: "getAgentMessageFileContent",
+    method: "GET",
+    path: "/api/agent-threads/:threadId/messages/:messageId/files/content",
+    accessToken: true,
+    agentApi: true,
+  },
+  {
+    operationId: "headAgentMessageFileContent",
+    method: "HEAD",
+    path: "/api/agent-threads/:threadId/messages/:messageId/files/content",
+    accessToken: true,
+    agentApi: false,
+  },
+  {
     operationId: "listEvents",
     method: "GET",
     path: "/api/events",

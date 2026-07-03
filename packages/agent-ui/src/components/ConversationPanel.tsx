@@ -12,7 +12,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronLeft, History, SquarePen } from "lucide-react"
 import { formatRelativeTime } from "../format"
 import type { LiveRunState } from "../liveRun"
-import type { Agent, AgentMessage, AgentThread } from "../types"
+import type { Agent, AgentFileRef, AgentMessage, AgentThread } from "../types"
 import { AgentAvatar } from "./AgentAvatar"
 import { Composer } from "./Composer"
 import { RunErrorMarker } from "./MessageView"
@@ -26,6 +26,7 @@ export interface ConversationPanelProps {
   readonly messagesError: string | null
   readonly streaming: boolean
   readonly pendingUserText?: string | null
+  readonly pendingUserAttachments?: readonly AgentFileRef[]
   /** A run has been requested and we're waiting on it — show the thinking shimmer immediately. */
   readonly awaitingResponse: boolean
   /** The active run's stream dropped and is re-subscribing. */
@@ -38,7 +39,7 @@ export interface ConversationPanelProps {
   readonly agentThreads: readonly AgentThread[]
   /** Whether a home/landing exists to return to (i.e. more than one agent). */
   readonly canGoHome: boolean
-  readonly onSend: (text: string) => void
+  readonly onSend: (text: string, attachments: readonly AgentFileRef[]) => void
   readonly onBackHome: () => void
   readonly onNewChat: () => void
   readonly onPickAgent: (agentId: string) => void
@@ -53,6 +54,7 @@ export interface ConversationPanelProps {
   readonly composerPlaceholder?: string
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
+  readonly composerDraftAttachments?: readonly AgentFileRef[]
   readonly composerDraftNonce?: number
 }
 
@@ -64,6 +66,7 @@ export function ConversationPanel({
   messagesError,
   streaming,
   pendingUserText,
+  pendingUserAttachments = [],
   awaitingResponse,
   reconnecting,
   sendError,
@@ -82,19 +85,25 @@ export function ConversationPanel({
   onStop,
   composerPlaceholder,
   composerDraft,
+  composerDraftAttachments,
   composerDraftNonce,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
   // brief durable-message load never flashes a centered "Loading…".
-  const hasActivity = Boolean(pendingUserText) || live.parts.length > 0 || awaitingResponse
+  const hasActivity =
+    Boolean(pendingUserText) ||
+    pendingUserAttachments.length > 0 ||
+    live.parts.length > 0 ||
+    awaitingResponse
   const showWelcome =
     !messagesLoading &&
     !messagesError &&
     !hasActivity &&
     messages.length === 0 &&
     live.parts.length === 0 &&
-    !pendingUserText
+    !pendingUserText &&
+    pendingUserAttachments.length === 0
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -166,6 +175,7 @@ export function ConversationPanel({
             messages={messages}
             live={live}
             pendingUserText={pendingUserText}
+            pendingUserAttachments={pendingUserAttachments}
             awaitingResponse={awaitingResponse}
             reconnecting={reconnecting}
           />
@@ -187,6 +197,7 @@ export function ConversationPanel({
         onStop={onStop}
         placeholder={composerPlaceholder}
         draft={composerDraft}
+        draftAttachments={composerDraftAttachments}
         draftNonce={composerDraftNonce}
       />
     </div>

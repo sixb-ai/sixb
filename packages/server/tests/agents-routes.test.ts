@@ -261,9 +261,15 @@ describe("agent routes", () => {
       threads: [{ id: createThreadBody.thread.id, agentId: "assistant", messageCount: 0 }],
     })
 
+    const attachment = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("pipeline log contents"),
+      fileName: "pipeline.log",
+      mediaType: "text/plain",
+    })
     const postMessageResponse = await app.fetch(
       jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
         text: "Check the failed pipeline.",
+        attachments: [attachment],
       })
     )
     expect(postMessageResponse.status).toBe(202)
@@ -311,10 +317,39 @@ describe("agent routes", () => {
           role: "user",
           authorPrincipal: { type: "system", id: "system" },
           seq: 1,
-          parts: [{ type: "text", text: "Check the failed pipeline." }],
+          parts: [
+            { type: "text", text: "Check the failed pipeline." },
+            { type: "file", fileRef: attachment },
+          ],
         },
       ],
     })
+
+    const contentUrl = `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+    const contentResponse = await app.fetch(new Request(contentUrl))
+    expect(contentResponse.status).toBe(200)
+    expect(contentResponse.headers.get("content-type")).toBe("text/plain")
+    expect(contentResponse.headers.get("content-disposition")).toContain("pipeline.log")
+    expect(await contentResponse.text()).toBe("pipeline log contents")
+
+    const headResponse = await app.fetch(new Request(contentUrl, { method: "HEAD" }))
+    expect(headResponse.status).toBe(200)
+    expect(headResponse.headers.get("content-length")).toBe("21")
+    expect(await headResponse.text()).toBe("")
+
+    const invalidRoot = await app.fetch(
+      new Request(
+        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/metadata/file")}`
+      )
+    )
+    expect(invalidRoot.status).toBe(400)
+
+    const nonFile = await app.fetch(
+      new Request(
+        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/0/text")}`
+      )
+    )
+    expect(nonFile.status).toBe(404)
   })
 
   test("returns a generic 409 when creating a thread with a duplicate id", async () => {
@@ -530,11 +565,16 @@ describe("agent routes", () => {
     )
     expect(hiddenThread.status).toBe(404)
 
+    const attachment = await sixb.blobStorage.put({
+      body: new TextEncoder().encode("owner attachment"),
+      fileName: "owner.txt",
+      mediaType: "text/plain",
+    })
     const postMessageResponse = await app.fetch(
       jsonRequest(
         `/api/agent-threads/${ownerThread.thread.id}/messages`,
         "POST",
-        { text: "hello" },
+        { text: "hello", attachments: [attachment] },
         owner.csrfHeaders
       )
     )
@@ -582,5 +622,17 @@ describe("agent routes", () => {
       })
     )
     expect(hiddenMessages.status).toBe(404)
+
+    const fileContentUrl = `http://localhost/api/agent-threads/${ownerThread.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+    const hiddenFileContent = await app.fetch(
+      new Request(fileContentUrl, { headers: other.headers })
+    )
+    expect(hiddenFileContent.status).toBe(404)
+
+    const ownerFileContent = await app.fetch(
+      new Request(fileContentUrl, { headers: owner.headers })
+    )
+    expect(ownerFileContent.status).toBe(200)
+    expect(await ownerFileContent.text()).toBe("owner attachment")
   })
 })
