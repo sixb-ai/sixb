@@ -7,8 +7,9 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
 } from "@sixb/ui/components"
-import { useMemo } from "react"
+import { useLayoutEffect, useMemo, useRef } from "react"
 import { hasLiveContent, type LiveRunState } from "../liveRun"
 import type { AgentFileRef, AgentMessage } from "../types"
 import {
@@ -20,11 +21,14 @@ import {
 } from "./MessageView"
 
 export interface TranscriptProps {
+  readonly threadId: string | null
   readonly messages: readonly AgentMessage[]
   readonly live: LiveRunState
   /** A just-sent user message echoed locally until durable state catches up. */
   readonly pendingUserText?: string | null
   readonly pendingUserAttachments?: readonly AgentFileRef[]
+  /** This client initiated the current turn, so keep the user prompt anchored while it streams. */
+  readonly anchorCurrentTurn?: boolean
   /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
   readonly awaitingResponse?: boolean
   /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
@@ -32,10 +36,12 @@ export interface TranscriptProps {
 }
 
 export function Transcript({
+  threadId,
   messages,
   live,
   pendingUserText,
   pendingUserAttachments = [],
+  anchorCurrentTurn,
   awaitingResponse,
   reconnecting,
 }: TranscriptProps) {
@@ -45,34 +51,55 @@ export function Transcript({
     live.finalizedMessageId !== null &&
     messages.some((message) => message.id === live.finalizedMessageId)
   const showLive = hasLiveContent(live, live.runId) && !finalizedInDurable
+  const handoffPending = live.finalizedMessageId !== null && !finalizedInDurable
   // Bridge the gap between sending and the first stream event with a standalone thinking shimmer.
   const showThinking = Boolean(awaitingResponse) && !showLive && !finalizedInDurable
 
-  // Only the *current* turn's user message is a scroll anchor — the row the scroller lifts to the top
-  // of the viewport so the answer can stream into the space below it. Anchoring every historical user
-  // message instead makes the scroller jump to the first one when the optimistic echo is swapped for
-  // the durable message (the primitive re-targets the first not-yet-handled anchor on equal-count
-  // updates). While the optimistic echo is showing, it is the live turn, so no durable row anchors.
-  const lastUserMessageId = useMemo(() => {
-    if (pendingUserText || pendingUserAttachments.length > 0) return null
+  // A saved thread should open at the newest content, not at the first or last user turn. Only mark
+  // a user row as a scroll anchor while the current UI-initiated turn is in flight: the optimistic
+  // row anchors first, then the durable user row takes over once it replaces the optimistic echo.
+  const shouldAnchorCurrentTurn = Boolean(
+    anchorCurrentTurn &&
+      (pendingUserText ||
+        pendingUserAttachments.length > 0 ||
+        showLive ||
+        showThinking ||
+        handoffPending ||
+        live.finishStatus !== null)
+  )
+  const anchoredUserMessageId = useMemo(() => {
+    if (pendingUserText || pendingUserAttachments.length > 0 || !shouldAnchorCurrentTurn)
+      return null
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") return messages[i].id
     }
     return null
-  }, [messages, pendingUserText, pendingUserAttachments.length])
+  }, [messages, pendingUserText, pendingUserAttachments.length, shouldAnchorCurrentTurn])
 
   return (
-    // A turn begins at its user message: anchoring it lifts the new turn to the top of the viewport
-    // and lets the answer stream into the space below, with the prior turn peeking above for context.
-    // `last-anchor` reopens a saved thread at the last user turn rather than the absolute bottom.
+    // Opening an existing thread should land at the bottom/latest message. New in-flight turns still
+    // get an explicit anchor (pending user, then durable user) so the answer can stream into stable
+    // space below the prompt without changing the initial load behavior for saved threads.
     //
     // No `autoScroll`: anchoring inflates a spacer so the turn can reach the top, which leaves the
     // viewport sitting at its own scroll-bottom. With `autoScroll` the scroller reads that as "follow
     // the live edge", collapses the spacer on the next token, and pins everything to the bottom —
     // exactly the behavior we're avoiding. Without it the turn stays anchored at the top while the
     // answer streams in below, and `MessageScrollerButton` remains for an explicit jump to latest.
-    <MessageScrollerProvider defaultScrollPosition="last-anchor">
+    <MessageScrollerProvider key={threadId ?? "draft"} defaultScrollPosition="end">
       <MessageScroller className="flex-1">
+        <ScrollToLatestOnThreadLoad
+          threadId={threadId}
+          enabled={!shouldAnchorCurrentTurn}
+          hasMessages={
+            messages.length > 0 ||
+            Boolean(pendingUserText) ||
+            pendingUserAttachments.length > 0 ||
+            showLive ||
+            showThinking
+          }
+          currentTurnActive={Boolean(anchorCurrentTurn)}
+        />
         <MessageScrollerViewport>
           <MessageScrollerContent
             aria-busy={live.active || showThinking}
@@ -82,7 +109,7 @@ export function Transcript({
               <MessageScrollerItem
                 key={message.id}
                 messageId={message.id}
-                scrollAnchor={message.id === lastUserMessageId}
+                scrollAnchor={message.id === anchoredUserMessageId}
               >
                 <MessageView message={message} />
               </MessageScrollerItem>
@@ -111,7 +138,7 @@ export function Transcript({
               // The answer is not a turn anchor — it grows into the space below the anchored user
               // message, so streaming never yanks the reader away from where the turn started.
               <MessageScrollerItem messageId="live">
-                <LiveAssistant live={live} />
+                <LiveAssistant live={live} keepWorkOpen={handoffPending} />
               </MessageScrollerItem>
             ) : showThinking ? (
               <MessageScrollerItem messageId="thinking">
@@ -129,4 +156,69 @@ export function Transcript({
       </MessageScroller>
     </MessageScrollerProvider>
   )
+}
+
+function ScrollToLatestOnThreadLoad({
+  threadId,
+  enabled,
+  hasMessages,
+  currentTurnActive,
+}: {
+  threadId: string | null
+  enabled: boolean
+  hasMessages: boolean
+  currentTurnActive: boolean
+}) {
+  const { scrollToEnd } = useMessageScroller()
+  const didInitialScrollRef = useRef(false)
+  const suppressInitialScrollRef = useRef(false)
+
+  // Reset only when a different thread opens. If the current thread starts an in-flight turn, we
+  // suppress this initial-load scroll for the rest of that thread view; otherwise the completion
+  // handoff would flip `enabled` back on and yank the transcript to the bottom.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally reset only per thread
+  useLayoutEffect(() => {
+    didInitialScrollRef.current = false
+    suppressInitialScrollRef.current = currentTurnActive
+  }, [threadId])
+
+  useLayoutEffect(() => {
+    if (currentTurnActive) suppressInitialScrollRef.current = true
+  }, [currentTurnActive])
+
+  useLayoutEffect(() => {
+    if (
+      !threadId ||
+      !enabled ||
+      !hasMessages ||
+      currentTurnActive ||
+      didInitialScrollRef.current ||
+      suppressInitialScrollRef.current
+    ) {
+      return
+    }
+
+    didInitialScrollRef.current = true
+    let frameOne = 0
+    let frameTwo = 0
+    const timers: number[] = []
+    const scroll = () => scrollToEnd({ behavior: "auto" })
+
+    scroll()
+    frameOne = window.requestAnimationFrame(() => {
+      scroll()
+      frameTwo = window.requestAnimationFrame(scroll)
+    })
+    timers.push(window.setTimeout(scroll, 80), window.setTimeout(scroll, 240))
+
+    return () => {
+      window.cancelAnimationFrame(frameOne)
+      window.cancelAnimationFrame(frameTwo)
+      timers.forEach((timer) => {
+        window.clearTimeout(timer)
+      })
+    }
+  }, [currentTurnActive, enabled, hasMessages, scrollToEnd, threadId])
+
+  return null
 }

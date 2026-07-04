@@ -8,7 +8,13 @@ import type {
   AgentStorage,
   Storage,
 } from "@sixb/core"
-import { createAgentMessageId, fromAiSdk, isAbortError, toModelMessages } from "@sixb/core"
+import {
+  buildAgentSystemPrompt,
+  createAgentMessageId,
+  fromAiSdk,
+  isAbortError,
+  toModelMessages,
+} from "@sixb/core"
 import {
   type LanguageModelUsage,
   type ModelMessage,
@@ -30,8 +36,6 @@ import {
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
-const DEFAULT_SYSTEM_CONTEXT =
-  "You are operating as a Sixb agent with a sandboxed bash tool and scoped access to the current Sixb ontology API. Use live API context for object types, objects, telemetry, and declared actions; keep work grounded in the user's request, explain important assumptions briefly, and ask before making domain changes."
 
 export interface RunAgentTurnInput {
   /** The worker's stable execution context (storage, tools, stream sink, lease timings). */
@@ -133,7 +137,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     model: agent.model,
     ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
     ...(agent.providerOptions === undefined ? {} : { providerOptions: agent.providerOptions }),
-    system: systemInstructions(agent.instructions, context.systemAddendum),
+    system: buildAgentSystemPrompt({
+      instructions: agent.instructions,
+      addendum: context.systemAddendum,
+    }),
     messages: modelMessages,
     tools,
     stopWhen: stepCountIs(maxSteps),
@@ -477,14 +484,6 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
     parts,
     ...(message.metadata === undefined ? {} : { metadata: message.metadata }),
   })
-}
-
-function systemInstructions(instructions: string, addendum: string | undefined): string {
-  const base = `${instructions.trimEnd()}\n\n${DEFAULT_SYSTEM_CONTEXT}`
-  if (!addendum) {
-    return base
-  }
-  return `${base}\n\n${addendum}`
 }
 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider

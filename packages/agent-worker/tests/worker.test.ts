@@ -2439,10 +2439,19 @@ describe("AgentWorker", () => {
       signal: new AbortController().signal,
     })
 
-    expect(capturedSystem).toContain("You are a helpful test assistant.")
+    expect(capturedSystem).toBeDefined()
+    if (!capturedSystem) throw new Error("Expected a system prompt")
+
+    expect(capturedSystem).toContain("<sixb_core_rules>")
     expect(capturedSystem).toContain("You are operating as a Sixb agent")
     expect(capturedSystem).toContain("sandboxed bash tool")
+    expect(capturedSystem).toContain("<sixb_runtime_context>")
     expect(capturedSystem).toContain("Extra sandbox context.")
+    expect(capturedSystem).toContain("<agent_instructions>")
+    expect(capturedSystem).toContain("You are a helpful test assistant.")
+    expect(capturedSystem.indexOf("<sixb_core_rules>")).toBeLessThan(
+      capturedSystem.indexOf("<agent_instructions>")
+    )
   })
 
   test("passes agent model options into streamText", async () => {

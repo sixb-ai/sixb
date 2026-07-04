@@ -78,14 +78,20 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
 }
 
 /** The transient assistant row driven by the live `/ws/agents` stream. */
-export function LiveAssistant({ live }: { live: LiveRunState }) {
+export function LiveAssistant({
+  live,
+  keepWorkOpen = false,
+}: {
+  live: LiveRunState
+  keepWorkOpen?: boolean
+}) {
   if (isAwaitingFirstToken(live)) {
     return <ThinkingMarker />
   }
 
   return (
     <div className="flex flex-col gap-2">
-      <AssistantBody parts={live.parts} live={live.active} />
+      <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
       {live.finishStatus === "failed" ? (
         <RunErrorMarker message={live.finishError ?? "The agent run failed."} />
       ) : null}
