@@ -32,6 +32,8 @@ export interface ComposerProps {
   readonly stopping?: boolean
   readonly onStop?: () => void
   readonly placeholder?: string
+  /** Optional classes for the composer shell. */
+  readonly className?: string
   /** Optional status line shown under the input, e.g. while a run is active. */
   readonly hint?: string
   /**
@@ -75,6 +77,7 @@ export function Composer({
   stopping,
   onStop,
   placeholder,
+  className,
   hint,
   draft,
   draftAttachments,
@@ -87,6 +90,7 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const dragDepthRef = useRef(0)
   const uploadFile = useUploadFile()
+  const wasRunningRef = useRef(Boolean(running))
 
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
   const readyAttachments = attachments.flatMap((attachment) =>
@@ -113,6 +117,15 @@ export function Composer({
     )
     textareaRef.current?.focus()
   }, [draftNonce])
+
+  useEffect(() => {
+    const wasRunning = wasRunningRef.current
+    wasRunningRef.current = Boolean(running)
+    if (!wasRunning || running || disabled) return
+
+    const frame = requestAnimationFrame(() => textareaRef.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [disabled, running])
 
   // Grow the textarea to fit its content, up to a max height where it starts scrolling.
   // Keep overflow hidden until the content actually exceeds the cap so an empty input does not
@@ -282,12 +295,12 @@ export function Composer({
         : hint
 
   return (
-    <div className="bg-background px-4 pt-2 pb-3">
+    <div className={cn("bg-background px-4 pt-2 pb-3", className)}>
       {draggingFiles ? <DropFilesOverlay /> : null}
-      <div className="mx-auto w-full max-w-3xl">
+      <div className="mx-auto w-full max-w-2xl">
         <div
           className={cn(
-            "rounded-[2rem] border border-border bg-card shadow-sm transition-all",
+            "rounded-3xl border border-border bg-card shadow-sm transition-[border-color,box-shadow] duration-500",
             draggingFiles && "border-primary/50 ring-2 ring-primary/15"
           )}
         >
@@ -302,7 +315,7 @@ export function Composer({
               ))}
             </div>
           ) : null}
-          <div className="flex items-end gap-2 py-2 pr-2.5 pl-3">
+          <div className="relative flex items-end gap-2 py-2 pr-2.5 pl-3">
             <input
               ref={fileInputRef}
               type="file"
@@ -331,7 +344,7 @@ export function Composer({
               onKeyDown={handleKeyDown}
               disabled={disabled}
               rows={1}
-              placeholder={placeholder ?? "Ask anything"}
+              placeholder={placeholder ?? "Send a message…"}
               aria-label="Message"
               className="max-h-[200px] min-h-9 flex-1 resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1.5 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
             />

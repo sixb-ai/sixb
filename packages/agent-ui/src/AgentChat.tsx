@@ -119,17 +119,25 @@ export function AgentChat({
       : null
 
   const { live, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  const finalizedMessageInDurable =
+    live.finalizedMessageId !== null &&
+    messages.some((message) => message.id === live.finalizedMessageId)
 
-  // Drop the pending run once it reaches any terminal status. `activeRunId` then falls back to the
-  // durable `thread.activeRunId`, which stays set until its refetch lands — so the live row survives
-  // the handoff to the stored message without flashing empty. Clearing on every terminal status (not
-  // just a finalized success) means a run that ends without a persisted message — a tool-only turn,
-  // or a lost finalize event — still clears instead of pinning the run and its socket forever.
+  // Drop the pending run once it reaches a terminal status, but keep it pinned through the handoff
+  // from the transient live row to the durable assistant message. Otherwise a fast thread refetch can
+  // clear `thread.activeRunId` before the messages refetch lands, resetting `live` to null and making
+  // the transcript briefly flash/reflow at the end of a response.
   useEffect(() => {
-    if (pendingSend && live.runId === pendingSend.runId && live.finishStatus !== null) {
-      setPendingSend(null)
-    }
-  }, [pendingSend, live.runId, live.finishStatus])
+    if (!pendingSend || live.runId !== pendingSend.runId || live.finishStatus === null) return
+    if (live.finalizedMessageId && !finalizedMessageInDurable) return
+    setPendingSend(null)
+  }, [
+    pendingSend,
+    live.runId,
+    live.finishStatus,
+    live.finalizedMessageId,
+    finalizedMessageInDurable,
+  ])
 
   // Drop the optimistic user echo once the durable message lands (or the thread changes).
   useEffect(() => {
@@ -274,7 +282,7 @@ export function AgentChat({
   }
 
   if (agentsQuery.isLoading) {
-    return <LoadingState className={className} label="Loading agents..." />
+    return <div className={cn("h-full", className)} aria-busy="true" />
   }
   if (agentsQuery.isError) {
     return (
@@ -304,6 +312,10 @@ export function AgentChat({
     !(pendingUser.messageId && messages.some((message) => message.id === pendingUser.messageId))
       ? pendingUser
       : null
+  const anchorCurrentTurn = Boolean(
+    (pendingUser && pendingUser.threadId === threadId) ||
+      (pendingSend && pendingSend.threadId === threadId)
+  )
 
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
@@ -319,15 +331,16 @@ export function AgentChat({
       ) : (
         <ConversationPanel
           agent={currentAgent}
+          threadId={threadId}
           messages={messages}
           live={live}
           messagesLoading={threadId !== null && messagesQuery.isLoading}
           messagesError={
             threadId !== null && messagesQuery.isError ? "Could not load this conversation." : null
           }
-          streaming={live.active && live.runId === activeRunId}
           pendingUserText={pendingUserForThread?.text ?? null}
           pendingUserAttachments={pendingUserForThread?.attachments ?? []}
+          anchorCurrentTurn={anchorCurrentTurn}
           awaitingResponse={isRunning}
           reconnecting={reconnecting}
           sendError={sendError && sendError.threadId === threadId ? sendError.message : null}
@@ -352,14 +365,6 @@ export function AgentChat({
           composerDraftNonce={draftReseed.nonce}
         />
       )}
-    </div>
-  )
-}
-
-function LoadingState({ label, className }: { label: string; className?: string }) {
-  return (
-    <div className={cn("flex h-full items-center justify-center", className)}>
-      <p className="text-sm text-muted-foreground">{label}</p>
     </div>
   )
 }

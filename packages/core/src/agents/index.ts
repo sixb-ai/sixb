@@ -52,6 +52,11 @@ export {
   type AgentToolCallState,
 } from "./message"
 export {
+  type BuildAgentSystemPromptInput,
+  buildAgentSystemPrompt,
+  DEFAULT_AGENT_SYSTEM_CONTEXT,
+} from "./prompt"
+export {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
   requestAgentRun,
