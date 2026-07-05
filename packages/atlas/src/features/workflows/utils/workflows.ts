@@ -161,27 +161,6 @@ export function runTimeLabel(run: WorkflowRunSummary | WorkflowRunDetail): strin
   return `Started ${formatRelativeTime(run.startedAt)}`
 }
 
-export function initialStatusCounts(): Record<WorkflowRunStatus, number> {
-  return {
-    queued: 0,
-    running: 0,
-    waiting: 0,
-    succeeded: 0,
-    failed: 0,
-    cancelled: 0,
-  }
-}
-
-export function countRunsByStatus(
-  runs: readonly WorkflowRunSummary[]
-): Record<WorkflowRunStatus, number> {
-  const counts = initialStatusCounts()
-  for (const run of runs) {
-    counts[run.status] += 1
-  }
-  return counts
-}
-
 function timestampMs(value?: string): number | null {
   if (!value) return null
 

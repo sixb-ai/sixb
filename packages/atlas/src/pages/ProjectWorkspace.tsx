@@ -1,6 +1,7 @@
 import type { ObjectSummary } from "@sixb/client"
 import {
   getProjectInfoOptions,
+  getWorkflowRunOptions,
   listActionsOptions,
   listAgentsOptions,
   listConnectorsOptions,
@@ -25,6 +26,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useParams,
   useSearchParams,
 } from "react-router-dom"
 import { SidebarDataContext } from "../components/layout/sidebarData"
@@ -50,7 +52,6 @@ import { OntologyExplorer } from "./OntologyExplorer"
 import { PipelineDetailPage, PipelinesPage } from "./PipelinesPage"
 import { ProjectionDetailPage, ProjectionsPage } from "./ProjectionsPage"
 import { RuleDetailPage, RulesPage } from "./RulesPage"
-import { RunDetailPage } from "./RunDetailPage"
 import { SyncDetailPage, SyncsPage } from "./SyncsPage"
 import { WorkflowDetailPage } from "./WorkflowDetailPage"
 import { WorkflowsPage } from "./WorkflowsPage"
@@ -346,7 +347,7 @@ export function ProjectWorkspace() {
       <Route path="workflows" element={<WorkflowsPage />} />
       <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
       <Route path="runs" element={<RunsTabRedirect />} />
-      <Route path="runs/:runId" element={<RunDetailPage />} />
+      <Route path="runs/:runId" element={<RunRedirect />} />
       <Route
         path="*"
         element={constrained(
@@ -418,4 +419,36 @@ function RunsTabRedirect() {
   params.set("tab", "runs")
 
   return <Navigate to={`/workflows?${params.toString()}`} replace />
+}
+
+// A run is inspected on its workflow's canvas, so resolve the run's workflow and
+// hand off to `/workflows/:workflowId?run=:runId`.
+function RunRedirect() {
+  const { runId = "" } = useParams()
+  const runQuery = useQuery({
+    ...getWorkflowRunOptions({ path: { runId } }),
+    enabled: runId.length > 0,
+  })
+
+  if (!runId) {
+    return <Navigate to="/workflows?tab=runs" replace />
+  }
+
+  if (runQuery.isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          <span className="text-sm">Loading run...</span>
+        </div>
+      </div>
+    )
+  }
+
+  const workflowId = runQuery.data?.run.workflowId
+  if (!workflowId) {
+    return <Navigate to="/workflows?tab=runs" replace />
+  }
+
+  return <Navigate to={`/workflows/${workflowId}?run=${runId}`} replace />
 }

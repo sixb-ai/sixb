@@ -56,7 +56,7 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
         }),
       ])
       setOpen(false)
-      navigate(`/runs/${response.runId}`)
+      navigate(`/workflows/${workflow.id}?run=${response.runId}`)
     },
   })
 

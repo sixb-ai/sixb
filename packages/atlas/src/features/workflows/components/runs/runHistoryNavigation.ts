@@ -5,17 +5,17 @@ import type { WorkflowRunSummary } from "../../utils/workflows"
 const nestedInteractiveSelector =
   "a,button,input,select,textarea,[role='button'],[data-run-history-interactive]"
 
-export function runDetailPath(runId: string): string {
-  return `/runs/${runId}`
+function runDetailPath(workflowId: string, runId: string): string {
+  return `/workflows/${workflowId}?run=${runId}`
 }
 
-export function workflowDetailPath(workflowId: string): string {
+function workflowDetailPath(workflowId: string): string {
   return `/workflows/${workflowId}`
 }
 
 export function useRunHistoryNavigation(run: Pick<WorkflowRunSummary, "id" | "workflowId">) {
   const navigate = useNavigate()
-  const runPath = runDetailPath(run.id)
+  const runPath = runDetailPath(run.workflowId, run.id)
   const workflowPath = workflowDetailPath(run.workflowId)
 
   const openRun = () => navigate(runPath)
