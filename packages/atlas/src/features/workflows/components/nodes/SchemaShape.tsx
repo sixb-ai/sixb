@@ -30,7 +30,7 @@ export function SchemaShape({
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
   }
   return (
-    <ul className="divide-y divide-border/60 text-sm">
+    <ul className="divide-y divide-border/40 text-sm">
       {entries.map(([name, descriptor]) => (
         <SchemaFieldRow key={name} name={name} descriptor={descriptor} />
       ))}
@@ -41,16 +41,22 @@ export function SchemaShape({
 function SchemaFieldRow({ name, descriptor }: { name: string; descriptor: unknown }) {
   const wrapped = unwrapFieldDescriptor(descriptor)
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0">
-      <span className="min-w-0 font-medium text-foreground">{name}</span>
-      <span className="flex flex-wrap items-center gap-1.5">
+    <li className="group flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="break-all font-mono text-[13px] font-medium text-foreground">
+            {name}
+          </span>
+          {wrapped.hasRequiredFlag && !wrapped.required ? <Pill>optional</Pill> : null}
+          {wrapped.nullable ? <Pill>nullable</Pill> : null}
+        </div>
+        {wrapped.description ? (
+          <p className="text-xs leading-snug text-muted-foreground">{wrapped.description}</p>
+        ) : null}
+      </div>
+      <span className="shrink-0">
         <SchemaChip schema={wrapped.schema} />
-        {wrapped.nullable ? <Pill>nullable</Pill> : null}
-        {wrapped.hasRequiredFlag && !wrapped.required ? <Pill>optional</Pill> : null}
       </span>
-      {wrapped.description ? (
-        <p className="basis-full text-xs text-muted-foreground">{wrapped.description}</p>
-      ) : null}
     </li>
   )
 }
@@ -69,7 +75,7 @@ export function SchemaChip({ schema }: { schema: unknown }) {
 
 function Pill({ children }: { children: ReactNode }) {
   return (
-    <span className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+    <span className="inline-flex items-center rounded border border-border/70 px-1 py-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
       {children}
     </span>
   )

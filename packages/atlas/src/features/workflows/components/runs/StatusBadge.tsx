@@ -27,7 +27,11 @@ export function NodeStatusBadge({ status }: { status: WorkflowNodeStatus }) {
   )
 }
 
-function WorkflowRunStatusIcon({ status }: { status: WorkflowRunStatus | WorkflowNodeStatus }) {
+export function WorkflowRunStatusIcon({
+  status,
+}: {
+  status: WorkflowRunStatus | WorkflowNodeStatus
+}) {
   if (status === "queued") return <CircleDashed className="h-3 w-3" />
   if (status === "running") return <TimerReset className="h-3 w-3 animate-spin" />
   if (status === "waiting") return <Hourglass className="h-3 w-3" />
