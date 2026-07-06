@@ -63,7 +63,7 @@ const pd = await sixb.connector(pipedriveConnector)
 | `pd.deals.get(id, opts?)` | `GET /api/v2/deals/{id}` |
 | `pd.deals.search(opts)` | `GET /api/v2/deals/search` |
 | `pd.persons.list(opts?)` / `listAll` / `create` / `get` / `update` / `search` | `/api/v2/persons*` |
-| `pd.organizations.list(opts?)` / `get` / `search` | `GET /api/v2/organizations*` |
+| `pd.organizations.list(opts?)` / `listAll` / `create` / `get` / `update` / `search` | `/api/v2/organizations*` |
 | `pd.products.list(opts?)` / `get` / `search` | `GET /api/v2/products*` |
 | `pd.pipelines.list(opts?)` / `get` | `GET /api/v2/pipelines*` |
 | `pd.stages.list(opts?)` / `get` | `GET /api/v2/stages*` |
