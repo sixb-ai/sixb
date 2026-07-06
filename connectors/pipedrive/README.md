@@ -14,8 +14,9 @@ This connector covers high-payback CRM sync surface:
 - Item search
 - Inbound Pipedrive general webhook v2 deliveries
 
-The connector uses personal API tokens only. OAuth, writes, Projects/Tasks, file upload/download,
-and webhook management API calls are intentionally deferred.
+The connector uses personal API tokens only. OAuth, most writes, Projects/Tasks, file upload/download,
+and webhook management API calls are intentionally deferred. Person create/update writes are supported
+for CRM contact writeback flows.
 
 ## Register
 
@@ -61,7 +62,7 @@ const pd = await sixb.connector(pipedriveConnector)
 | `pd.deals.listAllArchived(opts?)` | cursor iterator over `GET /api/v2/deals/archived` |
 | `pd.deals.get(id, opts?)` | `GET /api/v2/deals/{id}` |
 | `pd.deals.search(opts)` | `GET /api/v2/deals/search` |
-| `pd.persons.list(opts?)` / `get` / `search` | `GET /api/v2/persons*` |
+| `pd.persons.list(opts?)` / `listAll` / `create` / `get` / `update` / `search` | `/api/v2/persons*` |
 | `pd.organizations.list(opts?)` / `get` / `search` | `GET /api/v2/organizations*` |
 | `pd.products.list(opts?)` / `get` / `search` | `GET /api/v2/products*` |
 | `pd.pipelines.list(opts?)` / `get` | `GET /api/v2/pipelines*` |
@@ -151,7 +152,7 @@ try {
 ## Not covered yet
 
 - OAuth
-- Creates, updates, and deletes
+- Most creates, updates, and deletes beyond Pipedrive persons
 - Projects, project boards, project phases, project templates, project fields, and tasks
 - File upload, remote file linking, file updates/deletes, and file download
 - Webhook management API calls
