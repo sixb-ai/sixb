@@ -8,7 +8,12 @@
  * and the hooks alike. React is an optional peer of `@sixb/client`; nothing here
  * may import it.
  */
-import { isSixbEvent, type SixbEvent, type SixbEventTopic, type SixbEventType } from "./events"
+import {
+  isSixbEvent,
+  type SixbEvent,
+  type SixbEventTopic,
+  type SixbEventType,
+} from "./events-model"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,

@@ -19,7 +19,7 @@ import type {
   SixbEventOfType,
   SixbEventTopic,
   SixbEventType,
-} from "./events"
+} from "./events-model"
 import { createEventSocket, type EventSocketState } from "./events-transport"
 import type { Client } from "./generated/client"
 

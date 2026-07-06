@@ -6,7 +6,7 @@
  * telemetry. Previously copy-pasted byte-for-byte across every app's
  * `lib/telemetryEvents.ts`; it lives here once.
  */
-import type { SixbEventOfType } from "./events"
+import type { SixbEventOfType } from "./events-model"
 import { decodeObjectId, encodeObjectId } from "./models"
 
 export interface TelemetryUpdate {
