@@ -1,17 +1,16 @@
 import type { PandaDocHttp } from "../http"
 import { pathPart } from "../http"
-import { listAllPages } from "../pagination"
 import type {
   PandaDocContact,
   PandaDocContactInput,
   PandaDocContactListOptions,
   PandaDocResultsResponse,
+  QueryParams,
 } from "../types"
 
 export interface ContactsResource {
   /** `GET /public/v1/contacts` */
   list(options?: PandaDocContactListOptions): Promise<PandaDocResultsResponse<PandaDocContact>>
-  listAll(options?: PandaDocContactListOptions): AsyncIterable<PandaDocContact>
   /** `POST /public/v1/contacts` */
   create(input: PandaDocContactInput): Promise<PandaDocContact>
   /** `GET /public/v1/contacts/{id}` */
@@ -23,12 +22,9 @@ export interface ContactsResource {
 }
 
 export function contactsResource(http: PandaDocHttp): ContactsResource {
-  const resource: ContactsResource = {
+  return {
     list(options) {
-      return http.get("public/v1/contacts", options)
-    },
-    listAll(options) {
-      return listAllPages(resource.list, (page) => page.results, options)
+      return http.get("public/v1/contacts", options as QueryParams | undefined)
     },
     create(input) {
       return http.post("public/v1/contacts", input)
@@ -43,6 +39,4 @@ export function contactsResource(http: PandaDocHttp): ContactsResource {
       return http.delete(`public/v1/contacts/${pathPart(id, "contact id")}`)
     },
   }
-
-  return resource
 }
