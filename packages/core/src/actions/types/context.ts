@@ -145,6 +145,7 @@ export interface ActionValidationContext<
 export interface GlobalActionWritebackContext<TParams extends Record<string, unknown>>
   extends BaseActionPhaseContext<TParams> {
   readonly sixb: ActionRuntimeFacade
+  readonly read: ActionReadFacade
 }
 
 export interface ActionWritebackContext<
@@ -153,6 +154,7 @@ export interface ActionWritebackContext<
 > extends BaseActionPhaseContext<TParams> {
   readonly sixb: ActionRuntimeFacade
   readonly target: ActionTargetObject<TObjectType>
+  readonly read: ActionReadFacade
 }
 
 export interface GlobalActionEditsContext<TParams extends Record<string, unknown>, TWriteback>
