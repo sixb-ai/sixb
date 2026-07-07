@@ -56,7 +56,7 @@ export function WorkflowRunInputFields({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {entries.map(([name, descriptor]) => (
         <WorkflowInputField
           key={name}
@@ -136,8 +136,8 @@ function WorkflowInputField({
   if (isObjectSchema(schema)) {
     const entries = Object.entries(schema.properties)
     return (
-      <fieldset className="rounded-lg border border-border bg-muted/20 p-4">
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+      <fieldset className="min-w-0 rounded-lg border border-border bg-muted/20 p-4">
+        <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2">
           <legend className="font-medium text-foreground">{name}</legend>
           <SchemaChip schema={spec.schema} />
           {spec.required ? <RequiredPill /> : <OptionalPill />}
@@ -148,7 +148,7 @@ function WorkflowInputField({
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">No fields</p>
         ) : (
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             {entries.map(([fieldName, fieldDescriptor]) => (
               <WorkflowInputField
                 key={fieldName}
@@ -170,8 +170,8 @@ function WorkflowInputField({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
+    <div className="min-w-0 space-y-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Label htmlFor={controlId} className="font-medium text-foreground">
           {name}
         </Label>
@@ -301,7 +301,7 @@ function ObjectRefInput({
   const disabled = objectsQuery.isLoading || objects.length === 0
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <Combobox
         value={value}
         disabled={disabled}
@@ -345,7 +345,7 @@ function EnumInput({
 }) {
   return (
     <Select value={value} onValueChange={(next) => onChange(path, next)}>
-      <SelectTrigger aria-describedby={errorId} className="bg-background">
+      <SelectTrigger aria-describedby={errorId} className="w-full min-w-0 bg-background">
         <SelectValue placeholder="Choose a value" />
       </SelectTrigger>
       <SelectContent>
@@ -372,7 +372,7 @@ function BooleanInput({
 }) {
   return (
     <Select value={value} onValueChange={(next) => onChange(path, next)}>
-      <SelectTrigger aria-describedby={errorId} className="bg-background">
+      <SelectTrigger aria-describedby={errorId} className="w-full min-w-0 bg-background">
         <SelectValue placeholder="Choose true or false" />
       </SelectTrigger>
       <SelectContent>
@@ -430,7 +430,7 @@ function JsonFieldInput({
   onChange: (path: readonly string[], value: string) => void
 }) {
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <textarea
         id={id}
         value={value}
@@ -438,7 +438,7 @@ function JsonFieldInput({
         placeholder={defaultJsonForSchema(schema) || "{ ... }"}
         spellCheck={false}
         aria-describedby={errorId}
-        className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground shadow-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        className="min-h-24 w-full min-w-0 resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed text-foreground shadow-xs outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
       />
       <p className="text-xs text-muted-foreground">
         This field uses a structured value. Enter only this field as JSON.
