@@ -1,12 +1,14 @@
 import type {
   GetDatasetResponse,
   GetPipelineResponse,
+  GetPipelineRunResponse,
   ListDatasetRowsResponse,
   ListPipelinesResponse,
 } from "@sixb/client"
 import {
   getDatasetOptions,
   getPipelineOptions,
+  getPipelineRunOptions,
   listDatasetRowsOptions,
   listPipelineRunsOptions,
   listPipelinesOptions,
@@ -49,9 +51,11 @@ import {
 } from "@xyflow/react"
 import {
   Ban,
+  Check,
   CheckCircle2,
   ChevronLeft,
   Clock3,
+  Copy,
   Database,
   FunctionSquare,
   History,
@@ -63,7 +67,7 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { type ReactNode, useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { type DatasetGridColumnMeta, DatasetTableGrid } from "../features/datasets/DatasetTableGrid"
 import { usePipelineLiveUpdates } from "../features/pipelines/hooks/usePipelineLiveUpdates"
@@ -129,21 +133,41 @@ function runStatusClasses(status: PipelineRunStatus): string {
   }
 }
 
-function RunStatusBadge({ status }: { status: PipelineRunStatus }) {
-  const Icon =
-    status === "succeeded"
-      ? CheckCircle2
-      : status === "failed"
-        ? XCircle
-        : status === "cancelled"
-          ? Ban
-          : LoaderCircle
+function runStatusIcon(status: PipelineRunStatus) {
+  return status === "succeeded"
+    ? CheckCircle2
+    : status === "failed"
+      ? XCircle
+      : status === "cancelled"
+        ? Ban
+        : LoaderCircle
+}
 
+function RunStatusBadge({ status }: { status: PipelineRunStatus }) {
+  const Icon = runStatusIcon(status)
   return (
     <Badge variant="outline" className={cn("rounded-md", runStatusClasses(status))}>
       <Icon className={cn("h-3 w-3", status === "running" && "animate-spin")} />
       {runStatusLabel(status)}
     </Badge>
+  )
+}
+
+// Compact icon-only status indicator for tight layouts like the step timeline.
+function RunStatusIcon({ status }: { status: PipelineRunStatus }) {
+  const Icon = runStatusIcon(status)
+  return (
+    <Icon
+      className={cn(
+        "h-4 w-4 shrink-0",
+        status === "succeeded" && "text-emerald-600 dark:text-emerald-400",
+        status === "failed" && "text-destructive",
+        status === "cancelled" && "text-amber-600 dark:text-amber-400",
+        status === "running" && "text-sky-600 dark:text-sky-400",
+        status === "running" && "animate-spin"
+      )}
+      aria-label={runStatusLabel(status)}
+    />
   )
 }
 
@@ -637,11 +661,13 @@ function PipelineCanvas({
   selectedDatasetId,
   onDatasetSelect,
   drawerOpen,
+  runsOpen,
 }: {
   pipeline: PipelineSummary
   selectedDatasetId: string | null
   onDatasetSelect: (datasetId: string | null) => void
   drawerOpen: boolean
+  runsOpen: boolean
 }) {
   const built = useMemo(() => buildPipelineGraph(pipeline), [pipeline])
   const [nodes, setNodes, onNodesChange] = useNodesState<PipelineGraphFlowNode>(built.nodes)
@@ -663,14 +689,15 @@ function PipelineCanvas({
     )
   }, [selectedDatasetId, setNodes])
 
-  // When the drawer pushes the canvas, re-fit once the height transition settles.
+  // Re-fit when the dataset drawer or runs side panel opens/closes so nodes
+  // stay in view as the canvas area resizes.
   useEffect(() => {
-    const padding = drawerOpen ? 0.18 : 0.25
+    const padding = drawerOpen || runsOpen ? 0.2 : 0.25
     const timer = setTimeout(() => {
       fitView({ duration: 320, padding, maxZoom: 1.1 })
     }, 320)
     return () => clearTimeout(timer)
-  }, [drawerOpen, fitView])
+  }, [drawerOpen, runsOpen, fitView])
 
   return (
     <ReactFlow
@@ -708,79 +735,365 @@ function PipelineCanvas({
   )
 }
 
-function RunsFloatingPanel({
+function PipelineSidePanel({ open, children }: { open: boolean; children: ReactNode }) {
+  return (
+    <aside
+      className={cn(
+        "h-full shrink-0 overflow-hidden border-l border-border bg-card transition-[width] duration-300 ease-out",
+        open ? "w-[22rem] max-w-[calc(100vw-1rem)]" : "w-0"
+      )}
+      aria-hidden={!open}
+    >
+      <div className="flex h-full w-[22rem] max-w-[calc(100vw-1rem)] flex-col">{children}</div>
+    </aside>
+  )
+}
+
+function shortRunId(runId: string): string {
+  return runId.startsWith("run_") ? runId.slice(4) : runId
+}
+
+function formatAbsoluteDate(value?: string): string {
+  if (!value) return "—"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
+    date
+  )
+}
+
+function stepDuration(step: {
+  status: PipelineRunStatus
+  startedAt: string
+  finishedAt?: string
+}): string {
+  if (!step.finishedAt) return step.status === "running" ? "Running" : "Pending"
+  const ms = new Date(step.finishedAt).getTime() - new Date(step.startedAt).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return "Unknown"
+  if (ms < 1000) return "<1s"
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+}
+
+function PanelHeader({
+  badge,
+  title,
+  copyValue,
+  onBack,
+  onClose,
+}: {
+  badge?: ReactNode
+  title: string
+  copyValue?: string
+  onBack?: () => void
+  onClose: () => void
+}) {
+  return (
+    <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
+      {onBack ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={onBack}
+          aria-label="Back"
+          className="shrink-0"
+        >
+          <ChevronLeft />
+        </Button>
+      ) : null}
+      <h2
+        className={cn(
+          "min-w-0 truncate text-sm font-medium text-foreground",
+          copyValue && "font-mono"
+        )}
+        title={copyValue ?? undefined}
+      >
+        {title}
+      </h2>
+      {badge}
+      {copyValue ? <CopyButton value={copyValue} label="Copy run ID" /> : null}
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        onClick={onClose}
+        aria-label="Close"
+        className="-mr-1 ml-auto shrink-0"
+      >
+        <X />
+      </Button>
+    </div>
+  )
+}
+
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+    } catch {
+      // Clipboard access can be denied; fail silently.
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      onClick={onCopy}
+      aria-label={label}
+      title={label}
+      className="shrink-0 text-muted-foreground hover:text-foreground"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy />}
+    </Button>
+  )
+}
+
+function RunStat({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-lg border border-border/60 bg-background/30 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      <p className={cn("mt-0.5 truncate text-sm text-foreground", mono && "font-mono text-xs")}>
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function RunsListPanel({
   pipelineId,
-  open,
+  pendingRun,
+  onSelectRun,
   onClose,
 }: {
   pipelineId: string
-  open: boolean
+  pendingRun: { id: string; queuedAt: string } | null
+  onSelectRun: (runId: string) => void
   onClose: () => void
 }) {
   const runsQuery = useQuery({
     ...listPipelineRunsOptions({
-      query: { pipelineId, limit: "20", order: "desc" },
+      query: { pipelineId, limit: "50", order: "desc" },
     }),
-    enabled: open,
   })
-
-  if (!open) return null
-
   const runs = runsQuery.data?.runs ?? []
+  // Show the optimistic placeholder only until the real run lands in the list.
+  const showPending = pendingRun !== null && !runs.some((run) => run.id === pendingRun.id)
+  const itemCount = runs.length + (showPending ? 1 : 0)
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-16 z-20 w-[320px] max-w-[calc(100%-2rem)] overflow-hidden rounded-lg border border-border bg-card shadow-none ">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <History className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="text-[13px] font-medium text-foreground">Runs</span>
-          {runs.length > 0 && (
-            <Badge variant="secondary" className="bg-muted text-[10px]">
-              {runs.length}
+    <>
+      <PanelHeader
+        badge={
+          itemCount > 0 ? (
+            <Badge variant="secondary" className="rounded px-1.5 py-0 text-[10px] tabular-nums">
+              {itemCount}
             </Badge>
-          )}
-        </div>
-        <Button type="button" variant="ghost" size="icon-xs" onClick={onClose} className="-mr-1.5">
-          <X />
-        </Button>
-      </div>
-      <div className="max-h-[60vh] overflow-y-auto">
+          ) : null
+        }
+        title="Run history"
+        onClose={onClose}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-auto-hide">
         {runsQuery.isLoading ? (
-          <div className="px-4 py-8">
-            <div className="flex items-center gap-3 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              <span className="text-sm">Loading runs...</span>
-            </div>
+          <div className="flex items-center gap-3 px-4 py-8 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading runs...</span>
           </div>
-        ) : runs.length === 0 ? (
-          <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+        ) : runsQuery.isError ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            Could not load runs for this pipeline.
+          </p>
+        ) : itemCount === 0 ? (
+          <p className="px-4 py-8 text-center text-xs text-muted-foreground">
             No runs yet. Trigger one with the Run button.
-          </div>
+          </p>
         ) : (
-          <ul className="divide-y divide-border/30">
+          <ul className="divide-y divide-border/40">
+            {showPending && pendingRun ? (
+              <li
+                aria-busy="true"
+                className="flex items-start justify-between gap-2 border-b border-dashed border-border/50 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {pendingRun.id}
+                  </p>
+                  <p className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Queued · starting...
+                  </p>
+                </div>
+                <RunStatusBadge status="running" />
+              </li>
+            ) : null}
             {runs.map((run) => (
-              <li key={run.id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-2">
+              <li key={run.id}>
+                <button
+                  type="button"
+                  onClick={() => onSelectRun(run.id)}
+                  className="flex w-full items-start justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                >
                   <div className="min-w-0">
                     <p className="truncate font-mono text-[11px] text-foreground">{run.id}</p>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
                       {formatRelativeTime(run.startedAt)} · {runDuration(run)}
                     </p>
-                    {run.error && (
+                    {run.error ? (
                       <p className="mt-1 break-words text-[11px] text-destructive">
                         {run.error.name ? `${run.error.name}: ` : ""}
                         {run.error.message}
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   <RunStatusBadge status={run.status} />
-                </div>
+                </button>
               </li>
             ))}
           </ul>
         )}
       </div>
-    </div>
+    </>
+  )
+}
+
+function RunSummaryPanel({
+  runId,
+  pipelineId,
+  onBack,
+  onClose,
+  onOpenDataset,
+}: {
+  runId: string
+  pipelineId: string
+  onBack: () => void
+  onClose: () => void
+  onOpenDataset: (datasetId: string) => void
+}) {
+  const runQuery = useQuery({
+    ...getPipelineRunOptions({ path: { runId } }),
+    enabled: runId.length > 0,
+  })
+  const data: GetPipelineRunResponse | undefined = runQuery.data
+  const run = data?.run
+  const steps = data?.steps ?? []
+
+  return (
+    <>
+      <PanelHeader
+        badge={run ? <RunStatusBadge status={run.status} /> : null}
+        title={run ? shortRunId(runId) : "Loading..."}
+        copyValue={runId}
+        onBack={onBack}
+        onClose={onClose}
+      />
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 scrollbar-auto-hide">
+        {runQuery.isLoading ? (
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            <span className="text-sm">Loading run...</span>
+          </div>
+        ) : runQuery.isError || !run ? (
+          <p className="text-center text-sm text-muted-foreground">Could not load this run.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-2">
+              <RunStat label="Duration" value={runDuration(run)} />
+              <RunStat label="Started" value={formatAbsoluteDate(run.startedAt)} />
+              <RunStat label="Finished" value={formatAbsoluteDate(run.finishedAt)} />
+              <RunStat label="Pipeline" value={pipelineId} mono />
+            </div>
+
+            {run.error ? (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                {run.error.name ? `${run.error.name}: ` : ""}
+                {run.error.message}
+              </div>
+            ) : null}
+
+            {run.output ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full justify-start"
+                onClick={() => onOpenDataset(run.output!.datasetId)}
+              >
+                <Database className="h-3.5 w-3.5" />
+                Open output dataset
+              </Button>
+            ) : null}
+
+            <div>
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Steps · {steps.length}
+              </p>
+              {steps.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No steps recorded yet.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {steps.map((step) => (
+                    <li
+                      key={step.id}
+                      className="rounded-lg border border-border/60 bg-background/30 p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-[11px] text-foreground">
+                            {step.stepId}
+                          </p>
+                          <p className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {step.mode}
+                          </p>
+                        </div>
+                        <RunStatusIcon status={step.status} />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                        <span>{stepDuration(step)}</span>
+                        {step.rowsWritten !== undefined ? (
+                          <span>{formatRowCount(step.rowsWritten)} rows</span>
+                        ) : null}
+                      </div>
+                      {step.output ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenDataset(step.output!.datasetId)}
+                          className="mt-2 inline-flex items-center gap-1 text-[11px] text-foreground underline-offset-2 hover:underline"
+                        >
+                          <Database className="h-3 w-3" />
+                          {step.output.datasetId}
+                        </button>
+                      ) : null}
+                      {step.error ? (
+                        <p className="mt-2 break-words text-[11px] text-destructive">
+                          {step.error.name ? `${step.error.name}: ` : ""}
+                          {step.error.message}
+                        </p>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </>
   )
 }
 
@@ -954,7 +1267,9 @@ export function PipelineDetailPage() {
   const navigate = useNavigate()
   const decodedPipelineId = decodeURIComponent(pipelineId)
   const [runsOpen, setRunsOpen] = useState(false)
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [selectedDatasetId, setSelectedDatasetId] = useState<string | null>(null)
+  const [pendingRun, setPendingRun] = useState<{ id: string; queuedAt: string } | null>(null)
   usePipelineLiveUpdates({
     pipelineId: decodedPipelineId,
     enabled: decodedPipelineId.length > 0,
@@ -972,11 +1287,30 @@ export function PipelineDetailPage() {
     requestRun.mutate(
       { path: { pipelineId: decodedPipelineId } },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          setActiveRunId(null)
+          setPendingRun({ id: data.runId, queuedAt: data.queuedAt })
           setRunsOpen(true)
         },
       }
     )
+  }
+
+  // Toggle the Runs button: if a run is selected, return to the list; otherwise
+  // open/close the runs list.
+  const toggleRuns = () => {
+    if (activeRunId) {
+      setActiveRunId(null)
+      setRunsOpen(true)
+      return
+    }
+    setRunsOpen((open) => !open)
+  }
+
+  const closeRunsPanel = () => {
+    setRunsOpen(false)
+    setActiveRunId(null)
+    setPendingRun(null)
   }
 
   if (pipelineQuery.isLoading) {
@@ -1019,98 +1353,118 @@ export function PipelineDetailPage() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <ReactFlowProvider>
-        <div className="relative min-h-0 flex-1">
-          <PipelineCanvas
-            pipeline={pipeline}
-            selectedDatasetId={selectedDatasetId}
-            onDatasetSelect={setSelectedDatasetId}
-            drawerOpen={drawerOpen}
-          />
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="relative min-h-0 flex-1">
+              <PipelineCanvas
+                pipeline={pipeline}
+                selectedDatasetId={selectedDatasetId}
+                onDatasetSelect={setSelectedDatasetId}
+                drawerOpen={drawerOpen}
+                runsOpen={runsOpen}
+              />
 
-          {/* Floating header */}
-          <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
-            <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card shadow-sm ">
-              <div className="flex items-center gap-3 px-3 py-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => navigate("/pipelines")}
-                  aria-label="Back to pipelines"
-                >
-                  <ChevronLeft />
-                </Button>
-                <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Pipeline
-                  </p>
-                  <h1 className="truncate text-sm font-medium text-foreground">
-                    {pipelineName(pipeline)}
-                  </h1>
-                </div>
-                {pipeline.latestRun && (
-                  <div className="ml-1 hidden shrink-0 border-l border-border pl-3 sm:block">
-                    <RunStatusBadge status={pipeline.latestRun.status} />
-                  </div>
-                )}
-              </div>
-              {(pipeline.graph.nodes.length > 0 || pipeline.triggers.length > 0) && (
-                <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-                  <span>{pipelineSummary(pipeline)}</span>
-                  {pipeline.triggers.map((trigger) => (
-                    <span
-                      key={triggerLabel(trigger)}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5"
+              {/* Floating header */}
+              <div className="pointer-events-none absolute left-4 right-4 top-4 z-10 flex flex-wrap items-start justify-between gap-3">
+                <div className="pointer-events-auto min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card shadow-sm ">
+                  <div className="flex items-center gap-3 px-3 py-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => navigate("/pipelines")}
+                      aria-label="Back to pipelines"
                     >
-                      <Clock3 className="h-3 w-3" />
-                      {triggerLabel(trigger)}
-                    </span>
-                  ))}
+                      <ChevronLeft />
+                    </Button>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        Pipeline
+                      </p>
+                      <h1 className="truncate text-sm font-medium text-foreground">
+                        {pipelineName(pipeline)}
+                      </h1>
+                    </div>
+                    {pipeline.latestRun && (
+                      <div className="ml-1 hidden shrink-0 border-l border-border pl-3 sm:block">
+                        <RunStatusBadge status={pipeline.latestRun.status} />
+                      </div>
+                    )}
+                  </div>
+                  {(pipeline.graph.nodes.length > 0 || pipeline.triggers.length > 0) && (
+                    <div className="flex flex-wrap items-center gap-2 border-t border-border bg-background/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+                      <span>{pipelineSummary(pipeline)}</span>
+                      {pipeline.triggers.map((trigger) => (
+                        <span
+                          key={triggerLabel(trigger)}
+                          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5"
+                        >
+                          <Clock3 className="h-3 w-3" />
+                          {triggerLabel(trigger)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-border bg-card p-1.5 shadow-sm ">
+                  <Button
+                    type="button"
+                    variant={runsOpen || activeRunId ? "secondary" : "ghost"}
+                    size="sm"
+                    onClick={toggleRuns}
+                    aria-expanded={runsOpen || activeRunId !== null}
+                  >
+                    <History />
+                    Runs
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={handleRequestRun}
+                    disabled={requestRun.isPending}
+                  >
+                    {requestRun.isPending ? <LoaderCircle className="animate-spin" /> : <Play />}
+                    Run
+                  </Button>
+                </div>
+              </div>
+
+              {requestRun.error && (
+                <div className="pointer-events-auto absolute bottom-4 left-4 z-10 max-w-sm rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm ">
+                  {errorMessage(requestRun.error)}
                 </div>
               )}
             </div>
 
-            <div className="pointer-events-auto flex items-center gap-2 rounded-lg border border-border bg-card p-1.5 shadow-sm ">
-              <Button
-                type="button"
-                variant={runsOpen ? "secondary" : "ghost"}
-                size="sm"
-                onClick={() => setRunsOpen((open) => !open)}
-                aria-expanded={runsOpen}
-              >
-                <History />
-                Runs
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={handleRequestRun}
-                disabled={requestRun.isPending}
-              >
-                {requestRun.isPending ? <LoaderCircle className="animate-spin" /> : <Play />}
-                Run
-              </Button>
-            </div>
+            <DatasetPreviewDrawer
+              datasetId={selectedDatasetId}
+              open={drawerOpen}
+              onClose={() => setSelectedDatasetId(null)}
+            />
           </div>
 
-          <RunsFloatingPanel
-            pipelineId={decodedPipelineId}
-            open={runsOpen}
-            onClose={() => setRunsOpen(false)}
-          />
-
-          {requestRun.error && (
-            <div className="pointer-events-auto absolute bottom-4 right-4 z-10 max-w-sm rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-sm ">
-              {errorMessage(requestRun.error)}
-            </div>
-          )}
+          <PipelineSidePanel open={runsOpen}>
+            {runsOpen ? (
+              activeRunId ? (
+                <RunSummaryPanel
+                  runId={activeRunId}
+                  pipelineId={decodedPipelineId}
+                  onBack={() => setActiveRunId(null)}
+                  onClose={closeRunsPanel}
+                  onOpenDataset={setSelectedDatasetId}
+                />
+              ) : (
+                <RunsListPanel
+                  pipelineId={decodedPipelineId}
+                  pendingRun={pendingRun}
+                  onSelectRun={setActiveRunId}
+                  onClose={closeRunsPanel}
+                />
+              )
+            ) : null}
+          </PipelineSidePanel>
         </div>
-
-        <DatasetPreviewDrawer
-          datasetId={selectedDatasetId}
-          open={drawerOpen}
-          onClose={() => setSelectedDatasetId(null)}
-        />
       </ReactFlowProvider>
     </div>
   )
