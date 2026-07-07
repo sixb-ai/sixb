@@ -11,5 +11,10 @@ export const sixb = createSixb({
   lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: new InMemoryQueues(),
-  sandboxes: new LocalSandboxFactory({ timeout: 30_000 }),
+  sandboxes: new LocalSandboxFactory({
+    timeout: 30_000,
+    env: {
+      HOME: "/tmp",
+    },
+  }),
 })

@@ -109,6 +109,26 @@ function toolThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
+function toolOnlyModel(): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      return stream([
+        { type: "stream-start", warnings: [] },
+        {
+          type: "tool-call",
+          toolCallId: `tool-only-${call}`,
+          toolName: "echo",
+          input: JSON.stringify({ value: `step-${call}` }),
+        },
+        finish("tool-calls"),
+      ])
+    },
+  })
+}
+
 function bashThenAnswerModel(): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
@@ -1247,6 +1267,52 @@ describe("AgentWorker", () => {
         runId,
         attempt: 1,
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("adds visible guidance when the step limit is reached before an answer", async () => {
+    const sixb = buildSixb(toolOnlyModel())
+    const storage = agentStorageOf(sixb)
+
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({
+        tools: echoTool,
+      })
+    )
+    await worker.start()
+    try {
+      const { threadId } = await sixb.agents.request({
+        agentId: "assistant",
+        text: "use tools forever",
+      })
+
+      const run = await waitFor(
+        async () => {
+          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+          const found = list.runs[0]
+          return found && found.status !== "running" ? found : null
+        },
+        { label: "tool-only run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(run.finishReason).toBe("tool-calls")
+
+      const messages = await listMessages(storage, threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      const parts = assistant?.parts ?? []
+      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
+      expect(
+        parts.some(
+          (part) =>
+            part.type === "text" &&
+            part.text.includes("configured 4-step limit") &&
+            part.text.includes("producing a final answer")
+        )
+      ).toBe(true)
     } finally {
       await worker.stop()
     }
