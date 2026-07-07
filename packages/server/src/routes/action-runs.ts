@@ -1,14 +1,13 @@
 import { type ActionRunRecord, canViewActionRun, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { ZodError, z } from "zod"
+import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
-  createFileContentResponse,
+  createContextualFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
-  resolveFileRefAtPath,
 } from "../files/content"
 import {
   ActionRunDetailSchema,
@@ -87,47 +86,28 @@ async function actionRunFileContentResponse(
 ) {
   const { authz } = requestAuthState(context)
 
-  try {
-    const storage = sixb.storage.actionRuns
-    if (!storage) {
-      context.set.status = 400
-      return { error: "Action run storage is not configured" }
-    }
-
-    const parsed = ActionRunFileContentQuerySchema.parse(context.query)
-    const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-    if (!run || !canViewActionRun(authz, run)) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const fileRef = resolveFileRefAtPath(serializeActionRunDetail(run), parsed.path)
-    if (!fileRef) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
-      fileRef,
-      disposition: parsed.disposition,
-      head: options.head,
-      rangeHeader: context.request.headers.get("range"),
-    })
-    if (!response) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    return response
-  } catch (error) {
-    if (error instanceof ZodError) {
-      context.set.status = 400
-      return { error: "Invalid file content query" }
-    }
-
-    throw error
+  const storage = sixb.storage.actionRuns
+  if (!storage) {
+    context.set.status = 400
+    return { error: "Action run storage is not configured" }
   }
+
+  return createContextualFileContentResponse({
+    blobStorage: sixb.blobStorage,
+    query: context.query,
+    querySchema: ActionRunFileContentQuerySchema,
+    request: context.request,
+    set: context.set,
+    head: options.head,
+    resolveRoot: async () => {
+      const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
+      if (!run || !canViewActionRun(authz, run)) {
+        return null
+      }
+
+      return serializeActionRunDetail(run)
+    },
+  })
 }
 
 export function registerActionRunRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {

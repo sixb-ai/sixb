@@ -19,10 +19,9 @@ import { ZodError, z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import {
-  createFileContentResponse,
+  createContextualFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
-  resolveFileRefAtPath,
 } from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -191,46 +190,23 @@ async function objectFileContentResponse(
 ) {
   const { scoped } = requestAuthState(context)
 
-  try {
-    const parsed = ObjectFileContentQuerySchema.parse(context.query)
-    const row = await getObjectRow(sixb, scoped, context.params)
-    if (!row) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
+  return createContextualFileContentResponse({
+    blobStorage: sixb.blobStorage,
+    query: context.query,
+    querySchema: ObjectFileContentQuerySchema,
+    request: context.request,
+    set: context.set,
+    head: options.head,
+    hideError: (error) => error instanceof AuthorizationError,
+    resolveRoot: async () => {
+      const row = await getObjectRow(sixb, scoped, context.params)
+      if (!row) {
+        return null
+      }
 
-    const fileRef = resolveFileRefAtPath(serializeObject(row), parsed.path)
-    if (!fileRef) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
-      fileRef,
-      disposition: parsed.disposition,
-      head: options.head,
-      rangeHeader: context.request.headers.get("range"),
-    })
-    if (!response) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    return response
-  } catch (error) {
-    if (error instanceof AuthorizationError) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    if (error instanceof ZodError) {
-      context.set.status = 400
-      return { error: "Invalid file content query" }
-    }
-
-    throw error
-  }
+      return serializeObject(row)
+    },
+  })
 }
 
 export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {

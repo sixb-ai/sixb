@@ -6,6 +6,7 @@ import {
   isFileRef,
   supportsRangeRead,
 } from "@sixb/core"
+import { ZodError } from "zod"
 
 export type FileContentDisposition = "inline" | "attachment"
 
@@ -15,6 +16,24 @@ export interface FileContentResponseInput {
   readonly disposition?: FileContentDisposition
   readonly head?: boolean
   readonly rangeHeader?: string | null
+}
+
+export interface FileContentQuery {
+  readonly path: string
+  readonly disposition?: FileContentDisposition
+}
+
+export interface ContextualFileContentResponseInput<TQuery extends FileContentQuery> {
+  readonly blobStorage: BlobStorage
+  readonly query: unknown
+  readonly querySchema: { parse(value: unknown): TQuery }
+  readonly request: Request
+  readonly set: { status?: number | string }
+  readonly head?: boolean
+  readonly resolveRoot: (query: TQuery) => Promise<unknown | null | undefined> | unknown | null
+  readonly hideError?: (error: unknown) => boolean
+  readonly missingMessage?: string
+  readonly invalidQueryMessage?: string
 }
 
 export function fileContentGetResponses() {
@@ -136,9 +155,65 @@ export async function createFileContentResponse(
   }
 }
 
+/**
+ * Serve a FileRef only through the record that contains it. Callers authorize the containing
+ * context first, then this helper validates the content-addressed FileRef before streaming.
+ */
+export async function createContextualFileContentResponse<TQuery extends FileContentQuery>(
+  input: ContextualFileContentResponseInput<TQuery>
+): Promise<Response | { readonly error: string }> {
+  const missingMessage = input.missingMessage ?? "File not found"
+  const invalidQueryMessage = input.invalidQueryMessage ?? "Invalid file content query"
+
+  try {
+    const parsed = input.querySchema.parse(input.query)
+    const root = await input.resolveRoot(parsed)
+    if (root === null || root === undefined) {
+      return fileContentNotFound(input.set, missingMessage)
+    }
+
+    const fileRef = resolveFileRefAtPath(root, parsed.path)
+    if (!fileRef) {
+      return fileContentNotFound(input.set, missingMessage)
+    }
+
+    const response = await createFileContentResponse({
+      blobStorage: input.blobStorage,
+      fileRef,
+      disposition: parsed.disposition,
+      head: input.head,
+      rangeHeader: input.request.headers.get("range"),
+    })
+    if (!response) {
+      return fileContentNotFound(input.set, missingMessage)
+    }
+
+    return response
+  } catch (error) {
+    if (error instanceof ZodError) {
+      input.set.status = 400
+      return { error: invalidQueryMessage }
+    }
+
+    if (input.hideError?.(error)) {
+      return fileContentNotFound(input.set, missingMessage)
+    }
+
+    throw error
+  }
+}
+
 export function resolveFileRefAtPath(root: unknown, path: string): FileRef | null {
   const value = resolveJsonPointer(root, path)
   return isFileRef(value) ? value : null
+}
+
+function fileContentNotFound(
+  set: { status?: number | string },
+  message: string
+): { readonly error: string } {
+  set.status = 404
+  return { error: message }
 }
 
 function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
@@ -166,11 +241,14 @@ function resolveJsonPointer(root: unknown, pointer: string): unknown {
       if (!Number.isInteger(index) || index < 0 || index.toString() !== segment) {
         return undefined
       }
+      if (!Object.hasOwn(current, segment)) {
+        return undefined
+      }
       current = current[index]
       continue
     }
 
-    if (typeof current !== "object" || current === null || !(segment in current)) {
+    if (typeof current !== "object" || current === null || !Object.hasOwn(current, segment)) {
       return undefined
     }
 
