@@ -78,7 +78,7 @@ const pd = await sixb.connector(pandadocConnector)
 | `pd.documentSections.*` | `/public/v1/documents/{id}/sections*` |
 | `pd.documentDsv.addNamedItems(documentId, input)` | `POST /public/v2/dsv/{id}/add-named-items` |
 | `pd.templates.*` | `/public/v1/templates*` and `/public/v2/templates/{id}/settings` |
-| `pd.contacts.list(opts?)` / `listAll` / `create` / `get` / `update` / `delete` | `/public/v1/contacts*` |
+| `pd.contacts.list({ email? })` / `create` / `get` / `update` / `delete` | `/public/v1/contacts*` |
 | `pd.contentLibraryItems.*` | `/public/v1/content-library-items*` |
 | `pd.forms.list(opts?)` / `listAll` | `GET /public/v1/forms` |
 | `pd.members.list()` / `listAll` / `current` / `get` / `createToken` | `/public/v1/members*` |
@@ -108,9 +108,13 @@ strings and serializes them to PandaDoc's code values for `status` and `status__
 
 ## Pagination
 
-PandaDoc list endpoints use page/count pagination. `listAll(...)` starts at `page` or `1`, preserves
-the requested `count`, and stops on an empty page or a page shorter than the requested count. It does
-not silently increase page size.
+Most PandaDoc list endpoints use page/count pagination. `listAll(...)` starts at `page` or `1`,
+preserves the requested `count`, and stops on an empty page or a page shorter than the requested
+count. It does not silently increase page size.
+
+The contacts list endpoint is an exception in PandaDoc's public API: it only supports an optional
+exact-match `email` filter and does not expose `page`/`count`, so the connector intentionally does
+not provide `pd.contacts.listAll(...)`.
 
 ## Downloads
 

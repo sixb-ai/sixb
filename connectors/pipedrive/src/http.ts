@@ -11,12 +11,40 @@ export interface PipedriveHttpClients {
 
 export interface PipedriveHttp {
   get<T>(version: PipedriveApiVersion, path: string, query?: QueryParams): Promise<T>
+  post<T>(
+    version: PipedriveApiVersion,
+    path: string,
+    body?: unknown,
+    query?: QueryParams
+  ): Promise<T>
+  patch<T>(
+    version: PipedriveApiVersion,
+    path: string,
+    body?: unknown,
+    query?: QueryParams
+  ): Promise<T>
 }
 
 export function createPipedriveHttp(clients: PipedriveHttpClients): PipedriveHttp {
   return {
     async get<T>(version: PipedriveApiVersion, path: string, query?: QueryParams): Promise<T> {
       return readJson<T>(await clients[version].get(withQuery(path, query)))
+    },
+    async post<T>(
+      version: PipedriveApiVersion,
+      path: string,
+      body?: unknown,
+      query?: QueryParams
+    ): Promise<T> {
+      return readJson<T>(await clients[version].post(withQuery(path, query), body))
+    },
+    async patch<T>(
+      version: PipedriveApiVersion,
+      path: string,
+      body?: unknown,
+      query?: QueryParams
+    ): Promise<T> {
+      return readJson<T>(await requestWithBody(clients[version], "PATCH", path, body, query))
     },
   }
 }
@@ -49,6 +77,50 @@ export function pathPart(value: string | number, field: string): string {
   }
 
   return encodeURIComponent(value)
+}
+
+async function requestWithBody(
+  rest: RestClient,
+  method: "PATCH",
+  path: string,
+  body: unknown,
+  query?: QueryParams
+): Promise<Response> {
+  const headers = new Headers()
+  const requestBody = serializeBody(body, headers)
+  const init: RequestInit = { method, headers }
+
+  if (requestBody !== undefined) {
+    init.body = requestBody
+  }
+
+  return rest.request(withQuery(path, query), init)
+}
+
+function serializeBody(body: unknown, headers: Headers): BodyInit | undefined {
+  if (body === undefined) {
+    return undefined
+  }
+
+  if (body === null) {
+    headers.set("content-type", "application/json")
+    return JSON.stringify(body)
+  }
+
+  if (
+    typeof body === "string" ||
+    body instanceof Blob ||
+    body instanceof ArrayBuffer ||
+    ArrayBuffer.isView(body) ||
+    body instanceof FormData ||
+    body instanceof URLSearchParams ||
+    body instanceof ReadableStream
+  ) {
+    return body as BodyInit
+  }
+
+  headers.set("content-type", "application/json")
+  return JSON.stringify(body)
 }
 
 async function readJson<T>(response: Response): Promise<T> {
