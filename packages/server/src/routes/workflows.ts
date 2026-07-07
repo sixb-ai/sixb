@@ -11,14 +11,13 @@ import {
   type WorkflowRunRecord,
 } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { ZodError, z } from "zod"
+import { z } from "zod"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import {
-  createFileContentResponse,
+  createContextualFileContentResponse,
   fileContentGetResponses,
   fileContentHeadResponses,
-  resolveFileRefAtPath,
 } from "../files/content"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -137,47 +136,28 @@ async function workflowRunFileContentResponse(
 ) {
   const { authz } = requestAuthState(context)
 
-  try {
-    const storage = sixb.storage.workflowRuns
-    if (!storage) {
-      context.set.status = 400
-      return { error: "Workflow run storage is not configured" }
-    }
-
-    const parsed = WorkflowRunFileContentQuerySchema.parse(context.query)
-    const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-    if (!run || !canViewWorkflowRun(authz, run)) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const fileRef = resolveFileRefAtPath(serializeWorkflowRun(run), parsed.path)
-    if (!fileRef) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
-      fileRef,
-      disposition: parsed.disposition,
-      head: options.head,
-      rangeHeader: context.request.headers.get("range"),
-    })
-    if (!response) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    return response
-  } catch (error) {
-    if (error instanceof ZodError) {
-      context.set.status = 400
-      return { error: "Invalid file content query" }
-    }
-
-    throw error
+  const storage = sixb.storage.workflowRuns
+  if (!storage) {
+    context.set.status = 400
+    return { error: "Workflow run storage is not configured" }
   }
+
+  return createContextualFileContentResponse({
+    blobStorage: sixb.blobStorage,
+    query: context.query,
+    querySchema: WorkflowRunFileContentQuerySchema,
+    request: context.request,
+    set: context.set,
+    head: options.head,
+    resolveRoot: async () => {
+      const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
+      if (!run || !canViewWorkflowRun(authz, run)) {
+        return null
+      }
+
+      return serializeWorkflowRun(run)
+    },
+  })
 }
 
 async function workflowNodeFileContentResponse(
@@ -192,60 +172,40 @@ async function workflowNodeFileContentResponse(
 ) {
   const { authz } = requestAuthState(context)
 
-  try {
-    const storage = sixb.storage.workflowRuns
-    if (!storage) {
-      context.set.status = 400
-      return { error: "Workflow run storage is not configured" }
-    }
-
-    const parsed = WorkflowNodeFileContentQuerySchema.parse(context.query)
-    const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
-    if (!run || !canViewWorkflowRun(authz, run)) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const result = await storage.nodes.list({
-      projectId: sixb.id,
-      workflowRunId: run.id,
-      nodeKey: context.params.nodeKey,
-      limit: 1,
-      order: "asc",
-    })
-    const [node] = result.nodes
-    if (!node) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const fileRef = resolveFileRefAtPath(serializeWorkflowNodeRun(node), parsed.path)
-    if (!fileRef) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    const response = await createFileContentResponse({
-      blobStorage: sixb.blobStorage,
-      fileRef,
-      disposition: parsed.disposition,
-      head: options.head,
-      rangeHeader: context.request.headers.get("range"),
-    })
-    if (!response) {
-      context.set.status = 404
-      return { error: "File not found" }
-    }
-
-    return response
-  } catch (error) {
-    if (error instanceof ZodError) {
-      context.set.status = 400
-      return { error: "Invalid file content query" }
-    }
-
-    throw error
+  const storage = sixb.storage.workflowRuns
+  if (!storage) {
+    context.set.status = 400
+    return { error: "Workflow run storage is not configured" }
   }
+
+  return createContextualFileContentResponse({
+    blobStorage: sixb.blobStorage,
+    query: context.query,
+    querySchema: WorkflowNodeFileContentQuerySchema,
+    request: context.request,
+    set: context.set,
+    head: options.head,
+    resolveRoot: async () => {
+      const run = await storage.getById({ projectId: sixb.id, id: context.params.runId })
+      if (!run || !canViewWorkflowRun(authz, run)) {
+        return null
+      }
+
+      const result = await storage.nodes.list({
+        projectId: sixb.id,
+        workflowRunId: run.id,
+        nodeKey: context.params.nodeKey,
+        limit: 1,
+        order: "asc",
+      })
+      const [node] = result.nodes
+      if (!node) {
+        return null
+      }
+
+      return serializeWorkflowNodeRun(node)
+    },
+  })
 }
 
 async function getLatestWorkflowRun(
