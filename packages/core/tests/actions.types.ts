@@ -94,14 +94,18 @@ const reboot = defineAction("reboot")
 const runtimeFacade = defineAction("runtimeFacade")
   .on(Room)
   .params({})
-  .writeback(({ sixb }) => {
+  .writeback(({ sixb, read }) => {
     sixb.objects(Room).appendTelemetryBatch([{ id: "room:1", properties: {}, at: new Date() }])
 
-    // @ts-expect-error writeback cannot perform local object writes
+    // @ts-expect-error the runtime (telemetry) facade cannot perform local object writes
     sixb.objects(Room).upsert({ properties: { id: "room:1" } })
 
-    // @ts-expect-error writeback cannot perform local object reads
+    // @ts-expect-error the runtime (telemetry) facade cannot perform local object reads
     sixb.objects(Room).get("room:1")
+
+    // writeback can enrich its external payload with side-effect-free reads
+    read.objects(Room).get("room:1")
+    read.objects(Room).query()
   })
 
 defineAction("targetAlias")

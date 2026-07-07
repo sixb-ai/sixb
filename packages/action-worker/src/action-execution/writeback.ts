@@ -1,5 +1,10 @@
-import type { ActionRunRecord, JsonValue } from "@sixb/core"
-import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb/core"
+import type { ActionReadObjectSetSource, ActionRunRecord, JsonValue } from "@sixb/core"
+import {
+  assertJsonValue,
+  cloneJsonValue,
+  createActionReadFacade,
+  isObjectActionDefinition,
+} from "@sixb/core"
 import { toActionRunFailure } from "../normalize"
 import { type BasePhaseContext, requireObjectTarget, toActionRuntimeFacade } from "./context"
 import type {
@@ -34,13 +39,20 @@ export async function runWritebackPhase(
   input.updateActiveRun(run)
 
   try {
+    // Reads are side-effect-free, so the writeback phase can safely enrich its
+    // external payload from related objects (links, traversals) before the edit
+    // batch exists. This mirrors the read facade the edits phase receives.
+    const read = createActionReadFacade(
+      (objectType) => input.runtime.sixb.objects(objectType) as ActionReadObjectSetSource
+    )
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({
           ...input.baseContext,
           sixb: toActionRuntimeFacade(input.runtime),
+          read,
           target: requireObjectTarget(input.objectTarget, input.action.id).snapshot,
         })
-      : await handler({ ...input.baseContext, sixb: toActionRuntimeFacade(input.runtime) })
+      : await handler({ ...input.baseContext, sixb: toActionRuntimeFacade(input.runtime), read })
     const result = normalizeWritebackResult(rawResult)
     run = await input.runtime.actionRunsStorage.recordWriteback({
       projectId: input.runtime.id,

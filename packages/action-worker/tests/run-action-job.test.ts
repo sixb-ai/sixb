@@ -368,6 +368,65 @@ describe("runActionJob", () => {
     expect(linksAfter).toEqual([])
   })
 
+  test("exposes object reads inside action writeback", async () => {
+    // The writeback phase must be able to enrich its external payload from
+    // related objects (here: the linked Sensor) before the edit batch exists.
+    const captureSensorName = defineAction("captureSensorName")
+      .on(Device)
+      .params({})
+      .writeback(async ({ read, target }) => {
+        const links = await read.objects(Device).byId(target.primaryId).listLinks(Device.l.sensor)
+        const sensor = await read.objects(Sensor).byId(links[0].targetId).get()
+        return { sensorName: String(sensor?.properties.name ?? "unknown") }
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.sensorName })
+      })
+
+    const sixb = createSixb([captureSensorName], [Device, Sensor])
+    await sixb.upsertObject("Device", {
+      id: "device-1",
+      name: "Device 1",
+    })
+    await sixb.upsertObject("Sensor", {
+      id: "sensor-1",
+      name: "Sensor 1",
+    })
+    await (
+      sixb as unknown as {
+        objects(objectType: typeof Device): {
+          byId(id: string): {
+            link(
+              linkToken: typeof Device.l.sensor,
+              target: { objectTypeId: "Sensor"; primaryId: string }
+            ): Promise<void>
+          }
+        }
+      }
+    )
+      .objects(Device)
+      .byId("device-1")
+      .link(Device.l.sensor, { objectTypeId: "Sensor", primaryId: "sensor-1" })
+    await queueActionRun(sixb, {
+      id: "act_1",
+      actionId: "captureSensorName",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runActionJob({
+      runtime: createContext(sixb),
+      job: {
+        id: "act_1",
+        actionId: "captureSensorName",
+      },
+    })
+
+    expect(result.status).toBe("succeeded")
+    const updated = await deviceObjects(sixb).get("device-1")
+    expect(updated?.properties.status).toBe("Sensor 1")
+  })
+
   test("marks queued runs failed when the action definition is missing", async () => {
     const sixb = createSixb([])
     await queueActionRun(sixb, {
