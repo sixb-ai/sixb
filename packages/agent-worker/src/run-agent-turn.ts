@@ -228,14 +228,17 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw new AgentWorkerError(`Agent run '${runId}' produced no response message.`)
   }
 
-  const assistant: AgentMessage = fromAiSdk(responseMessage)
+  const finishReason = await result.finishReason
+  const assistant = ensureVisibleAssistantMessage(fromAiSdk(responseMessage), {
+    finishReason,
+    maxSteps,
+  })
 
   // One last renew right before we write: a successful renew proves we still hold the lease, and it
   // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
   await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
 
   const usage = mapUsage(await result.usage)
-  const finishReason = await result.finishReason
   const assistantMessageId = createAgentMessageId()
 
   // The assistant append and run finish share one transaction, so redelivery cannot observe a
@@ -270,6 +273,29 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   await context.streamSink.publishRunFinished(finalizedRun)
 
   return finalizedRun
+}
+
+function ensureVisibleAssistantMessage(
+  message: AgentMessage,
+  input: { readonly finishReason: string | undefined; readonly maxSteps: number }
+): AgentMessage {
+  if (hasVisibleText(message.parts) || input.finishReason !== "tool-calls") {
+    return message
+  }
+  return {
+    ...message,
+    parts: [
+      ...message.parts,
+      {
+        type: "text",
+        text: `I reached the configured ${input.maxSteps}-step limit before producing a final answer. Ask me to continue and I can use the work above as context.`,
+      },
+    ],
+  }
+}
+
+function hasVisibleText(parts: AgentMessage["parts"]): boolean {
+  return parts.some((part) => part.type === "text" && part.text.trim().length > 0)
 }
 
 /**
