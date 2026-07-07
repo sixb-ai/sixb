@@ -121,7 +121,7 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
           Run workflow
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[min(46rem,calc(100vh-2rem))] overflow-visible sm:max-w-2xl">
+      <DialogContent className="min-w-0 max-h-[min(46rem,calc(100vh-2rem))] overflow-visible sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Run workflow</DialogTitle>
           <DialogDescription>
@@ -129,9 +129,9 @@ export function RequestWorkflowRunDialog({ workflow }: { workflow: WorkflowDetai
           </DialogDescription>
         </DialogHeader>
 
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <section className="max-h-[min(32rem,calc(100vh-16rem))] space-y-3 overflow-y-auto pr-1">
-            <div className="flex items-center justify-between gap-3">
+        <form className="min-w-0 space-y-5" onSubmit={handleSubmit}>
+          <section className="min-w-0 max-h-[min(32rem,calc(100vh-16rem))] space-y-3 overflow-y-auto pr-1">
+            <div className="flex min-w-0 items-center justify-between gap-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                 Run input
               </p>

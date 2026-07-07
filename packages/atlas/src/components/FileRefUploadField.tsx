@@ -105,7 +105,7 @@ export function FileRefUploadField({
   const mediaLabel = value && fileName ? fileMediaLabel(value.mediaType, fileName) : null
 
   return (
-    <div className="space-y-2">
+    <div className="w-full min-w-0 space-y-2">
       <input
         ref={inputRef}
         id={inputId}
@@ -117,21 +117,21 @@ export function FileRefUploadField({
       />
 
       {value && fileName && mediaLabel ? (
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="flex w-full min-w-0 max-w-full flex-col gap-3 overflow-hidden rounded-lg border border-border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-500/[0.08] text-emerald-600 dark:text-emerald-300">
               <CheckCircle2 className="h-5 w-5" />
             </span>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground" title={fileName}>
                 {fileName}
               </p>
-              <p className="text-xs text-muted-foreground">
+              <p className="truncate text-xs text-muted-foreground">
                 {mediaLabel} · {formatFileSize(value.sizeBytes)} · Ready to submit
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
             <Button
               type="button"
               variant="outline"
@@ -163,15 +163,15 @@ export function FileRefUploadField({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={cn(
-            "rounded-lg border border-dashed bg-muted/10 p-4 transition-colors",
+            "w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/10 p-4 transition-colors",
             dragging
               ? "border-primary/60 bg-primary/5"
               : "border-border/80 hover:border-border hover:bg-muted/20",
             isDisabled && "pointer-events-none opacity-70"
           )}
         >
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-background text-muted-foreground shadow-xs ring-1 ring-border">
                 {isBusy ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
@@ -179,11 +179,11 @@ export function FileRefUploadField({
                   <FileUp className="h-5 w-5" />
                 )}
               </span>
-              <div className="min-w-0 space-y-0.5">
-                <p className="text-sm font-medium text-foreground">
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="truncate text-sm font-medium text-foreground">
                   {isBusy ? `Uploading ${uploadingFileName ?? "file"}...` : "Drop a file here"}
                 </p>
-                <p className="text-xs text-muted-foreground">
+                <p className="truncate text-xs text-muted-foreground">
                   {isBusy
                     ? "Keep this dialog open while the upload finishes."
                     : "Or browse to upload now and store the FileRef on submit."}
