@@ -8,7 +8,7 @@ One package spans Google's many APIs: auth and HTTP conventions live in a shared
 API is a **surface** of declarative typed resources. Adding a surface (e.g. `meet`, `calendar`)
 costs a base-URL entry, its resources, and one wiring line — the auth/HTTP core never changes.
 
-Surfaces implemented: **`drive`** (v3).
+Surfaces implemented: **`drive`** (v3), **`calendar`** (v3).
 
 ## Usage
 
@@ -39,6 +39,46 @@ const bytes = await client.drive.files.export(fileId, "text/plain")
 const { startPageToken } = await client.drive.changes.getStartPageToken()
 for await (const change of client.drive.changes.listAll({ pageToken: startPageToken })) { /* ... */ }
 ```
+
+### Calendar (v3)
+
+The full Calendar API v3: `events`, `calendars`, `calendarList`, `acl`, `settings`, `colors`,
+`freebusy`, and `channels`. Requires a Calendar scope (e.g. `calendar.readonly`, `calendar`, or
+`calendar.events`).
+
+```ts
+// Events — list / read / write / recurring instances / natural-language add.
+await client.calendar.events.list("primary", { timeMin, singleEvents: true, orderBy: "startTime" })
+for await (const e of client.calendar.events.listAll("primary", { timeMin })) { /* ... */ }
+await client.calendar.events.get("primary", eventId)
+await client.calendar.events.insert("primary", { summary, start, end }, { sendUpdates: "all" })
+await client.calendar.events.patch("primary", eventId, { location: "Room 4" })
+await client.calendar.events.delete("primary", eventId)
+await client.calendar.events.quickAdd("primary", { text: "Lunch tomorrow 12pm" })
+for await (const i of client.calendar.events.instancesAll("primary", recurringEventId)) { /* ... */ }
+
+// Calendars, calendar list, ACLs, settings, colors.
+await client.calendar.calendars.get("primary")
+for await (const c of client.calendar.calendarList.listAll()) { /* ... */ }
+await client.calendar.acl.list("primary")
+await client.calendar.settings.get("timezone")
+await client.calendar.colors.get()
+
+// Free/busy across calendars.
+await client.calendar.freebusy.query({ timeMin, timeMax, items: [{ id: "primary" }] })
+
+// Push notifications: open a channel with any `watch`, close it with `channels.stop`.
+const channel = await client.calendar.events.watch("primary", {
+  id: crypto.randomUUID(),
+  type: "web_hook",
+  address: "https://example.com/hook",
+})
+await client.calendar.channels.stop({ id: channel.id, resourceId: channel.resourceId })
+```
+
+List endpoints return `nextSyncToken` on their final page; call `list` (not `listAll`) when you
+need it to poll incrementally with `syncToken`. `patch`/`insert`/`update` accept the raw Calendar
+resource shapes — the connector relays them without interpretation.
 
 ## Auth
 
