@@ -77,6 +77,144 @@ describe("teamleader connector", () => {
     expect(response.data).toEqual([{ id: "deal-1" }])
   })
 
+  test("supports documented quotation actions", async () => {
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/quotations.create") {
+          return Promise.resolve(jsonResponse({ data: { type: "quotation", id: "quotation-1" } }))
+        }
+
+        if (path === "/quotations.download") {
+          return Promise.resolve(
+            jsonResponse({
+              data: {
+                location: "https://cdn.teamleader.eu/file",
+                expires: "2018-02-05T16:44:33+00:00",
+              },
+            })
+          )
+        }
+
+        return Promise.resolve(new Response(undefined, { status: 204 }))
+      }),
+    })
+
+    const created = await client.quotations.create({
+      deal_id: "deal-1",
+      text: "Quotation text",
+    })
+    const download = await client.quotations.download({ id: "quotation-1", format: "pdf" })
+    await client.quotations.send({
+      quotations: ["quotation-1"],
+      recipients: { to: [{ email_address: "quentin@sixb.ai" }] },
+      subject: "Quotation",
+      content: "Sign your offer here #LINK",
+      language: "fr",
+    })
+    await client.quotations.update({ id: "quotation-1", text: "Updated text" })
+    await client.quotations.accept({ id: "quotation-1" })
+    await client.quotations.delete({ id: "quotation-1" })
+
+    expect(created.data).toEqual({ type: "quotation", id: "quotation-1" })
+    expect(download.data.location).toBe("https://cdn.teamleader.eu/file")
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/quotations.create",
+      "/quotations.download",
+      "/quotations.send",
+      "/quotations.update",
+      "/quotations.accept",
+      "/quotations.delete",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      { deal_id: "deal-1", text: "Quotation text" },
+      { id: "quotation-1", format: "pdf" },
+      {
+        quotations: ["quotation-1"],
+        recipients: { to: [{ email_address: "quentin@sixb.ai" }] },
+        subject: "Quotation",
+        content: "Sign your offer here #LINK",
+        language: "fr",
+      },
+      { id: "quotation-1", text: "Updated text" },
+      { id: "quotation-1" },
+      { id: "quotation-1" },
+    ])
+  })
+
+  test("exposes quotation reference endpoints", async () => {
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/products.info") {
+          return Promise.resolve(jsonResponse({ data: { id: "product-1", name: "Product" } }))
+        }
+
+        if (path === "/paymentTerms.list") {
+          return Promise.resolve(
+            jsonResponse({ data: [{ id: "term-1" }], meta: { default: "term-1" } })
+          )
+        }
+
+        return Promise.resolve(jsonResponse({ data: [] }))
+      }),
+    })
+
+    await client.products.list({ filter: { term: "kitchen" }, page: { size: 20 } })
+    await client.products.info({ id: "product-1", includes: "suppliers" })
+    await client.productCategories.list({ filter: { department_id: "department-1" } })
+    await client.priceLists.list({ filter: { ids: ["price-list-1"] } })
+    await client.taxRates.list({ filter: { department_id: "department-1" } })
+    await client.unitsOfMeasure.list()
+    const paymentTerms = await client.paymentTerms.list()
+    await client.paymentMethods.list({ filter: { status: ["active"] }, page: { size: 20 } })
+    await client.documentTemplates.list({
+      filter: {
+        department_id: "department-1",
+        document_type: "quotation",
+        status: ["active"],
+      },
+    })
+
+    expect(paymentTerms.meta?.default).toBe("term-1")
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/products.list",
+      "/products.info",
+      "/productCategories.list",
+      "/priceLists.list",
+      "/taxRates.list",
+      "/unitsOfMeasure.list",
+      "/paymentTerms.list",
+      "/paymentMethods.list",
+      "/documentTemplates.list",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      { filter: { term: "kitchen" }, page: { size: 20 } },
+      { id: "product-1", includes: "suppliers" },
+      { filter: { department_id: "department-1" } },
+      { filter: { ids: ["price-list-1"] } },
+      { filter: { department_id: "department-1" } },
+      {},
+      {},
+      { filter: { status: ["active"] }, page: { size: 20 } },
+      {
+        filter: {
+          department_id: "department-1",
+          document_type: "quotation",
+          status: ["active"],
+        },
+      },
+    ])
+  })
+
   test("paginates listAll requests", async () => {
     const requestedPages: number[] = []
     const client = createTeamleaderClient({

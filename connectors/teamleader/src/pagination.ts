@@ -5,8 +5,11 @@ import type {
   TeamleaderDealsListRequest,
   TeamleaderListAllOptions,
   TeamleaderListResponse,
+  TeamleaderPaymentMethodListRequest,
+  TeamleaderProductListRequest,
   TeamleaderQuotationListRequest,
   TeamleaderRequestOptions,
+  TeamleaderTaxRateListRequest,
 } from "./types"
 
 const defaultPageSize = 20
@@ -17,6 +20,9 @@ type TeamleaderListRequest =
   | TeamleaderContactListRequest
   | TeamleaderCompanyListRequest
   | TeamleaderCustomFieldDefinitionListRequest
+  | TeamleaderProductListRequest
+  | TeamleaderTaxRateListRequest
+  | TeamleaderPaymentMethodListRequest
 
 type TeamleaderListMethod<TRequest extends TeamleaderListRequest, TItem> = (
   body: TRequest | undefined,
