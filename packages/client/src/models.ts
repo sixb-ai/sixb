@@ -95,9 +95,15 @@ export interface EventStreamServerMessage {
     cursor: string
     type:
       | "object.upserted"
+      | "object.created"
+      | "object.updated"
+      | "object.deleted"
       | "telemetry.appended"
       | "link.upserted"
       | "link.removed"
+      | "link.created"
+      | "link.updated"
+      | "link.deleted"
       | "action.requested"
       | "action.completed"
       | "action.failed"

@@ -17804,10 +17804,15 @@
               "type": "string",
               "enum": [
                 "object.upserted",
+                "object.created",
+                "object.updated",
                 "object.deleted",
                 "telemetry.appended",
                 "link.upserted",
                 "link.removed",
+                "link.created",
+                "link.updated",
+                "link.deleted",
                 "action.requested",
                 "action.completed",
                 "action.failed",
@@ -17906,6 +17911,23 @@
                             "required": ["type", "id"],
                             "additionalProperties": false
                           },
+                          "origin": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["action"]
+                              },
+                              "actionId": {
+                                "type": "string"
+                              },
+                              "runId": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["kind", "actionId", "runId"],
+                            "additionalProperties": false
+                          },
                           "metadata": {
                             "type": "object",
                             "additionalProperties": {}
@@ -17914,10 +17936,15 @@
                             "type": "string",
                             "enum": [
                               "object.upserted",
+                              "object.created",
+                              "object.updated",
                               "object.deleted",
                               "telemetry.appended",
                               "link.upserted",
                               "link.removed",
+                              "link.created",
+                              "link.updated",
+                              "link.deleted",
                               "action.requested",
                               "action.completed",
                               "action.failed",

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type {
   DomainEvent,
-  NewDomainEvent,
+  EventDraft,
   ObjectStorage,
   RuleDefinition,
   RulesStorage,
@@ -253,7 +253,7 @@ function createStorageWithoutRules(): Storage {
   })
 }
 
-function objectUpsertedEvent(status: string, primaryId = "tx-1"): NewDomainEvent {
+function objectUpsertedEvent(status: string, primaryId = "tx-1"): EventDraft {
   return {
     type: "object.upserted",
     payload: {

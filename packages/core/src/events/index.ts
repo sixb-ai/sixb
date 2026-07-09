@@ -18,6 +18,7 @@ export {
   WORKFLOW_EVENT_DEFINITIONS,
 } from "./definitions"
 export { EventsError } from "./errors"
+export { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
 export {
   DEFAULT_EVENTS_RETENTION_MS,
   EVENTS_STREAM,
@@ -29,6 +30,15 @@ export {
 } from "./runtime"
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"
+export {
+  buildEventSelectorPredicate,
+  type EventPropertySelector,
+  type EventSelectorSpec,
+  eventSelectorSpec,
+  events,
+  type LinkEventSelectorBuilder,
+  type ObjectEventSelectorBuilder,
+} from "./selectors"
 export { toStoredEvent } from "./toStoredEvent"
 export type {
   ActionCompletedEvent,
@@ -39,18 +49,28 @@ export type {
   DatasetVersionCommittedEvent,
   DomainEvent,
   EventActor,
+  EventDraft,
   EventEnvelope,
+  EventOrigin,
+  LinkCreatedEvent,
+  LinkDeletedEvent,
   LinkEvent,
   LinkRemovedEvent,
+  LinkUpdatedEvent,
   LinkUpsertedEvent,
-  NewDomainEvent,
+  ObjectCreatedEvent,
+  ObjectDeletedEvent,
   ObjectEvent,
+  ObjectUpdatedEvent,
   ObjectUpsertedEvent,
   PipelineEvent,
   PipelineRunFinishedEvent,
   PipelineRunStartedEvent,
   PipelineRunStepFinishedEvent,
   PipelineRunStepStartedEvent,
+  PropertyChange,
+  PropertyChangeMap,
+  PropertyChangeOperation,
   RuleEvent,
   RuleEventSubject,
   RuleResolvedEvent,
@@ -62,8 +82,14 @@ export type {
   StoredActionRequestedEvent,
   StoredDatasetVersionCommittedEvent,
   StoredDomainEvent,
+  StoredLinkCreatedEvent,
+  StoredLinkDeletedEvent,
   StoredLinkRemovedEvent,
+  StoredLinkUpdatedEvent,
   StoredLinkUpsertedEvent,
+  StoredObjectCreatedEvent,
+  StoredObjectDeletedEvent,
+  StoredObjectUpdatedEvent,
   StoredObjectUpsertedEvent,
   StoredPipelineRunFinishedEvent,
   StoredPipelineRunStartedEvent,

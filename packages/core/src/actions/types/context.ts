@@ -1,5 +1,6 @@
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
 import type { EditCommitDiff, RecordEditsContext } from "../../edits"
+import type { EventDraft } from "../../events"
 import type { ObjectType, ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
@@ -121,6 +122,7 @@ export interface ActionRuntimeFacade<
 
 export interface ActionPhaseCommit {
   readonly diff: EditCommitDiff
+  readonly events: readonly EventDraft[]
   readonly committedAt: Date
   readonly created: boolean
 }

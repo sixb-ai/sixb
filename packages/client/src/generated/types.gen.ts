@@ -6281,10 +6281,15 @@ export type ListEventsData = {
       | "rules"
     type?:
       | "object.upserted"
+      | "object.created"
+      | "object.updated"
       | "object.deleted"
       | "telemetry.appended"
       | "link.upserted"
       | "link.removed"
+      | "link.created"
+      | "link.updated"
+      | "link.deleted"
       | "action.requested"
       | "action.completed"
       | "action.failed"
@@ -6351,15 +6356,25 @@ export type ListEventsResponses = {
         type: "user" | "service" | "system"
         id: string
       }
+      origin?: {
+        kind: "action"
+        actionId: string
+        runId: string
+      }
       metadata?: {
         [key: string]: unknown
       }
       type:
         | "object.upserted"
+        | "object.created"
+        | "object.updated"
         | "object.deleted"
         | "telemetry.appended"
         | "link.upserted"
         | "link.removed"
+        | "link.created"
+        | "link.updated"
+        | "link.deleted"
         | "action.requested"
         | "action.completed"
         | "action.failed"

@@ -6,7 +6,8 @@
  */
 
 import { assertPrivileged } from "../../authorization"
-import type { NewDomainEvent } from "../../events"
+import type { EventDraft } from "../../events"
+import { buildLinkUpsertMutationEvents } from "../../mutations"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
@@ -76,17 +77,24 @@ export async function upsertLinkBatch(
   if (validation.valid.length === 0) return results
 
   // Append events, then project the stored events into object storage.
-  const events: NewDomainEvent[] = validation.valid.map(({ item }) => ({
-    type: "link.upserted",
-    payload: {
+  const events: EventDraft[] = validation.valid.flatMap(({ item }) => {
+    const sameLink = (
+      linksMap.get(`${item.objectType.id}:${item.sourceId}:${item.linkId}`) ?? []
+    ).find(
+      (candidate) =>
+        candidate.targetTypeId === item.targetTypeId && candidate.targetId === item.targetId
+    )
+    return buildLinkUpsertMutationEvents({
       sourceTypeId: item.objectType.id,
       sourceId: item.sourceId,
       linkId: item.linkId,
       targetTypeId: item.targetTypeId,
       targetId: item.targetId,
+      operation: sameLink ? "update" : "create",
+      previousProperties: sameLink?.properties,
       ...(item.properties !== undefined ? { properties: item.properties } : {}),
-    },
-  }))
+    })
+  })
 
   const appended = await eventsRuntime.append({ events })
   const linkEvents = appended.filter(

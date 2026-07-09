@@ -29,7 +29,7 @@ export interface UseEventsOptions {
 /**
  * Subscribe to a builder's events. `onEvent` is kept in a ref so changing the
  * handler never tears down the socket, and the subscription is rebuilt only when
- * the filter IR (or transport options) change.
+ * the filter spec (or transport options) change.
  */
 export function useEvents<TEvent extends SixbEvent>(
   builder: SubscribableEvents<TEvent>,
@@ -53,7 +53,7 @@ export function useEvents<TEvent extends SixbEvent>(
   const reconnectDelayMs = options?.reconnectDelayMs
   const irKey = JSON.stringify(builder.ir)
 
-  // Re-subscribe only when the serialized filter IR (or a transport option)
+  // Re-subscribe only when the serialized filter spec (or a transport option)
   // changes; the builder and handler are read through refs, so identity churn
   // on every render never tears the socket down.
   // biome-ignore lint/correctness/useExhaustiveDependencies: irKey is the reactive proxy for builder.ir, read via builderRef

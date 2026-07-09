@@ -17,6 +17,11 @@ export const EVENT_TYPES = CORE_EVENT_TYPES as readonly [
 
 export const EventTopicSchema = z.enum(EVENT_TOPICS)
 export const EventTypeSchema = z.enum(EVENT_TYPES)
+export const EventOriginSchema = z.object({
+  kind: z.literal("action"),
+  actionId: z.string(),
+  runId: z.string(),
+})
 
 export const EventsQuerySchema = z.object({
   topic: EventTopicSchema.optional(),
@@ -40,6 +45,7 @@ export const EventSchema = z.object({
       id: z.string(),
     })
     .optional(),
+  origin: EventOriginSchema.optional(),
   metadata: z.record(z.unknown()).optional(),
   type: EventTypeSchema,
   topic: EventTopicSchema,

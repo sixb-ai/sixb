@@ -476,7 +476,7 @@ describe("EditBatch core contract", () => {
   test("supports object delete as contract-only diff", async () => {
     const storage = await createSeededStorage()
 
-    const diff = await deriveEditCommitDiff({
+    const plan = await planEditBatch({
       projectId: "project-a",
       ontology,
       storage,
@@ -485,7 +485,7 @@ describe("EditBatch core contract", () => {
       }),
     })
 
-    expect(diff).toEqual({
+    expect(plan.diff).toEqual({
       objects: [
         {
           objectTypeId: "Payment",
@@ -496,6 +496,13 @@ describe("EditBatch core contract", () => {
       ],
       links: [],
     })
+    expect(plan.objects.deletes).toEqual([
+      {
+        objectTypeId: "Payment",
+        primaryId: "pay_1",
+        previousProperties: { id: "pay_1", status: "pending" },
+      },
+    ])
   })
 
   test("cascades object delete diffs to incoming and outgoing links", async () => {
@@ -614,7 +621,22 @@ describe("EditBatch core contract", () => {
     })
 
     expect(result.commit.created).toBe(true)
+    expect(result.commit.events.map((event) => event.type)).toEqual([
+      "object.upserted",
+      "object.updated",
+    ])
+    expect(result.commit.events[1]).toMatchObject({
+      type: "object.updated",
+      payload: {
+        objectTypeId: "Invoice",
+        primaryId: "inv_1",
+        propertyChanges: {
+          status: { operation: "updated", before: "draft", after: "paid" },
+        },
+      },
+    })
     expect(retry.commit.created).toBe(false)
+    expect(retry.commit.events).toEqual([])
     expect(retry.commit.diff).toEqual(result.commit.diff)
     expect(invoice?.properties.status).toBe("paid")
     expect(invoice?.version).toBe(2)
@@ -833,6 +855,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         linkId: "customer",
         target: { objectTypeId: "Customer", primaryId: "cus_1" },
         properties: { role: "shipTo" },
+        previousProperties: { role: "billTo" },
         operation: "update",
       },
     ])
@@ -886,6 +909,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         linkId: "customer",
         target: { objectTypeId: "Customer", primaryId: "cus_1" },
         properties: { role: "new" },
+        previousProperties: { role: "old" },
         operation: "update",
       },
     ])
@@ -986,6 +1010,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         source: { objectTypeId: "Invoice", primaryId: "inv_1" },
         linkId: "customer",
         target: { objectTypeId: "Customer", primaryId: "cus_1" },
+        previousProperties: { role: "billTo" },
       },
     ])
   })
@@ -1025,6 +1050,7 @@ describe("EditBatch net diff (delete then re-create within one batch)", () => {
         objectTypeId: "Invoice",
         primaryId: "inv_1",
         properties: { id: "inv_1", amount: 999, status: "reissued" },
+        previousProperties: { id: "inv_1", amount: 120, status: "draft" },
         operation: "update",
       },
     ])

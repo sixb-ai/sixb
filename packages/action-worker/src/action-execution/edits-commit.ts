@@ -34,6 +34,7 @@ export async function runEditsAndCommitPhase(
       run: input.run,
       result: {
         diff: input.run.commit.diff,
+        events: [],
         committedAt: input.run.commit.committedAt,
         created: false,
       },
@@ -92,7 +93,7 @@ export async function runEditsAndCommitPhase(
     idempotencyKey: run.idempotencyKey,
   })
 
-  await emitLocalCommitEvents(input.runtime, run.id, committed.commit)
+  await emitLocalCommitEvents(input.runtime, committed.commit)
 
   input.updateActiveRun(committed.run)
   return { run: committed.run, result: committed.commit }

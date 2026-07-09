@@ -546,13 +546,18 @@ describe("Sixb runtime", () => {
     ).rejects.toThrow("does not define link properties")
 
     const stream = await sixb.events.read()
-    expect(stream).toHaveLength(4)
-    expect(stream[0]?.type).toBe("object.upserted")
+    expect(stream.map((event) => event.type)).toEqual([
+      "object.upserted",
+      "object.created",
+      "telemetry.appended",
+      "object.upserted",
+      "object.created",
+      "link.upserted",
+      "link.created",
+    ])
     expect(stream[0]?.topic).toBe("objects")
-    expect(stream[1]?.type).toBe("telemetry.appended")
-    expect(stream[1]?.topic).toBe("telemetry")
-    expect(stream[3]?.type).toBe("link.upserted")
-    expect(stream[3]?.topic).toBe("links")
+    expect(stream[2]?.topic).toBe("telemetry")
+    expect(stream[6]?.topic).toBe("links")
 
     const latest = await runtimeDeps.storage.timeseries.getLatest({
       projectId: "project-a",

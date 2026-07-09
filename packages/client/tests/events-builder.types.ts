@@ -22,7 +22,7 @@ const Sensor = defineObjectType({
     prop("indoorTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
     prop("online", "boolean", { mode: "telemetry" }),
   ],
-  links: [link.ref("zone", "Zone", { cardinality: "one" })],
+  links: [link.ref("zone", "Zone", { cardinality: "one", properties: [prop("rank", "integer")] })],
 })
 
 // ── Channels narrow the payload ───────────────────────────────────────────────
@@ -73,6 +73,25 @@ events(Sensor)
     void primaryId
   })
 
+events(Sensor)
+  .created()
+  .subscribe((event) => {
+    const name: string = event.payload.properties.name
+    const change = event.payload.propertyChanges.name
+    void [name, change]
+  })
+
+events(Sensor)
+  .p.name.updated()
+  .subscribe((event) => {
+    const change = event.payload.propertyChanges.name
+    if (change?.operation === "updated") {
+      const before: unknown = change.before
+      const after: unknown = change.after
+      void [before, after]
+    }
+  })
+
 // `.linked(token)` validates the token against the type's links and yields the
 // links event. The token does NOT narrow the payload — every link event shares
 // the same shape — so this asserts the event type, not a per-link payload.
@@ -84,8 +103,34 @@ events(Sensor)
     void [linkId, sourceId]
   })
 
+events(Sensor)
+  .link(Sensor.l.zone)
+  .created()
+  .subscribe((event) => {
+    const linkId: string = event.payload.linkId
+    const change = event.payload.propertyChanges.rank
+    void [linkId, change]
+  })
+
+events(Sensor)
+  .link(Sensor.l.zone)
+  .p.rank.updated()
+  .subscribe((event) => {
+    const change = event.payload.propertyChanges.rank
+    void change
+  })
+
 // @ts-expect-error — `.linked` requires a link token, not a property token.
 events(Sensor).linked(Sensor.p.indoorTemperature)
+
+// @ts-expect-error — `.link` requires a link token, not a property token.
+events(Sensor).link(Sensor.p.indoorTemperature)
+
+// @ts-expect-error — missing object property.
+events(Sensor).p.missing
+
+// @ts-expect-error — missing link property.
+events(Sensor).link(Sensor.l.zone).p.missing
 
 // `.object(key)` is orthogonal — it preserves the channel's event type, in
 // either order.
@@ -220,6 +265,11 @@ function useSensorLive(): void {
   useEvents(events(Sensor).telemetry(Sensor.p.indoorTemperature), (event) => {
     const value: number = event.payload.value
     void value
+  })
+
+  useEvents(events(Sensor).p.name.updated(), (event) => {
+    const change = event.payload.propertyChanges.name
+    void change
   })
 
   const { values } = useLatest(events(Sensor).object("sensor-1").telemetry())
