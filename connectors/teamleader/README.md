@@ -2,10 +2,12 @@
 
 Teamleader Focus connector for Sixb.
 
-V1 covers read access for:
+V1 covers:
 
 - Deals
 - Quotations
+- Quotation actions
+- Quotation reference data
 - Contacts
 - Companies
 - Custom field definitions
@@ -58,6 +60,26 @@ client.deals.info(...)
 client.quotations.list(...)
 client.quotations.listAll(...)
 client.quotations.info(...)
+client.quotations.create(...)
+client.quotations.download(...)
+client.quotations.send(...)
+client.quotations.update(...)
+client.quotations.accept(...)
+client.quotations.delete(...)
+
+client.products.list(...)
+client.products.listAll(...)
+client.products.info(...)
+
+client.productCategories.list(...)
+client.priceLists.list(...)
+client.taxRates.list(...)
+client.taxRates.listAll(...)
+client.unitsOfMeasure.list()
+client.paymentTerms.list()
+client.paymentMethods.list(...)
+client.paymentMethods.listAll(...)
+client.documentTemplates.list(...)
 
 client.contacts.list(...)
 client.contacts.listAll(...)

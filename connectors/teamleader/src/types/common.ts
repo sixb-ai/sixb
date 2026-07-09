@@ -19,9 +19,9 @@ export interface TeamleaderInfoRequest {
   readonly id: string
 }
 
-export interface TeamleaderListResponse<TItem> {
+export interface TeamleaderListResponse<TItem, TMeta = TeamleaderPaginationMeta> {
   readonly data: readonly TItem[]
-  readonly meta?: TeamleaderPaginationMeta
+  readonly meta?: TMeta
   readonly included?: TeamleaderIncluded
 }
 
