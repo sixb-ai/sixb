@@ -6370,6 +6370,107 @@ export type ListEventsResponses = {
 
 export type ListEventsResponse = ListEventsResponses[keyof ListEventsResponses]
 
+export type ListLogsData = {
+  body?: never
+  path?: never
+  query?: {
+    kind?: "sync" | "pipeline" | "workflow" | "action"
+    runId?: string
+    level?: "debug" | "info" | "warn" | "error"
+    direction?: "forward" | "backward"
+    afterCursor?: string
+    beforeCursor?: string
+    limit?: string
+  }
+  url: "/api/logs"
+}
+
+export type ListLogsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListLogsError = ListLogsErrors[keyof ListLogsErrors]
+
+export type ListLogsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    count: number
+    lines: Array<{
+      level: "debug" | "info" | "warn" | "error"
+      message: string
+      fields?: {
+        [key: string]: unknown
+      }
+      at: string
+      context: {
+        run: {
+          kind: "sync" | "pipeline" | "workflow" | "action"
+          id: string
+        }
+        stepId?: string
+        phase?: string
+        attempt?: number
+      }
+      cursor: string
+    }>
+    cursor?: string
+    hasMore: boolean
+  }
+}
+
+export type ListLogsResponse = ListLogsResponses[keyof ListLogsResponses]
+
+export type CreateLogStreamTicketData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/api/logs/stream-ticket"
+}
+
+export type CreateLogStreamTicketErrors = {
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Response for status 503
+   */
+  503: {
+    error: string
+  }
+}
+
+export type CreateLogStreamTicketError =
+  CreateLogStreamTicketErrors[keyof CreateLogStreamTicketErrors]
+
+export type CreateLogStreamTicketResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    ticket: string
+    expiresAt: string
+  }
+}
+
+export type CreateLogStreamTicketResponse =
+  CreateLogStreamTicketResponses[keyof CreateLogStreamTicketResponses]
+
 export type ListProjectionsData = {
   body?: never
   path?: never

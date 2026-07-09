@@ -68,6 +68,7 @@ export function createRuntimeSecurityRegistry(input: {
     syncIds: input.syncIds,
     pipelineIds: input.pipelineIds,
     agentIds: input.agentIds,
+    observableIds: new Set(["logs"]),
   })
 
   const universe = {
@@ -78,6 +79,7 @@ export function createRuntimeSecurityRegistry(input: {
     syncIds: input.syncIds ?? new Set<string>(),
     pipelineIds: input.pipelineIds ?? new Set<string>(),
     agentIds: input.agentIds ?? new Set<string>(),
+    observableIds: new Set(["logs"]),
     getSubTypes: input.getSubTypes ?? (() => []),
   }
   const resolvedRoles = securityDefinitions.roles.map((role) => ({

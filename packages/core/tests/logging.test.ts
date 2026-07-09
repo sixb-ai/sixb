@@ -25,7 +25,7 @@ import {
 const PROJECT = "logging-tests"
 
 async function readLines(broker: InMemoryBroker): Promise<readonly LogRecord[]> {
-  const records = await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })
+  const { records } = await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })
   return records.map((record) => record.payload as unknown as LogRecord)
 }
 
@@ -46,7 +46,7 @@ describe("LogsRuntime broker capture", () => {
     session.logger.info("Reviewing invoice", { invoice: "INV-1" })
     await session.flush()
 
-    const records = await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })
+    const { records } = await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })
     expect(records).toHaveLength(1)
     expect(records[0]?.name).toBe("sync.info")
     expect(records[0]?.key).toBe("sync:run-1")
@@ -280,7 +280,9 @@ describe("LogsRuntime broker capture", () => {
     await session.flush()
 
     expect(entries).toHaveLength(1)
-    expect(await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })).toEqual([])
+    expect((await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })).records).toEqual(
+      []
+    )
   })
 })
 

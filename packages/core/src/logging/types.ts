@@ -50,6 +50,9 @@ export interface LogEntry {
 /** One sanitized, bounded log line stored in the `__logs` broker stream. */
 export type LogRecord = LogEntry
 
+/** A broker-backed log line tagged with its opaque stream cursor. */
+export type StoredLogLine = LogRecord & { readonly cursor: string }
+
 /**
  * Process-level output destination. Providers own their lifecycle; handlers
  * only receive the narrower {@link Logger} façade.

@@ -22,6 +22,7 @@ import {
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
   createFileUpload,
+  createLogStreamTicket,
   disableAuthServiceAccount,
   existsObjects,
   facetObjects,
@@ -74,6 +75,7 @@ import {
   listDatasets,
   listDatasetVersions,
   listEvents,
+  listLogs,
   listObjectLinks,
   listObjects,
   listObjectTypes,
@@ -150,6 +152,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
+  CreateLogStreamTicketData,
+  CreateLogStreamTicketError,
+  CreateLogStreamTicketResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -300,6 +305,9 @@ import type {
   ListEventsData,
   ListEventsError,
   ListEventsResponse,
+  ListLogsData,
+  ListLogsError,
+  ListLogsResponse,
   ListObjectLinksData,
   ListObjectLinksError,
   ListObjectLinksResponse,
@@ -3440,6 +3448,58 @@ export const listEventsOptions = (options?: Options<ListEventsData>) =>
     },
     queryKey: listEventsQueryKey(options),
   })
+
+export const listLogsQueryKey = (options?: Options<ListLogsData>) =>
+  createQueryKey("listLogs", options)
+
+/**
+ * Read run logs
+ */
+export const listLogsOptions = (options?: Options<ListLogsData>) =>
+  queryOptions<
+    ListLogsResponse,
+    ListLogsError,
+    ListLogsResponse,
+    ReturnType<typeof listLogsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listLogs({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listLogsQueryKey(options),
+  })
+
+/**
+ * Create a log stream ticket
+ */
+export const createLogStreamTicketMutation = (
+  options?: Partial<Options<CreateLogStreamTicketData>>
+): UseMutationOptions<
+  CreateLogStreamTicketResponse,
+  CreateLogStreamTicketError,
+  Options<CreateLogStreamTicketData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    CreateLogStreamTicketResponse,
+    CreateLogStreamTicketError,
+    Options<CreateLogStreamTicketData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await createLogStreamTicket({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>
   createQueryKey("listProjections", options)

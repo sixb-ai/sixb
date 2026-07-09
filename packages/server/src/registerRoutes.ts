@@ -9,6 +9,7 @@ import { registerDatasetRoutes } from "./routes/datasets"
 import { registerEventRoutes } from "./routes/events"
 import { registerFileRoutes } from "./routes/files"
 import { registerLinkRoutes } from "./routes/links"
+import { registerLogRoutes } from "./routes/logs"
 import { registerObjectRoutes } from "./routes/objects"
 import { registerOntologyRoutes } from "./routes/ontology"
 import { registerPipelineRoutes } from "./routes/pipelines"
@@ -21,7 +22,13 @@ import { registerTelemetryRoutes } from "./routes/telemetry"
 import { registerWebhookRunRoutes } from "./routes/webhook-runs"
 import { registerWorkflowRoutes } from "./routes/workflows"
 
-export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
+export function registerHttpRoutes(
+  app: Elysia,
+  sixb: Sixb<readonly OntologySource[]>,
+  options: {
+    readonly issueLogStreamTicket: Parameters<typeof registerLogRoutes>[2]
+  }
+) {
   registerAgentApiGatewayRoutes(app, sixb)
   registerProjectRoutes(app, sixb)
   registerStatusRoutes(app, sixb)
@@ -40,6 +47,7 @@ export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
   registerLinkRoutes(app, sixb)
   registerTelemetryRoutes(app, sixb)
   registerEventRoutes(app, sixb)
+  registerLogRoutes(app, sixb, options.issueLogStreamTicket)
   registerProjectionRoutes(app, sixb)
   registerWebhookRunRoutes(app, sixb)
 

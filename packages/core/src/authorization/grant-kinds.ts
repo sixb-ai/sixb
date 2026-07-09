@@ -18,6 +18,7 @@ export type GrantKind =
   | "run:sync"
   | "run:pipeline"
   | "run:agent"
+  | "observe:logs"
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
@@ -28,6 +29,7 @@ export interface GrantUniverse {
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
   readonly agentIds: ReadonlySet<string>
+  readonly observableIds: ReadonlySet<string>
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
 }
 
@@ -86,6 +88,11 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     subject: "agent",
     fix: "Add it to 'agents/' or pass it to createSixb({ agents }).",
   },
+  "observe:logs": {
+    universeKey: "observableIds",
+    subject: "observability surface",
+    fix: 'Use can.observe("logs").',
+  },
 }
 
 export const GRANT_KIND_KEYS = Object.keys(GRANT_KINDS) as readonly GrantKind[]
@@ -99,6 +106,8 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
       return "apply:action"
     case "run":
       return `run:${grant.target}`
+    case "observe":
+      return "observe:logs"
   }
 }
 

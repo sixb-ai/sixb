@@ -2,14 +2,21 @@ import { randomUUID } from "node:crypto"
 import type { JetStreamClient, OrderedConsumerOptions, StreamInfo } from "@nats-io/jetstream"
 import { DeliverPolicy, jetstream } from "@nats-io/jetstream"
 import type { ConnectionOptions } from "@nats-io/nats-core"
-import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@sixb/core"
-import { cloneJsonValue } from "@sixb/core"
+import {
+  type Broker,
+  BrokerCursorExpiredError,
+  type BrokerPage,
+  type BrokerRecord,
+  type BrokerRecordInput,
+  type BrokerStreamDefinition,
+  cloneJsonValue,
+} from "@sixb/core"
 import { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
 import { validateProjectId } from "./project-id"
 import { assertEncodableRecord, decodeRecord, encodeRecord } from "./serialization"
 import { StreamManager } from "./stream"
-import { assertNamespace, buildNameFilters, buildRecordSubject } from "./subjects"
+import { assertNamespace, buildRecordFilters, buildRecordSubject } from "./subjects"
 import { type ActiveSubscription, SubscriptionRegistry } from "./subscription-registry"
 
 const DEFAULT_NAMESPACE = "sixb_broker"
@@ -107,6 +114,7 @@ export class NatsBroker implements Broker {
               projectId: params.projectId,
               streamId: params.streamId,
               name: input.name,
+              key: input.key,
             })
             const ack = await js.publish(subject, encodeRecord(input, publishedAt), {
               msgID: input.idempotencyKey,
@@ -147,35 +155,127 @@ export class NatsBroker implements Broker {
     afterCursor?: string
     limit?: number
     names?: readonly string[]
-  }): Promise<readonly BrokerRecord[]> {
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
     this.assertOpen()
     validateProjectId(params.projectId)
     assertStreamId(params.streamId)
     assertCursor(params.afterCursor)
 
     if (params.limit !== undefined && params.limit <= 0) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
     const streamName = await this.streamManager.getExistingStream(params.projectId, params.streamId)
     if (!streamName) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
-    await this.assertCursorInRetainedRange({
-      streamName,
-      streamId: params.streamId,
-      afterCursor: params.afterCursor,
-    })
+    const streamInfo = await this.fetchStreamInfo(streamName)
+    this.assertCursorInRetainedRange(streamInfo, params.streamId, params.afterCursor)
+    if (streamInfo.state.messages === 0) {
+      return { records: [], cursor: params.afterCursor, hasMore: false }
+    }
 
-    return this.fetchRecords({
+    const requested = params.limit === undefined ? undefined : params.limit + 1
+    const fetched = await this.fetchWindow({
       projectId: params.projectId,
       streamId: params.streamId,
       streamName,
-      afterCursor: params.afterCursor,
-      limit: params.limit,
+      startSequence:
+        params.afterCursor === undefined
+          ? firstAvailableSequenceFor(streamInfo)
+          : BigInt(params.afterCursor) + 1n,
+      endSequence: BigInt(streamInfo.state.last_seq) + 1n,
+      maxRecords: requested,
       names: params.names,
+      keys: params.keys,
     })
+    const hasMore = params.limit !== undefined && fetched.length > params.limit
+    const records = hasMore ? fetched.slice(0, params.limit) : fetched
+    const lastStreamCursor = String(streamInfo.state.last_seq)
+    return {
+      records,
+      cursor: hasMore ? records.at(-1)?.cursor : maxCursor(params.afterCursor, lastStreamCursor),
+      hasMore,
+    }
+  }
+
+  async tail(params: {
+    projectId: string
+    streamId: string
+    beforeCursor?: string
+    limit?: number
+    names?: readonly string[]
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
+    this.assertOpen()
+    validateProjectId(params.projectId)
+    assertStreamId(params.streamId)
+    assertCursor(params.beforeCursor)
+
+    if (params.limit !== undefined && params.limit <= 0) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    const streamName = await this.streamManager.getExistingStream(params.projectId, params.streamId)
+    if (!streamName) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    const streamInfo = await this.fetchStreamInfo(streamName)
+    this.assertTailCursorInRetainedRange(streamInfo, params.streamId, params.beforeCursor)
+    const first = firstAvailableSequenceFor(streamInfo)
+    const streamEnd = BigInt(streamInfo.state.last_seq) + 1n
+    const end = params.beforeCursor === undefined ? streamEnd : BigInt(params.beforeCursor)
+    if (streamInfo.state.messages === 0 || end <= first) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    if (params.limit === undefined) {
+      const records = await this.fetchWindow({
+        projectId: params.projectId,
+        streamId: params.streamId,
+        streamName,
+        startSequence: first,
+        endSequence: end,
+        names: params.names,
+        keys: params.keys,
+      })
+      return { records, cursor: records[0]?.cursor ?? params.beforeCursor, hasMore: false }
+    }
+
+    const target = params.limit + 1
+    let span = BigInt(Math.max(DEFAULT_FETCH_BATCH_SIZE, target * 4))
+    let start = end > span ? end - span : first
+    if (start < first) start = first
+    let fetched: readonly BrokerRecord[] = []
+
+    while (true) {
+      fetched = await this.fetchWindow({
+        projectId: params.projectId,
+        streamId: params.streamId,
+        streamName,
+        startSequence: start,
+        endSequence: end,
+        names: params.names,
+        keys: params.keys,
+      })
+      if (fetched.length >= target || start === first) {
+        break
+      }
+      span *= 2n
+      start = end > span ? end - span : first
+      if (start < first) start = first
+    }
+
+    const hasMore = fetched.length > params.limit
+    const records = fetched.slice(Math.max(0, fetched.length - params.limit))
+    return {
+      records,
+      cursor: records[0]?.cursor ?? params.beforeCursor ?? String(first),
+      hasMore,
+    }
   }
 
   async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
@@ -199,6 +299,7 @@ export class NatsBroker implements Broker {
       from?: "latest" | "earliest"
       afterCursor?: string
       names?: readonly string[]
+      keys?: readonly string[]
     },
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void> {
@@ -216,6 +317,7 @@ export class NatsBroker implements Broker {
       afterCursor: params.afterCursor,
       from: params.from,
       names: params.names,
+      keys: params.keys,
       live: true,
     })
     const consumer = await js.consumers.get(streamName, consumerOptions)
@@ -290,13 +392,15 @@ export class NatsBroker implements Broker {
     }
   }
 
-  private async fetchRecords(params: {
+  private async fetchWindow(params: {
     projectId: string
     streamId: string
     streamName: string
-    afterCursor?: string
-    limit?: number
+    startSequence: bigint
+    endSequence?: bigint
+    maxRecords?: number
     names?: readonly string[]
+    keys?: readonly string[]
   }): Promise<readonly BrokerRecord[]> {
     const js = await this.getJetStream()
     const consumer = await js.consumers.get(
@@ -304,12 +408,18 @@ export class NatsBroker implements Broker {
       this.consumerOptions({
         projectId: params.projectId,
         streamId: params.streamId,
-        afterCursor: params.afterCursor,
+        afterCursor: String(params.startSequence - 1n),
         from: "earliest",
         names: params.names,
+        keys: params.keys,
         live: false,
       })
     )
+
+    const consumerInfo = await consumer.info()
+    if (consumerInfo.num_pending === 0) {
+      return []
+    }
 
     // `read()` is bounded. Use fetch() rather than consume() so missing or
     // empty streams return promptly instead of blocking indefinitely on a
@@ -317,13 +427,20 @@ export class NatsBroker implements Broker {
     // match the filter; the batch size bounds memory when the caller did not
     // provide a limit.
     const records: BrokerRecord[] = []
-    while (params.limit === undefined || records.length < params.limit) {
+    let pending = consumerInfo.num_pending
+    let reachedEnd = false
+    while (
+      pending > 0 &&
+      !reachedEnd &&
+      (params.maxRecords === undefined || records.length < params.maxRecords)
+    ) {
       const remaining =
-        params.limit === undefined
+        params.maxRecords === undefined
           ? DEFAULT_FETCH_BATCH_SIZE
-          : Math.min(DEFAULT_FETCH_BATCH_SIZE, params.limit - records.length)
+          : Math.min(DEFAULT_FETCH_BATCH_SIZE, params.maxRecords - records.length)
+      const requested = Math.min(remaining, pending)
       const batch = await consumer.fetch({
-        max_messages: remaining,
+        max_messages: requested,
         // JetStream client requires expires >= 1000ms. This mostly affects
         // empty reads; non-empty reads break as soon as pending reaches 0.
         expires: 1000,
@@ -332,6 +449,15 @@ export class NatsBroker implements Broker {
       let received = 0
       for await (const msg of batch) {
         received += 1
+        pending = msg.info.pending
+        if (
+          params.endSequence !== undefined &&
+          BigInt(msg.info.streamSequence) >= params.endSequence
+        ) {
+          reachedEnd = true
+          batch.stop()
+          break
+        }
         records.push(
           decodeRecord({
             streamId: params.streamId,
@@ -343,13 +469,18 @@ export class NatsBroker implements Broker {
 
         if (
           msg.info.pending === 0 ||
-          (params.limit !== undefined && records.length >= params.limit)
+          (params.maxRecords !== undefined && records.length >= params.maxRecords)
         ) {
+          batch.stop()
           break
         }
       }
 
-      if (received === 0 || records.length >= (params.limit ?? Number.POSITIVE_INFINITY)) {
+      if (
+        received === 0 ||
+        received < requested ||
+        records.length >= (params.maxRecords ?? Number.POSITIVE_INFINITY)
+      ) {
         break
       }
     }
@@ -357,24 +488,41 @@ export class NatsBroker implements Broker {
     return records
   }
 
-  private async assertCursorInRetainedRange(params: {
-    streamName: string
-    streamId: string
+  private assertCursorInRetainedRange(
+    streamInfo: StreamInfo,
+    streamId: string,
     afterCursor: string | undefined
-  }): Promise<void> {
-    if (params.afterCursor === undefined) {
+  ): void {
+    if (afterCursor === undefined) {
       return
     }
 
-    const streamInfo = await this.fetchStreamInfo(params.streamName)
-    const requestedNextSequence = BigInt(params.afterCursor) + 1n
+    const requestedNextSequence = BigInt(afterCursor) + 1n
     const firstAvailableSequence = firstAvailableSequenceFor(streamInfo)
 
     if (requestedNextSequence < firstAvailableSequence) {
-      throw new NatsBrokerError(
-        `afterCursor '${params.afterCursor}' is outside the retained range for stream ` +
-          `'${params.streamId}'. The next requested cursor sequence is ` +
+      throw new BrokerCursorExpiredError(
+        `afterCursor '${afterCursor}' is outside the retained range for stream ` +
+          `'${streamId}'. The next requested cursor sequence is ` +
           `'${requestedNextSequence}', but the earliest available cursor sequence is ` +
+          `'${firstAvailableSequence}'.`
+      )
+    }
+  }
+
+  private assertTailCursorInRetainedRange(
+    streamInfo: StreamInfo,
+    streamId: string,
+    beforeCursor: string | undefined
+  ): void {
+    if (beforeCursor === undefined || streamInfo.state.messages === 0) {
+      return
+    }
+    const firstAvailableSequence = firstAvailableSequenceFor(streamInfo)
+    if (BigInt(beforeCursor) < firstAvailableSequence) {
+      throw new BrokerCursorExpiredError(
+        `beforeCursor '${beforeCursor}' is outside the retained range for stream ` +
+          `'${streamId}'. The earliest available cursor sequence is ` +
           `'${firstAvailableSequence}'.`
       )
     }
@@ -424,13 +572,15 @@ export class NatsBroker implements Broker {
     afterCursor?: string
     from?: "latest" | "earliest"
     names?: readonly string[]
+    keys?: readonly string[]
     live: boolean
   }): Partial<OrderedConsumerOptions> {
-    const filterSubjects = buildNameFilters({
+    const filterSubjects = buildRecordFilters({
       namespace: this.namespace,
       projectId: params.projectId,
       streamId: params.streamId,
       names: params.names,
+      keys: params.keys,
     })
     const filter_subjects = filterSubjects === undefined ? undefined : [...filterSubjects]
 
@@ -505,4 +655,11 @@ function firstAvailableSequenceFor(streamInfo: StreamInfo): bigint {
     return BigInt(streamInfo.state.first_seq)
   }
   return BigInt(streamInfo.state.last_seq) + 1n
+}
+
+function maxCursor(first: string | undefined, second: string): string {
+  if (first === undefined) {
+    return second
+  }
+  return BigInt(first) >= BigInt(second) ? first : second
 }

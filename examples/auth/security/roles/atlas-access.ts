@@ -17,5 +17,6 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
     can.view(datasets()),
     can.apply(actions()),
     can.run(workflows()),
+    can.observe("logs"),
   ],
 })

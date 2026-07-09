@@ -562,6 +562,7 @@ function authz(principal: Principal, agentIds: readonly string[] = []): Authoriz
       "run:sync": new Set(),
       "run:pipeline": new Set(),
       "run:agent": new Set(agentIds),
+      "observe:logs": new Set(),
     },
   }
 }

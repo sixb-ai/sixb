@@ -859,6 +859,10 @@
       "description": "Domain event stream"
     },
     {
+      "name": "Logs",
+      "description": "Run log stream"
+    },
+    {
       "name": "Auth Sessions",
       "description": "Authentication sessions and sign-out"
     },
@@ -17869,6 +17873,266 @@
         }
       }
     },
+    "/api/logs": {
+      "get": {
+        "summary": "Read run logs",
+        "tags": ["Logs"],
+        "operationId": "listLogs",
+        "security": [
+          {
+            "sixbBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["sync", "pipeline", "workflow", "action"]
+            }
+          },
+          {
+            "name": "runId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["debug", "info", "warn", "error"]
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["forward", "backward"]
+            }
+          },
+          {
+            "name": "afterCursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeCursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "number"
+                    },
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "level": {
+                            "type": "string",
+                            "enum": ["debug", "info", "warn", "error"]
+                          },
+                          "message": {
+                            "type": "string"
+                          },
+                          "fields": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "at": {
+                            "type": "string"
+                          },
+                          "context": {
+                            "type": "object",
+                            "properties": {
+                              "run": {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["sync", "pipeline", "workflow", "action"]
+                                  },
+                                  "id": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "id"],
+                                "additionalProperties": false
+                              },
+                              "stepId": {
+                                "type": "string"
+                              },
+                              "phase": {
+                                "type": "string"
+                              },
+                              "attempt": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["run"],
+                            "additionalProperties": false
+                          },
+                          "cursor": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["level", "message", "at", "context", "cursor"],
+                        "additionalProperties": false
+                      }
+                    },
+                    "cursor": {
+                      "type": "string"
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["count", "lines", "hasMore"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/logs/stream-ticket": {
+      "post": {
+        "summary": "Create a log stream ticket",
+        "tags": ["Logs"],
+        "operationId": "createLogStreamTicket",
+        "security": [
+          {
+            "sixbCsrf": []
+          },
+          {
+            "sixbBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ticket": {
+                      "type": "string"
+                    },
+                    "expiresAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["ticket", "expiresAt"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projections": {
       "get": {
         "summary": "List all projection definitions",
@@ -19304,6 +19568,11 @@
     "/ws/events": {
       "ws": {
         "operationId": "wsWsEvents"
+      }
+    },
+    "/ws/logs": {
+      "ws": {
+        "operationId": "wsWsLogs"
       }
     },
     "/ws/agents": {

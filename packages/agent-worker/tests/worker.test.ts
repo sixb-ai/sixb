@@ -727,10 +727,12 @@ async function listMessages(storage: AgentStorage, threadId: string) {
 }
 
 async function listRunStreamRecords(broker: Broker, runId: string) {
-  return broker.read({
-    projectId: PROJECT_ID,
-    streamId: agentRunStreamId(runId),
-  })
+  return broker
+    .read({
+      projectId: PROJECT_ID,
+      streamId: agentRunStreamId(runId),
+    })
+    .then((page) => page.records)
 }
 
 /**

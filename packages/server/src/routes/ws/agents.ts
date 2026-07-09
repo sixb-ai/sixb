@@ -237,18 +237,18 @@ async function replayAgentStream(
       projectId: sixb.id,
       stream: agentRunStreamDefinition(message.runId),
     })
-    const records = await sixb.broker.read({
+    const page = await sixb.broker.read({
       projectId: sixb.id,
       streamId,
       afterCursor: message.afterCursor,
       limit: message.limit,
     })
-    sendRecords(ws, records)
+    sendRecords(ws, page.records)
     safeSend(ws, {
       type: "replayed",
       runId: message.runId,
-      afterCursor: records.at(-1)?.cursor ?? message.afterCursor ?? null,
-      count: records.length,
+      afterCursor: page.cursor ?? message.afterCursor ?? null,
+      count: page.records.length,
     })
   } catch (error) {
     safeSend(ws, { type: "error", message: errorMessage(error) })

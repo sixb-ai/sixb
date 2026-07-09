@@ -145,7 +145,9 @@ describe("EventsRuntime", () => {
 
     expect(await events.append({ events: [] })).toEqual([])
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
-    expect(await broker.read({ projectId: "project-a", streamId: EVENTS_STREAM.id })).toEqual([])
+    expect(
+      (await broker.read({ projectId: "project-a", streamId: EVENTS_STREAM.id })).records
+    ).toEqual([])
   })
 })
 

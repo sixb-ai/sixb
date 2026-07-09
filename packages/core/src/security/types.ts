@@ -41,7 +41,16 @@ export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
   readonly selection: Selection
 }
 
-export type GrantDefinition = ViewGrant | ApplyGrant | RunGrant
+export type ObserveGrantTarget = "logs"
+
+export interface ObserveGrant {
+  readonly kind: "grant"
+  readonly capability: "observe"
+  readonly target: ObserveGrantTarget
+  readonly selection: Selection
+}
+
+export type GrantDefinition = ViewGrant | ApplyGrant | RunGrant | ObserveGrant
 
 export type GrantCapability = GrantDefinition["capability"]
 

@@ -531,7 +531,7 @@ describe("agent routes", () => {
     )
     expect(ok.status).toBe(202)
     expect(await ok.json()).toEqual({ runId: run.id })
-    const control = await sixb.broker.read({
+    const { records: control } = await sixb.broker.read({
       projectId: sixb.id,
       streamId: agentRunControlStreamId(run.id),
     })

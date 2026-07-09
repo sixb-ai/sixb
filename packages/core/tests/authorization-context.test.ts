@@ -149,6 +149,7 @@ describe("resolveAuthorizationContext", () => {
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
     agentIds: new Set(["contract-agent", "invoice-agent"]),
+    observableIds: new Set(["logs"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
   }
 
@@ -181,6 +182,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
     expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
+    expect(context.grants["observe:logs"]).toEqual(new Set())
   })
 
   test("unions grants across all matched roles", () => {

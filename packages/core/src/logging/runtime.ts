@@ -1,4 +1,4 @@
-import type { Broker, BrokerRetention, BrokerStreamDefinition } from "../broker"
+import type { Broker, BrokerRecord, BrokerRetention, BrokerStreamDefinition } from "../broker"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { noopLoggerProvider } from "./console-logger"
 import { type LogPublisher, RunLogSession } from "./run-logger"
@@ -12,7 +12,46 @@ import {
   DEFAULT_MAX_LOG_RECORD_BYTES,
   LOGS_STREAM,
 } from "./stream"
-import type { LoggerProvider, LogLevel, LogRunRef } from "./types"
+import type {
+  LoggerProvider,
+  LogLevel,
+  LogRecord,
+  LogRunKind,
+  LogRunRef,
+  StoredLogLine,
+} from "./types"
+
+const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"]
+
+export interface LogsPage {
+  readonly lines: readonly StoredLogLine[]
+  readonly cursor?: string
+  readonly hasMore: boolean
+}
+
+export interface LogsReadInput {
+  readonly afterCursor?: string
+  readonly limit?: number
+  readonly kinds?: readonly LogRunKind[]
+  readonly levels?: readonly LogLevel[]
+  readonly run?: LogRunRef
+}
+
+export interface LogsTailInput {
+  readonly beforeCursor?: string
+  readonly limit?: number
+  readonly kinds?: readonly LogRunKind[]
+  readonly levels?: readonly LogLevel[]
+  readonly run?: LogRunRef
+}
+
+export interface LogsSubscribeInput {
+  readonly from?: "latest" | "earliest"
+  readonly afterCursor?: string
+  readonly kinds?: readonly LogRunKind[]
+  readonly levels?: readonly LogLevel[]
+  readonly run?: LogRunRef
+}
 
 export interface LogsObservabilityOptions {
   /** Forward handler logs to the broker. Defaults to `true`. */
@@ -111,6 +150,76 @@ export class LogsRuntime {
     })
   }
 
+  async read(input: LogsReadInput = {}): Promise<LogsPage> {
+    if (!this.broker || (input.limit !== undefined && input.limit <= 0)) {
+      return { lines: [], cursor: input.afterCursor, hasMore: false }
+    }
+    await this.ensureStream()
+    const page = await this.broker.read({
+      projectId: this.projectId,
+      streamId: this.stream.id,
+      afterCursor: input.afterCursor,
+      limit: input.limit,
+      names: logRecordNames(input.kinds, input.levels, input.run),
+      keys: input.run ? [`${input.run.kind}:${input.run.id}`] : undefined,
+    })
+    return {
+      lines: page.records.map(hydrateLogRecord),
+      cursor: page.cursor,
+      hasMore: page.hasMore,
+    }
+  }
+
+  async tail(input: LogsTailInput = {}): Promise<LogsPage> {
+    if (!this.broker || (input.limit !== undefined && input.limit <= 0)) {
+      return { lines: [], cursor: input.beforeCursor, hasMore: false }
+    }
+    await this.ensureStream()
+    const page = await this.broker.tail({
+      projectId: this.projectId,
+      streamId: this.stream.id,
+      beforeCursor: input.beforeCursor,
+      limit: input.limit,
+      names: logRecordNames(input.kinds, input.levels, input.run),
+      keys: input.run ? [`${input.run.kind}:${input.run.id}`] : undefined,
+    })
+    return {
+      lines: page.records.map(hydrateLogRecord),
+      cursor: page.cursor,
+      hasMore: page.hasMore,
+    }
+  }
+
+  async subscribe(
+    input: LogsSubscribeInput,
+    handler: (lines: readonly StoredLogLine[]) => void
+  ): Promise<() => void> {
+    const broker = this.broker
+    if (!broker) {
+      return () => undefined
+    }
+    await this.ensureStream()
+    return broker.subscribe(
+      {
+        projectId: this.projectId,
+        streamId: this.stream.id,
+        from: input.from,
+        afterCursor: input.afterCursor,
+        names: logRecordNames(input.kinds, input.levels, input.run),
+        keys: input.run ? [`${input.run.kind}:${input.run.id}`] : undefined,
+      },
+      (records) => {
+        const lines = records.map(hydrateLogRecord)
+        if (lines.length === 0) return
+        try {
+          handler(lines)
+        } catch {
+          // Subscriber failures never break broker delivery.
+        }
+      }
+    )
+  }
+
   /** Flush the process provider. Execution sessions never call this globally. */
   async flush(): Promise<void> {
     await this.provider.flush?.()
@@ -206,4 +315,49 @@ function nonNegativeInteger(value: number, path: string): number {
     throw new TypeError(`${path} must be a non-negative safe integer`)
   }
   return value
+}
+
+function logRecordNames(
+  kinds: readonly LogRunKind[] | undefined,
+  levels: readonly LogLevel[] | undefined,
+  run: LogRunRef | undefined
+): readonly string[] | undefined {
+  const selectedKinds = run ? [run.kind] : kinds
+  if ((!selectedKinds || selectedKinds.length === 0) && (!levels || levels.length === 0)) {
+    return undefined
+  }
+  const resolvedKinds = selectedKinds && selectedKinds.length > 0 ? selectedKinds : LOG_RUN_KINDS
+  const resolvedLevels = levels && levels.length > 0 ? levels : LOG_LEVELS
+  return resolvedKinds.flatMap((kind) => resolvedLevels.map((level) => `${kind}.${level}`))
+}
+
+const LOG_RUN_KINDS: readonly LogRunKind[] = ["sync", "pipeline", "workflow", "action"]
+
+function hydrateLogRecord(record: BrokerRecord): StoredLogLine {
+  const payload = record.payload
+  if (
+    !isObjectRecord(payload) ||
+    !isLogLevel(payload.level) ||
+    typeof payload.message !== "string" ||
+    typeof payload.at !== "string" ||
+    !isObjectRecord(payload.context) ||
+    !isObjectRecord(payload.context.run) ||
+    !isLogRunKind(payload.context.run.kind) ||
+    typeof payload.context.run.id !== "string"
+  ) {
+    throw new Error(`[Sixb] Broker record at cursor '${record.cursor}' is not a log line.`)
+  }
+  return { ...(payload as unknown as LogRecord), cursor: record.cursor }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function isLogLevel(value: unknown): value is LogLevel {
+  return value === "debug" || value === "info" || value === "warn" || value === "error"
+}
+
+function isLogRunKind(value: unknown): value is LogRunKind {
+  return value === "sync" || value === "pipeline" || value === "workflow" || value === "action"
 }

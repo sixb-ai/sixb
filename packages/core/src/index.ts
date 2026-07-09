@@ -219,12 +219,13 @@ export {
 export type {
   Broker,
   BrokerCursor,
+  BrokerPage,
   BrokerRecord,
   BrokerRecordInput,
   BrokerRetention,
   BrokerStreamDefinition,
 } from "./broker"
-export { BrokerError, InMemoryBroker } from "./broker"
+export { BrokerCursorExpiredError, BrokerError, InMemoryBroker } from "./broker"
 export type { JsonValue } from "./json"
 export {
   assertJsonValue,
@@ -435,8 +436,13 @@ export type {
   LogRunKind,
   LogRunRef,
   LogsObservabilityOptions,
+  LogsPage,
+  LogsReadInput,
   LogsRuntimeOptions,
+  LogsSubscribeInput,
+  LogsTailInput,
   ObservabilityOptions,
+  StoredLogLine,
 } from "./logging"
 export {
   ConsoleLogger,
@@ -666,6 +672,8 @@ export type {
   MembershipOperationScope,
   MembershipPolicyDefinition,
   MembershipPolicyScope,
+  ObserveGrant,
+  ObserveGrantTarget,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,

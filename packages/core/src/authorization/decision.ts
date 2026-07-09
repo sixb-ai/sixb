@@ -29,6 +29,7 @@ export type AuthzRequest =
   | { readonly kind: "sync.run"; readonly syncId: string }
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
   | { readonly kind: "agent.run"; readonly agentId: string }
+  | { readonly kind: "logs.observe" }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
 
 export interface AuthzDecision {
@@ -68,12 +69,15 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
       return [{ kind: "run:pipeline", id: request.pipelineId }]
     case "agent.run":
       return [{ kind: "run:agent", id: request.agentId }]
+    case "logs.observe":
+      return [{ kind: "observe:logs", id: "logs" }]
     case "object.query":
       return request.touchedObjectTypeIds.map((id) => ({ kind: "view:object", id }))
   }
 }
 
 function atomKey(atom: Atom): string {
+  if (atom.kind === "observe:logs") return atom.kind
   return `${atom.kind}:${atom.id}`
 }
 
@@ -149,6 +153,8 @@ function deniedMessage(
       return `[Sixb] Principal '${principalId}' is not allowed to run pipeline '${request.pipelineId}'.`
     case "agent.run":
       return `[Sixb] Principal '${principalId}' is not allowed to run agent '${request.agentId}'.`
+    case "logs.observe":
+      return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
     case "object.query": {
       // Name the first touched type the principal cannot view.
       const blocked = request.touchedObjectTypeIds.find(

@@ -30,6 +30,12 @@
       "import": "./dist/events.js",
       "default": "./dist/events.js"
     },
+    "./logs": {
+      "types": "./dist/logs.d.ts",
+      "bun": "./src/logs.ts",
+      "import": "./dist/logs.js",
+      "default": "./dist/logs.js"
+    },
     "./hooks": {
       "types": "./dist/hooks.d.ts",
       "bun": "./src/hooks.ts",

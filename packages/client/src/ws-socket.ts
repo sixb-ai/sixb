@@ -26,6 +26,10 @@ export interface ReconnectingSocketErrorSink {
 
 export interface ReconnectingSocketOptions {
   readonly url: string
+  /** Built before every connection; useful for one-shot WebSocket tickets. */
+  readonly protocols?: () => readonly string[] | Promise<readonly string[]>
+  /** Decide whether a failed async connection setup should be retried. */
+  readonly shouldReconnectAfterSetupError?: (error: unknown) => boolean
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
   /** Built fresh for each subscription so it can carry the latest resume cursor. */
@@ -68,6 +72,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   let openedOnce = false
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let connectionGeneration = 0
 
   const setState = (next: ReconnectingSocketState) => {
     state = next
@@ -81,14 +86,36 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     },
   }
 
-  const connect = () => {
-    if (stopped) return
+  const scheduleReconnect = () => {
+    if (!reconnect || stopped || reconnectTimer) return
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null
+      void connect()
+    }, reconnectDelayMs)
+  }
 
-    const ws = new WebSocket(options.url)
+  const connect = async () => {
+    if (stopped) return
+    const generation = ++connectionGeneration
+    setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
+
+    let protocols: readonly string[] | undefined
+    try {
+      if (options.protocols) protocols = await options.protocols()
+    } catch (error) {
+      if (stopped || generation !== connectionGeneration) return
+      sink.reportError(error instanceof Error ? error.message : String(error))
+      const retry = reconnect && (options.shouldReconnectAfterSetupError?.(error) ?? true)
+      setState({ connected: false, reconnecting: retry, error: state.error })
+      if (retry) scheduleReconnect()
+      return
+    }
+    if (stopped || generation !== connectionGeneration) return
+
+    const ws = protocols ? new WebSocket(options.url, [...protocols]) : new WebSocket(options.url)
     socket = ws
     let subscribed = false
     let readyTimer: ReturnType<typeof setTimeout> | null = null
-    setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
 
     const clearReadyTimer = () => {
       if (readyTimer) {
@@ -144,17 +171,16 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       }
       if (stopped) return
       setState({ connected: false, reconnecting: reconnect, error: state.error })
-      if (reconnect) {
-        reconnectTimer = setTimeout(connect, reconnectDelayMs)
-      }
+      scheduleReconnect()
     }
   }
 
-  connect()
+  void connect()
 
   return {
     close() {
       stopped = true
+      connectionGeneration += 1
       if (reconnectTimer) {
         clearTimeout(reconnectTimer)
         reconnectTimer = null

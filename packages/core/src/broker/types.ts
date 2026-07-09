@@ -36,6 +36,15 @@ export interface BrokerRecord {
   readonly publishedAt: string
 }
 
+/** One directional broker page plus the opaque cursor to continue from. */
+export interface BrokerPage {
+  readonly records: readonly BrokerRecord[]
+  /** Last record scanned in the requested direction, even when no record matched. */
+  readonly cursor?: BrokerCursor
+  /** Whether the provider may have more records to scan in the requested direction. */
+  readonly hasMore: boolean
+}
+
 export interface Broker {
   /** Ensures a retained stream exists for the given project. */
   ensureStream(params: { projectId: string; stream: BrokerStreamDefinition }): Promise<void>
@@ -49,7 +58,8 @@ export interface Broker {
 
   /**
    * Reads retained records after an exclusive cursor. `limit` applies after
-   * filtering by `names`.
+   * filtering by `names` and `keys`. The returned cursor advances over scanned
+   * non-matches, so repeated filtered reads always make progress.
    *
    * Providers must reject `afterCursor` values that are older than the retained
    * range instead of silently advancing to the first retained record.
@@ -60,7 +70,22 @@ export interface Broker {
     afterCursor?: BrokerCursor
     limit?: number
     names?: readonly string[]
-  }): Promise<readonly BrokerRecord[]>
+    keys?: readonly string[]
+  }): Promise<BrokerPage>
+
+  /**
+   * Reads the most recent retained records before an exclusive cursor. Records
+   * are returned oldest-first; `cursor` points at the oldest record scanned and
+   * can be passed back as `beforeCursor` to continue toward older history.
+   */
+  tail(params: {
+    projectId: string
+    streamId: string
+    beforeCursor?: BrokerCursor
+    limit?: number
+    names?: readonly string[]
+    keys?: readonly string[]
+  }): Promise<BrokerPage>
 
   /**
    * Returns the latest retained cursor without reading the stream contents.
@@ -79,6 +104,7 @@ export interface Broker {
       from?: "latest" | "earliest"
       afterCursor?: BrokerCursor
       names?: readonly string[]
+      keys?: readonly string[]
     },
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void>

@@ -1,6 +1,12 @@
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
-import { BrokerError } from "./errors"
-import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "./types"
+import { BrokerCursorExpiredError, BrokerError } from "./errors"
+import type {
+  Broker,
+  BrokerPage,
+  BrokerRecord,
+  BrokerRecordInput,
+  BrokerStreamDefinition,
+} from "./types"
 
 // Payloads are validated by assertBrokerPayload above the call site, so we can
 // skip the redundant validity walk that cloneJsonValue performs.
@@ -27,6 +33,7 @@ interface Subscription {
   readonly projectId: string
   readonly streamId: string
   readonly names?: readonly string[]
+  readonly keys?: readonly string[]
   readonly handler: (records: readonly BrokerRecord[]) => void
 }
 
@@ -92,27 +99,55 @@ export class InMemoryBroker implements Broker {
     afterCursor?: string
     limit?: number
     names?: readonly string[]
-  }): Promise<readonly BrokerRecord[]> {
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
     assertProjectId(params.projectId)
     assertStreamId(params.streamId)
     assertCursor(params.afterCursor)
 
     if (params.limit !== undefined && params.limit <= 0) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
     const storedStream = this.streams.get(streamKey(params.projectId, params.streamId))
     if (!storedStream) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
     this.applyRetention(storedStream)
     this.assertCursorInRetainedRange(storedStream, params.afterCursor)
-    return this.filterRecords(storedStream.records, {
+    return this.readForward(storedStream.records, {
       afterCursor: params.afterCursor,
       limit: params.limit,
       names: params.names,
+      keys: params.keys,
     })
+  }
+
+  async tail(params: {
+    projectId: string
+    streamId: string
+    beforeCursor?: string
+    limit?: number
+    names?: readonly string[]
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
+    assertProjectId(params.projectId)
+    assertStreamId(params.streamId)
+    assertCursor(params.beforeCursor)
+
+    if (params.limit !== undefined && params.limit <= 0) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    const storedStream = this.streams.get(streamKey(params.projectId, params.streamId))
+    if (!storedStream) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    this.applyRetention(storedStream)
+    this.assertTailCursorInRetainedRange(storedStream, params.beforeCursor)
+    return this.readBackward(storedStream.records, params)
   }
 
   async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
@@ -135,6 +170,7 @@ export class InMemoryBroker implements Broker {
       from?: "latest" | "earliest"
       afterCursor?: string
       names?: readonly string[]
+      keys?: readonly string[]
     },
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void> {
@@ -147,6 +183,7 @@ export class InMemoryBroker implements Broker {
       projectId: params.projectId,
       streamId: params.streamId,
       names: params.names,
+      keys: params.keys,
       handler,
     }
     this.subscriptions.add(subscription)
@@ -154,10 +191,11 @@ export class InMemoryBroker implements Broker {
     const startMode = params.afterCursor !== undefined ? undefined : (params.from ?? "latest")
     if (params.afterCursor !== undefined || startMode === "earliest") {
       this.applyRetention(storedStream)
-      const initial = this.filterRecords(storedStream.records, {
+      const initial = this.readForward(storedStream.records, {
         afterCursor: params.afterCursor,
         names: params.names,
-      })
+        keys: params.keys,
+      }).records
       this.deliver(subscription, initial)
     }
 
@@ -265,10 +303,26 @@ export class InMemoryBroker implements Broker {
       firstRecord === undefined ? storedStream.nextSequence : BigInt(firstRecord.cursor)
 
     if (requestedNextSequence < firstAvailableSequence) {
-      throw new BrokerError(
+      throw new BrokerCursorExpiredError(
         `afterCursor '${afterCursor}' is outside the retained range for stream '${storedStream.definition.id}'. ` +
           `The next requested cursor sequence is '${requestedNextSequence}', but the earliest ` +
           `available cursor sequence is '${firstAvailableSequence}'.`
+      )
+    }
+  }
+
+  private assertTailCursorInRetainedRange(
+    storedStream: StoredStream,
+    beforeCursor: string | undefined
+  ): void {
+    if (beforeCursor === undefined || storedStream.records.length === 0) {
+      return
+    }
+    const firstAvailableSequence = BigInt(storedStream.records[0]!.cursor)
+    if (BigInt(beforeCursor) < firstAvailableSequence) {
+      throw new BrokerCursorExpiredError(
+        `beforeCursor '${beforeCursor}' is outside the retained range for stream '${storedStream.definition.id}'. ` +
+          `The earliest available cursor sequence is '${firstAvailableSequence}'.`
       )
     }
   }
@@ -280,9 +334,10 @@ export class InMemoryBroker implements Broker {
       }
       this.deliver(
         subscription,
-        this.filterRecords(records, {
+        this.readForward(records, {
           names: subscription.names,
-        })
+          keys: subscription.keys,
+        }).records
       )
     }
   }
@@ -299,33 +354,96 @@ export class InMemoryBroker implements Broker {
     }
   }
 
-  private filterRecords(
+  private readForward(
     records: readonly StoredRecord[],
     filters: {
       afterCursor?: string
       limit?: number
       names?: readonly string[]
+      keys?: readonly string[]
     }
-  ): readonly BrokerRecord[] {
+  ): BrokerPage {
     const names = filters.names && filters.names.length > 0 ? new Set(filters.names) : undefined
+    const keys = filters.keys && filters.keys.length > 0 ? new Set(filters.keys) : undefined
     const afterCursor = filters.afterCursor ? BigInt(filters.afterCursor) : undefined
     const result: BrokerRecord[] = []
+    let cursor = filters.afterCursor
+    let stoppedAt = records.length
 
-    for (const record of records) {
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index]!
       if (afterCursor !== undefined && BigInt(record.cursor) <= afterCursor) {
         continue
       }
-      if (names && (!record.name || !names.has(record.name))) {
+      cursor = record.cursor
+      if (!matchesFilters(record, names, keys)) {
         continue
       }
       result.push(toBrokerRecord(record))
       if (filters.limit !== undefined && result.length >= filters.limit) {
+        stoppedAt = index + 1
         break
       }
     }
 
-    return result
+    return {
+      records: result,
+      cursor,
+      hasMore: records.slice(stoppedAt).some((record) => matchesFilters(record, names, keys)),
+    }
   }
+
+  private readBackward(
+    records: readonly StoredRecord[],
+    filters: {
+      beforeCursor?: string
+      limit?: number
+      names?: readonly string[]
+      keys?: readonly string[]
+    }
+  ): BrokerPage {
+    const names = filters.names && filters.names.length > 0 ? new Set(filters.names) : undefined
+    const keys = filters.keys && filters.keys.length > 0 ? new Set(filters.keys) : undefined
+    const beforeCursor = filters.beforeCursor ? BigInt(filters.beforeCursor) : undefined
+    const reversed: BrokerRecord[] = []
+    let cursor = filters.beforeCursor
+    let stoppedAt = -1
+
+    for (let index = records.length - 1; index >= 0; index -= 1) {
+      const record = records[index]!
+      if (beforeCursor !== undefined && BigInt(record.cursor) >= beforeCursor) {
+        continue
+      }
+      cursor = record.cursor
+      if (!matchesFilters(record, names, keys)) {
+        continue
+      }
+      reversed.push(toBrokerRecord(record))
+      if (filters.limit !== undefined && reversed.length >= filters.limit) {
+        stoppedAt = index - 1
+        break
+      }
+    }
+
+    return {
+      records: reversed.reverse(),
+      cursor,
+      hasMore:
+        stoppedAt >= 0 &&
+        records.slice(0, stoppedAt + 1).some((record) => matchesFilters(record, names, keys)),
+    }
+  }
+}
+
+function matchesFilters(
+  record: BrokerRecord,
+  names: ReadonlySet<string> | undefined,
+  keys: ReadonlySet<string> | undefined
+): boolean {
+  return (
+    (!names || (!!record.name && names.has(record.name))) &&
+    (!keys || (!!record.key && keys.has(record.key)))
+  )
 }
 
 function streamKey(projectId: string, streamId: string): string {

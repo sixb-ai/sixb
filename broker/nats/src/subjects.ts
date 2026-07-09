@@ -3,6 +3,7 @@ import { NatsBrokerError } from "./errors"
 // Records without a name still need a concrete final subject token so they
 // live inside the stream subject filter and can be published consistently.
 const DEFAULT_RECORD_NAME = "_"
+const DEFAULT_RECORD_KEY = "_"
 
 /**
  * Build the broad subject filter owned by a single broker stream. Every record
@@ -13,44 +14,51 @@ export function buildStreamSubject(namespace: string, projectId: string, streamI
 }
 
 /**
- * Build the subject for one broker record. The record name is encoded into
- * the final subject token so name filters can run inside JetStream instead of
- * filtering every record in application code.
+ * Build the subject for one broker record. Name and key are encoded into the
+ * final two subject tokens so both filters can run inside JetStream.
  */
 export function buildRecordSubject(params: {
   readonly namespace: string
   readonly projectId: string
   readonly streamId: string
   readonly name?: string
+  readonly key?: string
 }): string {
   return [
     params.namespace,
     params.projectId,
     encodeSubjectToken(params.streamId),
     encodeSubjectToken(params.name ?? DEFAULT_RECORD_NAME),
+    encodeSubjectToken(params.key ?? DEFAULT_RECORD_KEY),
   ].join(".")
 }
 
 /**
  * Translate broker record-name filters into JetStream subject filters.
  */
-export function buildNameFilters(params: {
+export function buildRecordFilters(params: {
   readonly namespace: string
   readonly projectId: string
   readonly streamId: string
   readonly names?: readonly string[]
+  readonly keys?: readonly string[]
 }): readonly string[] | undefined {
-  if (!params.names || params.names.length === 0) {
+  const names = params.names && params.names.length > 0 ? params.names : [undefined]
+  const keys = params.keys && params.keys.length > 0 ? params.keys : [undefined]
+  if (names[0] === undefined && keys[0] === undefined) {
     return undefined
   }
 
-  return params.names.map((name) =>
-    buildRecordSubject({
-      namespace: params.namespace,
-      projectId: params.projectId,
-      streamId: params.streamId,
-      name,
-    })
+  return names.flatMap((name) =>
+    keys.map((key) =>
+      [
+        params.namespace,
+        params.projectId,
+        encodeSubjectToken(params.streamId),
+        name === undefined ? "*" : encodeSubjectToken(name),
+        key === undefined ? "*" : encodeSubjectToken(key),
+      ].join(".")
+    )
   )
 }
 

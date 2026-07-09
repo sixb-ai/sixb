@@ -16,7 +16,7 @@ import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
 import { isScope, type Scope, scopeIdOf } from "./scopes"
-import type { ApplyGrant, RunGrant, Selection, ViewGrant } from "./types"
+import type { ApplyGrant, ObserveGrant, RunGrant, Selection, ViewGrant } from "./types"
 
 type GrantInput<TDefinition, TTarget extends Scope["target"]> =
   | TDefinition
@@ -138,8 +138,18 @@ function run(
   }
 }
 
+function observe(target: "logs"): ObserveGrant {
+  return {
+    kind: "grant",
+    capability: "observe",
+    target,
+    selection: { all: false, ids: [target] },
+  }
+}
+
 export const can = {
   view,
   apply,
   run,
+  observe,
 }

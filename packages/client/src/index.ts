@@ -12,6 +12,7 @@ export * from "./events"
 export * from "./file"
 export * from "./generated"
 export { client } from "./generated/client.gen"
+export * from "./logs"
 
 // Framework UI models and adapters
 export * from "./models"

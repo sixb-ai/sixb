@@ -6,8 +6,12 @@ export {
 } from "./console-logger"
 export {
   type LogsObservabilityOptions,
+  type LogsPage,
+  type LogsReadInput,
   LogsRuntime,
   type LogsRuntimeOptions,
+  type LogsSubscribeInput,
+  type LogsTailInput,
   type ObservabilityOptions,
   resolveLogsRuntime,
 } from "./runtime"
@@ -28,4 +32,5 @@ export {
   type LogRunKind,
   type LogRunRef,
   normalizeLogError,
+  type StoredLogLine,
 } from "./types"
