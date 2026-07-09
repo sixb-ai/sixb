@@ -423,7 +423,12 @@ function referencedLinkIds(rule: RuleDefinition): readonly string[] {
   const seen = new Set<string>()
 
   for (const dependency of deriveRuleEventDependencies(rule)) {
-    if (dependency.type === "link.created" && !seen.has(dependency.linkId)) {
+    if (
+      (dependency.type === "link.created" ||
+        dependency.type === "link.updated" ||
+        dependency.type === "link.deleted") &&
+      !seen.has(dependency.linkId)
+    ) {
       seen.add(dependency.linkId)
       linkIds.push(dependency.linkId)
     }
