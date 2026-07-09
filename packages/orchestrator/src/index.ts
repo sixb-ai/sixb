@@ -9,6 +9,7 @@ export type {
   OrchestratorRouteKey,
   OrchestratorRoutes,
   OrchestratorRuntimeOptions,
+  OrchestratorWorkflowTriggerBinding,
   ProjectionRunRequestedJobTemplate,
 } from "./types"
 export { OrchestratorWorker } from "./worker"

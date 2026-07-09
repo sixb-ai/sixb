@@ -131,6 +131,7 @@ export async function startOrchestratorRuntime(
       ...sixb.getTelemetryProjections(),
     ],
     workflows: sixb.workflows.list(),
+    triggers: sixb.getTriggerDefinitions(),
   })
   const warnings = diagnostics.map(formatRouteDiagnosticWarning)
   let orchestratorWorker: OrchestratorWorker | null = null
@@ -141,6 +142,8 @@ export async function startOrchestratorRuntime(
       events: sixb.events,
       queues: sixb.queues,
       routes,
+      workflows: sixb.workflows.list(),
+      triggers: sixb.getTriggerDefinitions(),
     })
     await orchestratorWorker.start()
   }
@@ -289,6 +292,8 @@ function formatRouteDiagnosticWarning(diagnostic: CompileRoutesDiagnostic): stri
   switch (diagnostic.type) {
     case "workflow.schedule.input-required":
       return `[Sixb] Workflow '${diagnostic.workflowId}' is scheduled but has non-empty input (${diagnostic.inputFields.join(", ")}); it was not auto-routed.`
+    case "workflow.trigger.unknown":
+      return `[Sixb] Workflow '${diagnostic.workflowId}' references unknown trigger '${diagnostic.triggerId}'; it was not auto-routed.`
   }
 }
 

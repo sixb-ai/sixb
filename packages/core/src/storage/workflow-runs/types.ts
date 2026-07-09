@@ -48,6 +48,7 @@ export interface StartWorkflowRunInput {
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
+  readonly source?: WorkflowRunSource
 }
 
 export interface QueueWorkflowRunInput {

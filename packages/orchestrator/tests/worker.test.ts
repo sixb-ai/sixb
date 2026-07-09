@@ -1,18 +1,69 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
   type DomainEvent,
+  defineObjectType,
+  defineTrigger,
+  defineWorkflow,
+  defineWorkflowStep,
   type EventDraft,
   EventsRuntime,
+  events as eventSelectors,
+  InMemoryBlobStorage,
   InMemoryBroker,
+  InMemoryLakeStorage,
   InMemoryQueues,
+  InMemoryStorage,
+  prop,
+  Sixb,
+  SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import type { OrchestratorJob, OrchestratorRouteKey, OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
 
 const PROJECT_ID = "test-project"
 
+const Invoice = defineObjectType({
+  id: "Invoice",
+  name: "Invoice",
+  properties: [prop("id", "string", { required: true, primary: true }), prop("amount", "double")],
+})
+
+const highValueInvoice = defineTrigger("invoice.high-value")
+  .on(eventSelectors(Invoice).updated())
+  .where((event) => event.object.p.amount.gt(500))
+
+const captureInvoice = defineWorkflowStep("capture-invoice")
+  .input({ invoiceId: "string", amount: "double" })
+  .output({})
+  .run(() => ({}))
+
+const highValueInvoiceWorkflow = defineWorkflow("notify-high-value-invoice")
+  .input({ invoiceId: "string", amount: "double" })
+  .when(highValueInvoice, (event) => ({
+    invoiceId: event.object.primaryId,
+    amount: event.object.p.amount,
+  }))
+  .then(captureInvoice)
+
 function createEvents(projectId = PROJECT_ID, broker = new InMemoryBroker()): EventsRuntime {
   return new EventsRuntime({ projectId, broker })
+}
+
+function createSixbForTriggerWorkflow() {
+  const broker = new InMemoryBroker()
+  return new Sixb({
+    id: PROJECT_ID,
+    ontology: [Invoice],
+    actions: [],
+    functions: [],
+    workflows: [highValueInvoiceWorkflow],
+    triggers: [highValueInvoice],
+    broker,
+    storage: new InMemoryStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+    queues: new InMemoryQueues(),
+  })
 }
 
 function makeScheduleTriggeredEvent(
@@ -37,6 +88,20 @@ function makeObjectUpsertedEvent(): EventDraft {
       objectTypeId: "Room",
       primaryId: "room-1",
       properties: { name: "Room A" },
+    },
+  }
+}
+
+function makeInvoiceUpdatedEvent(amountBefore: number, amountAfter: number): EventDraft {
+  return {
+    type: "object.updated",
+    payload: {
+      objectTypeId: "Invoice",
+      primaryId: "inv-1",
+      properties: { id: "inv-1", amount: amountAfter },
+      propertyChanges: {
+        amount: { operation: "updated", before: amountBefore, after: amountAfter },
+      },
     },
   }
 }
@@ -157,6 +222,64 @@ describe("OrchestratorWorker", () => {
       expect(claimed[0]!.job.payload).toEqual({
         workflowId: "nightly-reconciliation",
         input: {},
+      })
+      return true
+    })
+  })
+
+  test("trigger workflow route enqueues a workflow job", async () => {
+    const sixb = createSixbForTriggerWorkflow()
+    const routes: OrchestratorRoutes = new Map([
+      [
+        "trigger:object.updated",
+        {
+          eventType: "object.updated",
+          jobs: [],
+          workflowTriggers: [
+            {
+              workflowId: highValueInvoiceWorkflow.id,
+              triggerId: highValueInvoice.id,
+            },
+          ],
+        },
+      ],
+    ])
+
+    const worker = new OrchestratorWorker({
+      projectId: PROJECT_ID,
+      events: sixb.events,
+      queues: sixb.queues,
+      routes,
+      workflows: [highValueInvoiceWorkflow],
+      triggers: [highValueInvoice],
+    })
+    workers.push(worker)
+    await worker.start()
+
+    const [event] = await sixb.events.append({
+      events: [makeInvoiceUpdatedEvent(400, 700)],
+    })
+    expect(event).toBeDefined()
+
+    const runId = `workflow:${highValueInvoiceWorkflow.id}:trigger:${highValueInvoice.id}:event:${event!.id}`
+
+    await waitFor(async () => {
+      const claimed = await sixb.queues.workflows.claim({
+        projectId: PROJECT_ID,
+        workerId: "observer",
+      })
+      if (claimed.length === 0) return false
+
+      expect(claimed[0]!.job.payload).toEqual({
+        workflowId: highValueInvoiceWorkflow.id,
+        runId,
+        input: { invoiceId: "inv-1", amount: 700 },
+        source: {
+          type: "trigger",
+          triggerId: highValueInvoice.id,
+          eventId: event!.id,
+          principal: SYSTEM_PRINCIPAL,
+        },
       })
       return true
     })

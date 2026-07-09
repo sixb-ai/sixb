@@ -13,8 +13,10 @@ import {
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
+  defineTrigger,
   defineWorkflow,
   defineWorkflowStep,
+  events,
   link,
   prop,
   type RunTrigger,
@@ -49,6 +51,10 @@ const Room = defineObjectType({
   ],
   links: [link("hasSensors", Sensor, { cardinality: "many" })],
 })
+
+const highTemperature = defineTrigger("room.high-temperature")
+  .on(events(Room).updated())
+  .where((event) => event.object.p.temperature.gt(30))
 
 function makeDataset(id: string) {
   return defineDataset(id, {
@@ -125,6 +131,10 @@ function makeWorkflowWithoutTriggers(id: string) {
 
 function makeWorkflowWithSchedule(id: string, schedule: ScheduleDefinition) {
   return defineWorkflow(id).input({}).when(schedule).then(workflowStep)
+}
+
+function makeWorkflowWithTrigger(id: string) {
+  return defineWorkflow(id).input({}).when(highTemperature).then(workflowStep)
 }
 
 function makeWorkflowWithRequiredInput(id: string, schedule: ScheduleDefinition) {
@@ -275,6 +285,44 @@ describe("compileRoutes", () => {
         workflowId: "reconcile-transaction",
         scheduleId: "daily",
         inputFields: ["accountId"],
+      },
+    ])
+  })
+
+  test("workflow trigger produces a trigger subscription route", () => {
+    const routes = compileRoutes({
+      syncs: [],
+      pipelines: [],
+      workflows: [makeWorkflowWithTrigger("alert-hot-room")],
+      triggers: [highTemperature],
+    })
+
+    expect(routes.size).toBe(1)
+    expect(routes.get("trigger:object.updated")).toEqual({
+      eventType: "object.updated",
+      jobs: [],
+      workflowTriggers: [
+        {
+          workflowId: "alert-hot-room",
+          triggerId: "room.high-temperature",
+        },
+      ],
+    })
+  })
+
+  test("unknown workflow trigger reports diagnostics", () => {
+    const result = compileRoutesWithDiagnostics({
+      syncs: [],
+      pipelines: [],
+      workflows: [makeWorkflowWithTrigger("alert-hot-room")],
+    })
+
+    expect(result.routes.size).toBe(0)
+    expect(result.diagnostics).toEqual([
+      {
+        type: "workflow.trigger.unknown",
+        workflowId: "alert-hot-room",
+        triggerId: "room.high-temperature",
       },
     ])
   })

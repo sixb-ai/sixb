@@ -45,12 +45,16 @@ export async function upsertObjectBatch(
   // Append events, then project the stored events into object storage.
   const events: EventDraft[] = validation.valid.flatMap(({ item }) => {
     const existing = existingMap.get(`${objectType.id}:${item.primaryId}`)
+    const properties = {
+      ...(existing?.properties ?? {}),
+      ...item.properties,
+    }
     return buildObjectUpsertEvents({
       objectTypeId: objectType.id,
       primaryId: item.primaryId,
       operation: existing ? "update" : "create",
       previousProperties: existing?.properties,
-      properties: item.properties,
+      properties,
     })
   })
 

@@ -1,8 +1,18 @@
-import type { DomainEvent, StoredDomainEvent } from "@sixb/core"
-import { Worker } from "@sixb/core"
+import type {
+  DomainEvent,
+  DomainTriggerDefinition,
+  StoredDomainEvent,
+  WorkflowDefinition,
+} from "@sixb/core"
+import { evaluateTrigger, SYSTEM_PRINCIPAL, Worker } from "@sixb/core"
 import { OrchestratorError } from "./errors"
-import { routeKeyForEvent } from "./route-key"
-import type { OrchestratorJob, OrchestratorRoutes, OrchestratorRuntimeOptions } from "./types"
+import { routeKeysForEvent } from "./route-key"
+import type {
+  OrchestratorJob,
+  OrchestratorRoutes,
+  OrchestratorRuntimeOptions,
+  OrchestratorWorkflowTriggerBinding,
+} from "./types"
 
 /**
  * Derives the minimal set of event types the orchestrator needs to subscribe to,
@@ -57,19 +67,29 @@ async function dispatch(
   events: readonly StoredDomainEvent[]
 ): Promise<void> {
   for (const event of events) {
-    const key = routeKeyForEvent(event)
-    if (!key) continue
-    const route = options.routes.get(key)
-    if (!route) continue
-    for (const item of route.jobs) {
-      try {
-        await enqueueJob(options, event, item)
-      } catch (error) {
-        // Best-effort: an error on one fan-out sibling must not drop the rest.
-        console.error(
-          `[SixbOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
-          error
-        )
+    for (const key of routeKeysForEvent(event)) {
+      const route = options.routes.get(key)
+      if (!route) continue
+      for (const item of route.jobs) {
+        try {
+          await enqueueJob(options, event, item)
+        } catch (error) {
+          // Best-effort: an error on one fan-out sibling must not drop the rest.
+          console.error(
+            `[SixbOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
+            error
+          )
+        }
+      }
+      for (const binding of route.workflowTriggers ?? []) {
+        try {
+          await requestTriggeredWorkflow(options, event, binding)
+        } catch (error) {
+          console.error(
+            `[SixbOrchestrator] Trigger workflow request failed (workflowId=${binding.workflowId}, triggerId=${binding.triggerId}, eventId=${event.id}):`,
+            error
+          )
+        }
       }
     }
   }
@@ -172,4 +192,84 @@ function buildMetadata(event: StoredDomainEvent): Record<string, string> {
     default:
       return {}
   }
+}
+
+async function requestTriggeredWorkflow(
+  options: OrchestratorRuntimeOptions,
+  sourceEvent: StoredDomainEvent,
+  binding: OrchestratorWorkflowTriggerBinding
+): Promise<void> {
+  const workflow = findWorkflow(options, binding.workflowId)
+  if (!workflow) {
+    throw new OrchestratorError(`Unknown workflow '${binding.workflowId}'.`)
+  }
+
+  const workflowTrigger = workflow.triggers.find(
+    (trigger) => trigger.type === "trigger" && trigger.triggerId === binding.triggerId
+  )
+  if (!workflowTrigger || workflowTrigger.type !== "trigger") {
+    throw new OrchestratorError(
+      `Workflow '${binding.workflowId}' is not bound to trigger '${binding.triggerId}'.`
+    )
+  }
+
+  const trigger = findTrigger(options, binding.triggerId)
+  if (!trigger) {
+    throw new OrchestratorError(`Unknown trigger '${binding.triggerId}'.`)
+  }
+
+  const match = evaluateTrigger(trigger, sourceEvent)
+  if (!match) {
+    return
+  }
+
+  const input = workflowTrigger.mapper ? workflowTrigger.mapper(match.event as never) : {}
+  if (!isRecord(input)) {
+    throw new OrchestratorError(
+      `Workflow '${workflow.id}' trigger mapper must return an input object.`
+    )
+  }
+
+  await options.queues.workflows.enqueue({
+    projectId: options.projectId,
+    jobs: [
+      {
+        type: "workflow.run.requested",
+        payload: {
+          workflowId: workflow.id,
+          runId: workflowTriggerRunId(workflow.id, trigger.id, sourceEvent.id),
+          input,
+          source: {
+            type: "trigger",
+            triggerId: trigger.id,
+            eventId: sourceEvent.id,
+            principal: SYSTEM_PRINCIPAL,
+          },
+        },
+        metadata: buildMetadata(sourceEvent),
+      },
+    ],
+  })
+}
+
+function findWorkflow(
+  options: OrchestratorRuntimeOptions,
+  workflowId: string
+): WorkflowDefinition | null {
+  return (options.workflows ?? []).find((workflow) => workflow.id === workflowId) ?? null
+}
+
+function findTrigger(
+  options: OrchestratorRuntimeOptions,
+  triggerId: string
+): DomainTriggerDefinition | null {
+  return (options.triggers ?? []).find((trigger) => trigger.id === triggerId) ?? null
+}
+
+function workflowTriggerRunId(workflowId: string, triggerId: string, eventId: string): string {
+  return `workflow:${workflowId}:trigger:${triggerId}:event:${eventId}`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }

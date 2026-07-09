@@ -100,6 +100,7 @@ function workflowJobFromClaimed(claimed: ClaimedQueueJob<WorkflowQueueJob>): Wor
     id: job.payload.runId ?? `${job.id}:attempt:${job.attempt}`,
     workflowId: job.payload.workflowId,
     input: job.payload.input,
+    source: job.payload.source,
   }
 }
 

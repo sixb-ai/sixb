@@ -133,7 +133,8 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
               input = ?,
               started_at = ?,
               finished_at = NULL,
-              error = NULL
+              error = NULL,
+              source = COALESCE(source, ?)
             WHERE project_id = ? AND id = ?
           `
           )
@@ -141,6 +142,7 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             "running",
             serializeRecord(input.input),
             startedAt.toISOString(),
+            input.source ? JSON.stringify(input.source) : null,
             input.projectId,
             input.id
           )
@@ -158,8 +160,9 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
               workflow_id,
               status,
               input,
-              started_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+              started_at,
+              source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
           `
           )
           .run(
@@ -168,7 +171,8 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             input.workflowId,
             "running",
             serializeRecord(input.input),
-            startedAt.toISOString()
+            startedAt.toISOString(),
+            input.source ? JSON.stringify(input.source) : null
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {

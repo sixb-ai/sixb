@@ -49,6 +49,14 @@ export async function upsertLink(
     ontology.getValueTypesById()
   )
 
+  const mergedProperties =
+    properties !== undefined || sameLink?.properties !== undefined
+      ? {
+          ...(sameLink?.properties ?? {}),
+          ...(properties ?? {}),
+        }
+      : undefined
+
   if (linkDefinition.cardinality === "one") {
     const conflicting = existingLinks.find(
       (existing) => existing.targetTypeId !== targetTypeId || existing.targetId !== targetId
@@ -71,7 +79,7 @@ export async function upsertLink(
       targetId,
       operation: sameLink ? "update" : "create",
       previousProperties: sameLink?.properties,
-      ...(properties !== undefined ? { properties } : {}),
+      ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
     }),
   })
 

@@ -8,6 +8,7 @@ export {
   notPredicate,
   type RuntimePropertyPredicateBuilder,
 } from "./builders"
+export { evaluatePredicate, type PredicateEvaluationSubject } from "./evaluate"
 export type {
   AllPredicate,
   AnyPredicate,

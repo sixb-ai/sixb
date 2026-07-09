@@ -19,3 +19,12 @@ export function routeKeyForEvent(event: StoredDomainEvent): OrchestratorRouteKey
       return null
   }
 }
+
+export function routeKeysForEvent(event: StoredDomainEvent): readonly OrchestratorRouteKey[] {
+  const keys: OrchestratorRouteKey[] = [`trigger:${event.type}`]
+  const staticKey = routeKeyForEvent(event)
+  if (staticKey) {
+    keys.unshift(staticKey)
+  }
+  return keys
+}

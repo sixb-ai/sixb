@@ -1,4 +1,10 @@
-import { type DomainEvent, projectionKindOf, type RunTrigger } from "@sixb/core"
+import {
+  type DomainEvent,
+  type DomainTriggerDefinition,
+  projectionKindOf,
+  type RunTrigger,
+  triggerSubscribedEventTypes,
+} from "@sixb/core"
 import type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
@@ -6,11 +12,13 @@ import type {
   OrchestratorJob,
   OrchestratorRouteKey,
   OrchestratorRoutes,
+  OrchestratorWorkflowTriggerBinding,
 } from "./types"
 
 type MutableOrchestratorRoute = {
   eventType: DomainEvent["type"]
   jobs: OrchestratorJob[]
+  workflowTriggers?: OrchestratorWorkflowTriggerBinding[]
 }
 
 type MutableOrchestratorRoutes = Map<OrchestratorRouteKey, MutableOrchestratorRoute>
@@ -29,6 +37,7 @@ export function compileRoutes(params: CompileRoutesParams): OrchestratorRoutes {
 export function compileRoutesWithDiagnostics(params: CompileRoutesParams): CompileRoutesResult {
   const routes: MutableOrchestratorRoutes = new Map()
   const diagnostics: CompileRoutesDiagnostic[] = []
+  const triggersById = new Map((params.triggers ?? []).map((trigger) => [trigger.id, trigger]))
 
   for (const sync of params.syncs) {
     for (const trigger of sync.triggers) {
@@ -50,6 +59,24 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
 
   for (const workflow of params.workflows ?? []) {
     for (const trigger of workflow.triggers) {
+      if (trigger.type === "trigger") {
+        const definition = triggersById.get(trigger.triggerId)
+        if (!definition) {
+          diagnostics.push({
+            type: "workflow.trigger.unknown",
+            workflowId: workflow.id,
+            triggerId: trigger.triggerId,
+          })
+          continue
+        }
+
+        addTriggerWorkflowRouteBinding(routes, definition, {
+          workflowId: workflow.id,
+          triggerId: trigger.triggerId,
+        })
+        continue
+      }
+
       if (trigger.type !== "schedule") continue
 
       const inputFields = Object.keys(workflow.input)
@@ -136,6 +163,42 @@ function addCompiledRouteJob(
   routes.set(route.key, {
     eventType: route.eventType,
     jobs: [job],
+  })
+}
+
+function addTriggerWorkflowRouteBinding(
+  routes: MutableOrchestratorRoutes,
+  trigger: DomainTriggerDefinition,
+  binding: OrchestratorWorkflowTriggerBinding
+): void {
+  for (const eventType of triggerSubscribedEventTypes(trigger)) {
+    addCompiledRouteWorkflowTrigger(
+      routes,
+      {
+        key: `trigger:${eventType}`,
+        eventType,
+      },
+      binding
+    )
+  }
+}
+
+function addCompiledRouteWorkflowTrigger(
+  routes: MutableOrchestratorRoutes,
+  route: { key: OrchestratorRouteKey; eventType: DomainEvent["type"] },
+  binding: OrchestratorWorkflowTriggerBinding
+): void {
+  const existing = routes.get(route.key)
+  if (existing) {
+    existing.workflowTriggers ??= []
+    existing.workflowTriggers.push(binding)
+    return
+  }
+
+  routes.set(route.key, {
+    eventType: route.eventType,
+    jobs: [],
+    workflowTriggers: [binding],
   })
 }
 
