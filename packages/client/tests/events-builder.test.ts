@@ -90,6 +90,16 @@ describe("events builder filter spec", () => {
       propertyId: "status",
       propertyOperation: "updated",
     })
+    expect(events(Sensor).p.status.created().ir).toMatchObject({
+      topic: "objects",
+      types: ["object.created", "object.updated"],
+      propertyId: "status",
+      propertyOperation: "created",
+    })
+    expect(events(Sensor).p.status.created().updated().ir).toMatchObject({
+      types: ["object.updated"],
+      propertyOperation: "updated",
+    })
     expect(events(Sensor).link(Sensor.l.zone).created().ir).toMatchObject({
       topic: "links",
       types: ["link.created"],
@@ -101,6 +111,13 @@ describe("events builder filter spec", () => {
       linkId: "zone",
       propertyId: "rank",
       propertyOperation: "updated",
+    })
+    expect(events(Sensor).link(Sensor.l.zone).p.rank.created().ir).toMatchObject({
+      topic: "links",
+      types: ["link.created", "link.updated"],
+      linkId: "zone",
+      propertyId: "rank",
+      propertyOperation: "created",
     })
   })
 

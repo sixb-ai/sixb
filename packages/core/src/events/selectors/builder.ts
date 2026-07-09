@@ -252,10 +252,12 @@ function eventTypesForPropertyOperation(
   propertyOperation: EventSelectorSpec["propertyOperation"]
 ): readonly DomainEvent["type"][] | undefined {
   if (topic === "objects") {
-    return propertyOperation === "created" ? ["object.created"] : ["object.updated"]
+    return propertyOperation === "created"
+      ? ["object.created", "object.updated"]
+      : ["object.updated"]
   }
   if (topic === "links") {
-    return propertyOperation === "created" ? ["link.created"] : ["link.updated"]
+    return propertyOperation === "created" ? ["link.created", "link.updated"] : ["link.updated"]
   }
   return undefined
 }

@@ -48,6 +48,14 @@ describe("events selector builder", () => {
       propertyId: "amount",
       propertyOperation: "updated",
     })
+
+    expect(eventSelectorSpec(events(Invoice).p.amount.created())).toEqual({
+      objectTypeId: "Invoice",
+      topic: "objects",
+      types: ["object.created", "object.updated"],
+      propertyId: "amount",
+      propertyOperation: "created",
+    })
   })
 
   test("builds link mutation selectors", () => {
@@ -108,6 +116,27 @@ describe("buildEventSelectorPredicate", () => {
     ).toBe(false)
   })
 
+  test("matches a property created on an existing object", () => {
+    const matches = buildEventSelectorPredicate(events(Invoice).p.amount.created())
+
+    expect(
+      matches(
+        event({
+          type: "object.updated",
+          topic: "objects",
+          payload: {
+            objectTypeId: "Invoice",
+            primaryId: "inv-1",
+            properties: { amount: 700 },
+            propertyChanges: {
+              amount: { operation: "created", after: 700 },
+            },
+          },
+        })
+      )
+    ).toBe(true)
+  })
+
   test("matches link property changes", () => {
     const matches = buildEventSelectorPredicate(
       events(Invoice).link(Invoice.l.payments).p.amount.created()
@@ -116,7 +145,7 @@ describe("buildEventSelectorPredicate", () => {
     expect(
       matches(
         event({
-          type: "link.created",
+          type: "link.updated",
           topic: "links",
           payload: {
             sourceTypeId: "Invoice",
