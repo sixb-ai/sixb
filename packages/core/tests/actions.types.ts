@@ -4,6 +4,7 @@ import {
   defineObjectType,
   type InferActionParams,
   type InferSchemaOrRef,
+  link,
   type ObjectRef,
   type ObjectRefSchema,
   optional,
@@ -22,6 +23,15 @@ function actionDefinition(action: unknown): ActionDefinition {
   return action as ActionDefinition
 }
 
+const Building = defineObjectType({
+  id: "Building",
+  name: "Building",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", { required: true }),
+  ],
+})
+
 const Room = defineObjectType({
   id: "Room",
   name: "Room",
@@ -30,6 +40,7 @@ const Room = defineObjectType({
     prop("externalId", "string", { required: true }),
     prop("name", "string", { required: true }),
   ],
+  links: [link("building", Building, { cardinality: "one" })],
 })
 
 const RoomRefSchema = ref(Room)
@@ -174,6 +185,16 @@ const createInvoice = defineAction("createInvoice")
     const changedObjects = commit.diff.objects
     void externalId
     void changedObjects
+  })
+
+defineAction("inspectRoomLinks")
+  .on(Room)
+  .params({})
+  .edits(async ({ read, subject }) => {
+    await read.objects(Room).byId(subject.primaryId).listLinks(Room.l.building)
+
+    // @ts-expect-error action read listLinks requires a link token, not a plain id object
+    await read.objects(Room).byId(subject.primaryId).listLinks({ id: "building" })
   })
 
 defineAction("writebackOnly")

@@ -204,6 +204,29 @@ export const sendReminder = defineAction("sendReminder", {
 
 The runtime commits every staged edit in a single atomic batch once the handler returns.
 
+The normal link rules apply inside `edits(...)`. For `cardinality: "one"` links, `link(...)` does not replace a different existing target. To reassign one, read the current link and stage `unlink(...)`
+followed by `link(...)`; the two staged edits commit atomically:
+
+```ts
+.edits(async ({ objects, read, subject, params }) => {
+  const [currentProject] = await read
+    .objects(Transcript)
+    .byId(subject.primaryId)
+    .listLinks(Transcript.l.project)
+
+  const transcript = objects(Transcript).byId(subject.primaryId)
+
+  if (currentProject) {
+    transcript.unlink(Transcript.l.project, {
+      objectTypeId: currentProject.targetTypeId,
+      primaryId: currentProject.targetId,
+    })
+  }
+
+  transcript.link(Transcript.l.project, params.project)
+})
+```
+
 ## Requesting actions
 
 Actions run asynchronously. Requesting one enqueues a durable run and returns immediately; a worker

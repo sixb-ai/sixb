@@ -868,6 +868,21 @@ describe("Sixb runtime", () => {
     expect(events).toHaveLength(1)
   })
 
+  test("rejects plain link id objects in listLinks", async () => {
+    const sixb = new Sixb({
+      id: "list-links-token-test",
+      ontology: [Room, Thermostat],
+      ...createTestRuntimeDeps(),
+    })
+
+    await expect(
+      sixb
+        .objects(Room)
+        .byId("room:101")
+        .listLinks({ id: "hasThermostat" } as unknown as typeof Room.l.hasThermostat)
+    ).rejects.toThrow("Expected a link token from Room.l.<linkId>")
+  })
+
   test("removes a link via ObjectSet.removeLink", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = new Sixb({

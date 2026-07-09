@@ -176,6 +176,29 @@ await projects.byId("proj-001").unlink(Project.l.members, {
 The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks it against the
 link's declared target, so linking `members` to a `Customer` is a compile error.
 
+For a `cardinality: "one"` link, `link(...)` is not a setter. Calling `link(...)` with the same
+target updates that relationship's properties, but calling it with a different target while one is
+already present is rejected. Reassign by removing the current target, then linking the new one:
+
+```ts
+const [currentLead] = await sixb.objects(Project).byId("proj-001").listLinks(Project.l.lead)
+
+if (currentLead) {
+  await projects.byId("proj-001").unlink(Project.l.lead, {
+    objectTypeId: currentLead.targetTypeId,
+    primaryId: currentLead.targetId,
+  })
+}
+
+await projects.byId("proj-001").link(Project.l.lead, {
+  objectTypeId: "Employee",
+  primaryId: "emp-027",
+})
+```
+
+`unlink(...)` removes one exact relationship row. Even for `cardinality: "one"` links, pass the
+current target; when you only know the `linkId`, read it first with `listLinks(Project.l.lead)`.
+
 Writing a link emits a `link.upserted` [event](../events/overview.md); removing one emits
 `link.removed`.
 

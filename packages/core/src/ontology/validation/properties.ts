@@ -27,13 +27,49 @@ export function assertPropertyTokenBelongsToObjectType(
 
 export function assertLinkTokenBelongsToObjectType(
   objectType: ObjectTypeWithPropertyTokens,
-  link: LinkToken<string, string, string | readonly string[], ObjectLink>
-): void {
+  link: unknown
+): asserts link is LinkToken<string, string, string | readonly string[], ObjectLink> {
+  if (!isLinkTokenLike(link)) {
+    throw new OntologyValidationError(
+      `[Sixb] Expected a link token from ${objectType.id}.l.<linkId>, not a plain link id.`
+    )
+  }
+
   if (link.objectTypeId !== objectType.id) {
     throw new OntologyValidationError(
       `[Sixb] Link token ${link.objectTypeId}.${link.id} cannot be used with ${objectType.id}`
     )
   }
+}
+
+function isLinkTokenLike(
+  value: unknown
+): value is LinkToken<string, string, string | readonly string[], ObjectLink> {
+  if (typeof value !== "object" || value === null) return false
+  if (
+    !("objectTypeId" in value) ||
+    !("id" in value) ||
+    !("targetObjectTypeId" in value) ||
+    !("link" in value)
+  ) {
+    return false
+  }
+
+  return (
+    typeof value.objectTypeId === "string" &&
+    typeof value.id === "string" &&
+    isLinkTargetTypeId(value.targetObjectTypeId) &&
+    typeof value.link === "object" &&
+    value.link !== null
+  )
+}
+
+function isLinkTargetTypeId(value: unknown): value is string | readonly string[] {
+  return typeof value === "string" || (Array.isArray(value) && value.every(isString))
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string"
 }
 
 export function assertKnownProperties(
