@@ -12,7 +12,7 @@
  */
 
 import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
-import { buildEventSelectorPredicate, type EventSelectorSpec } from "@sixb/core"
+import { buildEventSelectorPredicate, type EventSelectorSpec } from "@sixb/core/events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
 import type { SixbEvent, SixbEventOfTopic, SixbEventOfType, SixbEventTopic } from "./events-model"
 import { createEventSocket, type EventSocketState } from "./events-transport"
