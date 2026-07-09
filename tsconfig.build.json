@@ -20,6 +20,9 @@
       "path": "connectors/github/tsconfig.build.json"
     },
     {
+      "path": "connectors/google/tsconfig.build.json"
+    },
+    {
       "path": "connectors/meta/tsconfig.build.json"
     },
     {

@@ -102,6 +102,18 @@
         "typescript": "^5.7.0",
       },
     },
+    "connectors/google": {
+      "name": "@sixb/connector-google",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:*",
+        "@sixb/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
     "connectors/meta": {
       "name": "@sixb/connector-meta",
       "version": "0.1.0",
@@ -1043,6 +1055,8 @@
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
 
     "@sixb/connector-github": ["@sixb/connector-github@workspace:connectors/github"],
+
+    "@sixb/connector-google": ["@sixb/connector-google@workspace:connectors/google"],
 
     "@sixb/connector-meta": ["@sixb/connector-meta@workspace:connectors/meta"],
 
