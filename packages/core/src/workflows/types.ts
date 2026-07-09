@@ -9,6 +9,7 @@ import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 import type { ScheduleDefinition } from "../schedules"
+import type { InferTriggerEvent, TriggerDefinition } from "../triggers"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -86,10 +87,28 @@ export interface StepBuilder<TId extends string> {
   ): StepOutputBuilder<TId, TInput>
 }
 
-export type WorkflowTriggerDefinition = {
+export type WorkflowScheduleTriggerDefinition = {
   readonly type: "schedule"
   readonly scheduleId: string
 }
+
+export type WorkflowDomainTriggerMapper<
+  TTrigger extends TriggerDefinition = TriggerDefinition,
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+> = (event: InferTriggerEvent<TTrigger>) => TInput
+
+export type WorkflowDomainTriggerDefinition<
+  TTrigger extends TriggerDefinition = TriggerDefinition,
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+> = {
+  readonly type: "trigger"
+  readonly triggerId: TTrigger["id"]
+  readonly mapper?: WorkflowDomainTriggerMapper<TTrigger, TInput>
+}
+
+export type WorkflowTriggerDefinition =
+  | WorkflowScheduleTriggerDefinition
+  | WorkflowDomainTriggerDefinition
 
 /**
  * Origin of a workflow run request.
@@ -326,6 +345,10 @@ type DirectActionDataflowGuard<
       : never
     : never
 
+type EmptyWorkflowInputGuard<TInput extends Record<string, unknown>> = keyof TInput extends never
+  ? unknown
+  : never
+
 export interface WorkflowStepNodeDefinition<
   TStep extends StepDefinition = StepDefinition,
   TMapper = unknown,
@@ -503,6 +526,13 @@ export interface WorkflowDraftBuilder<
   TSteps extends WorkflowStepOutputs = Record<never, never>,
 > {
   when(schedule: ScheduleDefinition): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
+  when<const TTrigger extends TriggerDefinition>(
+    trigger: TTrigger & EmptyWorkflowInputGuard<TInput>
+  ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
+  when<const TTrigger extends TriggerDefinition>(
+    trigger: TTrigger,
+    mapper: WorkflowDomainTriggerMapper<TTrigger, InferSchemaOrRefRecord<TInput>>
+  ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
   then<const TStep extends StepDefinition>(
     step: TStep & DirectDataflowGuard<TCurrent, TStep>
   ): WorkflowChainDefinition<

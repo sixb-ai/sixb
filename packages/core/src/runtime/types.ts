@@ -59,6 +59,7 @@ import type { ScheduleDefinition } from "../schedules"
 import type { SecurityRegistry } from "../security"
 import type { ActionRunRecord, ObjectLinkRow, ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
+import type { TriggerDefinition } from "../triggers"
 import type { RegisteredWebhook } from "../webhooks"
 import type { WorkflowsRuntime } from "../workflows"
 import type { ScopedSixb } from "./scoped"
@@ -85,6 +86,7 @@ export interface SixbRuntimeContext {
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
+  readonly triggers?: readonly TriggerDefinition[]
   /**
    * Principal scope for this context. Absent on privileged runtimes (raw
    * `sixb`, syncs, workers, tests); present on contexts created by
@@ -1032,6 +1034,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
   readonly rules?: readonly RuleDefinition[]
+  readonly triggers?: readonly TriggerDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
   readonly actions: ActionsRuntime
@@ -1097,6 +1100,12 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
 
   /** Lookup a rule definition by id. */
   getRuleById(ruleId: string): RuleDefinition | null
+
+  /** All registered trigger definitions. */
+  getTriggerDefinitions(): readonly TriggerDefinition[]
+
+  /** Lookup a trigger definition by id. */
+  getTriggerById(triggerId: string): TriggerDefinition | null
 
   /** All registered connector definitions. */
   listConnectors(): readonly ConnectorDefinition[]

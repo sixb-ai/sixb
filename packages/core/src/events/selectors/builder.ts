@@ -1,9 +1,15 @@
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "../../ontology"
 import type { DomainEvent } from "../types"
-import type { EventSelectorSpec } from "./types"
+import type {
+  EventSelectorSpec,
+  LinkEventSelectorContext,
+  ObjectEventSelectorContext,
+} from "./types"
 
-type EventPropertySelectorMap<TTokens> = {
-  readonly [K in keyof TTokens]: TTokens[K] extends PropertyToken ? EventPropertySelector : never
+type EventPropertySelectorMap<TTokens, TContext> = {
+  readonly [K in keyof TTokens]: TTokens[K] extends PropertyToken
+    ? EventPropertySelector<TContext>
+    : never
 }
 
 type LinkPropertyTokens<TLink extends LinkToken> =
@@ -18,12 +24,12 @@ type LinkPropertyTokens<TLink extends LinkToken> =
     : Record<never, never>
 
 export interface ObjectEventSelectorBuilder<TObjectType extends ObjectTypeWithTokens>
-  extends EventSelectorSpec {
-  readonly p: EventPropertySelectorMap<TObjectType["p"]>
+  extends EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
+  readonly p: EventPropertySelectorMap<TObjectType["p"], ObjectEventSelectorContext<TObjectType>>
 
-  created(): EventSelectorSpec
-  updated(): EventSelectorSpec
-  deleted(): EventSelectorSpec
+  created(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
+  updated(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
+  deleted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
 
   link<TLink extends LinkToken<TObjectType["id"]>>(
     link: TLink
@@ -33,24 +39,27 @@ export interface ObjectEventSelectorBuilder<TObjectType extends ObjectTypeWithTo
 export interface LinkEventSelectorBuilder<
   TObjectType extends ObjectTypeWithTokens,
   TLink extends LinkToken<TObjectType["id"]>,
-> extends EventSelectorSpec {
-  readonly p: EventPropertySelectorMap<LinkPropertyTokens<TLink>>
+> extends EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
+  readonly p: EventPropertySelectorMap<
+    LinkPropertyTokens<TLink>,
+    LinkEventSelectorContext<TObjectType, TLink>
+  >
 
-  created(): EventSelectorSpec
-  updated(): EventSelectorSpec
-  deleted(): EventSelectorSpec
+  created(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
+  updated(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
+  deleted(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
   /** @deprecated Use `.deleted()` instead. */
-  removed(): EventSelectorSpec
+  removed(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
 }
 
-export interface EventPropertySelector extends EventSelectorSpec {
-  created(): EventSelectorSpec
-  updated(): EventSelectorSpec
-  cleared(): EventSelectorSpec
+export interface EventPropertySelector<TContext = unknown> extends EventSelectorSpec<TContext> {
+  created(): EventSelectorSpec<TContext>
+  updated(): EventSelectorSpec<TContext>
+  cleared(): EventSelectorSpec<TContext>
 }
 
-abstract class EventSelectorSpecView implements EventSelectorSpec {
-  constructor(protected readonly spec: EventSelectorSpec) {}
+abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TContext> {
+  constructor(protected readonly spec: EventSelectorSpec<TContext>) {}
 
   get topic(): EventSelectorSpec["topic"] {
     return this.spec.topic
@@ -90,17 +99,17 @@ abstract class EventSelectorSpecView implements EventSelectorSpec {
 }
 
 class ObjectEventSelectorBuilderImpl<TObjectType extends ObjectTypeWithTokens>
-  extends EventSelectorSpecView
+  extends EventSelectorSpecView<ObjectEventSelectorContext<TObjectType>>
   implements ObjectEventSelectorBuilder<TObjectType>
 {
   constructor(
     private readonly objectType: TObjectType,
-    spec: EventSelectorSpec
+    spec: EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   ) {
     super(spec)
   }
 
-  get p(): EventPropertySelectorMap<TObjectType["p"]> {
+  get p(): EventPropertySelectorMap<TObjectType["p"], ObjectEventSelectorContext<TObjectType>> {
     return createPropertySelectorMap(
       this.objectType.p,
       (property) =>
@@ -109,33 +118,37 @@ class ObjectEventSelectorBuilderImpl<TObjectType extends ObjectTypeWithTokens>
           topic: "objects",
           propertyId: property.id,
         })
-    ) as EventPropertySelectorMap<TObjectType["p"]>
+    ) as EventPropertySelectorMap<TObjectType["p"], ObjectEventSelectorContext<TObjectType>>
   }
 
-  created(): EventSelectorSpec {
+  created(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
     return this.withObjectEventType("object.created")
   }
 
-  updated(): EventSelectorSpec {
+  updated(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
     return this.withObjectEventType("object.updated")
   }
 
-  deleted(): EventSelectorSpec {
+  deleted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
     return this.withObjectEventType("object.deleted")
   }
 
   link<TLink extends LinkToken<TObjectType["id"]>>(
     link: TLink
   ): LinkEventSelectorBuilder<TObjectType, TLink> {
-    return new LinkEventSelectorBuilderImpl(link, {
+    const spec = {
       ...this.spec,
       topic: "links",
       linkId: link.id,
-    })
+    } as EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
+
+    return new LinkEventSelectorBuilderImpl(link, spec)
   }
 
-  private withObjectEventType(type: "object.created" | "object.updated" | "object.deleted") {
-    const spec: EventSelectorSpec = {
+  private withObjectEventType(
+    type: "object.created" | "object.updated" | "object.deleted"
+  ): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
+    const spec: EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> = {
       ...this.spec,
       topic: "objects",
       types: [type],
@@ -148,17 +161,20 @@ class LinkEventSelectorBuilderImpl<
     TObjectType extends ObjectTypeWithTokens,
     TLink extends LinkToken<TObjectType["id"]>,
   >
-  extends EventSelectorSpecView
+  extends EventSelectorSpecView<LinkEventSelectorContext<TObjectType, TLink>>
   implements LinkEventSelectorBuilder<TObjectType, TLink>
 {
   constructor(
     private readonly linkToken: TLink,
-    spec: EventSelectorSpec
+    spec: EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>>
   ) {
     super(spec)
   }
 
-  get p(): EventPropertySelectorMap<LinkPropertyTokens<TLink>> {
+  get p(): EventPropertySelectorMap<
+    LinkPropertyTokens<TLink>,
+    LinkEventSelectorContext<TObjectType, TLink>
+  > {
     return createPropertySelectorMap(
       createLinkPropertyTokens(this.linkToken),
       (property) =>
@@ -167,27 +183,32 @@ class LinkEventSelectorBuilderImpl<
           topic: "links",
           propertyId: property.id,
         })
-    ) as EventPropertySelectorMap<LinkPropertyTokens<TLink>>
+    ) as EventPropertySelectorMap<
+      LinkPropertyTokens<TLink>,
+      LinkEventSelectorContext<TObjectType, TLink>
+    >
   }
 
-  created(): EventSelectorSpec {
+  created(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
     return this.withLinkEventType("link.created")
   }
 
-  updated(): EventSelectorSpec {
+  updated(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
     return this.withLinkEventType("link.updated")
   }
 
-  deleted(): EventSelectorSpec {
+  deleted(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
     return this.withLinkEventType("link.deleted")
   }
 
-  removed(): EventSelectorSpec {
+  removed(): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
     return this.deleted()
   }
 
-  private withLinkEventType(type: "link.created" | "link.updated" | "link.deleted") {
-    const spec: EventSelectorSpec = {
+  private withLinkEventType(
+    type: "link.created" | "link.updated" | "link.deleted"
+  ): EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> {
+    const spec: EventSelectorSpec<LinkEventSelectorContext<TObjectType, TLink>> = {
       ...this.spec,
       topic: "links",
       types: [type],
@@ -196,20 +217,25 @@ class LinkEventSelectorBuilderImpl<
   }
 }
 
-class EventPropertySelectorImpl extends EventSelectorSpecView implements EventPropertySelector {
-  created(): EventSelectorSpec {
+class EventPropertySelectorImpl<TContext>
+  extends EventSelectorSpecView<TContext>
+  implements EventPropertySelector<TContext>
+{
+  created(): EventSelectorSpec<TContext> {
     return this.withPropertyOperation("created")
   }
 
-  updated(): EventSelectorSpec {
+  updated(): EventSelectorSpec<TContext> {
     return this.withPropertyOperation("updated")
   }
 
-  cleared(): EventSelectorSpec {
+  cleared(): EventSelectorSpec<TContext> {
     return this.withPropertyOperation("cleared")
   }
 
-  private withPropertyOperation(propertyOperation: EventSelectorSpec["propertyOperation"]) {
+  private withPropertyOperation(
+    propertyOperation: EventSelectorSpec["propertyOperation"]
+  ): EventSelectorSpec<TContext> {
     const types = eventTypesForPropertyOperation(this.spec.topic, propertyOperation)
     return {
       ...this.spec,
@@ -227,8 +253,8 @@ export function events<TObjectType extends ObjectTypeWithTokens>(
 
 function createPropertySelectorMap(
   tokens: Record<string, PropertyToken>,
-  createSelector: (property: PropertyToken) => EventPropertySelector
-): Record<string, EventPropertySelector> {
+  createSelector: (property: PropertyToken) => EventPropertySelector<unknown>
+): Record<string, EventPropertySelector<unknown>> {
   return Object.fromEntries(
     Object.entries(tokens).map(([propertyId, token]) => [propertyId, createSelector(token)])
   )

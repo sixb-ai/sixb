@@ -1,35 +1,8 @@
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ObjectType } from "../ontology/types"
+import { assertPredicateShape, isPredicateValue } from "../predicates"
 import { RuleValidationError } from "./errors"
-import type {
-  RuleDefinition,
-  RuleLinkOperator,
-  RulePredicate,
-  RulePropertyOperator,
-  RuleValue,
-} from "./types"
-
-const propertyOperators = new Set<RulePropertyOperator>([
-  "eq",
-  "notEq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-  "isPresent",
-  "isMissing",
-])
-
-const propertyValueOperators = new Set<RulePropertyOperator>([
-  "eq",
-  "notEq",
-  "gt",
-  "gte",
-  "lt",
-  "lte",
-])
-
-const linkOperators = new Set<RuleLinkOperator>(["exists", "isMissing"])
+import type { RuleDefinition, RulePredicate, RuleValue } from "./types"
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -46,15 +19,7 @@ function assertNonEmptyString(
 }
 
 export function isRuleValue(value: unknown): value is RuleValue {
-  if (value === null) {
-    return true
-  }
-
-  if (typeof value === "number") {
-    return Number.isFinite(value)
-  }
-
-  return typeof value === "string" || typeof value === "boolean"
+  return isPredicateValue(value)
 }
 
 /**
@@ -68,61 +33,7 @@ export function assertRulePredicateShape(
   value: unknown,
   createError: (message: string) => Error = (message) => new RuleValidationError(message)
 ): asserts value is RulePredicate {
-  if (!isRecord(value)) {
-    throw createError("Rule predicate must be an object.")
-  }
-
-  if (value.kind === "all" || value.kind === "any") {
-    if (!Array.isArray(value.predicates)) {
-      throw createError(`Rule ${value.kind} predicate must declare predicates.`)
-    }
-
-    for (const predicate of value.predicates) {
-      assertRulePredicateShape(predicate, createError)
-    }
-    return
-  }
-
-  if (value.kind === "not") {
-    assertRulePredicateShape(value.predicate, createError)
-    return
-  }
-
-  if (value.kind === "property") {
-    assertNonEmptyString(value.propertyId, "Rule property predicate propertyId", createError)
-
-    if (!propertyOperators.has(value.op as RulePropertyOperator)) {
-      throw createError(
-        `Rule property predicate '${value.propertyId}' has invalid operator '${String(value.op)}'.`
-      )
-    }
-
-    const op = value.op as RulePropertyOperator
-    const hasValue = Object.hasOwn(value, "value")
-    if (propertyValueOperators.has(op)) {
-      if (!hasValue || !isRuleValue(value.value)) {
-        throw createError(`Rule property predicate '${value.propertyId}' must declare a value.`)
-      }
-      return
-    }
-
-    if (hasValue) {
-      throw createError(`Rule property predicate '${value.propertyId}' must not declare a value.`)
-    }
-    return
-  }
-
-  if (value.kind === "link") {
-    assertNonEmptyString(value.linkId, "Rule link predicate linkId", createError)
-    if (!linkOperators.has(value.op as RuleLinkOperator)) {
-      throw createError(
-        `Rule link predicate '${value.linkId}' has invalid operator '${String(value.op)}'.`
-      )
-    }
-    return
-  }
-
-  throw createError(`Unknown rule predicate kind '${String(value.kind)}'.`)
+  assertPredicateShape(value, { subject: "Rule", createError })
 }
 
 /** Validate the serializable rule envelope without consulting ontology state. */

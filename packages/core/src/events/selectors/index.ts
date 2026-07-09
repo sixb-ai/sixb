@@ -5,4 +5,10 @@ export type {
 } from "./builder"
 export { events } from "./builder"
 export { buildEventSelectorPredicate, eventSelectorSpec } from "./predicate"
-export type { EventSelectorSpec } from "./types"
+export type {
+  EventSelectorContext,
+  EventSelectorSpec,
+  InferEventSelectorContext,
+  LinkEventSelectorContext,
+  ObjectEventSelectorContext,
+} from "./types"

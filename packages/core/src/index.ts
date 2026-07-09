@@ -287,15 +287,18 @@ export type {
   EventOrigin,
   EventPropertySelector,
   EventScopeKeys,
+  EventSelectorContext,
   EventSelectorSpec,
   EventsAppendInput,
   EventsReadInput,
   EventsRuntimeOptions,
   EventsSubscribeInput,
+  InferEventSelectorContext,
   LinkCreatedEvent,
   LinkDeletedEvent,
   LinkEvent,
   LinkEventSelectorBuilder,
+  LinkEventSelectorContext,
   LinkRemovedEvent,
   LinkRemovedEventsInput,
   LinkUpdatedEvent,
@@ -306,6 +309,7 @@ export type {
   ObjectDeletedEventsInput,
   ObjectEvent,
   ObjectEventSelectorBuilder,
+  ObjectEventSelectorContext,
   ObjectUpdatedEvent,
   ObjectUpsertEventsInput,
   ObjectUpsertedEvent,
@@ -388,6 +392,22 @@ export {
   scopeKeysForEvent,
   toStoredEvent,
 } from "./events"
+
+// ── Predicates ─────────────────────────────────────────────
+
+export type {
+  AllPredicate,
+  AnyPredicate,
+  LinkPredicate,
+  LinkPredicateBuilder,
+  LinkPredicateOperator,
+  NotPredicate,
+  Predicate,
+  PredicateValue,
+  PropertyPredicate,
+  PropertyPredicateBuilder,
+  PropertyPredicateOperator,
+} from "./predicates"
 
 // ── Rules ──────────────────────────────────────────────────
 
@@ -1189,13 +1209,31 @@ export { defineSchedule, isScheduleDefinition, ScheduleValidationError } from ".
 
 // ── Triggers ───────────────────────────────────────────────
 
-export type { RunTrigger } from "./triggers"
+export type {
+  InferTriggerEvent,
+  RunTrigger,
+  TriggerBuilder,
+  TriggerCondition,
+  TriggerConditionScope,
+  TriggerDefinition as DomainTriggerDefinition,
+  TriggerEventContext,
+  TriggerLinkEventContext,
+  TriggerObjectEventContext,
+  TriggerPredicateContext,
+  TriggerPropertyPredicateBuilder,
+  TriggerScopedPredicate,
+  TriggerWhereBuilder,
+} from "./triggers"
 export {
+  assertTriggerDefinition,
   datasetUpdated,
+  defineTrigger,
   isRunTrigger,
+  isTriggerDefinition,
   pipelineFinished,
   syncFinished,
   TriggerValidationError,
+  validateTriggersAtStartup,
 } from "./triggers"
 
 // ── Pipelines ───────────────────────────────────────────────
@@ -1258,6 +1296,8 @@ export type {
   WorkflowBuilder,
   WorkflowChainDefinition,
   WorkflowDefinition,
+  WorkflowDomainTriggerDefinition,
+  WorkflowDomainTriggerMapper,
   WorkflowDraftBuilder,
   WorkflowInterventionNodeDefinition,
   WorkflowIOSnapshot,
@@ -1266,6 +1306,7 @@ export type {
   WorkflowRunRequestOptions,
   WorkflowRunRequestResult,
   WorkflowRunSource,
+  WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,
   WorkflowStepNodeDefinition,
   WorkflowStepOutputs,

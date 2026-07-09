@@ -4,8 +4,10 @@ import {
   defineIntervention,
   defineObjectType,
   defineSchedule,
+  defineTrigger,
   defineWorkflow,
   defineWorkflowStep,
+  events,
   interventionField,
   isInterventionDefinition,
   isStepDefinition,
@@ -25,7 +27,7 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const Transaction = defineObjectType({
   id: "Transaction",
   name: "Transaction",
-  properties: [prop("id", "string", { required: true, primary: true })],
+  properties: [prop("id", "string", { required: true, primary: true }), prop("amount", "double")],
 })
 
 const Invoice = defineObjectType({
@@ -50,7 +52,7 @@ type RuntimeWorkflowDefinition = {
 }
 
 type RuntimeWorkflowDraft = {
-  when(schedule: unknown): RuntimeWorkflowDraft
+  when(...args: unknown[]): RuntimeWorkflowDraft
   then(...args: unknown[]): RuntimeWorkflowDefinition
 }
 
@@ -107,6 +109,10 @@ const approveInvoiceMatch = defineIntervention("approve-invoice-match", {
     invoice: ref(Invoice),
     reviewerNote: interventionField("string", { required: false }),
   })
+
+const highValueTransaction = defineTrigger("transaction.high-value")
+  .on(events(Transaction).updated())
+  .where((event) => event.object.p.amount.gt(500))
 
 describe("defineWorkflowStep", () => {
   test("builds an inert step definition", () => {
@@ -223,6 +229,24 @@ describe("defineWorkflow", () => {
     expect(workflow.triggers).toEqual([{ type: "schedule", scheduleId: "daily-reconciliation" }])
     expect(workflow.nodes).toHaveLength(1)
     expect(isWorkflowDefinition(workflow)).toBe(true)
+  })
+
+  test("attaches domain triggers through .when()", () => {
+    const workflow = runtimeDefineWorkflow("review-high-value-transaction")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .when(highValueTransaction, (event: { object: { primaryId: string } }) => ({
+        transaction: { objectTypeId: "Transaction", primaryId: event.object.primaryId },
+      }))
+      .then(findBestInvoice)
+
+    expect(workflow.triggers).toHaveLength(1)
+    expect(workflow.triggers[0]).toMatchObject({
+      type: "trigger",
+      triggerId: "transaction.high-value",
+    })
+    expect(typeof (workflow.triggers[0] as { mapper?: unknown }).mapper).toBe("function")
   })
 
   test("stores empty triggers when .when() is not called", () => {
@@ -405,6 +429,17 @@ describe("defineWorkflow", () => {
     expect(() => then(findBestInvoice, () => ({}), "alias")).toThrow(WorkflowDefinitionError)
     expect(() => then(approveInvoiceMatch, "alias")).toThrow(WorkflowDefinitionError)
   })
+
+  test("rejects invalid runtime .when(...) overloads", () => {
+    const draft = runtimeDefineWorkflow("invalid-trigger-overload").input({
+      transaction: ref(Transaction),
+    })
+    const when = draft.when
+
+    expect(() => when(highValueTransaction, "mapper")).toThrow(WorkflowDefinitionError)
+    expect(() => when(highValueTransaction, () => ({}), "extra")).toThrow(WorkflowDefinitionError)
+    expect(() => when({ kind: "trigger" })).toThrow(WorkflowDefinitionError)
+  })
 })
 
 describe("validateWorkflowDefinition", () => {
@@ -550,6 +585,75 @@ describe("Sixb workflow registration", () => {
         ...createTestRuntimeDeps(),
       })
     }).toThrow('Workflow "unknown-schedule" references unknown schedule "missing-schedule"')
+  })
+
+  test("accepts workflows referencing registered triggers", () => {
+    const workflow = defineWorkflow("registered-domain-trigger")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .when(highValueTransaction, (event) => ({
+        transaction: {
+          objectTypeId: "Transaction",
+          primaryId: event.object.primaryId,
+        },
+      }))
+      .then(findBestInvoice)
+
+    const sixb = new Sixb({
+      ontology: [Transaction, Invoice],
+      triggers: [highValueTransaction],
+      workflows: [workflow],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getTriggerDefinitions()).toEqual([highValueTransaction])
+    expect(sixb.getTriggerById("transaction.high-value")).toBe(highValueTransaction)
+    expect(sixb.workflows.getById("registered-domain-trigger")).toBe(workflow)
+  })
+
+  test("rejects workflows referencing unknown triggers", () => {
+    const workflow = defineWorkflow("unknown-domain-trigger")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .when(highValueTransaction, (event) => ({
+        transaction: {
+          objectTypeId: "Transaction",
+          primaryId: event.object.primaryId,
+        },
+      }))
+      .then(findBestInvoice)
+
+    expect(() => {
+      new Sixb({
+        ontology: [Transaction, Invoice],
+        workflows: [workflow],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow(
+      'Workflow "unknown-domain-trigger" references unknown trigger "transaction.high-value"'
+    )
+  })
+
+  test("rejects trigger-driven workflows with input and no mapper at runtime", () => {
+    const workflow = runtimeDefineWorkflow("missing-trigger-mapper")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .when(highValueTransaction)
+      .then(findBestInvoice)
+
+    expect(() => {
+      new Sixb({
+        ontology: [Transaction, Invoice],
+        triggers: [highValueTransaction],
+        workflows: [workflow as unknown as WorkflowDefinition],
+        ...createTestRuntimeDeps(),
+      })
+    }).toThrow(
+      'Workflow "missing-trigger-mapper" trigger "transaction.high-value" requires a mapper'
+    )
   })
 
   test("rejects workflows referencing unknown actions", () => {

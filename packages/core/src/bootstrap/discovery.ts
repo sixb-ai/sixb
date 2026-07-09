@@ -34,6 +34,8 @@ import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from
 import { isGroupDefinition, isMembershipPolicyDefinition, isRoleDefinition } from "../security"
 import type { SyncDefinition } from "../syncs"
 import { isSyncDefinition } from "../syncs"
+import type { TriggerDefinition } from "../triggers"
+import { isTriggerDefinition } from "../triggers"
 import type { WorkflowDefinition } from "../workflows"
 import { isWorkflowDefinition } from "../workflows"
 
@@ -266,6 +268,25 @@ export async function discoverRules(projectRoot: string): Promise<readonly RuleD
   return rules
 }
 
+export async function discoverTriggers(projectRoot: string): Promise<readonly TriggerDefinition[]> {
+  const triggersDir = join(projectRoot, "triggers")
+  const modulePaths = await listModuleFiles(triggersDir)
+  const exportedCandidates = await loadModuleExports({
+    modulePaths,
+    projectRoot,
+    kind: "trigger",
+  })
+
+  const triggers: TriggerDefinition[] = []
+  for (const candidate of exportedCandidates) {
+    if (isTriggerDefinition(candidate)) {
+      triggers.push(candidate)
+    }
+  }
+
+  return triggers
+}
+
 export async function discoverGroups(projectRoot: string): Promise<readonly GroupDefinition[]> {
   const groupsDir = join(projectRoot, "security", "groups")
   const modulePaths = await listModuleFiles(groupsDir)
@@ -382,6 +403,7 @@ async function loadModuleExports(options: {
     | "schedule"
     | "pipeline"
     | "rule"
+    | "trigger"
     | "group"
     | "role"
     | "membershipPolicy"

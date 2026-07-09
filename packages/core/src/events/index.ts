@@ -47,11 +47,15 @@ export { scopeKeysForEvent } from "./scope"
 export {
   buildEventSelectorPredicate,
   type EventPropertySelector,
+  type EventSelectorContext,
   type EventSelectorSpec,
   eventSelectorSpec,
   events,
+  type InferEventSelectorContext,
   type LinkEventSelectorBuilder,
+  type LinkEventSelectorContext,
   type ObjectEventSelectorBuilder,
+  type ObjectEventSelectorContext,
 } from "./selectors"
 export { toStoredEvent } from "./toStoredEvent"
 export type {

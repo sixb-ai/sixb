@@ -14,10 +14,12 @@ import {
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
+  defineTrigger,
   defineValueType,
   defineWorkflow,
   defineWorkflowStep,
   EVENTS_STREAM,
+  events,
   fromForeignKey,
   link,
   ProjectionValidationError,
@@ -179,6 +181,33 @@ export const syncOrders = defineSync("sync-orders")
     expect(sixb.workflows.getById("missing-workflow")).toBeNull()
   })
 
+  test("uses explicit triggers when provided", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Transaction = defineObjectType({
+      id: "Transaction",
+      name: "Transaction",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "double"),
+      ],
+    })
+
+    const trigger = defineTrigger("transaction.high-value")
+      .on(events(Transaction).updated())
+      .where((event) => event.object.p.amount.gt(500))
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Transaction],
+      triggers: [trigger],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getTriggerDefinitions()).toEqual([trigger])
+    expect(sixb.getTriggerById("transaction.high-value")).toBe(trigger)
+  })
+
   test("discovers workflows from workflows directory", async () => {
     const projectRoot = await createTempProjectRoot()
 
@@ -275,6 +304,78 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     expect(sixb.workflows.getById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
       "find-best-invoice",
       "attach-invoice",
+    ])
+  })
+
+  test("discovers triggers from triggers directory", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/transaction.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Transaction = defineObjectType({
+  id: "Transaction",
+  name: "Transaction",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "double"),
+  ],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "triggers/highValueTransaction.ts",
+      `import { defineTrigger, events } from "${coreModuleUrl}"
+import { Transaction } from "../ontology/transaction"
+
+export const highValueTransaction = defineTrigger("transaction.high-value")
+  .on(events(Transaction).updated())
+  .where((event) => event.object.p.amount.gt(500))
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "workflows/reviewHighValueTransaction.ts",
+      `import { defineWorkflow, defineWorkflowStep, ref } from "${coreModuleUrl}"
+import { Transaction } from "../ontology/transaction"
+import { highValueTransaction } from "../triggers/highValueTransaction"
+
+const reviewTransaction = defineWorkflowStep("review-transaction")
+  .input({
+    transaction: ref(Transaction),
+  })
+  .output({})
+  .run(() => ({}))
+
+export const reviewHighValueTransaction = defineWorkflow("review-high-value-transaction")
+  .input({
+    transaction: ref(Transaction),
+  })
+  .when(highValueTransaction, (event) => ({
+    transaction: {
+      objectTypeId: "Transaction",
+      primaryId: event.object.primaryId,
+    },
+  }))
+  .then(reviewTransaction)
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getTriggerDefinitions().map((trigger) => trigger.id)).toEqual([
+      "transaction.high-value",
+    ])
+    expect(sixb.workflows.getById("review-high-value-transaction")?.triggers).toMatchObject([
+      { type: "trigger", triggerId: "transaction.high-value" },
     ])
   })
 

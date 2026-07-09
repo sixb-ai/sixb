@@ -87,6 +87,7 @@ export const invoiceReminder = defineWorkflow("invoice-reminder")
 | `defineWorkflow("invoice-reminder")` | Names the workflow |
 | `.input({ invoice })` | Declares the input needed to start a run |
 | `.when(schedule)` | Auto-starts the workflow from a [schedule](../schedules/overview.md) |
+| `.when(trigger, mapper?)` | Binds the workflow to a [trigger](../triggers/overview.md) |
 | `.then(step)` | Runs a step |
 | `.then(action, mapper)` | Runs an object action |
 | `.then(intervention)` | Pauses for a human decision |
@@ -206,6 +207,27 @@ export const dailyInvoiceReminders = defineWorkflow("daily-invoice-reminders")
   .input({})
   .when(daily)
   .then(findOverdueInvoices)
+```
+
+### Bind to a trigger
+
+A workflow can also reference a [trigger](../triggers/overview.md) with
+`.when(trigger, mapper?)`. Use a mapper when the trigger event must be converted into the
+workflow input.
+
+```ts
+export const reviewHighValuePayment = defineWorkflow("review-high-value-payment")
+  .input({
+    invoice: ref(Invoice),
+    payment: ref(Payment),
+    amount: "double",
+  })
+  .when(highValuePaymentLinked, (event) => ({
+    invoice: event.source,
+    payment: event.target,
+    amount: event.link.p.amount,
+  }))
+  .then(reviewPayment)
 ```
 
 ## Run lifecycle
