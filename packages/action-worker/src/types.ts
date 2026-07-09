@@ -5,6 +5,7 @@ import type {
   ActionRunStorage,
   ActionSubject,
   EventsRuntime,
+  LogsRuntime,
   ObjectRow,
   OntologySource,
   Sixb,
@@ -27,6 +28,7 @@ export interface ActionWorkerSixbFacade
 export interface ActionWorkerContext {
   readonly id: string
   readonly events: EventsRuntime
+  readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly actionRunsStorage: ActionRunStorage
   readonly sixb: ActionWorkerSixbFacade

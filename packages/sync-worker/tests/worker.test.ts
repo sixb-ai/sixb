@@ -10,6 +10,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  LOGS_STREAM,
   prop,
   Sixb,
   type SyncDefinition,
@@ -112,6 +113,49 @@ describe("SyncWorker", () => {
     expect(claimed).toHaveLength(0)
 
     await worker.stop()
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const dataset = makeDataset("raw.erp.orders")
+    const sync = defineSync("sync-logged")
+      .from(erpDb)
+      .read((_client, context) => {
+        context.logger.info("Reading orders", { source: "erp" })
+        return [{ orderId: "ord_1" }]
+      })
+      .intoDataset(dataset)
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "sync-logged", runId: "run-log" } }],
+    })
+
+    await worker.start()
+    await waitFor(
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "run-log" }),
+      (value) => value?.status === "succeeded"
+    )
+    await worker.stop()
+
+    const records = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: LOGS_STREAM.id,
+      names: ["sync"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Reading orders"
+    )
+    expect(line?.key).toBe("run-log")
+    const payload = line?.payload as {
+      level: string
+      fields?: { source?: string }
+      run?: { kind?: string; id?: string }
+    }
+    expect(payload.level).toBe("info")
+    expect(payload.fields?.source).toBe("erp")
+    expect(payload.run).toEqual({ kind: "sync", id: "run-log" })
   })
 
   test("uses a fallback run id when the queue payload does not provide one", async () => {

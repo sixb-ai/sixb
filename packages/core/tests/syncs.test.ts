@@ -6,6 +6,7 @@ import {
   defineObjectType,
   defineSchedule,
   defineSync,
+  noopLogger,
   prop,
   Sixb,
   type SyncDefinition,
@@ -163,6 +164,7 @@ describe("defineSync", () => {
         syncId: "sync-orders",
         signal: new AbortController().signal,
         blobs: createTestRuntimeDeps().blobStorage,
+        logger: noopLogger,
         checkpoint: { cursor: "cursor-1" },
         setCheckpoint(next) {
           nextCheckpoint = next
@@ -195,6 +197,7 @@ describe("defineSync", () => {
         syncId: "sync-orders",
         signal: new AbortController().signal,
         blobs: createTestRuntimeDeps().blobStorage,
+        logger: noopLogger,
       }
     )
 

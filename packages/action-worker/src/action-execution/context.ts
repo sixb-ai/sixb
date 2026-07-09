@@ -5,6 +5,7 @@ import type {
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
+  Logger,
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core"
 import {
@@ -55,6 +56,7 @@ export function createBasePhaseContext(input: {
   readonly action: ActionDefinition
   readonly run: ActionRunRecord
   readonly signal: AbortSignal
+  readonly logger: Logger
 }) {
   return {
     run: {
@@ -62,6 +64,7 @@ export function createBasePhaseContext(input: {
       startedAt: input.run.startedAt ?? input.run.queuedAt,
       idempotencyKey: input.run.idempotencyKey,
     },
+    logger: input.logger,
     // Params are stored as JSON (date/timestamp -> ISO string); handler types
     // promise `Date`, so re-hydrate them before the handler sees them.
     params: coerceActionParamsToTyped(

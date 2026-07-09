@@ -1,5 +1,6 @@
 import type { WorkflowStepNodeDefinition } from "@sixb/core"
 import {
+  resolveLogsRuntime,
   snapshotWorkflowStepInput,
   snapshotWorkflowStepOutput,
   validateWorkflowStepInput,
@@ -55,10 +56,20 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
     })
 
     context.markSideEffectBoundaryPassed()
-    const rawOutput = await node.step.handler({
-      input: stepInput,
-      sixb: context.runtime.sixb,
-    })
+    const logger = resolveLogsRuntime(context.runtime.projectId, context.runtime.logs).forRun(
+      { kind: "workflow", id: context.job.id },
+      { step: node.step.id }
+    )
+    let rawOutput: Record<string, unknown>
+    try {
+      rawOutput = await node.step.handler({
+        input: stepInput,
+        sixb: context.runtime.sixb,
+        logger,
+      })
+    } finally {
+      await logger.flush()
+    }
     throwIfAborted(context.signal)
 
     const validatedOutput = validateWorkflowStepOutput({

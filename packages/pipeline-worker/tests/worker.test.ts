@@ -11,6 +11,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  LOGS_STREAM,
   prop,
   Sixb,
 } from "@sixb/core"
@@ -115,6 +116,61 @@ describe("PipelineWorker", () => {
     }
 
     expect(() => new PipelineWorker(withoutPipelineRuns)).toThrow("storage.pipelineRuns")
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const cleanStep = definePipelineStep("clean-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(customersDataset)
+      .run(async ({ inputs, output, logger }) => {
+        logger.info("Cleaning customers", { phase: "clean" })
+        await output.writeRows(inputs.rawCustomers.readRows())
+      })
+    const pipeline = definePipeline("customers").then(cleanStep)
+    const sixb = createSixbForPipeline({
+      pipeline,
+      datasets: [rawCustomersDataset, customersDataset],
+    })
+    await seedDatasetVersion(sixb.lakeStorage as InMemoryLakeStorage, rawCustomersDataset, [
+      { id: "cust_1", name: "Ada" },
+    ])
+
+    const worker = new PipelineWorker(sixb)
+    await sixb.queues.pipelines.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        { type: "pipeline.run.requested", payload: { pipelineId: "customers", runId: "run-log" } },
+      ],
+    })
+
+    await worker.start()
+    try {
+      await waitFor(
+        () => sixb.storage.pipelineRuns!.getById({ projectId: sixb.id, id: "run-log" }),
+        (value) => value?.status === "succeeded"
+      )
+    } finally {
+      await worker.stop()
+    }
+
+    const records = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: LOGS_STREAM.id,
+      names: ["pipeline"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Cleaning customers"
+    )
+    expect(line?.key).toBe("run-log")
+    const payload = line?.payload as {
+      level: string
+      fields?: { phase?: string; step?: string }
+      run?: { kind?: string; id?: string }
+    }
+    expect(payload.level).toBe("info")
+    expect(payload.fields?.phase).toBe("clean")
+    expect(payload.fields?.step).toBe("clean-customers")
+    expect(payload.run).toEqual({ kind: "pipeline", id: "run-log" })
   })
 
   test("processes queued JS pipeline jobs and emits lineage events", async () => {

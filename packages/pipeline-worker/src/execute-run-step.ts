@@ -6,6 +6,7 @@ import type {
   PipelineStepDefinition,
   PipelineStepRunContext,
 } from "@sixb/core"
+import { resolveLogsRuntime } from "@sixb/core"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
 import type { PipelineJob, PipelineWorkerContext } from "./types"
@@ -27,6 +28,10 @@ export async function executeRunStep(input: {
     )
   }
 
+  const logger = resolveLogsRuntime(runtime.id, runtime.logs).forRun(
+    { kind: "pipeline", id: job.id },
+    { step: step.id }
+  )
   let rowsWritten = 0
   const write = await runtime.lakeStorage.beginWrite({
     dataset: outputDataset,
@@ -47,6 +52,7 @@ export async function executeRunStep(input: {
       stepId: step.id,
       runId: job.id,
       signal,
+      logger,
       inputs: createStepInputs(runtime.lakeStorage, resolvedInputs),
       output: {
         async writeRows(rows) {
@@ -73,6 +79,8 @@ export async function executeRunStep(input: {
   } catch (error) {
     await write.abort().catch(() => {})
     throw error
+  } finally {
+    await logger.flush()
   }
 }
 

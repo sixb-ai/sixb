@@ -11,6 +11,7 @@ import {
   type SqlDialect,
   type SqlTransformBody,
 } from "../lake-storage/sql-transforms"
+import type { Logger } from "../logging"
 import type { ScheduleDefinition } from "../schedules"
 import type { RunTrigger } from "../triggers"
 import { isRunTrigger } from "../triggers"
@@ -48,6 +49,7 @@ export interface PipelineStepRunContext<
   readonly signal: AbortSignal
   readonly inputs: { readonly [K in keyof TInputs]: PipelineStepInput }
   readonly output: PipelineStepOutput
+  readonly logger: Logger
 }
 
 export type PipelineStepRunHandler<

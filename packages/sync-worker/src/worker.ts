@@ -7,6 +7,7 @@ import type {
   DatasetDefinition,
   EventsRuntime,
   LakeStorage,
+  LogsRuntime,
   Queues,
   QueueWorkerFailureDecision,
   Storage,
@@ -21,6 +22,7 @@ import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 export interface SyncWorkerSixb {
   readonly id: string
   readonly events?: EventsRuntime
+  readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
@@ -183,6 +185,7 @@ function buildSyncContext(sixb: SyncWorkerSixb): SyncWorkerContext {
     syncRunsStorage,
     lakeStorage: sixb.lakeStorage,
     blobStorage: sixb.blobStorage,
+    logs: sixb.logs,
     getSyncById(syncId) {
       return sixb.getSyncById(syncId)
     },

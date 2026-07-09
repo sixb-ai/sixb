@@ -118,6 +118,7 @@ function buildPipelineContext(
     id: sixb.id,
     pipelineRunsStorage,
     lakeStorage: sixb.lakeStorage,
+    logs: sixb.logs,
     getPipelineById(pipelineId) {
       return sixb.getPipelineById(pipelineId)
     },

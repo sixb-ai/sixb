@@ -3,6 +3,7 @@ import type {
   DatasetVersion,
   EventsRuntime,
   LakeStorage,
+  LogsRuntime,
   PipelineDefinition,
   PipelineRunRecord,
   PipelineRunStorage,
@@ -15,6 +16,7 @@ export interface PipelineWorkerContext {
   readonly id: string
   readonly pipelineRunsStorage: PipelineRunStorage
   readonly lakeStorage: LakeStorage
+  readonly logs?: LogsRuntime
   getDatasetById(datasetId: string): DatasetDefinition | null
   getPipelineById(pipelineId: string): PipelineDefinition | null
 }
@@ -22,6 +24,7 @@ export interface PipelineWorkerContext {
 export interface PipelineWorkerSixb {
   readonly id: string
   readonly events?: EventsRuntime
+  readonly logs?: LogsRuntime
   readonly lakeStorage: LakeStorage
   readonly queues: Queues
   readonly storage: Storage

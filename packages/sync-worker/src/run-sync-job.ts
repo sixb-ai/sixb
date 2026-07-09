@@ -8,6 +8,7 @@ import {
   isFileRef,
   type JsonValue,
   type LakeWriteSession,
+  resolveLogsRuntime,
   type SyncRunFailure,
   type SyncRunRecord,
 } from "@sixb/core"
@@ -140,6 +141,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   })
   await input.onRunStarted?.(startedRun)
 
+  const logger = resolveLogsRuntime(runtime.id, runtime.logs).forRun({ kind: "sync", id: job.id })
   let write: LakeWriteSession | undefined
   let rowsRead = 0
   let committedVersion: DatasetVersion | undefined
@@ -165,6 +167,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       syncId: sync.id,
       signal,
       blobs: blobStorage,
+      logger,
       checkpoint: previousCheckpoint !== undefined ? cloneJsonValue(previousCheckpoint) : undefined,
       setCheckpoint(next: unknown) {
         assertJsonValue(next, `Sync '${sync.id}' checkpoint`)
@@ -275,5 +278,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     }
 
     throw error
+  } finally {
+    await logger.flush()
   }
 }

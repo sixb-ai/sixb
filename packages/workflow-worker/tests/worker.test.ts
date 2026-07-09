@@ -10,6 +10,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  LOGS_STREAM,
   prop,
   ref,
   Sixb,
@@ -177,6 +178,61 @@ describe("WorkflowWorker", () => {
     expect(() => new WorkflowWorker(withoutWorkflowInterventions)).toThrow(
       "storage.workflowInterventions"
     )
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const loggedStep = defineWorkflowStep("log-step")
+      .input({ transaction: ref(Transaction) })
+      .output({ invoice: ref(Invoice) })
+      .run(({ input, logger }) => {
+        logger.info("Reviewing transaction", { txn: input.transaction.primaryId })
+        return { invoice: { objectTypeId: "Invoice", primaryId: "inv_1" } }
+      })
+    const workflow = defineWorkflow("logged-workflow")
+      .input({ transaction: ref(Transaction) })
+      .then(loggedStep)
+    const sixb = createSixb({ workflows: [workflow] })
+    await sixb.queues.workflows.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "workflow.run.requested",
+          payload: {
+            workflowId: workflow.id,
+            runId: "wfrun_log",
+            input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
+          },
+        },
+      ],
+    })
+
+    const worker = new WorkflowWorker(sixb)
+    workers.push(worker)
+    await worker.start()
+
+    await waitFor(
+      () => sixb.storage.workflowRuns!.getById({ projectId: sixb.id, id: "wfrun_log" }),
+      (value) => value?.status === "succeeded"
+    )
+
+    const records = await sixb.broker.read({
+      projectId: sixb.id,
+      streamId: LOGS_STREAM.id,
+      names: ["workflow"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Reviewing transaction"
+    )
+    expect(line?.key).toBe("wfrun_log")
+    const payload = line?.payload as {
+      level: string
+      fields?: { txn?: string; step?: string }
+      run?: { kind?: string; id?: string }
+    }
+    expect(payload.level).toBe("info")
+    expect(payload.fields?.txn).toBe("txn_1")
+    expect(payload.fields?.step).toBe("log-step")
+    expect(payload.run).toEqual({ kind: "workflow", id: "wfrun_log" })
   })
 
   test("processes queued workflow jobs and emits workflow lifecycle events", async () => {
