@@ -9,7 +9,7 @@ import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
 import type { ScheduleDefinition } from "../schedules"
-import type { InferTriggerEvent, TriggerDefinition } from "../triggers"
+import type { InferTriggerEvent, TriggerDefinitionForEvent } from "../triggers"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -93,12 +93,12 @@ export type WorkflowScheduleTriggerDefinition = {
 }
 
 export type WorkflowDomainTriggerMapper<
-  TTrigger extends TriggerDefinition = TriggerDefinition,
+  TTrigger extends TriggerDefinitionForEvent = TriggerDefinitionForEvent<never>,
   TInput extends Record<string, unknown> = Record<string, unknown>,
 > = (event: InferTriggerEvent<TTrigger>) => TInput
 
 export type WorkflowDomainTriggerDefinition<
-  TTrigger extends TriggerDefinition = TriggerDefinition,
+  TTrigger extends TriggerDefinitionForEvent = TriggerDefinitionForEvent<never>,
   TInput extends Record<string, unknown> = Record<string, unknown>,
 > = {
   readonly type: "trigger"
@@ -526,12 +526,12 @@ export interface WorkflowDraftBuilder<
   TSteps extends WorkflowStepOutputs = Record<never, never>,
 > {
   when(schedule: ScheduleDefinition): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
-  when<const TTrigger extends TriggerDefinition>(
-    trigger: TTrigger & EmptyWorkflowInputGuard<TInput>
+  when(
+    trigger: TriggerDefinitionForEvent & EmptyWorkflowInputGuard<TInput>
   ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
-  when<const TTrigger extends TriggerDefinition>(
-    trigger: TTrigger,
-    mapper: WorkflowDomainTriggerMapper<TTrigger, InferSchemaOrRefRecord<TInput>>
+  when<const TEvent>(
+    trigger: TriggerDefinitionForEvent<TEvent>,
+    mapper: (event: TEvent) => InferSchemaOrRefRecord<TInput>
   ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
   then<const TStep extends StepDefinition>(
     step: TStep & DirectDataflowGuard<TCurrent, TStep>

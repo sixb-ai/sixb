@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
   datasetUpdated,
+  defineAction,
   defineObjectType,
+  defineRule,
   defineTrigger,
   events,
   isRunTrigger,
   link,
   OntologyRegistry,
+  param,
   pipelineFinished,
   prop,
   syncFinished,
@@ -31,6 +34,15 @@ const Invoice = defineObjectType({
     }),
   ],
 })
+
+const invoiceAtRisk = defineRule("invoice.at-risk")
+  .on(Invoice)
+  .where((invoice) => invoice.p.amount.gt(500))
+
+const approveInvoice = defineAction("approve-invoice")
+  .on(Invoice)
+  .params({ reason: param("string") })
+  .writeback(async () => {})
 
 describe("syncFinished", () => {
   test("returns a sync.finished trigger", () => {
@@ -173,6 +185,56 @@ describe("defineTrigger", () => {
     })
   })
 
+  test("supports typed target identity predicates on links", () => {
+    const trigger = defineTrigger("invoice.payment-target")
+      .on(events(Invoice).link(Invoice.l.payments).created())
+      .where((event) => event.link.all(event.target.is(Payment), event.target.id.eq("payment-1")))
+
+    expect(trigger.condition).toEqual({
+      kind: "becomesTrue",
+      scope: "event.link",
+      predicate: {
+        kind: "all",
+        predicates: [
+          {
+            kind: "field",
+            field: "target.objectTypeId",
+            op: "eq",
+            value: "Payment",
+          },
+          {
+            kind: "field",
+            field: "target.primaryId",
+            op: "eq",
+            value: "payment-1",
+          },
+        ],
+      },
+    })
+  })
+
+  test("supports rule and action event sources without conditions", () => {
+    const ruleTrigger = defineTrigger("invoice.at-risk-triggered").on(
+      events.rule(invoiceAtRisk).triggered()
+    )
+    const actionTrigger = defineTrigger("invoice.approved").on(
+      events.action(approveInvoice).completed()
+    )
+
+    expect(ruleTrigger.source).toEqual({
+      topic: "rules",
+      types: ["rule.triggered"],
+      ruleId: invoiceAtRisk.id,
+    })
+    expect(actionTrigger.source).toEqual({
+      topic: "actions",
+      types: ["action.completed"],
+      actionId: approveInvoice.id,
+    })
+    expect("where" in ruleTrigger).toBe(false)
+    expect("where" in actionTrigger).toBe(false)
+  })
+
   test("rejects empty ids and non-terminal event selectors", () => {
     expect(() => defineTrigger("")).toThrow(TriggerValidationError)
     expect(() => defineTrigger("bad-source").on(events(Invoice))).toThrow(
@@ -190,6 +252,38 @@ describe("validateTriggersAtStartup", () => {
     expect(() =>
       validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).not.toThrow()
+  })
+
+  test("accepts link target identity predicates", () => {
+    const trigger = defineTrigger("invoice.payment-target")
+      .on(events(Invoice).link(Invoice.l.payments).created())
+      .where((event) => event.target.is(Payment))
+
+    expect(() =>
+      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
+    ).not.toThrow()
+  })
+
+  test("rejects link target types outside the selected link", () => {
+    const trigger = {
+      kind: "trigger",
+      id: "invoice.invalid-payment-target",
+      source: events(Invoice).link(Invoice.l.payments).created(),
+      condition: {
+        kind: "becomesTrue",
+        scope: "event.link",
+        predicate: {
+          kind: "field",
+          field: "target.objectTypeId",
+          op: "eq",
+          value: "Invoice",
+        },
+      },
+    } as const
+
+    expect(() =>
+      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
+    ).toThrow('object type "Invoice" is not a target of link "payments"')
   })
 
   test("rejects duplicate trigger ids", () => {
@@ -229,5 +323,37 @@ describe("validateTriggersAtStartup", () => {
     expect(() =>
       validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).toThrow('Trigger "bad-link-property": unknown property "missing" on link "payments"')
+  })
+
+  test("validates registered rule and action sources", () => {
+    const triggers = [
+      defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
+      defineTrigger("invoice.approved").on(events.action(approveInvoice).completed()),
+    ]
+
+    expect(() =>
+      validateTriggersAtStartup(triggers, new OntologyRegistry({ sources: [Invoice, Payment] }), {
+        registeredRuleIds: new Set([invoiceAtRisk.id]),
+        registeredActionIds: new Set([approveInvoice.id]),
+      })
+    ).not.toThrow()
+  })
+
+  test("rejects unknown rule and action sources", () => {
+    const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
+
+    expect(() =>
+      validateTriggersAtStartup(
+        [defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered())],
+        ontology
+      )
+    ).toThrow('unknown rule "invoice.at-risk"')
+
+    expect(() =>
+      validateTriggersAtStartup(
+        [defineTrigger("invoice.approved").on(events.action(approveInvoice).completed())],
+        ontology
+      )
+    ).toThrow('unknown action "approve-invoice"')
   })
 })

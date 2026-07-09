@@ -1,8 +1,7 @@
 # Triggers
 
 A trigger describes *when* a domain event should start work. Reach for triggers when a
-[workflow](../workflows/overview.md) should react to a typed object or link mutation, for example
-when a payment is linked to an invoice and the payment amount crosses a threshold.
+[workflow](../workflows/overview.md) should react to a typed object, link, rule, or action event.
 
 A trigger is declarative. It has a source event selector, an optional condition, and no handler.
 Pass it to a workflow with `.when(trigger, mapper?)`.
@@ -65,6 +64,19 @@ defineTrigger("invoice.payment-amount-created").on(
 
 Property selectors support `.created()`, `.updated()`, and `.cleared()`.
 
+Rules and actions are selected from their definitions:
+
+```ts
+defineTrigger("invoice.at-risk").on(events.rule(invoiceAtRisk).triggered())
+defineTrigger("invoice.risk-resolved").on(events.rule(invoiceAtRisk).resolved())
+
+defineTrigger("invoice.approval-requested").on(events.action(approveInvoice).requested())
+defineTrigger("invoice.approved").on(events.action(approveInvoice).completed())
+defineTrigger("invoice.approval-failed").on(events.action(approveInvoice).failed())
+```
+
+Rule and action selectors already encode the occurrence and do not expose `.where(...)`.
+
 ## Add an event condition
 
 Conditions read the event payload after the mutation. For object events, use `event.object`; for
@@ -81,6 +93,16 @@ export const highValueUsdPayment = defineTrigger("invoice.high-value-usd-payment
   .on(events(Invoice).link(Invoice.l.payments).created())
   .where((event) =>
     event.link.all(event.link.p.amount.gt(500), event.link.p.currency.eq("USD"))
+  )
+```
+
+Link conditions can also select a typed target identity without loading target state:
+
+```ts
+defineTrigger("invoice.wire-payment")
+  .on(events(Invoice).link(Invoice.l.payments).created())
+  .where((event) =>
+    event.link.all(event.target.is(WirePayment), event.link.p.amount.gt(500))
   )
 ```
 
@@ -139,6 +161,10 @@ Use a mapper when the workflow input is not empty. The mapper receives a typed e
 | --- | --- |
 | Object event | `event.object.objectTypeId`, `event.object.primaryId`, `event.object.p.*` |
 | Link event | `event.source`, `event.target`, `event.link.id`, `event.link.p.*` |
+| Rule event | `event.ruleId`, `event.subject` |
+| Action requested | `event.actionId`, `event.runId`, `event.subject`, `event.params` |
+| Action completed | `event.actionId`, `event.runId`, `event.subject` |
+| Action failed | `event.actionId`, `event.runId`, `event.subject`, `event.error` |
 
 If the workflow input is `{}`, the mapper is optional:
 
@@ -187,7 +213,7 @@ currently true*.
 
 | Need | Use |
 | --- | --- |
-| Start a workflow from an object or link event | Trigger |
+| Start a workflow from an object, link, rule, or action event | Trigger |
 | Add a threshold or payload condition to that event | Trigger |
 | Track active/resolved state for an object | [Rule](../rules/overview.md) |
 | Run a multi-step business process | [Workflow](../workflows/overview.md) |
@@ -196,12 +222,12 @@ currently true*.
 ## Notes
 
 - Trigger ids must be unique.
-- Sources must select an object or link event operation: `.created()`, `.updated()`, or
-  `.deleted()`.
+- Sources must select a terminal event operation.
 - Conditions are validated against the resolved ontology at startup. Unknown properties and empty
   `all()` / `any()` groups are rejected.
 - Object triggers can only use `event.object` conditions; link triggers can only use `event.link`
   conditions.
+- Rule and action event sources do not support additional conditions.
 
 ## Related
 

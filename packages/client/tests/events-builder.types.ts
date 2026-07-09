@@ -3,6 +3,7 @@
 // and `.upserted()` on a wide object type must survive `Object.entries().map()`
 // WITHOUT tripping TS2589 — the recursion-prone path real components hit.
 // Checked by `cd packages/client && bun run typecheck` (tests are in the program).
+import { defineAction, defineRule, param } from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import { events } from "../src/events-builder"
 import { useEvents, useInvalidateOnEvent, useLatest, useLatestByObject } from "../src/events-hooks"
@@ -25,6 +26,15 @@ const Sensor = defineObjectType({
   links: [link.ref("zone", "Zone", { cardinality: "one", properties: [prop("rank", "integer")] })],
 })
 
+const sensorOffline = defineRule("sensor.offline")
+  .on(Sensor)
+  .where((sensor) => sensor.p.name.eq("offline"))
+
+const acknowledgeSensor = defineAction("acknowledge-sensor")
+  .on(Sensor)
+  .params({ note: param("string") })
+  .writeback(async () => {})
+
 // ── Channels narrow the payload ───────────────────────────────────────────────
 
 // `.telemetry(token)` → the property's ontology-typed value.
@@ -34,6 +44,24 @@ events(Sensor)
     const value: number = event.payload.value
     void value
   })
+
+events
+  .rule(sensorOffline)
+  .triggered()
+  .subscribe((event) => {
+    const ruleId: string = event.payload.ruleId
+    void ruleId
+  })
+
+function useActionEventsTypeProof() {
+  useEvents(events.action(acknowledgeSensor).completed(), (event) => {
+    const actionId: string = event.payload.actionId
+    const runId: string = event.payload.runId
+    void [actionId, runId]
+  })
+}
+
+void useActionEventsTypeProof
 
 // `.telemetry(boolean prop)` → boolean value.
 events(Sensor)

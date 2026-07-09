@@ -2,7 +2,7 @@ import { scopeKeysForEvent } from "../scope"
 import type { DomainEvent } from "../types"
 import type { EventSelectorSpec } from "./types"
 
-export function eventSelectorSpec(selector: EventSelectorSpec): EventSelectorSpec {
+export function eventSelectorSpec(selector: EventSelectorSpec<unknown>): EventSelectorSpec {
   return {
     ...(selector.topic !== undefined ? { topic: selector.topic } : {}),
     ...(selector.types !== undefined ? { types: selector.types } : {}),
@@ -13,13 +13,14 @@ export function eventSelectorSpec(selector: EventSelectorSpec): EventSelectorSpe
       ? { propertyOperation: selector.propertyOperation }
       : {}),
     ...(selector.linkId !== undefined ? { linkId: selector.linkId } : {}),
+    ...(selector.ruleId !== undefined ? { ruleId: selector.ruleId } : {}),
     ...(selector.actionId !== undefined ? { actionId: selector.actionId } : {}),
     ...(selector.runId !== undefined ? { runId: selector.runId } : {}),
   }
 }
 
 export function buildEventSelectorPredicate(
-  selector: EventSelectorSpec
+  selector: EventSelectorSpec<unknown>
 ): (event: DomainEvent) => boolean {
   const filter = eventSelectorSpec(selector)
 
@@ -33,6 +34,7 @@ export function buildEventSelectorPredicate(
       return false
     if (filter.primaryId !== undefined && scope.primaryId !== filter.primaryId) return false
     if (filter.linkId !== undefined && scope.linkId !== filter.linkId) return false
+    if (filter.ruleId !== undefined && scope.ruleId !== filter.ruleId) return false
     if (filter.runId !== undefined && scope.runId !== filter.runId) return false
     if (filter.actionId !== undefined && scope.actionId !== filter.actionId) return false
 

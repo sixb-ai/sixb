@@ -86,7 +86,7 @@ describe("scopeKeysForEvent", () => {
     ).toEqual({ actionId: "refreshCache", runId: "act-2" })
   })
 
-  test("topics without an object/run scope return no keys", () => {
+  test("rule topics carry rule scope", () => {
     expect(
       scopeKeysForEvent(
         event("rules", "rule.triggered", {
@@ -94,6 +94,6 @@ describe("scopeKeysForEvent", () => {
           subject: { objectTypeId: "d", primaryId: "1" },
         })
       )
-    ).toEqual({})
+    ).toEqual({ ruleId: "x" })
   })
 })

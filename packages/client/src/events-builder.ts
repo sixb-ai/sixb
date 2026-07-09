@@ -11,7 +11,12 @@
  * `@sixb/client/hooks`.
  */
 
-import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
+import type {
+  ActionDefinition,
+  InferObjectProperties,
+  InferPropertyValue,
+  RuleDefinition,
+} from "@sixb/core"
 import {
   buildEventSelectorPredicate,
   type EventPropertySelector as CoreEventPropertySelector,
@@ -248,6 +253,12 @@ export interface EventsActionBuilder<TEvent extends SixbEvent> extends Subscriba
   >
 }
 
+/** Rule-scoped topic builder: `events.rule(rule).triggered()`. */
+export interface EventsRuleBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
+  triggered(): EventsRuleBuilder<SixbEventOfType<"rule.triggered">>
+  resolved(): EventsRuleBuilder<SixbEventOfType<"rule.resolved">>
+}
+
 /**
  * The minimal builder contract the React hooks consume: a filter spec plus a
  * typed `subscribe`. Every builder surface satisfies it, and the hooks infer
@@ -469,6 +480,14 @@ class EventsBuilderImpl {
     return this.withFilter({ topic: "actions", types: ["action.completed", "action.failed"] })
   }
 
+  triggered(): EventsBuilderImpl {
+    return this.withFilter({ topic: "rules", types: ["rule.triggered"] })
+  }
+
+  resolved(): EventsBuilderImpl {
+    return this.withFilter({ topic: "rules", types: ["rule.resolved"] })
+  }
+
   subscribe(handler: (event: SixbEvent) => void, options?: EventSubscribeOptions): () => void {
     return this.params.executor.subscribe(this.params.filter, handler, options)
   }
@@ -488,7 +507,7 @@ class EventsBuilderImpl {
     })
   }
 
-  private withSelectorSpec(selector: EventSelectorSpec): EventsBuilderImpl {
+  private withSelectorSpec(selector: EventSelectorSpec<unknown>): EventsBuilderImpl {
     return new EventsBuilderImpl({
       ...this.params,
       filter: { ...this.params.filter, ...eventSelectorSpec(selector) },
@@ -546,6 +565,14 @@ export interface SixbEventsApi {
   telemetry(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"telemetry">>
   links(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"links">>
   actions(options?: SixbEventsClientOptions): EventsActionBuilder<SixbEventOfTopic<"actions">>
+  action<TAction extends ActionDefinition>(
+    action: TAction,
+    options?: SixbEventsClientOptions
+  ): EventsActionBuilder<SixbEventOfTopic<"actions">>
+  rule<TRule extends RuleDefinition>(
+    rule: TRule,
+    options?: SixbEventsClientOptions
+  ): EventsRuleBuilder<SixbEventOfTopic<"rules">>
   schedules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"schedules">>
   rules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"rules">>
   datasets(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"datasets">>
@@ -590,6 +617,15 @@ eventsApi.objects = (options) => topicBuilder("objects", options)
 eventsApi.telemetry = (options) => topicBuilder("telemetry", options)
 eventsApi.links = (options) => topicBuilder("links", options)
 eventsApi.actions = (options) => actionBuilder(options)
+eventsApi.action = (action, options) =>
+  createBuilder(
+    { topic: "actions", actionId: action.id },
+    options
+  ) as unknown as EventsActionBuilder<SixbEventOfTopic<"actions">>
+eventsApi.rule = (rule, options) =>
+  createBuilder({ topic: "rules", ruleId: rule.id }, options) as unknown as EventsRuleBuilder<
+    SixbEventOfTopic<"rules">
+  >
 eventsApi.schedules = (options) => topicBuilder("schedules", options)
 eventsApi.rules = (options) => topicBuilder("rules", options)
 eventsApi.datasets = (options) => topicBuilder("datasets", options)

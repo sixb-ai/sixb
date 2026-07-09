@@ -272,7 +272,10 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       this.rulesById.set(rule.id, rule)
     }
 
-    validateTriggersAtStartup(this.triggers, this.ontology)
+    validateTriggersAtStartup(this.triggers, this.ontology, {
+      registeredRuleIds: new Set(this.rulesById.keys()),
+      registeredActionIds,
+    })
     for (const trigger of this.triggers) {
       this.triggersById.set(trigger.id, trigger)
     }

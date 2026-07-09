@@ -22,6 +22,8 @@ function evaluatePredicate(predicate: RulePredicate, input: EvaluateRulePredicat
       return !evaluatePredicate(predicate.predicate, input)
     case "property":
       return evaluatePropertyPredicate(predicate, input.object.properties[predicate.propertyId])
+    case "field":
+      throw new Error("[SixbRulesWorker] Field predicates are not supported by rules.")
     case "link":
       return evaluateLinkPredicate(predicate, input.links.get(predicate.linkId) ?? [])
   }

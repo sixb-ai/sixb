@@ -3,6 +3,7 @@ export type Predicate =
   | AnyPredicate
   | NotPredicate
   | PropertyPredicate
+  | FieldPredicate
   | LinkPredicate
 
 export interface AllPredicate {
@@ -35,6 +36,13 @@ export interface PropertyPredicate {
   readonly propertyId: string
   readonly op: PropertyPredicateOperator
   readonly value?: PredicateValue
+}
+
+export interface FieldPredicate {
+  readonly kind: "field"
+  readonly field: string
+  readonly op: "eq"
+  readonly value: PredicateValue
 }
 
 export type LinkPredicateOperator = "exists" | "isMissing"

@@ -125,6 +125,19 @@ export function assertPredicateShape(
     return
   }
 
+  if (value.kind === "field") {
+    assertNonEmptyString(value.field, `${subject} field predicate field`, createError)
+    if (value.op !== "eq") {
+      throw createError(
+        `${subject} field predicate '${value.field}' has invalid operator '${String(value.op)}'.`
+      )
+    }
+    if (!isPredicateValue(value.value)) {
+      throw createError(`${subject} field predicate '${value.field}' must declare a value.`)
+    }
+    return
+  }
+
   if (value.kind === "link") {
     assertNonEmptyString(value.linkId, `${subject} link predicate linkId`, createError)
     if (!linkOperators.has(value.op as LinkPredicateOperator)) {

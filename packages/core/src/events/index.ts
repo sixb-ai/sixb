@@ -45,10 +45,16 @@ export {
 export type { EventScopeKeys } from "./scope"
 export { scopeKeysForEvent } from "./scope"
 export {
+  type ActionEventSelectorBuilder,
+  type ActionEventSelectorContext,
+  type ActionEventSelectorOperation,
+  type ActionEventToken,
+  type ActionEventTokenOf,
   buildEventSelectorPredicate,
   type EventPropertySelector,
   type EventSelectorContext,
   type EventSelectorSpec,
+  type EventSelectors,
   eventSelectorSpec,
   events,
   type InferEventSelectorContext,
@@ -56,6 +62,9 @@ export {
   type LinkEventSelectorContext,
   type ObjectEventSelectorBuilder,
   type ObjectEventSelectorContext,
+  type RuleEventSelectorBuilder,
+  type RuleEventSelectorContext,
+  type RuleEventSelectorOperation,
 } from "./selectors"
 export { toStoredEvent } from "./toStoredEvent"
 export type {

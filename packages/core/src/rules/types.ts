@@ -13,19 +13,22 @@ import type {
   PropertyPredicateOperator,
 } from "../predicates"
 
-export interface RuleDefinition<TId extends string = string> {
+export interface RuleDefinition<
+  TId extends string = string,
+  TObjectType extends RuleObjectType = RuleObjectType,
+> {
   /** Inert marker used by discovery and runtime registration. */
   readonly kind: "rule"
   readonly id: TId
   /** The ontology entity kind this rule evaluates against. V1 supports objects only. */
-  readonly subject: RuleSubject
+  readonly subject: RuleSubject<TObjectType["id"]>
   /** Serializable predicate AST. No executable callbacks are retained after `.where(...)`. */
   readonly predicate: RulePredicate
 }
 
-export type RuleSubject = {
+export type RuleSubject<TObjectTypeId extends string = string> = {
   readonly kind: "object"
-  readonly objectTypeId: string
+  readonly objectTypeId: TObjectTypeId
 }
 
 export type RulePredicate = Predicate
@@ -98,7 +101,9 @@ export type RuleSubjectBuilder<TObjectType extends RuleObjectType> = {
 }
 
 export interface RuleWhereBuilder<TId extends string, TObjectType extends RuleObjectType> {
-  where(predicate: (subject: RuleSubjectBuilder<TObjectType>) => RulePredicate): RuleDefinition<TId>
+  where(
+    predicate: (subject: RuleSubjectBuilder<TObjectType>) => RulePredicate
+  ): RuleDefinition<TId, TObjectType>
 }
 
 export interface RuleBuilder<TId extends string> {

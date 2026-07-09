@@ -15,6 +15,7 @@ export interface EventScopeKeys {
   readonly primaryId?: string
   readonly propertyId?: string
   readonly linkId?: string
+  readonly ruleId?: string
   readonly runId?: string
   readonly actionId?: string
 }
@@ -50,9 +51,10 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
             }
           : {}),
       }
+    case "rules":
+      return { ruleId: event.payload.ruleId }
     case "schedules":
     case "datasets":
-    case "rules":
       return {}
     default: {
       // Exhaustiveness guard: a new topic must extend the switch above.

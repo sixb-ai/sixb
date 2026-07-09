@@ -4,6 +4,7 @@ import {
   allPredicates,
   anyPredicates,
   assertPredicateShape,
+  createFieldPredicate,
   createPropertyPredicateBuilder,
   notPredicate,
   type Predicate,
@@ -32,6 +33,12 @@ type RuntimeTriggerPredicateSubject = {
 type RuntimeTriggerPredicateContext = {
   object?: RuntimeTriggerPredicateSubject
   link?: RuntimeTriggerPredicateSubject
+  target?: RuntimeTriggerTargetPredicateSubject
+}
+
+type RuntimeTriggerTargetPredicateSubject = {
+  is(objectType: { readonly id: string }): TriggerCondition
+  id: { eq(value: string): TriggerCondition }
 }
 
 function assertNonEmpty(value: string, field: string): void {
@@ -93,6 +100,30 @@ function createPredicateSubject(scope: TriggerConditionScope): RuntimeTriggerPre
   }
 }
 
+function createTargetPredicateSubject(): RuntimeTriggerTargetPredicateSubject {
+  const condition = (field: string, value: string) =>
+    createCondition(
+      "event.link",
+      createFieldPredicate(field, value, {
+        subject: "Trigger",
+        createError: (message) => new TriggerValidationError(message),
+      })
+    )
+
+  return {
+    is(objectType) {
+      assertNonEmpty(objectType.id, "target object type id")
+      return condition("target.objectTypeId", objectType.id)
+    },
+    id: {
+      eq(value) {
+        assertNonEmpty(value, "target object id")
+        return condition("target.primaryId", value)
+      },
+    },
+  }
+}
+
 function createPredicateContext(selector: EventSelectorSpec): RuntimeTriggerPredicateContext {
   if (selector.topic === "objects") {
     return {
@@ -103,6 +134,7 @@ function createPredicateContext(selector: EventSelectorSpec): RuntimeTriggerPred
   if (selector.topic === "links") {
     return {
       link: createPredicateSubject("event.link"),
+      target: createTargetPredicateSubject(),
     }
   }
 
@@ -110,24 +142,40 @@ function createPredicateContext(selector: EventSelectorSpec): RuntimeTriggerPred
 }
 
 function assertTriggerSource(source: EventSelectorSpec): void {
-  if (source.objectTypeId?.trim() && (!source.types || source.types.length === 0)) {
+  if (!source.types || source.types.length === 0) {
     throw new TriggerValidationError(
       "Trigger source must select an event operation, e.g. .created(), .updated(), or .deleted()."
     )
   }
 
-  if (source.topic !== "objects" && source.topic !== "links") {
-    throw new TriggerValidationError(
-      "Trigger source must be an object or link event selector, e.g. events(Invoice).updated()."
-    )
-  }
-
-  if (!source.objectTypeId?.trim()) {
-    throw new TriggerValidationError("Trigger source objectTypeId must not be empty.")
-  }
-
-  if (source.topic === "links" && !source.linkId?.trim()) {
-    throw new TriggerValidationError("Trigger link source linkId must not be empty.")
+  switch (source.topic) {
+    case "objects":
+      if (!source.objectTypeId?.trim()) {
+        throw new TriggerValidationError("Trigger source objectTypeId must not be empty.")
+      }
+      return
+    case "links":
+      if (!source.objectTypeId?.trim()) {
+        throw new TriggerValidationError("Trigger source objectTypeId must not be empty.")
+      }
+      if (!source.linkId?.trim()) {
+        throw new TriggerValidationError("Trigger link source linkId must not be empty.")
+      }
+      return
+    case "rules":
+      if (!source.ruleId?.trim()) {
+        throw new TriggerValidationError("Trigger rule source ruleId must not be empty.")
+      }
+      return
+    case "actions":
+      if (!source.actionId?.trim()) {
+        throw new TriggerValidationError("Trigger action source actionId must not be empty.")
+      }
+      return
+    default:
+      throw new TriggerValidationError(
+        "Trigger source must select object, link, rule, or action events."
+      )
   }
 }
 
@@ -145,6 +193,10 @@ export function defineTrigger(id: string): TriggerBuilder<string> {
         kind: "trigger" as const,
         id,
         source,
+      }
+
+      if (source.topic !== "objects" && source.topic !== "links") {
+        return base satisfies TriggerDefinition
       }
 
       Object.defineProperty(base, "where", {

@@ -6,6 +6,14 @@ import type { TriggerCondition, TriggerDefinition } from "./types"
 
 const objectEventTypes = new Set(["object.created", "object.updated", "object.deleted"])
 const linkEventTypes = new Set(["link.created", "link.updated", "link.deleted"])
+const ruleEventTypes = new Set(["rule.triggered", "rule.resolved"])
+const actionEventTypes = new Set(["action.requested", "action.completed", "action.failed"])
+const linkIdentityFields = new Set(["target.objectTypeId", "target.primaryId"])
+
+export interface ValidateTriggersAtStartupOptions {
+  readonly registeredRuleIds?: ReadonlySet<string>
+  readonly registeredActionIds?: ReadonlySet<string>
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -52,7 +60,8 @@ export function isTriggerDefinition(value: unknown): value is TriggerDefinition 
 
 export function validateTriggersAtStartup(
   triggers: readonly TriggerDefinition[],
-  ontology: OntologyRegistry
+  ontology: OntologyRegistry,
+  options: ValidateTriggersAtStartupOptions = {}
 ): void {
   const seenTriggerIds = new Set<string>()
 
@@ -64,24 +73,37 @@ export function validateTriggersAtStartup(
     }
     seenTriggerIds.add(trigger.id)
 
-    const objectTypeId = trigger.source.objectTypeId
-    if (!objectTypeId) {
-      throw new TriggerValidationError(`Trigger "${trigger.id}": source objectTypeId is missing.`)
-    }
+    switch (trigger.source.topic) {
+      case "objects":
+      case "links": {
+        const objectTypeId = trigger.source.objectTypeId
+        if (!objectTypeId) {
+          throw new TriggerValidationError(
+            `Trigger "${trigger.id}": source objectTypeId is missing.`
+          )
+        }
 
-    const objectType = ontology.getObjectTypeById(objectTypeId)
-    if (!objectType) {
-      throw new TriggerValidationError(
-        `Trigger "${trigger.id}": unknown object type "${objectTypeId}".`
-      )
-    }
+        const objectType = ontology.getObjectTypeById(objectTypeId)
+        if (!objectType) {
+          throw new TriggerValidationError(
+            `Trigger "${trigger.id}": unknown object type "${objectTypeId}".`
+          )
+        }
 
-    if (trigger.source.topic === "objects") {
-      validateObjectTriggerSource(trigger, objectType)
-      continue
+        if (trigger.source.topic === "objects") {
+          validateObjectTriggerSource(trigger, objectType)
+        } else {
+          validateLinkTriggerSource(trigger, objectType)
+        }
+        break
+      }
+      case "rules":
+        validateRuleTriggerSource(trigger, options.registeredRuleIds ?? new Set())
+        break
+      case "actions":
+        validateActionTriggerSource(trigger, options.registeredActionIds ?? new Set())
+        break
     }
-
-    validateLinkTriggerSource(trigger, objectType)
   }
 }
 
@@ -89,23 +111,38 @@ function assertTriggerSourceShape(
   value: unknown,
   path: string,
   createError: (message: string) => Error
-): asserts value is EventSelectorSpec & { topic: "objects" | "links"; objectTypeId: string } {
+): asserts value is EventSelectorSpec {
   if (!isRecord(value)) {
     throw createError(`${path} must be an event selector.`)
   }
 
-  if (value.topic !== "objects" && value.topic !== "links") {
-    throw createError(`${path} must select object or link events.`)
+  if (
+    value.topic !== "objects" &&
+    value.topic !== "links" &&
+    value.topic !== "rules" &&
+    value.topic !== "actions"
+  ) {
+    throw createError(`${path} must select object, link, rule, or action events.`)
   }
-
-  assertNonEmptyString(value.objectTypeId, `${path} objectTypeId`, createError)
 
   if (!Array.isArray(value.types) || value.types.length === 0) {
     throw createError(`${path} must select at least one event type.`)
   }
 
-  if (value.topic === "links") {
-    assertNonEmptyString(value.linkId, `${path} linkId`, createError)
+  switch (value.topic) {
+    case "objects":
+      assertNonEmptyString(value.objectTypeId, `${path} objectTypeId`, createError)
+      break
+    case "links":
+      assertNonEmptyString(value.objectTypeId, `${path} objectTypeId`, createError)
+      assertNonEmptyString(value.linkId, `${path} linkId`, createError)
+      break
+    case "rules":
+      assertNonEmptyString(value.ruleId, `${path} ruleId`, createError)
+      break
+    case "actions":
+      assertNonEmptyString(value.actionId, `${path} actionId`, createError)
+      break
   }
 }
 
@@ -178,6 +215,57 @@ function validateLinkTriggerSource(trigger: TriggerDefinition, objectType: Objec
   validateTriggerPredicate(trigger, propertyIds, trigger.condition.predicate, link)
 }
 
+function validateRuleTriggerSource(
+  trigger: TriggerDefinition,
+  registeredRuleIds: ReadonlySet<string>
+): void {
+  validateEventTypes(trigger, ruleEventTypes, "rule")
+  if (!registeredRuleIds.has(trigger.source.ruleId ?? "")) {
+    throw new TriggerValidationError(
+      `Trigger "${trigger.id}": unknown rule "${trigger.source.ruleId}".`
+    )
+  }
+  rejectConditionOnStatelessSource(trigger, "rule")
+}
+
+function validateActionTriggerSource(
+  trigger: TriggerDefinition,
+  registeredActionIds: ReadonlySet<string>
+): void {
+  validateEventTypes(trigger, actionEventTypes, "action")
+  if (!registeredActionIds.has(trigger.source.actionId ?? "")) {
+    throw new TriggerValidationError(
+      `Trigger "${trigger.id}": unknown action "${trigger.source.actionId}".`
+    )
+  }
+  rejectConditionOnStatelessSource(trigger, "action")
+}
+
+function validateEventTypes(
+  trigger: TriggerDefinition,
+  supportedTypes: ReadonlySet<string>,
+  source: "rule" | "action"
+): void {
+  for (const type of trigger.source.types ?? []) {
+    if (!supportedTypes.has(type)) {
+      throw new TriggerValidationError(
+        `Trigger "${trigger.id}": unsupported ${source} event type "${type}".`
+      )
+    }
+  }
+}
+
+function rejectConditionOnStatelessSource(
+  trigger: TriggerDefinition,
+  source: "rule" | "action"
+): void {
+  if (trigger.condition) {
+    throw new TriggerValidationError(
+      `Trigger "${trigger.id}": ${source} event sources do not support .where() conditions.`
+    )
+  }
+}
+
 function validateSelectorProperty(
   trigger: TriggerDefinition,
   propertyIds: ReadonlySet<string>
@@ -221,6 +309,30 @@ function validateTriggerPredicate(
     throw new TriggerValidationError(
       `Trigger "${trigger.id}": link predicates are not supported in trigger conditions.`
     )
+  }
+
+  if (predicate.kind === "field") {
+    if (!link || !linkIdentityFields.has(predicate.field)) {
+      throw new TriggerValidationError(
+        `Trigger "${trigger.id}": unsupported event field predicate "${predicate.field}".`
+      )
+    }
+    if (typeof predicate.value !== "string" || !predicate.value.trim()) {
+      throw new TriggerValidationError(
+        `Trigger "${trigger.id}": event field "${predicate.field}" must compare against a non-empty string.`
+      )
+    }
+    if (predicate.field === "target.objectTypeId") {
+      const targetIds = Array.isArray(link.targetObjectTypeId)
+        ? link.targetObjectTypeId
+        : [link.targetObjectTypeId]
+      if (!targetIds.includes("*") && !targetIds.includes(predicate.value)) {
+        throw new TriggerValidationError(
+          `Trigger "${trigger.id}": object type "${predicate.value}" is not a target of link "${link.id}".`
+        )
+      }
+    }
+    return
   }
 
   if (!propertyIds.has(predicate.propertyId)) {

@@ -1,6 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { buildEventSelectorPredicate, type DomainEvent, eventSelectorSpec, events } from "../src"
+import {
+  buildEventSelectorPredicate,
+  type DomainEvent,
+  defineAction,
+  eventSelectorSpec,
+  events,
+  param,
+} from "../src"
 import { defineObjectType, link, prop } from "../src/ontology"
+import { defineRule } from "../src/rules"
 
 const Payment = defineObjectType({
   id: "Payment",
@@ -22,6 +30,15 @@ const Invoice = defineObjectType({
     }),
   ],
 })
+
+const invoiceAtRisk = defineRule("invoice.at-risk")
+  .on(Invoice)
+  .where((invoice) => invoice.p.amount.gt(500))
+
+const approveInvoice = defineAction("approve-invoice")
+  .on(Invoice)
+  .params({ reason: param("string") })
+  .writeback(async () => {})
 
 function event(overrides: { type: string; topic: string } & Record<string, unknown>): DomainEvent {
   const { type, topic, ...rest } = overrides
@@ -73,6 +90,20 @@ describe("events selector builder", () => {
       linkId: "payments",
       propertyId: "amount",
       propertyOperation: "updated",
+    })
+  })
+
+  test("builds rule and action selectors from definition tokens", () => {
+    expect(eventSelectorSpec(events.rule(invoiceAtRisk).triggered())).toEqual({
+      topic: "rules",
+      types: ["rule.triggered"],
+      ruleId: "invoice.at-risk",
+    })
+
+    expect(eventSelectorSpec(events.action(approveInvoice).completed())).toEqual({
+      topic: "actions",
+      types: ["action.completed"],
+      actionId: "approve-invoice",
     })
   })
 })
@@ -181,5 +212,52 @@ describe("buildEventSelectorPredicate", () => {
         })
       )
     ).toBe(false)
+  })
+
+  test("matches rule and action definition ids", () => {
+    const matchesRule = buildEventSelectorPredicate(events.rule(invoiceAtRisk).triggered())
+    const matchesAction = buildEventSelectorPredicate(events.action(approveInvoice).completed())
+
+    expect(
+      matchesRule(
+        event({
+          type: "rule.triggered",
+          topic: "rules",
+          payload: {
+            ruleId: invoiceAtRisk.id,
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            triggeredAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(true)
+    expect(
+      matchesRule(
+        event({
+          type: "rule.triggered",
+          topic: "rules",
+          payload: {
+            ruleId: "invoice.other",
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            triggeredAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(false)
+
+    expect(
+      matchesAction(
+        event({
+          type: "action.completed",
+          topic: "actions",
+          payload: {
+            actionId: approveInvoice.id,
+            runId: "run-1",
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            finishedAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(true)
   })
 })

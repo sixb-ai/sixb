@@ -1,6 +1,7 @@
 export {
   allPredicates,
   anyPredicates,
+  createFieldPredicate,
   createLinkPredicateBuilder,
   createPropertyPredicate,
   createPropertyPredicateBuilder,
@@ -10,6 +11,7 @@ export {
 export type {
   AllPredicate,
   AnyPredicate,
+  FieldPredicate,
   LinkPredicate,
   LinkPredicateBuilder,
   LinkPredicateOperator,

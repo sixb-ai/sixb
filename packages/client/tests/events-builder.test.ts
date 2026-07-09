@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { defineAction, defineRule, param } from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import type { SixbEvent } from "../src/events"
 import { buildEventPredicate, events } from "../src/events-builder"
@@ -14,6 +15,15 @@ const Sensor = defineObjectType({
   ],
   links: [link.ref("zone", "Zone", { cardinality: "one", properties: [prop("rank", "integer")] })],
 })
+
+const sensorOffline = defineRule("sensor.offline")
+  .on(Sensor)
+  .where((sensor) => sensor.p.status.eq("offline"))
+
+const acknowledgeSensor = defineAction("acknowledge-sensor")
+  .on(Sensor)
+  .params({ note: param("string") })
+  .writeback(async () => {})
 
 // A loose fixture builder: tests provide ad-hoc per-topic payloads, so the
 // override bag is intentionally untyped and cast to `SixbEvent` on the way out.
@@ -148,6 +158,19 @@ describe("events builder filter spec", () => {
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
       types: ["action.failed"],
+    })
+  })
+
+  test("definition-scoped rule and action builders", () => {
+    expect(events.rule(sensorOffline).triggered().ir).toEqual({
+      topic: "rules",
+      ruleId: "sensor.offline",
+      types: ["rule.triggered"],
+    })
+    expect(events.action(acknowledgeSensor).completed().ir).toEqual({
+      topic: "actions",
+      actionId: "acknowledge-sensor",
+      types: ["action.completed"],
     })
   })
 })

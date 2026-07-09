@@ -1,6 +1,7 @@
 import type { ObjectRef } from "../src"
 import {
   defineObjectType,
+  defineRule,
   defineTrigger,
   defineWorkflow,
   defineWorkflowStep,
@@ -37,6 +38,11 @@ const highValuePayment = defineTrigger("invoice.high-value-payment")
   .where((event) => {
     event.link.p.amount.gt(500)
     event.link.p.currency.eq("USD")
+    event.target.is(Payment)
+    event.target.id.eq("payment-1")
+
+    // @ts-expect-error target type must be declared by the selected link
+    event.target.is(Invoice)
 
     // @ts-expect-error object state is not exposed on link trigger conditions in V1
     event.object
@@ -52,6 +58,17 @@ const highValuePayment = defineTrigger("invoice.high-value-payment")
 
     return event.link.p.amount.gt(500)
   })
+
+const invoiceAtRisk = defineRule("invoice.at-risk")
+  .on(Invoice)
+  .where((invoice) => invoice.p.amount.gt(500))
+
+const atRiskTriggered = defineTrigger("invoice.at-risk-triggered").on(
+  events.rule(invoiceAtRisk).triggered()
+)
+
+// @ts-expect-error rule sources do not expose state predicates
+atRiskTriggered.where(() => ({ kind: "becomesTrue" }))
 
 defineTrigger("invoice.object-updated")
   .on(events(Invoice).updated())
@@ -100,6 +117,15 @@ defineWorkflow("missing-trigger-mapper")
   .input({ invoice: ref(Invoice) })
   // @ts-expect-error workflows with input need a trigger mapper
   .when(highValuePayment)
+
+defineWorkflow("collect-at-risk-invoice")
+  .input({ invoice: ref(Invoice) })
+  .when(atRiskTriggered, (event) => {
+    const invoice: ObjectRef<"Invoice"> = event.subject
+    const ruleId: "invoice.at-risk" = event.ruleId
+
+    return { invoice, ruleId }
+  })
 
 defineWorkflow("empty-triggered-workflow")
   .input({})

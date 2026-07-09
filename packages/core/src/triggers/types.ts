@@ -1,8 +1,12 @@
+import type { InferActionParams } from "../actions"
 import type {
+  ActionEventSelectorContext,
+  ActionEventToken,
   EventSelectorSpec,
   InferEventSelectorContext,
   LinkEventSelectorContext,
   ObjectEventSelectorContext,
+  RuleEventSelectorContext,
 } from "../events/selectors"
 import type {
   LinkToken,
@@ -12,7 +16,12 @@ import type {
   PropertyToken,
 } from "../ontology"
 import type { InferPropertyValue } from "../ontology/inference"
-import type { Predicate, PredicateValue, PropertyPredicate } from "../predicates"
+import type { FieldPredicate, Predicate, PredicateValue, PropertyPredicate } from "../predicates"
+import type { RuleDefinition } from "../rules"
+import type { ActionRunFailure } from "../storage"
+
+declare const triggerSelectorType: unique symbol
+declare const triggerEventType: unique symbol
 
 /**
  * Declarative trigger that can request a sync or pipeline run.
@@ -36,19 +45,37 @@ export type RunTrigger =
 
 export interface TriggerDefinition<
   TId extends string = string,
-  TSelector extends EventSelectorSpec = EventSelectorSpec,
+  TSelector extends EventSelectorSpec<unknown> = EventSelectorSpec<unknown>,
 > {
+  readonly [triggerSelectorType]?: TSelector
   /** Inert marker used by discovery and runtime registration. */
   readonly kind: "trigger"
   readonly id: TId
   /** Public event selector that defines which domain events this trigger can observe. */
-  readonly source: EventSelectorSpec<InferEventSelectorContext<TSelector>>
+  readonly source: TSelector
   /**
    * V1 condition semantics are edge-triggered: the trigger fires when this
    * predicate becomes true after the observed mutation.
    */
   readonly condition?: TriggerCondition
 }
+
+type TriggerEventCarrier<TEvent> = {
+  readonly [triggerEventType]?: TEvent
+}
+
+export type TriggerDefinitionWithEvent<
+  TId extends string,
+  TSelector extends EventSelectorSpec<unknown>,
+> = TriggerDefinition<TId, TSelector> &
+  TriggerEventCarrier<TriggerEventContext<InferEventSelectorContext<TSelector>>>
+
+export type TriggerDefinitionForEvent<TEvent = unknown> = {
+  readonly kind: "trigger"
+  readonly id: string
+  readonly source: EventSelectorSpec<unknown>
+  readonly condition?: TriggerCondition
+} & TriggerEventCarrier<TEvent>
 
 export type TriggerConditionScope = "event.object" | "event.link"
 
@@ -61,20 +88,25 @@ export interface TriggerCondition {
 export type TriggerScopedPredicate = TriggerCondition
 
 export interface TriggerBuilder<TId extends string> {
-  on<const TSelector extends EventSelectorSpec>(
+  on<const TSelector extends EventSelectorSpec<unknown>>(
     selector: TSelector
-  ): TriggerWhereBuilder<TId, TSelector>
+  ): TriggerSourceBuilder<TId, TSelector>
 }
+
+export type TriggerSourceBuilder<TId extends string, TSelector extends EventSelectorSpec<unknown>> =
+  InferEventSelectorContext<TSelector> extends ObjectEventSelectorContext | LinkEventSelectorContext
+    ? TriggerWhereBuilder<TId, TSelector>
+    : TriggerDefinitionWithEvent<TId, TSelector>
 
 export type TriggerWhereBuilder<
   TId extends string,
-  TSelector extends EventSelectorSpec,
-> = TriggerDefinition<TId, TSelector> & {
+  TSelector extends EventSelectorSpec<unknown>,
+> = TriggerDefinitionWithEvent<TId, TSelector> & {
   where(
     predicate: (
       event: TriggerPredicateContext<InferEventSelectorContext<TSelector>>
     ) => TriggerCondition
-  ): TriggerDefinition<TId, TSelector>
+  ): TriggerDefinitionWithEvent<TId, TSelector>
 }
 
 export type TriggerPredicateContext<TContext> =
@@ -85,6 +117,7 @@ export type TriggerPredicateContext<TContext> =
     : TContext extends LinkEventSelectorContext<infer TObjectType, infer TLink>
       ? {
           readonly link: TriggerLinkPredicateSubject<TObjectType, TLink>
+          readonly target: TriggerTargetPredicateSubject<TLink>
         }
       : never
 
@@ -95,6 +128,15 @@ export type TriggerLinkPredicateSubject<
   _TObjectType extends ObjectTypeWithTokens,
   TLink extends LinkToken,
 > = TriggerPredicateSubject<"event.link", LinkPropertyTokens<TLink>>
+
+export type TriggerTargetPredicateSubject<TLink extends LinkToken> = {
+  is(
+    objectType: ObjectTypeWithTokens & { readonly id: AllowedTargetTypeId<TLink> }
+  ): TriggerConditionFor<"event.link", FieldPredicate>
+  readonly id: {
+    eq(value: string): TriggerConditionFor<"event.link", FieldPredicate>
+  }
+}
 
 export type TriggerPredicateSubject<
   TScope extends TriggerConditionScope,
@@ -128,9 +170,12 @@ export interface TriggerPropertyPredicateBuilder<
   isMissing(): TriggerConditionFor<TScope>
 }
 
-export type TriggerConditionFor<TScope extends TriggerConditionScope> = TriggerCondition & {
+export type TriggerConditionFor<
+  TScope extends TriggerConditionScope,
+  TPredicate extends Predicate = PropertyPredicate,
+> = TriggerCondition & {
   readonly scope: TScope
-  readonly predicate: PropertyPredicate
+  readonly predicate: TPredicate
 }
 
 export type TriggerSerializableValue<TProperty extends Property> = Extract<
@@ -149,17 +194,22 @@ export type TriggerNumericValue<TProperty extends Property> = Extract<
   number
 >
 
-export type InferTriggerEvent<TTrigger extends TriggerDefinition> =
-  TTrigger extends TriggerDefinition<string, infer TSelector>
-    ? TriggerEventContext<InferEventSelectorContext<TSelector>>
-    : never
+export type InferTriggerEvent<TTrigger> = TTrigger extends {
+  readonly [triggerEventType]?: infer TEvent
+}
+  ? NonNullable<TEvent>
+  : never
 
 export type TriggerEventContext<TContext> =
   TContext extends ObjectEventSelectorContext<infer TObjectType>
     ? TriggerObjectEventContext<TObjectType>
     : TContext extends LinkEventSelectorContext<infer TObjectType, infer TLink>
       ? TriggerLinkEventContext<TObjectType, TLink>
-      : never
+      : TContext extends RuleEventSelectorContext<infer TRule, infer TOperation>
+        ? TriggerRuleEventContext<TRule, TOperation>
+        : TContext extends ActionEventSelectorContext<infer TAction, infer TOperation>
+          ? TriggerActionEventContext<TAction, TOperation>
+          : never
 
 export interface TriggerObjectEventContext<TObjectType extends ObjectTypeWithTokens> {
   readonly object: {
@@ -180,6 +230,27 @@ export interface TriggerLinkEventContext<
     readonly p: TriggerLinkPropertyValues<TLink>
   }
 }
+
+export type TriggerRuleEventContext<
+  TRule extends RuleDefinition = RuleDefinition,
+  _TOperation extends "triggered" | "resolved" = "triggered" | "resolved",
+> = {
+  readonly ruleId: TRule["id"]
+  readonly subject: ObjectRef<RuleSubjectTypeId<TRule>>
+}
+
+export type TriggerActionEventContext<
+  TAction extends ActionEventToken = ActionEventToken,
+  TOperation extends "requested" | "completed" | "failed" = "requested" | "completed" | "failed",
+> = {
+  readonly actionId: TAction["id"]
+  readonly runId: string
+} & TriggerActionSubjectContext<TAction> &
+  (TOperation extends "requested"
+    ? { readonly params: InferActionParams<TAction["params"]> }
+    : TOperation extends "failed"
+      ? { readonly error: ActionRunFailure }
+      : Record<never, never>)
 
 type LinkPropertyTokens<TLink extends LinkToken> =
   NonNullable<TLink["link"]["properties"]> extends readonly Property[]
@@ -210,6 +281,21 @@ type ResolveTargetTypeId<TTarget> = TTarget extends readonly string[]
   : TTarget extends string
     ? TTarget
     : string
+
+type AllowedTargetTypeId<TLink extends LinkToken> =
+  "*" extends ResolveTargetTypeId<TLink["targetObjectTypeId"]>
+    ? string
+    : ResolveTargetTypeId<TLink["targetObjectTypeId"]>
+
+type RuleSubjectTypeId<TRule extends RuleDefinition> =
+  TRule extends RuleDefinition<string, infer TObjectType> ? TObjectType["id"] : string
+
+type TriggerActionSubjectContext<TAction extends ActionEventToken> = TAction["binding"] extends {
+  readonly kind: "object"
+  readonly objectType: infer TObjectType extends { readonly id: string }
+}
+  ? { readonly subject: ObjectRef<TObjectType["id"]> }
+  : Record<never, never>
 
 /** Runtime type guard for values discovered as triggers. */
 export function isRunTrigger(value: unknown): value is RunTrigger {

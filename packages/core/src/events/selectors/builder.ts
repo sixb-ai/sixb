@@ -1,9 +1,15 @@
+import type { ActionDefinition } from "../../actions"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "../../ontology"
+import type { RuleDefinition } from "../../rules"
 import type { DomainEvent } from "../types"
 import type {
+  ActionEventSelectorContext,
+  ActionEventToken,
+  ActionEventTokenOf,
   EventSelectorSpec,
   LinkEventSelectorContext,
   ObjectEventSelectorContext,
+  RuleEventSelectorContext,
 } from "./types"
 
 type EventPropertySelectorMap<TTokens, TContext> = {
@@ -58,6 +64,19 @@ export interface EventPropertySelector<TContext = unknown> extends EventSelector
   cleared(): EventSelectorSpec<TContext>
 }
 
+export interface RuleEventSelectorBuilder<TRule extends RuleDefinition>
+  extends EventSelectorSpec<RuleEventSelectorContext<TRule>> {
+  triggered(): EventSelectorSpec<RuleEventSelectorContext<TRule, "triggered">>
+  resolved(): EventSelectorSpec<RuleEventSelectorContext<TRule, "resolved">>
+}
+
+export interface ActionEventSelectorBuilder<TAction extends ActionEventToken>
+  extends EventSelectorSpec<ActionEventSelectorContext<TAction>> {
+  requested(): EventSelectorSpec<ActionEventSelectorContext<TAction, "requested">>
+  completed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "completed">>
+  failed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "failed">>
+}
+
 abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TContext> {
   constructor(protected readonly spec: EventSelectorSpec<TContext>) {}
 
@@ -87,6 +106,10 @@ abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TCon
 
   get linkId(): EventSelectorSpec["linkId"] {
     return this.spec.linkId
+  }
+
+  get ruleId(): EventSelectorSpec["ruleId"] {
+    return this.spec.ruleId
   }
 
   get actionId(): EventSelectorSpec["actionId"] {
@@ -245,11 +268,84 @@ class EventPropertySelectorImpl<TContext>
   }
 }
 
-export function events<TObjectType extends ObjectTypeWithTokens>(
+class RuleEventSelectorBuilderImpl<TRule extends RuleDefinition>
+  extends EventSelectorSpecView<RuleEventSelectorContext<TRule>>
+  implements RuleEventSelectorBuilder<TRule>
+{
+  triggered(): EventSelectorSpec<RuleEventSelectorContext<TRule, "triggered">> {
+    return this.withType("rule.triggered")
+  }
+
+  resolved(): EventSelectorSpec<RuleEventSelectorContext<TRule, "resolved">> {
+    return this.withType("rule.resolved")
+  }
+
+  private withType<TOperation extends "triggered" | "resolved">(
+    type: `rule.${TOperation}`
+  ): EventSelectorSpec<RuleEventSelectorContext<TRule, TOperation>> {
+    return { ...this.spec, types: [type] } as EventSelectorSpec<
+      RuleEventSelectorContext<TRule, TOperation>
+    >
+  }
+}
+
+class ActionEventSelectorBuilderImpl<TAction extends ActionEventToken>
+  extends EventSelectorSpecView<ActionEventSelectorContext<TAction>>
+  implements ActionEventSelectorBuilder<TAction>
+{
+  requested(): EventSelectorSpec<ActionEventSelectorContext<TAction, "requested">> {
+    return this.withType("action.requested")
+  }
+
+  completed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "completed">> {
+    return this.withType("action.completed")
+  }
+
+  failed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "failed">> {
+    return this.withType("action.failed")
+  }
+
+  private withType<TOperation extends "requested" | "completed" | "failed">(
+    type: `action.${TOperation}`
+  ): EventSelectorSpec<ActionEventSelectorContext<TAction, TOperation>> {
+    return { ...this.spec, types: [type] } as EventSelectorSpec<
+      ActionEventSelectorContext<TAction, TOperation>
+    >
+  }
+}
+
+function objectEvents<TObjectType extends ObjectTypeWithTokens>(
   objectType: TObjectType
 ): ObjectEventSelectorBuilder<TObjectType> {
   return new ObjectEventSelectorBuilderImpl(objectType, { objectTypeId: objectType.id })
 }
+
+export interface EventSelectors {
+  <TObjectType extends ObjectTypeWithTokens>(
+    objectType: TObjectType
+  ): ObjectEventSelectorBuilder<TObjectType>
+  rule<TRule extends RuleDefinition>(rule: TRule): RuleEventSelectorBuilder<TRule>
+  action<TAction extends ActionDefinition>(
+    action: TAction
+  ): ActionEventSelectorBuilder<ActionEventTokenOf<TAction>>
+}
+
+export const events = Object.assign(objectEvents, {
+  rule<TRule extends RuleDefinition>(rule: TRule): RuleEventSelectorBuilder<TRule> {
+    return new RuleEventSelectorBuilderImpl({
+      topic: "rules",
+      ruleId: rule.id,
+    } as EventSelectorSpec<RuleEventSelectorContext<TRule>>)
+  },
+  action<TAction extends ActionDefinition>(
+    action: TAction
+  ): ActionEventSelectorBuilder<ActionEventTokenOf<TAction>> {
+    return new ActionEventSelectorBuilderImpl({
+      topic: "actions",
+      actionId: action.id,
+    } as EventSelectorSpec<ActionEventSelectorContext<ActionEventTokenOf<TAction>>>)
+  },
+}) satisfies EventSelectors
 
 function createPropertySelectorMap(
   tokens: Record<string, PropertyToken>,

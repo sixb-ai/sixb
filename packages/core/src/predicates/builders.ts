@@ -1,4 +1,5 @@
 import type {
+  FieldPredicate,
   LinkPredicate,
   LinkPredicateBuilder,
   Predicate,
@@ -17,6 +18,21 @@ export type RuntimePropertyPredicateBuilder<TResult = PropertyPredicate> = {
   lte(value: PredicateValue): TResult
   isPresent(): TResult
   isMissing(): TResult
+}
+
+export function createFieldPredicate(
+  field: string,
+  value: PredicateValue,
+  options: Pick<PropertyPredicateBuilderOptions<unknown>, "subject" | "createError"> = {}
+): FieldPredicate {
+  const subject = options.subject ?? "Predicate"
+  const createError = options.createError ?? defaultError
+  if (!field.trim()) {
+    throw createError(`${subject} predicate field must not be empty.`)
+  }
+  assertSerializablePredicateValue(value, subject, createError)
+
+  return { kind: "field", field, op: "eq", value }
 }
 
 export type PropertyPredicateBuilderOptions<TResult> = {

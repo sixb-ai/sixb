@@ -6,11 +6,13 @@ import { pathToFileURL } from "node:url"
 import {
   col,
   createSixb,
+  defineAction,
   defineConnector,
   defineDataset,
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineRule,
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
@@ -206,6 +208,40 @@ export const syncOrders = defineSync("sync-orders")
 
     expect(sixb.getTriggerDefinitions()).toEqual([trigger])
     expect(sixb.getTriggerById("transaction.high-value")).toBe(trigger)
+  })
+
+  test("validates rule and action trigger sources against registered definitions", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Invoice = defineObjectType({
+      id: "Invoice",
+      name: "Invoice",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "double"),
+      ],
+    })
+    const invoiceAtRisk = defineRule("invoice.at-risk")
+      .on(Invoice)
+      .where((invoice) => invoice.p.amount.gt(500))
+    const approveInvoice = defineAction("approve-invoice")
+      .on(Invoice)
+      .params({})
+      .writeback(async () => {})
+    const triggers = [
+      defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
+      defineTrigger("invoice.approved").on(events.action(approveInvoice).completed()),
+    ]
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Invoice],
+      actions: [approveInvoice],
+      rules: [invoiceAtRisk],
+      triggers,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getTriggerDefinitions()).toEqual(triggers)
   })
 
   test("discovers workflows from workflows directory", async () => {

@@ -138,6 +138,12 @@ function validatePredicateAgainstSubject(
     return
   }
 
+  if (predicate.kind === "field") {
+    throw new RuleValidationError(
+      `Rule "${rule.id}": field predicates are not supported in rule conditions.`
+    )
+  }
+
   const linkIds = new Set(objectType.links.map((link) => link.id))
   if (!linkIds.has(predicate.linkId)) {
     throw new RuleValidationError(
