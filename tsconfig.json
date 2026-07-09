@@ -44,6 +44,7 @@
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],
       "@sixb/ducklake": ["./storage/ducklake/src/index.ts"],
       "@sixb/lake-local": ["./storage/lake-local/src/index.ts"],
+      "@sixb/logger-pino": ["./loggers/pino/src/index.ts"],
       "@sixb/orchestrator": ["./packages/orchestrator/src/index.ts"],
       "@sixb/pg": ["./storage/pg/src/index.ts"],
       "@sixb/pipeline-worker": ["./packages/pipeline-worker/src/index.ts"],

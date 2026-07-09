@@ -47,6 +47,9 @@
       "path": "connectors/teamleader/tsconfig.build.json"
     },
     {
+      "path": "loggers/pino/tsconfig.build.json"
+    },
+    {
       "path": "packages/action-worker/tsconfig.build.json"
     },
     {

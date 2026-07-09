@@ -1139,6 +1139,9 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   /** Close the runtime broker provider if it owns external resources. */
   closeBroker(): Promise<void>
 
+  /** Close the process logger provider, flushing buffered output. */
+  closeLogger(): Promise<void>
+
   /**
    * Type-safe ObjectSet for a registered object type.
    *

@@ -22,6 +22,7 @@
     "storage/*/tests/**/*.ts",
     "broker/*/tests/**/*.ts",
     "queues/*/tests/**/*.ts",
+    "loggers/*/tests/**/*.ts",
     "auth/*/tests/**/*.ts"
   ]
 }

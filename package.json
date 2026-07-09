@@ -10,13 +10,14 @@
     "queues/*",
     "sandboxes/*",
     "storage/*",
+    "loggers/*",
     "examples/*"
   ],
   "scripts": {
     "build": "bun run build:types && bun run build:js",
     "build:types": "tsc -b tsconfig.build.json",
     "build:js": "bun --filter '@sixb/*' build",
-    "build:clean": "rm -rf packages/*/dist packages/*/.tsbuild auth/*/dist auth/*/.tsbuild connectors/*/dist connectors/*/.tsbuild broker/*/dist broker/*/.tsbuild queues/*/dist queues/*/.tsbuild storage/*/dist storage/*/.tsbuild examples/*/.sixb",
+    "build:clean": "rm -rf packages/*/dist packages/*/.tsbuild auth/*/dist auth/*/.tsbuild connectors/*/dist connectors/*/.tsbuild broker/*/dist broker/*/.tsbuild queues/*/dist queues/*/.tsbuild storage/*/dist storage/*/.tsbuild loggers/*/dist loggers/*/.tsbuild examples/*/.sixb",
     "dev": "bun sixb dev",
     "test": "bun test",
     "test:e2e": "bun run --workspaces --if-present test:e2e",
