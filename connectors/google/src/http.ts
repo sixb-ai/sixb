@@ -7,9 +7,12 @@ import type { QueryParams } from "./types/common"
  * name here, a base URL in `google.ts`, its typed resources, and one wiring
  * line in `client.ts` — the auth and HTTP core below never change.
  */
-export type GoogleSurface = "drive"
+export type GoogleSurface = "drive" | "calendar"
 
 export type GoogleHttpClients = Record<GoogleSurface, RestClient>
+
+/** Every HTTP verb the Google REST surfaces use. */
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 export interface GoogleRequestOptions {
   readonly query?: QueryParams
@@ -20,7 +23,7 @@ export interface GoogleHttp {
   /** JSON request against a surface; throws `GoogleApiError` on non-2xx. */
   json<T>(
     surface: GoogleSurface,
-    method: "GET" | "POST",
+    method: HttpMethod,
     path: string,
     options?: GoogleRequestOptions
   ): Promise<T>
@@ -36,15 +39,20 @@ export function createGoogleHttp(clients: GoogleHttpClients): GoogleHttp {
   return {
     async json<T>(
       surface: GoogleSurface,
-      method: "GET" | "POST",
+      method: HttpMethod,
       path: string,
       options?: GoogleRequestOptions
     ): Promise<T> {
+      const client = clients[surface]
       const url = withQuery(path, options?.query)
+      // `post` serializes a JSON body and sets content-type under any verb;
+      // `request` covers the bodiless verbs (GET/DELETE) without one.
       const response =
         method === "GET"
-          ? await clients[surface].get(url)
-          : await clients[surface].post(url, options?.body)
+          ? await client.get(url)
+          : method === "DELETE"
+            ? await client.request(url, { method: "DELETE" })
+            : await client.post(url, options?.body, { method })
       return readJson<T>(response)
     },
 

@@ -8,4 +8,5 @@ export interface GoogleConnectorOptions {
   readonly retry?: RestRetryPolicy
 }
 
+export type * from "./calendar"
 export type * from "./drive"

@@ -12,6 +12,7 @@ import type { GoogleConnectorOptions } from "./types"
  */
 const BASE_URLS = {
   drive: "https://www.googleapis.com/drive/v3/",
+  calendar: "https://www.googleapis.com/calendar/v3/",
 } as const satisfies Record<GoogleSurface, string>
 
 export type GoogleConnector = ConnectorAdapter<"google", GoogleClient>
