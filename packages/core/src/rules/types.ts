@@ -72,11 +72,11 @@ export type RuleValue = string | number | boolean | null
  */
 export type RuleEventDependency =
   | {
-      readonly type: "object.upserted"
+      readonly type: "object.created" | "object.updated" | "object.deleted"
       readonly objectTypeId: string
     }
   | {
-      readonly type: "link.upserted" | "link.removed"
+      readonly type: "link.created" | "link.updated" | "link.deleted"
       readonly sourceTypeId: string
       readonly linkId: string
     }

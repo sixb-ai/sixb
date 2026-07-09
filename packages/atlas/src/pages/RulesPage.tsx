@@ -147,23 +147,35 @@ function predicateSearchText(predicate: unknown): string {
 
 function dependencyLabel(dependency: RuleSummary["dependencies"][number]): string {
   switch (dependency.type) {
-    case "object.upserted":
-      return `Object ${dependency.objectTypeId}`
-    case "link.upserted":
-      return `Link ${dependency.sourceTypeId}.${dependency.linkId} upserted`
-    case "link.removed":
-      return `Link ${dependency.sourceTypeId}.${dependency.linkId} removed`
+    case "object.created":
+      return `Object ${dependency.objectTypeId} created`
+    case "object.updated":
+      return `Object ${dependency.objectTypeId} updated`
+    case "object.deleted":
+      return `Object ${dependency.objectTypeId} deleted`
+    case "link.created":
+      return `Link ${dependency.sourceTypeId}.${dependency.linkId} created`
+    case "link.updated":
+      return `Link ${dependency.sourceTypeId}.${dependency.linkId} updated`
+    case "link.deleted":
+      return `Link ${dependency.sourceTypeId}.${dependency.linkId} deleted`
   }
 }
 
 function dependencyEventLabel(dependency: RuleSummary["dependencies"][number]): string {
   switch (dependency.type) {
-    case "object.upserted":
-      return `${dependency.objectTypeId} upserted`
-    case "link.upserted":
-      return `${dependency.sourceTypeId}.${dependency.linkId} added`
-    case "link.removed":
-      return `${dependency.sourceTypeId}.${dependency.linkId} removed`
+    case "object.created":
+      return `${dependency.objectTypeId} created`
+    case "object.updated":
+      return `${dependency.objectTypeId} updated`
+    case "object.deleted":
+      return `${dependency.objectTypeId} deleted`
+    case "link.created":
+      return `${dependency.sourceTypeId}.${dependency.linkId} created`
+    case "link.updated":
+      return `${dependency.sourceTypeId}.${dependency.linkId} updated`
+    case "link.deleted":
+      return `${dependency.sourceTypeId}.${dependency.linkId} deleted`
   }
 }
 

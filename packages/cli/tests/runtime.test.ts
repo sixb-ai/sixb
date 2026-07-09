@@ -697,11 +697,17 @@ describe("startSixbRuntime", () => {
     await sixb.events.append({
       events: [
         {
-          type: "object.upserted",
+          type: "object.created",
           payload: {
             objectTypeId: "Transaction",
             primaryId: "tx-1",
             properties: { status: "posted" },
+            propertyChanges: {
+              status: {
+                operation: "created",
+                after: "posted",
+              },
+            },
           },
         },
       ],
@@ -1052,13 +1058,13 @@ class LifecycleBroker extends InMemoryBroker {
     params: Parameters<InMemoryBroker["subscribe"]>[0],
     handler: Parameters<InMemoryBroker["subscribe"]>[1]
   ): Promise<() => void> {
-    if (params.names?.includes("object.upserted")) {
+    if (params.names?.includes("object.created")) {
       this.calls.push("rules:start")
     }
 
     const unsubscribe = await super.subscribe(params, handler)
     return () => {
-      if (params.names?.includes("object.upserted")) {
+      if (params.names?.includes("object.created")) {
         this.calls.push("rules:stop")
       }
       unsubscribe()

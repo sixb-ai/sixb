@@ -66,16 +66,11 @@ export const RulePredicateSchema = NestedRulePredicateSchema as z.ZodType<RulePr
 
 const RuleEventDependencySchema = z.union([
   z.object({
-    type: z.literal("object.upserted"),
+    type: z.enum(["object.created", "object.updated", "object.deleted"]),
     objectTypeId: z.string(),
   }),
   z.object({
-    type: z.literal("link.upserted"),
-    sourceTypeId: z.string(),
-    linkId: z.string(),
-  }),
-  z.object({
-    type: z.literal("link.removed"),
+    type: z.enum(["link.created", "link.updated", "link.deleted"]),
     sourceTypeId: z.string(),
     linkId: z.string(),
   }),
