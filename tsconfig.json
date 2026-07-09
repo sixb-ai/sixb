@@ -22,6 +22,7 @@
       "@sixb/client/browser": ["./packages/client/src/browser.ts"],
       "@sixb/client/events": ["./packages/client/src/events.ts"],
       "@sixb/client/hooks": ["./packages/client/src/hooks.ts"],
+      "@sixb/client/logs": ["./packages/client/src/logs.ts"],
       "@sixb/client/models": ["./packages/client/src/models.ts"],
       "@sixb/client/query": ["./packages/client/src/query.ts"],
       "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],

@@ -213,6 +213,7 @@ describe("/ws/logs", () => {
         const secondConnected = nextWsMessage(second)
         try {
           await Promise.all([firstConnected, secondConnected])
+          const firstFrames = nextWsMessages(first, 2)
           first.send(
             JSON.stringify({
               type: "subscribe",
@@ -220,14 +221,18 @@ describe("/ws/logs", () => {
               afterCursor: cursor.cursor,
             })
           )
-          second.send(JSON.stringify({ type: "subscribe" }))
-
-          expect(await nextWsMessage(first)).toMatchObject({ type: "subscribed" })
-          expect(await nextWsMessage(second)).toMatchObject({ type: "subscribed" })
-          expect(await nextWsMessage(first)).toMatchObject({
+          const [subscribed, replay] = await firstFrames
+          expect(subscribed).toMatchObject({ type: "subscribed" })
+          expect(replay).toMatchObject({
             type: "logs",
             logs: [{ message: "after cursor" }],
           })
+
+          // Install listeners before sending: Bun can deliver local websocket
+          // frames before a listener added after send() observes them.
+          const secondSubscribed = nextWsMessage(second)
+          second.send(JSON.stringify({ type: "subscribe" }))
+          expect(await secondSubscribed).toMatchObject({ type: "subscribed" })
           expect(broker.subscriptionCount).toBe(1)
         } finally {
           first.close()
@@ -480,6 +485,43 @@ async function nextWsMessage(ws: WebSocket, timeoutMs = 3_000): Promise<Record<s
       try {
         resolvePromise(JSON.parse(String(event.data)) as Record<string, unknown>)
       } catch (error) {
+        reject(error)
+      }
+    }
+    const onError = () => {
+      cleanup()
+      reject(new Error("WebSocket error"))
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      ws.removeEventListener("message", onMessage)
+      ws.removeEventListener("error", onError)
+    }
+    ws.addEventListener("message", onMessage)
+    ws.addEventListener("error", onError)
+  })
+}
+
+async function nextWsMessages(
+  ws: WebSocket,
+  count: number,
+  timeoutMs = 3_000
+): Promise<Record<string, unknown>[]> {
+  return await new Promise((resolvePromise, reject) => {
+    const messages: Record<string, unknown>[] = []
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error(`Timed out waiting for ${count} websocket messages`))
+    }, timeoutMs)
+    const onMessage = (event: MessageEvent) => {
+      try {
+        messages.push(JSON.parse(String(event.data)) as Record<string, unknown>)
+        if (messages.length === count) {
+          cleanup()
+          resolvePromise(messages)
+        }
+      } catch (error) {
+        cleanup()
         reject(error)
       }
     }
