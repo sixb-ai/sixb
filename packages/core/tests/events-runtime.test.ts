@@ -126,6 +126,19 @@ describe("EventsRuntime", () => {
     expect(received).toEqual(["telemetry.appended"])
   })
 
+  test("can subscribe from the earliest retained event", async () => {
+    const events = new EventsRuntime({ projectId: "project-a", broker: new InMemoryBroker() })
+    await events.append({ events: [objectUpserted("room-1")] })
+
+    const received: string[] = []
+    const unsubscribe = await events.subscribe({ from: "earliest" }, (batch) => {
+      received.push(...batch.map(primaryIds).filter((id): id is string => id !== undefined))
+    })
+
+    expect(received).toEqual(["room-1"])
+    unsubscribe()
+  })
+
   test("returns empty append batches", async () => {
     const broker = new InMemoryBroker()
     const events = new EventsRuntime({ projectId: "project-a", broker })

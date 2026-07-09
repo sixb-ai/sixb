@@ -1,7 +1,14 @@
-import type { LinkPredicate, Predicate, PredicateValue, PropertyPredicate } from "./types"
+import type {
+  FieldPredicate,
+  LinkPredicate,
+  Predicate,
+  PredicateValue,
+  PropertyPredicate,
+} from "./types"
 
 export interface PredicateEvaluationSubject {
   readonly properties?: Readonly<Record<string, unknown>>
+  readonly fields?: Readonly<Record<string, unknown>>
   readonly links?: Readonly<Record<string, boolean>>
 }
 
@@ -18,9 +25,18 @@ export function evaluatePredicate(
       return !evaluatePredicate(predicate.predicate, subject)
     case "property":
       return evaluatePropertyPredicate(predicate, subject.properties ?? {})
+    case "field":
+      return evaluateFieldPredicate(predicate, subject.fields ?? {})
     case "link":
       return evaluateLinkPredicate(predicate, subject.links ?? {})
   }
+}
+
+function evaluateFieldPredicate(
+  predicate: FieldPredicate,
+  fields: Readonly<Record<string, unknown>>
+): boolean {
+  return predicateValueEquals(fields[predicate.field], predicate.value)
 }
 
 function evaluatePropertyPredicate(

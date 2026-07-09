@@ -14,13 +14,8 @@ import type {
   OrchestratorWorkflowTriggerBinding,
 } from "./types"
 
-/**
- * Derives the minimal set of event types the orchestrator needs to subscribe to,
- * based on the structured route metadata compiled at startup.
- */
-function deriveSubscribedTypes(routes: OrchestratorRoutes): DomainEvent["type"][] {
-  return [...new Set([...routes.values()].map((route) => route.eventType))]
-}
+const TRIGGER_RETRY_INITIAL_DELAY_MS = 250
+const TRIGGER_RETRY_MAX_DELAY_MS = 10_000
 
 export class OrchestratorWorker extends Worker {
   private readonly options: OrchestratorRuntimeOptions
@@ -35,34 +30,124 @@ export class OrchestratorWorker extends Worker {
 
   protected async run(signal: AbortSignal): Promise<void> {
     const options = this.options
-    let pending: Promise<void> = Promise.resolve()
+    const { jobTypes, triggerTypes } = deriveSubscribedTypes(options.routes)
+    const consumers: Promise<void>[] = []
 
-    const subscribedTypes = deriveSubscribedTypes(options.routes)
+    if (jobTypes.length > 0) {
+      consumers.push(consumeLiveJobs(options, jobTypes, signal))
+    }
+    for (const eventType of triggerTypes) {
+      consumers.push(consumeRetainedTriggers(options, eventType, signal))
+    }
 
-    const unsubscribe = await options.events.subscribe({ types: subscribedTypes }, (events) => {
-      if (signal.aborted) return
-      pending = pending
-        .then(() => dispatch(options, events))
-        .catch((error) => {
-          // Never crash the subscribe loop — log and keep consuming.
-          console.error("[SixbOrchestrator] Dispatch failed:", error)
-        })
-    })
-
-    await new Promise<void>((resolve) => {
-      if (signal.aborted) {
-        resolve()
-        return
-      }
-      signal.addEventListener("abort", () => resolve(), { once: true })
-    })
-
-    unsubscribe()
-    await pending
+    await Promise.all(consumers)
   }
 }
 
-async function dispatch(
+function deriveSubscribedTypes(routes: OrchestratorRoutes): {
+  readonly jobTypes: readonly DomainEvent["type"][]
+  readonly triggerTypes: readonly DomainEvent["type"][]
+} {
+  const jobTypes = new Set<DomainEvent["type"]>()
+  const triggerTypes = new Set<DomainEvent["type"]>()
+
+  for (const route of routes.values()) {
+    if (route.jobs.length > 0) {
+      jobTypes.add(route.eventType)
+    }
+    if ((route.workflowTriggers?.length ?? 0) > 0) {
+      triggerTypes.add(route.eventType)
+    }
+  }
+
+  return { jobTypes: [...jobTypes], triggerTypes: [...triggerTypes] }
+}
+
+async function consumeLiveJobs(
+  options: OrchestratorRuntimeOptions,
+  types: readonly DomainEvent["type"][],
+  signal: AbortSignal
+): Promise<void> {
+  let pending: Promise<void> = Promise.resolve()
+  const unsubscribe = await options.events.subscribe({ types }, (events) => {
+    if (signal.aborted) return
+    pending = pending
+      .then(() => dispatchJobs(options, events))
+      .catch((error) => {
+        console.error("[SixbOrchestrator] Dispatch failed:", error)
+      })
+  })
+
+  await waitForAbort(signal)
+  unsubscribe()
+  await pending
+}
+
+async function consumeRetainedTriggers(
+  options: OrchestratorRuntimeOptions,
+  eventType: DomainEvent["type"],
+  signal: AbortSignal
+): Promise<void> {
+  let retryAttempt = 0
+  while (!signal.aborted) {
+    const failure = deferred<unknown>()
+    const aborted = deferred<void>()
+    const onAbort = () => aborted.resolve()
+    signal.addEventListener("abort", onAbort, { once: true })
+    if (signal.aborted) aborted.resolve()
+    let failed = false
+    let pending: Promise<void> = Promise.resolve()
+    let unsubscribe: (() => void) | undefined
+    try {
+      unsubscribe = await options.events.subscribe(
+        { types: [eventType], from: "earliest" },
+        (events) => {
+          if (signal.aborted || failed) return
+          pending = pending.then(async () => {
+            await dispatchTriggers(options, events)
+            retryAttempt = 0
+          })
+          pending.catch((error) => {
+            if (failed) return
+            failed = true
+            failure.resolve(error)
+          })
+        }
+      )
+    } catch (error) {
+      signal.removeEventListener("abort", onAbort)
+      if (signal.aborted) return
+      console.error(
+        `[SixbOrchestrator] Trigger subscription failed for '${eventType}'; retrying:`,
+        error
+      )
+      await sleep(triggerRetryDelay(retryAttempt), signal)
+      retryAttempt += 1
+      continue
+    }
+
+    const outcome = await Promise.race([
+      aborted.promise.then(() => ({ type: "aborted" as const })),
+      failure.promise.then((error) => ({ type: "failed" as const, error })),
+    ])
+
+    signal.removeEventListener("abort", onAbort)
+    unsubscribe()
+    await pending.catch(() => {})
+    if (outcome.type === "aborted" || signal.aborted) {
+      return
+    }
+
+    console.error(
+      `[SixbOrchestrator] Trigger dispatch failed for '${eventType}'; replaying retained events:`,
+      outcome.error
+    )
+    await sleep(triggerRetryDelay(retryAttempt), signal)
+    retryAttempt += 1
+  }
+}
+
+async function dispatchJobs(
   options: OrchestratorRuntimeOptions,
   events: readonly StoredDomainEvent[]
 ): Promise<void> {
@@ -81,15 +166,28 @@ async function dispatch(
           )
         }
       }
-      for (const binding of route.workflowTriggers ?? []) {
-        try {
-          await requestTriggeredWorkflow(options, event, binding)
-        } catch (error) {
-          console.error(
-            `[SixbOrchestrator] Trigger workflow request failed (workflowId=${binding.workflowId}, triggerId=${binding.triggerId}, eventId=${event.id}):`,
-            error
-          )
-        }
+    }
+  }
+}
+
+async function dispatchTriggers(
+  options: OrchestratorRuntimeOptions,
+  events: readonly StoredDomainEvent[]
+): Promise<void> {
+  for (const event of events) {
+    for (const key of routeKeysForEvent(event)) {
+      const bindings = options.routes.get(key)?.workflowTriggers ?? []
+      const results = await Promise.allSettled(
+        bindings.map((binding) => requestTriggeredWorkflow(options, event, binding))
+      )
+      const errors = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason)
+      if (errors.length === 1) {
+        throw errors[0]
+      }
+      if (errors.length > 1) {
+        throw new AggregateError(errors, `Trigger dispatch failed for event '${event.id}'.`)
       }
     }
   }
@@ -272,4 +370,48 @@ function workflowTriggerRunId(workflowId: string, triggerId: string, eventId: st
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true })
+  })
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve()
+  }
+
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", onAbort)
+      resolve()
+    }
+    signal.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
+function triggerRetryDelay(attempt: number): number {
+  return Math.min(TRIGGER_RETRY_INITIAL_DELAY_MS * 2 ** attempt, TRIGGER_RETRY_MAX_DELAY_MS)
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((next) => {
+    resolve = next
+  })
+  return { promise, resolve }
 }

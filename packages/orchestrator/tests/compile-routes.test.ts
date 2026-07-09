@@ -3,6 +3,7 @@ import {
   col,
   type DomainEvent,
   datasetUpdated,
+  defineAction,
   defineConnector,
   defineDataset,
   defineLinkProjection,
@@ -10,6 +11,7 @@ import {
   definePipeline,
   definePipelineStep,
   defineProjection,
+  defineRule,
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
@@ -55,6 +57,23 @@ const Room = defineObjectType({
 const highTemperature = defineTrigger("room.high-temperature")
   .on(events(Room).updated())
   .where((event) => event.object.p.temperature.gt(30))
+
+const highTemperatureRule = defineRule("room.high-temperature-rule")
+  .on(Room)
+  .where((room) => room.p.temperature.gt(30))
+
+const acknowledgeRoom = defineAction("acknowledge-room")
+  .on(Room)
+  .params({})
+  .writeback(async () => {})
+
+const highTemperatureRuleTriggered = defineTrigger("room.rule-triggered").on(
+  events.rule(highTemperatureRule).triggered()
+)
+
+const roomAcknowledged = defineTrigger("room.acknowledged").on(
+  events.action(acknowledgeRoom).completed()
+)
 
 function makeDataset(id: string) {
   return defineDataset(id, {
@@ -298,7 +317,7 @@ describe("compileRoutes", () => {
     })
 
     expect(routes.size).toBe(1)
-    expect(routes.get("trigger:object.updated")).toEqual({
+    expect(routes.get("trigger:object.updated:room")).toEqual({
       eventType: "object.updated",
       jobs: [],
       workflowTriggers: [
@@ -308,6 +327,47 @@ describe("compileRoutes", () => {
         },
       ],
     })
+  })
+
+  test("rule and action triggers produce source-scoped routes", () => {
+    const ruleWorkflow = defineWorkflow("notify-rule-triggered")
+      .input({})
+      .when(highTemperatureRuleTriggered)
+      .then(workflowStep)
+    const actionWorkflow = defineWorkflow("notify-room-acknowledged")
+      .input({})
+      .when(roomAcknowledged)
+      .then(workflowStep)
+
+    const ruleRoutes = compileRoutes({
+      syncs: [],
+      pipelines: [],
+      workflows: [ruleWorkflow],
+      triggers: [highTemperatureRuleTriggered],
+    })
+    const actionRoutes = compileRoutes({
+      syncs: [],
+      pipelines: [],
+      workflows: [actionWorkflow],
+      triggers: [roomAcknowledged],
+    })
+
+    expect(
+      ruleRoutes.get("trigger:rule.triggered:room.high-temperature-rule")?.workflowTriggers
+    ).toEqual([
+      {
+        workflowId: "notify-rule-triggered",
+        triggerId: "room.rule-triggered",
+      },
+    ])
+    expect(actionRoutes.get("trigger:action.completed:acknowledge-room")?.workflowTriggers).toEqual(
+      [
+        {
+          workflowId: "notify-room-acknowledged",
+          triggerId: "room.acknowledged",
+        },
+      ]
+    )
   })
 
   test("unknown workflow trigger reports diagnostics", () => {

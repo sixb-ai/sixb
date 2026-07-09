@@ -1,6 +1,7 @@
 import { buildEventSelectorPredicate } from "../events/selectors"
 import type { DomainEvent, PropertyChange, PropertyChangeMap } from "../events/types"
 import { evaluatePredicate } from "../predicates"
+import type { ActionRunFailure } from "../storage"
 import type { TriggerConditionScope, TriggerDefinition } from "./types"
 
 export type RuntimeTriggerEventContext =
@@ -19,6 +20,21 @@ export type RuntimeTriggerEventContext =
         readonly p: Readonly<Record<string, unknown>>
       }
     }
+  | {
+      readonly ruleId: string
+      readonly subject: { readonly objectTypeId: string; readonly primaryId: string }
+    }
+  | RuntimeActionTriggerEventContext
+
+type RuntimeActionTriggerEventContext = {
+  readonly actionId: string
+  readonly runId: string
+  readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
+} & (
+  | { readonly params: Readonly<Record<string, unknown>> }
+  | { readonly error: ActionRunFailure }
+  | Record<never, never>
+)
 
 export interface TriggerEvaluationResult {
   readonly trigger: TriggerDefinition
@@ -49,13 +65,14 @@ export function evaluateTrigger(
   }
 
   const afterProperties = propertiesForScope(event, trigger.condition.scope)
-  if (!evaluatePredicate(trigger.condition.predicate, { properties: afterProperties })) {
+  const fields = fieldsForEvent(event)
+  if (!evaluatePredicate(trigger.condition.predicate, { properties: afterProperties, fields })) {
     return null
   }
 
   if (isUpdateEvent(event)) {
     const beforeProperties = previousProperties(afterProperties, event.payload.propertyChanges)
-    if (evaluatePredicate(trigger.condition.predicate, { properties: beforeProperties })) {
+    if (evaluatePredicate(trigger.condition.predicate, { properties: beforeProperties, fields })) {
       return null
     }
   }
@@ -92,8 +109,69 @@ export function buildTriggerEventContext(event: DomainEvent): RuntimeTriggerEven
           p: currentProperties(event),
         },
       }
+    case "rule.triggered":
+    case "rule.resolved":
+      return {
+        ruleId: event.payload.ruleId,
+        subject: {
+          objectTypeId: event.payload.subject.objectTypeId,
+          primaryId: event.payload.subject.primaryId,
+        },
+      }
+    case "action.requested":
+      return {
+        actionId: event.payload.actionId,
+        runId: event.payload.runId,
+        ...actionSubjectContext(event.payload.subject),
+        params: { ...event.payload.params },
+      }
+    case "action.completed":
+      return {
+        actionId: event.payload.actionId,
+        runId: event.payload.runId,
+        ...actionSubjectContext(event.payload.subject),
+      }
+    case "action.failed":
+      return {
+        actionId: event.payload.actionId,
+        runId: event.payload.runId,
+        ...actionSubjectContext(event.payload.subject),
+        error: event.payload.error,
+      }
     default:
       return null
+  }
+}
+
+function actionSubjectContext(subject: {
+  readonly kind: "none" | "object"
+  readonly objectTypeId?: string
+  readonly primaryId?: string
+}): { readonly subject?: { readonly objectTypeId: string; readonly primaryId: string } } {
+  if (
+    subject.kind !== "object" ||
+    subject.objectTypeId === undefined ||
+    subject.primaryId === undefined
+  ) {
+    return {}
+  }
+
+  return {
+    subject: {
+      objectTypeId: subject.objectTypeId,
+      primaryId: subject.primaryId,
+    },
+  }
+}
+
+function fieldsForEvent(event: DomainEvent): Readonly<Record<string, unknown>> {
+  if (event.topic !== "links") {
+    return {}
+  }
+
+  return {
+    "target.objectTypeId": event.payload.targetTypeId,
+    "target.primaryId": event.payload.targetId,
   }
 }
 

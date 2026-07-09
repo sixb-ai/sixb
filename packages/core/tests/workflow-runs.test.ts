@@ -101,6 +101,34 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(alreadySourced.source).toEqual({ type: "manual" })
   })
 
+  test("allows exactly one concurrent claim of a queued workflow run", async () => {
+    const storage = new InMemoryWorkflowRunStorage()
+    await storage.queue({
+      id: "wf-run-claim",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: {},
+    })
+
+    const results = await Promise.allSettled([
+      storage.start({
+        id: "wf-run-claim",
+        projectId: "my-app",
+        workflowId: "reconcile-transaction",
+        input: {},
+      }),
+      storage.start({
+        id: "wf-run-claim",
+        projectId: "my-app",
+        workflowId: "reconcile-transaction",
+        input: {},
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+  })
+
   test("queues workflow runs before transitioning them to running", async () => {
     const storage = new InMemoryWorkflowRunStorage()
     const queuedAt = new Date("2026-05-08T09:59:00.000Z")

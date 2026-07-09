@@ -31,7 +31,7 @@ type PipelineRunFinishedRouteKey =
 
 type DatasetVersionCommittedRouteKey =
   `${DatasetVersionCommittedEvent["type"]}:${DatasetVersionCommittedEvent["payload"]["datasetId"]}`
-type TriggerEventRouteKey = `trigger:${DomainEvent["type"]}`
+type TriggerEventRouteKey = `trigger:${DomainEvent["type"]}:${string}`
 
 export type OrchestratorRouteKey =
   | ScheduleTriggeredRouteKey

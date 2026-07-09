@@ -126,6 +126,24 @@ function buildRoutes(entries: [OrchestratorRouteKey, OrchestratorJob[]][]): Orch
   )
 }
 
+function triggerWorkflowRoutes(): OrchestratorRoutes {
+  return new Map([
+    [
+      "trigger:object.updated:Invoice",
+      {
+        eventType: "object.updated",
+        jobs: [],
+        workflowTriggers: [
+          {
+            workflowId: highValueInvoiceWorkflow.id,
+            triggerId: highValueInvoice.id,
+          },
+        ],
+      },
+    ],
+  ])
+}
+
 async function waitFor(fn: () => Promise<boolean> | boolean, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
@@ -229,21 +247,7 @@ describe("OrchestratorWorker", () => {
 
   test("trigger workflow route enqueues a workflow job", async () => {
     const sixb = createSixbForTriggerWorkflow()
-    const routes: OrchestratorRoutes = new Map([
-      [
-        "trigger:object.updated",
-        {
-          eventType: "object.updated",
-          jobs: [],
-          workflowTriggers: [
-            {
-              workflowId: highValueInvoiceWorkflow.id,
-              triggerId: highValueInvoice.id,
-            },
-          ],
-        },
-      ],
-    ])
+    const routes = triggerWorkflowRoutes()
 
     const worker = new OrchestratorWorker({
       projectId: PROJECT_ID,
@@ -283,6 +287,79 @@ describe("OrchestratorWorker", () => {
       })
       return true
     })
+  })
+
+  test("replays retained trigger events when the orchestrator starts", async () => {
+    const sixb = createSixbForTriggerWorkflow()
+    const [event] = await sixb.events.append({
+      events: [makeInvoiceUpdatedEvent(400, 700)],
+    })
+
+    const worker = new OrchestratorWorker({
+      projectId: PROJECT_ID,
+      events: sixb.events,
+      queues: sixb.queues,
+      routes: triggerWorkflowRoutes(),
+      workflows: [highValueInvoiceWorkflow],
+      triggers: [highValueInvoice],
+    })
+    workers.push(worker)
+    await worker.start()
+
+    await waitFor(async () => {
+      const claimed = await sixb.queues.workflows.claim({
+        projectId: PROJECT_ID,
+        workerId: "observer",
+      })
+      if (claimed.length === 0) return false
+      expect(claimed[0]!.job.payload.runId).toBe(
+        `workflow:${highValueInvoiceWorkflow.id}:trigger:${highValueInvoice.id}:event:${event!.id}`
+      )
+      return true
+    })
+  })
+
+  test("replays a retained trigger after a transient workflow enqueue failure", async () => {
+    const sixb = createSixbForTriggerWorkflow()
+    await sixb.events.append({
+      events: [makeInvoiceUpdatedEvent(400, 700)],
+    })
+
+    let enqueueAttempts = 0
+    const enqueue = sixb.queues.workflows.enqueue.bind(sixb.queues.workflows)
+    sixb.queues.workflows.enqueue = async (params) => {
+      enqueueAttempts += 1
+      if (enqueueAttempts === 1) {
+        throw new Error("Transient workflow enqueue failure")
+      }
+      return enqueue(params)
+    }
+
+    const originalError = console.error
+    console.error = () => {}
+    try {
+      const worker = new OrchestratorWorker({
+        projectId: PROJECT_ID,
+        events: sixb.events,
+        queues: sixb.queues,
+        routes: triggerWorkflowRoutes(),
+        workflows: [highValueInvoiceWorkflow],
+        triggers: [highValueInvoice],
+      })
+      workers.push(worker)
+      await worker.start()
+
+      await waitFor(async () => {
+        const claimed = await sixb.queues.workflows.claim({
+          projectId: PROJECT_ID,
+          workerId: "observer",
+        })
+        return claimed.length === 1
+      })
+      expect(enqueueAttempts).toBe(2)
+    } finally {
+      console.error = originalError
+    }
   })
 
   test("fan-out: same event triggers jobs on both lanes", async () => {

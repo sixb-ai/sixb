@@ -5,6 +5,8 @@ import {
   type RunTrigger,
   triggerSubscribedEventTypes,
 } from "@sixb/core"
+import { OrchestratorError } from "./errors"
+import { triggerRouteKeyForSelector } from "./route-key"
 import type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
@@ -172,10 +174,16 @@ function addTriggerWorkflowRouteBinding(
   binding: OrchestratorWorkflowTriggerBinding
 ): void {
   for (const eventType of triggerSubscribedEventTypes(trigger)) {
+    const key = triggerRouteKeyForSelector(eventType, trigger.source)
+    if (!key) {
+      throw new OrchestratorError(
+        `Trigger '${trigger.id}' source cannot be compiled into a scoped route.`
+      )
+    }
     addCompiledRouteWorkflowTrigger(
       routes,
       {
-        key: `trigger:${eventType}`,
+        key,
         eventType,
       },
       binding
