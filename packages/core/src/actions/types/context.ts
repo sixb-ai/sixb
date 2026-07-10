@@ -1,7 +1,7 @@
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
 import type { EditCommitDiff, RecordEditsContext } from "../../edits"
 import type { ObjectType, ValueType } from "../../ontology"
-import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
   ListResult,
   ObjectQueryBuilder,
@@ -57,6 +57,13 @@ export type ActionBinding<TObjectType extends ObjectType = ObjectType> =
   | { readonly kind: "global" }
   | { readonly kind: "object"; readonly objectType: TObjectType }
 
+type ActionLinkTokenForObjectType<TObjectType extends ObjectTypeWithPropertyTokens> = LinkToken<
+  TObjectType["id"],
+  TObjectType["links"][number]["id"],
+  TObjectType["links"][number]["targetObjectTypeId"],
+  TObjectType["links"][number]
+>
+
 export interface ActionRunPhaseInfo {
   readonly id: string
   readonly startedAt: Date
@@ -68,7 +75,7 @@ export interface ActionReadObjectByIdHandle<
   TValueTypes extends readonly ValueType[],
 > {
   get(): Promise<TwinObject<TObjectType, TValueTypes> | null>
-  listLinks(link?: { readonly id: string }): Promise<
+  listLinks(link?: ActionLinkTokenForObjectType<TObjectType>): Promise<
     readonly {
       readonly linkId: string
       readonly targetTypeId: string
