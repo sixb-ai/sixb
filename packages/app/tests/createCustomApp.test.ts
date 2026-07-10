@@ -233,6 +233,16 @@ describe("createCustomApp.dev", () => {
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig")
   })
 
+  test("renders an access-denied view without starting the application", async () => {
+    const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
+    const main = await readFile(mainPath, "utf-8")
+
+    expect(main).toContain("!authSession.applicationAccess.allowed")
+    expect(main).toContain("function AccessDeniedView()")
+    expect(main).toContain("<AccessDeniedView />")
+    expect(main).toContain("await signOut({ throwOnError: true })")
+  })
+
   test("wraps routes in an error boundary that special-cases 404s", async () => {
     const { mainPath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
     const main = await readFile(mainPath, "utf-8")

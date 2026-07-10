@@ -7,6 +7,7 @@ import {
   type ActionDefinition,
   type AgentDefinition,
   agents,
+  applications,
   can,
   canPerformMembershipOperation,
   col,
@@ -375,6 +376,15 @@ describe("role definitions", () => {
     })
   })
 
+  test("can.access grants browser applications", () => {
+    expect(can.access([applications.atlas, applications.app])).toEqual({
+      kind: "grant",
+      capability: "access",
+      target: "application",
+      selection: { all: false, ids: ["atlas", "app"] },
+    })
+  })
+
   test("can.view dedupes ids within an explicit selection", () => {
     expect(can.view([Account, Account])).toEqual({
       kind: "grant",
@@ -498,6 +508,29 @@ describe("role definitions", () => {
     })
 
     expect(() => createRuntime({ roles: [role] })).toThrow("unknown group 'commercial'")
+  })
+
+  test("runtime registration rejects access grants on unknown applications", () => {
+    expect(() =>
+      createRuntime({
+        groups: [commercial],
+        roles: [
+          {
+            kind: "role",
+            id: "unknown.application",
+            grantedToGroupIds: [commercial.id],
+            grants: [
+              {
+                kind: "grant",
+                capability: "access",
+                target: "application",
+                selection: { all: false, ids: ["unknown"] },
+              },
+            ],
+          },
+        ],
+      })
+    ).toThrow("access on unknown application 'unknown'")
   })
 
   test("runtime registration rejects view grants on unknown object types", () => {

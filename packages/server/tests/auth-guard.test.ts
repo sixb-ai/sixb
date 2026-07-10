@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
+  applications,
+  can,
   createAccessTokenCredential,
   createSessionCredential,
   defineConnector,
+  defineGroup,
   defineObjectType,
+  defineRole,
   defineWebhook,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -13,10 +17,14 @@ import {
   InMemoryStorage,
   type OntologySource,
   prop,
+  type RoleDefinition,
   Sixb,
 } from "@sixb/core"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
+
+const securityAdmins = defineGroup("security-admins")
+const atlasUsers = defineGroup("atlas-users")
 
 const authStrategy = {
   id: "test",
@@ -54,7 +62,13 @@ async function getFreePort(): Promise<number> {
   })
 }
 
-function createRuntime(options: { readonly auth?: boolean; readonly connector?: boolean } = {}) {
+function createRuntime(
+  options: {
+    readonly auth?: boolean
+    readonly connector?: boolean
+    readonly roles?: readonly RoleDefinition[]
+  } = {}
+) {
   const storage = new InMemoryStorage()
   const connector = defineConnector("github", {
     type: "test",
@@ -81,6 +95,8 @@ function createRuntime(options: { readonly auth?: boolean; readonly connector?: 
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     connectors: options.connector ? [connector] : [],
+    groups: [securityAdmins, atlasUsers],
+    roles: options.roles,
     auth: options.auth ? authStrategy : undefined,
   })
 
@@ -179,6 +195,24 @@ describe("server auth guard", () => {
     }
   })
 
+  test("maps each auth audience to exactly one browser origin", () => {
+    const { sixb } = createRuntime({ auth: true })
+
+    expect(
+      () =>
+        new SixbServer({
+          sixb,
+          quiet: true,
+          browser: {
+            allowedOrigins: [
+              { origin: "http://atlas.localhost", audience: "atlas" },
+              { origin: "http://admin.localhost", audience: "atlas" },
+            ],
+          },
+        })
+    ).toThrow("Auth audience 'atlas' is mapped to multiple browser origins")
+  })
+
   test("protects API routes with generic JSON 401", async () => {
     const { sixb } = createRuntime({ auth: true })
     const app = createSixbApi(
@@ -255,6 +289,7 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({
       authenticated: true,
       csrfToken: expect.any(String),
+      applicationAccess: { audience: "atlas", allowed: true },
       user: {
         id: "usr_1",
         email: "ava@acme.com",
@@ -267,6 +302,66 @@ describe("server auth guard", () => {
       },
     })
     expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
+  })
+
+  test("application grants restrict Atlas at the session and API boundaries", async () => {
+    const atlasAccess = defineRole("atlas.access", {
+      grantedTo: [atlasUsers],
+      grants: [can.access(applications.atlas)],
+    })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
+    const atlasSession = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+
+    const deniedSession = await app.fetch(
+      new Request("http://api.localhost/api/auth/session", {
+        headers: {
+          origin: "http://atlas.localhost",
+          cookie: atlasSession.cookie,
+        },
+      })
+    )
+    const deniedApi = await app.fetch(
+      new Request("http://api.localhost/api/project", {
+        headers: {
+          origin: "http://atlas.localhost",
+          cookie: atlasSession.cookie,
+        },
+      })
+    )
+
+    expect(deniedSession.status).toBe(200)
+    expect(await deniedSession.json()).toMatchObject({
+      authenticated: true,
+      applicationAccess: { audience: "atlas", allowed: false },
+    })
+    expect(deniedApi.status).toBe(403)
+    expect(await deniedApi.json()).toEqual({ error: "Application access is not allowed" })
+  })
+
+  test("application grants allow Atlas for a matching group", async () => {
+    const atlasAccess = defineRole("atlas.access", {
+      grantedTo: [securityAdmins],
+      grants: [can.access(applications.atlas)],
+    })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasAccess] })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/project", {
+        headers: {
+          origin: "http://atlas.localhost",
+          cookie: seeded.cookie,
+        },
+      })
+    )
+
+    expect(response.status).toBe(200)
   })
 
   test("resolves sessions with the app audience cookie names", async () => {

@@ -1,8 +1,9 @@
+import type { AuthSessionAudience } from "./audience"
 import type { AuthenticatedAuthSession } from "./types"
 
 interface SessionCacheEntry {
   readonly tokenHash: string
-  readonly audience: string
+  readonly audience: AuthSessionAudience
   readonly session: AuthenticatedAuthSession
   readonly expiresAtMs: number
 }
@@ -10,7 +11,7 @@ interface SessionCacheEntry {
 export interface SessionCacheGetInput {
   readonly sessionId: string
   readonly tokenHash: string
-  readonly audience: string
+  readonly audience: AuthSessionAudience
   readonly nowMs: number
 }
 

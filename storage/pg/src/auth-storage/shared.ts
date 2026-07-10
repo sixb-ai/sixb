@@ -1,4 +1,5 @@
 import type {
+  AuthSessionAudience,
   CompleteAuthSessionInput,
   CreateAuthSessionInput,
   GroupMembershipRecord,
@@ -525,7 +526,7 @@ export async function revokeActiveSessionsForUser(
   params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }
 ): Promise<readonly SessionRecord[]> {

@@ -5,6 +5,7 @@ import {
   verifyDoubleSubmitCsrf,
 } from "@sixb/core"
 import { isAccessTokenRoute, shouldVerifyCsrfForAuthSource } from "./access-token-boundary"
+import { sessionCanAccessApplication } from "./application-access"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
 import {
@@ -83,6 +84,13 @@ export class ServerAuthGuard {
       }
 
       return { kind: "deny", response: jsonAuthRequiredResponse() }
+    }
+
+    if (!sessionCanAccessApplication(this.sixb, session, authContext.audience)) {
+      return {
+        kind: "deny",
+        response: jsonForbiddenResponse("Application access is not allowed"),
+      }
     }
 
     if (session.credentialSource === "accessToken" && !isAccessTokenRoute(request)) {

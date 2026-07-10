@@ -2,6 +2,7 @@ import { watch } from "node:fs"
 import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
+import type { AuthSessionAudience } from "@sixb/core"
 import { type BuildAppResult, buildApp } from "./build"
 import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
@@ -15,7 +16,7 @@ export interface CreateCustomAppOptions {
   generatedDir?: string
   publicDir?: string
   apiBaseUrl?: string
-  audience?: string
+  audience?: AuthSessionAudience
   authEnabled?: boolean
   agentRoutes?: boolean
 }
@@ -34,7 +35,7 @@ export interface CustomAppStartOptions {
   port?: number
   outdir?: string
   apiBaseUrl?: string
-  audience?: string
+  audience?: AuthSessionAudience
   authEnabled?: boolean
 }
 
@@ -570,7 +571,7 @@ function injectRuntimeConfig(
   html: string,
   config: {
     readonly apiBaseUrl?: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly authEnabled: boolean
   }
 ): string {

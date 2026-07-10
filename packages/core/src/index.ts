@@ -593,7 +593,6 @@ export type {
   UpdateMemberGroupsResult,
 } from "./auth"
 export {
-  AUTH_SESSION_AUDIENCE_PATTERN,
   AuthRuntime,
   AuthRuntimeError,
   CSRF_HEADER_NAME,
@@ -652,6 +651,7 @@ export type {
 export {
   AuthorizationError,
   assertAuthorized,
+  canAccessApplication,
   canViewActionRun,
   canViewEvent,
   canViewPipelineRun,
@@ -661,6 +661,7 @@ export {
   canViewWorkflowRun,
   evaluate,
   isAllowed,
+  isApplicationAccessControlled,
   resolveAuthorizationContext,
   resolveRoleGrants,
 } from "./authorization"
@@ -668,6 +669,8 @@ export {
 // ── Security Definitions ───────────────────────────────────
 
 export type {
+  AccessGrant,
+  ApplicationDefinition,
   ApplyGrant,
   DefineGroupOptions,
   DefineMembershipPolicyOptions,
@@ -695,6 +698,7 @@ export type {
 export {
   actions,
   agents,
+  applications,
   assertGrantDefinition,
   assertGroupDefinition,
   assertMembershipPolicyDefinition,

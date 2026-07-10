@@ -11,7 +11,6 @@ export {
 } from "./access-tokens"
 export type { AuthSessionAudience, AuthSessionAudienceOptions } from "./audience"
 export {
-  AUTH_SESSION_AUDIENCE_PATTERN,
   DEFAULT_AUTH_SESSION_AUDIENCE,
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,

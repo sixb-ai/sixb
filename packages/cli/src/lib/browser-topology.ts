@@ -123,11 +123,11 @@ function createAllowedBrowserOrigins(origins: BrowserPublicOrigins): readonly Si
   const allowedOrigins: SixbBrowserOrigin[] = []
 
   if (origins.atlasPublicOrigin) {
-    allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas", kind: "atlas" })
+    allowedOrigins.push({ origin: origins.atlasPublicOrigin, audience: "atlas" })
   }
 
   if (origins.appPublicOrigin) {
-    allowedOrigins.push({ origin: origins.appPublicOrigin, audience: "app", kind: "app" })
+    allowedOrigins.push({ origin: origins.appPublicOrigin, audience: "app" })
   }
 
   return allowedOrigins

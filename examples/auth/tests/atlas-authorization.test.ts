@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { resolve } from "node:path"
 import {
+  canAccessApplication,
   canPerformMembershipOperation,
   createSixb,
   InMemoryBlobStorage,
@@ -46,9 +47,20 @@ describe("auth example Atlas authorization", () => {
     const sixb = await createAuthExampleRuntime()
     await seedAuthExampleObjects(sixb)
 
-    const teamMember = sixb.as(atlasContext(sixb, ["team-members"]))
-    const admin = sixb.as(atlasContext(sixb, ["security-admins"]))
-    const noGroups = sixb.as(atlasContext(sixb, []))
+    const roles = sixb.security.getResolvedRoles()
+    const teamMemberContext = atlasContext(sixb, ["team-members"])
+    const adminContext = atlasContext(sixb, ["security-admins"])
+    const noGroupsContext = atlasContext(sixb, [])
+    const teamMember = sixb.as(teamMemberContext)
+    const admin = sixb.as(adminContext)
+    const noGroups = sixb.as(noGroupsContext)
+
+    expect(canAccessApplication(teamMemberContext, roles, "app")).toBe(true)
+    expect(canAccessApplication(teamMemberContext, roles, "atlas")).toBe(false)
+    expect(canAccessApplication(adminContext, roles, "app")).toBe(true)
+    expect(canAccessApplication(adminContext, roles, "atlas")).toBe(true)
+    expect(canAccessApplication(noGroupsContext, roles, "app")).toBe(false)
+    expect(canAccessApplication(noGroupsContext, roles, "atlas")).toBe(false)
 
     expect((await teamMember.list({})).objects.map((object) => object.objectTypeId)).toEqual([
       "note",

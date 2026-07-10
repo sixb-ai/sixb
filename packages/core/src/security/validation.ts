@@ -168,14 +168,19 @@ export function assertGrantDefinition(
   }
 
   if (
+    value.capability !== "access" &&
     value.capability !== "view" &&
     value.capability !== "apply" &&
     value.capability !== "run" &&
     value.capability !== "observe"
   ) {
     throw createError(
-      `[Sixb] ${field} grant capability must be 'view', 'apply', 'run', or 'observe'.`
+      `[Sixb] ${field} grant capability must be 'access', 'view', 'apply', 'run', or 'observe'.`
     )
+  }
+
+  if (value.capability === "access" && value.target !== "application") {
+    throw createError(`[Sixb] ${field} access grant target must be 'application'.`)
   }
 
   if (value.capability === "view" && value.target !== "object" && value.target !== "dataset") {
@@ -259,6 +264,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly groups: readonly GroupDefinition[]
   readonly membershipPolicies: readonly MembershipPolicyDefinition[]
   readonly roles?: readonly RoleDefinition[]
+  /** Registered browser application ids — when provided, access grants must reference them. */
+  readonly applicationIds?: ReadonlySet<string>
   /** Registered object type ids — when provided, view grants must reference them. */
   readonly objectTypeIds?: ReadonlySet<string>
   /** Registered dataset ids — when provided, dataset view grants must reference them. */

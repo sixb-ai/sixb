@@ -11,7 +11,7 @@ may do. Sixb builds it from four small layers:
 | --- | --- |
 | **Groups** | Named buckets that principals belong to |
 | **Roles** | Bundles of grants attached to groups |
-| **Grants** | The capabilities a role gives — view, apply, run |
+| **Grants** | The capabilities a role gives — access, view, apply, run |
 | **Membership policies** | Who can administer membership for which groups |
 
 At request time these resolve into one set of grants per principal, and a scoped runtime enforces
@@ -48,7 +48,7 @@ group receives the role's grants.
 
 ```ts
 // security/roles/billing-access.ts
-import { can, defineRole } from "@sixb/core"
+import { applications, can, defineRole } from "@sixb/core"
 import { sendReminder } from "../../actions/sendReminder"
 import { Customer } from "../../ontology/customer"
 import { Invoice } from "../../ontology/invoice"
@@ -56,7 +56,11 @@ import { teamMembers } from "../groups/team-members"
 
 export const teamMemberBillingAccess = defineRole("team-member.billing-access", {
   grantedTo: [teamMembers],
-  grants: [can.view([Customer, Invoice]), can.apply(sendReminder)],
+  grants: [
+    can.access(applications.app),
+    can.view([Customer, Invoice]),
+    can.apply(sendReminder),
+  ],
 })
 ```
 
@@ -68,6 +72,7 @@ Every member of `team-members` can now view `Customer` and `Invoice` objects and
 | `defineRole("team-member.billing-access")` | Names the role |
 | `grantedTo: [teamMembers]` | Groups whose members receive the role |
 | `grants: [...]` | The capabilities the role gives |
+| `can.access(applications.app)` | Allow access to the custom app |
 | `can.view([Customer, Invoice])` | Allow viewing those object types |
 | `can.apply(sendReminder)` | Allow applying the `sendReminder` action |
 
@@ -76,12 +81,13 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Three capability builders —
-`can.view`, `can.apply`, and `can.run` — resolve to **seven grant kinds**, one per protected target
-family.
+A grant pairs a capability with the definitions it covers. Four capability builders —
+`can.access`, `can.view`, `can.apply`, and `can.run` — resolve to **eight grant kinds**, one per
+protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
+| `access:application` | `can.access(...)` | Open a grant-controlled browser application | `applications.atlas`, `applications.app` |
 | `view:object` | `can.view(...)` | Read objects: `get`, `list`, `query`, telemetry, related events | [Object types](../ontology/object-types.md) |
 | `view:dataset` | `can.view(...)` | Read datasets and their versions | [Datasets](../data/datasets.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
@@ -90,6 +96,7 @@ family.
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
 | `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
 
+`can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
 type-checked, so mixing target families in one call does not compile. `can.view(Type)` also covers
@@ -101,6 +108,7 @@ Each builder takes one definition, a list, or a breadth selector.
 
 | Want | Write |
 | --- | --- |
+| One application | `can.access(applications.atlas)` |
 | One definition | `can.view(Invoice)` |
 | Several definitions | `can.view([Customer, Invoice])` |
 | Every object type | `can.view(ontology.objects())` |
@@ -141,6 +149,31 @@ export const financeAdminFullAccess = defineRole("finance-admin.full-access", {
 // Grant every object type except Customer
 can.view(ontology.objects().except([Customer]))
 ```
+
+## Application access
+
+Application grants control whether a signed-in principal may open Atlas or the custom app. They are
+opt-in per application for compatibility: when no role grants an application, every authenticated
+user may open it. Once any role grants that application, it becomes an allowlist and principals
+without the grant receive an access-denied page before application data loads.
+
+```ts
+import { applications, can, defineRole } from "@sixb/core"
+
+export const securityAdminAtlasAccess = defineRole("security-admin.atlas-access", {
+  grantedTo: [securityAdmins],
+  grants: [can.access(applications.atlas)],
+})
+
+export const customerAppAccess = defineRole("customer.app-access", {
+  grantedTo: [customers],
+  grants: [can.access(applications.app)],
+})
+```
+
+Application access complements resource grants rather than replacing them. For example, a user may
+be allowed into the custom app but still see only the object types granted to their groups. Atlas
+and the custom app enforce application grants at the session, HTTP, and WebSocket boundaries.
 
 ## Membership policies
 

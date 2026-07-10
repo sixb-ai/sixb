@@ -43,6 +43,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   EmptyState,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -85,6 +90,7 @@ type StatusFilter = "all" | MemberStatus
 type Invitation = ListAuthInvitationsResponse["invitations"][number]
 type InvitationCreateCapability =
   GetAuthInvitationOptionsResponse["capabilities"]["createInvitation"]
+type InvitationDestination = GetAuthInvitationOptionsResponse["destinations"][number]
 type MemberAction = "suspend" | "reactivate"
 
 const memberListOptions = {
@@ -248,10 +254,13 @@ function inviteDisabledMessage(capability: InvitationCreateCapability | undefine
 
 function InviteMembersCard({
   groups,
+  destinations,
+  destinationId,
   canInviteWithoutGroups,
   disabledReason,
   email,
   onEmailChange,
+  onDestinationChange,
   selectedGroupIds,
   onGroupsChange,
   onSubmit,
@@ -259,13 +268,20 @@ function InviteMembersCard({
   errorMessage,
 }: {
   readonly groups: readonly AuthGroupOption[]
+  readonly destinations: readonly InvitationDestination[]
+  readonly destinationId: string
   readonly canInviteWithoutGroups: boolean
   readonly disabledReason: string | null
   readonly email: string
   readonly onEmailChange: (email: string) => void
+  readonly onDestinationChange: (destinationId: string) => void
   readonly selectedGroupIds: readonly string[]
   readonly onGroupsChange: (groupIds: string[]) => void
-  readonly onSubmit: (body: { email: string; groupIds: string[] }) => void
+  readonly onSubmit: (body: {
+    email: string
+    groupIds: string[]
+    destinationId?: "atlas" | "app"
+  }) => void
   readonly isSubmitting: boolean
   readonly errorMessage: string | null
 }) {
@@ -273,37 +289,46 @@ function InviteMembersCard({
   const canSubmit =
     !disabled &&
     email.trim().length > 0 &&
+    (destinations.length === 0 || destinationId.length > 0) &&
     (selectedGroupIds.length > 0 || canInviteWithoutGroups) &&
     !isSubmitting
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!canSubmit) return
-    onSubmit({ email: email.trim(), groupIds: [...selectedGroupIds] })
+    onSubmit({
+      email: email.trim(),
+      groupIds: [...selectedGroupIds],
+      ...(destinationId === "atlas" || destinationId === "app" ? { destinationId } : {}),
+    })
   }
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <form onSubmit={submit}>
-        <div className="p-6">
+        <div className="p-5 sm:p-6">
           <h2 className="text-lg font-semibold tracking-tight text-foreground">Invite members</h2>
-          <p className="mt-1.5 text-sm text-muted-foreground">
-            Add people to this workspace by email and choose the groups they join.
+          <p className="mt-1 text-sm text-muted-foreground">
+            Send an invitation and choose where the member lands and what they can access.
           </p>
 
           {disabled ? (
-            <p className="mt-5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
+            <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
               {disabledReason}
             </p>
           ) : null}
 
-          <div className="mt-6 grid gap-x-6 gap-y-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-            <div className="space-y-2">
-              <label
-                htmlFor="invite-email"
-                className="block text-sm font-medium text-muted-foreground"
-              >
-                Email
+          <div
+            className={cn(
+              "mt-5 grid gap-4",
+              destinations.length > 0
+                ? "sm:grid-cols-[minmax(0,1fr)_minmax(13rem,0.42fr)]"
+                : "sm:grid-cols-1"
+            )}
+          >
+            <div className="space-y-1.5">
+              <label htmlFor="invite-email" className="block text-sm font-medium text-foreground">
+                Email address
               </label>
               <input
                 id="invite-email"
@@ -313,40 +338,68 @@ function InviteMembersCard({
                 onChange={(event) => onEmailChange(event.target.value)}
                 disabled={disabled || isSubmitting}
                 placeholder="ava@acme.com"
-                className="h-11 w-full rounded-lg border border-border/60 bg-background px-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
+                className="h-10 w-full rounded-lg border border-border/60 bg-background px-3.5 text-sm outline-none transition-colors placeholder:text-muted-foreground/60 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
 
-            <div className="space-y-2">
-              <span className="block text-sm font-medium text-muted-foreground">Groups</span>
-              <GroupPicker
-                groups={groups}
-                selectedGroupIds={selectedGroupIds}
-                onChange={onGroupsChange}
-                disabled={disabled || isSubmitting}
-                emptyMessage="You have no groups available to assign."
-              />
+            {destinations.length > 0 ? (
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="invite-destination"
+                  className="block text-sm font-medium text-foreground"
+                >
+                  Destination
+                </label>
+                <Select
+                  value={destinationId || undefined}
+                  onValueChange={onDestinationChange}
+                  disabled={disabled || isSubmitting}
+                >
+                  <SelectTrigger
+                    id="invite-destination"
+                    className="h-10 w-full rounded-lg border-border/60 bg-background px-3.5 shadow-none focus-visible:ring-ring/20 data-[size=default]:h-10 dark:bg-background dark:hover:bg-background"
+                  >
+                    <SelectValue placeholder="Choose an app" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {destinations.map((destination) => (
+                      <SelectItem key={destination.id} value={destination.id}>
+                        {destination.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="mt-5 border-t border-border/60 pt-4">
+            <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <span className="text-sm font-medium text-foreground">Access groups</span>
+              {groups.length > 0 && !canInviteWithoutGroups ? (
+                <span className="text-xs text-muted-foreground">Select at least one group</span>
+              ) : null}
             </div>
+            <GroupPicker
+              groups={groups}
+              selectedGroupIds={selectedGroupIds}
+              onChange={onGroupsChange}
+              disabled={disabled || isSubmitting}
+              emptyMessage="You have no groups available to assign."
+            />
           </div>
 
           {errorMessage && (
-            <p className="mt-5 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <p className="mt-4 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {errorMessage}
             </p>
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-6 py-3.5">
-          <p className="text-sm text-muted-foreground">
-            {groups.length === 0
-              ? ""
-              : canInviteWithoutGroups
-                ? "Groups are optional — members without groups start with no access."
-                : "Select at least one group before sending."}
-          </p>
+        <div className="flex justify-end border-t border-border/60 bg-muted/20 px-5 py-3 sm:px-6">
           <Button type="submit" disabled={!canSubmit} className="shrink-0">
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Invite
+            Send invite
           </Button>
         </div>
       </form>
@@ -440,6 +493,7 @@ export function SettingsMembersPage() {
   } | null>(null)
   const [activeTab, setActiveTab] = useState<"members" | "invitations">("members")
   const [inviteEmail, setInviteEmail] = useState("")
+  const [inviteDestinationId, setInviteDestinationId] = useState("")
   const [inviteGroupIds, setInviteGroupIds] = useState<string[]>([])
   const [revokingInvitationId, setRevokingInvitationId] = useState<string | null>(null)
   const [showPastInvitations, setShowPastInvitations] = useState(false)
@@ -467,6 +521,12 @@ export function SettingsMembersPage() {
   )
 
   const inviteOptions = inviteOptionsQuery.data
+  const inviteDestinations = inviteOptions?.destinations ?? []
+  const resolvedInviteDestinationId = inviteDestinations.some(
+    (destination) => destination.id === inviteDestinationId
+  )
+    ? inviteDestinationId
+    : (inviteOptions?.defaultDestinationId ?? inviteDestinations[0]?.id ?? "")
   const inviteGroupOptions = useMemo<readonly AuthGroupOption[]>(
     () => inviteOptions?.groups ?? [],
     [inviteOptions]
@@ -698,10 +758,13 @@ export function SettingsMembersPage() {
 
       <InviteMembersCard
         groups={inviteGroupOptions}
+        destinations={inviteDestinations}
+        destinationId={resolvedInviteDestinationId}
         canInviteWithoutGroups={inviteOptions?.canInviteWithoutGroups === true}
         disabledReason={inviteDisabledReason}
         email={inviteEmail}
         onEmailChange={setInviteEmail}
+        onDestinationChange={setInviteDestinationId}
         selectedGroupIds={inviteGroupIds}
         onGroupsChange={setInviteGroupIds}
         onSubmit={(body) =>
@@ -709,6 +772,7 @@ export function SettingsMembersPage() {
             body: {
               email: body.email,
               ...(body.groupIds.length > 0 ? { groupIds: body.groupIds } : {}),
+              ...(body.destinationId ? { destinationId: body.destinationId } : {}),
             },
           })
         }

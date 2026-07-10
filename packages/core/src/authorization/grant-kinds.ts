@@ -11,6 +11,7 @@
 import type { GrantDefinition } from "../security/types"
 
 export type GrantKind =
+  | "access:application"
   | "view:object"
   | "view:dataset"
   | "apply:action"
@@ -22,6 +23,7 @@ export type GrantKind =
 
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
+  readonly applicationIds: ReadonlySet<string>
   readonly objectTypeIds: ReadonlySet<string>
   readonly datasetIds: ReadonlySet<string>
   readonly actionIds: ReadonlySet<string>
@@ -52,6 +54,11 @@ interface GrantKindSpec {
  * `Record<GrantKind, …>` makes every omission a compile error.
  */
 export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
+  "access:application": {
+    universeKey: "applicationIds",
+    subject: "application",
+    fix: "Use an application exported from '@sixb/core'.",
+  },
   "view:object": {
     universeKey: "objectTypeIds",
     subject: "object type",
@@ -100,6 +107,8 @@ export const GRANT_KIND_KEYS = Object.keys(GRANT_KINDS) as readonly GrantKind[]
 /** The grant kind a stored grant resolves to. */
 export function grantKindOf(grant: GrantDefinition): GrantKind {
   switch (grant.capability) {
+    case "access":
+      return "access:application"
     case "view":
       return `view:${grant.target}`
     case "apply":

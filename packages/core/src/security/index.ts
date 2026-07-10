@@ -1,3 +1,4 @@
+export { applications } from "./applications"
 export type {
   DefineGroupOptions,
   DefineMembershipPolicyOptions,
@@ -16,6 +17,8 @@ export {
 export type { Scope, ScopeTarget } from "./scopes"
 export { actions, agents, datasets, ontology, pipelines, syncs, workflows } from "./scopes"
 export type {
+  AccessGrant,
+  ApplicationDefinition,
   ApplyGrant,
   GrantCapability,
   GrantDefinition,

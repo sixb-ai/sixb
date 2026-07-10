@@ -33,8 +33,8 @@ const server = createSixbServer({
   browser: {
     publicOrigin: "https://api.acme.example",
     allowedOrigins: [
-      { origin: "https://atlas.acme.example", audience: "atlas", kind: "atlas" },
-      { origin: "https://app.acme.example", audience: "app", kind: "app" },
+      { origin: "https://atlas.acme.example", audience: "atlas" },
+      { origin: "https://app.acme.example", audience: "app" },
     ],
   },
 })
@@ -56,7 +56,7 @@ await server.stop()
 | `host`    | `string`               | `"0.0.0.0"` | Bind host.                                                      |
 | `quiet`   | `boolean`              | `false`     | Suppress startup logging.                                       |
 
-The `browser` policy is load-bearing for security: it drives CORS, rejects disallowed `Origin` headers up front, and resolves the public origin used to mint auth redirects. Each `allowedOrigins` entry maps a front-end origin to its auth `audience` (`atlas` or `app`); list every browser front-end you serve.
+The `browser` policy is load-bearing for security: it drives CORS, rejects disallowed `Origin` headers up front, and resolves the public origin used to mint auth redirects. Each `allowedOrigins` entry maps one front-end origin to its auth `audience` (`atlas` or `app`), and each audience can have only one origin. Configured audiences become invitation destinations and application-access boundaries.
 
 ## Route groups
 

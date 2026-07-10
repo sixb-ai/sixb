@@ -29,7 +29,11 @@ import {
 } from "@sixb/core"
 import { type Elysia, t } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { sessionCanAccessApplication } from "../auth/application-access"
 import {
+  type AuthInvitationDestinationOptions,
+  type AuthInvitationRedirectContext,
+  type AuthInvitationRedirectInput,
   type AuthRedirectContext,
   BrowserOriginError,
   type ResolveAuthRedirectContext,
@@ -83,6 +87,10 @@ type ResolvedCookieOptions = Parameters<typeof createCsrfCookieHeader>[0]["optio
 type AuthenticatedAuthSessionResponse = {
   readonly authenticated: true
   readonly csrfToken: string
+  readonly applicationAccess: {
+    readonly allowed: boolean
+    readonly audience: AuthSessionAudience
+  }
   readonly user: {
     readonly id: string
     readonly email: string
@@ -99,7 +107,12 @@ type AuthenticatedAuthSessionResponse = {
 export interface AuthRoutesOptions {
   readonly resolveAuthContext: ResolveRequestAuthContext
   readonly resolveAuthRedirectContext: ResolveAuthRedirectContext
+  readonly getInvitationDestinationOptions: (request: Request) => AuthInvitationDestinationOptions
   readonly resolveAuthRequestOrigin: (request: Request) => string
+  readonly resolveInvitationRedirectContext: (
+    request: Request,
+    input: AuthInvitationRedirectInput
+  ) => AuthInvitationRedirectContext
 }
 
 export function registerAuthRoutes(
@@ -123,6 +136,10 @@ export function registerAuthRoutes(
           {
             authenticated: true as const,
             csrfToken: csrf.token,
+            applicationAccess: {
+              allowed: sessionCanAccessApplication(sixb, session, authOptions.audience),
+              audience: authOptions.audience,
+            },
             user: {
               id: session.user.id,
               email: session.user.email,
@@ -822,12 +839,10 @@ export function registerAuthRoutes(
         try {
           const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthInvitationBodySchema.parse(body)
-          const deliveryContext = resolveInvitationDeliveryContext(
-            options,
-            request,
-            parsed.returnTo,
-            authOptions
-          )
+          const deliveryContext = resolveInvitationDeliveryContext(options, request, {
+            destinationId: parsed.destinationId,
+            returnTo: parsed.returnTo,
+          })
           if (deliveryContext instanceof Response) {
             return deliveryContext
           }
@@ -843,6 +858,7 @@ export function registerAuthRoutes(
             {
               ...authOptions,
               delivery: {
+                audience: deliveryContext.audience,
                 returnTo: deliveryContext.returnTo,
                 requestOrigin: deliveryContext.requestOrigin,
               },
@@ -884,7 +900,13 @@ export function registerAuthRoutes(
       async ({ request }) => {
         try {
           const authOptions = resolveAuthOptions(options, request)
-          return jsonResponse(await sixb.auth.getInvitationOptions(request, authOptions), 200)
+          return jsonResponse(
+            {
+              ...(await sixb.auth.getInvitationOptions(request, authOptions)),
+              ...options.getInvitationDestinationOptions(request),
+            },
+            200
+          )
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1649,18 +1671,13 @@ function resolveAuthRedirectContext(
 function resolveInvitationDeliveryContext(
   options: AuthRoutesOptions,
   request: Request,
-  returnTo: string | undefined,
-  authContext: ReturnType<ResolveRequestAuthContext>
-): AuthRedirectContext | Response {
+  input: AuthInvitationRedirectInput
+): AuthInvitationRedirectContext | Response {
   try {
-    return options.resolveAuthRedirectContext(request, {
-      audience: authContext.audience,
-      fallbackReturnToOrigin: authContext.browserOrigin,
-      returnTo,
-    })
+    return options.resolveInvitationRedirectContext(request, input)
   } catch (error) {
     if (error instanceof BrowserOriginError) {
-      return jsonResponse({ error: "Invitation return target is not allowed" }, 400)
+      return jsonResponse({ error: "Invitation destination is not allowed" }, 400)
     }
 
     throw error

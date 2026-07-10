@@ -168,8 +168,15 @@ export const AuthCreateInvitationCapabilitySchema = z.union([
   }),
 ])
 
+export const AuthInvitationDestinationSchema = z.object({
+  id: z.enum(["atlas", "app"]),
+  label: z.string(),
+})
+
 export const GetAuthInvitationOptionsResponseSchema = z.object({
   groups: z.array(AuthInvitationGroupOptionSchema),
+  destinations: z.array(AuthInvitationDestinationSchema),
+  defaultDestinationId: z.enum(["atlas", "app"]).optional(),
   canInviteWithoutGroups: z.boolean(),
   capabilities: z.object({
     createInvitation: AuthCreateInvitationCapabilitySchema,
@@ -220,6 +227,7 @@ export const ReactivateAuthMemberResponseSchema = z.object({
 export const CreateAuthInvitationBodySchema = z.object({
   email: z.string().min(1),
   groupIds: z.array(z.string().min(1)).optional(),
+  destinationId: z.enum(["atlas", "app"]).optional(),
   expiresAt: z.string().optional(),
   returnTo: z.string().optional(),
 })
@@ -258,6 +266,10 @@ export const AuthSessionResponseSchema = z.union([
   z.object({
     authenticated: z.literal(true),
     csrfToken: z.string(),
+    applicationAccess: z.object({
+      allowed: z.boolean(),
+      audience: z.enum(["atlas", "app"]),
+    }),
     user: z.object({
       id: z.string(),
       email: z.string(),
@@ -278,7 +290,7 @@ export const AuthSignOutResponseSchema = z.object({
 
 export const AuthSessionSummarySchema = z.object({
   id: z.string(),
-  audience: z.string(),
+  audience: z.enum(["atlas", "app"]),
   current: z.boolean(),
   createdAt: z.string(),
   expiresAt: z.string(),

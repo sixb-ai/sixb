@@ -235,6 +235,10 @@ export type GetAuthSessionResponses = {
     | {
         authenticated: true
         csrfToken: string
+        applicationAccess: {
+          allowed: boolean
+          audience: "atlas" | "app"
+        }
         user: {
           id: string
           email: string
@@ -305,7 +309,7 @@ export type ListAuthSessionsResponses = {
   200: {
     sessions: Array<{
       id: string
-      audience: string
+      audience: "atlas" | "app"
       current: boolean
       createdAt: string
       expiresAt: string
@@ -1082,6 +1086,7 @@ export type CreateAuthInvitationData = {
   body: {
     email: string
     groupIds?: Array<string>
+    destinationId?: "atlas" | "app"
     expiresAt?: string
     returnTo?: string
   }
@@ -1191,6 +1196,11 @@ export type GetAuthInvitationOptionsResponses = {
       label?: string
       description?: string
     }>
+    destinations: Array<{
+      id: "atlas" | "app"
+      label: string
+    }>
+    defaultDestinationId?: "atlas" | "app"
     canInviteWithoutGroups: boolean
     capabilities: {
       createInvitation:

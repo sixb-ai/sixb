@@ -1,3 +1,4 @@
+import type { AuthSessionAudience } from "../auth/audience"
 import type { ResolvedRole } from "../authorization/types"
 
 export interface GroupDefinition<TId extends string = string> {
@@ -16,6 +17,19 @@ export interface GroupDefinition<TId extends string = string> {
 export type Selection =
   | { readonly all: true; readonly except: readonly string[] }
   | { readonly all: false; readonly ids: readonly string[] }
+
+export interface ApplicationDefinition<TId extends AuthSessionAudience = AuthSessionAudience> {
+  readonly kind: "application"
+  readonly id: TId
+  readonly label: string
+}
+
+export interface AccessGrant {
+  readonly kind: "grant"
+  readonly capability: "access"
+  readonly target: "application"
+  readonly selection: Selection
+}
 
 export type ViewGrantTarget = "object" | "dataset"
 
@@ -50,7 +64,7 @@ export interface ObserveGrant {
   readonly selection: Selection
 }
 
-export type GrantDefinition = ViewGrant | ApplyGrant | RunGrant | ObserveGrant
+export type GrantDefinition = AccessGrant | ViewGrant | ApplyGrant | RunGrant | ObserveGrant
 
 export type GrantCapability = GrantDefinition["capability"]
 

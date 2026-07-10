@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import {
   actions,
   agents,
+  applications,
   can,
+  canAccessApplication,
   col,
   createSessionCredential,
   datasets,
@@ -16,6 +18,7 @@ import {
   definePipelineStep,
   defineRole,
   defineSync,
+  isApplicationAccessControlled,
   ontology,
   pipelines,
   prop,
@@ -142,6 +145,7 @@ describe("resolveAuthorizationContext", () => {
   // The registry expands grants against the registered universe at startup;
   // here we expand by hand so the resolver can be exercised in isolation.
   const universe = {
+    applicationIds: new Set(["atlas", "app"]),
     objectTypeIds: new Set(["contract", "signed-contract", "invoice"]),
     datasetIds: new Set(["raw.contracts", "raw.invoices"]),
     actionIds: new Set(["send-contract"]),
@@ -168,6 +172,25 @@ describe("resolveAuthorizationContext", () => {
         grants: resolveRoleGrants(role, universe),
       })),
     })
+
+  test("application access becomes an allowlist when a role grants it", () => {
+    const atlasAccess = defineRole("atlas.access", {
+      grantedTo: [admins],
+      grants: [can.access(applications.atlas)],
+    })
+    const roles = [atlasAccess].map((role) => ({
+      id: role.id,
+      grantedToGroupIds: role.grantedToGroupIds,
+      grants: resolveRoleGrants(role, universe),
+    }))
+    const allowed = resolveAuthorizationContext({ principal, groupIds: [admins.id], roles })
+    const denied = resolveAuthorizationContext({ principal, groupIds: [finance.id], roles })
+
+    expect(isApplicationAccessControlled(roles, "atlas")).toBe(true)
+    expect(canAccessApplication(allowed, roles, "atlas")).toBe(true)
+    expect(canAccessApplication(denied, roles, "atlas")).toBe(false)
+    expect(canAccessApplication(denied, roles, "app")).toBe(true)
+  })
 
   test("matches roles by group membership and expands view grants to subtypes", () => {
     const context = resolve(["commercial"], [contractOperator, invoiceViewer], "ses_adam")

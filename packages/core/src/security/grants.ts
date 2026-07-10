@@ -1,7 +1,7 @@
 /**
  * Grant builders for role definitions.
  *
- * Grants are plain data referencing ontology, action, and workflow definitions
+ * Grants are plain data referencing application and runtime definitions
  * by id. They carry no enforcement logic — the authorization engine expands
  * each grant's selection into per-principal id sets at startup, so runtime
  * checks stay simple `set.has(id)` lookups.
@@ -16,7 +16,15 @@ import type { SyncDefinition } from "../syncs"
 import type { WorkflowDefinition } from "../workflows/types"
 import { SecurityValidationError } from "./errors"
 import { isScope, type Scope, scopeIdOf } from "./scopes"
-import type { ApplyGrant, ObserveGrant, RunGrant, Selection, ViewGrant } from "./types"
+import type {
+  AccessGrant,
+  ApplicationDefinition,
+  ApplyGrant,
+  ObserveGrant,
+  RunGrant,
+  Selection,
+  ViewGrant,
+} from "./types"
 
 type GrantInput<TDefinition, TTarget extends Scope["target"]> =
   | TDefinition
@@ -59,6 +67,15 @@ function viewTargetFrom(
 
   const first = Array.isArray(input) ? input[0] : input
   return isDatasetDefinitionInput(first) ? "dataset" : "object"
+}
+
+function access(input: ApplicationDefinition | readonly ApplicationDefinition[]): AccessGrant {
+  return {
+    kind: "grant",
+    capability: "access",
+    target: "application",
+    selection: selectionFrom(input, "can.access"),
+  }
 }
 
 function view(input: GrantInput<ObjectType, "object">): ViewGrant<"object">
@@ -148,6 +165,7 @@ function observe(target: "logs"): ObserveGrant {
 }
 
 export const can = {
+  access,
   view,
   apply,
   run,

@@ -201,7 +201,7 @@ beforeAll(async () => {
     quiet: true,
     browser: {
       publicOrigin: baseUrl,
-      allowedOrigins: [{ origin: baseUrl, audience: "atlas", kind: "atlas" }],
+      allowedOrigins: [{ origin: baseUrl, audience: "atlas" }],
     },
   })
   await server.start()

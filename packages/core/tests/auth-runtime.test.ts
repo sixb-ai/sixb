@@ -534,7 +534,7 @@ describe("Sixb auth runtime", () => {
         { audience: "atlas" }
       )
     ).resolves.toEqual({ authenticated: false, reason: "invalid_session" })
-    expect(() => sixb.auth.getCookieOptions({ audience: "app prod" })).toThrow(
+    expect(() => sixb.auth.getCookieOptions({ audience: "app prod" as never })).toThrow(
       "Auth session audience 'app prod' is invalid"
     )
   })

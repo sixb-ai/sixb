@@ -1,4 +1,9 @@
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
+import type {
+  AuthSessionAudience,
+  AuthSessionStore,
+  CreateAuthSessionInput,
+  SessionRecord,
+} from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
 import {
   authLockKey,
@@ -35,7 +40,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const [row] = await this.sql<PgAuthSessionRow[]>`
@@ -74,7 +79,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -123,7 +128,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return runPgTransaction(this.sql, async (tx) => {

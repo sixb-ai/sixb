@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { type CompleteAuthSessionInput, InMemoryAuthStorage } from "@sixb/core"
+import {
+  type AuthSessionAudience,
+  type CompleteAuthSessionInput,
+  InMemoryAuthStorage,
+} from "@sixb/core"
 import { magicLink, type SendMagicLinkInput } from "../src"
 import { hashMagicLinkToken } from "../src/tokens"
 
@@ -47,7 +51,7 @@ async function requestMagicLink(input: {
   readonly storage: InMemoryAuthStorage
   readonly strategy: ReturnType<typeof magicLink>
   readonly email: string
-  readonly audience?: string
+  readonly audience?: AuthSessionAudience
   readonly requesterHash?: string
   readonly now?: Date
 }) {
@@ -569,7 +573,7 @@ describe("magicLink", () => {
       email: "ava@acme.com",
     })
 
-    for (const audience of ["atlas", "app"]) {
+    for (const audience of ["atlas", "app"] as const) {
       await expect(
         requestMagicLink({
           storage,

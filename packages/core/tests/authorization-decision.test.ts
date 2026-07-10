@@ -17,6 +17,7 @@ import {
 } from "../src"
 
 function context(grants: {
+  applications?: readonly string[]
   view?: readonly string[]
   datasets?: readonly string[]
   apply?: readonly string[]
@@ -31,6 +32,7 @@ function context(grants: {
     groupIds: [],
     roleIds: [],
     grants: {
+      "access:application": new Set(grants.applications ?? []),
       "view:object": new Set(grants.view ?? []),
       "view:dataset": new Set(grants.datasets ?? []),
       "apply:action": new Set(grants.apply ?? []),
@@ -54,6 +56,21 @@ describe("evaluate", () => {
       allowed: false,
       requirements: ["observe:logs"],
       missing: ["observe:logs"],
+    })
+  })
+
+  test("application.access checks application grants", () => {
+    expect(
+      evaluate(context({ applications: ["atlas"] }), {
+        kind: "application.access",
+        audience: "atlas",
+      })
+    ).toEqual({ allowed: true, requirements: ["access:application:atlas"], missing: [] })
+
+    expect(evaluate(context({}), { kind: "application.access", audience: "atlas" })).toEqual({
+      allowed: false,
+      requirements: ["access:application:atlas"],
+      missing: ["access:application:atlas"],
     })
   })
 

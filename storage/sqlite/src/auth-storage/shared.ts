@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type {
+  AuthSessionAudience,
   CompleteAuthSessionInput,
   CreateAuthSessionInput,
   GroupMembershipRecord,
@@ -476,7 +477,7 @@ export function revokeActiveSessionsForUser(
   params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }
 ): readonly ReturnType<typeof rowToSessionRecord>[] {
