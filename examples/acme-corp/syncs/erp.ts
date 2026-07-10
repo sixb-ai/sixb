@@ -37,7 +37,6 @@ export const syncErpDepartments = defineSync("sync-erp-departments")
   .when(hourlyErpSync)
   .from(acmeErpConnector)
   .read((client, ctx) => {
-
     const logger = ctx.logger
 
     logger.info(`[AcmeCorp] Starting sync of ERP departments`)
