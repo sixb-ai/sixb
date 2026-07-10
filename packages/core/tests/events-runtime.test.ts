@@ -85,6 +85,20 @@ describe("EventsRuntime", () => {
     expect(limited.map(primaryIds)).toEqual(["room-1"])
   })
 
+  test("returns the latest event cursor without reading retained events", async () => {
+    const broker = new LatestCursorRecordingBroker()
+    const events = new EventsRuntime({ projectId: "project-a", broker })
+
+    expect(await events.latestCursor()).toBeUndefined()
+    const appended = await events.append({
+      events: [objectUpserted("room-1"), objectUpserted("room-2")],
+    })
+
+    expect(await events.latestCursor()).toBe(appended.at(-1)?.cursor)
+    expect(broker.latestCursorCalls).toBe(2)
+    expect(broker.readCalls).toBe(0)
+  })
+
   test("isolates projects on a shared broker", async () => {
     const broker = new InMemoryBroker()
     const projectAEvents = new EventsRuntime({ projectId: "project-a", broker })
@@ -124,6 +138,23 @@ describe("EventsRuntime", () => {
 
 function primaryIds(event: StoredDomainEvent): string | undefined {
   return event.type === "object.upserted" ? event.payload.primaryId : undefined
+}
+
+class LatestCursorRecordingBroker extends InMemoryBroker {
+  latestCursorCalls = 0
+  readCalls = 0
+
+  override latestCursor(
+    params: Parameters<InMemoryBroker["latestCursor"]>[0]
+  ): ReturnType<InMemoryBroker["latestCursor"]> {
+    this.latestCursorCalls += 1
+    return super.latestCursor(params)
+  }
+
+  override read(params: Parameters<InMemoryBroker["read"]>[0]): ReturnType<InMemoryBroker["read"]> {
+    this.readCalls += 1
+    return super.read(params)
+  }
 }
 
 class RecordingBroker extends InMemoryBroker {

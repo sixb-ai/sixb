@@ -205,7 +205,7 @@ describe("action wait helpers", () => {
       if (request.method === "GET" && url.pathname === "/api/action-runs/act_1") {
         getCount += 1
         return Response.json(
-          getCount < 2
+          getCount < 3
             ? createActionRun({ status: "running" })
             : createActionRun({ status: "succeeded", finishedAt: "2026-06-29T12:00:02.000Z" })
         )
@@ -225,12 +225,56 @@ describe("action wait helpers", () => {
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
+    ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
 
     const run = await promise
 
     expect(ws.closed).toBe(true)
     expect(run.status).toBe("succeeded")
+    expect(getCount).toBe(3)
+  })
+
+  test("rechecks when a fast action completes before its subscription is ready", async () => {
+    let getCount = 0
+    let completed = false
+    const succeeded = createActionRun({
+      status: "succeeded",
+      finishedAt: "2026-06-29T12:00:02.000Z",
+    })
+    const { client } = createTestClient((request) => {
+      const url = new URL(request.url)
+      if (request.method === "GET" && url.pathname === "/api/action-runs/act_1") {
+        getCount += 1
+        return Response.json(completed ? succeeded : createActionRun({ status: "running" }))
+      }
+      return Response.json({ error: "Unexpected request" }, { status: 500 })
+    })
+
+    const promise = waitForActionRun({
+      client,
+      runId: "act_1",
+      fallbackPollIntervalMs: 1_000,
+      disconnectedPollIntervalMs: 1_000,
+      timeoutMs: 200,
+    })
+
+    await waitUntil(() => getCount === 1)
+    completed = true
+
+    const ws = FakeWebSocket.instances[0]
+    if (!ws) throw new Error("expected a websocket")
+    ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
+    // The server's baseline already includes the terminal event, so no event
+    // frame follows. Subscription acknowledgement must trigger the second read.
+    ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
+
+    const run = await promise
+
+    expect(run).toEqual(succeeded)
     expect(getCount).toBe(2)
+    expect(ws.closed).toBe(true)
   })
 
   test("runs a follow-up detail fetch when a terminal event arrives during an in-flight check", async () => {

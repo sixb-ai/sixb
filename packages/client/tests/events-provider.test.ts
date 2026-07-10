@@ -188,6 +188,8 @@ describe("createEventsRegistry", () => {
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
+    ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
 
     const states: { connected: boolean }[] = []
     registry.register(events(Sensor).telemetry().ir, () => {}, {

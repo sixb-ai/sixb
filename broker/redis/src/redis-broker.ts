@@ -249,6 +249,23 @@ export class RedisBroker implements Broker {
     return records
   }
 
+  async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
+    this.assertOpen()
+    validateProjectId(params.projectId)
+    assertStreamId(params.streamId)
+
+    const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
+    if (ensured === null) {
+      return undefined
+    }
+
+    return this.connectionManager.useCommandClient(async (client) => {
+      await this.enforceAgeRetention(client, ensured)
+      const entries = await this.readReverseRange(client, ensured, "+", "-", 1)
+      return entries[0]?.id
+    })
+  }
+
   async subscribe(
     params: {
       projectId: string
@@ -298,7 +315,7 @@ export class RedisBroker implements Broker {
         params.afterCursor ??
         (params.from === "earliest"
           ? (lastTrimmedId ?? "0-0")
-          : await this.latestCursor(client, ensured))
+          : await this.subscriptionStartCursor(client, ensured))
       this.assertOpen()
 
       pump = (async () => {
@@ -514,7 +531,10 @@ export class RedisBroker implements Broker {
     }
   }
 
-  private async latestCursor(client: RedisBrokerClient, ensured: EnsuredStream): Promise<string> {
+  private async subscriptionStartCursor(
+    client: RedisBrokerClient,
+    ensured: EnsuredStream
+  ): Promise<string> {
     const entries = await this.readReverseRange(client, ensured, "+", "-", 1)
     const latest = entries[0]
     if (latest !== undefined) {

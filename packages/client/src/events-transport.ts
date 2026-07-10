@@ -20,6 +20,7 @@ import {
   type ReconnectingSocketState,
 } from "./ws-socket"
 
+/** Event-level state: `connected` becomes true only after the subscription is acknowledged. */
 export type EventSocketState = ReconnectingSocketState
 
 export interface EventSocketOptions {
@@ -63,6 +64,19 @@ type EventStreamServerMessage =
 export function createEventSocket(options: EventSocketOptions): EventSocket {
   const { topic, types, objectTypeId, primaryId, actionId, runId, limit } = options
   let latestCursor = options.afterCursor
+  let transportState: ReconnectingSocketState = {
+    connected: false,
+    reconnecting: false,
+    error: null,
+  }
+  let subscribed = false
+
+  const publishState = () => {
+    options.onStateChange?.({
+      ...transportState,
+      connected: transportState.connected && subscribed,
+    })
+  }
 
   return createReconnectingSocket({
     url: createSixbEventsWebSocketUrl(options.baseUrl),
@@ -70,7 +84,11 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
     reconnectDelayMs: options.reconnectDelayMs,
     connectionErrorMessage: "Event websocket connection failed.",
     onError: options.onError,
-    onStateChange: options.onStateChange,
+    onStateChange: (state) => {
+      transportState = state
+      if (!state.connected) subscribed = false
+      publishState()
+    },
     subscribeMessage: () => ({
       type: "subscribe",
       ...(topic ? { topic } : {}),
@@ -94,6 +112,12 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
         if (matchesSubscription(message.event, topic, types)) {
           options.onEvent(message.event)
         }
+        return
+      }
+
+      if (message.type === "subscribed") {
+        subscribed = true
+        publishState()
         return
       }
 

@@ -180,6 +180,20 @@ export class NatsBroker implements Broker {
     })
   }
 
+  async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
+    this.assertOpen()
+    validateProjectId(params.projectId)
+    assertStreamId(params.streamId)
+
+    const streamName = await this.streamManager.getExistingStream(params.projectId, params.streamId)
+    if (!streamName) {
+      return undefined
+    }
+
+    const streamInfo = await this.fetchStreamInfo(streamName)
+    return streamInfo.state.messages > 0 ? String(streamInfo.state.last_seq) : undefined
+  }
+
   async subscribe(
     params: {
       projectId: string
