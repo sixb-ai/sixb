@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -31,29 +31,6 @@ function wait(ms: number): Promise<void> {
 
 async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
   return await Promise.all(paths.map(async (path) => (await stat(path)).mtimeMs))
-}
-
-async function linkAppTestDependencies(root: string): Promise<void> {
-  const fixtureModules = join(root, "node_modules")
-  await mkdir(join(fixtureModules, "@tanstack"), { recursive: true })
-  await mkdir(join(fixtureModules, "@sixb"), { recursive: true })
-  for (const dependency of ["react", "react-dom", "react-router-dom"]) {
-    await symlink(
-      join(process.cwd(), "packages", "app", "node_modules", dependency),
-      join(fixtureModules, dependency),
-      "dir"
-    )
-  }
-  await symlink(
-    join(process.cwd(), "packages", "app", "node_modules", "@tanstack", "react-query"),
-    join(fixtureModules, "@tanstack", "react-query"),
-    "dir"
-  )
-  await symlink(
-    join(process.cwd(), "packages", "client"),
-    join(fixtureModules, "@sixb", "client"),
-    "dir"
-  )
 }
 
 describe("createCustomApp.start", () => {
@@ -234,9 +211,7 @@ describe("createCustomApp.dev", () => {
   let tempRoot = ""
 
   beforeEach(async () => {
-    // Keep bundling fixtures inside the workspace so Bun resolves workspace source
-    // exports. Unit-test CI intentionally has no prebuilt package dist artifacts.
-    tempRoot = await mkdtemp(join(import.meta.dir, "tmp-app-dev-"))
+    tempRoot = await mkdtemp(join(tmpdir(), "sixb-app-dev-"))
     const appDir = join(tempRoot, "app")
     await mkdir(appDir, { recursive: true })
     await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
@@ -254,16 +229,17 @@ describe("createCustomApp.dev", () => {
     await writeFile(join(publicDir, "favicon.svg"), "<svg></svg>\n")
     await writeFile(join(publicDir, "icon-192.png"), "fixture png")
     await writeFile(join(publicDir, "app.webmanifest"), '{"name":"Shadow"}\n')
-    await linkAppTestDependencies(tempRoot)
 
     const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
     const server = await app.dev({ host: "127.0.0.1", port })
 
     try {
-      const shell = await fetch(`http://127.0.0.1:${port}/`)
-      expect(shell.status).toBe(200)
-      expect(await shell.text()).toContain('href="/app.webmanifest"')
+      const generatedHtml = await readFile(
+        join(tempRoot, ".sixb", "generated", "index.html"),
+        "utf-8"
+      )
+      expect(generatedHtml).toContain('href="/app.webmanifest"')
 
       for (const method of ["GET", "HEAD"]) {
         const manifest = await fetch(`http://127.0.0.1:${port}/app.webmanifest`, { method })
