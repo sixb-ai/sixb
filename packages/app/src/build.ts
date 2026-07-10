@@ -1,9 +1,13 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { basename, dirname, join } from "node:path"
+
+const STATIC_ASSET_ORIGIN = "https://sixb-static.invalid"
 
 export interface BuildAppOptions {
   /** Path to the generated index.html entry point */
   entryPath: string
+  /** Generated manifest copied to the stable `/app.webmanifest` output path. */
+  manifestPath?: string
   /** Output directory, defaults to `.sixb/dist/app` */
   outdir?: string
 }
@@ -25,15 +29,21 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
   await rm(outdir, { recursive: true, force: true })
   await mkdir(outdir, { recursive: true })
 
-  const result = await Bun.build({
-    entrypoints: [options.entryPath],
-    outdir,
-    target: "browser",
-    conditions: ["bun"],
-    publicPath: "/",
-    minify: true,
-    sourcemap: "external",
-  })
+  const bundleEntryPath = await prepareAppHtmlBundleEntry(options.entryPath)
+  let result: Awaited<ReturnType<typeof Bun.build>>
+  try {
+    result = await Bun.build({
+      entrypoints: [bundleEntryPath],
+      outdir,
+      target: "browser",
+      conditions: ["bun"],
+      publicPath: "/",
+      minify: true,
+      sourcemap: "external",
+    })
+  } finally {
+    await rm(bundleEntryPath, { force: true })
+  }
 
   if (!result.success) {
     return {
@@ -43,14 +53,38 @@ export async function buildApp(options: BuildAppOptions): Promise<BuildAppResult
     }
   }
 
+  const bundleHtmlPath = join(outdir, basename(bundleEntryPath))
+  await rename(bundleHtmlPath, join(outdir, "index.html"))
   await rewriteIndexAssetPaths(outdir)
+  if (options.manifestPath) {
+    await copyFile(options.manifestPath, join(outdir, "app.webmanifest"))
+  }
 
   return { success: true, outdir }
 }
 
+// Bun's HTML bundler currently tries to resolve root-relative link assets from
+// the filesystem root. A temporary external origin keeps these stable URLs out
+// of the asset graph; dev responses and production output restore the originals.
+export async function prepareAppHtmlBundleEntry(entryPath: string): Promise<string> {
+  const html = await readFile(entryPath, "utf-8")
+  const bundleHtml = html.replace(
+    /(<link\s+rel=["'](?:manifest|icon|apple-touch-icon)["']\s+href=["'])(\/[^"']*)(["'][^>]*>)/g,
+    `$1${STATIC_ASSET_ORIGIN}$2$3`
+  )
+  const bundleEntryPath = join(dirname(entryPath), "index.sixb-bundle.html")
+  await writeFile(bundleEntryPath, bundleHtml, "utf-8")
+  return bundleEntryPath
+}
+
+export function restoreAppStaticUrls(html: string): string {
+  return html.replaceAll(STATIC_ASSET_ORIGIN, "")
+}
+
 async function rewriteIndexAssetPaths(outdir: string): Promise<void> {
   const indexPath = join(outdir, "index.html")
-  const html = await readFile(indexPath, "utf-8")
+  const originalHtml = await readFile(indexPath, "utf-8")
+  const html = restoreAppStaticUrls(originalHtml)
 
   const rewritten = html.replace(
     /(href|src)=(["'])((?!\/|#|[a-zA-Z][a-zA-Z\d+.-]*:)(?:\.\/)?[^"'?#]+(?:[?#][^"']*)?)\2/g,
@@ -60,7 +94,7 @@ async function rewriteIndexAssetPaths(outdir: string): Promise<void> {
     }
   )
 
-  if (rewritten !== html) {
+  if (rewritten !== originalHtml) {
     await writeFile(indexPath, rewritten, "utf-8")
   }
 }

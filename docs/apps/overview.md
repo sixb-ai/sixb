@@ -127,7 +127,10 @@ modified clicks (new tab, etc.) fall through to native navigation.
 ## Layout and metadata
 
 `app/layout.tsx` is optional. Its `default` export wraps every route, and its
-named `metadata` export sets the document title, description, and favicon.
+named `metadata` export sets the static document and install identity. sixb loads
+it during app generation, before browser or auth startup, so `layout.tsx` must be
+import-safe in Bun. Keep metadata declarative and do not access `window` or
+`document` at module scope.
 
 ```tsx
 import type { AppMetadata } from "@sixb/app"
@@ -137,6 +140,8 @@ export const metadata = {
   title: "Acme Operations",
   description: "Customers, projects, and invoices for Acme operations.",
   favicon: "/logo.svg",
+  themeColor: "#172018",
+  backgroundColor: "#f5f6f2",
 } satisfies AppMetadata
 
 export default function RootLayout({ children }: PropsWithChildren) {
@@ -148,9 +153,53 @@ export default function RootLayout({ children }: PropsWithChildren) {
 
 | Field | Type | Purpose |
 | --- | --- | --- |
-| `title` | `string` | Document `<title>` |
+| `title` | `string` | Document `<title>` and manifest name |
 | `description` | `string` | `<meta name="description">` |
 | `favicon` | `string` | `<link rel="icon" href>` (e.g. a `public/` path) |
+| `themeColor` | `string` | Browser chrome and manifest theme color |
+| `backgroundColor` | `string` | Manifest launch background color |
+
+The title defaults to `Sixb`. The theme defaults to the background color, then
+white; the background defaults to the resolved theme. If no favicon is configured,
+`app/public/favicon.svg` is discovered automatically.
+
+## PWA assets and standalone layout
+
+Every custom app gets a generated manifest at `/app.webmanifest` with root scope
+and `standalone` display. Add these conventional files under `app/public/` for
+reliable installation:
+
+| File | Use |
+| --- | --- |
+| `favicon.svg` | Browser favicon and best-effort manifest fallback |
+| `icon-192.png` | Standard 192x192 install icon |
+| `icon-512.png` | Standard 512x512 install icon |
+| `icon-maskable-512.png` | 512x512 Android adaptive icon; keep artwork in the 80% safe zone |
+| `apple-touch-icon.png` | 180x180 opaque iOS Home Screen icon |
+
+`/app.webmanifest` is framework-owned, so a same-named file in `app/public/` is
+ignored. Sixb emits `viewport-fit=cover`, dynamic viewport-height support, and
+disables root overscroll only when the app is running standalone. It does not add
+global safe-area padding because that would break full-bleed and fixed layouts.
+
+App-owned shells should protect important content themselves:
+
+```css
+.app-shell {
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+```
+
+`max()` preserves normal spacing on devices without an inset. Keep full-bleed
+backgrounds on an outer element and pad its content container. Fixed bottom
+navigation should include `env(safe-area-inset-bottom)` in its own padding.
+
+This PWA foundation does not add a service worker or cache API/authenticated data.
+Hosting outside `createCustomApp().start()` should serve `/app.webmanifest` as
+`application/manifest+json` with revalidation rather than immutable caching.
 
 ## Styles and theming
 

@@ -28,11 +28,11 @@ app/
 Two functions generate the entry point files into `.sixb/generated/`:
 
 - **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with a static import for each scanned page. Routes are eager on purpose: project apps bundle small, and a single bundle means no loading gap when navigating between pages.
-- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell) and `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK).
+- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell), `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK), and `app.webmanifest`.
 
 The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
 
-If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`) that is applied to the document at runtime. An `app/globals.css` file is imported automatically when present.
+If `app/layout.tsx` exists, it is used as a root layout wrapper. It can also export a `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata is loaded during generation and written into the static HTML and manifest, so it is available before auth and client startup. The layout module must therefore be import-safe in Bun: do not access `window` or `document` at module scope. An `app/globals.css` file is imported automatically when present.
 
 ### Built-in Agent Routes
 
@@ -67,7 +67,7 @@ Tailwind's source detection is scoped to `app/`, and the CLI is resolved from th
 
 ### 3. Build
 
-`buildApp(options)` runs `Bun.build()` on the generated HTML entry point to produce a minified, browser-targeted bundle with external source maps in `.sixb/dist/app/`. The output directory is build-owned and cleared before each build so stale hashed chunks don't accumulate.
+`buildApp(options)` runs `Bun.build()` on the generated HTML entry point to produce a minified, browser-targeted bundle with external source maps in `.sixb/dist/app/`. Pass the generated `manifestPath` to copy the framework manifest to the stable output URL. The output directory is build-owned and cleared before each build so stale hashed chunks don't accumulate.
 
 ### 4. Start
 
@@ -106,8 +106,8 @@ const generatedDir = "./.sixb/generated"
 
 const routes = await scanPages(appDir)
 await generateRouteManifest(routes, generatedDir)
-const { htmlPath } = await generateAppEntry(".", generatedDir, { appDir })
-await buildApp({ entryPath: htmlPath })
+const { htmlPath, manifestPath } = await generateAppEntry(".", generatedDir, { appDir })
+await buildApp({ entryPath: htmlPath, manifestPath })
 ```
 
 ## Public Assets
@@ -118,6 +118,18 @@ Static files in `app/public/` are served at root-relative paths:
 - `app/public/models/macbook.glb` serves at `/models/macbook.glb`
 
 In dev mode the Bun server serves them directly; in production they are copied into `.sixb/dist/app/`.
+
+Custom apps are PWAs by default. Sixb owns `/app.webmanifest`, emits `display: "standalone"`, and recognizes these optional files in `app/public/`:
+
+| File | Purpose |
+| --- | --- |
+| `favicon.svg` | Browser favicon and manifest fallback |
+| `icon-192.png` | 192x192 install icon |
+| `icon-512.png` | 512x512 install icon |
+| `icon-maskable-512.png` | 512x512 adaptive icon with artwork in the 80% safe zone |
+| `apple-touch-icon.png` | 180x180 opaque iOS Home Screen icon |
+
+A file at `app/public/app.webmanifest` is ignored because the generated manifest is framework-owned. The manifest is served with `no-cache`; fixed-name public icons are not given immutable caching. In standalone mode Sixb suppresses root overscroll without hiding overflow or preventing normal document scrolling.
 
 ## Exports
 

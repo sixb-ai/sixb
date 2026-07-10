@@ -3,7 +3,12 @@ import { access, cp, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { AuthSessionAudience } from "@sixb/core"
-import { type BuildAppResult, buildApp } from "./build"
+import {
+  type BuildAppResult,
+  buildApp,
+  prepareAppHtmlBundleEntry,
+  restoreAppStaticUrls,
+} from "./build"
 import { type BuiltInRouteManifestEntry, generateAppEntry, generateRouteManifest } from "./codegen"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, scanPages } from "./scanner"
@@ -60,6 +65,8 @@ const packageRoot = resolve(import.meta.dir, "..")
 const builtInAgentRouteModule = "@sixb/app/agents"
 const builtInAgentRoutePaths = ["/agents", "/agents/new/:agentId", "/agents/:threadId"] as const
 const builtInAgentRouteSourcePath = join(packageRoot, "src", "agents.ts")
+const customAppManifestRoute = "/app.webmanifest"
+const internalAppShellRoute = "/__sixb/generated/app-shell"
 
 export async function createCustomApp(options: CreateCustomAppOptions): Promise<CustomAppInstance> {
   const rootDir = resolve(options.rootDir)
@@ -205,7 +212,11 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     return outputPath
   }
 
-  async function prepareGeneratedApp(): Promise<{ htmlPath: string; routes: PageRoute[] }> {
+  async function prepareGeneratedApp(): Promise<{
+    htmlPath: string
+    manifestPath: string
+    routes: PageRoute[]
+  }> {
     const routes = await scanRoutes()
     if (routes.length === 0) {
       throw new Error(`[SixbCustomApp] No app routes found in ${appDir}`)
@@ -214,15 +225,16 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     const builtInRoutes = agentRoutesEnabled ? builtInAgentRoutesFor(routes) : []
     const stylesheets = await prepareStylesheets(builtInRoutes)
     await generateRouteManifest(routes, generatedDir, { builtInRoutes })
-    const { htmlPath } = await generateAppEntry(rootDir, generatedDir, {
+    const { htmlPath, manifestPath } = await generateAppEntry(rootDir, generatedDir, {
       apiBaseUrl,
       audience,
       authEnabled,
       appDir,
+      publicDir,
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
     })
-    return { htmlPath, routes }
+    return { htmlPath, manifestPath, routes }
   }
 
   return {
@@ -238,7 +250,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
-      const { htmlPath } = await prepareGeneratedApp()
+      const { htmlPath, manifestPath } = await prepareGeneratedApp()
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
       const publicRoutes = (await pathExists(publicDir)) ? await createPublicRoutes(publicDir) : {}
@@ -250,8 +262,10 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           routes: {
             ...publicRoutes,
             ...reservedSixbRoutes(),
-            "/": htmlBundleRoute(bundle),
-            "/*": htmlBundleRoute(bundle),
+            [customAppManifestRoute]: manifestRoute(manifestPath),
+            [internalAppShellRoute]: htmlBundleRoute(bundle),
+            "/": spaHtmlRoute(),
+            "/*": spaHtmlRoute(),
           },
         }) as Parameters<typeof Bun.serve>[0]
       const server = Bun.serve(serveOptions(htmlBundle))
@@ -311,9 +325,10 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
     async build(buildOptions: CustomAppBuildOptions = {}) {
       const outdir = resolve(rootDir, buildOptions.outdir ?? join(".sixb", "dist", "app"))
-      const { htmlPath } = await prepareGeneratedApp()
+      const { htmlPath, manifestPath } = await prepareGeneratedApp()
       const result = await buildApp({
         entryPath: htmlPath,
+        manifestPath,
         outdir,
       })
 
@@ -321,6 +336,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         await cp(publicDir, outdir, {
           recursive: true,
           force: true,
+          filter: (source) => resolve(source) !== join(publicDir, "app.webmanifest"),
         })
       }
 
@@ -367,7 +383,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
-            return fileResponse(req, directFile, immutableAssetHeaders(url.pathname))
+            return fileResponse(req, directFile, staticAssetHeaders(url.pathname))
           }
 
           if (isAssetRequest(url.pathname)) {
@@ -458,7 +474,7 @@ async function createPublicRoutes(publicDir: string): Promise<BunServeRoutes> {
       .slice(publicDir.length + 1)
       .split("\\")
       .join("/")}`
-    if (isReservedSixbRoute(routePath)) {
+    if (isReservedSixbRoute(routePath) || routePath === customAppManifestRoute) {
       continue
     }
     routes[routePath] = getHeadRoute((request) => filePathResponse(request, filePath))
@@ -610,7 +626,14 @@ function htmlResponse(request: Request, html: string): Response {
 // from `public/` keep their names across deploys and stay uncached.
 const IMMUTABLE_ASSET_PATTERN = /^chunk-[a-z0-9]+\.(js|css|js\.map|css\.map)$/
 
-function immutableAssetHeaders(pathname: string): Record<string, string> {
+function staticAssetHeaders(pathname: string): Record<string, string> {
+  if (pathname === customAppManifestRoute) {
+    return {
+      "content-type": "application/manifest+json; charset=utf-8",
+      "cache-control": "no-cache",
+    }
+  }
+
   const lastSegment = pathname.split("/").pop() ?? ""
   if (!IMMUTABLE_ASSET_PATTERN.test(lastSegment)) {
     return {}
@@ -640,7 +663,7 @@ function notFoundResponse(): Response {
   })
 }
 
-function getHeadRoute(handler: (request: Request) => Response): BunServeRoute {
+function getHeadRoute(handler: (request: Request) => Response | Promise<Response>): BunServeRoute {
   return {
     GET: handler,
     HEAD: handler,
@@ -660,7 +683,8 @@ function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute
 }
 
 async function importHtmlBundle(htmlPath: string, version: number): Promise<Bun.HTMLBundle> {
-  const url = pathToFileURL(htmlPath)
+  const bundleEntryPath = await prepareAppHtmlBundleEntry(htmlPath)
+  const url = pathToFileURL(bundleEntryPath)
   url.searchParams.set("v", String(version))
   const htmlModule = (await import(url.href)) as { default: Bun.HTMLBundle }
   return htmlModule.default
@@ -671,4 +695,40 @@ function htmlBundleRoute(bundle: Bun.HTMLBundle): BunServeRoute {
     GET: bundle,
     HEAD: bundle,
   } as unknown as BunServeRoute
+}
+
+function manifestRoute(manifestPath: string): BunServeRoute {
+  return getHeadRoute((request) =>
+    fileResponse(request, Bun.file(manifestPath), staticAssetHeaders(customAppManifestRoute))
+  )
+}
+
+function spaHtmlRoute(): BunServeRoute {
+  return getHeadRoute(async (request) => {
+    const url = new URL(request.url)
+    if (url.pathname !== "/" && isAssetRequest(url.pathname)) {
+      return notFoundResponse()
+    }
+
+    url.pathname = internalAppShellRoute
+    const bundleResponse = await fetch(
+      new Request(url, { method: request.method, headers: request.headers })
+    )
+    const headers = new Headers(bundleResponse.headers)
+    headers.delete("content-length")
+    headers.delete("etag")
+    if (request.method === "HEAD") {
+      return new Response(null, {
+        status: bundleResponse.status,
+        statusText: bundleResponse.statusText,
+        headers,
+      })
+    }
+
+    return new Response(restoreAppStaticUrls(await bundleResponse.text()), {
+      status: bundleResponse.status,
+      statusText: bundleResponse.statusText,
+      headers,
+    })
+  })
 }
