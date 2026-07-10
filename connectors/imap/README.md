@@ -26,11 +26,19 @@ const client = await sixb.connector(mail)
 
 await client.withMailbox("INBOX", async (mailbox) => {
   const state = mailbox.state()
-  const messages = await mailbox.listMessages({ afterUid: lastUid, limit: 100 })
+  const messages = await mailbox.listMessages({
+    afterUid: lastUid,
+    limit: 100,
+    headers: ["auto-submitted", "list-id", "list-unsubscribe"],
+  })
 
-  console.log(state.uidValidity, messages.length)
+  console.log(state.uidValidity, messages[0]?.headers["list-id"])
 })
 ```
+
+Requested header names are validated and deduplicated case-insensitively. Returned keys are
+lowercase and repeated fields remain separate values. Header interpretation belongs to the
+consumer; the connector only transports the requested metadata.
 
 All mailbox sessions use IMAP `EXAMINE`; the client does not expose any write or flag mutation
 method. Consume a stream returned by `downloadPart()` before the `withMailbox()` callback ends.

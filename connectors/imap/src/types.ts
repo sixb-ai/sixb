@@ -85,9 +85,13 @@ export interface ImapMessageSummary {
   readonly internalDate: Date | null
   readonly size: number | null
   readonly envelope: ImapEnvelope | null
+  /** Requested header values, keyed by lowercase field name. Missing headers are omitted. */
+  readonly headers: ImapHeaders
   readonly references: readonly string[]
   readonly bodyStructure: ImapBodyPart | null
 }
+
+export type ImapHeaders = Readonly<Record<string, readonly string[] | undefined>>
 
 export interface ImapListMessagesInput {
   /** Exclusive UID checkpoint. Omit to start from the first message. */
@@ -96,6 +100,8 @@ export interface ImapListMessagesInput {
   readonly since?: Date
   /** Maximum page size, from 1 to 1000. */
   readonly limit: number
+  /** Optional RFC 5322 header fields to fetch. Names are deduplicated case-insensitively. */
+  readonly headers?: readonly string[]
 }
 
 export interface ImapDownloadInput {

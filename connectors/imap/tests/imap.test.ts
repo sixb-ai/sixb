@@ -172,6 +172,7 @@ describe("imap connector", () => {
     expect(messages[0]).toMatchObject({
       internalDate: new Date("2026-07-10T08:00:00.000Z"),
       size: 1_024,
+      headers: {},
       references: ["<root@example.com>", "<parent@example.com>"],
       envelope: {
         subject: "Project update",
@@ -192,6 +193,46 @@ describe("imap connector", () => {
     })
   })
 
+  test("fetches requested headers and preserves repeated unfolded values", async () => {
+    const fixture = clientFixture()
+    fixture.configure = (transport) => {
+      transport.searchResult = [11]
+      transport.messages = [
+        {
+          ...message(11),
+          headers: Buffer.from(
+            [
+              "References: <root@example.com>",
+              "List-Id: first.example.com",
+              "List-ID: second.example.com",
+              "Auto-Submitted: auto-generated;",
+              "\towner-email=robot@example.com",
+              "",
+            ].join("\r\n")
+          ),
+        },
+      ]
+    }
+
+    const messages = await fixture.client.withMailbox("INBOX", (mailbox) =>
+      mailbox.listMessages({
+        limit: 1,
+        headers: ["List-Id", "list-id", "AUTO-SUBMITTED"],
+      })
+    )
+
+    expect(fixture.transports[0]?.fetchQuery?.headers).toEqual([
+      "references",
+      "list-id",
+      "auto-submitted",
+    ])
+    expect(messages[0]?.headers).toEqual({
+      "list-id": ["first.example.com", "second.example.com"],
+      "auto-submitted": ["auto-generated; owner-email=robot@example.com"],
+    })
+    expect(messages[0]?.references).toEqual(["<root@example.com>"])
+  })
+
   test("validates page inputs before issuing a search", async () => {
     const fixture = clientFixture()
 
@@ -201,6 +242,26 @@ describe("imap connector", () => {
       )
     ).rejects.toThrow("Message page limit must be between 1 and 1000")
     expect(fixture.transports[0]?.searchQuery).toBeUndefined()
+  })
+
+  test("rejects invalid or excessive requested header names before searching", async () => {
+    const fixture = clientFixture()
+
+    await expect(
+      fixture.client.withMailbox("INBOX", (mailbox) =>
+        mailbox.listMessages({ limit: 1, headers: ["List-Id: injected"] })
+      )
+    ).rejects.toThrow("valid RFC 5322 field names")
+    expect(fixture.transports[0]?.searchQuery).toBeUndefined()
+
+    await expect(
+      fixture.client.withMailbox("INBOX", (mailbox) =>
+        mailbox.listMessages({
+          limit: 1,
+          headers: Array.from({ length: 65 }, (_, index) => `X-Test-${index}`),
+        })
+      )
+    ).rejects.toThrow("No more than 64 message headers")
   })
 
   test("streams a MIME part within the byte limit", async () => {

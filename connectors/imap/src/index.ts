@@ -13,6 +13,7 @@ export type {
   ImapDownloadedPart,
   ImapDownloadInput,
   ImapEnvelope,
+  ImapHeaders,
   ImapListMessagesInput,
   ImapMailboxInfo,
   ImapMailboxSession,

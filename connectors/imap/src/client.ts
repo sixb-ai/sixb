@@ -29,6 +29,7 @@ import type {
   ImapDownloadedPart,
   ImapDownloadInput,
   ImapEnvelope,
+  ImapHeaders,
   ImapListMessagesInput,
   ImapMailboxInfo,
   ImapMailboxSession,
@@ -40,7 +41,10 @@ import type {
 const DEFAULT_CONNECT_TIMEOUT_MS = 30_000
 const DEFAULT_SOCKET_TIMEOUT_MS = 300_000
 const MAX_PAGE_SIZE = 1_000
+const MAX_REQUESTED_HEADERS = 64
+const MAX_HEADER_NAME_LENGTH = 128
 const MAX_UID = 0xffff_ffff
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
 
 export interface ImapTransport {
   usable: boolean
@@ -262,7 +266,8 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
 
   async listMessages(input: ImapListMessagesInput): Promise<readonly ImapMessageSummary[]> {
     this.assertActive()
-    validateListInput(input)
+    const requestedHeaders = validateListInput(input)
+    const fetchHeaders = [...new Set(["references", ...requestedHeaders])]
 
     const startUid = (input.afterUid ?? 0) + 1
     const search: SearchObject = {
@@ -294,12 +299,14 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
           internalDate: true,
           size: true,
           bodyStructure: true,
-          headers: ["references"],
+          headers: fetchHeaders,
         },
         { uid: true }
       )
       this.assertActive()
-      return messages.map(normalizeMessage).sort((left, right) => left.uid - right.uid)
+      return messages
+        .map((message) => normalizeMessage(message, requestedHeaders))
+        .sort((left, right) => left.uid - right.uid)
     } catch (error) {
       throw imapOperationError("Message listing", error, [this.password])
     }
@@ -415,14 +422,19 @@ function normalizeMailboxInfo(mailbox: ListResponse): ImapMailboxInfo {
   }
 }
 
-function normalizeMessage(message: FetchMessageObject): ImapMessageSummary {
+function normalizeMessage(
+  message: FetchMessageObject,
+  requestedHeaders: readonly string[]
+): ImapMessageSummary {
+  const parsedHeaders = parseHeaders(message.headers)
   return {
     seq: message.seq,
     uid: message.uid,
     internalDate: normalizeDate(message.internalDate),
     size: message.size ?? null,
     envelope: message.envelope ? normalizeEnvelope(message.envelope) : null,
-    references: parseReferences(message.headers),
+    headers: selectHeaders(parsedHeaders, requestedHeaders),
+    references: parseReferences(parsedHeaders),
     bodyStructure: message.bodyStructure ? normalizeBodyPart(message.bodyStructure) : null,
   }
 }
@@ -476,21 +488,48 @@ function normalizeOptionalString(value: string | undefined): string | null {
   return normalized ? normalized : null
 }
 
-function parseReferences(headers: Buffer | undefined): readonly string[] {
+function parseHeaders(headers: Buffer | undefined): ImapHeaders {
+  const result = new Map<string, string[]>()
   if (!headers?.length) {
-    return []
+    return Object.fromEntries(result)
   }
 
   const unfolded = headers.toString("utf8").replaceAll(/\r?\n[\t ]+/g, " ")
-  const references: string[] = []
 
   for (const line of unfolded.split(/\r?\n/)) {
-    const match = /^references\s*:\s*(.+)$/i.exec(line)
-    if (!match?.[1]) {
+    const separator = line.indexOf(":")
+    if (separator < 1) {
       continue
     }
+    const name = line.slice(0, separator).trim().toLowerCase()
+    if (!HEADER_NAME_PATTERN.test(name)) {
+      continue
+    }
+    const value = line.slice(separator + 1).trim()
+    const values = result.get(name)
+    if (values) {
+      values.push(value)
+    } else {
+      result.set(name, [value])
+    }
+  }
 
-    const value = match[1]
+  return Object.fromEntries(result)
+}
+
+function selectHeaders(headers: ImapHeaders, requestedHeaders: readonly string[]): ImapHeaders {
+  return Object.fromEntries(
+    requestedHeaders.flatMap((name) => {
+      const values = headers[name]
+      return values ? [[name, values] as const] : []
+    })
+  )
+}
+
+function parseReferences(headers: ImapHeaders): readonly string[] {
+  const references: string[] = []
+
+  for (const value of headers.references ?? []) {
     const messageIds = value.match(/<[^<>]+>/g) ?? value.split(/\s+/).filter(Boolean)
     references.push(...messageIds)
   }
@@ -498,7 +537,7 @@ function parseReferences(headers: Buffer | undefined): readonly string[] {
   return [...new Set(references)]
 }
 
-function validateListInput(input: ImapListMessagesInput): void {
+function validateListInput(input: ImapListMessagesInput): readonly string[] {
   if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > MAX_PAGE_SIZE) {
     throw new ImapConnectorError(`Message page limit must be between 1 and ${MAX_PAGE_SIZE}.`)
   }
@@ -511,6 +550,35 @@ function validateListInput(input: ImapListMessagesInput): void {
   if (input.since && Number.isNaN(input.since.getTime())) {
     throw new ImapConnectorError("since must be a valid Date.")
   }
+  return normalizeRequestedHeaders(input.headers)
+}
+
+function normalizeRequestedHeaders(headers: readonly string[] | undefined): readonly string[] {
+  if (!headers) {
+    return []
+  }
+  if (headers.length > MAX_REQUESTED_HEADERS) {
+    throw new ImapConnectorError(
+      `No more than ${MAX_REQUESTED_HEADERS} message headers may be requested.`
+    )
+  }
+
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const header of headers) {
+    if (typeof header !== "string") {
+      throw new ImapConnectorError("Message header names must be strings.")
+    }
+    const name = header.trim().toLowerCase()
+    if (!name || name.length > MAX_HEADER_NAME_LENGTH || !HEADER_NAME_PATTERN.test(name)) {
+      throw new ImapConnectorError("Message header names must be valid RFC 5322 field names.")
+    }
+    if (!seen.has(name)) {
+      normalized.push(name)
+      seen.add(name)
+    }
+  }
+  return normalized
 }
 
 function validateDownloadInput(input: ImapDownloadInput): void {
