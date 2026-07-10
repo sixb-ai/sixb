@@ -189,42 +189,43 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
   } catch (error) {
     drainError = error
-  } finally {
-    clearTimeout(timeoutTimer)
   }
 
-  try {
+  const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
     if (leaseLost) {
       throw new AgentLeaseLostError(runId)
     }
-    // Sandbox provisioning failed (and likely aborted the stream above): surface the real cause ahead
-    // of the abort-shaped `drainError` it produced, so the run is recorded `failed` with that reason.
+    // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
     if (provisionError !== undefined) {
       throw provisionError
     }
-    // A timeout aborts the stream, surfacing as `drainError`; check our flag first so a timed-out turn
-    // throws the typed (non-abort) error and is recorded `failed` rather than treated as a shutdown.
     if (timedOut) {
       throw new AgentTurnTimeoutError(runId, turnTimeoutMs)
     }
+    if (!streamAborted && !abortSignal.aborted && (error === undefined || !isAbortError(error))) {
+      return null
+    }
+    return finalizeCancelledTurn({
+      storage,
+      agents,
+      context,
+      run,
+      leaseId,
+      leaseMs,
+      projectId,
+      modelId: agent.model.modelId,
+      partial: responseMessage,
+    })
+  }
+
+  try {
     // A user cancel (or worker shutdown) aborts the stream, which the SDK ends gracefully — so we reach
     // here with no drain error, only the `isAborted`/signal flags. Persist whatever streamed so far as a
     // `cancelled` turn — the agent's tool calls and partial text — so the next (steering) turn keeps the
     // context of what it was doing, instead of throwing the whole response away.
-    const wasAborted =
-      streamAborted || abortSignal.aborted || (drainError !== undefined && isAbortError(drainError))
-    if (wasAborted) {
-      return await finalizeCancelledTurn({
-        storage,
-        agents,
-        context,
-        run,
-        leaseId,
-        leaseMs,
-        projectId,
-        modelId: agent.model.modelId,
-        partial: responseMessage,
-      })
+    const interruptedAfterStream = await finalizeIfInterrupted(drainError)
+    if (interruptedAfterStream) {
+      return interruptedAfterStream
     }
     if (drainError !== undefined) {
       throw drainError
@@ -238,12 +239,29 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       finishReason,
       maxSteps,
     })
-    const outputAttachments = await collectAgentOutputAttachments({
-      sandboxReady: context.sandboxReady,
-      sandboxWasUsed: context.sandboxWasUsed,
-      blobStorage: context.blobStorage,
-      runId,
-    })
+    let outputAttachments: AgentOutputAttachmentResult
+    try {
+      outputAttachments = await collectAgentOutputAttachments({
+        sandboxReady: context.sandboxReady,
+        sandboxWasUsed: context.sandboxWasUsed,
+        blobStorage: context.blobStorage,
+        signal: abortSignal,
+      })
+    } catch (error) {
+      const interruptedDuringCollection = await finalizeIfInterrupted(error)
+      if (interruptedDuringCollection) {
+        return interruptedDuringCollection
+      }
+      throw error
+    }
+
+    // Cancellation, timeout, or lease loss may happen after the model stream drained while output
+    // files are being collected. Re-check all terminal signals before the fenced write so an abort
+    // can never be finalized as success.
+    const interruptedAfterCollection = await finalizeIfInterrupted()
+    if (interruptedAfterCollection) {
+      return interruptedAfterCollection
+    }
     const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
 
     // One last renew right before we write: a successful renew proves we still hold the lease, and it
@@ -252,6 +270,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     const usage = mapUsage(await result.usage)
     const assistantMessageId = createAgentMessageId()
+
+    // Keep the final signal check adjacent to the transaction. Collection, lease renewal, or usage
+    // resolution can each yield long enough for a cancellation to arrive.
+    const interruptedBeforeCommit = await finalizeIfInterrupted()
+    if (interruptedBeforeCommit) {
+      return interruptedBeforeCommit
+    }
 
     // The assistant append and run finish share one transaction, so redelivery cannot observe a
     // finalized message without the terminal run state that releases the thread. Transient blips are
@@ -277,6 +302,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         modelId: agent.model.modelId,
         finishReason,
         ...(usage === undefined ? {} : { usage }),
+        ...(outputAttachments.diagnostics.length === 0
+          ? {}
+          : { diagnostics: outputAttachments.diagnostics }),
       },
     })
 
@@ -288,6 +316,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     return finalizedRun
   } finally {
+    clearTimeout(timeoutTimer)
     heartbeat.stop()
   }
 }
@@ -298,29 +327,11 @@ function assistantPartsWithOutputAttachments(
 ): AgentMessagePart[] {
   return [
     ...parts,
-    ...(output.notes.length === 0
-      ? []
-      : [
-          {
-            type: "text" as const,
-            text: generatedFileNotesText(output.notes),
-          },
-        ]),
     ...output.attachments.map((attachment) => ({
       type: "file" as const,
       fileRef: attachment.fileRef,
     })),
   ]
-}
-
-function generatedFileNotesText(notes: readonly string[]): string {
-  const visible = notes.slice(0, 3)
-  const remaining = notes.length - visible.length
-  return [
-    "\n\nNote: Some generated files were not attached.",
-    ...visible.map((note) => `- ${note}`),
-    ...(remaining > 0 ? [`- ${remaining} more generated file note(s).`] : []),
-  ].join("\n")
 }
 
 function ensureVisibleAssistantMessage(

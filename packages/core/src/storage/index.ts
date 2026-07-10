@@ -45,6 +45,9 @@ export type {
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,
+  AgentRunDiagnostic,
+  AgentRunDiagnosticCode,
+  AgentRunDiagnosticSeverity,
   AgentRunFinishReason,
   AgentRunLease,
   AgentRunRecord,
@@ -70,6 +73,7 @@ export type {
   ReserveAgentRunInput,
 } from "./agents"
 export {
+  AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FINISH_REASONS,
   AgentStorageError,
   coerceAgentRunFinishReason,

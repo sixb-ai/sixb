@@ -17,6 +17,7 @@ import {
   agentRunStreamId,
   type BlobStorage,
   type Broker,
+  type CommandResult,
   type CreateSandboxOptions,
   createAgentRunId,
   createAgentRunLeaseId,
@@ -48,6 +49,7 @@ import {
   NOOP_STREAM_SINK,
 } from "../src"
 import { normalizeApiBaseUrl } from "../src/api-url"
+import { prepareAgentAttachments } from "../src/attachments"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
@@ -379,6 +381,7 @@ class RecordingSandbox implements Sandbox {
   readonly commands: RecordedCommand[] = []
   readonly writtenFiles: SandboxFileRecord[] = []
   readonly outputFiles = new Map<string, Uint8Array>()
+  readonly outputListedSizeOverrides = new Map<string, number>()
   destroyed = false
 
   constructor(id: string) {
@@ -432,7 +435,10 @@ class RecordingSandbox implements Sandbox {
           .sort(([left], [right]) => left.localeCompare(right))
           .map(
             ([relativePath, bytes]) =>
-              `${bytes.byteLength}\t${Buffer.from(relativePath, "utf-8").toString("base64")}`
+              `${this.outputListedSizeOverrides.get(relativePath) ?? bytes.byteLength}\t${Buffer.from(
+                relativePath,
+                "utf-8"
+              ).toString("base64")}`
           )
           .join("\n"),
         stderr: "",
@@ -475,6 +481,7 @@ class RecordingSandbox implements Sandbox {
           `context=${env.SIXB_RUN_CONTEXT ?? ""}`,
           `attachments=${env.SIXB_ATTACHMENTS ?? ""}`,
           `attachmentDir=${env.SIXB_ATTACHMENT_DIR ?? ""}`,
+          `outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR ?? ""}`,
           `outputDir=${env.SIXB_OUTPUT_DIR ?? ""}`,
           `token=${env.SIXB_ACCESS_TOKEN ?? ""}`,
         ].join("\n"),
@@ -508,6 +515,60 @@ class RecordingSandboxFactory implements SandboxFactory {
     this.createOptions.push(options)
     const sandbox = new RecordingSandbox(`sandbox-${this.sandboxes.length + 1}`)
     this.sandboxes.push(sandbox)
+    return sandbox
+  }
+}
+
+class BlockingOutputCollectionSandbox extends RecordingSandbox {
+  readonly listStarted: Promise<void>
+  private markListStarted!: () => void
+
+  constructor(id: string) {
+    super(id)
+    this.listStarted = new Promise((resolve) => {
+      this.markListStarted = resolve
+    })
+  }
+
+  override async runCommand(
+    command: string,
+    args: readonly string[] = [],
+    options: RunCommandOptions = {}
+  ): Promise<CommandResult> {
+    const script = args.at(-1)
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-list-agent-output-files")
+    ) {
+      this.commands.push({ command, args, options })
+      this.markListStarted()
+      return new Promise((resolve) => {
+        const finish = (): void =>
+          resolve({ exitCode: 137, stdout: "", stderr: "cancelled", durationMs: 1 })
+        if (options.signal?.aborted) {
+          finish()
+        } else {
+          options.signal?.addEventListener("abort", finish, { once: true })
+        }
+      })
+    }
+    return super.runCommand(command, args, options)
+  }
+}
+
+class BlockingOutputCollectionSandboxFactory implements SandboxFactory {
+  readonly sandbox = new BlockingOutputCollectionSandbox("blocking-output-collection")
+
+  async create(): Promise<Sandbox> {
+    return this.sandbox
+  }
+}
+
+class OversizedOutputSandboxFactory extends RecordingSandboxFactory {
+  override async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const sandbox = (await super.create(options)) as RecordingSandbox
+    sandbox.outputListedSizeOverrides.set("report.txt", 25 * 1024 * 1024 + 1)
     return sandbox
   }
 }
@@ -690,6 +751,7 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
       renewLease: (input) => agents.runs.renewLease(input),
       reclaim: (input) => agents.runs.reclaim(input),
       getById: (params) => agents.runs.getById(params),
+      getByIds: (params) => agents.runs.getByIds(params),
       list: (input) => agents.runs.list(input),
       finish: (input) => {
         if (fails < failTimes) {
@@ -727,6 +789,7 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
       renewLease: (input) => agents.runs.renewLease(input),
       reclaim: (input) => agents.runs.reclaim(input),
       getById: (params) => agents.runs.getById(params),
+      getByIds: (params) => agents.runs.getByIds(params),
       list: (input) => agents.runs.list(input),
       finish: () => Promise.reject(new Error("storage down after message generation")),
     },
@@ -1005,7 +1068,7 @@ describe("AgentWorker", () => {
     expect(promptJson).toContain("contentUrl")
   })
 
-  test("inlines supported image attachments when the model advertises image input", async () => {
+  test("inlines supported images only when the Bun runtime provides image processing", async () => {
     let capturedPrompt: unknown
     const model = new MockLanguageModelV4({
       modelId: "mock-model",
@@ -1058,9 +1121,14 @@ describe("AgentWorker", () => {
 
     const promptJson = JSON.stringify(capturedPrompt)
     expect(promptJson).toContain("pixel.png")
-    expect(promptJson).toContain('"type":"file"')
-    expect(promptJson).toContain("image/png")
-    expect(promptJson).toContain("iVBORw0KGgo")
+    if (typeof Bun.Image === "function") {
+      expect(promptJson).toContain('"type":"file"')
+      expect(promptJson).toContain("image/png")
+      expect(promptJson).toContain("iVBORw0KGgo")
+    } else {
+      expect(promptJson).not.toContain('"type":"file"')
+      expect(promptJson).toContain("this Bun runtime does not provide image processing")
+    }
   })
 
   test("keeps image attachments metadata-only when the model does not advertise images", async () => {
@@ -1118,6 +1186,46 @@ describe("AgentWorker", () => {
     expect(promptJson).toContain("does not advertise image input support")
     expect(promptJson).not.toContain('"type":"file"')
     expect(promptJson).not.toContain("iVBORw0KGgo")
+  })
+
+  test("keeps historical assistant files metadata-only and bounds their projection", async () => {
+    const blobStorage = new InMemoryBlobStorage()
+    const fileRef = await blobStorage.put({
+      body: new TextEncoder().encode("sensitive generated contents"),
+      fileName: "generated.txt",
+      mediaType: "text/plain",
+      logicalPath: "reports/generated.txt",
+    })
+    const messages = Array.from({ length: 51 }, (_, index) => ({
+      id: `assistant-${index}`,
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      runId: `run-${index}`,
+      role: "assistant" as const,
+      seq: index + 1,
+      parts: [{ type: "file" as const, fileRef }],
+      contentVersion: 1,
+      createdAt: new Date(2026, 0, 1, 0, 0, index),
+    }))
+
+    const prepared = await prepareAgentAttachments({
+      projectId: PROJECT_ID,
+      threadId: "thread-1",
+      messages,
+      blobStorage,
+      apiBaseUrl: TEST_AGENT_API_BASE_URL,
+      inlineImages: true,
+    })
+
+    expect(prepared.entries).toHaveLength(50)
+    expect(prepared.promptTextByPartKey.has("assistant-0:0")).toBe(false)
+    expect(prepared.promptTextByPartKey.get("assistant-50:0")).toContain(
+      "Generated file kept as metadata"
+    )
+    expect(JSON.stringify([...prepared.promptTextByPartKey.values()])).not.toContain(
+      "sensitive generated contents"
+    )
+    expect(prepared.modelFileDataByPartKey.size).toBe(0)
   })
 
   test("provisions the sandbox concurrently without blocking turn start", async () => {
@@ -1520,7 +1628,7 @@ describe("AgentWorker", () => {
         fileRef: {
           fileName: "report.txt",
           mediaType: "text/plain",
-          logicalPath: `agent-outputs/${run.id}/report.txt`,
+          logicalPath: "report.txt",
         },
       })
       if (!filePart || filePart.type !== "file") {
@@ -1533,6 +1641,88 @@ describe("AgentWorker", () => {
           String(command.args.at(-1)).includes("sixb-list-agent-output-files")
         )
       ).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("finalizes as cancelled when cancellation arrives during output collection", async () => {
+    const sandboxes = new BlockingOutputCollectionSandboxFactory()
+    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({
+        agentId: "assistant",
+        text: "create a report",
+      })
+      await sandboxes.sandbox.listStarted
+
+      await publishAgentRunCancel(sixb.broker, {
+        projectId: PROJECT_ID,
+        runId: request.runId,
+      })
+
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.runId,
+          })
+          return record && record.status !== "running" ? record : null
+        },
+        { label: "cancel during output collection" }
+      )
+      expect(run.status).toBe("cancelled")
+      const messages = await listMessages(storage, request.threadId)
+      const persistedAssistant = messages.find((message) => message.role === "assistant")
+      expect(persistedAssistant?.parts.some((part) => part.type === "file")).toBe(false)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("stores output collection warnings as run diagnostics, not assistant text", async () => {
+    const sandboxes = new OversizedOutputSandboxFactory()
+    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({
+        agentId: "assistant",
+        text: "create a report",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: request.runId,
+          })
+          return record && record.status !== "running" ? record : null
+        },
+        { label: "diagnostic output run terminal" }
+      )
+      expect(run.status).toBe("succeeded")
+      expect(run.diagnostics).toEqual([
+        {
+          code: "output_file_too_large",
+          severity: "warning",
+          scope: "output",
+          path: "report.txt",
+          message: "This generated file exceeds the per-file attachment limit and was skipped.",
+        },
+      ])
+
+      const messages = await listMessages(storage, request.threadId)
+      const assistant = messages.find((message) => message.role === "assistant")
+      expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
+      expect(
+        assistant?.parts.some(
+          (part) => part.type === "text" && part.text.includes("per-file attachment limit")
+        )
+      ).toBe(false)
     } finally {
       await worker.stop()
     }
@@ -1588,7 +1778,8 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_RUN_CONTEXT).toContain("/.sixb/agent/context/run.json")
       expect(env?.SIXB_ATTACHMENTS).toContain("/.sixb/agent/context/attachments.json")
       expect(env?.SIXB_ATTACHMENT_DIR).toContain("/.sixb/agent/attachments")
-      expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs")
+      expect(env?.SIXB_OUTPUT_STAGING_DIR).toContain("/.sixb/agent/outputs/staging")
+      expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs/published")
       expect(env?.SIXB_API_GUIDE).toBeUndefined()
       expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
 
@@ -1675,7 +1866,13 @@ describe("AgentWorker", () => {
         runId,
         apiBaseUrl: env.SIXB_API_BASE_URL,
         outputDir: env.SIXB_OUTPUT_DIR,
+        outputStagingDir: env.SIXB_OUTPUT_STAGING_DIR,
       })
+      if (!env.SIXB_OUTPUT_STAGING_DIR || !env.SIXB_OUTPUT_DIR) {
+        throw new Error("Expected sandbox output publication env.")
+      }
+      expect(sandbox.readFileContents(join(env.SIXB_OUTPUT_STAGING_DIR, ".keep"))).toBe("")
+      expect(sandbox.readFileContents(join(env.SIXB_OUTPUT_DIR, ".keep"))).toBe("")
 
       const messages = await listMessages(storage, threadId)
       const assistant = messages.find((message) => message.role === "assistant")
@@ -1696,6 +1893,7 @@ describe("AgentWorker", () => {
       expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
       expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
       expect(stdout).toContain(`outputDir=${env.SIXB_OUTPUT_DIR}`)
+      expect(stdout).toContain(`outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR}`)
       expect(stdout).toContain("token=")
       expect(stdout).not.toContain("sixb_sat_")
       expect(

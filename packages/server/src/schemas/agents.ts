@@ -1,4 +1,4 @@
-import { AGENT_REASONING_LEVELS } from "@sixb/core"
+import { AGENT_REASONING_LEVELS, AGENT_RUN_DIAGNOSTIC_CODES } from "@sixb/core"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
 import { FileRefSchema } from "./files"
@@ -137,6 +137,14 @@ export const AgentMessagePartSchema = z.union([
   AgentToolCallErrorSchema,
 ])
 
+export const AgentRunDiagnosticSchema = z.object({
+  code: z.enum(AGENT_RUN_DIAGNOSTIC_CODES),
+  severity: z.enum(["warning", "error"]),
+  scope: z.literal("output"),
+  path: z.string().optional(),
+  message: z.string(),
+})
+
 export const AgentMessageSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -146,6 +154,8 @@ export const AgentMessageSchema = z.object({
   authorPrincipal: AgentPrincipalSchema.optional(),
   seq: z.number(),
   parts: z.array(AgentMessagePartSchema),
+  /** Platform-authored annotations associated with this message's run. */
+  annotations: z.array(AgentRunDiagnosticSchema),
   metadata: JsonValueSchema.optional(),
   contentVersion: z.number(),
   createdAt: z.string(),
@@ -220,6 +230,7 @@ export const AgentRunSchema = z.object({
   modelId: z.string().optional(),
   finishReason: AgentRunFinishReasonSchema.optional(),
   usage: AgentRunUsageSchema.optional(),
+  diagnostics: z.array(AgentRunDiagnosticSchema).optional(),
   error: z.string().optional(),
   attempt: z.number(),
   streamId: z.string(),

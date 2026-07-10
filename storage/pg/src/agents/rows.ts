@@ -1,6 +1,7 @@
 import {
   type AgentMessagePart,
   type AgentMessageRecord,
+  type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentRunUsage,
   type AgentThreadRecord,
@@ -47,6 +48,7 @@ export interface AgentRunRow {
   usage_reasoning_tokens: number | string | null
   usage_cached_input_tokens: number | string | null
   error: string | null
+  diagnostics: AgentRunDiagnostic[] | string | null
   attempt: number | string
   lease_id: string | null
   lease_expires_at: Date | string | null
@@ -108,6 +110,7 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
     error: row.error ?? undefined,
+    diagnostics: normalizeDiagnostics(row.diagnostics),
     attempt: Number(row.attempt),
     lease:
       row.lease_id && row.lease_expires_at
@@ -174,6 +177,15 @@ function normalizeMetadata(value: unknown): AgentMessageRecord["metadata"] {
   }
   const parsed = typeof value === "string" ? JSON.parse(value) : value
   return parsed === null ? undefined : (parsed as AgentMessageRecord["metadata"])
+}
+
+function normalizeDiagnostics(
+  value: AgentRunRow["diagnostics"]
+): readonly AgentRunDiagnostic[] | undefined {
+  if (value === null) {
+    return undefined
+  }
+  return typeof value === "string" ? (JSON.parse(value) as AgentRunDiagnostic[]) : value
 }
 
 // ── offset pagination (threads / messages order by their own column, not started_at) ─────────────

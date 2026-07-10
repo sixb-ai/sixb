@@ -95,6 +95,29 @@ export interface AgentRunUsage {
   readonly cachedInputTokens?: number
 }
 
+/** Stable, user-facing diagnostics emitted by the platform while executing a run. */
+export const AGENT_RUN_DIAGNOSTIC_CODES = [
+  "output_file_limit_exceeded",
+  "output_file_too_large",
+  "output_budget_exhausted",
+  "output_collection_failed",
+  "output_file_changed",
+  "output_storage_failed",
+] as const
+
+export type AgentRunDiagnosticCode = (typeof AGENT_RUN_DIAGNOSTIC_CODES)[number]
+export type AgentRunDiagnosticSeverity = "warning" | "error"
+
+export interface AgentRunDiagnostic {
+  readonly code: AgentRunDiagnosticCode
+  readonly severity: AgentRunDiagnosticSeverity
+  readonly scope: "output"
+  /** Relative path inside the run's published output directory, when one file is involved. */
+  readonly path?: string
+  /** Sanitized, stable copy suitable for display to an end user. */
+  readonly message: string
+}
+
 /** A worker's claim on a run: a unique lease id and an expiry the worker keeps renewing. */
 export interface AgentRunLease {
   readonly id: string
@@ -114,6 +137,8 @@ export interface AgentRunRecord {
   /** Why the run ended (our own SDK-independent enum). */
   readonly finishReason?: AgentRunFinishReason
   readonly usage?: AgentRunUsage
+  /** Platform diagnostics are transcript annotations, never agent-authored message content. */
+  readonly diagnostics?: readonly AgentRunDiagnostic[]
   /** Failure message when the run did not succeed. */
   readonly error?: string
   readonly attempt: number
@@ -161,6 +186,7 @@ export type FinishAgentRunInput =
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
       readonly usage?: AgentRunUsage
+      readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly completedAt?: Date
     }
   | {
@@ -171,6 +197,7 @@ export type FinishAgentRunInput =
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
       readonly usage?: AgentRunUsage
+      readonly diagnostics?: readonly AgentRunDiagnostic[]
       readonly error?: string
       readonly completedAt?: Date
     }
@@ -262,6 +289,10 @@ export interface AgentRunStore {
   /** Finalize a run and release the thread's `activeRunId`. */
   finish(input: FinishAgentRunInput): Promise<AgentRunRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentRunRecord | null>
+  getByIds(params: {
+    projectId: string
+    ids: readonly string[]
+  }): Promise<readonly AgentRunRecord[]>
   list(input: ListAgentRunsInput): Promise<ListAgentRunsResult>
 }
 

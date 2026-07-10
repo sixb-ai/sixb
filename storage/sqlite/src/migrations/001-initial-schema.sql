@@ -732,6 +732,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     usage_cached_input_tokens IS NULL OR usage_cached_input_tokens >= 0
   ),
   error TEXT,
+  diagnostics TEXT,
   attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
   lease_id TEXT,
   lease_expires_at TEXT,

@@ -613,6 +613,9 @@ export type {
   ActionRunWritebackRecord,
   AgentMessageRecord,
   AgentMessageStore,
+  AgentRunDiagnostic,
+  AgentRunDiagnosticCode,
+  AgentRunDiagnosticSeverity,
   AgentRunFinishReason,
   AgentRunLease,
   AgentRunRecord,
@@ -836,6 +839,7 @@ export type {
 } from "./storage"
 export {
   ActionRunError,
+  AGENT_RUN_DIAGNOSTIC_CODES,
   AGENT_RUN_FINISH_REASONS,
   AgentStorageError,
   AuthStorageError,

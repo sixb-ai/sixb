@@ -263,6 +263,7 @@ class InMemoryAgentRunStore implements AgentRunStore {
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       ...(input.finishReason === undefined ? {} : { finishReason: input.finishReason }),
       ...(input.usage === undefined ? {} : { usage: clone(input.usage) }),
+      ...(input.diagnostics === undefined ? {} : { diagnostics: clone(input.diagnostics) }),
       ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
       lease: undefined,
       completedAt,
@@ -284,6 +285,16 @@ class InMemoryAgentRunStore implements AgentRunStore {
   async getById(params: { projectId: string; id: string }): Promise<AgentRunRecord | null> {
     const record = this.state.runs.get(key(params.projectId, params.id))
     return record ? clone(record) : null
+  }
+
+  async getByIds(params: {
+    projectId: string
+    ids: readonly string[]
+  }): Promise<readonly AgentRunRecord[]> {
+    return [...new Set(params.ids)]
+      .map((id) => this.state.runs.get(key(params.projectId, id)))
+      .filter((record): record is AgentRunRecord => record !== undefined)
+      .map(clone)
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

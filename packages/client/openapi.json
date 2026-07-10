@@ -15829,6 +15829,41 @@
                               ]
                             }
                           },
+                          "annotations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "output_file_limit_exceeded",
+                                    "output_file_too_large",
+                                    "output_budget_exhausted",
+                                    "output_collection_failed",
+                                    "output_file_changed",
+                                    "output_storage_failed"
+                                  ]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "error"]
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "enum": ["output"]
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "severity", "scope", "message"],
+                              "additionalProperties": false
+                            }
+                          },
                           "metadata": {
                             "description": "Any JSON-compatible value.",
                             "nullable": true,
@@ -15870,6 +15905,7 @@
                           "role",
                           "seq",
                           "parts",
+                          "annotations",
                           "contentVersion",
                           "createdAt"
                         ],
@@ -16622,6 +16658,41 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "diagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "output_file_limit_exceeded",
+                              "output_file_too_large",
+                              "output_budget_exhausted",
+                              "output_collection_failed",
+                              "output_file_changed",
+                              "output_storage_failed"
+                            ]
+                          },
+                          "severity": {
+                            "type": "string",
+                            "enum": ["warning", "error"]
+                          },
+                          "scope": {
+                            "type": "string",
+                            "enum": ["output"]
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["code", "severity", "scope", "message"],
+                        "additionalProperties": false
+                      }
                     },
                     "error": {
                       "type": "string"

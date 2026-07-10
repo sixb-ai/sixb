@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite"
 import {
   type AgentMessagePart,
   type AgentMessageRecord,
+  type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentRunUsage,
   type AgentThreadRecord,
@@ -47,6 +48,7 @@ export interface AgentRunRow {
   usage_reasoning_tokens: number | null
   usage_cached_input_tokens: number | null
   error: string | null
+  diagnostics: string | null
   attempt: number
   lease_id: string | null
   lease_expires_at: string | null
@@ -108,6 +110,8 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     finishReason: coerceAgentRunFinishReason(row.finish_reason),
     usage: rowToUsage(row),
     error: row.error ?? undefined,
+    diagnostics:
+      row.diagnostics === null ? undefined : (JSON.parse(row.diagnostics) as AgentRunDiagnostic[]),
     attempt: row.attempt,
     lease:
       row.lease_id && row.lease_expires_at

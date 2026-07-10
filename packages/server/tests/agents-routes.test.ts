@@ -371,6 +371,68 @@ describe("agent routes", () => {
     expect(body.error).not.toContain("[Sixb")
   })
 
+  test("projects run diagnostics as transcript annotations without changing message parts", async () => {
+    const { app, storage, sixb } = createApp()
+    const thread = await storage.agents.threads.create({
+      id: "thr-diagnostics",
+      projectId: sixb.id,
+      agentId: "assistant",
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+    const leaseId = createAgentRunLeaseId()
+    await storage.agents.runs.reserve({
+      id: "run-diagnostics",
+      projectId: sixb.id,
+      threadId: thread.id,
+      agentId: "assistant",
+      triggerMessageId: "trigger-diagnostics",
+      requestedByPrincipal: { type: "system", id: "system" },
+      lease: { id: leaseId, expiresAt: new Date(Date.now() + 60_000) },
+    })
+    await storage.agents.messages.append({
+      id: "msg-diagnostics",
+      projectId: sixb.id,
+      threadId: thread.id,
+      runId: "run-diagnostics",
+      role: "assistant",
+      parts: [{ type: "text", text: "The report is ready." }],
+    })
+    const diagnostics = [
+      {
+        code: "output_file_too_large" as const,
+        severity: "warning" as const,
+        scope: "output" as const,
+        path: "reports/full.csv",
+        message: "This generated file was skipped.",
+      },
+    ]
+    await storage.agents.runs.finish({
+      id: "run-diagnostics",
+      projectId: sixb.id,
+      leaseId,
+      status: "succeeded",
+      diagnostics,
+    })
+
+    const messagesResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${thread.id}/messages`)
+    )
+    expect(messagesResponse.status).toBe(200)
+    const messagesBody = (await messagesResponse.json()) as {
+      messages: { parts: unknown[]; annotations: unknown[] }[]
+    }
+    expect(messagesBody.messages[0]?.parts).toEqual([
+      { type: "text", text: "The report is ready." },
+    ])
+    expect(messagesBody.messages[0]?.annotations).toEqual(diagnostics)
+
+    const runResponse = await app.fetch(
+      new Request("http://localhost/api/agent-runs/run-diagnostics")
+    )
+    expect(runResponse.status).toBe(200)
+    expect(await runResponse.json()).toMatchObject({ diagnostics })
+  })
+
   test("returns 409 when posting to a thread with an active run", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({

@@ -20,6 +20,8 @@ const DEFAULT_AGENT_ATTACHMENT_LIMITS: AgentAttachmentLimits = {
   sandboxFileMaxBytes: 25 * 1024 * 1024,
   sandboxTotalMaxBytes: 100 * 1024 * 1024,
 }
+const TEXT_INLINE_TOTAL_MAX_BYTES = 200 * 1024
+const MAX_ASSISTANT_ATTACHMENTS = 50
 
 export interface PreparedAgentAttachmentContext {
   readonly entries: readonly PreparedAgentAttachment[]
@@ -69,14 +71,17 @@ export async function prepareAgentAttachments(input: {
   const sandboxFiles: PreparedSandboxAttachmentFile[] = []
   const entries: PreparedAgentAttachment[] = []
   let sandboxBytes = 0
+  let textInlineBytes = 0
 
   for (const item of fileWorkItems(input.messages)) {
     const prepared = await prepareOneAttachment({
       ...input,
       item,
       sandboxBytes,
+      textInlineBytes,
     })
     sandboxBytes += prepared.sandboxBytesAdded
+    textInlineBytes += prepared.textInlineBytesAdded
     entries.push(prepared.entry)
     promptTextByPartKey.set(prepared.entry.key, prepared.promptText)
     if (prepared.modelFileData) {
@@ -113,7 +118,17 @@ function fileWorkItems(messages: readonly AgentMessageRecord[]): AttachmentWorkI
       }
     })
   }
-  return items
+  const retainedAssistantKeys = new Set(
+    items
+      .filter((item) => item.message.role === "assistant")
+      .slice(-MAX_ASSISTANT_ATTACHMENTS)
+      .map((item) => attachmentKey(item.message.id, item.partIndex))
+  )
+  return items.filter(
+    (item) =>
+      item.message.role !== "assistant" ||
+      retainedAssistantKeys.has(attachmentKey(item.message.id, item.partIndex))
+  )
 }
 
 async function prepareOneAttachment(input: {
@@ -124,12 +139,14 @@ async function prepareOneAttachment(input: {
   readonly apiBaseUrl: string
   readonly inlineImages: boolean
   readonly sandboxBytes: number
+  readonly textInlineBytes: number
 }): Promise<{
   readonly entry: PreparedAgentAttachment
   readonly promptText: string
   readonly modelFileData?: AgentFileDataProjection
   readonly sandboxFile?: PreparedSandboxAttachmentFile
   readonly sandboxBytesAdded: number
+  readonly textInlineBytesAdded: number
 }> {
   const { item } = input
   const key = attachmentKey(item.message.id, item.partIndex)
@@ -150,6 +167,7 @@ async function prepareOneAttachment(input: {
   let sandboxFile: PreparedSandboxAttachmentFile | undefined
   let sandboxBytesAdded = 0
   let textExcerpt: string | undefined
+  let textInlineBytesAdded = 0
   let modelFileData: AgentFileDataProjection | undefined
 
   const stat = await safeBlobStat(input.blobStorage, fileRef, notes)
@@ -160,13 +178,19 @@ async function prepareOneAttachment(input: {
     const canMaterializeFile = stat.sizeBytes <= DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes
     const canMaterializeTotal =
       input.sandboxBytes + stat.sizeBytes <= DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxTotalMaxBytes
-    const shouldReadForText = shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
-    const shouldReadForImage = input.inlineImages && shouldAttemptImageInline(mediaType, fileName)
+    const mayInlineContent = item.message.role !== "assistant"
+    const remainingTextBytes = Math.max(0, TEXT_INLINE_TOTAL_MAX_BYTES - input.textInlineBytes)
+    const shouldReadForText =
+      mayInlineContent &&
+      remainingTextBytes > 0 &&
+      shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
+    const shouldReadForImage =
+      mayInlineContent && input.inlineImages && shouldAttemptImageInline(mediaType, fileName)
     const needsFullBytes = canMaterializeFile && canMaterializeTotal
     const readLimit = needsFullBytes
       ? stat.sizeBytes
       : shouldReadForText
-        ? DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes + 4
+        ? Math.min(DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes, remainingTextBytes) + 4
         : shouldReadForImage
           ? DEFAULT_AGENT_ATTACHMENT_LIMITS.sandboxFileMaxBytes
           : 0
@@ -193,14 +217,18 @@ async function prepareOneAttachment(input: {
     }
 
     if (bytes) {
-      const text = maybeTextExcerpt(bytes, mediaType, fileName, stat.sizeBytes)
+      const text =
+        mayInlineContent && remainingTextBytes > 0
+          ? maybeTextExcerpt(bytes, mediaType, fileName, stat.sizeBytes, remainingTextBytes)
+          : undefined
       if (text) {
         textExcerpt = text.text
+        textInlineBytesAdded = Buffer.byteLength(text.text, "utf-8")
         inlineDisposition = "text"
         if (text.truncated) {
           notes.push(
             `[Text attachment truncated: showing first ${text.linesShown} line(s) within ${formatBytes(
-              DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes
+              Math.min(DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes, remainingTextBytes)
             )}. Full file is available through the sandbox path or content URL.]`
           )
         }
@@ -211,7 +239,7 @@ async function prepareOneAttachment(input: {
           bytes,
           mediaType,
           fileName,
-          inlineImages: input.inlineImages,
+          inlineImages: mayInlineContent && input.inlineImages,
           hasImageHint: hasImageHint(mediaType, fileName),
         })
         if (image) {
@@ -232,12 +260,18 @@ async function prepareOneAttachment(input: {
       }
     }
 
-    if (!input.inlineImages && hasImageHint(mediaType, fileName)) {
+    if (mayInlineContent && !input.inlineImages && hasImageHint(mediaType, fileName)) {
       notes.push("[Image not inlined: the selected model does not advertise image input support.]")
     }
 
     if (inlineDisposition === "metadata-only" && notes.length === 0) {
-      notes.push("[File not inlined: available through the sandbox path or content URL.]")
+      notes.push(
+        item.message.role === "assistant"
+          ? "[Generated file kept as metadata: use the sandbox path or content URL when its contents are needed.]"
+          : remainingTextBytes === 0 && shouldAttemptTextInline(mediaType, fileName, stat.sizeBytes)
+            ? "[File not inlined: the attachment text budget is exhausted; use the sandbox path or content URL.]"
+            : "[File not inlined: available through the sandbox path or content URL.]"
+      )
     }
   }
 
@@ -262,6 +296,7 @@ async function prepareOneAttachment(input: {
     ...(modelFileData === undefined ? {} : { modelFileData }),
     ...(sandboxFile === undefined ? {} : { sandboxFile }),
     sandboxBytesAdded,
+    textInlineBytesAdded,
   }
 }
 
@@ -274,7 +309,8 @@ async function safeBlobStat(
   try {
     stat = await blobStorage.stat(fileRef.blobId)
   } catch (error) {
-    notes.push(`[File omitted: blob storage stat failed: ${errorMessage(error)}.]`)
+    console.error("[SixbAgentWorker] Failed to inspect an attachment blob.", error)
+    notes.push("[File omitted: blob storage metadata is unavailable.]")
     return null
   }
   if (!stat || !blobMatchesFileRef(stat, fileRef)) {
@@ -303,7 +339,8 @@ async function readBlobBytes(
   try {
     stream = await blobStorage.open(blobId)
   } catch (error) {
-    return { ok: false, reason: errorMessage(error) }
+    console.error("[SixbAgentWorker] Failed to open an attachment blob.", error)
+    return { ok: false, reason: "blob content is unavailable" }
   }
 
   const reader = stream.getReader()
@@ -348,7 +385,8 @@ function maybeTextExcerpt(
   bytes: Uint8Array,
   mediaType: string,
   fileName: string,
-  sizeBytes: number
+  sizeBytes: number,
+  maxBytes: number
 ): { readonly text: string; readonly truncated: boolean; readonly linesShown: number } | undefined {
   const declaredText = isTextMediaType(mediaType) || looksLikeTextFileName(fileName)
   if (!declaredText && !looksLikeUtf8Text(bytes)) {
@@ -357,12 +395,17 @@ function maybeTextExcerpt(
 
   let text: string
   try {
-    text = new TextDecoder("utf-8", { fatal: !declaredText }).decode(bytes)
+    text = new TextDecoder("utf-8", { fatal: !declaredText }).decode(
+      bytes.subarray(0, Math.min(bytes.byteLength, maxBytes + 4))
+    )
   } catch {
     return undefined
   }
 
-  const truncated = truncateText(text, DEFAULT_AGENT_ATTACHMENT_LIMITS)
+  const truncated = truncateText(text, {
+    ...DEFAULT_AGENT_ATTACHMENT_LIMITS,
+    textInlineMaxBytes: Math.min(DEFAULT_AGENT_ATTACHMENT_LIMITS.textInlineMaxBytes, maxBytes),
+  })
   return {
     text: truncated.text,
     truncated: truncated.truncated || sizeBytes > bytes.byteLength,
@@ -636,11 +679,4 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }

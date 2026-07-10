@@ -58,6 +58,14 @@ export async function processAgentImageAttachment(input: {
   readonly limits: AgentAttachmentLimits
 }): Promise<ProcessedAgentImage> {
   const { bytes, limits } = input
+  if (typeof Bun.Image !== "function") {
+    return {
+      ok: false,
+      reason: "Bun.Image is unavailable in this runtime",
+      notes: ["[Image not inlined: this Bun runtime does not provide image processing.]"],
+    }
+  }
+
   let metadata: ImageMetadata
   try {
     metadata = await readImageMetadata(bytes, limits)
