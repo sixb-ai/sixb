@@ -297,6 +297,35 @@ export function runBrokerContractSuite<TBroker extends Broker>(
       })
     })
 
+    describe("latestCursor", () => {
+      test("returns undefined for missing and empty streams", async () => {
+        await withBroker(async (broker) => {
+          expect(
+            await broker.latestCursor({ projectId: "project-a", streamId: "missing" })
+          ).toBeUndefined()
+
+          await broker.ensureStream({ projectId: "project-a", stream: eventsStream })
+          expect(
+            await broker.latestCursor({ projectId: "project-a", streamId: eventsStream.id })
+          ).toBeUndefined()
+        })
+      })
+
+      test("returns the newest retained record cursor", async () => {
+        await withBroker(async (broker) => {
+          const records = await appendRecords(broker, {
+            projectId: "project-a",
+            stream: retainedStream,
+            records: [{ payload: "one" }, { payload: "two" }, { payload: "three" }],
+          })
+
+          expect(
+            await broker.latestCursor({ projectId: "project-a", streamId: retainedStream.id })
+          ).toBe(records.at(-1)?.cursor)
+        })
+      })
+    })
+
     describe("subscribe", () => {
       test("requires streams to be ensured before subscribing", async () => {
         await withBroker(async (broker) => {

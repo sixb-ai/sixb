@@ -116,6 +116,31 @@ describe("createEventSocket", () => {
     socket.close()
   })
 
+  test("reports connected only after the server acknowledges the subscription", () => {
+    const states: { connected: boolean }[] = []
+    const socket = createEventSocket({
+      topic: "telemetry",
+      reconnect: false,
+      onEvent: () => {},
+      onStateChange: (state) => states.push(state),
+    })
+
+    const ws = FakeWebSocket.instances[0]
+    if (!ws) throw new Error("expected a websocket")
+
+    ws.onopen?.()
+    expect(states.at(-1)).toMatchObject({ connected: false })
+
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
+    expect(ws.sent).toHaveLength(1)
+    expect(states.at(-1)).toMatchObject({ connected: false })
+
+    ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
+    expect(states.at(-1)).toMatchObject({ connected: true })
+
+    socket.close()
+  })
+
   test("does not reconnect when reconnect is disabled", async () => {
     const socket = createEventSocket({
       topic: "telemetry",

@@ -62,9 +62,7 @@ export function parseSubscriptionMessage(payload: unknown):
 }
 
 async function resolveLatestCursor(server: SixbServer): Promise<string | undefined> {
-  const p = server.getSixb()
-  const events = await p.events.read()
-  return events.at(-1)?.cursor
+  return server.getSixb().events.latestCursor()
 }
 
 function createDefaultState(): EventSubscriptionState {

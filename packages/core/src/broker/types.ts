@@ -61,6 +61,12 @@ export interface Broker {
   }): Promise<readonly BrokerRecord[]>
 
   /**
+   * Returns the latest retained cursor without reading the stream contents.
+   * Returns undefined when the stream is missing or has no retained records.
+   */
+  latestCursor(params: { projectId: string; streamId: string }): Promise<BrokerCursor | undefined>
+
+  /**
    * Subscribes to retained/live records. Defaults to `from: "latest"` unless
    * `afterCursor` is provided.
    */

@@ -113,6 +113,14 @@ export class EventsRuntime {
     return records.map(hydrateEventRecord)
   }
 
+  async latestCursor(): Promise<string | undefined> {
+    await this.ensureStream()
+    return this.broker.latestCursor({
+      projectId: this.projectId,
+      streamId: this.stream.id,
+    })
+  }
+
   async subscribe(
     input: EventsSubscribeInput,
     handler: (events: readonly StoredDomainEvent[]) => void

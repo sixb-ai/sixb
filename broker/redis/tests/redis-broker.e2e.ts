@@ -302,26 +302,26 @@ describe("RedisBroker", () => {
     await broker.ensureStream({ projectId, stream })
 
     const brokerInternals = broker as unknown as {
-      latestCursor(client: unknown, ensured: unknown): Promise<string>
+      subscriptionStartCursor(client: unknown, ensured: unknown): Promise<string>
     }
-    const originalLatestCursor = brokerInternals.latestCursor.bind(broker)
-    let releaseLatestCursor!: () => void
-    const latestCursorGate = new Promise<void>((resolve) => {
-      releaseLatestCursor = resolve
+    const originalSubscriptionStartCursor = brokerInternals.subscriptionStartCursor.bind(broker)
+    let releaseSubscriptionStartCursor!: () => void
+    const subscriptionStartCursorGate = new Promise<void>((resolve) => {
+      releaseSubscriptionStartCursor = resolve
     })
-    const blockedInLatestCursor = new Promise<void>((resolve) => {
-      brokerInternals.latestCursor = async (client, ensured) => {
+    const blockedInSubscriptionStartCursor = new Promise<void>((resolve) => {
+      brokerInternals.subscriptionStartCursor = async (client, ensured) => {
         resolve()
-        await latestCursorGate
-        return originalLatestCursor(client, ensured)
+        await subscriptionStartCursorGate
+        return originalSubscriptionStartCursor(client, ensured)
       }
     })
 
     const subscribe = broker.subscribe({ projectId, streamId: stream.id }, () => {})
 
-    await blockedInLatestCursor
+    await blockedInSubscriptionStartCursor
     await broker.close()
-    releaseLatestCursor()
+    releaseSubscriptionStartCursor()
 
     await expect(subscribe).rejects.toThrow()
   })

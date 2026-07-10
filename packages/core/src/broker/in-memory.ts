@@ -108,6 +108,19 @@ export class InMemoryBroker implements Broker {
     })
   }
 
+  async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
+    assertProjectId(params.projectId)
+    assertStreamId(params.streamId)
+
+    const storedStream = this.streams.get(streamKey(params.projectId, params.streamId))
+    if (!storedStream) {
+      return undefined
+    }
+
+    this.applyRetention(storedStream)
+    return storedStream.records.at(-1)?.cursor
+  }
+
   async subscribe(
     params: {
       projectId: string

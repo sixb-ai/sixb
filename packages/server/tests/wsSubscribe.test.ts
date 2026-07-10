@@ -178,7 +178,7 @@ describe("/ws/events subscriptions", () => {
           ws.close()
         }
       },
-      { broker: new SlowReadBroker() }
+      { broker: new SlowLatestCursorBroker() }
     )
   })
 
@@ -382,10 +382,10 @@ function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
   return new SixbConstructor(options)
 }
 
-class SlowReadBroker extends InMemoryBroker {
-  override async read(params: Parameters<InMemoryBroker["read"]>[0]) {
+class SlowLatestCursorBroker extends InMemoryBroker {
+  override async latestCursor(params: Parameters<InMemoryBroker["latestCursor"]>[0]) {
     await new Promise<void>((resolve) => setTimeout(resolve, 100))
-    return super.read(params)
+    return super.latestCursor(params)
   }
 }
 

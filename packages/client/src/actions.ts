@@ -244,7 +244,15 @@ export function waitForActionRun(input: WaitForActionRunInput): Promise<ActionRu
             const nextSocketHealthy = state.connected && !state.reconnecting && !state.error
             if (nextSocketHealthy !== socketHealthy) {
               socketHealthy = nextSocketHealthy
-              reschedulePoll()
+              // The subscription baseline may have been captured after a fast
+              // action completed. Check storage once at acknowledgement so a
+              // terminal event skipped by that baseline cannot strand the wait
+              // on the slow safety poll.
+              if (socketHealthy) {
+                wakeAndCheck()
+              } else {
+                reschedulePoll()
+              }
             }
           },
         }
