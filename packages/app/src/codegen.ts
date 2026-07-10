@@ -1,6 +1,8 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import type { AuthSessionAudience } from "@sixb/core"
+import { renderAppManifest } from "./manifest"
+import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
@@ -71,6 +73,7 @@ ${routeEntries}
  * Generates the app entry files:
  * - `.sixb/generated/index.html` — HTML shell
  * - `.sixb/generated/main.tsx` — React entry with BrowserRouter
+ * - `.sixb/generated/app.webmanifest` — installable app identity
  */
 export async function generateAppEntry(
   projectRoot: string,
@@ -80,6 +83,7 @@ export async function generateAppEntry(
     audience?: AuthSessionAudience
     authEnabled?: boolean
     appDir?: string
+    publicDir?: string
     /**
      * Stylesheet to import from the generated entry. `undefined` auto-detects
      * `app/globals.css` and imports it when it exists; `null` skips the import;
@@ -89,12 +93,18 @@ export async function generateAppEntry(
     /** Framework-owned stylesheets imported before the app stylesheet. */
     frameworkStylesheetPaths?: readonly string[]
   } = {}
-): Promise<{ htmlPath: string; mainPath: string }> {
+): Promise<{ htmlPath: string; mainPath: string; manifestPath: string }> {
   await mkdir(generatedDir, { recursive: true })
 
   const appDir = options.appDir ? resolve(projectRoot, options.appDir) : join(projectRoot, "app")
+  const publicDir = options.publicDir
+    ? resolve(projectRoot, options.publicDir)
+    : join(appDir, "public")
   const globalsCssPath = join(appDir, "globals.css")
   const layoutPath = join(appDir, "layout.tsx")
+  const metadata = await resolveAppMetadata({ layoutPath, publicDir })
+  const manifestPath = join(generatedDir, "app.webmanifest")
+  await writeFileIfChanged(manifestPath, renderAppManifest(metadata))
   const layoutRel = relativeTo(generatedDir, layoutPath)
   const hasLayout = await fileExists(layoutPath)
   const stylesheetPath =
@@ -110,12 +120,7 @@ export async function generateAppEntry(
   const globalsCssImport = stylesheetPaths
     .map((path) => `import ${JSON.stringify(relativeTo(generatedDir, path))}`)
     .join("\n")
-  const layoutImport = hasLayout
-    ? `import RootLayout, { metadata } from ${JSON.stringify(layoutRel)}\n`
-    : ""
-  const metadataSpread = hasLayout
-    ? `...(typeof metadata === "object" && metadata ? metadata : {}),`
-    : ""
+  const layoutImport = hasLayout ? `import RootLayout from ${JSON.stringify(layoutRel)}\n` : ""
   const layoutWrapperStart = hasLayout ? "<RootLayout>" : "<>"
   const layoutWrapperEnd = hasLayout ? "</RootLayout>" : "</>"
   const runtimeConfigScript = options.apiBaseUrl
@@ -161,43 +166,6 @@ const queryClient = new QueryClient({
     },
   },
 })
-
-const appMetadata = {
-  title: "Sixb",
-  description: "",
-  favicon: "",
-  ${metadataSpread}
-}
-
-function applyMetadata() {
-  if (appMetadata.title) {
-    document.title = appMetadata.title
-  }
-
-  if (appMetadata.description) {
-    let description = document.querySelector('meta[name="description"]')
-    if (!description) {
-      description = document.createElement("meta")
-      description.setAttribute("name", "description")
-      document.head.append(description)
-    }
-    description.setAttribute("content", appMetadata.description)
-  }
-
-  if (appMetadata.favicon) {
-    let icon = document.querySelector('link[rel="icon"]')
-    if (!icon) {
-      icon = document.createElement("link")
-      icon.setAttribute("rel", "icon")
-      document.head.append(icon)
-    }
-    icon.setAttribute("href", appMetadata.favicon)
-  }
-}
-
-if (canRenderApp) {
-  applyMetadata()
-}
 
 const RESERVED_PATH_PREFIXES = ["/api", "/auth", "/ws", "/docs"]
 
@@ -275,7 +243,7 @@ function AppFallback({
     <div
       role="alert"
       style={{
-        minHeight: "100vh",
+        minHeight: "100dvh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -467,14 +435,15 @@ if (canRenderApp) {
   const mainPath = join(generatedDir, "main.tsx")
   await writeFileIfChanged(mainPath, mainContent)
 
-  // Generate index.html with only structural reset rules. Apps own visual
-  // styling through app/globals.css.
+  // Generate index.html with static identity and only structural reset rules.
+  // Apps own visual styling through app/globals.css.
+  const metadataHead = renderMetadataHead(metadata)
   const htmlContent = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Sixb</title>
+${metadataHead}
     ${runtimeConfigScript}
     <style>
       * {
@@ -486,8 +455,16 @@ if (canRenderApp) {
         margin: 0;
         min-height: 100%;
       }
-      body {
+      body,
+      #root {
         min-height: 100vh;
+        min-height: 100dvh;
+      }
+      @media (display-mode: standalone) {
+        html,
+        body {
+          overscroll-behavior: none;
+        }
       }
     </style>
   </head>
@@ -501,7 +478,33 @@ if (canRenderApp) {
   const htmlPath = join(generatedDir, "index.html")
   await writeFileIfChanged(htmlPath, htmlContent)
 
-  return { htmlPath, mainPath }
+  return { htmlPath, mainPath, manifestPath }
+}
+
+function renderMetadataHead(metadata: Awaited<ReturnType<typeof resolveAppMetadata>>): string {
+  const tags = [
+    `    <title>${escapeHtmlText(metadata.title)}</title>`,
+    ...(metadata.description
+      ? [`    <meta name="description" content="${escapeHtmlAttribute(metadata.description)}" />`]
+      : []),
+    `    <meta name="theme-color" content="${escapeHtmlAttribute(metadata.themeColor)}" />`,
+    '    <link rel="manifest" href="/app.webmanifest" />',
+    ...(metadata.favicon
+      ? [`    <link rel="icon" href="${escapeHtmlAttribute(metadata.favicon)}" />`]
+      : []),
+    ...(metadata.appleTouchIcon
+      ? [`    <link rel="apple-touch-icon" href="${metadata.appleTouchIcon}" />`]
+      : []),
+  ]
+  return tags.join("\n")
+}
+
+function escapeHtmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return escapeHtmlText(value).replaceAll('"', "&quot;").replaceAll("'", "&#39;")
 }
 
 async function writeFileIfChanged(path: string, content: string): Promise<void> {

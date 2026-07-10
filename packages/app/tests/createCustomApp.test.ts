@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -33,6 +33,29 @@ async function mtimes(paths: readonly string[]): Promise<readonly number[]> {
   return await Promise.all(paths.map(async (path) => (await stat(path)).mtimeMs))
 }
 
+async function linkAppTestDependencies(root: string): Promise<void> {
+  const fixtureModules = join(root, "node_modules")
+  await mkdir(join(fixtureModules, "@tanstack"), { recursive: true })
+  await mkdir(join(fixtureModules, "@sixb"), { recursive: true })
+  for (const dependency of ["react", "react-dom", "react-router-dom"]) {
+    await symlink(
+      join(process.cwd(), "packages", "app", "node_modules", dependency),
+      join(fixtureModules, dependency),
+      "dir"
+    )
+  }
+  await symlink(
+    join(process.cwd(), "packages", "app", "node_modules", "@tanstack", "react-query"),
+    join(fixtureModules, "@tanstack", "react-query"),
+    "dir"
+  )
+  await symlink(
+    join(process.cwd(), "packages", "cli", "node_modules", "@sixb", "client"),
+    join(fixtureModules, "@sixb", "client"),
+    "dir"
+  )
+}
+
 describe("createCustomApp.start", () => {
   let tempRoot = ""
 
@@ -54,6 +77,10 @@ describe("createCustomApp.start", () => {
       ].join("\n")
     )
     await writeFile(join(outdir, "main.js"), "console.log('fixture app')\n")
+    await writeFile(
+      join(outdir, "app.webmanifest"),
+      '{"id":"/","name":"Fixture App","start_url":"/","scope":"/","display":"standalone"}\n'
+    )
   })
 
   afterEach(async () => {
@@ -97,6 +124,28 @@ describe("createCustomApp.start", () => {
         method: "POST",
       })
       expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("serves the manifest with revalidation headers for GET and HEAD", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot })
+    const server = await app.start({ host: "127.0.0.1", port })
+
+    try {
+      const manifest = await fetch(`http://127.0.0.1:${port}/app.webmanifest`)
+      expect(manifest.status).toBe(200)
+      expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8")
+      expect(manifest.headers.get("cache-control")).toBe("no-cache")
+      expect((await manifest.json()).name).toBe("Fixture App")
+
+      const head = await fetch(`http://127.0.0.1:${port}/app.webmanifest`, { method: "HEAD" })
+      expect(head.status).toBe(200)
+      expect(head.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8")
+      expect(head.headers.get("cache-control")).toBe("no-cache")
+      expect(await head.text()).toBe("")
     } finally {
       await server.stop()
     }
@@ -194,6 +243,45 @@ describe("createCustomApp.dev", () => {
   afterEach(async () => {
     if (tempRoot) {
       await rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  test("serves the generated manifest and conventional public icons", async () => {
+    const publicDir = join(tempRoot, "app", "public")
+    await mkdir(publicDir, { recursive: true })
+    await writeFile(join(publicDir, "favicon.svg"), "<svg></svg>\n")
+    await writeFile(join(publicDir, "icon-192.png"), "fixture png")
+    await writeFile(join(publicDir, "app.webmanifest"), '{"name":"Shadow"}\n')
+    await linkAppTestDependencies(tempRoot)
+
+    const port = await getFreePort()
+    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      const shell = await fetch(`http://127.0.0.1:${port}/`)
+      expect(shell.status).toBe(200)
+      expect(await shell.text()).toContain('href="/app.webmanifest"')
+
+      for (const method of ["GET", "HEAD"]) {
+        const manifest = await fetch(`http://127.0.0.1:${port}/app.webmanifest`, { method })
+        expect(manifest.status).toBe(200)
+        expect(manifest.headers.get("content-type")).toBe(
+          "application/manifest+json; charset=utf-8"
+        )
+        expect(manifest.headers.get("cache-control")).toBe("no-cache")
+        if (method === "GET") {
+          expect((await manifest.json()).name).toBe("Sixb")
+        }
+      }
+
+      const icon = await fetch(`http://127.0.0.1:${port}/icon-192.png`)
+      expect(icon.status).toBe(200)
+      expect(icon.headers.get("content-type")).toBe("image/png")
+      expect((await fetch(`http://127.0.0.1:${port}/missing-icon.png`)).status).toBe(404)
+      expect((await fetch(`http://127.0.0.1:${port}/other.webmanifest`)).status).toBe(404)
+    } finally {
+      await server.stop()
     }
   })
 
@@ -347,9 +435,9 @@ describe("createCustomApp.dev", () => {
       },
     ]
 
-    const manifestPath = await generateRouteManifest(routes, generatedDir)
-    const { htmlPath, mainPath } = await generateAppEntry(tempRoot, generatedDir)
-    const files = [manifestPath, mainPath, htmlPath]
+    const routeManifestPath = await generateRouteManifest(routes, generatedDir)
+    const { htmlPath, mainPath, manifestPath } = await generateAppEntry(tempRoot, generatedDir)
+    const files = [routeManifestPath, mainPath, htmlPath, manifestPath]
     const before = await mtimes(files)
 
     await wait(25)
@@ -388,7 +476,10 @@ describe("createCustomApp.dev", () => {
     expect(html).toContain("box-sizing: border-box")
     expect(html).toContain("margin: 0")
     expect(html).toContain("min-height: 100vh")
-    expect(html).not.toContain("theme-color")
+    expect(html).toContain("min-height: 100dvh")
+    expect(html).toContain('<meta name="theme-color" content="#ffffff" />')
+    expect(html).toContain("@media (display-mode: standalone)")
+    expect(html).toContain("overscroll-behavior: none")
     expect(html).not.toContain("font-family")
     expect(html).not.toContain("background")
     expect(html).not.toContain("color:")
