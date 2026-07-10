@@ -234,7 +234,9 @@ describe("createCustomApp.dev", () => {
   let tempRoot = ""
 
   beforeEach(async () => {
-    tempRoot = await mkdtemp(join(tmpdir(), "sixb-app-dev-"))
+    // Keep bundling fixtures inside the workspace so Bun resolves workspace source
+    // exports. Unit-test CI intentionally has no prebuilt package dist artifacts.
+    tempRoot = await mkdtemp(join(import.meta.dir, "tmp-app-dev-"))
     const appDir = join(tempRoot, "app")
     await mkdir(appDir, { recursive: true })
     await writeFile(join(appDir, "page.tsx"), "export default function Page() { return null }\n")
