@@ -19,7 +19,7 @@ import {
   type SixbAuthConfig,
 } from "@sixb/core"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { confirmCallback, createTestBrowserPolicy, linkFromLatestMessage } from "./helpers"
 
 const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
@@ -123,15 +123,6 @@ async function seedAdminSession(
     cookie: `sixb_session${cookieSuffix}=${credential.cookieValue}; sixb_csrf${cookieSuffix}=csrf_1`,
     csrfHeader: { "x-sixb-csrf": "csrf_1" },
   }
-}
-
-function linkFromLatestMessage(messages: readonly { readonly text: string }[]): URL {
-  const text = messages.at(-1)?.text ?? ""
-  const match = text.match(/https?:\/\/\S+/)
-  if (!match) {
-    throw new Error("No magic link found in sent email")
-  }
-  return new URL(match[0])
 }
 
 describe("auth invitation routes", () => {
@@ -591,17 +582,12 @@ describe("auth invitation routes", () => {
     )
 
     const link = linkFromLatestMessage(messages)
-    const callback = await app.fetch(
-      new Request(link.toString(), {
-        redirect: "manual",
-      })
-    )
+    // Invitations have no requesting browser, so no same-device fast path.
+    expect(link.searchParams.get("requester")).toBeNull()
+    const callback = await confirmCallback(app, link)
 
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("location")).toBeNull()
-    expect(await callback.text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
-    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
     await expect(
       storage.auth.groupMemberships.listForGroup({
         projectId,

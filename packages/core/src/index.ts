@@ -433,6 +433,8 @@ export type {
   MagicLinkInvitationRecipientInput,
   MagicLinkInvitationRecipientResult,
   MagicLinkInvitationRecipientStatus,
+  MagicLinkPeekInput,
+  MagicLinkPeekResult,
   MagicLinkRequestInput,
   MagicLinkRequestResult,
   MagicLinkRequestStatus,

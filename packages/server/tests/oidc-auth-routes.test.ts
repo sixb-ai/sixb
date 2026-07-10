@@ -212,14 +212,8 @@ describe("oidc auth routes", () => {
       })
     )
 
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("location")).toBeNull()
-    expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://atlas.localhost"
-    )
-    expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
-    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "sixb_session")
     const csrfCookie = cookieValue(setCookie, "sixb_csrf")
@@ -268,13 +262,8 @@ describe("oidc auth routes", () => {
 
     expect(signIn.status).toBe(303)
     expect(providerUrl.searchParams.get("redirect_uri")).toBe("http://api.localhost/auth/callback")
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://app.localhost"
-    )
-    expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://app.localhost/dashboard">'
-    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "sixb_session_app")
     expect(sessionCookie).toContain(".")
@@ -368,11 +357,8 @@ describe("oidc auth routes", () => {
       )
     )
 
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("location")).toBeNull()
-    expect(await callback.text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
-    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
     await expect(
       storage.auth.groupMemberships.listForGroup({
         projectId,

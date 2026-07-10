@@ -48,6 +48,7 @@ async function requestMagicLink(input: {
   readonly strategy: ReturnType<typeof magicLink>
   readonly email: string
   readonly audience?: string
+  readonly requesterHash?: string
   readonly now?: Date
 }) {
   return input.strategy.requestMagicLink({
@@ -57,6 +58,7 @@ async function requestMagicLink(input: {
     audience: input.audience ?? "atlas",
     returnTo: "/dashboard",
     requestOrigin,
+    requesterHash: input.requesterHash,
     now: input.now ?? at("2026-05-16T10:00:00.000Z"),
   })
 }
@@ -189,6 +191,7 @@ describe("magicLink", () => {
     expect(link.origin).toBe(requestOrigin)
     expect(link.pathname).toBe("/auth/callback")
     expect(link.searchParams.get("returnTo")).toBeNull()
+    expect(link.searchParams.get("requester")).toBeNull()
     expect(token).toBeTruthy()
     expect(magicLinkId).toBeTruthy()
 
@@ -204,6 +207,77 @@ describe("magicLink", () => {
       tokenHash: hashMagicLinkToken(token ?? ""),
     })
     expect(record?.tokenHash).not.toBe(token)
+  })
+
+  test("embeds the requester hash in the callback URL when provided", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      sendMagicLink,
+    })
+
+    await storage.users.create({
+      id: "usr_1",
+      projectId,
+      email: "ava@acme.com",
+    })
+
+    await requestMagicLink({
+      storage,
+      strategy,
+      email: "ava@acme.com",
+      requesterHash: "requester-hash-value",
+    })
+
+    const link = linkFromLatestMessage(messages)
+    expect(link.searchParams.get("requester")).toBe("requester-hash-value")
+  })
+
+  test("peekMagicLink validates without consuming and rejects bad tokens", async () => {
+    const storage = new InMemoryAuthStorage()
+    const { messages, sendMagicLink } = createSender()
+    const strategy = magicLink({
+      allowedDomains: ["acme.com"],
+      bootstrapUsers: ["ava@acme.com"],
+      sendMagicLink,
+    })
+
+    await requestMagicLink({ storage, strategy, email: "ava@acme.com" })
+    const link = linkFromLatestMessage(messages)
+    const magicLinkId = link.searchParams.get("magicLinkId") ?? ""
+    const token = link.searchParams.get("token") ?? ""
+    const peek = (peekToken: string, now?: Date) =>
+      strategy.peekMagicLink!({
+        projectId,
+        authStorage: storage,
+        magicLinkId,
+        token: peekToken,
+        now: now ?? at("2026-05-16T10:01:00.000Z"),
+      })
+
+    // Valid link peeks the email — repeatedly, without consuming it.
+    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com" })
+    await expect(peek(token)).resolves.toEqual({ email: "ava@acme.com" })
+    await expect(peek("wrong-token")).resolves.toBeNull()
+    await expect(peek(token, at("2026-05-16T10:16:00.000Z"))).resolves.toBeNull()
+
+    // Completion still works after peeking, and a consumed link peeks null.
+    await strategy.completeMagicLinkSignIn({
+      projectId,
+      authStorage: storage,
+      magicLinkId,
+      token,
+      now: at("2026-05-16T10:02:00.000Z"),
+      session: {
+        id: "ses_1",
+        audience: "atlas",
+        tokenHash: "session-hash",
+        createdAt: at("2026-05-16T10:02:00.000Z"),
+        expiresAt: at("2026-05-16T22:02:00.000Z"),
+      },
+    })
+    await expect(peek(token, at("2026-05-16T10:03:00.000Z"))).resolves.toBeNull()
   })
 
   test("does not send for unknown, suspended, or disallowed emails", async () => {

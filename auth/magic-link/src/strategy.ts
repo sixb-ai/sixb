@@ -9,6 +9,8 @@ import type {
   MagicLinkCallbackResult,
   MagicLinkInvitationRecipientInput,
   MagicLinkInvitationRecipientResult,
+  MagicLinkPeekInput,
+  MagicLinkPeekResult,
   MagicLinkRequestInput,
   MagicLinkRequestResult,
 } from "@sixb/core"
@@ -59,10 +61,11 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
   readonly id: string
   readonly bootstrapGroupIds: readonly string[]
 
+  readonly magicLinkTtlMs: number
+
   private readonly allowedDomains: ReadonlySet<string>
   private readonly bootstrapUsers: ReadonlySet<string>
   private readonly publicOrigin?: string
-  private readonly magicLinkTtlMs: number
   private readonly rateLimiter: MagicLinkRateLimiter
   private readonly sendMagicLink: (message: SendMagicLinkInput) => Promise<void>
   private readonly from?: string
@@ -120,6 +123,7 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       magicLinkId,
       requestOrigin: input.requestOrigin,
       token: credential.token,
+      requesterHash: input.requesterHash,
     })
 
     try {
@@ -181,6 +185,31 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     }
 
     return { status: "allowed", email }
+  }
+
+  // Read-only twin of completeMagicLinkSignIn's validity rules: same record
+  // checks plus token verification, but never consumes the token. Keeps the
+  // "can this link still sign in?" logic in one package so the server's GET
+  // handler cannot drift from the rules applied on completion.
+  async peekMagicLink(input: MagicLinkPeekInput): Promise<MagicLinkPeekResult | null> {
+    const now = input.now ? new Date(input.now) : new Date()
+    const magicLink = await input.authStorage.magicLinks.getById({
+      projectId: input.projectId,
+      id: input.magicLinkId,
+    })
+
+    if (
+      !magicLink ||
+      !this.isAllowedEmail(magicLink.email) ||
+      magicLink.consumedAt ||
+      magicLink.revokedAt ||
+      magicLink.expiresAt.getTime() <= now.getTime() ||
+      hashMagicLinkToken(input.token) !== magicLink.tokenHash
+    ) {
+      return null
+    }
+
+    return { email: magicLink.email }
   }
 
   async completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<MagicLinkCallbackResult> {
@@ -255,11 +284,15 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
     readonly magicLinkId: string
     readonly requestOrigin: string
     readonly token: string
+    readonly requesterHash?: string
   }): string {
     const origin = this.publicOrigin ?? normalizePublicOrigin(input.requestOrigin)
     const url = new URL("/auth/callback", origin)
     url.searchParams.set("magicLinkId", input.magicLinkId)
     url.searchParams.set("token", input.token)
+    if (input.requesterHash) {
+      url.searchParams.set("requester", input.requesterHash)
+    }
     return url.toString()
   }
 

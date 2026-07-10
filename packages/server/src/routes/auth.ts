@@ -1,3 +1,4 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
 import {
   type AccessTokenRecord,
   type AuthenticatedUserRequestSession,
@@ -17,10 +18,12 @@ import {
   type InvitationRecord,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
+  type MagicLinkAuthStrategy,
   type MemberSummary,
   type OntologySource,
   type ServiceAccountRecord,
   type Sixb,
+  shouldUseSecureCookies,
   type UserRecord,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core"
@@ -1174,20 +1177,41 @@ export function registerAuthRoutes(
         const authStorage = requireAuthStorage(sixb)
 
         if (isMagicLinkAuthStrategy(strategy)) {
-          await strategy.requestMagicLink({
+          const pending = createMagicLinkPendingCredential()
+          const result = await strategy.requestMagicLink({
             projectId: sixb.id,
             authStorage,
             email: body.email ?? "",
             audience: authRedirect.audience,
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
+            requesterHash: pending.hash,
           })
 
-          return htmlMessageResponse(
+          const response = htmlMessageResponse(
             "If this email can sign in, we sent a link. Check your inbox to continue.",
             200,
             "Check your email"
           )
+          // Same-device fast path: this browser keeps the preimage of the
+          // `requester` hash embedded in the emailed callback URL, so opening
+          // the link here signs in without the confirmation click. Always
+          // answer with a pending cookie of identical shape (a missing
+          // Set-Cookie for ineligible emails would leak which addresses can
+          // sign in), but only rotate the stored secret when a link was
+          // actually delivered — a rate-limited or skipped request must not
+          // orphan the hash in the previously emailed, still-valid link.
+          const existingPending = getCookie(request, MAGIC_LINK_PENDING_COOKIE_NAME)?.trim()
+          response.headers.append(
+            "set-cookie",
+            magicLinkPendingCookieHeader({
+              request,
+              sixb,
+              value: result.status === "sent" ? pending.secret : existingPending || pending.secret,
+              maxAgeSeconds: magicLinkPendingCookieMaxAgeSeconds(strategy),
+            })
+          )
+          return response
         }
 
         if (isOidcAuthStrategy(strategy)) {
@@ -1249,12 +1273,8 @@ export function registerAuthRoutes(
       "/auth/callback",
       async ({ request }) => {
         const strategy = sixb.auth.getStrategy()
-        const now = new Date()
-        const sessionCredential = createSessionCredential()
-        const device = resolveSessionDevice(request)
 
         if (isMagicLinkAuthStrategy(strategy)) {
-          const authOptions = resolveAuthOptions(options, request)
           const url = new URL(request.url)
           const magicLinkId = url.searchParams.get("magicLinkId")?.trim()
           const token = url.searchParams.get("token")?.trim()
@@ -1263,35 +1283,61 @@ export function registerAuthRoutes(
             return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
           }
 
-          try {
-            const result = await strategy.completeMagicLinkSignIn({
-              projectId: sixb.id,
-              authStorage: requireAuthStorage(sixb),
+          // Read-only peek so the page can greet the user by email and dead
+          // links fail before the confirmation click. Email security scanners
+          // (Safe Links, Avanan, Mimecast, ...) prefetch emailed URLs, so this
+          // GET must not consume the single-use token — a scanner would
+          // invalidate the link before the user ever opens it. The strategy
+          // owns the validity rules (including token verification, so a bare
+          // magicLinkId cannot disclose the account email).
+          let email: string | undefined
+          if (strategy.peekMagicLink) {
+            try {
+              const peeked = await strategy.peekMagicLink({
+                projectId: sixb.id,
+                authStorage: requireAuthStorage(sixb),
+                magicLinkId,
+                token,
+              })
+              if (!peeked) {
+                return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+              }
+              email = peeked.email
+            } catch {
+              return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+            }
+          }
+
+          // Same-device fast path: only the browser that requested this link
+          // holds the preimage of the URL's `requester` hash, so it may sign in
+          // straight from the navigation. Scanners and other browsers get the
+          // confirmation page; POST /auth/callback completes the sign-in there.
+          const requesterHash = url.searchParams.get("requester")?.trim()
+          const pendingSecret = getCookie(request, MAGIC_LINK_PENDING_COOKIE_NAME)?.trim()
+          if (
+            requesterHash &&
+            pendingSecret &&
+            matchesMagicLinkRequester(pendingSecret, requesterHash)
+          ) {
+            return completeMagicLinkCallback({
+              sixb,
+              strategy,
+              options,
+              request,
               magicLinkId,
               token,
-              session: {
-                id: sessionCredential.sessionId,
-                audience: authOptions.audience,
-                tokenHash: sessionCredential.tokenHash,
-                createdAt: now,
-                expiresAt: new Date(now.getTime() + sixb.auth.getSessionTtlMs()),
-                ...device,
-              },
+              clearPendingCookie: true,
             })
-
-            return sessionCallbackCompletionResponse({
-              sixb,
-              request,
-              sessionCredential,
-              audience: result.session.audience,
-              returnTo: result.returnTo,
-            })
-          } catch {
-            return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
           }
+
+          return magicLinkConfirmResponse({ magicLinkId, token, email })
         }
 
         if (isOidcAuthStrategy(strategy)) {
+          const now = new Date()
+          const sessionCredential = createSessionCredential()
+          const device = resolveSessionDevice(request)
+
           try {
             const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
@@ -1312,6 +1358,7 @@ export function registerAuthRoutes(
             return sessionCallbackCompletionResponse({
               sixb,
               request,
+              apiOrigin: options.resolveAuthRequestOrigin(request),
               sessionCredential,
               audience: result.session.audience,
               returnTo: result.returnTo,
@@ -1326,6 +1373,144 @@ export function registerAuthRoutes(
       },
       { detail: { hide: true } }
     )
+    .post(
+      "/auth/callback",
+      async ({ body, request }) => {
+        const strategy = sixb.auth.getStrategy()
+
+        if (!isMagicLinkAuthStrategy(strategy)) {
+          return strategyNotImplementedResponse("Auth callback is not implemented yet.")
+        }
+
+        const magicLinkId = body.magicLinkId?.trim()
+        const token = body.token?.trim()
+        if (!magicLinkId || !token) {
+          return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+        }
+
+        return completeMagicLinkCallback({ sixb, strategy, options, request, magicLinkId, token })
+      },
+      {
+        body: t.Object({
+          magicLinkId: t.Optional(t.String()),
+          token: t.Optional(t.String()),
+        }),
+        parse: "urlencoded",
+        detail: { hide: true },
+      }
+    )
+}
+
+// The pending cookie carries the preimage of the `requester` hash embedded in
+// the emailed callback URL. Only the browser that requested the link holds it,
+// so GET /auth/callback can distinguish that browser (sign in immediately) from
+// scanners and other devices (confirmation page). It is an anti-burn shortcut,
+// not an auth credential — the magic-link token still authenticates the sign-in.
+const MAGIC_LINK_PENDING_COOKIE_NAME = "sixb_pending"
+// Fallback when a strategy doesn't expose its link TTL; matches the default
+// magic-link TTL. An expired cookie only costs the confirmation click.
+const MAGIC_LINK_PENDING_COOKIE_FALLBACK_MAX_AGE_SECONDS = 15 * 60
+
+function magicLinkPendingCookieMaxAgeSeconds(strategy: MagicLinkAuthStrategy): number {
+  return strategy.magicLinkTtlMs && strategy.magicLinkTtlMs > 0
+    ? Math.max(1, Math.trunc(strategy.magicLinkTtlMs / 1000))
+    : MAGIC_LINK_PENDING_COOKIE_FALLBACK_MAX_AGE_SECONDS
+}
+
+function createMagicLinkPendingCredential(): {
+  readonly secret: string
+  readonly hash: string
+} {
+  const secret = randomBytes(32).toString("base64url")
+  return { secret, hash: hashMagicLinkPendingSecret(secret) }
+}
+
+function hashMagicLinkPendingSecret(secret: string): string {
+  return createHash("sha256").update(secret).digest("base64url")
+}
+
+function matchesMagicLinkRequester(pendingSecret: string, requesterHash: string): boolean {
+  const expected = Buffer.from(hashMagicLinkPendingSecret(pendingSecret))
+  const provided = Buffer.from(requesterHash)
+  return expected.length === provided.length && timingSafeEqual(expected, provided)
+}
+
+// SameSite=Lax, not Strict: the emailed link arrives as a cross-site top-level
+// navigation and the cookie must accompany that GET for the fast path to work.
+function magicLinkPendingCookieHeader(params: {
+  readonly request: Request
+  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly value: string
+  readonly maxAgeSeconds: number
+}): string {
+  const parts = [
+    `${MAGIC_LINK_PENDING_COOKIE_NAME}=${params.value}`,
+    "Path=/auth/callback",
+    "SameSite=Lax",
+    "HttpOnly",
+    `Max-Age=${params.maxAgeSeconds}`,
+  ]
+  if (shouldUseSecureCookies(params.request, params.sixb.auth.getCookieOptions())) {
+    parts.push("Secure")
+  }
+  return parts.join("; ")
+}
+
+// Shared by POST /auth/callback (confirmation click) and the same-device fast
+// path on GET. Consumes the single-use token and mints the session cookies.
+async function completeMagicLinkCallback(input: {
+  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly strategy: MagicLinkAuthStrategy
+  readonly options: AuthRoutesOptions
+  readonly request: Request
+  readonly magicLinkId: string
+  readonly token: string
+  readonly clearPendingCookie?: boolean
+}): Promise<Response> {
+  const authOptions = resolveAuthOptions(input.options, input.request)
+  const now = new Date()
+  const sessionCredential = createSessionCredential()
+  const device = resolveSessionDevice(input.request)
+
+  try {
+    const result = await input.strategy.completeMagicLinkSignIn({
+      projectId: input.sixb.id,
+      authStorage: requireAuthStorage(input.sixb),
+      magicLinkId: input.magicLinkId,
+      token: input.token,
+      session: {
+        id: sessionCredential.sessionId,
+        audience: authOptions.audience,
+        tokenHash: sessionCredential.tokenHash,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + input.sixb.auth.getSessionTtlMs()),
+        ...device,
+      },
+    })
+
+    const response = sessionCallbackCompletionResponse({
+      sixb: input.sixb,
+      request: input.request,
+      apiOrigin: input.options.resolveAuthRequestOrigin(input.request),
+      sessionCredential,
+      audience: result.session.audience,
+      returnTo: result.returnTo,
+    })
+    if (input.clearPendingCookie) {
+      response.headers.append(
+        "set-cookie",
+        magicLinkPendingCookieHeader({
+          request: input.request,
+          sixb: input.sixb,
+          value: "",
+          maxAgeSeconds: 0,
+        })
+      )
+    }
+    return response
+  } catch {
+    return htmlMessageResponse("This sign-in link is invalid or expired.", 400)
+  }
 }
 
 // Best-effort client metadata for the active-sessions view. `x-forwarded-for`
@@ -1347,6 +1532,7 @@ function resolveSessionDevice(request: Request): {
 function sessionCallbackCompletionResponse(input: {
   readonly sixb: Sixb<readonly OntologySource[]>
   readonly request: Request
+  readonly apiOrigin: string
   readonly sessionCredential: ReturnType<typeof createSessionCredential>
   readonly audience: AuthSessionAudience
   readonly returnTo: string
@@ -1374,17 +1560,44 @@ function sessionCallbackCompletionResponse(input: {
     })
   )
 
-  return authCallbackCompletionResponse(input.returnTo, headers)
+  return authCallbackCompletionResponse(input.returnTo, headers, input.apiOrigin)
 }
 
-// OAuth and magic-link callbacks arrive from a cross-site navigation. A direct 3xx after
-// setting SameSite=Strict cookies can keep the next request in that cross-site redirect
-// chain. Finish on a Sixb document first, then navigate to the sanitized return path.
-function authCallbackCompletionResponse(returnTo: string, headers: Headers): Response {
+// OAuth and magic-link callbacks can arrive as a cross-site navigation, and a direct
+// 3xx after setting SameSite=Strict cookies keeps the chained request cross-site — the
+// cookies get dropped. That only matters when the return target is on the API origin
+// itself (e.g. /docs); there, finish on a Sixb document first and navigate from it.
+// Any other origin doesn't need our cookies on the navigation, so redirect straight
+// through — the page the user is on (email client or the confirmation page with its
+// loading button) stays visible until the app renders.
+function authCallbackCompletionResponse(
+  returnTo: string,
+  headers: Headers,
+  apiOrigin: string
+): Response {
+  if (!isSameOriginReturnTarget(returnTo, apiOrigin)) {
+    headers.set("location", returnTo)
+    return new Response(null, { status: 303, headers })
+  }
+
+  return authCallbackCompletionDocumentResponse(returnTo, headers)
+}
+
+function isSameOriginReturnTarget(returnTo: string, apiOrigin: string): boolean {
+  try {
+    return new URL(returnTo).origin === apiOrigin
+  } catch {
+    return true
+  }
+}
+
+// `style-src 'unsafe-inline'` lets the shared auth-page stylesheet apply; the page
+// stays script-free and everything else is locked down by `default-src 'none'`.
+function authCallbackCompletionDocumentResponse(returnTo: string, headers: Headers): Response {
   headers.set("content-type", "text/html; charset=utf-8")
   headers.set(
     "content-security-policy",
-    `default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to ${resolveNavigateToSources(
+    `default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to ${resolveNavigateToSources(
       returnTo
     )}`
   )
@@ -1392,24 +1605,17 @@ function authCallbackCompletionResponse(returnTo: string, headers: Headers): Res
   headers.set("x-content-type-options", "nosniff")
 
   return new Response(
-    [
-      "<!doctype html>",
-      '<html lang="en">',
-      "<head>",
-      '<meta charset="utf-8">',
-      '<meta name="viewport" content="width=device-width, initial-scale=1">',
-      '<meta name="referrer" content="no-referrer">',
-      `<meta http-equiv="refresh" content="0;url=${escapeHtml(returnTo)}">`,
-      "<title>Signing in</title>",
-      "</head>",
-      "<body>",
-      "<main>",
-      "<p>Signing you in...</p>",
-      `<p><a href="${escapeHtml(returnTo)}">Continue</a></p>`,
-      "</main>",
-      "</body>",
-      "</html>",
-    ].join(""),
+    authPageDocument(
+      [
+        "<h1>Signing you in&hellip;</h1>",
+        `<p>If you are not redirected automatically, <a href="${escapeHtml(returnTo)}">continue</a>.</p>`,
+      ].join(""),
+      "Signing in",
+      [
+        '<meta name="referrer" content="no-referrer">',
+        `<meta http-equiv="refresh" content="0;url=${escapeHtml(returnTo)}">`,
+      ].join("")
+    ),
     {
       status: 200,
       headers,
@@ -1579,6 +1785,14 @@ p {
   color: var(--muted-foreground);
   font-size: 0.875rem;
 }
+p strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+a {
+  color: var(--foreground);
+  text-underline-offset: 0.2em;
+}
 form { margin: 1.75rem 0 0; }
 input[type="email"] {
   width: 100%;
@@ -1610,14 +1824,26 @@ button {
   border-radius: calc(var(--radius) - 2px);
   cursor: pointer;
 }
-button:hover { opacity: 0.9; }
+button:hover:not(:disabled) { opacity: 0.9; }
 button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+button:disabled { cursor: default; }
+.spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  vertical-align: -0.2em;
+  border: 2px solid color-mix(in srgb, var(--primary-foreground) 35%, transparent);
+  border-top-color: var(--primary-foreground);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>`
 
-function authPageDocument(body: string, title = "Sign in"): string {
+function authPageDocument(body: string, title = "Sign in", head = ""): string {
   return [
     "<!doctype html>",
     '<html lang="en">',
@@ -1625,6 +1851,7 @@ function authPageDocument(body: string, title = "Sign in"): string {
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     `<title>${escapeHtml(title)}</title>`,
+    head,
     AUTH_PAGE_STYLE,
     "</head>",
     "<body>",
@@ -1661,6 +1888,55 @@ function signInFormResponse(context: AuthRedirectContext): Response {
       "</form>",
     ].join("")
   )
+}
+
+// Deliberately a plain form with no auto-submit: link scanners that execute
+// pages headlessly still won't press the button, so the token survives until a
+// person clicks Continue. The extra click also keeps the link reusable when a
+// phone opens it in a preview or hands it to a different default browser. The
+// inline script never submits anything — it only turns the clicked button into
+// a disabled spinner. The form POST is a normal navigation, so this page stays
+// visible (spinner and all) until the server responds; the pageshow handler
+// resets the button when the page is restored from the back/forward cache.
+function magicLinkConfirmResponse(input: {
+  readonly magicLinkId: string
+  readonly token: string
+  // Absent when the strategy doesn't support the read-only peek.
+  readonly email?: string
+}): Response {
+  const response = authPageResponse(
+    [
+      "<h1>Sign in</h1>",
+      input.email
+        ? `<p>You're signing in as <strong>${escapeHtml(input.email)}</strong>.</p>`
+        : "<p>Click continue to finish signing in.</p>",
+      '<form method="post" action="/auth/callback" id="confirm">',
+      `<input type="hidden" name="magicLinkId" value="${escapeHtml(input.magicLinkId)}">`,
+      `<input type="hidden" name="token" value="${escapeHtml(input.token)}">`,
+      '<button type="submit" id="confirm-button">Continue</button>',
+      "</form>",
+      "<script>",
+      '(function () {var button = document.getElementById("confirm-button");',
+      'document.getElementById("confirm").addEventListener("submit", function () {',
+      "button.disabled = true;",
+      'button.setAttribute("aria-busy", "true");',
+      'button.innerHTML = \'<span class="spinner" aria-hidden="true"></span>\';',
+      "});",
+      'window.addEventListener("pageshow", function (event) {',
+      "if (!event.persisted) return;",
+      "button.disabled = false;",
+      'button.removeAttribute("aria-busy");',
+      'button.textContent = "Continue";',
+      "});})();",
+      "</script>",
+    ].join("")
+  )
+  // The single-use token is in this page's URL; keep it out of cross-origin
+  // referrers. Must stay `same-origin`, not `no-referrer` — a no-referrer policy
+  // makes browsers send `Origin: null` on the form POST, which the browser-origin
+  // guard rejects before the callback route runs.
+  response.headers.set("referrer-policy", "same-origin")
+  return response
 }
 
 function resolveNavigateToSources(returnTo: string): string {
