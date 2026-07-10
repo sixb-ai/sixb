@@ -82,6 +82,9 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
       ...(latestCursor ? { afterCursor: latestCursor } : {}),
       ...(limit ? { limit } : {}),
     }),
+    // The event server resolves its initial cursor before announcing readiness.
+    // Waiting for that frame prevents subscribe from racing server-side state setup.
+    subscribeWhen: (data) => parseEventStreamMessage(data)?.type === "connected",
     onMessage: (data, sink) => {
       const message = parseEventStreamMessage(data)
       if (!message) return

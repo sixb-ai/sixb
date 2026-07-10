@@ -176,6 +176,7 @@ describe("action wait helpers", () => {
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
       type: "subscribe",
       topic: "actions",
@@ -267,6 +268,7 @@ describe("action wait helpers", () => {
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     ws.onmessage?.({
       data: JSON.stringify({ type: "event", event: actionEvent("action.completed") }),
     })
