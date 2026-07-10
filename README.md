@@ -1,123 +1,91 @@
-# Sixb
+<div align="center">
 
-Build software for business operations.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./docs/brand/sixb-wordmark-white.svg">
+  <img alt="Sixb" src="./docs/brand/sixb-wordmark-black.svg" width="320">
+</picture>
 
-Sixb is a TypeScript framework for building apps around the data, workflows, and decisions that
-run a business.
+Sixb: For something between [Palantir Foundry](https://www.palantir.com/platforms/foundry/)
+and [Mastra](https://mastra.ai/). An open TypeScript framework for operational software.
 
-It gives teams a unified operational layer: business logic in code, connected to the tools they
-already use, shaped around how the company actually works.
+<h3>
 
-[Docs](./docs) · [Examples](./examples) · [Contributing](./CONTRIBUTING.md)
+[Documentation](https://docs.sixb.ai) | [Examples](https://docs.sixb.ai/examples/overview) | [Contributing](./CONTRIBUTING.md)
 
-## What It Is
+</h3>
 
-Sixb gives operational software a shared backbone:
+[![CI](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml)
+[![Docs](https://github.com/sixb-ai/sixb/actions/workflows/docs.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/docs.yml)
+[![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
+[![License](https://img.shields.io/badge/license-MIT-black)](./LICENSE)
 
-- `ontology/` describes your domain as typed objects, links, properties, and telemetry
-- `actions/` defines commands people or agents can request on those objects
-- `connectors/` connects Sixb to outside systems
-- `datasets/`, `syncs/`, `pipelines/`, and `projections/` move external data into the model
-- `schedules/` and `workflows/` orchestrate ongoing work
-- `app/` adds a custom React UI on top of the same runtime
+</div>
 
-## The Mental Model
+---
 
-The ontology is the center. Everything else either changes the model, reads from it, or exposes it.
+## What is Sixb?
 
-Syncs and pipelines bring in source data. Projections materialize that data as objects and links.
-Actions make the model operational. Events record what happened. The server exposes REST,
-WebSocket, OpenAPI, and a built-in UI. Custom apps and generated clients use the same API.
+Sixb gives operational systems a shared backbone:
 
-`createSixb()` wires the project together with convention-based discovery and gives you a typed
-runtime API like `sixb.objects(Invoice)`.
+- **Ontology** — typed objects, links, properties, telemetry, and value types.
+- **Actions** — commands that people, apps, and agents can request.
+- **Data** — connectors, datasets, syncs, pipelines, and projections.
+- **Runtime** — functions, schedules, workflows, rules, events, and authorization.
+- **Interfaces** — HTTP/WebSocket API, generated client, Atlas UI, and custom React apps.
 
-## Example
+Everything starts with `createSixb()`. It discovers your project folders and gives you a
+typed runtime API like `sixb.objects(Invoice)`.
 
-```ts
-// ontology/invoice.ts
-import { defineObjectType, prop, stringEnum } from "@sixb/core"
+## Quick start
 
-export const Invoice = defineObjectType({
-  id: "Invoice",
-  name: "Invoice",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("customerId", "string", { required: true }),
-    prop("amount", "double", { required: true }),
-    prop("status", stringEnum(["draft", "approved", "paid"])),
-  ],
-})
-```
-
-```ts
-// actions/approve-invoice.ts
-import { defineAction } from "@sixb/core"
-import { Invoice } from "../ontology/invoice"
-
-export const approveInvoice = defineAction("approve")
-  .on(Invoice)
-  .params({})
-  .edits(({ objects, subject }) => {
-    objects(Invoice).byId(subject.primaryId).update({
-      status: "approved",
-    })
-  })
-```
-
-From there, Sixb can expose the same model through a typed runtime API, durable events, and
-the built-in server and UI.
-
-Add `sixb.config.ts` with `createSixb()`, and Sixb auto-discovers your project folders.
-
-## Quick Start
-
-Sixb uses [Bun](https://bun.sh) for package management and runtime.
+Install [Bun](https://bun.sh), then run the Acme example:
 
 ```bash
-git clone https://github.com/sixb-ai/sixb
+git clone https://github.com/sixb-ai/sixb.git
 cd sixb
 bun install
-bun run link-cli
-sixb create my-sixb-app
-cd my-sixb-app
-bun install
-sixb dev
+bun --filter @sixb/example-acme-corp dev
 ```
 
-Open `http://localhost:3000` to see the starter app, built-in UI, and local runtime. Generated
-API docs are available at `http://localhost:3000/docs`.
+Open:
 
-## Production
+- Atlas: `http://localhost:3000`
+- App: `http://localhost:3001`
+- API docs: `http://localhost:3002/docs`
 
-Use `sixb dev` for local all-in-one development. For production, build once and run each role as a
-separate process so scaling and failure boundaries stay explicit:
+## Learn
+
+- [Get started](https://docs.sixb.ai)
+- [Project structure](https://docs.sixb.ai/fundamentals/project-structure)
+- [Ontology](https://docs.sixb.ai/ontology/overview)
+- [Objects](https://docs.sixb.ai/objects/overview)
+- [Actions](https://docs.sixb.ai/actions/overview)
+- [Data integrations](https://docs.sixb.ai/data/overview)
+- [Apps](https://docs.sixb.ai/apps/overview)
+- [Deployment](https://docs.sixb.ai/deployment/overview)
+
+## Develop this repo
 
 ```bash
-sixb build
-sixb api
-sixb atlas
-sixb app
-sixb scheduler
-sixb orchestrator
-sixb functions
-sixb rules
-sixb worker sync
-sixb worker pipeline
-sixb worker projection
-sixb worker action
-sixb worker workflow
+bun run build
+bun run typecheck
+bun run test
+bun run check
 ```
 
-The split commands are the production layout for Docker, Kubernetes, systemd, and other process
-managers. `sixb atlas` and `sixb app` serve only assets prepared by `sixb build`.
+Bun is the only package manager and runtime used by this repository.
 
-## Where To Go Next
+## Repo map
 
-- [`docs/`](./docs) for the simplified framework overview and concepts
-- [`examples/roku-tv`](./examples/roku-tv) for a device-control example
-- [`examples/panasonic-ac`](./examples/panasonic-ac) for a live system integration example
-- [`packages/core`](./packages/core) for the runtime and ontology builders
-- [`packages/server`](./packages/server) for the HTTP/WebSocket API and built-in UI
-- [`packages/cli`](./packages/cli) for `sixb` and `create-sixb`
-- [`packages/client`](./packages/client) for the generated typed client
+- `packages/core` — runtime, ontology builders, providers, validation, and functions
+- `packages/server` — HTTP/WebSocket API and OpenAPI generation
+- `packages/atlas` — built-in React UI
+- `packages/client` — generated typed client
+- `packages/cli` — `sixb` and `create-sixb`
+- `docs/` — documentation source, hosted at [docs.sixb.ai](https://docs.sixb.ai)
+- `examples/` — runnable sample projects
+
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and keep changes
+small, typed, tested, and readable.
