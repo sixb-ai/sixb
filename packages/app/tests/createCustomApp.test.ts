@@ -50,7 +50,7 @@ async function linkAppTestDependencies(root: string): Promise<void> {
     "dir"
   )
   await symlink(
-    join(process.cwd(), "packages", "cli", "node_modules", "@sixb", "client"),
+    join(process.cwd(), "packages", "client"),
     join(fixtureModules, "@sixb", "client"),
     "dir"
   )
