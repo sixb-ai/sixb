@@ -152,20 +152,21 @@ describe("ActionWorker", () => {
     const records = await broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
-      names: ["action"],
+      names: ["action.info"],
     })
     const line = records.find(
       (record) => (record.payload as { message?: string }).message === "Applying status"
     )
-    expect(line?.key).toBe(runId)
+    expect(line?.key).toBe(`action:${runId}`)
     const payload = line?.payload as {
       level: string
       fields?: { status?: string }
-      run?: { kind?: string; id?: string }
+      context?: { run?: { kind?: string; id?: string }; phase?: string }
     }
     expect(payload.level).toBe("info")
     expect(payload.fields?.status).toBe("active")
-    expect(payload.run).toEqual({ kind: "action", id: runId })
+    expect(payload.context?.phase).toBe("writeback")
+    expect(payload.context?.run).toEqual({ kind: "action", id: runId })
   })
 
   test("date/timestamp params arrive as Date objects in handlers", async () => {

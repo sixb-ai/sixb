@@ -1,4 +1,5 @@
 import type {
+  RunLogSession,
   ValueType,
   WorkflowDefinition,
   WorkflowInterventionNodeDefinition,
@@ -11,6 +12,7 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core"
 import {
+  resolveLogsRuntime,
   snapshotWorkflowInput,
   snapshotWorkflowInterventionResponse,
   validateWorkflowInput,
@@ -38,6 +40,7 @@ export class WorkflowRunSession {
       readonly job: WorkflowJob
       readonly workflow: WorkflowDefinition
       readonly signal: AbortSignal
+      readonly logSession: RunLogSession
       readonly valueTypesById: ReadonlyMap<string, ValueType>
       readonly workflowInputSnapshot: WorkflowIOSnapshot
       readonly state: WorkflowExecutionState
@@ -79,12 +82,17 @@ export class WorkflowRunSession {
       workflowRuns: runtime.workflowRuns,
       observer: input.observer ?? noopWorkflowRunObserver,
     })
+    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+      kind: "workflow",
+      id: job.id,
+    })
 
     return new WorkflowRunSession({
       runtime,
       job,
       workflow,
       signal,
+      logSession,
       valueTypesById,
       workflowInputSnapshot,
       state,
@@ -205,11 +213,16 @@ export class WorkflowRunSession {
       ),
       alreadyStarted: true,
     })
+    const logSession = resolveLogsRuntime(runtime.projectId, runtime.logs).startExecution({
+      kind: "workflow",
+      id: job.id,
+    })
     const session = new WorkflowRunSession({
       runtime,
       job,
       workflow,
       signal,
+      logSession,
       valueTypesById,
       workflowInputSnapshot: run.input,
       state,
@@ -278,6 +291,7 @@ export class WorkflowRunSession {
           job: this.dependencies.job,
           valueTypesById: this.dependencies.valueTypesById,
           signal: this.dependencies.signal,
+          logSession: this.dependencies.logSession,
           state: this.dependencies.state,
           markSideEffectBoundaryPassed: () => this.markSideEffectBoundaryPassed(),
         },
@@ -327,6 +341,10 @@ export class WorkflowRunSession {
     })
 
     await this.finishWorkflowRunAfterError({ error, status })
+  }
+
+  flushLogs(): Promise<void> {
+    return this.dependencies.logSession.flush()
   }
 
   private markSideEffectBoundaryPassed(): void {

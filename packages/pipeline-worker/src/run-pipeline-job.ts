@@ -1,4 +1,5 @@
 import type { DatasetVersion, PipelineRunRecord } from "@sixb/core"
+import { resolveLogsRuntime } from "@sixb/core"
 import {
   createPipelineBookkeepingError,
   requireFinishedAt,
@@ -14,6 +15,10 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
   const pipeline = requirePipeline(runtime.getPipelineById(job.pipelineId), job)
+  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+    kind: "pipeline",
+    id: job.id,
+  })
   const steps: PipelineStepRunResult[] = []
   let startedRun: PipelineRunRecord | undefined
   let finalVersion: DatasetVersion | undefined
@@ -37,6 +42,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
         stepIndex,
         job,
         signal,
+        logSession,
         onStepStarted: input.onStepStarted,
         onStepFinished: input.onStepFinished,
       })
@@ -94,5 +100,7 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
     }
 
     throw error
+  } finally {
+    await logSession.flush()
   }
 }

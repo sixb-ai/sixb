@@ -218,21 +218,21 @@ describe("WorkflowWorker", () => {
     const records = await sixb.broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
-      names: ["workflow"],
+      names: ["workflow.info"],
     })
     const line = records.find(
       (record) => (record.payload as { message?: string }).message === "Reviewing transaction"
     )
-    expect(line?.key).toBe("wfrun_log")
+    expect(line?.key).toBe("workflow:wfrun_log")
     const payload = line?.payload as {
       level: string
-      fields?: { txn?: string; step?: string }
-      run?: { kind?: string; id?: string }
+      fields?: { txn?: string }
+      context?: { run?: { kind?: string; id?: string }; stepId?: string }
     }
     expect(payload.level).toBe("info")
     expect(payload.fields?.txn).toBe("txn_1")
-    expect(payload.fields?.step).toBe("log-step")
-    expect(payload.run).toEqual({ kind: "workflow", id: "wfrun_log" })
+    expect(payload.context?.stepId).toBe("log-step")
+    expect(payload.context?.run).toEqual({ kind: "workflow", id: "wfrun_log" })
   })
 
   test("processes queued workflow jobs and emits workflow lifecycle events", async () => {

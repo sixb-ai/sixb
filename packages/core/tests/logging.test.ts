@@ -4,10 +4,12 @@ import type { JsonValue } from "../src/json"
 import {
   ConsoleLogger,
   LOGS_STREAM,
-  type LogFields,
-  type Logger,
+  type LogEntry,
+  type LoggerProvider,
+  type LogLevel,
   type LogRecord,
   LogsRuntime,
+  noopLoggerProvider,
   resolveLogsRuntime,
 } from "../src/logging"
 
@@ -18,159 +20,320 @@ async function readLines(broker: InMemoryBroker): Promise<readonly LogRecord[]> 
   return records.map((record) => record.payload as unknown as LogRecord)
 }
 
-/** A `Logger` that records every line (and its child bindings) into `lines`. */
-function recordingLogger(): {
-  logger: Logger
-  lines: { level: string; message: string; fields?: LogFields }[]
-} {
-  const lines: { level: string; message: string; fields?: LogFields }[] = []
-  const make = (bound: LogFields): Logger => ({
-    debug: (message, fields) =>
-      lines.push({ level: "debug", message, fields: { ...bound, ...fields } }),
-    info: (message, fields) =>
-      lines.push({ level: "info", message, fields: { ...bound, ...fields } }),
-    warn: (message, fields) =>
-      lines.push({ level: "warn", message, fields: { ...bound, ...fields } }),
-    error: (message, fields) =>
-      lines.push({ level: "error", message: String(message), fields: { ...bound, ...fields } }),
-    child: (bindings) => make({ ...bound, ...bindings }),
-  })
-  return { logger: make({}), lines }
+function recordingProvider(): { provider: LoggerProvider; entries: LogEntry[] } {
+  const entries: LogEntry[] = []
+  return {
+    provider: { write: (entry) => entries.push(entry) },
+    entries,
+  }
 }
 
-describe("LogsRuntime broker publishing", () => {
-  test("publishes a run-tagged record to the __logs stream", async () => {
+describe("LogsRuntime broker capture", () => {
+  test("publishes a routed, run-tagged record", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const session = logs.startExecution({ kind: "sync", id: "run-1" })
 
-    const logger = logs.forRun({ kind: "sync", id: "run-1" })
-    logger.info("Reviewing invoice", { invoice: "INV-1" })
-    await logger.flush()
+    session.logger.info("Reviewing invoice", { invoice: "INV-1" })
+    await session.flush()
 
     const records = await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })
     expect(records).toHaveLength(1)
-    expect(records[0]?.name).toBe("sync")
-    expect(records[0]?.key).toBe("run-1")
-
-    const line = records[0]?.payload as unknown as LogRecord
-    expect(line.level).toBe("info")
-    expect(line.message).toBe("Reviewing invoice")
-    expect(line.fields).toEqual({ invoice: "INV-1" })
-    expect(line.run).toEqual({ kind: "sync", id: "run-1" })
-    expect(typeof line.at).toBe("string")
+    expect(records[0]?.name).toBe("sync.info")
+    expect(records[0]?.key).toBe("sync:run-1")
+    expect(records[0]?.payload).toMatchObject({
+      level: "info",
+      message: "Reviewing invoice",
+      fields: { invoice: "INV-1" },
+      context: { run: { kind: "sync", id: "run-1" } },
+    })
   })
 
-  test("keeps every level on the broker regardless of the output logger level", async () => {
+  test("uses a capture level independent from the output provider", async () => {
     const broker = new InMemoryBroker()
-    // Output logger silences everything below error; the broker must still get debug.
+    const { provider, entries } = recordingProvider()
     const logs = new LogsRuntime({
       projectId: PROJECT,
       broker,
-      logger: new ConsoleLogger({ level: "error" }),
+      logger: provider,
+      observability: { level: "warn" },
     })
+    const session = logs.startExecution({ kind: "workflow", id: "run-2" })
 
-    const logger = logs.forRun({ kind: "workflow", id: "run-2" })
-    logger.debug("verbose detail")
-    await logger.flush()
+    session.logger.debug("provider only")
+    session.logger.warn("captured")
+    await session.flush()
 
-    const lines = await readLines(broker)
-    expect(lines).toHaveLength(1)
-    expect(lines[0]?.level).toBe("debug")
+    expect(entries.map((entry) => entry.message)).toEqual(["provider only", "captured"])
+    expect((await readLines(broker)).map((line) => line.message)).toEqual(["captured"])
   })
 
-  test("caps lines per run and emits a single truncation marker", async () => {
+  test("caps one complete execution across step loggers", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker, maxLinesPerRun: 3 })
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: noopLoggerProvider,
+      observability: { limits: { maxLinesPerExecution: 3 } },
+    })
+    const session = logs.startExecution({ kind: "pipeline", id: "run-3" })
 
-    const logger = logs.forRun({ kind: "sync", id: "run-3" })
-    for (let index = 0; index < 10; index += 1) {
-      logger.info(`line ${index}`)
+    for (const stepId of ["extract", "transform"]) {
+      const logger = session.withContext({ stepId })
+      for (let index = 0; index < 3; index += 1) {
+        logger.info(`${stepId} ${index}`)
+      }
     }
-    await logger.flush()
+    await session.flush()
 
     const lines = await readLines(broker)
-    expect(lines).toHaveLength(4)
-    expect(lines.slice(0, 3).map((line) => line.message)).toEqual(["line 0", "line 1", "line 2"])
-    expect(lines[3]?.message).toBe("log truncated")
-    expect(lines[3]?.fields).toEqual({ droppedLines: 7 })
+    expect(lines.map((line) => line.message)).toEqual([
+      "extract 0",
+      "extract 1",
+      "extract 2",
+      "log truncated",
+    ])
+    expect(lines[3]?.fields).toEqual({ droppedLines: 3, lineLimit: 3, backpressure: 0 })
   })
 
-  test("normalizes an Error into a message plus structured fields", async () => {
+  test("keeps framework context separate from user bindings", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const session = logs.startExecution({ kind: "workflow", id: "run-4" })
 
-    const logger = logs.forRun({ kind: "action", id: "run-4" })
-    logger.error(new Error("boom"), { step: "commit" })
-    await logger.flush()
+    session
+      .withContext({ stepId: "review" })
+      .child({ run: { kind: "sync", id: "spoofed" }, stepId: "spoofed" })
+      .info("safe")
+    await session.flush()
+
+    const line = (await readLines(broker))[0]
+    expect(line?.context).toEqual({
+      run: { kind: "workflow", id: "run-4" },
+      stepId: "review",
+    })
+    expect(line?.fields).toMatchObject({ stepId: "spoofed" })
+  })
+
+  test("normalizes errors and invalid fields without throwing", async () => {
+    const broker = new InMemoryBroker()
+    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const session = logs.startExecution({ kind: "action", id: "run-5" })
+
+    session.logger.error(new Error("boom"), { phase: "commit" })
+    session.logger.info("invalid", { fn: (() => undefined) as unknown as JsonValue })
+    await session.flush()
 
     const lines = await readLines(broker)
-    const line = lines[0]
-    expect(line?.level).toBe("error")
-    expect(line?.message).toBe("boom")
-    expect(line?.fields?.step).toBe("commit")
-    expect((line?.fields?.error as { name?: string } | undefined)?.name).toBe("Error")
+    expect(lines[0]?.message).toBe("boom")
+    expect((lines[0]?.fields?.error as { name?: string } | undefined)?.name).toBe("Error")
+    expect(typeof lines[1]?.fields?.sixb_unloggableFields).toBe("string")
   })
 
-  test("child loggers merge bound fields and share the run", async () => {
+  test("redacts and byte-bounds only the broker copy", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const { provider, entries } = recordingProvider()
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: provider,
+      observability: {
+        limits: { maxRecordBytes: 300, maxBufferedBytes: 1_000 },
+        redact: { paths: ["credentials.token"] },
+      },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-6" })
+    const body = "x".repeat(1_000)
 
-    const logger = logs.forRun({ kind: "pipeline", id: "run-5" }, { step: "extract" })
-    logger.child({ attempt: 2 }).info("progress", { pct: 50 })
-    await logger.flush()
+    session.logger.info(body, { credentials: { token: "secret" }, body })
+    await session.flush()
 
-    const line = (await readLines(broker))[0]
-    expect(line?.fields).toEqual({ step: "extract", attempt: 2, pct: 50 })
-    expect(line?.run).toEqual({ kind: "pipeline", id: "run-5" })
+    expect(entries[0]?.message).toHaveLength(1_000)
+    expect((entries[0]?.fields?.credentials as { token?: string } | undefined)?.token).toBe(
+      "secret"
+    )
+    const line = (await readLines(broker))[0]!
+    expect(new TextEncoder().encode(JSON.stringify(line)).byteLength).toBeLessThanOrEqual(300)
+    expect(line.fields).toMatchObject({ sixb_truncated: true })
   })
 
-  test("falls back to a marker when fields are not JSON-serializable", async () => {
+  test("redacts nested and wildcard field paths only in broker capture", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    const { provider, entries } = recordingProvider()
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: provider,
+      observability: { redact: { paths: ["credentials.token", "users.*.email"] } },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-redact" })
 
-    const logger = logs.forRun({ kind: "sync", id: "run-6" })
-    logger.info("bad fields", { fn: (() => undefined) as unknown as JsonValue })
-    await logger.flush()
+    session.logger.info("credentials", {
+      credentials: { token: "secret" },
+      users: [{ email: "ada@example.com" }, { email: "grace@example.com" }],
+    })
+    await session.flush()
 
-    const line = (await readLines(broker))[0]
-    expect(typeof line?.fields?.sixb_unloggableFields).toBe("string")
+    expect((entries[0]?.fields?.credentials as { token?: string }).token).toBe("secret")
+    const fields = (await readLines(broker))[0]?.fields
+    expect((fields?.credentials as { token?: string }).token).toBe("[REDACTED]")
+    expect((fields?.users as Array<{ email?: string }>).map((user) => user.email)).toEqual([
+      "[REDACTED]",
+      "[REDACTED]",
+    ])
+  })
+
+  test("batches ordered broker appends", async () => {
+    const broker = new CountingBroker()
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: noopLoggerProvider,
+      observability: { batching: { maxRecords: 4, maxBytes: 1_000_000, maxDelayMs: 60_000 } },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-7" })
+
+    for (let index = 0; index < 10; index += 1) {
+      session.logger.info(`line ${index}`)
+    }
+    await session.flush()
+
+    expect(broker.appendSizes).toEqual([4, 4, 2])
+    expect((await readLines(broker)).map((line) => line.message)).toEqual(
+      Array.from({ length: 10 }, (_, index) => `line ${index}`)
+    )
+  })
+
+  test("keeps one append in flight and bounds queued bytes", async () => {
+    const broker = new BlockingBroker()
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: noopLoggerProvider,
+      observability: {
+        limits: { maxRecordBytes: 256, maxBufferedBytes: 512 },
+        batching: { maxRecords: 1, maxBytes: 256, maxDelayMs: 60_000 },
+      },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-backpressure" })
+
+    for (let index = 0; index < 20; index += 1) {
+      session.logger.info(`line ${index}`)
+    }
+    const flushing = session.flush()
+    await Bun.sleep(0)
+    broker.release()
+    await flushing
+
+    const lines = await readLines(broker)
+    expect(broker.maxConcurrentAppends).toBe(1)
+    expect(lines.length).toBeLessThan(20)
+    expect(Number(lines.at(-1)?.fields?.backpressure)).toBeGreaterThan(0)
+  })
+
+  test("can disable broker forwarding without disabling the provider", async () => {
+    const broker = new InMemoryBroker()
+    const { provider, entries } = recordingProvider()
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      broker,
+      logger: provider,
+      observability: { enabled: false },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-8" })
+
+    session.logger.info("provider only")
+    await session.flush()
+
+    expect(entries).toHaveLength(1)
+    expect(await broker.read({ projectId: PROJECT, streamId: LOGS_STREAM.id })).toEqual([])
   })
 })
 
-describe("LogsRuntime output fan-out", () => {
-  test("forwards each line to the output logger, bound to the run", () => {
-    const broker = new InMemoryBroker()
-    const { logger: output, lines } = recordingLogger()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: output })
-
-    logs.forRun({ kind: "sync", id: "run-7" }).info("hello", { a: 1 })
-
-    expect(lines).toHaveLength(1)
-    expect(lines[0]?.message).toBe("hello")
-    expect(lines[0]?.fields).toMatchObject({ run: { kind: "sync", id: "run-7" }, a: 1 })
+describe("logging failure isolation and lifecycle", () => {
+  test("validates observability limits and redaction config at startup", () => {
+    expect(
+      () =>
+        new LogsRuntime({
+          projectId: PROJECT,
+          observability: { level: "fatal" as LogLevel },
+        })
+    ).toThrow("observability.logs.level")
+    expect(
+      () =>
+        new LogsRuntime({
+          projectId: PROJECT,
+          observability: { retention: { maxBytes: -1 } },
+        })
+    ).toThrow("observability.logs.retention.maxBytes")
+    expect(
+      () =>
+        new LogsRuntime({
+          projectId: PROJECT,
+          observability: {
+            redact: { paths: ["secret"], censor: new Date() as unknown as JsonValue },
+          },
+        })
+    ).toThrow("observability.logs.redact.censor")
   })
 
-  test("works output-only when no broker is configured", async () => {
-    const { logger: output, lines } = recordingLogger()
-    const logs = new LogsRuntime({ projectId: PROJECT, logger: output })
+  test("a throwing provider cannot fail a handler or block broker capture", async () => {
+    const errorSpy = spyOn(console, "error").mockImplementation(() => undefined)
+    try {
+      const broker = new InMemoryBroker()
+      const logs = new LogsRuntime({
+        projectId: PROJECT,
+        broker,
+        logger: {
+          write() {
+            throw new Error("sink failed")
+          },
+        },
+      })
+      const session = logs.startExecution({ kind: "sync", id: "run-9" })
 
-    const logger = logs.forRun({ kind: "sync", id: "run-8" })
-    logger.info("no broker here")
-    await logger.flush()
+      expect(() => session.logger.info("still captured")).not.toThrow()
+      await session.flush()
+      expect((await readLines(broker))[0]?.message).toBe("still captured")
+      expect(errorSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      errorSpy.mockRestore()
+    }
+  })
 
-    expect(lines).toHaveLength(1)
-    expect(lines[0]?.message).toBe("no broker here")
+  test("provider flush and close are runtime responsibilities", async () => {
+    const calls: string[] = []
+    const logs = new LogsRuntime({
+      projectId: PROJECT,
+      logger: {
+        write() {},
+        flush: () => {
+          calls.push("flush")
+        },
+        close: () => {
+          calls.push("close")
+        },
+      },
+    })
+    const session = logs.startExecution({ kind: "sync", id: "run-10" })
+
+    await session.flush()
+    expect(calls).toEqual([])
+    await logs.flush()
+    await logs.close()
+    expect(calls).toEqual(["flush", "close"])
   })
 })
 
 describe("ConsoleLogger", () => {
-  test("drops lines below its level", () => {
+  test("drops entries below its provider level", () => {
     const debugSpy = spyOn(console, "debug").mockImplementation(() => undefined)
     const infoSpy = spyOn(console, "info").mockImplementation(() => undefined)
     try {
-      const logger = new ConsoleLogger({ level: "info" })
-      logger.debug("dropped")
-      logger.info("kept")
+      const provider = new ConsoleLogger({ level: "info" })
+      const context = { run: { kind: "sync" as const, id: "run" } }
+      provider.write({ level: "debug", message: "dropped", at: new Date().toISOString(), context })
+      provider.write({ level: "info", message: "kept", at: new Date().toISOString(), context })
       expect(debugSpy).not.toHaveBeenCalled()
       expect(infoSpy).toHaveBeenCalledTimes(1)
     } finally {
@@ -186,10 +349,47 @@ describe("resolveLogsRuntime", () => {
     expect(resolveLogsRuntime(PROJECT, existing)).toBe(existing)
   })
 
-  test("falls back to a usable, silent, broker-less runtime", async () => {
-    const logs = resolveLogsRuntime(PROJECT)
-    const logger = logs.forRun({ kind: "sync", id: "run-9" })
-    logger.info("still works")
-    await expect(logger.flush()).resolves.toBeUndefined()
+  test("falls back to a usable silent runtime", async () => {
+    const session = resolveLogsRuntime(PROJECT).startExecution({ kind: "sync", id: "run-11" })
+    session.logger.info("still works")
+    await expect(session.flush()).resolves.toBeUndefined()
   })
 })
+
+class CountingBroker extends InMemoryBroker {
+  readonly appendSizes: number[] = []
+
+  override append(params: Parameters<InMemoryBroker["append"]>[0]) {
+    this.appendSizes.push(params.records.length)
+    return super.append(params)
+  }
+}
+
+class BlockingBroker extends InMemoryBroker {
+  private readonly gate: Promise<void>
+  private releaseGate: () => void = () => undefined
+  private activeAppends = 0
+  maxConcurrentAppends = 0
+
+  constructor() {
+    super()
+    this.gate = new Promise((resolve) => {
+      this.releaseGate = resolve
+    })
+  }
+
+  release(): void {
+    this.releaseGate()
+  }
+
+  override async append(params: Parameters<InMemoryBroker["append"]>[0]) {
+    this.activeAppends += 1
+    this.maxConcurrentAppends = Math.max(this.maxConcurrentAppends, this.activeAppends)
+    try {
+      await this.gate
+      return await super.append(params)
+    } finally {
+      this.activeAppends -= 1
+    }
+  }
+}

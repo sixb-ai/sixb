@@ -3,26 +3,24 @@ import type { JsonValue } from "../json"
 /** Log severity, ordered `debug < info < warn < error`. */
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
-/** Structured, JSON-serializable fields attached to a log line. */
+/** Structured, JSON-serializable fields attached by project code. */
 export type LogFields = Record<string, JsonValue>
 
 /**
- * The logger surface for project code.
+ * The logger surface exposed to project handlers.
  *
- * Handlers receive a run-bound `ctx.logger`; `createSixb({ logger })` swaps the
- * process-wide output sink. Calls are fire-and-forget — logging never throws
- * into a handler.
+ * Calls are deliberately fire-and-forget: logging must never fail a handler.
+ * `child()` only binds user fields; framework-owned context stays immutable.
  */
 export interface Logger {
   debug(message: string, fields?: LogFields): void
   info(message: string, fields?: LogFields): void
   warn(message: string, fields?: LogFields): void
   error(message: string | Error, fields?: LogFields): void
-  /** Derive a logger that merges `bindings` into every subsequent line. */
   child(bindings: LogFields): Logger
 }
 
-/** The primitive whose run a log line belongs to. */
+/** The primitive whose execution produced a log line. */
 export type LogRunKind = "sync" | "pipeline" | "workflow" | "action"
 
 /** Points a log line back at the run that produced it. */
@@ -31,25 +29,35 @@ export interface LogRunRef {
   readonly id: string
 }
 
-/** One stored log line — the payload of a `__logs` broker record. */
-export interface LogRecord {
+/** Framework-owned metadata. It cannot be overwritten through `Logger.child()`. */
+export interface LogContext {
+  readonly run: LogRunRef
+  readonly stepId?: string
+  readonly phase?: string
+  readonly attempt?: number
+}
+
+/** One complete entry sent to the configured output provider. */
+export interface LogEntry {
   readonly level: LogLevel
   readonly message: string
   readonly fields?: LogFields
   /** ISO-8601 emission timestamp. */
   readonly at: string
-  readonly run: LogRunRef
+  readonly context: LogContext
 }
 
+/** One sanitized, bounded log line stored in the `__logs` broker stream. */
+export type LogRecord = LogEntry
+
 /**
- * A run-bound logger. Handlers see it as a {@link Logger}; the worker that owns
- * the run holds the concrete type so it can {@link RunLogger.flush} buffered
- * lines deterministically at run end.
+ * Process-level output destination. Providers own their lifecycle; handlers
+ * only receive the narrower {@link Logger} façade.
  */
-export interface RunLogger extends Logger {
-  child(bindings: LogFields): RunLogger
-  /** Await delivery of every emitted line to the broker. Framework-internal. */
-  flush(): Promise<void>
+export interface LoggerProvider {
+  write(entry: LogEntry): void
+  flush?(): void | Promise<void>
+  close?(): void | Promise<void>
 }
 
 const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 }

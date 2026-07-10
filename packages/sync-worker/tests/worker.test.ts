@@ -142,20 +142,20 @@ describe("SyncWorker", () => {
     const records = await sixb.broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
-      names: ["sync"],
+      names: ["sync.info"],
     })
     const line = records.find(
       (record) => (record.payload as { message?: string }).message === "Reading orders"
     )
-    expect(line?.key).toBe("run-log")
+    expect(line?.key).toBe("sync:run-log")
     const payload = line?.payload as {
       level: string
       fields?: { source?: string }
-      run?: { kind?: string; id?: string }
+      context?: { run?: { kind?: string; id?: string } }
     }
     expect(payload.level).toBe("info")
     expect(payload.fields?.source).toBe("erp")
-    expect(payload.run).toEqual({ kind: "sync", id: "run-log" })
+    expect(payload.context?.run).toEqual({ kind: "sync", id: "run-log" })
   })
 
   test("uses a fallback run id when the queue payload does not provide one", async () => {

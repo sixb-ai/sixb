@@ -28,7 +28,7 @@ import { EventsRuntime } from "../events"
 import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
-import { type Logger, LogsRuntime } from "../logging"
+import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
 import { createObjectSet, objectService } from "../objects"
 import {
   assertObjectTypeRegistered,
@@ -88,8 +88,10 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
-  /** Output logger for `ctx.logger` (the stdout side). Defaults to `ConsoleLogger`. */
-  logger?: Logger
+  /** Process-level output provider. Defaults to `ConsoleLogger`. */
+  logger?: LoggerProvider
+  /** Broker capture controls, independent from the output provider. */
+  observability?: ObservabilityOptions
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this runtime. */
@@ -156,6 +158,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       projectId: this.projectId,
       broker: this.broker,
       logger: options.logger,
+      observability: options.observability?.logs,
     })
     this.storage = options.storage
     this.lakeStorage = options.lakeStorage
@@ -505,6 +508,11 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   /** Disconnect all currently connected connector clients. */
   async disconnectConnectors(): Promise<void> {
     await this.connectorRuntime.disconnectAll()
+  }
+
+  /** Flush and close the configured process logger provider. */
+  async closeLogger(): Promise<void> {
+    await this.logs.close()
   }
 
   /** Close the runtime broker provider if it owns external resources. */

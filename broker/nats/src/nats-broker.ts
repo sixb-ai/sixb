@@ -14,6 +14,7 @@ import { type ActiveSubscription, SubscriptionRegistry } from "./subscription-re
 
 const DEFAULT_NAMESPACE = "sixb_broker"
 const DEFAULT_FETCH_BATCH_SIZE = 1_000
+const PUBLISH_CONCURRENCY = 256
 
 export interface NatsBrokerOptions {
   /**
@@ -91,53 +92,50 @@ export class NatsBroker implements Broker {
     const js = await this.getJetStream()
     const records: BrokerRecord[] = []
 
-    // Non-atomic: NATS JetStream has no multi-message transaction. We publish
-    // sequentially and fail fast on the first error. If record N fails, records
-    // 0..N-1 are already committed to the stream. Callers should use a stable
-    // `idempotencyKey` on retries to avoid duplicating already-stored records;
-    // the key is passed as msgID and JetStream deduplicates server-side within
-    // the stream's duplicate_window.
-    for (const input of params.records) {
-      const publishedAt = new Date().toISOString()
-      const subject = buildRecordSubject({
-        namespace: this.namespace,
-        projectId: params.projectId,
-        streamId: params.streamId,
-        name: input.name,
-      })
-
-      let ack: Awaited<ReturnType<JetStreamClient["publish"]>>
+    // JetStream has no multi-message transaction. Queue bounded windows without
+    // awaiting each PubAck so a logger batch costs roughly one network latency,
+    // while retaining input order in the returned array. A failed window may be
+    // partially committed; stable idempotency keys make generic broker retries safe.
+    for (let offset = 0; offset < params.records.length; offset += PUBLISH_CONCURRENCY) {
+      const window = params.records.slice(offset, offset + PUBLISH_CONCURRENCY)
       try {
-        ack = await js.publish(subject, encodeRecord(input, publishedAt), {
-          msgID: input.idempotencyKey,
-        })
+        const published = await Promise.all(
+          window.map(async (input): Promise<BrokerRecord> => {
+            const publishedAt = new Date().toISOString()
+            const subject = buildRecordSubject({
+              namespace: this.namespace,
+              projectId: params.projectId,
+              streamId: params.streamId,
+              name: input.name,
+            })
+            const ack = await js.publish(subject, encodeRecord(input, publishedAt), {
+              msgID: input.idempotencyKey,
+            })
+
+            if (ack.duplicate) {
+              return this.fetchRecordBySequence({
+                streamName,
+                streamId: params.streamId,
+                streamSequence: ack.seq,
+              })
+            }
+
+            return {
+              streamId: params.streamId,
+              cursor: String(ack.seq),
+              name: input.name,
+              key: input.key,
+              payload: cloneJsonValue(input.payload),
+              publishedAt,
+            }
+          })
+        )
+        records.push(...published)
       } catch (error) {
-        throw new NatsBrokerError(`Failed to publish record to stream "${params.streamId}"`, {
+        throw new NatsBrokerError(`Failed to publish records to stream "${params.streamId}"`, {
           cause: error,
         })
       }
-
-      if (ack.duplicate) {
-        records.push(
-          await this.fetchRecordBySequence({
-            streamName,
-            streamId: params.streamId,
-            streamSequence: ack.seq,
-          })
-        )
-        continue
-      }
-
-      // The authoritative cursor is the JetStream PubAck sequence. Core treats
-      // it as opaque even though this provider interprets it internally.
-      records.push({
-        streamId: params.streamId,
-        cursor: String(ack.seq),
-        name: input.name,
-        key: input.key,
-        payload: cloneJsonValue(input.payload),
-        publishedAt,
-      })
     }
 
     return records

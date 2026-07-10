@@ -156,21 +156,21 @@ describe("PipelineWorker", () => {
     const records = await sixb.broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
-      names: ["pipeline"],
+      names: ["pipeline.info"],
     })
     const line = records.find(
       (record) => (record.payload as { message?: string }).message === "Cleaning customers"
     )
-    expect(line?.key).toBe("run-log")
+    expect(line?.key).toBe("pipeline:run-log")
     const payload = line?.payload as {
       level: string
-      fields?: { phase?: string; step?: string }
-      run?: { kind?: string; id?: string }
+      fields?: { phase?: string }
+      context?: { run?: { kind?: string; id?: string }; stepId?: string }
     }
     expect(payload.level).toBe("info")
     expect(payload.fields?.phase).toBe("clean")
-    expect(payload.fields?.step).toBe("clean-customers")
-    expect(payload.run).toEqual({ kind: "pipeline", id: "run-log" })
+    expect(payload.context?.stepId).toBe("clean-customers")
+    expect(payload.context?.run).toEqual({ kind: "pipeline", id: "run-log" })
   })
 
   test("processes queued JS pipeline jobs and emits lineage events", async () => {

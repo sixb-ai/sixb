@@ -15,12 +15,18 @@ export async function executeActionPhases(
 ): Promise<ActionRunRecord> {
   const { runtime, action, signal } = input
   let run = input.run
-  const logger = resolveLogsRuntime(runtime.id, runtime.logs).forRun({
+  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
     kind: "action",
     id: input.run.id,
   })
   const objectTarget = await loadObjectTarget({ runtime, action, run })
-  const phaseContext = createBasePhaseContext({ runtime, action, run, signal, logger })
+  const phaseContext = createBasePhaseContext({
+    runtime,
+    action,
+    run,
+    signal,
+    logger: logSession.withContext({ phase: "validation" }),
+  })
 
   try {
     if (!run.writeback && !run.commit) {
@@ -45,7 +51,10 @@ export async function executeActionPhases(
       action,
       run,
       signal,
-      baseContext: phaseContext,
+      baseContext: {
+        ...phaseContext,
+        logger: logSession.withContext({ phase: "writeback" }),
+      },
       objectTarget,
       updateActiveRun(run) {
         input.updateActiveRun(run)
@@ -60,7 +69,10 @@ export async function executeActionPhases(
       action,
       run,
       signal,
-      baseContext: phaseContext,
+      baseContext: {
+        ...phaseContext,
+        logger: logSession.withContext({ phase: "edits" }),
+      },
       objectTarget,
       writeback: writeback.value,
       updateActiveRun(run) {
@@ -77,7 +89,10 @@ export async function executeActionPhases(
         action,
         run,
         signal,
-        baseContext: phaseContext,
+        baseContext: {
+          ...phaseContext,
+          logger: logSession.withContext({ phase: "effects" }),
+        },
         objectTarget,
         writeback: writeback.value,
         commit: commit.result,
@@ -93,6 +108,6 @@ export async function executeActionPhases(
       status: "succeeded",
     })
   } finally {
-    await logger.flush()
+    await logSession.flush()
   }
 }

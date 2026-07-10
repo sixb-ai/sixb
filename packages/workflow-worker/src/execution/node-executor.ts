@@ -1,4 +1,5 @@
 import type {
+  RunLogSession,
   ValueType,
   WorkflowDefinition,
   WorkflowInterventionRecord,
@@ -21,6 +22,7 @@ export interface WorkflowNodeExecutionContext {
   readonly job: WorkflowJob
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly signal: AbortSignal
+  readonly logSession: RunLogSession
   readonly state: WorkflowExecutionState
   markSideEffectBoundaryPassed(): void
 }

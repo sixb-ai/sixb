@@ -151,6 +151,7 @@ function assertStreamId(streamId: string): void {
 
 function toRetentionConfig(retention: BrokerRetention | undefined): {
   readonly max_age?: number
+  readonly max_bytes?: number
   readonly max_msgs?: number
 } {
   // JetStream uses 0/-1 as "unlimited" sentinels. Broker retention stays
@@ -158,6 +159,7 @@ function toRetentionConfig(retention: BrokerRetention | undefined): {
   // passes an explicit short maxAgeMs by default.
   return {
     max_age: retention?.maxAgeMs === undefined ? 0 : Math.max(1, retention.maxAgeMs) * 1_000_000,
+    max_bytes: retention?.maxBytes === undefined ? -1 : Math.max(0, retention.maxBytes),
     max_msgs: retention?.maxRecords === undefined ? -1 : Math.max(0, retention.maxRecords),
   }
 }

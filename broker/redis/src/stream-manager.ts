@@ -53,6 +53,7 @@ export class StreamManager {
           new Date().toISOString(),
           retention.maxAgeMs === undefined ? "" : String(retention.maxAgeMs),
           retention.maxRecords === undefined ? "" : String(retention.maxRecords),
+          retention.maxBytes === undefined ? "" : String(retention.maxBytes),
         ])
       } catch (error) {
         throw new RedisBrokerError(`Failed to ensure stream "${stream.id}"`, { cause: error })

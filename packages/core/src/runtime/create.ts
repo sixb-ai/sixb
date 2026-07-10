@@ -25,7 +25,7 @@ import type { ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
-import type { Logger } from "../logging"
+import type { LoggerProvider, ObservabilityOptions } from "../logging"
 import type { PipelineDefinition } from "../pipelines/types"
 import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
@@ -48,8 +48,10 @@ export interface CreateSixbOptions {
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
-  /** Output logger for `ctx.logger` (the stdout side). Defaults to `ConsoleLogger`. */
-  logger?: Logger
+  /** Process-level output provider. Defaults to `ConsoleLogger`. */
+  logger?: LoggerProvider
+  /** Broker capture controls, independent from the output provider. */
+  observability?: ObservabilityOptions
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
   /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
@@ -137,6 +139,7 @@ export async function createSixb(
     queues: options.queues,
     sandboxes: options.sandboxes,
     logger: options.logger,
+    observability: options.observability,
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],

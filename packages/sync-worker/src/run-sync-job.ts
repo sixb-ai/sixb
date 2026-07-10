@@ -141,7 +141,11 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
   })
   await input.onRunStarted?.(startedRun)
 
-  const logger = resolveLogsRuntime(runtime.id, runtime.logs).forRun({ kind: "sync", id: job.id })
+  const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
+    kind: "sync",
+    id: job.id,
+  })
+  const logger = logSession.logger
   let write: LakeWriteSession | undefined
   let rowsRead = 0
   let committedVersion: DatasetVersion | undefined
@@ -279,6 +283,6 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
     throw error
   } finally {
-    await logger.flush()
+    await logSession.flush()
   }
 }
