@@ -23,6 +23,9 @@
       "path": "connectors/google/tsconfig.build.json"
     },
     {
+      "path": "connectors/imap/tsconfig.build.json"
+    },
+    {
       "path": "connectors/meta/tsconfig.build.json"
     },
     {
