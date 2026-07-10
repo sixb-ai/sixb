@@ -65,7 +65,12 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
-  if (pathname === "/auth/callback" && normalizedMethod === "GET") {
+  // GET renders the magic-link confirmation page; POST consumes the emailed
+  // token. The token itself is the credential, and no CSRF cookie exists yet.
+  if (
+    pathname === "/auth/callback" &&
+    (normalizedMethod === "GET" || normalizedMethod === "POST")
+  ) {
     return true
   }
 

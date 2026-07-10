@@ -96,6 +96,14 @@ export interface MagicLinkRequestInput {
   readonly audience: AuthSessionAudience
   readonly returnTo: string
   readonly requestOrigin: string
+  /**
+   * Opaque hash the strategy appends to the callback URL as the `requester`
+   * query param. The server keeps the preimage in a cookie on the requesting
+   * browser so the callback can sign that same browser in without the extra
+   * confirmation click. Omitted for deliveries with no requesting browser
+   * (invitations).
+   */
+  readonly requesterHash?: string
   readonly now?: Date
 }
 
@@ -131,13 +139,38 @@ export interface MagicLinkCallbackResult extends CompleteSignInResult {
   readonly returnTo: string
 }
 
+export interface MagicLinkPeekInput {
+  readonly projectId: string
+  readonly authStorage: AuthStorage
+  readonly magicLinkId: string
+  readonly token: string
+  readonly now?: Date
+}
+
+export interface MagicLinkPeekResult {
+  readonly email: string
+}
+
 export interface MagicLinkAuthStrategy extends InvitationDeliveryAuthStrategy {
   readonly kind: "magicLink"
   readonly bootstrapGroupIds?: readonly string[]
+  /**
+   * How long issued links stay valid (ms). Lets the server align dependent
+   * lifetimes (e.g. the same-device pending cookie) with the configured TTL.
+   */
+  readonly magicLinkTtlMs?: number
   validateInvitationRecipient?(
     input: MagicLinkInvitationRecipientInput
   ): Promise<MagicLinkInvitationRecipientResult>
   requestMagicLink(input: MagicLinkRequestInput): Promise<MagicLinkRequestResult>
+  /**
+   * Read-only validity check for a link the user has not confirmed yet. Must
+   * never consume the token, and must apply the same rules that would make
+   * {@link completeMagicLinkSignIn} fail (including token verification), so a
+   * link that peeks as valid only fails to complete when raced. Returns null
+   * for links that cannot complete sign-in.
+   */
+  peekMagicLink?(input: MagicLinkPeekInput): Promise<MagicLinkPeekResult | null>
   completeMagicLinkSignIn(input: MagicLinkCallbackInput): Promise<MagicLinkCallbackResult>
 }
 

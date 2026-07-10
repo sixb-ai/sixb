@@ -13,7 +13,7 @@ import {
   Sixb,
 } from "@sixb/core"
 import { createSixbApi, SixbServer } from "../src/server"
-import { createTestBrowserPolicy } from "./helpers"
+import { confirmCallback, createTestBrowserPolicy, linkFromLatestMessage } from "./helpers"
 
 const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
@@ -41,6 +41,7 @@ function createRuntime(
   options: {
     readonly bootstrapUsers?: readonly string[]
     readonly bootstrapGroups?: readonly [typeof securityAdmins]
+    readonly rateLimit?: false | { readonly perMinute?: number; readonly perHour?: number }
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -58,6 +59,7 @@ function createRuntime(
       allowedDomains: ["acme.com"],
       bootstrapUsers: options.bootstrapUsers ?? [],
       bootstrapGroups: options.bootstrapGroups ?? [],
+      rateLimit: options.rateLimit,
       sendMagicLink,
     }),
   })
@@ -76,18 +78,14 @@ function createRuntime(
   }
 }
 
-function linkFromLatestMessage(messages: readonly { readonly text: string }[]): URL {
-  const text = messages.at(-1)?.text ?? ""
-  const match = text.match(/https?:\/\/\S+/)
-  if (!match) {
-    throw new Error("No magic link found in sent email")
-  }
-  return new URL(match[0])
-}
-
 async function postSignIn(
   app: ReturnType<typeof createSixbApi>,
-  input: { readonly email: string; readonly audience?: string; readonly returnTo?: string }
+  input: {
+    readonly email: string
+    readonly audience?: string
+    readonly returnTo?: string
+    readonly cookie?: string
+  }
 ): Promise<Response> {
   const body = new URLSearchParams()
   body.set("audience", input.audience ?? "atlas")
@@ -99,6 +97,7 @@ async function postSignIn(
       method: "POST",
       headers: {
         "content-type": "application/x-www-form-urlencoded",
+        ...(input.cookie ? { cookie: input.cookie } : {}),
       },
       body,
     })
@@ -124,7 +123,7 @@ async function signInAtlas(
 }> {
   await postSignIn(app, { email })
   const link = linkFromLatestMessage(messages)
-  const callback = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+  const callback = await confirmCallback(app, link)
   const setCookie = callback.headers.get("set-cookie")
   const sessionCookie = cookieValue(setCookie, "sixb_session")
   const csrfCookie = cookieValue(setCookie, "sixb_csrf")
@@ -191,20 +190,22 @@ describe("magic-link auth routes", () => {
       returnTo: "http://atlas.localhost/dashboard",
     })
     const link = linkFromLatestMessage(messages)
-    const callback = await app.fetch(
-      new Request(link.toString(), {
-        redirect: "manual",
-      })
-    )
+    const confirm = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
 
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("location")).toBeNull()
-    expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://atlas.localhost"
-    )
-    expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://atlas.localhost/dashboard">'
-    )
+    expect(confirm.status).toBe(200)
+    expect(confirm.headers.get("set-cookie")).toBeNull()
+    // `no-referrer` would make browsers POST the form with `Origin: null`,
+    // which the browser-origin guard rejects.
+    expect(confirm.headers.get("referrer-policy")).toBe("same-origin")
+    const confirmHtml = await confirm.text()
+    expect(confirmHtml).toContain("You're signing in as <strong>founder@acme.com</strong>.")
+    expect(confirmHtml).toContain('<form method="post" action="/auth/callback" id="confirm">')
+    expect(confirmHtml).toContain('<button type="submit" id="confirm-button">Continue</button>')
+
+    const callback = await confirmCallback(app, link)
+
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://atlas.localhost/dashboard")
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "sixb_session")
     const csrfCookie = cookieValue(setCookie, "sixb_csrf")
@@ -232,20 +233,184 @@ describe("magic-link auth routes", () => {
     })
   })
 
-  test("callback refuses replayed links without setting cookies", async () => {
+  test("GET with a wrong token is rejected without disclosing the email", async () => {
     const { app, messages } = createRuntime({
       bootstrapUsers: ["founder@acme.com"],
     })
 
     await postSignIn(app, { email: "founder@acme.com" })
     const link = linkFromLatestMessage(messages)
-    const callbackUrl = link.toString()
+    link.searchParams.set("token", "not-the-real-token")
 
-    await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
-    const replay = await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
+    const response = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).not.toContain("founder@acme.com")
+  })
+
+  test("a rate-limited resend keeps the pending cookie for the delivered link", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+      rateLimit: { perMinute: 1 },
+    })
+
+    const first = await postSignIn(app, { email: "founder@acme.com" })
+    const pending = cookieValue(first.headers.get("set-cookie"), "sixb_pending")
+    const link = linkFromLatestMessage(messages)
+
+    // A second click within the rate limit sends no email and must not rotate
+    // the secret backing the already-delivered link.
+    const resend = await postSignIn(app, {
+      email: "founder@acme.com",
+      cookie: `sixb_pending=${pending}`,
+    })
+
+    expect(messages).toHaveLength(1)
+    expect(cookieValue(resend.headers.get("set-cookie"), "sixb_pending")).toBe(pending)
+
+    // The first (only) emailed link still fast-paths on this device.
+    const callback = await app.fetch(
+      new Request(link.toString(), {
+        headers: { cookie: `sixb_pending=${pending}` },
+        redirect: "manual",
+      })
+    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("set-cookie")).toContain("sixb_session=")
+  })
+
+  test("emailed link survives repeated GET prefetches by email link scanners", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+    })
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const link = linkFromLatestMessage(messages)
+
+    // Safe Links / Avanan style scanners fetch the URL before the user does.
+    for (let i = 0; i < 3; i++) {
+      const prefetch = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+      expect(prefetch.status).toBe(200)
+      expect(prefetch.headers.get("set-cookie")).toBeNull()
+    }
+
+    const callback = await confirmCallback(app, link)
+
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("set-cookie")).toContain("sixb_session=")
+  })
+
+  test("callback refuses replayed confirmations without setting cookies", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+    })
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const link = linkFromLatestMessage(messages)
+
+    await confirmCallback(app, link)
+
+    // Consumed links fail on GET before the confirmation click...
+    const replayGet = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+    expect(replayGet.status).toBe(400)
+
+    // ...and a replayed POST with the original credentials is refused too.
+    const body = new URLSearchParams()
+    body.set("magicLinkId", link.searchParams.get("magicLinkId") ?? "")
+    body.set("token", link.searchParams.get("token") ?? "")
+    const replay = await app.fetch(
+      new Request(new URL("/auth/callback", link).toString(), {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          origin: link.origin,
+        },
+        body,
+        redirect: "manual",
+      })
+    )
 
     expect(replay.status).toBe(400)
     expect(replay.headers.get("set-cookie")).toBeNull()
+  })
+
+  test("same-device fast path signs in straight from the emailed link", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+    })
+
+    const signIn = await postSignIn(app, { email: "founder@acme.com" })
+    const pendingCookie = cookieValue(signIn.headers.get("set-cookie"), "sixb_pending")
+    const link = linkFromLatestMessage(messages)
+    expect(link.searchParams.get("requester")).toBeTruthy()
+
+    // Scanners never hold the pending cookie, so their GETs stay inert.
+    const prefetch = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+    expect(prefetch.status).toBe(200)
+    expect(prefetch.headers.get("set-cookie")).toBeNull()
+
+    const callback = await app.fetch(
+      new Request(link.toString(), {
+        headers: { cookie: `sixb_pending=${pendingCookie}` },
+        redirect: "manual",
+      })
+    )
+
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://atlas.localhost/")
+    const setCookie = callback.headers.get("set-cookie")
+    expect(cookieValue(setCookie, "sixb_session")).toContain(".")
+    expect(setCookie).toContain("sixb_pending=;")
+  })
+
+  // A direct 3xx after a cross-site navigation drops SameSite=Strict cookies on
+  // the chained request, so API-origin return targets must finish on a document.
+  test("API-origin return targets finish on a completion document", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+    })
+
+    await postSignIn(app, {
+      email: "founder@acme.com",
+      returnTo: "http://api.localhost/docs",
+    })
+    const link = linkFromLatestMessage(messages)
+    const callback = await confirmCallback(app, link)
+
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("location")).toBeNull()
+    expect(callback.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://api.localhost"
+    )
+    expect(await callback.clone().text()).toContain(
+      '<meta http-equiv="refresh" content="0;url=http://api.localhost/docs">'
+    )
+    expect(cookieValue(callback.headers.get("set-cookie"), "sixb_session")).toContain(".")
+  })
+
+  test("a mismatched pending cookie falls back to the confirmation page", async () => {
+    const { app, messages } = createRuntime({
+      bootstrapUsers: ["founder@acme.com"],
+    })
+
+    await postSignIn(app, { email: "founder@acme.com" })
+    const link = linkFromLatestMessage(messages)
+
+    const callback = await app.fetch(
+      new Request(link.toString(), {
+        headers: { cookie: "sixb_pending=not-the-requester-preimage" },
+        redirect: "manual",
+      })
+    )
+
+    expect(callback.status).toBe(200)
+    expect(callback.headers.get("set-cookie")).toBeNull()
+    expect(await callback.text()).toContain('action="/auth/callback"')
+
+    // The link stays valid: the confirmation click still completes sign-in.
+    const completed = await confirmCallback(app, link)
+    expect(completed.status).toBe(303)
+    expect(cookieValue(completed.headers.get("set-cookie"), "sixb_session")).toContain(".")
   })
 
   test("sign-in rejects unsafe returnTo values before sending a link", async () => {
@@ -283,17 +448,12 @@ describe("magic-link auth routes", () => {
     )
     const link = linkFromLatestMessage(messages)
     link.searchParams.set("returnTo", "http://evil.localhost/steal")
-    const callback = await app.fetch(new Request(link.toString(), { redirect: "manual" }))
+    const callback = await confirmCallback(app, link)
 
     expect(signIn.status).toBe(200)
     expect(link.origin).toBe("http://api.localhost")
-    expect(callback.status).toBe(200)
-    expect(callback.headers.get("content-security-policy")).toBe(
-      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; navigate-to 'self' http://app.localhost"
-    )
-    expect(await callback.clone().text()).toContain(
-      '<meta http-equiv="refresh" content="0;url=http://app.localhost/dashboard">'
-    )
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://app.localhost/dashboard")
 
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "sixb_session_app")
@@ -344,11 +504,7 @@ describe("magic-link auth routes", () => {
 
     await postSignIn(app, { email: "founder@acme.com" })
     const link = linkFromLatestMessage(messages)
-    const callback = await app.fetch(
-      new Request(link.toString(), {
-        redirect: "manual",
-      })
-    )
+    const callback = await confirmCallback(app, link)
     const setCookie = callback.headers.get("set-cookie")
     const sessionCookie = cookieValue(setCookie, "sixb_session")
     const csrfCookie = cookieValue(setCookie, "sixb_csrf")
