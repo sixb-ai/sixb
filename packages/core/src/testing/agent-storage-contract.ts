@@ -385,6 +385,15 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           modelId: "claude-haiku-4-5",
           finishReason: "stop",
           usage: { inputTokens: 120, outputTokens: 80, totalTokens: 200 },
+          diagnostics: [
+            {
+              code: "output_file_too_large",
+              severity: "warning",
+              scope: "output",
+              path: "reports/full.csv",
+              message: "This generated file was skipped.",
+            },
+          ],
           completedAt: at("2026-06-23T10:07:00.000Z"),
         })
         expect(finished).toMatchObject({
@@ -393,6 +402,18 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           finishReason: "stop",
         })
         expect(finished.usage).toEqual({ inputTokens: 120, outputTokens: 80, totalTokens: 200 })
+        expect(finished.diagnostics).toEqual([
+          {
+            code: "output_file_too_large",
+            severity: "warning",
+            scope: "output",
+            path: "reports/full.csv",
+            message: "This generated file was skipped.",
+          },
+        ])
+        await expect(
+          storage.runs.getByIds({ projectId, ids: ["run_1", "missing", "run_1"] })
+        ).resolves.toEqual([finished])
         expect(finished.lease).toBeUndefined()
         expect(finished.completedAt?.toISOString()).toBe("2026-06-23T10:07:00.000Z")
 

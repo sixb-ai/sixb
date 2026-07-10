@@ -6,6 +6,9 @@ export type {
   AgentMessageRecord,
   AgentMessageRole,
   AgentMessageStore,
+  AgentRunDiagnostic,
+  AgentRunDiagnosticCode,
+  AgentRunDiagnosticSeverity,
   AgentRunFinishReason,
   AgentRunLease,
   AgentRunRecord,
@@ -29,4 +32,8 @@ export type {
   RenewAgentRunLeaseInput,
   ReserveAgentRunInput,
 } from "./types"
-export { AGENT_RUN_FINISH_REASONS, coerceAgentRunFinishReason } from "./types"
+export {
+  AGENT_RUN_DIAGNOSTIC_CODES,
+  AGENT_RUN_FINISH_REASONS,
+  coerceAgentRunFinishReason,
+} from "./types"

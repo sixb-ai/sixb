@@ -5631,6 +5631,19 @@ export type ListAgentThreadMessagesResponses = {
             errorText: string
           }
       >
+      annotations: Array<{
+        code:
+          | "output_file_limit_exceeded"
+          | "output_file_too_large"
+          | "output_budget_exhausted"
+          | "output_collection_failed"
+          | "output_file_changed"
+          | "output_storage_failed"
+        severity: "warning" | "error"
+        scope: "output"
+        path?: string
+        message: string
+      }>
       /**
        * Any JSON-compatible value.
        */
@@ -5915,6 +5928,19 @@ export type GetAgentRunResponses = {
       reasoningTokens?: number
       cachedInputTokens?: number
     }
+    diagnostics?: Array<{
+      code:
+        | "output_file_limit_exceeded"
+        | "output_file_too_large"
+        | "output_budget_exhausted"
+        | "output_collection_failed"
+        | "output_file_changed"
+        | "output_storage_failed"
+      severity: "warning" | "error"
+      scope: "output"
+      path?: string
+      message: string
+    }>
     error?: string
     attempt: number
     streamId: string

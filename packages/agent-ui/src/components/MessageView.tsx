@@ -42,11 +42,38 @@ function UserMessage({ message }: { message: AgentMessage }) {
 
 function AssistantMessage({ message }: { message: AgentMessage }) {
   return (
-    <AssistantBody
-      parts={normalizeDurableParts(message.parts, {
-        fileHref: (partIndex) => agentMessageFileContentHref(message, partIndex, "inline"),
-      })}
-    />
+    <div className="flex flex-col gap-2">
+      <AssistantBody
+        parts={normalizeDurableParts(message.parts, {
+          fileHref: (partIndex) => agentMessageFileContentHref(message, partIndex, "inline"),
+        })}
+      />
+      {message.annotations.map((annotation, index) => (
+        <Marker
+          key={`${annotation.code}:${annotation.path ?? "run"}:${index}`}
+          className={
+            annotation.severity === "error"
+              ? "text-destructive"
+              : "text-amber-700 dark:text-amber-400"
+          }
+          role="status"
+        >
+          <MarkerIcon>
+            <AlertTriangle
+              className={
+                annotation.severity === "error"
+                  ? "text-destructive"
+                  : "text-amber-600 dark:text-amber-400"
+              }
+            />
+          </MarkerIcon>
+          <MarkerContent>
+            {annotation.path ? `${annotation.path}: ` : ""}
+            {annotation.message}
+          </MarkerContent>
+        </Marker>
+      ))}
+    </div>
   )
 }
 

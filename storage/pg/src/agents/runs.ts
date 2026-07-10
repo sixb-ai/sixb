@@ -15,6 +15,8 @@ import { isUniqueViolation } from "../storage-errors"
 import { type PgStoreClient, runPgTransaction } from "../transactions"
 import { type AgentRunRow, rowToRunRecord } from "./rows"
 
+const PG_RUN_ID_BATCH_SIZE = 10_000
+
 export class PgAgentRunStore implements AgentRunStore {
   constructor(private readonly sql: PgStoreClient) {}
 
@@ -180,6 +182,7 @@ export class PgAgentRunStore implements AgentRunStore {
           usage_reasoning_tokens = ${input.usage?.reasoningTokens ?? null},
           usage_cached_input_tokens = ${input.usage?.cachedInputTokens ?? null},
           error = ${errorValue},
+          diagnostics = ${input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics)}::text::jsonb,
           lease_id = ${null},
           lease_expires_at = ${null},
           completed_at = ${completedAt}
@@ -203,6 +206,33 @@ export class PgAgentRunStore implements AgentRunStore {
     `
 
     return row ? rowToRunRecord(row) : null
+  }
+
+  async getByIds(params: {
+    projectId: string
+    ids: readonly string[]
+  }): Promise<readonly AgentRunRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows: AgentRunRow[] = []
+    for (let offset = 0; offset < ids.length; offset += PG_RUN_ID_BATCH_SIZE) {
+      const batch = ids.slice(offset, offset + PG_RUN_ID_BATCH_SIZE)
+      const placeholders = batch.map((_, index) => `$${index + 2}`).join(", ")
+      rows.push(
+        ...(await this.sql.unsafe<AgentRunRow[]>(
+          `SELECT * FROM agent_runs WHERE project_id = $1 AND id IN (${placeholders})`,
+          [params.projectId, ...batch] as SqlParameter[]
+        ))
+      )
+    }
+    const byId = new Map(rows.map((row) => [row.id, rowToRunRecord(row)]))
+    return ids.flatMap((id) => {
+      const run = byId.get(id)
+      return run ? [run] : []
+    })
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

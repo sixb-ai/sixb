@@ -19,6 +19,8 @@ import {
 import { isUniqueConstraintError } from "../storage-errors"
 import { type AgentRunRow, rowToRunRecord } from "./rows"
 
+const SQLITE_RUN_ID_BATCH_SIZE = 500
+
 export class SqliteAgentRunStore implements AgentRunStore {
   constructor(private readonly db: Database) {}
 
@@ -187,6 +189,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             usage_reasoning_tokens = ?,
             usage_cached_input_tokens = ?,
             error = ?,
+            diagnostics = ?,
             lease_id = NULL,
             lease_expires_at = NULL,
             completed_at = ?
@@ -203,6 +206,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           input.usage?.reasoningTokens ?? null,
           input.usage?.cachedInputTokens ?? null,
           errorValue,
+          input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics),
           completedAt.toISOString(),
           input.projectId,
           input.id
@@ -229,6 +233,32 @@ export class SqliteAgentRunStore implements AgentRunStore {
       .get(params.projectId, params.id) as AgentRunRow | null
 
     return row ? rowToRunRecord(row) : null
+  }
+
+  async getByIds(params: {
+    projectId: string
+    ids: readonly string[]
+  }): Promise<readonly AgentRunRecord[]> {
+    const ids = [...new Set(params.ids)]
+    if (ids.length === 0) {
+      return []
+    }
+
+    const rows: AgentRunRow[] = []
+    for (let offset = 0; offset < ids.length; offset += SQLITE_RUN_ID_BATCH_SIZE) {
+      const batch = ids.slice(offset, offset + SQLITE_RUN_ID_BATCH_SIZE)
+      const placeholders = batch.map(() => "?").join(", ")
+      rows.push(
+        ...(this.db
+          .query(`SELECT * FROM agent_runs WHERE project_id = ? AND id IN (${placeholders})`)
+          .all(params.projectId, ...batch) as AgentRunRow[])
+      )
+    }
+    const byId = new Map(rows.map((row) => [row.id, rowToRunRecord(row)]))
+    return ids.flatMap((id) => {
+      const run = byId.get(id)
+      return run ? [run] : []
+    })
   }
 
   async list(input: ListAgentRunsInput): Promise<ListAgentRunsResult> {

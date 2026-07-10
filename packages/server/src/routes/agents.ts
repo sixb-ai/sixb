@@ -2,6 +2,7 @@ import {
   type AgentDefinition,
   type AgentMessageRecord,
   AgentRequestError,
+  type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentStorage,
   AgentStorageError,
@@ -89,7 +90,8 @@ function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThre
 }
 
 function serializeMessage(
-  message: AgentMessageRecord
+  message: AgentMessageRecord,
+  annotations: readonly AgentRunDiagnostic[] = []
 ): ReturnType<typeof AgentMessageSchema.parse> {
   return AgentMessageSchema.parse({
     id: message.id,
@@ -100,6 +102,7 @@ function serializeMessage(
     authorPrincipal: message.authorPrincipal,
     seq: message.seq,
     parts: message.parts,
+    annotations,
     metadata: message.metadata,
     contentVersion: message.contentVersion,
     createdAt: toIsoString(message.createdAt),
@@ -120,6 +123,7 @@ function serializeRun(run: AgentRunRecord): ReturnType<typeof AgentRunSchema.par
     modelId: run.modelId,
     finishReason: run.finishReason,
     usage: run.usage,
+    diagnostics: run.diagnostics,
     error: run.error,
     attempt: run.attempt,
     streamId: agentRunStreamId(run.id),
@@ -484,9 +488,21 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             offset,
             order: parsed.order,
           })
+          const runIds = result.messages.flatMap((message) =>
+            message.runId === null ? [] : [message.runId]
+          )
+          const runs = await storage.runs.getByIds({ projectId: sixb.id, ids: runIds })
+          const diagnosticsByRunId = new Map(
+            runs.map((run) => [run.id, run.diagnostics ?? []] as const)
+          )
 
           return AgentMessageListResponseSchema.parse({
-            messages: result.messages.map(serializeMessage),
+            messages: result.messages.map((message) =>
+              serializeMessage(
+                message,
+                message.runId === null ? [] : (diagnosticsByRunId.get(message.runId) ?? [])
+              )
+            ),
             hasMore: result.hasMore,
             total: result.total,
           })
