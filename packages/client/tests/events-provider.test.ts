@@ -124,6 +124,7 @@ describe("createEventsRegistry", () => {
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
+    ws1.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     deliver(ws1, telemetryEvent("device", "fan-1", "c9"))
 
     off()
@@ -134,6 +135,7 @@ describe("createEventsRegistry", () => {
     const ws2 = FakeWebSocket.instances[1]
     if (!ws2) throw new Error("expected a reopen")
     ws2.onopen?.()
+    ws2.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     expect(JSON.parse(ws2.sent[0]).afterCursor).toBe("c9")
   })
 

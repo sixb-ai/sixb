@@ -71,6 +71,8 @@ describe("createEventSocket", () => {
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
+    expect(ws1.sent).toHaveLength(0)
+    ws1.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     expect(JSON.parse(ws1.sent[0]).afterCursor).toBeUndefined()
 
     ws1.onmessage?.({ data: JSON.stringify({ type: "event", event: telemetryEvent("c5") }) })
@@ -83,9 +85,34 @@ describe("createEventSocket", () => {
     const ws2 = FakeWebSocket.instances[1]
     if (!ws2) throw new Error("expected a reconnect")
     ws2.onopen?.()
+    expect(ws2.sent).toHaveLength(0)
+    ws2.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     // The resubscribe resumes after the last delivered cursor — no replay, no gap.
     expect(JSON.parse(ws2.sent[0]).afterCursor).toBe("c5")
 
+    socket.close()
+  })
+
+  test("subscribes once after the event server announces readiness", () => {
+    const socket = createEventSocket({
+      topic: "telemetry",
+      reconnect: false,
+      onEvent: () => {},
+    })
+
+    const ws = FakeWebSocket.instances[0]
+    if (!ws) throw new Error("expected a websocket")
+    ws.onopen?.()
+    expect(ws.sent).toHaveLength(0)
+
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected", channel: "events" }) })
+
+    expect(ws.sent).toHaveLength(1)
+    expect(JSON.parse(ws.sent[0])).toMatchObject({
+      type: "subscribe",
+      topic: "telemetry",
+    })
     socket.close()
   })
 

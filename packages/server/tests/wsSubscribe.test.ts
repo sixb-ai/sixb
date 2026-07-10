@@ -139,6 +139,49 @@ describe("parseSubscriptionMessage", () => {
 })
 
 describe("/ws/events subscriptions", () => {
+  test("accepts an immediate subscription while the initial cursor is loading", async () => {
+    await withWsServer(
+      async ({ baseUrl }) => {
+        const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+
+        try {
+          const messages = await new Promise<Record<string, unknown>[]>((resolve, reject) => {
+            const received: Record<string, unknown>[] = []
+            const timeout = setTimeout(
+              () => reject(new Error("Timed out waiting for subscribe")),
+              3_000
+            )
+
+            ws.addEventListener("open", () => {
+              ws.send(JSON.stringify({ type: "subscribe", topic: "objects" }))
+            })
+            ws.addEventListener("message", (event) => {
+              const message = JSON.parse(decodeWsData(event.data)) as Record<string, unknown>
+              received.push(message)
+              if (message.type === "error") {
+                clearTimeout(timeout)
+                reject(new Error(String(message.message)))
+              } else if (message.type === "subscribed") {
+                clearTimeout(timeout)
+                resolve(received)
+              }
+            })
+            ws.addEventListener("error", () => {
+              clearTimeout(timeout)
+              reject(new Error("WebSocket error"))
+            })
+          })
+
+          expect(messages.map((message) => message.type)).toContain("connected")
+          expect(messages.map((message) => message.type)).toContain("subscribed")
+        } finally {
+          ws.close()
+        }
+      },
+      { broker: new SlowReadBroker() }
+    )
+  })
+
   test("streams after subscribe and keeps events emitted after open", async () => {
     await withWsServer(async ({ baseUrl, sixb }) => {
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
@@ -339,15 +382,23 @@ function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
   return new SixbConstructor(options)
 }
 
+class SlowReadBroker extends InMemoryBroker {
+  override async read(params: Parameters<InMemoryBroker["read"]>[0]) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 100))
+    return super.read(params)
+  }
+}
+
 async function withWsServer(
-  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: Sixb<readonly OntologySource[]> }) => Promise<void>,
+  options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
   const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
   const sixb = createSixbInstance<readonly OntologySource[]>({
     id: "ws-test-project",
     ontology: [],
-    broker: new InMemoryBroker(),
+    broker: options.broker ?? new InMemoryBroker(),
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),

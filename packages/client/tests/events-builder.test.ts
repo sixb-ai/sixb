@@ -283,6 +283,7 @@ describe("builder subscribe over the transport", () => {
     if (!ws) throw new Error("expected a websocket")
 
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     const subscribeMessage = JSON.parse(ws.sent[0])
     expect(subscribeMessage).toMatchObject({
       type: "subscribe",
@@ -324,6 +325,7 @@ describe("builder subscribe over the transport", () => {
     if (!ws) throw new Error("expected a websocket")
 
     ws.onopen?.()
+    ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     expect(JSON.parse(ws.sent[0])).toMatchObject({
       type: "subscribe",
       topic: "actions",

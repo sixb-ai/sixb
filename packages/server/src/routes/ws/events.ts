@@ -16,6 +16,7 @@ interface EventSubscriptionState {
   limit: number
   polling: boolean
   timer: ReturnType<typeof setInterval> | null
+  initialized: Promise<void>
 }
 
 const SubscribeSchema = z.object({
@@ -78,6 +79,7 @@ function createDefaultState(): EventSubscriptionState {
     limit: 200,
     polling: false,
     timer: null,
+    initialized: Promise.resolve(),
   }
 }
 
@@ -156,8 +158,11 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       // Any authenticated principal may connect; events are filtered per-event
       // by grants as they stream (see the poll loop in `startPolling`).
       const state = createDefaultState()
-      state.afterCursor = await resolveLatestCursor(server)
       states.set(wsStateKey(ws), state)
+      state.initialized = resolveLatestCursor(server).then((cursor) => {
+        state.afterCursor = cursor
+      })
+      await state.initialized
       safeSend(ws, { type: "connected", channel: "events" })
     },
 
@@ -174,6 +179,10 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
         safeSend(ws, { type: "error", message: "Subscription state not found." })
         return
       }
+
+      // Older clients may subscribe immediately on websocket open. Wait for the
+      // initial cursor instead of allowing that message to race connection setup.
+      await state.initialized
 
       if (parsed.data.type === "unsubscribe") {
         stopPolling(ws)

@@ -27,8 +27,14 @@ export interface ReconnectingSocketOptions {
   readonly url: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  /** Built fresh on each (re)open so it can carry the latest resume cursor. */
+  /** Built fresh for each subscription so it can carry the latest resume cursor. */
   readonly subscribeMessage: () => unknown
+  /**
+   * Optional protocol-level readiness check. When provided, defer the subscribe
+   * frame until an inbound message passes this check. Without it, subscribe as
+   * soon as the websocket opens.
+   */
+  readonly subscribeWhen?: (data: unknown) => boolean
   /** Handle one inbound message; call `sink.reportError` for stream-level error frames. */
   readonly onMessage: (data: unknown, sink: ReconnectingSocketErrorSink) => void
   /** Message surfaced when the socket itself errors (connection failure). */
@@ -74,17 +80,25 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
 
     const ws = new WebSocket(options.url)
     socket = ws
+    let subscribed = false
     setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
+
+    const subscribe = () => {
+      if (stopped || subscribed || socket !== ws) return
+      subscribed = true
+      ws.send(JSON.stringify(options.subscribeMessage()))
+    }
 
     ws.onopen = () => {
       if (stopped) return
       openedOnce = true
       setState({ connected: true, reconnecting: false, error: null })
-      ws.send(JSON.stringify(options.subscribeMessage()))
+      if (!options.subscribeWhen) subscribe()
     }
 
     ws.onmessage = (messageEvent) => {
       if (stopped) return
+      if (options.subscribeWhen?.(messageEvent.data)) subscribe()
       options.onMessage(messageEvent.data, sink)
     }
 
