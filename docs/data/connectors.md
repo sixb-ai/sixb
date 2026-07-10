@@ -135,6 +135,7 @@ When a system fits a common protocol, use a packaged adapter instead of writing 
 | `@sixb/connector-sql` | `sql(connection)` | `"sql"` | Bun `SQL` (Postgres, MySQL, SQLite) |
 | `@sixb/connector-rest` | `rest(options)` | `"rest"` | `RestClient` (`request`/`get`/`post`) |
 | `@sixb/connector-sftp` | `sftp(connection)` | `"sftp"` | `SftpClient` (`list`/`read`/`write`/…) |
+| `@sixb/connector-imap` | `imap(connection)` | `"imap"` | Read-only `ImapClient` (mailboxes/messages/MIME parts) |
 
 If the ERP were a real Postgres database, the connector would be one line:
 
