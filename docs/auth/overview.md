@@ -3,7 +3,7 @@
 Auth in Sixb is two independent layers. Reach for it whenever more than one person touches your runtime.
 
 - **Authentication** answers **who** a principal is — identity, login strategies, and sessions.
-- **Authorization** answers **what** that principal may do — grants on objects, datasets, actions, workflows, syncs, and pipelines, defined against groups and roles.
+- **Authorization** answers **what** that principal may do — application access and grants on objects, datasets, actions, workflows, syncs, and pipelines, defined against groups and roles.
 
 A request first resolves an identity (authentication), then resolves that identity's group memberships into a set of grants (authorization). The layers never overlap: being signed in says nothing about what you can reach, and a grant means nothing until a principal is attached to it.
 
@@ -19,7 +19,7 @@ A request first resolves an identity (authentication), then resolves that identi
 You configure authentication through the `auth` option on `createSixb()`, and authorization through `defineGroup`, `defineRole`, and `defineMembershipPolicy`.
 
 ```ts
-import { createSixb, can, defineGroup, defineRole } from "@sixb/core"
+import { applications, createSixb, can, defineGroup, defineRole } from "@sixb/core"
 import { magicLink } from "@sixb/auth-magic-link"
 import { Customer } from "./ontology/customer"
 import { Invoice } from "./ontology/invoice"
@@ -31,7 +31,12 @@ export const financeAdmins = defineGroup("finance-admins", { label: "Finance adm
 // WHAT: a role attaches grants to one or more groups.
 export const financeAccess = defineRole("finance-admin.access", {
   grantedTo: [financeAdmins],
-  grants: [can.view(Customer), can.view(Invoice), can.apply([markPaid, sendReminder])],
+  grants: [
+    can.access(applications.atlas),
+    can.view(Customer),
+    can.view(Invoice),
+    can.apply([markPaid, sendReminder]),
+  ],
 })
 
 export const sixb = await createSixb({

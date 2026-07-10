@@ -42,8 +42,8 @@ describe("browser topology", () => {
       apiPublicOrigin: "http://localhost:3002",
     })
     expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "http://localhost:3000", audience: "atlas", kind: "atlas" },
-      { origin: "http://localhost:3001", audience: "app", kind: "app" },
+      { origin: "http://localhost:3000", audience: "atlas" },
+      { origin: "http://localhost:3001", audience: "app" },
     ])
     expect(apiUrl(topology)).toBe("http://localhost:3002/api")
     expect(apiDocsUrl(topology)).toBe("http://localhost:3002/docs")
@@ -58,7 +58,7 @@ describe("browser topology", () => {
 
     expect(topology.appPublicOrigin).toBeNull()
     expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "http://localhost:3000", audience: "atlas", kind: "atlas" },
+      { origin: "http://localhost:3000", audience: "atlas" },
     ])
   })
 
@@ -96,8 +96,8 @@ describe("browser topology", () => {
       apiPublicOrigin: "https://api.example.com",
     })
     expect(topology.allowedBrowserOrigins).toEqual([
-      { origin: "https://atlas.example.com", audience: "atlas", kind: "atlas" },
-      { origin: "https://app.example.com", audience: "app", kind: "app" },
+      { origin: "https://atlas.example.com", audience: "atlas" },
+      { origin: "https://app.example.com", audience: "app" },
     ])
     expect(apiEventsUrl(topology)).toBe("wss://api.example.com/ws/events")
   })

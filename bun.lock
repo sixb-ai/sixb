@@ -238,14 +238,22 @@
     "examples/auth": {
       "name": "@sixb/example-auth",
       "dependencies": {
+        "@sixb/app": "workspace:*",
         "@sixb/auth-magic-link": "workspace:*",
         "@sixb/auth-oidc": "workspace:*",
+        "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/sqlite": "workspace:*",
+        "@tanstack/react-query": "^5.0.0",
+        "react": "^19.0.0",
+        "react-dom": "^19.0.0",
+        "react-router-dom": "^7.13.0",
       },
       "devDependencies": {
         "@types/bun": "latest",
         "@types/node": "^22.15.30",
+        "@types/react": "^19.0.0",
+        "@types/react-dom": "^19.0.0",
       },
     },
     "examples/panasonic-ac": {
@@ -361,6 +369,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@sixb/agent-ui": "workspace:*",
+        "@sixb/core": "workspace:*",
         "@sixb/ui": "workspace:*",
         "@tailwindcss/cli": "^4.2.2",
         "tailwindcss": "^4.1.18",

@@ -58,6 +58,7 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
     groupIds: [],
     roleIds: [],
     grants: {
+      "access:application": new Set(),
       "view:object": new Set(objectTypeIds),
       "view:dataset": new Set(),
       "apply:action": new Set(),

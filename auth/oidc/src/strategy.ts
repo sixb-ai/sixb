@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type {
+  AuthSessionAudience,
   AuthStorage,
   GroupDefinition,
   InvitationDeliveryInput,
@@ -294,7 +295,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }
 
   private createSignInUrl(input: {
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly requestOrigin: string
     readonly returnTo: string
   }): string {

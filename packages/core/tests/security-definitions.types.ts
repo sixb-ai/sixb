@@ -1,5 +1,5 @@
-import type { SecurityContext } from "../src"
-import { can, defineGroup, defineMembershipPolicy } from "../src"
+import type { AuthSessionAudience, SecurityContext } from "../src"
+import { applications, can, defineGroup, defineMembershipPolicy } from "../src"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -14,6 +14,10 @@ can.observe("events")
 
 type _groupId = Expect<Equal<typeof commercial.id, "commercial">>
 
+// @ts-expect-error auth audiences are the registered browser applications
+const unsupportedAudience: AuthSessionAudience = "backoffice"
+void unsupportedAudience
+
 const membershipPolicy = defineMembershipPolicy("member-admin", {
   grantedTo: [securityAdmins],
   scope: [commercial],
@@ -21,6 +25,10 @@ const membershipPolicy = defineMembershipPolicy("member-admin", {
 })
 
 type _membershipPolicyId = Expect<Equal<typeof membershipPolicy.id, "member-admin">>
+
+can.access(applications.atlas)
+// @ts-expect-error access grants accept application definitions, not groups
+can.access(commercial)
 
 defineMembershipPolicy("invalid", {
   // @ts-expect-error grantedTo accepts group definitions, not arbitrary objects

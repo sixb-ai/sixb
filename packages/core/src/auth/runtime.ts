@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { type AuthorizationContext, resolveAuthorizationContext } from "../authorization"
+import {
+  type AuthorizationContext,
+  canAccessApplication,
+  resolveAuthorizationContext,
+} from "../authorization"
 import {
   canPerformMembershipOperation,
   type MembershipOperation,
@@ -25,6 +29,7 @@ import {
   hashAccessTokenSecret,
   parseAccessTokenValue,
 } from "./access-tokens"
+import type { AuthSessionAudience } from "./audience"
 import {
   getCookie,
   type ResolvedAuthCookieOptions,
@@ -1144,6 +1149,10 @@ export class AuthRuntime {
     }
 
     await this.assertCanInviteRecipient(strategy, authStorage, input.email, now)
+    const deliveryAudience = resolveAuthSessionAudience(
+      options.delivery?.audience ?? options.audience
+    )
+    this.assertInvitationApplicationAccess(groupIds, deliveryAudience)
 
     const invitation = await authStorage.invitations.createOrUpdateActive({
       id: `inv_${randomUUID()}`,
@@ -1163,7 +1172,7 @@ export class AuthRuntime {
         projectId: this.projectId,
         authStorage,
         invitation,
-        audience: resolveAuthSessionAudience(options.audience),
+        audience: deliveryAudience,
         returnTo: options.delivery?.returnTo ?? sanitizeReturnTo(input.returnTo),
         requestOrigin: options.delivery?.requestOrigin ?? new URL(request.url).origin,
         now,
@@ -1304,6 +1313,27 @@ export class AuthRuntime {
     }
 
     return { state: "enabled" }
+  }
+
+  private assertInvitationApplicationAccess(
+    groupIds: readonly string[],
+    audience: AuthSessionAudience
+  ): void {
+    // Check only the groups this invitation assigns. Existing memberships may
+    // be outside the caller's policy scope and must not affect this response.
+    const roles = this.security.getResolvedRoles()
+    const authorization = resolveAuthorizationContext({
+      principal: { type: "user", id: "invited-user" },
+      groupIds,
+      roles,
+    })
+
+    if (canAccessApplication(authorization, roles, audience)) return
+
+    throw new AuthRuntimeError(
+      "authorization_denied",
+      `[Sixb] Invitation groups do not grant access to application '${audience}'.`
+    )
   }
 
   private async assertCanInviteRecipient(

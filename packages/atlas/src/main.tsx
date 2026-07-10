@@ -1,3 +1,4 @@
+import { signOut } from "@sixb/client"
 import {
   configureSixbBrowserClient,
   readSixbBrowserRuntimeConfig,
@@ -5,6 +6,7 @@ import {
   type SixbBrowserRuntimeConfig,
 } from "@sixb/client/browser"
 import { SixbEventsProvider } from "@sixb/client/hooks"
+import { Button } from "@sixb/ui/components"
 import { ThemeProvider } from "@sixb/ui/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React from "react"
@@ -38,13 +40,54 @@ async function start(): Promise<void> {
   const authSession = runtimeConfig.auth.enabled
     ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
     : null
-  canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
+  canRenderApp =
+    !runtimeConfig.auth.enabled ||
+    (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 
-  if (!canRenderApp) {
+  if (canRenderApp) {
+    renderApp()
     return
   }
 
-  renderApp()
+  if (authSession?.authenticated === true && !authSession.applicationAccess.allowed) {
+    renderAccessDenied()
+  }
+}
+
+function renderAccessDenied(): void {
+  getRoot().render(
+    <React.StrictMode>
+      <AtlasAccessDenied />
+    </React.StrictMode>
+  )
+}
+
+function AtlasAccessDenied() {
+  const [isSigningOut, setIsSigningOut] = React.useState(false)
+
+  const handleSignOut = async () => {
+    setIsSigningOut(true)
+    try {
+      await signOut({ throwOnError: true })
+      window.location.reload()
+    } catch {
+      setIsSigningOut(false)
+    }
+  }
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-background p-6 text-foreground">
+      <section className="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
+        <h1 className="text-xl font-semibold tracking-tight">Atlas access required</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your account is signed in, but it does not have permission to access Atlas.
+        </p>
+        <Button className="mt-6" variant="outline" disabled={isSigningOut} onClick={handleSignOut}>
+          {isSigningOut ? "Signing out…" : "Sign out"}
+        </Button>
+      </section>
+    </main>
+  )
 }
 
 function renderApp(): void {

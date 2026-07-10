@@ -1,9 +1,17 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "types": ["bun", "node"],
     "incremental": true,
     "tsBuildInfoFile": "./.tsbuild/tsconfig.tsbuildinfo"
   },
-  "include": ["ontology/**/*.ts", "security/**/*.ts", "sixb.config.ts", ".sixb/types/**/*.d.ts"]
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "ontology/**/*.ts",
+    "security/**/*.ts",
+    "sixb.config.ts",
+    ".sixb/types/**/*.d.ts"
+  ]
 }

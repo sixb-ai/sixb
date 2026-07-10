@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryAuthStorage } from "@sixb/core"
+import { type CompleteAuthSessionInput, InMemoryAuthStorage } from "@sixb/core"
 import { OidcAuthError, type OidcClientAdapter, type OidcTokenResponse, oidc } from "../src"
 
 const projectId = "project-a"
@@ -65,7 +65,7 @@ class FakeOidcClient implements OidcClientAdapter {
   }
 }
 
-function sessionInput(id = "ses_1") {
+function sessionInput(id = "ses_1"): CompleteAuthSessionInput {
   return {
     id,
     audience: "atlas",

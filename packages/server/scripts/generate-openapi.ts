@@ -67,7 +67,7 @@ async function main() {
     quiet: true,
     browser: {
       publicOrigin,
-      allowedOrigins: [{ origin: publicOrigin, audience: "atlas", kind: "atlas" }],
+      allowedOrigins: [{ origin: publicOrigin, audience: "atlas" }],
     },
   })
   await server.start()

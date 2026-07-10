@@ -1,4 +1,5 @@
 import { type ResolvedRole, resolveRoleGrants } from "../authorization"
+import { APPLICATION_IDS } from "./applications"
 import type {
   GroupDefinition,
   MembershipPolicyDefinition,
@@ -48,6 +49,7 @@ export function createRuntimeSecurityRegistry(input: {
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
+  readonly applicationIds?: ReadonlySet<string>
   readonly objectTypeIds?: ReadonlySet<string>
   readonly datasetIds?: ReadonlySet<string>
   readonly actionIds?: ReadonlySet<string>
@@ -61,6 +63,7 @@ export function createRuntimeSecurityRegistry(input: {
     groups: input.groups ?? [],
     roles: input.roles ?? [],
     membershipPolicies: input.membershipPolicies ?? [],
+    applicationIds: input.applicationIds ?? APPLICATION_IDS,
     objectTypeIds: input.objectTypeIds,
     datasetIds: input.datasetIds,
     actionIds: input.actionIds,
@@ -72,6 +75,7 @@ export function createRuntimeSecurityRegistry(input: {
   })
 
   const universe = {
+    applicationIds: input.applicationIds ?? APPLICATION_IDS,
     objectTypeIds: input.objectTypeIds ?? new Set<string>(),
     datasetIds: input.datasetIds ?? new Set<string>(),
     actionIds: input.actionIds ?? new Set<string>(),

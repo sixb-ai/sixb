@@ -1,0 +1,238 @@
+:root {
+  color-scheme: light dark;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f7f8;
+  color: #17191c;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f8;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.auth-app-shell {
+  width: min(960px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 72px 0 48px;
+}
+
+.auth-app-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 32px;
+  margin-bottom: 28px;
+}
+
+.auth-app-header h1 {
+  margin: 6px 0 0;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+.auth-app-eyebrow,
+.auth-app-label {
+  margin: 0;
+  color: #6d737c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.auth-app-lede {
+  max-width: 620px;
+  margin: 16px 0 0;
+  color: #626871;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.auth-app-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d8dce1;
+  border-radius: 999px;
+  background: #fff;
+  padding: 8px 12px;
+  color: #555b64;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.auth-app-status > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22a06b;
+  box-shadow: 0 0 0 4px rgb(34 160 107 / 12%);
+}
+
+.auth-app-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 16px;
+}
+
+.auth-app-card {
+  min-width: 0;
+  border: 1px solid #dfe2e6;
+  border-radius: 16px;
+  background: #fff;
+  padding: 24px;
+  box-shadow: 0 1px 2px rgb(17 24 39 / 4%);
+}
+
+.auth-app-card h2 {
+  margin: 8px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 1.15rem;
+}
+
+.auth-app-muted {
+  margin: 7px 0 0;
+  color: #747a83;
+  font-size: 0.88rem;
+}
+
+.auth-app-error {
+  color: #b42318;
+  font-size: 0.88rem;
+}
+
+.auth-app-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 24px;
+}
+
+.auth-app-groups span {
+  border-radius: 7px;
+  background: #f0f1f3;
+  padding: 5px 8px;
+  color: #555b64;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.auth-app-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.auth-app-card-heading > strong {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 10px;
+  background: #17191c;
+  color: #fff;
+}
+
+.auth-app-notes {
+  display: grid;
+  gap: 0;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.auth-app-notes li {
+  border-top: 1px solid #eceef0;
+  padding: 14px 0;
+}
+
+.auth-app-notes li:last-child {
+  padding-bottom: 0;
+}
+
+.auth-app-notes p {
+  margin: 5px 0 0;
+  color: #747a83;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.auth-app-help {
+  margin: 22px 0 0;
+  color: #747a83;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.auth-app-help strong {
+  color: #33373d;
+}
+
+@media (max-width: 700px) {
+  .auth-app-shell {
+    padding-top: 40px;
+  }
+
+  .auth-app-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .auth-app-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root,
+  body {
+    background: #111315;
+    color: #f4f5f6;
+  }
+
+  .auth-app-lede,
+  .auth-app-muted,
+  .auth-app-help,
+  .auth-app-notes p,
+  .auth-app-eyebrow,
+  .auth-app-label {
+    color: #9ca2ab;
+  }
+
+  .auth-app-card,
+  .auth-app-status {
+    border-color: #30343a;
+    background: #1b1e22;
+  }
+
+  .auth-app-status,
+  .auth-app-groups span {
+    color: #c9cdd2;
+  }
+
+  .auth-app-groups span {
+    background: #292d32;
+  }
+
+  .auth-app-card-heading > strong {
+    background: #f4f5f6;
+    color: #17191c;
+  }
+
+  .auth-app-notes li {
+    border-color: #30343a;
+  }
+
+  .auth-app-help strong {
+    color: #e2e4e7;
+  }
+}

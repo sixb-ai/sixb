@@ -1,5 +1,10 @@
 import type { Database } from "bun:sqlite"
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core"
+import type {
+  AuthSessionAudience,
+  AuthSessionStore,
+  CreateAuthSessionInput,
+  SessionRecord,
+} from "@sixb/core"
 import { AuthStorageError } from "@sixb/core"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthSessionRow } from "./rows"
@@ -30,7 +35,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const row = this.db
@@ -82,7 +87,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -137,7 +142,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return runImmediateTransaction(this.db, () => revokeActiveSessionsForUser(this.db, params))

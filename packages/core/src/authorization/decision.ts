@@ -16,12 +16,14 @@
  * never the raw runtime. See `RequestAuthState` in the server for the rule.
  */
 
+import type { AuthSessionAudience } from "../auth/audience"
 import { AuthorizationError } from "./errors"
 import type { GrantKind } from "./grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "./types"
 
 /** Something a principal may attempt, paired with the resource it targets. */
 export type AuthzRequest =
+  | { readonly kind: "application.access"; readonly audience: AuthSessionAudience }
   | { readonly kind: "object.view"; readonly objectTypeId: string }
   | { readonly kind: "dataset.view"; readonly datasetId: string }
   | { readonly kind: "action.apply"; readonly actionId: string }
@@ -55,6 +57,8 @@ interface Atom {
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
+    case "application.access":
+      return [{ kind: "access:application", id: request.audience }]
     case "object.view":
       return [{ kind: "view:object", id: request.objectTypeId }]
     case "dataset.view":
@@ -139,6 +143,8 @@ function deniedMessage(
 ): string {
   const principalId = authorization?.principal.id ?? "unknown"
   switch (request.kind) {
+    case "application.access":
+      return `[Sixb] Principal '${principalId}' is not allowed to access application '${request.audience}'.`
     case "object.view":
       return `[Sixb] Principal '${principalId}' is not allowed to view object type '${request.objectTypeId}'.`
     case "dataset.view":

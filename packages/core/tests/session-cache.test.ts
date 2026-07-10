@@ -16,7 +16,7 @@ const base = {
   sessionId: "ses_1",
   tokenHash: "hash_1",
   audience: "atlas",
-}
+} as const
 
 describe("SessionCache", () => {
   test("returns undefined on miss, hit after set within ttl", () => {
@@ -77,7 +77,7 @@ describe("SessionCache", () => {
     const mk = (id: string) => ({
       sessionId: id,
       tokenHash: `h_${id}`,
-      audience: "atlas",
+      audience: "atlas" as const,
       session: fakeSession(id),
       nowMs: 0,
       sessionExpiresAtMs: 1_000_000,

@@ -3,10 +3,13 @@ import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 import { oidc, type SendOidcInvitationInput } from "@sixb/auth-oidc"
 import {
   type AuthStrategy,
+  applications,
+  can,
   createSessionCredential,
   defineGroup,
   defineMembershipPolicy,
   defineObjectType,
+  defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -15,6 +18,7 @@ import {
   type MembershipPolicyDefinition,
   type OntologySource,
   prop,
+  type RoleDefinition,
   Sixb,
   type SixbAuthConfig,
 } from "@sixb/core"
@@ -25,6 +29,13 @@ const projectId = "test-project"
 const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 const finance = defineGroup("finance")
+const invitationDestinationOptions = {
+  destinations: [
+    { id: "atlas", label: "Atlas" },
+    { id: "app", label: "Custom app" },
+  ],
+  defaultDestinationId: "app",
+}
 
 const Device = defineObjectType({
   id: "device",
@@ -49,6 +60,7 @@ function createRuntime(
   options: {
     readonly auth?: SixbAuthConfig
     readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
+    readonly roles?: readonly RoleDefinition[]
   } = {}
 ) {
   const storage = new InMemoryStorage()
@@ -66,6 +78,7 @@ function createRuntime(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     groups: [securityAdmins, commercial, finance],
+    roles: options.roles,
     membershipPolicies: options.membershipPolicies ?? [
       defineMembershipPolicy("default-membership", {
         grantedTo: [securityAdmins],
@@ -229,6 +242,150 @@ describe("auth invitation routes", () => {
     })
   })
 
+  test("Atlas can invite an allowed group directly to the configured custom app", async () => {
+    const commercialAppAccess = defineRole("commercial.app-access", {
+      grantedTo: [commercial],
+      grants: [can.access(applications.app)],
+    })
+    const { app, messages, storage } = createRuntime({ roles: [commercialAppAccess] })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "app-user@acme.com",
+          groupIds: ["commercial"],
+          destinationId: "app",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(201)
+    const link = linkFromLatestMessage(messages)
+    const magicLink = await storage.auth.magicLinks.getById({
+      projectId,
+      id: link.searchParams.get("magicLinkId") ?? "",
+    })
+    expect(magicLink).toMatchObject({
+      audience: "app",
+      returnTo: "http://app.localhost/",
+    })
+
+    const callback = await confirmCallback(app, link)
+    expect(callback.status).toBe(303)
+    expect(callback.headers.get("location")).toBe("http://app.localhost/")
+    expect(callback.headers.get("set-cookie")).toContain("sixb_session_app=")
+  })
+
+  test("rejects an invitation destination that is not configured", async () => {
+    const { sixb, storage } = createRuntime()
+    const app = createSixbApi(
+      new SixbServer({
+        sixb,
+        quiet: true,
+        browser: createTestBrowserPolicy({ includeApp: false }),
+      })
+    )
+    const admin = await seedAdminSession(storage)
+    const destinationOptions = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitation-options", {
+        headers: {
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+        },
+      })
+    )
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "app-user@acme.com",
+          groupIds: ["commercial"],
+          destinationId: "app",
+        }),
+      })
+    )
+
+    expect(destinationOptions.status).toBe(200)
+    expect(await destinationOptions.json()).toMatchObject({
+      destinations: [{ id: "atlas", label: "Atlas" }],
+      defaultDestinationId: "atlas",
+    })
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invitation destination is not allowed" })
+  })
+
+  test("rejects a return target outside the selected destination", async () => {
+    const { app, storage } = createRuntime()
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "app-user@acme.com",
+          groupIds: ["commercial"],
+          destinationId: "app",
+          returnTo: "http://atlas.localhost/objects",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: "Invitation destination is not allowed" })
+  })
+
+  test("rejects invitation groups without access to a controlled destination", async () => {
+    const financeAppAccess = defineRole("finance.app-access", {
+      grantedTo: [finance],
+      grants: [can.access(applications.app)],
+    })
+    const { app, storage } = createRuntime({ roles: [financeAppAccess] })
+    const admin = await seedAdminSession(storage)
+
+    const response = await app.fetch(
+      new Request("http://api.localhost/api/auth/invitations", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: "http://atlas.localhost",
+          cookie: admin.cookie,
+          ...admin.csrfHeader,
+        },
+        body: JSON.stringify({
+          email: "app-user@acme.com",
+          groupIds: ["commercial"],
+          destinationId: "app",
+        }),
+      })
+    )
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({
+      error: "[Sixb] Invitation groups do not grant access to application 'app'.",
+    })
+  })
+
   test("creates OIDC invitations without magic-link delivery", async () => {
     const { app, storage } = createRuntime({
       auth: oidc({
@@ -307,7 +464,7 @@ describe("auth invitation routes", () => {
         body: JSON.stringify({
           email: "oidc-user@acme.com",
           groupIds: ["commercial"],
-          returnTo: "http://atlas.localhost/objects",
+          destinationId: "app",
         }),
       })
     )
@@ -327,7 +484,8 @@ describe("auth invitation routes", () => {
     expect(messages).toHaveLength(1)
     expect(signInUrl.origin).toBe("https://app.example.com")
     expect(signInUrl.pathname).toBe("/auth/sign-in")
-    expect(signInUrl.searchParams.get("returnTo")).toBe("http://atlas.localhost/objects")
+    expect(signInUrl.searchParams.get("audience")).toBe("app")
+    expect(signInUrl.searchParams.get("returnTo")).toBe("http://app.localhost/")
   })
 
   test("revokes OIDC invitations when invitation email sending fails", async () => {
@@ -423,6 +581,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       groups: [{ id: "commercial" }],
+      ...invitationDestinationOptions,
       canInviteWithoutGroups: true,
       capabilities: {
         createInvitation: { state: "enabled" },
@@ -456,6 +615,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       groups: [{ id: "commercial" }, { id: "finance" }],
+      ...invitationDestinationOptions,
       canInviteWithoutGroups: true,
       capabilities: {
         createInvitation: { state: "enabled" },
@@ -476,6 +636,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       groups: [],
+      ...invitationDestinationOptions,
       canInviteWithoutGroups: false,
       capabilities: {
         createInvitation: {
@@ -500,6 +661,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       groups: [{ id: "commercial" }],
+      ...invitationDestinationOptions,
       canInviteWithoutGroups: true,
       capabilities: {
         createInvitation: {
@@ -526,6 +688,7 @@ describe("auth invitation routes", () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
       groups: [{ id: "commercial" }],
+      defaultDestinationId: "app",
       capabilities: {
         createInvitation: { state: "enabled" },
       },

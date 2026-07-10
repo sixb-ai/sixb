@@ -22,13 +22,20 @@ const server = createSixbServer({
   port: 3002,
   browser: {
     publicOrigin: "https://api.example.com",
-    allowedOrigins: [{ origin: "https://atlas.example.com", audience: "atlas" }],
+    allowedOrigins: [
+      { origin: "https://atlas.example.com", audience: "atlas" },
+      { origin: "https://app.example.com", audience: "app" },
+    ],
   },
 })
 await server.start()
 // Server running at http://0.0.0.0:3002
 // OpenAPI docs at http://0.0.0.0:3002/docs
 ```
+
+Each configured audience identifies the browser application for exactly one origin. Configured
+origins are shown as invitation destinations and participate in `can.access(applications.atlas)` or
+`can.access(applications.app)` authorization.
 
 ## API Routes
 

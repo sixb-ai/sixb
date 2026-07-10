@@ -1,3 +1,4 @@
+import { type AuthSessionAudience, resolveAuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type {
   AccessTokenRecord,
@@ -202,7 +203,7 @@ export function revokeActiveSessionsForUser(
   projectId: string,
   userId: string,
   revokedAt: Date,
-  audience?: string
+  audience?: AuthSessionAudience
 ): readonly SessionRecord[] {
   const revoked: SessionRecord[] = []
 
@@ -291,7 +292,7 @@ export function createSessionRecord(
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const userId = assertNonEmpty(input.userId, "User id")
   const strategyId = assertNonEmpty(input.strategyId, "Strategy id")
-  const audience = assertNonEmpty(input.audience, "Session audience")
+  const audience = resolveAuthSessionAudience(input.audience)
   const tokenHash = assertNonEmpty(input.tokenHash, "Session token hash")
 
   assertSessionIdAvailable(state, projectId, id)

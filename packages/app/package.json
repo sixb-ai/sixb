@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@sixb/agent-ui": "workspace:*",
+    "@sixb/core": "workspace:*",
     "@sixb/ui": "workspace:*",
     "@tailwindcss/cli": "^4.2.2",
     "tailwindcss": "^4.1.18"

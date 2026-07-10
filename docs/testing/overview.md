@@ -217,10 +217,10 @@ await expect(
 expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-There are seven grant kinds, each gated by its own scoped method: `view:object`
-(`list`/`getObject`), `view:dataset` (`listDatasets`), `apply:action`
-(`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, `run:pipeline`,
-and `run:agent`. See [authorization](../auth/authorization.md) for how roles,
+There are eight grant kinds. `access:application` gates browser applications at the server
+boundary. The scoped runtime gates `view:object` (`list`/`getObject`), `view:dataset`
+(`listDatasets`), `apply:action` (`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`,
+`run:pipeline`, and `run:agent`. See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
 
@@ -254,7 +254,7 @@ beforeAll(async () => {
     quiet: true,
     browser: {
       publicOrigin: baseUrl,
-      allowedOrigins: [{ origin: baseUrl, audience: "atlas", kind: "atlas" }],
+      allowedOrigins: [{ origin: baseUrl, audience: "atlas" }],
     },
   })
   await server.start()

@@ -1,5 +1,6 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
+import type { AuthSessionAudience } from "@sixb/core"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import type { PageRoute } from "./scanner"
 
@@ -76,7 +77,7 @@ export async function generateAppEntry(
   generatedDir: string,
   options: {
     apiBaseUrl?: string
-    audience?: string
+    audience?: AuthSessionAudience
     authEnabled?: boolean
     appDir?: string
     /**
@@ -127,6 +128,7 @@ export async function generateAppEntry(
   // Generate main.tsx
   const mainContent = `import React from "react"
 import { createRoot } from "react-dom/client"
+import { signOut } from "@sixb/client"
 import { BrowserRouter, Routes, Route, matchPath, useNavigate, useLocation } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
@@ -145,7 +147,11 @@ const browserClient = configureSixbBrowserClient(runtimeConfig)
 const authSession = runtimeConfig.auth.enabled
   ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
   : null
-const canRenderApp = !runtimeConfig.auth.enabled || authSession?.authenticated === true
+const applicationAccessDenied =
+  authSession?.authenticated === true && !authSession.applicationAccess.allowed
+const canRenderApp =
+  !runtimeConfig.auth.enabled ||
+  (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -258,10 +264,12 @@ function AppFallback({
   title,
   detail,
   showReload = true,
+  action,
 }: {
   title: string
   detail: string
   showReload?: boolean
+  action?: React.ReactNode
 }) {
   return (
     <div
@@ -286,36 +294,79 @@ function AppFallback({
         {detail}
       </p>
       <div style={{ display: "flex", gap: "0.75rem" }}>
-        <a
-          href="/"
+        {action ?? (
+          <>
+            <a
+              href="/"
+              style={{
+                padding: "0.5rem 1rem",
+                borderRadius: "var(--radius, 0.5rem)",
+                background: "var(--primary, #1f2933)",
+                color: "var(--primary-foreground, #ffffff)",
+                textDecoration: "none",
+              }}
+            >
+              Go home
+            </a>
+            {showReload ? (
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                style={{
+                  padding: "0.5rem 1rem",
+                  borderRadius: "var(--radius, 0.5rem)",
+                  border: "1px solid var(--border, #cbd2d9)",
+                  background: "transparent",
+                  color: "inherit",
+                  cursor: "pointer",
+                }}
+              >
+                Reload
+              </button>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function AccessDeniedView() {
+  const [isSigningOut, setIsSigningOut] = React.useState(false)
+
+  async function handleSignOut() {
+    setIsSigningOut(true)
+    try {
+      await signOut({ throwOnError: true })
+      window.location.reload()
+    } catch {
+      setIsSigningOut(false)
+    }
+  }
+
+  return (
+    <AppFallback
+      title="Access required"
+      detail="Your account is signed in, but it does not have permission to access this app."
+      showReload={false}
+      action={
+        <button
+          type="button"
+          disabled={isSigningOut}
+          onClick={handleSignOut}
           style={{
             padding: "0.5rem 1rem",
             borderRadius: "var(--radius, 0.5rem)",
-            background: "var(--primary, #1f2933)",
-            color: "var(--primary-foreground, #ffffff)",
-            textDecoration: "none",
+            border: "1px solid var(--border, #cbd2d9)",
+            background: "transparent",
+            color: "inherit",
+            cursor: isSigningOut ? "default" : "pointer",
           }}
         >
-          Go home
-        </a>
-        {showReload ? (
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            style={{
-              padding: "0.5rem 1rem",
-              borderRadius: "var(--radius, 0.5rem)",
-              border: "1px solid var(--border, #cbd2d9)",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            Reload
-          </button>
-        ) : null}
-      </div>
-    </div>
+          {isSigningOut ? "Signing out…" : "Sign out"}
+        </button>
+      }
+    />
   )
 }
 
@@ -408,6 +459,8 @@ function App() {
 
 if (canRenderApp) {
   createRoot(document.getElementById("root")!).render(<App />)
+} else if (applicationAccessDenied) {
+  createRoot(document.getElementById("root")!).render(<AccessDeniedView />)
 }
 `
 

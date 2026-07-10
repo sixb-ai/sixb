@@ -1,3 +1,4 @@
+import type { AuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
 import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "../types"
 import type { AuthStorageState } from "./shared"
@@ -30,7 +31,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async getActiveByUserId(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly now: Date
   }): Promise<SessionRecord | null> {
     const sessions = [...this.state.sessions.values()]
@@ -65,7 +66,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null> {
@@ -108,7 +109,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
   async revokeActiveForUser(params: {
     readonly projectId: string
     readonly userId: string
-    readonly audience?: string
+    readonly audience?: AuthSessionAudience
     readonly revokedAt: Date
   }): Promise<readonly SessionRecord[]> {
     return revokeActiveSessionsForUser(

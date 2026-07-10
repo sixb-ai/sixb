@@ -1,3 +1,4 @@
+import type { AuthSessionAudience } from "@sixb/core"
 import { configureSixbClient as configureGeneratedSixbClient, normalizeSixbApiBaseUrl } from "./api"
 import { client } from "./generated/client.gen"
 
@@ -12,14 +13,14 @@ export interface SixbBrowserRuntimeConfig {
     readonly baseUrl: string
   }
   readonly auth: {
-    readonly audience: string
+    readonly audience: AuthSessionAudience
     readonly enabled: boolean
   }
 }
 
 export interface SixbBrowserRuntimeDefaults {
   readonly apiBaseUrl?: string
-  readonly audience: string
+  readonly audience: AuthSessionAudience
   readonly authEnabled?: boolean
 }
 

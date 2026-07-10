@@ -5,14 +5,19 @@ import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import {
+  type AuthInvitationDestinationOptions,
+  type AuthInvitationRedirectContext,
+  type AuthInvitationRedirectInput,
   BrowserOriginError,
   createApiBrowserAuthContextResolver,
   createApiBrowserAuthRedirectContextResolver,
+  getApiBrowserInvitationDestinationOptions,
   isAllowedApiBrowserOrigin,
   type RequestAuthContext,
   type ResolveAuthRedirectContext,
   type ResolvedSixbApiBrowserPolicy,
   type ResolveRequestAuthContext,
+  resolveApiBrowserInvitationRedirectContext,
   resolveApiBrowserPolicy,
   resolveApiBrowserPublicOrigin,
   type SixbApiBrowserPolicy,
@@ -89,6 +94,17 @@ export class SixbServer {
 
   resolveAuthRequestOrigin(request: Request): string {
     return resolveApiBrowserPublicOrigin(this.apiBrowserPolicy, request)
+  }
+
+  getInvitationDestinationOptions(_request: Request): AuthInvitationDestinationOptions {
+    return getApiBrowserInvitationDestinationOptions(this.apiBrowserPolicy)
+  }
+
+  resolveInvitationRedirectContext(
+    request: Request,
+    input: AuthInvitationRedirectInput
+  ): AuthInvitationRedirectContext {
+    return resolveApiBrowserInvitationRedirectContext(this.apiBrowserPolicy, request, input)
   }
 
   getApiBrowserPolicy(): ResolvedSixbApiBrowserPolicy {
@@ -215,7 +231,10 @@ export function createSixbApi(server: SixbServer) {
     resolveAuthContext: (request) => server.resolveAuthContext(request),
     resolveAuthRedirectContext: (request, input) =>
       server.resolveAuthRedirectContext(request, input),
+    getInvitationDestinationOptions: (request) => server.getInvitationDestinationOptions(request),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
+    resolveInvitationRedirectContext: (request, input) =>
+      server.resolveInvitationRedirectContext(request, input),
   })
   registerHttpRoutes(app, sixb)
   registerWebhookRoutes(app, sixb)

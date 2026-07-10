@@ -180,6 +180,13 @@ const { invitation, delivery } = await sixb.auth.invite(request, {
 `expiresAt`, and `returnTo`. The companion methods are `listInvitations`, `revokeInvitation`, and
 `getInvitationOptions`.
 
+In Atlas, the invite form also offers every browser application configured on the API. Selecting
+**Custom app** sends a link with the `app` session audience and returns the recipient to the custom
+app origin; selecting **Atlas** uses the `atlas` audience. The HTTP API accepts this as
+`destinationId: "app" | "atlas"` and resolves the URL server-side, so callers cannot turn
+invitations into arbitrary redirects. If an application has access grants configured, the
+selected invitation groups must grant that destination.
+
 For existing users, the runtime exposes the same policy boundary through member-management methods:
 
 ```ts
@@ -237,13 +244,13 @@ When you serve the runtime, these endpoints are registered for you:
 | `GET /auth/sign-in` | Sign-in form (magic link) or redirect to the provider (OIDC) |
 | `POST /auth/sign-in` | Request a magic link, or start the OIDC flow |
 | `GET /auth/callback` | Complete the link or provider redirect and start a session |
-| `GET /api/auth/session` | Current session and CSRF token, or `{ authenticated: false }` |
+| `GET /api/auth/session` | Current session, application-access decision, and CSRF token, or `{ authenticated: false }` |
 | `POST /api/auth/sign-out` | End the current session |
 | `POST /api/auth/sign-out-all` | End every session for the current user |
 | `GET /api/auth/invitations` | List invitations |
 | `POST /api/auth/invitations` | Create an invitation |
 | `POST /api/auth/invitations/:invitationId/revoke` | Revoke an invitation |
-| `GET /api/auth/invitation-options` | Groups and capabilities for the invite form |
+| `GET /api/auth/invitation-options` | Groups, destinations, and capabilities for the invite form |
 | `GET /api/auth/membership-options` | Groups and capabilities for member management |
 | `GET /api/auth/members` | List visible members with per-member capabilities |
 | `PATCH /api/auth/members/:userId/groups` | Replace a member's groups |

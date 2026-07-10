@@ -335,6 +335,7 @@ export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions
 
 export interface InviteUserOptions extends AuthSessionAudienceOptions {
   readonly delivery?: {
+    readonly audience?: AuthSessionAudience
     readonly requestOrigin?: string
     readonly returnTo?: string
   }

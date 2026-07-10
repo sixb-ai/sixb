@@ -55,12 +55,10 @@ export function createTestBrowserPolicy(
   const atlasOrigin = options.atlasOrigin ?? "http://atlas.localhost"
   const appOrigin = options.appOrigin ?? "http://app.localhost"
   const includeApp = options.includeApp ?? true
-  const allowedOrigins: SixbBrowserOrigin[] = [
-    { origin: atlasOrigin, audience: "atlas", kind: "atlas" },
-  ]
+  const allowedOrigins: SixbBrowserOrigin[] = [{ origin: atlasOrigin, audience: "atlas" }]
 
   if (includeApp) {
-    allowedOrigins.push({ origin: appOrigin, audience: "app", kind: "app" })
+    allowedOrigins.push({ origin: appOrigin, audience: "app" })
   }
 
   return {

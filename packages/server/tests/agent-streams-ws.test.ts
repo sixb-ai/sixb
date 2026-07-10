@@ -555,6 +555,7 @@ function authz(principal: Principal, agentIds: readonly string[] = []): Authoriz
     groupIds: [],
     roleIds: [],
     grants: {
+      "access:application": new Set(),
       "view:object": new Set(),
       "view:dataset": new Set(),
       "apply:action": new Set(),
