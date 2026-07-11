@@ -15,7 +15,6 @@ and [Mastra](https://mastra.ai/).
 </h3>
 
 [![CI](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/ci.yml)
-[![Docs](https://github.com/sixb-ai/sixb/actions/workflows/docs.yml/badge.svg)](https://github.com/sixb-ai/sixb/actions/workflows/docs.yml)
 [![Bun](https://img.shields.io/badge/runtime-Bun-black?logo=bun)](https://bun.sh)
 [![License](https://img.shields.io/badge/license-MIT-black)](./LICENSE)
 
