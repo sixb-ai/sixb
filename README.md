@@ -6,7 +6,7 @@
 </picture>
 
 Sixb: For something between [Palantir Foundry](https://www.palantir.com/platforms/foundry/)
-and [Mastra](https://mastra.ai/). An open TypeScript framework for operational software.
+and [Mastra](https://mastra.ai/).
 
 <h3>
 
