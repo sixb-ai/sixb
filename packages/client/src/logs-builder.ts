@@ -1,9 +1,13 @@
+import {
+  type LogLevel,
+  type LogRunKind,
+  type LogRunRef,
+  logLevelsAtOrAbove,
+  type StoredLogLine,
+} from "@sixb/core"
 import { listLogs } from "./generated"
 import type { Client } from "./generated/client"
-import type { LogLevel, LogRunKind, LogRunRef, SixbLogLine } from "./logs-model"
 import { createLogSocket, type LogSocketState } from "./logs-transport"
-
-const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"]
 
 export interface LogsFilterIR {
   readonly kinds?: readonly LogRunKind[]
@@ -31,7 +35,7 @@ export interface LogsTailOptions {
 }
 
 export interface SixbLogsPage {
-  readonly lines: readonly SixbLogLine[]
+  readonly lines: readonly StoredLogLine[]
   /** Forward cursor for `.read()`, backward pagination cursor for `.tail()`. */
   readonly cursor?: string
   readonly hasMore: boolean
@@ -45,7 +49,7 @@ export interface SixbLogsClientOptions {
 export interface LogsBuilder {
   readonly ir: LogsFilterIR
   level(level: LogLevel): LogsBuilder
-  subscribe(handler: (line: SixbLogLine) => void, options?: LogSubscribeOptions): () => void
+  subscribe(handler: (line: StoredLogLine) => void, options?: LogSubscribeOptions): () => void
   read(options?: LogsReadOptions): Promise<SixbLogsPage>
   tail(options?: LogsTailOptions): Promise<SixbLogsPage>
 }
@@ -61,6 +65,9 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
   ) {}
 
   run(runId: string): LogsBuilder {
+    if (typeof runId !== "string" || runId.trim().length === 0) {
+      throw new Error("runId must be a non-empty string")
+    }
     const kind = this.ir.kinds?.[0]
     if (!kind) {
       throw new Error("run() is only available after selecting a log run kind")
@@ -72,11 +79,11 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
     return this.withFilter({ level })
   }
 
-  subscribe(handler: (line: SixbLogLine) => void, options?: LogSubscribeOptions): () => void {
+  subscribe(handler: (line: StoredLogLine) => void, options?: LogSubscribeOptions): () => void {
     const socket = createLogSocket({
       kinds: this.ir.kinds,
       run: this.ir.run,
-      levels: this.ir.level ? levelsAtOrAbove(this.ir.level) : undefined,
+      levels: this.ir.level ? logLevelsAtOrAbove(this.ir.level) : undefined,
       afterCursor: options?.afterCursor,
       reconnect: options?.reconnect,
       reconnectDelayMs: options?.reconnectDelayMs,
@@ -119,13 +126,13 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
         direction: input.direction,
         afterCursor: input.afterCursor,
         beforeCursor: input.beforeCursor,
-        limit: input.limit === undefined ? undefined : String(input.limit),
+        limit: input.limit,
       },
       ...(this.options?.client ? { client: this.options.client } : {}),
       throwOnError: true,
     })
     return {
-      lines: (data?.lines ?? []) as unknown as SixbLogLine[],
+      lines: (data?.lines ?? []) as unknown as StoredLogLine[],
       cursor: data?.cursor,
       hasMore: data?.hasMore ?? false,
     }
@@ -154,8 +161,4 @@ export const logs: SixbLogsApi = {
   pipelines: (options) => createBuilder({ kinds: ["pipeline"] }, options),
   workflows: (options) => createBuilder({ kinds: ["workflow"] }, options),
   actions: (options) => createBuilder({ kinds: ["action"] }, options),
-}
-
-function levelsAtOrAbove(level: LogLevel): readonly LogLevel[] {
-  return LOG_LEVELS.slice(LOG_LEVELS.indexOf(level))
 }

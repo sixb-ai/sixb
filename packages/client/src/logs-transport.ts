@@ -1,10 +1,10 @@
 import {
-  isSixbLogLine,
+  isStoredLogLine,
   type LogLevel,
   type LogRunKind,
   type LogRunRef,
-  type SixbLogLine,
-} from "./logs-model"
+  type StoredLogLine,
+} from "@sixb/core"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
@@ -22,7 +22,7 @@ export interface LogSocketOptions {
   readonly reconnectDelayMs?: number
   /** API origin override. Authentication uses the browser session cookie. */
   readonly baseUrl?: string
-  readonly onLog: (line: SixbLogLine) => void
+  readonly onLog: (line: StoredLogLine) => void
   readonly onError?: (error: string) => void
   readonly onReset?: (cursor?: string) => void
   readonly onStateChange?: (state: LogSocketState) => void
@@ -35,7 +35,7 @@ export interface LogSocket {
 type LogStreamServerMessage =
   | { readonly type: "connected" | "subscribed" | "unsubscribed" }
   | { readonly type: "error"; readonly message: string }
-  | { readonly type: "logs"; readonly logs: readonly SixbLogLine[] }
+  | { readonly type: "logs"; readonly logs: readonly StoredLogLine[] }
   | { readonly type: "reset"; readonly reason: "cursor_expired"; readonly cursor?: string }
 
 export function createLogSocket(options: LogSocketOptions): LogSocket {
@@ -88,7 +88,7 @@ export function parseLogStreamMessage(value: unknown): LogStreamServerMessage | 
   }
   if (!isRecord(parsed) || typeof parsed.type !== "string") return null
 
-  if (parsed.type === "logs" && Array.isArray(parsed.logs) && parsed.logs.every(isSixbLogLine)) {
+  if (parsed.type === "logs" && Array.isArray(parsed.logs) && parsed.logs.every(isStoredLogLine)) {
     return { type: "logs", logs: parsed.logs }
   }
   if (parsed.type === "reset" && parsed.reason === "cursor_expired") {

@@ -1,31 +1,28 @@
-import type { LogLevel, LogRunKind } from "@sixb/core"
+import { LOG_LEVELS, LOG_RUN_KINDS } from "@sixb/core"
 import { z } from "zod"
 
-// `satisfies` pins these literals to the core unions, so a new run kind or log
-// level in `@sixb/core` fails the build here until the wire schema catches up.
-export const LOG_RUN_KINDS = [
-  "sync",
-  "pipeline",
-  "workflow",
-  "action",
-] as const satisfies readonly LogRunKind[]
-export const LOG_LEVELS = ["debug", "info", "warn", "error"] as const satisfies readonly LogLevel[]
+export { LOG_LEVELS, LOG_RUN_KINDS }
 
 export const LogRunKindSchema = z.enum(LOG_RUN_KINDS)
 export const LogLevelSchema = z.enum(LOG_LEVELS)
+export const LogRunIdSchema = z.string().regex(/\S/, "run id must not be blank")
+export const DEFAULT_LOGS_PAGE_LIMIT = 200
+export const MAX_LOGS_PAGE_LIMIT = 1_000
+
+const LogsLimitSchema = z.coerce.number().int().positive().max(MAX_LOGS_PAGE_LIMIT)
 
 export const LogsQuerySchema = z
   .object({
     kind: LogRunKindSchema.optional(),
-    runId: z.string().optional(),
+    runId: LogRunIdSchema.optional(),
     level: LogLevelSchema.optional(),
     direction: z.enum(["forward", "backward"]).optional(),
     afterCursor: z.string().optional(),
     beforeCursor: z.string().optional(),
-    limit: z.string().optional(),
+    limit: LogsLimitSchema.optional(),
   })
   .superRefine((query, context) => {
-    if (query.runId && !query.kind) {
+    if (query.runId !== undefined && query.kind === undefined) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["runId"],

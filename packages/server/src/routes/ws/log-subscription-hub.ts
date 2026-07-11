@@ -39,6 +39,7 @@ interface ClientState {
   queuedBytes: number
   pendingBytes: number
   flushTimer: ReturnType<typeof setTimeout> | null
+  readonly queueProgressWaiters: Set<() => void>
   catchingUp: boolean
   closed: boolean
 }
@@ -50,6 +51,7 @@ interface ClientState {
  */
 export class LogSubscriptionHub {
   private readonly clients = new Map<object, ClientState>()
+  private readonly subscriptionGenerations = new WeakMap<object, number>()
   private startPromise: Promise<void> | null = null
   private unsubscribeBroker: (() => void) | null = null
   private closed = false
@@ -62,8 +64,17 @@ export class LogSubscriptionHub {
     filter: LogSubscriptionFilter,
     onSubscribed: () => void
   ): Promise<void> {
-    await this.ensureStarted()
-    this.unsubscribe(key)
+    if (this.closed) throw new Error("Log subscription hub is closed")
+    const generation = this.nextSubscriptionGeneration(key)
+    this.removeClient(key)
+
+    try {
+      await this.ensureStarted()
+    } catch (error) {
+      if (this.closed || !this.isCurrentSubscription(key, generation)) return
+      throw error
+    }
+    if (this.closed || !this.isCurrentSubscription(key, generation)) return
 
     const state: ClientState = {
       ws,
@@ -76,6 +87,7 @@ export class LogSubscriptionHub {
       queuedBytes: 0,
       pendingBytes: 0,
       flushTimer: null,
+      queueProgressWaiters: new Set(),
       catchingUp: filter.afterCursor !== undefined,
       closed: false,
     }
@@ -88,11 +100,27 @@ export class LogSubscriptionHub {
   }
 
   unsubscribe(key: object): void {
+    this.nextSubscriptionGeneration(key)
+    this.removeClient(key)
+  }
+
+  private removeClient(key: object): void {
     const state = this.clients.get(key)
     if (!state) return
     state.closed = true
     if (state.flushTimer) clearTimeout(state.flushTimer)
+    this.notifyQueueProgress(state)
     this.clients.delete(key)
+  }
+
+  private nextSubscriptionGeneration(key: object): number {
+    const generation = (this.subscriptionGenerations.get(key) ?? 0) + 1
+    this.subscriptionGenerations.set(key, generation)
+    return generation
+  }
+
+  private isCurrentSubscription(key: object, generation: number): boolean {
+    return this.subscriptionGenerations.get(key) === generation
   }
 
   async close(): Promise<void> {
@@ -147,7 +175,7 @@ export class LogSubscriptionHub {
           if (state.pendingCursors.has(line.cursor)) {
             state.replayedPendingCursors.add(line.cursor)
           }
-          this.enqueue(state, line)
+          if (!(await this.enqueueReplay(state, line))) return
         }
         if (state.closed) return
         afterCursor = page.cursor ?? afterCursor
@@ -200,14 +228,37 @@ export class LogSubscriptionHub {
   private enqueue(state: ClientState, line: StoredLogLine): void {
     if (state.closed || state.queuedCursors.has(line.cursor)) return
     const bytes = encodedBytes(line)
-    if (
-      state.queue.length + state.pendingLive.length >= MAX_CLIENT_RECORDS ||
-      state.queuedBytes + state.pendingBytes + bytes > MAX_CLIENT_BYTES
-    ) {
+    if (!hasQueueCapacity(state, bytes)) {
       this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
       return
     }
 
+    this.pushQueuedLine(state, line, bytes)
+  }
+
+  private async enqueueReplay(state: ClientState, line: StoredLogLine): Promise<boolean> {
+    if (state.closed) return false
+    if (state.queuedCursors.has(line.cursor)) return true
+    const bytes = encodedBytes(line)
+
+    while (!hasQueueCapacity(state, bytes)) {
+      // Replay is an internal producer and can pause while already-queued replay
+      // batches drain. Pending live records cannot drain until replay finishes,
+      // so a queue containing only pending live records has no forward progress.
+      if (state.queue.length === 0 || socketBufferedAmount(state.ws) > MAX_SOCKET_BUFFERED_BYTES) {
+        this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+        return false
+      }
+      this.scheduleFlush(state)
+      await this.waitForQueueProgress(state)
+      if (state.closed) return false
+    }
+
+    this.pushQueuedLine(state, line, bytes)
+    return !state.closed
+  }
+
+  private pushQueuedLine(state: ClientState, line: StoredLogLine, bytes: number): void {
     state.queue.push(line)
     state.queuedCursors.add(line.cursor)
     state.queuedBytes += bytes
@@ -217,10 +268,7 @@ export class LogSubscriptionHub {
   private enqueuePendingLive(state: ClientState, line: StoredLogLine): void {
     if (state.closed || state.pendingCursors.has(line.cursor)) return
     const bytes = encodedBytes(line)
-    if (
-      state.queue.length + state.pendingLive.length >= MAX_CLIENT_RECORDS ||
-      state.queuedBytes + state.pendingBytes + bytes > MAX_CLIENT_BYTES
-    ) {
+    if (!hasQueueCapacity(state, bytes)) {
       this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
       return
     }
@@ -249,8 +297,19 @@ export class LogSubscriptionHub {
       state.queuedCursors.delete(line.cursor)
       state.queuedBytes -= encodedBytes(line)
     }
+    this.notifyQueueProgress(state)
     this.send(state, { type: "logs", logs: lines })
     if (state.queue.length > 0) this.scheduleFlush(state)
+  }
+
+  private waitForQueueProgress(state: ClientState): Promise<void> {
+    return new Promise((resolve) => state.queueProgressWaiters.add(resolve))
+  }
+
+  private notifyQueueProgress(state: ClientState): void {
+    const waiters = [...state.queueProgressWaiters]
+    state.queueProgressWaiters.clear()
+    for (const resolve of waiters) resolve()
   }
 
   private send(state: ClientState, payload: unknown): void {
@@ -271,6 +330,7 @@ export class LogSubscriptionHub {
     }
     state.closed = true
     if (state.flushTimer) clearTimeout(state.flushTimer)
+    this.notifyQueueProgress(state)
     for (const [key, candidate] of this.clients) {
       if (candidate === state) this.clients.delete(key)
     }
@@ -283,6 +343,13 @@ export class LogSubscriptionHub {
       // Socket is already gone.
     }
   }
+}
+
+function hasQueueCapacity(state: ClientState, bytes: number): boolean {
+  return (
+    state.queue.length + state.pendingLive.length < MAX_CLIENT_RECORDS &&
+    state.queuedBytes + state.pendingBytes + bytes <= MAX_CLIENT_BYTES
+  )
 }
 
 function matches(line: StoredLogLine, filter: LogSubscriptionFilter): boolean {

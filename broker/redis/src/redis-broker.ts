@@ -211,6 +211,7 @@ export class RedisBroker implements Broker {
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
     const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
     const records: BrokerRecord[] = []
+    const target = params.limit === undefined ? undefined : params.limit + 1
     // Redis makes range starts exclusive by prefixing the id with "(".
     let start =
       params.afterCursor === undefined
@@ -220,8 +221,8 @@ export class RedisBroker implements Broker {
         : `(${params.afterCursor}`
 
     let cursor = params.afterCursor
-    let reachedLimit = false
-    while (!reachedLimit) {
+    let reachedTarget = false
+    while (!reachedTarget) {
       const entries = await this.connectionManager.useCommandClient((client) =>
         this.readRange(client, ensured, start, this.readBatchSize)
       )
@@ -247,21 +248,25 @@ export class RedisBroker implements Broker {
         }
 
         records.push(record)
-        if (params.limit !== undefined && records.length >= params.limit) {
-          reachedLimit = true
+        if (target !== undefined && records.length >= target) {
+          reachedTarget = true
           break
         }
       }
 
-      if (reachedLimit || lastScannedId === undefined || entries.length < this.readBatchSize) {
+      if (reachedTarget || lastScannedId === undefined || entries.length < this.readBatchSize) {
         break
       }
       start = `(${lastScannedId}`
     }
 
-    const hasMore =
-      reachedLimit && cursor !== undefined && (await this.hasRecordsAfter(ensured, cursor))
-    return { records, cursor, hasMore }
+    const hasMore = params.limit !== undefined && records.length > params.limit
+    const pageRecords = hasMore ? records.slice(0, params.limit) : records
+    return {
+      records: pageRecords,
+      cursor: hasMore ? (pageRecords.at(-1)?.cursor ?? params.afterCursor) : cursor,
+      hasMore,
+    }
   }
 
   async tail(params: {
@@ -295,12 +300,13 @@ export class RedisBroker implements Broker {
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
     const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
     const reversed: BrokerRecord[] = []
+    const target = params.limit === undefined ? undefined : params.limit + 1
     let cursor = params.beforeCursor
     let start = params.beforeCursor === undefined ? "+" : `(${params.beforeCursor}`
     const end = lastTrimmedId === undefined ? "-" : `(${lastTrimmedId}`
-    let reachedLimit = false
+    let reachedTarget = false
 
-    while (!reachedLimit) {
+    while (!reachedTarget) {
       const entries = await this.connectionManager.useCommandClient((client) =>
         this.readReverseRange(client, ensured, start, end, this.readBatchSize)
       )
@@ -322,23 +328,25 @@ export class RedisBroker implements Broker {
           continue
         }
         reversed.push(record)
-        if (params.limit !== undefined && reversed.length >= params.limit) {
-          reachedLimit = true
+        if (target !== undefined && reversed.length >= target) {
+          reachedTarget = true
           break
         }
       }
 
-      if (reachedLimit || lastScannedId === undefined || entries.length < this.readBatchSize) {
+      if (reachedTarget || lastScannedId === undefined || entries.length < this.readBatchSize) {
         break
       }
       start = `(${lastScannedId}`
     }
 
-    const hasMore =
-      reachedLimit &&
-      cursor !== undefined &&
-      (await this.hasRecordsBefore(ensured, cursor, lastTrimmedId))
-    return { records: reversed.reverse(), cursor, hasMore }
+    const hasMore = params.limit !== undefined && reversed.length > params.limit
+    const pageRecords = (hasMore ? reversed.slice(0, params.limit) : reversed).reverse()
+    return {
+      records: pageRecords,
+      cursor: hasMore ? (pageRecords[0]?.cursor ?? params.beforeCursor) : cursor,
+      hasMore,
+    }
   }
 
   async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
@@ -659,30 +667,6 @@ export class RedisBroker implements Broker {
       throw new RedisBrokerError(`Failed to read stream "${ensured.streamId}"`, { cause: error })
     }
     return parseStreamEntries(reply)
-  }
-
-  private async hasRecordsAfter(ensured: EnsuredStream, cursor: string): Promise<boolean> {
-    const entries = await this.connectionManager.useCommandClient((client) =>
-      this.readRange(client, ensured, `(${cursor}`, 1)
-    )
-    return entries.length > 0
-  }
-
-  private async hasRecordsBefore(
-    ensured: EnsuredStream,
-    cursor: string,
-    lastTrimmedId: string | undefined
-  ): Promise<boolean> {
-    const entries = await this.connectionManager.useCommandClient((client) =>
-      this.readReverseRange(
-        client,
-        ensured,
-        `(${cursor}`,
-        lastTrimmedId === undefined ? "-" : `(${lastTrimmedId}`,
-        1
-      )
-    )
-    return entries.length > 0
   }
 
   private async readLastTrimmedId(

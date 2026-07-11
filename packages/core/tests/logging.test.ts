@@ -3,12 +3,18 @@ import { InMemoryBroker } from "../src/broker"
 import type { JsonValue } from "../src/json"
 import {
   ConsoleLogger,
+  isLevelEnabled,
+  isLogRecord,
+  isStoredLogLine,
+  LOG_LEVELS,
+  LOG_RUN_KINDS,
   LOGS_STREAM,
   type LogEntry,
   type LoggerProvider,
   type LogLevel,
   type LogRecord,
   LogsRuntime,
+  logLevelsAtOrAbove,
   noopLoggerProvider,
   resolveLogsRuntime,
 } from "../src/logging"
@@ -75,6 +81,29 @@ describe("LogsRuntime broker capture", () => {
     } finally {
       infoSpy.mockRestore()
     }
+  })
+
+  test("rejects malformed retained log records during hydration", async () => {
+    const broker = new InMemoryBroker()
+    const logs = new LogsRuntime({ projectId: PROJECT, broker })
+    await broker.ensureStream({ projectId: PROJECT, stream: LOGS_STREAM })
+    await broker.append({
+      projectId: PROJECT,
+      streamId: LOGS_STREAM.id,
+      records: [
+        {
+          payload: {
+            level: "info",
+            message: "malformed",
+            fields: [],
+            at: "2026-07-11T00:00:00.000Z",
+            context: { run: { kind: "workflow", id: "wf-1" } },
+          },
+        },
+      ],
+    })
+
+    await expect(logs.read()).rejects.toThrow("is not a log line")
   })
 
   test("uses a capture level independent from the output provider", async () => {
@@ -396,6 +425,50 @@ describe("resolveLogsRuntime", () => {
     const session = resolveLogsRuntime(PROJECT).startExecution({ kind: "sync", id: "run-11" })
     session.logger.info("still works")
     await expect(session.flush()).resolves.toBeUndefined()
+  })
+})
+
+describe("log metadata", () => {
+  test("uses one canonical severity ordering", () => {
+    expect(LOG_LEVELS).toEqual(["debug", "info", "warn", "error"])
+    expect(logLevelsAtOrAbove("debug")).toEqual(["debug", "info", "warn", "error"])
+    expect(logLevelsAtOrAbove("info")).toEqual(["info", "warn", "error"])
+    expect(logLevelsAtOrAbove("warn")).toEqual(["warn", "error"])
+    expect(logLevelsAtOrAbove("error")).toEqual(["error"])
+    expect(isLevelEnabled("warn", "info")).toBe(true)
+    expect(isLevelEnabled("debug", "info")).toBe(false)
+    expect(isLevelEnabled("debug", "fatal" as LogLevel)).toBe(false)
+    expect(logLevelsAtOrAbove("fatal" as LogLevel)).toEqual([])
+  })
+
+  test("exposes the canonical run kinds", () => {
+    expect(LOG_RUN_KINDS).toEqual(["sync", "pipeline", "workflow", "action"])
+  })
+
+  test("validates complete log records and stored lines", () => {
+    const valid = {
+      level: "info",
+      message: "validated",
+      fields: { nested: [1, true, null] },
+      at: "2026-07-11T00:00:00.000Z",
+      context: {
+        run: { kind: "workflow", id: "wf-1" },
+        stepId: "step-1",
+        phase: "execute",
+        attempt: 1,
+      },
+    }
+
+    expect(isLogRecord(valid)).toBe(true)
+    expect(isStoredLogLine({ ...valid, cursor: "1" })).toBe(true)
+    expect(isStoredLogLine(valid)).toBe(false)
+    expect(isLogRecord({ ...valid, level: "fatal" })).toBe(false)
+    expect(
+      isLogRecord({ ...valid, context: { ...valid.context, run: { kind: "agent", id: "a1" } } })
+    ).toBe(false)
+    expect(isLogRecord({ ...valid, fields: [] })).toBe(false)
+    expect(isLogRecord({ ...valid, fields: { invalid: new Date() } })).toBe(false)
+    expect(isLogRecord({ ...valid, context: { ...valid.context, attempt: "1" } })).toBe(false)
   })
 })
 

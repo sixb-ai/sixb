@@ -6380,7 +6380,7 @@ export type ListLogsData = {
     direction?: "forward" | "backward"
     afterCursor?: string
     beforeCursor?: string
-    limit?: string
+    limit?: number
   }
   url: "/api/logs"
 }

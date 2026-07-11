@@ -1,7 +1,7 @@
 import { isAllowed, type LogLevel } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { LOG_LEVELS, LOG_RUN_KINDS } from "../../schemas/logs"
+import { LOG_LEVELS, LOG_RUN_KINDS, LogRunIdSchema } from "../../schemas/logs"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
 import { LogSubscriptionHub } from "./log-subscription-hub"
@@ -14,7 +14,7 @@ const SubscribeSchema = z
     run: z
       .object({
         kind: z.enum(LOG_RUN_KINDS),
-        id: z.string().min(1),
+        id: LogRunIdSchema,
       })
       .optional(),
     afterCursor: z.string().optional(),

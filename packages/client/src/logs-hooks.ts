@@ -9,9 +9,9 @@
  * (or a load option) changes. `react` is an optional peer, so this hook lives
  * behind the `./hooks` subpath and never the root barrel.
  */
+import type { StoredLogLine } from "@sixb/core"
 import { useEffect, useRef, useState } from "react"
 import type { LogsBuilder } from "./logs-builder"
-import type { SixbLogLine } from "./logs-model"
 import type { LogSocketState } from "./logs-transport"
 
 const DISCONNECTED: LogSocketState = { connected: false, reconnecting: false, error: null }
@@ -28,7 +28,7 @@ export interface UseSixbLogsOptions {
 }
 
 export interface UseSixbLogsResult {
-  readonly lines: SixbLogLine[]
+  readonly lines: StoredLogLine[]
   readonly connected: boolean
   readonly error: string | null
 }
@@ -39,7 +39,7 @@ export function useSixbLogs(builder: LogsBuilder, options?: UseSixbLogsOptions):
   const onErrorRef = useRef(options?.onError)
   onErrorRef.current = options?.onError
 
-  const [lines, setLines] = useState<SixbLogLine[]>([])
+  const [lines, setLines] = useState<StoredLogLine[]>([])
   const [state, setState] = useState<LogSocketState>(DISCONNECTED)
 
   const enabled = options?.enabled ?? true
@@ -64,8 +64,9 @@ export function useSixbLogs(builder: LogsBuilder, options?: UseSixbLogsOptions):
     const builderNow = builderRef.current
     const onError = (message: string) => onErrorRef.current?.(message)
 
-    const cap = (next: SixbLogLine[]) => (next.length > max ? next.slice(next.length - max) : next)
-    const append = (line: SixbLogLine) => setLines((prev) => cap([...prev, line]))
+    const cap = (next: StoredLogLine[]) =>
+      next.length > max ? next.slice(next.length - max) : next
+    const append = (line: StoredLogLine) => setLines((prev) => cap([...prev, line]))
     const subscribe = (afterCursor?: string) =>
       builderNow.subscribe((line) => !cancelled && append(line), {
         afterCursor,

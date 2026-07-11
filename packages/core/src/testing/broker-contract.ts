@@ -342,6 +342,52 @@ export function runBrokerContractSuite<TBroker extends Broker>(
         })
       })
 
+      test("reports no forward page when only filtered-out records remain", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { key: "target", payload: "match" },
+              { key: "other", payload: "filtered-one" },
+              { key: "other", payload: "filtered-two" },
+            ],
+          })
+
+          const page = await broker.read({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            keys: ["target"],
+            limit: 1,
+          })
+          expect(page.records.map((record) => record.payload)).toEqual(["match"])
+          expect(page.hasMore).toBe(false)
+        })
+      })
+
+      test("reports no backward page when only filtered-out records remain", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { key: "other", payload: "filtered-one" },
+              { key: "other", payload: "filtered-two" },
+              { key: "target", payload: "match" },
+            ],
+          })
+
+          const page = await broker.tail({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            keys: ["target"],
+            limit: 1,
+          })
+          expect(page.records.map((record) => record.payload)).toEqual(["match"])
+          expect(page.hasMore).toBe(false)
+        })
+      })
+
       test("tails recent records and paginates toward older history", async () => {
         await withBroker(async (broker) => {
           await appendRecords(broker, {

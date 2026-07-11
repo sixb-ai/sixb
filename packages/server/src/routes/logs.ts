@@ -1,13 +1,10 @@
-import { isAllowed, type LogLevel, type OntologySource, type Sixb } from "@sixb/core"
+import { isAllowed, logLevelsAtOrAbove, type OntologySource, type Sixb } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
-import { LogsQuerySchema, LogsResponseSchema } from "../schemas/logs"
-import { parseOptionalInt } from "../utils/http"
-
-const LOG_LEVELS: readonly LogLevel[] = ["debug", "info", "warn", "error"]
+import { DEFAULT_LOGS_PAGE_LIMIT, LogsQuerySchema, LogsResponseSchema } from "../schemas/logs"
 
 export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySource[]>) {
   return app.get(
@@ -24,11 +21,13 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
       try {
         const parsed = LogsQuerySchema.parse(query)
         const run =
-          parsed.kind && parsed.runId ? { kind: parsed.kind, id: parsed.runId } : undefined
-        const levels = parsed.level ? levelsAtOrAbove(parsed.level) : undefined
+          parsed.kind !== undefined && parsed.runId !== undefined
+            ? { kind: parsed.kind, id: parsed.runId }
+            : undefined
+        const levels = parsed.level ? logLevelsAtOrAbove(parsed.level) : undefined
         const input = {
           kinds: parsed.kind ? [parsed.kind] : undefined,
-          limit: parseOptionalInt(parsed.limit),
+          limit: parsed.limit ?? DEFAULT_LOGS_PAGE_LIMIT,
           levels,
           run,
         }
@@ -63,8 +62,4 @@ export function registerLogRoutes(app: Elysia, sixb: Sixb<readonly OntologySourc
       },
     }
   )
-}
-
-function levelsAtOrAbove(level: LogLevel): readonly LogLevel[] {
-  return LOG_LEVELS.slice(LOG_LEVELS.indexOf(level))
 }

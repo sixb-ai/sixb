@@ -66,6 +66,8 @@ describe("logs builder", () => {
       level: "warn",
     })
     expect(logs.all().ir).toEqual({})
+    expect(() => logs.workflows().run("")).toThrow("runId must be a non-empty string")
+    expect(() => logs.workflows().run("   ")).toThrow("runId must be a non-empty string")
   })
 
   test("returns the complete page contract for forward and recent reads", async () => {
@@ -86,7 +88,7 @@ describe("logs builder", () => {
       direction: "forward",
       afterCursor: "c0",
       beforeCursor: undefined,
-      limit: "20",
+      limit: 20,
     })
     expect(fake.calls[1]?.options.query).toMatchObject({
       direction: "backward",
@@ -157,5 +159,15 @@ describe("log transport", () => {
       )
     ).toEqual({ type: "reset", reason: "cursor_expired", cursor: "c9" })
     expect(parseLogStreamMessage(JSON.stringify({ type: "logs", logs: [{}] }))).toBeNull()
+
+    const valid = line("c1")
+    for (const invalid of [
+      { ...valid, level: "fatal" },
+      { ...valid, fields: [] },
+      { ...valid, context: { ...valid.context, run: { kind: "agent", id: "agent-1" } } },
+      { ...valid, context: { ...valid.context, attempt: "1" } },
+    ]) {
+      expect(parseLogStreamMessage(JSON.stringify({ type: "logs", logs: [invalid] }))).toBeNull()
+    }
   })
 })

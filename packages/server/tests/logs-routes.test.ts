@@ -54,6 +54,12 @@ describe("parseLogSubscriptionMessage", () => {
         run: { kind: "workflow", id: "wf-1" },
       }).ok
     ).toBe(false)
+    expect(
+      parseLogSubscriptionMessage({
+        type: "subscribe",
+        run: { kind: "workflow", id: "   " },
+      }).ok
+    ).toBe(false)
   })
 
   test("accepts unsubscribe and rejects invalid payloads", () => {
@@ -97,6 +103,13 @@ describe("GET /api/logs", () => {
 
       const invalid = await fetch(`${baseUrl}/api/logs?runId=w2`)
       expect(invalid.status).toBe(422)
+
+      for (const runId of ["", "   "]) {
+        const invalidRun = await fetch(
+          `${baseUrl}/api/logs?kind=workflow&runId=${encodeURIComponent(runId)}`
+        )
+        expect(invalidRun.status).toBe(422)
+      }
     })
   })
 
@@ -107,6 +120,29 @@ describe("GET /api/logs", () => {
 
     const allowed = logRoutesWithAuthz(sixb, authzWithLogs())
     expect((await allowed.handle(new Request("http://localhost/api/logs"))).status).toBe(200)
+  })
+
+  test("uses a bounded default page and rejects invalid limits", async () => {
+    await withServer(async ({ baseUrl, sixb }) => {
+      const session = sixb.logs.startExecution({ kind: "workflow", id: "bounded-history" })
+      for (let index = 1; index <= 201; index += 1) {
+        session.logger.info(`line ${index}`)
+      }
+      await session.flush()
+
+      const defaultPage = await readLogs(baseUrl)
+      expect(defaultPage.lines).toHaveLength(200)
+      expect(defaultPage.hasMore).toBe(true)
+
+      const explicitPage = await readLogs(baseUrl, { limit: "1000" })
+      expect(explicitPage.lines).toHaveLength(201)
+      expect(explicitPage.hasMore).toBe(false)
+
+      for (const limit of ["0", "-1", "1.5", "10junk", "1001"]) {
+        const response = await fetch(`${baseUrl}/api/logs?limit=${encodeURIComponent(limit)}`)
+        expect(response.status).toBe(422)
+      }
+    })
   })
 })
 
