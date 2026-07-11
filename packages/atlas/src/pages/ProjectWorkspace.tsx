@@ -45,7 +45,6 @@ import { ActionsPage } from "./ActionsPage"
 import { AgentsPage } from "./AgentsPage"
 import { ConnectorDetailPage, ConnectorsPage } from "./ConnectorsPage"
 import { DatasetDetailPage, DatasetsPage } from "./DatasetsPage"
-import { LogRunPage } from "./LogRunPage"
 import { LogsPage } from "./LogsPage"
 import { ObjectDetailPage } from "./ObjectDetailPage"
 import { ObjectsWorkbench, type ObjectTypePreviewSection } from "./ObjectsWorkbench"
@@ -350,7 +349,6 @@ export function ProjectWorkspace() {
       <Route path="workflows/:workflowId" element={<WorkflowDetailPage />} />
       <Route path="logs" element={<LogsPage />} />
       <Route path="runs" element={<RunsTabRedirect />} />
-      <Route path="runs/:kind/:runId" element={<LogRunPage />} />
       <Route path="runs/:runId" element={<RunRedirect />} />
       <Route
         path="*"

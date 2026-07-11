@@ -1,5 +1,5 @@
 import { useSixbLogs } from "@sixb/client/hooks"
-import type { LogLevel, LogRunKind, LogsBuilder, SixbLogLine } from "@sixb/client/logs"
+import type { LogLevel, LogsBuilder, SixbLogLine } from "@sixb/client/logs"
 import {
   Card,
   MessageScroller,
@@ -10,13 +10,11 @@ import {
   MessageScrollerViewport,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Link } from "react-router-dom"
 
 /**
  * A live log console over a `logs` builder: loads retained history, tails new
  * lines, and pins to the newest line unless the reader scrolls up. Shared by the
- * Logs page (mixed kinds, run links shown) and the per-run Logs tab (single run,
- * meta hidden). The parent sets the height through `className`.
+ * Logs page. The parent sets the height through `className`.
  */
 export interface LogConsoleProps {
   readonly builder: LogsBuilder
@@ -26,7 +24,7 @@ export interface LogConsoleProps {
   readonly max?: number
   /** Show each line's run kind (mixed-kind views). */
   readonly showKind?: boolean
-  /** Show each line's run id, linked to its run detail when one exists. */
+  /** Show each line's run id. */
   readonly showRun?: boolean
   readonly emptyLabel?: string
   /** Height (and any layout) for the console card. */
@@ -166,12 +164,7 @@ function LogFieldList({ fields }: { fields: Record<string, unknown> }) {
 }
 
 function RunRef({ run }: { run: SixbLogLine["context"]["run"] }) {
-  const path = runDetailPath(run)
-  return (
-    <Link to={path} className="font-mono underline-offset-2 hover:underline">
-      {run.id}
-    </Link>
-  )
+  return <span className="font-mono">{run.id}</span>
 }
 
 function ConnectionIndicator({ connected, error }: { connected: boolean; error: string | null }) {
@@ -193,10 +186,6 @@ function ConnectionIndicator({ connected, error }: { connected: boolean; error: 
       {label}
     </span>
   )
-}
-
-function runDetailPath(run: { kind: LogRunKind; id: string }): string {
-  return `/runs/${run.kind}/${encodeURIComponent(run.id)}`
 }
 
 function formatFieldValue(value: unknown): string {
