@@ -41,7 +41,7 @@ describe("scopeKeysForEvent", () => {
     ).toEqual({ objectTypeId: "device", primaryId: "fan-1", linkId: "zone" })
   })
 
-  test("run topics carry only runId", () => {
+  test("run topics carry run and definition scope", () => {
     expect(
       scopeKeysForEvent(
         event("workflows", "workflow.run.started", { workflowId: "wf", runId: "r1" })
@@ -51,10 +51,10 @@ describe("scopeKeysForEvent", () => {
       scopeKeysForEvent(
         event("pipelines", "pipeline.run.started", { pipelineId: "p", runId: "r2" })
       )
-    ).toEqual({ runId: "r2" })
+    ).toEqual({ pipelineId: "p", runId: "r2" })
     expect(
       scopeKeysForEvent(event("syncs", "sync.run.started", { syncId: "s", runId: "r3" }))
-    ).toEqual({ runId: "r3" })
+    ).toEqual({ syncId: "s", runId: "r3" })
   })
 
   test("action topics carry action, run, and object subject scope", () => {
