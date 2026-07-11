@@ -21,6 +21,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type LakeStorage,
+  type LoggerProvider,
   prop,
   type RuleDefinition,
   Sixb,
@@ -732,6 +733,7 @@ describe("startSixbRuntime", () => {
       lakeStorage: new ClosableLakeStorage(calls),
       blobStorage: new ClosableBlobStorage(calls),
       queues: new ClosableQueues(calls),
+      logger: new ClosableLogger(calls),
     })
     sixb.disconnectConnectors = async () => {
       calls.push("connectors:stop")
@@ -745,6 +747,7 @@ describe("startSixbRuntime", () => {
       "storage:stop",
       "lake-storage:stop",
       "blob-storage:stop",
+      "logger:stop",
       "broker:stop",
     ])
   })
@@ -1033,6 +1036,16 @@ class LifecycleBroker extends InMemoryBroker {
 
   async close(): Promise<void> {
     this.calls.push("broker:stop")
+  }
+}
+
+class ClosableLogger implements LoggerProvider {
+  constructor(private readonly calls: string[]) {}
+
+  write(): void {}
+
+  async close(): Promise<void> {
+    this.calls.push("logger:stop")
   }
 }
 

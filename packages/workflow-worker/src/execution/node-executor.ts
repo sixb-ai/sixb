@@ -7,7 +7,7 @@ import type {
   WorkflowNodeRunRecord,
   WorkflowStepOutputs,
 } from "@sixb/core"
-import type { WorkflowJob, WorkflowWorkerContext } from "../types"
+import type { WorkflowJob, WorkflowLogSession, WorkflowWorkerContext } from "../types"
 
 export interface WorkflowExecutionState {
   readonly workflowInput: Readonly<Record<string, unknown>>
@@ -21,6 +21,7 @@ export interface WorkflowNodeExecutionContext {
   readonly job: WorkflowJob
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly signal: AbortSignal
+  readonly logSession: WorkflowLogSession
   readonly state: WorkflowExecutionState
   markSideEffectBoundaryPassed(): void
 }

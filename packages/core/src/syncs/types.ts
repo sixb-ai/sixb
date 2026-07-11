@@ -7,6 +7,7 @@ import {
 } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import { isDatasetDefinition } from "../datasets"
+import type { Logger } from "../logging"
 import type { ScheduleDefinition } from "../schedules"
 import type { RunTrigger } from "../triggers"
 import { isRunTrigger } from "../triggers"
@@ -20,6 +21,7 @@ export type SyncReadContext<TCheckpoint = never> = {
   readonly syncId: string
   readonly signal: AbortSignal
   readonly blobs: SyncBlobContext
+  readonly logger: Logger
 } & ([TCheckpoint] extends [never]
   ? { readonly checkpoint?: undefined }
   : {

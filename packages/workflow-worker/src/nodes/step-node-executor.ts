@@ -58,6 +58,7 @@ export const stepNodeExecutor: WorkflowNodeExecutor<WorkflowStepNodeDefinition> 
     const rawOutput = await node.step.handler({
       input: stepInput,
       sixb: context.runtime.sixb,
+      logger: context.logSession.withContext({ stepId: node.step.id }),
     })
     throwIfAborted(context.signal)
 

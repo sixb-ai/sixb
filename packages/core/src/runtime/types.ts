@@ -23,6 +23,7 @@ import type { DatasetDefinition } from "../datasets"
 import type { EventsRuntime } from "../events"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
+import type { LogsRuntime } from "../logging"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -1026,6 +1027,7 @@ export interface SixbInstance<_ extends readonly OntologySource[]> {
   readonly ontology: OntologyRegistry
   readonly broker: Broker
   readonly events: EventsRuntime
+  readonly logs: LogsRuntime
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage

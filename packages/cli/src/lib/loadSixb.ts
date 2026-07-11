@@ -54,6 +54,7 @@ export interface LoadedSixb extends SixbRuntimeContext {
   startScheduler(): Promise<void>
   stopScheduler(): Promise<void>
   disconnectConnectors(): Promise<void>
+  closeLogger(): Promise<void>
   closeBroker(): Promise<void>
   list(params: {
     objectTypeIds?: readonly string[]
@@ -108,6 +109,7 @@ function isSixbInstance(value: unknown): value is LoadedSixb {
     typeof (value as { startScheduler?: unknown }).startScheduler === "function" &&
     typeof (value as { stopScheduler?: unknown }).stopScheduler === "function" &&
     typeof (value as { disconnectConnectors?: unknown }).disconnectConnectors === "function" &&
+    typeof (value as { closeLogger?: unknown }).closeLogger === "function" &&
     typeof (value as { closeBroker?: unknown }).closeBroker === "function"
   )
 }

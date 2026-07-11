@@ -5,6 +5,7 @@ import type {
   ObjectActionDefinition,
 } from "../actions"
 import type { JsonValue } from "../json"
+import type { Logger } from "../logging"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
@@ -33,6 +34,7 @@ export type DerivedWorkflowNodeKey<TId extends string> = string extends TId
 export interface StepRunContext<TInput extends Record<string, unknown>> {
   readonly input: TInput
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
 }
 
 export type StepHandler<

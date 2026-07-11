@@ -25,6 +25,8 @@ export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<Workfl
     await session.finishAfterError(error)
     await failQueuedRun(input, error)
     throw error
+  } finally {
+    await session.flushLogs()
   }
 }
 
@@ -48,6 +50,8 @@ export async function runWorkflowResumeJob(
   } catch (error) {
     await session.finishAfterError(error)
     throw error
+  } finally {
+    await session.flushLogs()
   }
 }
 

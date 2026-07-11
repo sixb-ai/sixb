@@ -1,4 +1,5 @@
 import type {
+  LogsRuntime,
   OntologySource,
   Sixb,
   SixbRuntimeContext,
@@ -11,15 +12,19 @@ import type {
   WorkflowsRuntime,
 } from "@sixb/core"
 
+export type WorkflowLogSession = ReturnType<LogsRuntime["startExecution"]>
+
 export interface WorkflowWorkerContext extends SixbRuntimeContext {
   readonly workflowRuns: WorkflowRunStorage
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logs?: LogsRuntime
   getWorkflowById(workflowId: string): WorkflowDefinition | null
 }
 
 export interface WorkflowWorkerSixb extends SixbRuntimeContext {
   readonly id: string
   readonly workflows: WorkflowsRuntime
+  readonly logs?: LogsRuntime
 }
 
 export interface WorkflowJob {

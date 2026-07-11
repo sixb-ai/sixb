@@ -79,6 +79,7 @@ export async function stopSixbProviders(sixb: LoadedSixb): Promise<void> {
   await stopQuietly(() => closeProvider(sixb.storage))
   await stopQuietly(() => closeProvider(sixb.lakeStorage))
   await stopQuietly(() => closeProvider(sixb.blobStorage))
+  await stopQuietly(() => sixb.closeLogger())
   await stopQuietly(() => sixb.closeBroker())
 }
 

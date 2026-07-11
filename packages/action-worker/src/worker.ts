@@ -3,6 +3,7 @@ import type {
   ActionRunRequestedQueueJob,
   ClaimedQueueJob,
   EventsRuntime,
+  LogsRuntime,
   Queues,
   QueueWorkerFailureDecision,
   Storage,
@@ -20,6 +21,7 @@ import type {
 export interface ActionWorkerSixb {
   readonly id: string
   readonly events: EventsRuntime
+  readonly logs?: LogsRuntime
   readonly storage: Storage
   readonly queues: Queues
   getActionDefinitions(): readonly ActionDefinition[]
@@ -173,6 +175,7 @@ function buildActionContext(sixb: ActionWorkerSixb): ActionWorkerContext {
   return {
     id: sixb.id,
     events: sixb.events,
+    logs: sixb.logs,
     storage: sixb.storage,
     actionRunsStorage,
     sixb,

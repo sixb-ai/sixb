@@ -13,12 +13,14 @@ function cloneValidatedPayload(value: JsonValue): JsonValue {
 // record on every append/read.
 interface StoredRecord extends BrokerRecord {
   readonly publishedAtMs: number
+  readonly byteSize: number
 }
 
 interface StoredStream {
   definition: BrokerStreamDefinition
   nextSequence: bigint
   records: StoredRecord[]
+  retainedBytes: number
 }
 
 interface Subscription {
@@ -61,7 +63,7 @@ export class InMemoryBroker implements Broker {
       const cursor = storedStream.nextSequence.toString()
       storedStream.nextSequence += 1n
       const publishedAtMs = Date.now()
-      stored.push({
+      const storedRecord = {
         streamId: params.streamId,
         cursor,
         name: record.name,
@@ -69,10 +71,15 @@ export class InMemoryBroker implements Broker {
         payload: cloneValidatedPayload(record.payload as JsonValue),
         publishedAt: new Date(publishedAtMs).toISOString(),
         publishedAtMs,
+      }
+      stored.push({
+        ...storedRecord,
+        byteSize: utf8Bytes(JSON.stringify(storedRecord)),
       })
     }
 
     storedStream.records.push(...stored)
+    storedStream.retainedBytes += stored.reduce((total, record) => total + record.byteSize, 0)
     this.applyRetention(storedStream)
     const records = stored.map(toBrokerRecord)
     this.notify(params.projectId, params.streamId, stored)
@@ -163,7 +170,12 @@ export class InMemoryBroker implements Broker {
     const key = streamKey(projectId, stream.id)
     let storedStream = this.streams.get(key)
     if (!storedStream) {
-      storedStream = { definition: stream, nextSequence: 1n, records: [] }
+      storedStream = {
+        definition: stream,
+        nextSequence: 1n,
+        records: [],
+        retainedBytes: 0,
+      }
       this.streams.set(key, storedStream)
     }
     this.applyRetention(storedStream)
@@ -186,11 +198,12 @@ export class InMemoryBroker implements Broker {
       return
     }
 
-    let records = storedStream.records
+    let removeCount = 0
+    const records = storedStream.records
 
     if (retention.maxAgeMs !== undefined) {
       if (retention.maxAgeMs <= 0) {
-        records = []
+        removeCount = records.length
       } else {
         const oldestAllowed = Date.now() - retention.maxAgeMs
         // Records are appended in chronological order, so we only need to find
@@ -203,21 +216,39 @@ export class InMemoryBroker implements Broker {
         ) {
           firstInRange += 1
         }
-        if (firstInRange > 0) {
-          records = records.slice(firstInRange)
-        }
+        removeCount = Math.max(removeCount, firstInRange)
       }
     }
 
     if (retention.maxRecords !== undefined) {
       if (retention.maxRecords <= 0) {
-        records = []
-      } else if (records.length > retention.maxRecords) {
-        records = records.slice(records.length - retention.maxRecords)
+        removeCount = records.length
+      } else if (records.length - removeCount > retention.maxRecords) {
+        removeCount = records.length - retention.maxRecords
       }
     }
 
-    storedStream.records = records
+    if (retention.maxBytes !== undefined) {
+      if (retention.maxBytes <= 0) {
+        removeCount = records.length
+      } else {
+        let bytes = storedStream.retainedBytes
+        for (let index = 0; index < removeCount; index += 1) {
+          bytes -= records[index]!.byteSize
+        }
+        while (removeCount < records.length && bytes > retention.maxBytes) {
+          bytes -= records[removeCount]!.byteSize
+          removeCount += 1
+        }
+      }
+    }
+
+    if (removeCount > 0) {
+      for (let index = 0; index < removeCount; index += 1) {
+        storedStream.retainedBytes -= records[index]!.byteSize
+      }
+      storedStream.records = records.slice(removeCount)
+    }
   }
 
   private assertCursorInRetainedRange(
@@ -310,6 +341,10 @@ function toBrokerRecord(record: StoredRecord): BrokerRecord {
     payload: record.payload,
     publishedAt: record.publishedAt,
   }
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength
 }
 
 function assertProjectId(projectId: string): void {

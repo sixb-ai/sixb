@@ -45,8 +45,8 @@ const retainedStream: BrokerStreamDefinition = { id: "__retained", retention: { 
  *
  * The contract intentionally stays small: append records, read retained records
  * by exclusive cursor, subscribe to retained/live streams, and apply portable
- * retention. Provider-specific administration, byte caps, and durable consumer
- * identity are outside the V1 broker surface.
+ * retention. Provider-specific administration and durable consumer identity
+ * are outside the V1 broker surface.
  */
 export function runBrokerContractSuite<TBroker extends Broker>(
   label: string,
@@ -516,6 +516,30 @@ export function runBrokerContractSuite<TBroker extends Broker>(
     })
 
     describe("retention", () => {
+      test("bounds retained history by bytes", async () => {
+        await withBroker(async (broker) => {
+          const stream = { id: "__byte_retained", retention: { maxBytes: 1_024 } }
+          await broker.ensureStream({ projectId: "project-a", stream })
+
+          await broker.append({
+            projectId: "project-a",
+            streamId: stream.id,
+            records: ["one", "two", "three"].map((label) => ({
+              name: label,
+              payload: { label, body: "x".repeat(600) },
+            })),
+          })
+
+          const records = await broker.read({
+            projectId: "project-a",
+            streamId: stream.id,
+          })
+          expect(records.length).toBeGreaterThan(0)
+          expect(records.length).toBeLessThan(3)
+          expect(records.at(-1)?.name).toBe("three")
+        })
+      })
+
       test("retains only the latest maxRecords", async () => {
         await withBroker(async (broker) => {
           await appendRecords(broker, {

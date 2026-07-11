@@ -7,6 +7,7 @@ import type {
   DatasetVersion,
   DatasetWriteMode,
   LakeStorage,
+  LogsRuntime,
   SyncDefinition,
   SyncRunRecord,
   SyncRunStorage,
@@ -17,6 +18,7 @@ export interface SyncWorkerContext {
   readonly syncRunsStorage: SyncRunStorage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
+  readonly logs?: LogsRuntime
 
   getDatasetById(datasetId: string): DatasetDefinition | null
   getSyncById(syncId: string): SyncDefinition | null

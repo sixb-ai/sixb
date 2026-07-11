@@ -133,6 +133,7 @@ function buildWorkflowContext(
     queues: sixb.queues,
     rules: sixb.rules,
     workflowRuns,
+    logs: sixb.logs,
     sixb: sixb as unknown as WorkflowWorkerContext["sixb"],
     getWorkflowById(workflowId) {
       return sixb.workflows.getById(workflowId)

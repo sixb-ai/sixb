@@ -1,6 +1,7 @@
 import type { ConnectorAdapter, ConnectorClient, ConnectorDefinition } from "../../connectors"
 import type { EditCommitDiff, RecordEditsContext } from "../../edits"
 import type { EventDraft } from "../../events"
+import type { Logger } from "../../logging"
 import type { ObjectType, ValueType } from "../../ontology"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type {
@@ -139,6 +140,7 @@ export interface BaseActionPhaseContext<TParams extends Record<string, unknown>>
   readonly params: TParams
   readonly subject: ActionSubject
   readonly signal: AbortSignal
+  readonly logger: Logger
 }
 
 export interface GlobalActionValidationContext<TParams extends Record<string, unknown>>

@@ -421,6 +421,36 @@ export {
   toStoredEvent,
 } from "./events"
 
+// ── Logging ─────────────────────────────────────────────────
+
+export type {
+  ConsoleLoggerOptions,
+  LogContext,
+  LogEntry,
+  LogFields,
+  Logger,
+  LoggerProvider,
+  LogLevel,
+  LogRecord,
+  LogRunKind,
+  LogRunRef,
+  LogsObservabilityOptions,
+  LogsRuntimeOptions,
+  ObservabilityOptions,
+} from "./logging"
+export {
+  ConsoleLogger,
+  DEFAULT_LOGS_MAX_BYTES,
+  DEFAULT_LOGS_RETENTION,
+  isLevelEnabled,
+  LOGS_STREAM,
+  LogsRuntime,
+  noopLogger,
+  noopLoggerProvider,
+  normalizeLogError,
+  resolveLogsRuntime,
+} from "./logging"
+
 // ── Predicates ─────────────────────────────────────────────
 
 export type {

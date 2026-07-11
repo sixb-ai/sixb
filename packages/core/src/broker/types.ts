@@ -11,6 +11,8 @@ export type BrokerCursor = string
 export interface BrokerRetention {
   readonly maxAgeMs?: number
   readonly maxRecords?: number
+  /** Provider-accounted retained bytes. Oldest records are discarded first. */
+  readonly maxBytes?: number
 }
 
 export interface BrokerStreamDefinition {

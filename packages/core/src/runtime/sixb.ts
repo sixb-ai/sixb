@@ -28,6 +28,7 @@ import { EventsRuntime } from "../events"
 import { FunctionRuntime } from "../functions/runtime"
 import type { FunctionDefinition } from "../functions/types"
 import type { LakeStorage } from "../lake-storage"
+import { type LoggerProvider, LogsRuntime, type ObservabilityOptions } from "../logging"
 import { createObjectSet, objectService } from "../objects"
 import {
   assertObjectTypeRegistered,
@@ -87,6 +88,10 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
+  /** Optional process-level output provider. Omit for broker-only logging. */
+  logger?: LoggerProvider
+  /** Broker capture controls, independent from the output provider. */
+  observability?: ObservabilityOptions
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this runtime. */
@@ -131,6 +136,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly agents: AgentsRuntime
   readonly broker: Broker
   readonly events: EventsRuntime
+  readonly logs: LogsRuntime
   readonly storage: Storage
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
@@ -148,6 +154,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.functions = options.functions ?? []
     this.broker = options.broker
     this.events = new EventsRuntime({ projectId: this.projectId, broker: this.broker })
+    this.logs = new LogsRuntime({
+      projectId: this.projectId,
+      broker: this.broker,
+      logger: options.logger,
+      observability: options.observability?.logs,
+    })
     this.storage = options.storage
     this.lakeStorage = options.lakeStorage
     this.blobStorage = options.blobStorage
@@ -496,6 +508,11 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   /** Disconnect all currently connected connector clients. */
   async disconnectConnectors(): Promise<void> {
     await this.connectorRuntime.disconnectAll()
+  }
+
+  /** Flush and close the configured process logger provider. */
+  async closeLogger(): Promise<void> {
+    await this.logs.close()
   }
 
   /** Close the runtime broker provider if it owns external resources. */

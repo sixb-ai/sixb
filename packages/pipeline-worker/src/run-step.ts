@@ -17,6 +17,7 @@ import { executeSqlStep } from "./execute-sql-step"
 import { type ResolvedStepInput, resolveStepInputs } from "./step-inputs"
 import type {
   PipelineJob,
+  PipelineLogSession,
   PipelineStepFinishedHandler,
   PipelineStepRunResult,
   PipelineStepStartedHandler,
@@ -35,6 +36,7 @@ export async function runStep(input: {
   readonly stepIndex: number
   readonly job: PipelineJob
   readonly signal: AbortSignal
+  readonly logSession: PipelineLogSession
   readonly onStepStarted?: PipelineStepStartedHandler
   readonly onStepFinished?: PipelineStepFinishedHandler
 }): Promise<PipelineStepRunResult> {
@@ -80,6 +82,7 @@ export async function runStep(input: {
       step,
       job,
       signal,
+      logSession: input.logSession,
       outputDataset,
       resolvedInputs,
     })
@@ -140,6 +143,7 @@ async function executeStep(input: {
   readonly step: PipelineStepDefinition
   readonly job: PipelineJob
   readonly signal: AbortSignal
+  readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<StepExecutionResult> {

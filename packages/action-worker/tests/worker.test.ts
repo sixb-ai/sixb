@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type ActionDefinition,
   type ActionRunRecord,
+  type Broker,
   defineAction,
   defineObjectType,
   EventsRuntime,
@@ -10,6 +11,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  LOGS_STREAM,
   type ObjectRow,
   param,
   prop,
@@ -119,6 +121,52 @@ describe("ActionWorker", () => {
           },
         })
     ).toThrow(ActionWorkerError)
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const noteStatus = defineAction("noteStatus")
+      .on(Device)
+      .params({ status: param("string") })
+      .writeback((ctx) => {
+        ctx.logger.info("Applying status", { status: ctx.params.status })
+      })
+
+    const sixb = createSixb([noteStatus])
+    const worker = new ActionWorker(sixb)
+    await sixb.upsertObject("Device", { id: "device-1", name: "Device 1" })
+
+    await worker.start()
+    const { runId } = await deviceObjects(sixb).requestAction({
+      id: "device-1",
+      actionId: "noteStatus",
+      params: { status: "active" },
+    })
+
+    await waitFor(
+      () => sixb.storage.actionRuns!.getById({ projectId: sixb.id, id: runId }),
+      (value) => value?.status === "succeeded" || value?.status === "failed"
+    )
+    await worker.stop()
+
+    const broker = (sixb as unknown as { readonly broker: Broker }).broker
+    const records = await broker.read({
+      projectId: sixb.id,
+      streamId: LOGS_STREAM.id,
+      names: ["action.info"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Applying status"
+    )
+    expect(line?.key).toBe(`action:${runId}`)
+    const payload = line?.payload as {
+      level: string
+      fields?: { status?: string }
+      context?: { run?: { kind?: string; id?: string }; phase?: string }
+    }
+    expect(payload.level).toBe("info")
+    expect(payload.fields?.status).toBe("active")
+    expect(payload.context?.phase).toBe("writeback")
+    expect(payload.context?.run).toEqual({ kind: "action", id: runId })
   })
 
   test("date/timestamp params arrive as Date objects in handlers", async () => {
