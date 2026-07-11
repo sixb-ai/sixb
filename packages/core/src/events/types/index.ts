@@ -1,4 +1,5 @@
 import type { JsonValue } from "../../json"
+import type { EventOrigin } from "../envelope"
 import type { ActionEvent } from "./actions"
 import type { DatasetEvent } from "./datasets"
 import type { LinkEvent } from "./links"
@@ -10,7 +11,12 @@ import type { SyncEvent } from "./syncs"
 import type { TelemetryEvent } from "./telemetry"
 import type { WorkflowEvent } from "./workflows"
 
-export type { EventActor, EventEnvelope } from "../envelope"
+export type { EventActor, EventEnvelope, EventOrigin } from "../envelope"
+export type {
+  PropertyChange,
+  PropertyChangeMap,
+  PropertyChangeOperation,
+} from "../property-changes"
 export type {
   ActionCompletedEvent,
   ActionEvent,
@@ -18,8 +24,21 @@ export type {
   ActionRequestedEvent,
 } from "./actions"
 export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
-export type { LinkEvent, LinkRemovedEvent, LinkUpsertedEvent } from "./links"
-export type { ObjectDeletedEvent, ObjectEvent, ObjectUpsertedEvent } from "./objects"
+export type {
+  LinkCreatedEvent,
+  LinkDeletedEvent,
+  LinkEvent,
+  LinkRemovedEvent,
+  LinkUpdatedEvent,
+  LinkUpsertedEvent,
+} from "./links"
+export type {
+  ObjectCreatedEvent,
+  ObjectDeletedEvent,
+  ObjectEvent,
+  ObjectUpdatedEvent,
+  ObjectUpsertedEvent,
+} from "./objects"
 export type {
   PipelineEvent,
   PipelineRunFinishedEvent,
@@ -67,17 +86,20 @@ export type StoredDomainEvent = DomainEvent & {
   cursor: string
 }
 
-export type NewDomainEvent = {
+export type EventDraft = {
   [K in DomainEvent["type"]]: {
     type: K
     payload: Extract<DomainEvent, { type: K }>["payload"]
     occurredAt?: string
+    origin?: EventOrigin
     metadata?: Record<string, JsonValue>
     idempotencyKey?: string
   }
 }[DomainEvent["type"]]
 
 export type StoredObjectUpsertedEvent = Extract<StoredDomainEvent, { type: "object.upserted" }>
+export type StoredObjectCreatedEvent = Extract<StoredDomainEvent, { type: "object.created" }>
+export type StoredObjectUpdatedEvent = Extract<StoredDomainEvent, { type: "object.updated" }>
 export type StoredObjectDeletedEvent = Extract<StoredDomainEvent, { type: "object.deleted" }>
 export type StoredTelemetryAppendedEvent = Extract<
   StoredDomainEvent,
@@ -85,6 +107,9 @@ export type StoredTelemetryAppendedEvent = Extract<
 >
 export type StoredLinkUpsertedEvent = Extract<StoredDomainEvent, { type: "link.upserted" }>
 export type StoredLinkRemovedEvent = Extract<StoredDomainEvent, { type: "link.removed" }>
+export type StoredLinkCreatedEvent = Extract<StoredDomainEvent, { type: "link.created" }>
+export type StoredLinkUpdatedEvent = Extract<StoredDomainEvent, { type: "link.updated" }>
+export type StoredLinkDeletedEvent = Extract<StoredDomainEvent, { type: "link.deleted" }>
 export type StoredActionRequestedEvent = Extract<StoredDomainEvent, { type: "action.requested" }>
 export type StoredActionCompletedEvent = Extract<StoredDomainEvent, { type: "action.completed" }>
 export type StoredActionFailedEvent = Extract<StoredDomainEvent, { type: "action.failed" }>

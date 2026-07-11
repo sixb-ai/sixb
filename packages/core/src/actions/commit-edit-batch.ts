@@ -1,5 +1,6 @@
 import type { EditBatchInput, EditCommitDiff } from "../edits"
 import { planEditBatch } from "../edits"
+import { buildEditCommitPlanEvents, type EventDraft } from "../events"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ActionRunRecord, ActionRunStorage } from "../storage/action-runs"
 import { actionSubjectsEqual } from "../storage/action-runs"
@@ -47,6 +48,7 @@ export interface CommitActionEditBatchInput {
 
 export interface ActionEditCommitResult {
   readonly diff: EditCommitDiff
+  readonly events: readonly EventDraft[]
   readonly committedAt: Date
   readonly created: boolean
 }
@@ -159,6 +161,7 @@ async function commitActionEditBatchOnce(
           run,
           commit: {
             diff: run.commit.diff,
+            events: [],
             committedAt: run.commit.committedAt,
             created: false,
           },
@@ -190,11 +193,21 @@ async function commitActionEditBatchOnce(
         committedAt,
         diff: plan.diff,
       })
+      const domainEvents = buildEditCommitPlanEvents({
+        plan,
+        idempotencyKeyPrefix: `action.commit:${input.runId}`,
+        origin: {
+          kind: "action",
+          actionId: input.actionId,
+          runId: input.runId,
+        },
+      })
 
       return {
         run: committedRun,
         commit: {
           diff: plan.diff,
+          events: domainEvents,
           committedAt,
           created: true,
         },

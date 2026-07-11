@@ -1,7 +1,7 @@
 import { EventsError } from "./errors"
 import type { ActionEvent } from "./types/actions"
 import type { DatasetEvent } from "./types/datasets"
-import type { DomainEvent, NewDomainEvent } from "./types/index"
+import type { DomainEvent, EventDraft } from "./types/index"
 import type { LinkEvent } from "./types/links"
 import type { ObjectEvent } from "./types/objects"
 import type { PipelineEvent } from "./types/pipelines"
@@ -31,7 +31,19 @@ function defineEventGroup<Event extends DomainEvent>(
 }
 
 export const OBJECT_EVENT_DEFINITIONS = defineEventGroup<ObjectEvent>({
+  /**
+   * @deprecated Legacy compatibility event. Use `object.created` or
+   * `object.updated` instead. To be removed in the final migration phase.
+   */
   "object.upserted": {
+    topic: "objects",
+    partitionKey: (payload) => `${payload.objectTypeId}:${payload.primaryId}`,
+  },
+  "object.created": {
+    topic: "objects",
+    partitionKey: (payload) => `${payload.objectTypeId}:${payload.primaryId}`,
+  },
+  "object.updated": {
     topic: "objects",
     partitionKey: (payload) => `${payload.objectTypeId}:${payload.primaryId}`,
   },
@@ -49,11 +61,31 @@ export const TELEMETRY_EVENT_DEFINITIONS = defineEventGroup<TelemetryEvent>({
 })
 
 export const LINK_EVENT_DEFINITIONS = defineEventGroup<LinkEvent>({
+  /**
+   * @deprecated Legacy compatibility event. Use `link.created` or
+   * `link.updated` instead. To be removed in the final migration phase.
+   */
   "link.upserted": {
     topic: "links",
     partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
   },
+  /**
+   * @deprecated Legacy compatibility event. Use `link.deleted` instead.
+   * To be removed in the final migration phase.
+   */
   "link.removed": {
+    topic: "links",
+    partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
+  },
+  "link.created": {
+    topic: "links",
+    partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
+  },
+  "link.updated": {
+    topic: "links",
+    partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
+  },
+  "link.deleted": {
     topic: "links",
     partitionKey: (payload) => `${payload.sourceTypeId}:${payload.sourceId}:${payload.linkId}`,
   },
@@ -206,7 +238,7 @@ export function getEventTopic(type: DomainEvent["type"]): DomainEvent["topic"] {
   return EVENT_DEFINITIONS[type].topic
 }
 
-export function resolveEventStorage(event: NewDomainEvent): {
+export function resolveEventStorage(event: EventDraft): {
   readonly topic: DomainEvent["topic"]
   readonly partitionKey: string
 } {

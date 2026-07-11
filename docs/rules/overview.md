@@ -89,8 +89,8 @@ Once registered, Sixb evaluates rules as objects and links change. When a rule s
 object, it is **triggered**; when the object stops matching, it is **resolved**. Active state is
 tracked so each object triggers once until it clears.
 
-Evaluation reacts to `object.upserted` for the watched type, plus `link.upserted` and `link.removed`
-for any links named in the predicate. See [Events](../events/overview.md) for the full domain-event
+Evaluation reacts to object/link `created`, `updated`, and `deleted` events for the watched type
+and any links named in the predicate. See [Events](../events/overview.md) for the full domain-event
 list.
 
 ## Register rules

@@ -2,47 +2,35 @@
  * Fluent event-subscription builder (`@sixb/client/events`).
  *
  * `events(Type)` mirrors `objects(Type)`: an immutable, generic-threaded builder
- * that accumulates an event-filter IR and types the payload from the same
+ * that accumulates an event-filter spec and types the payload from the same
  * `Type.p.*` / `Type.l.*` tokens as `expand()`. Channels (`.telemetry()`,
- * `.upserted()`, `.deleted()`, `.linked()`) narrow both the event type and the
+ * `.created()`, `.updated()`, `.link(...)`) narrow both the event type and the
  * payload; `.object(key)` scopes to one instance. The single core terminal is
  * `.subscribe(handler) => unsubscribe`, which runs a client-side predicate over
  * the live stream. The builder is browser-safe and React-free — hooks live in
  * `@sixb/client/hooks`.
  */
+
 import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
-import { scopeKeysForEvent } from "@sixb/core/events/scope"
+import {
+  buildEventSelectorPredicate,
+  type EventPropertySelector as CoreEventPropertySelector,
+  type LinkEventSelectorBuilder as CoreLinkEventSelectorBuilder,
+  type ObjectEventSelectorBuilder as CoreObjectEventSelectorBuilder,
+  type EventSelectorSpec,
+  eventSelectorSpec,
+  events as selectEvents,
+} from "@sixb/core/events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
-import type {
-  SixbEvent,
-  SixbEventOfTopic,
-  SixbEventOfType,
-  SixbEventTopic,
-  SixbEventType,
-} from "./events-model"
+import type { SixbEvent, SixbEventOfTopic, SixbEventOfType, SixbEventTopic } from "./events-model"
 import { createEventSocket, type EventSocketState } from "./events-transport"
 import type { Client } from "./generated/client"
 
 /**
  * Conjunctive event-filter scope. Event subscriptions are a single flat scope
- * (not a query tree), so the IR is a flat record rather than nested nodes.
+ * (not a query tree), so the spec is a flat record rather than nested nodes.
  */
-export interface EventsFilterIR {
-  readonly topic?: SixbEventTopic
-  readonly types?: readonly SixbEventType[]
-  /** `Type.id` when built from `events(Type)`. */
-  readonly objectTypeId?: string
-  /** `.object(key)` instance scope (objects / telemetry / links). */
-  readonly primaryId?: string
-  /** `.telemetry(token)` property scope. */
-  readonly propertyId?: string
-  /** `.linked(token)` link scope. */
-  readonly linkId?: string
-  /** `.run(runId)` scope (workflows / pipelines / syncs). */
-  readonly runId?: string
-  /** `.action(actionId)` scope (actions). */
-  readonly actionId?: string
-}
+export interface EventsFilterSpec extends EventSelectorSpec {}
 
 // ── Payload typing ──────────────────────────────────────────────────────────
 // Flat, named conditionals keyed on the channel — never a recursive resolver —
@@ -53,6 +41,8 @@ type Override<TBase, TPatch> = Omit<TBase, keyof TPatch> & TPatch
 
 type StoredTelemetryEvent = SixbEventOfType<"telemetry.appended">
 type StoredObjectUpsertedEvent = SixbEventOfType<"object.upserted">
+type StoredObjectCreatedEvent = SixbEventOfType<"object.created">
+type StoredObjectUpdatedEvent = SixbEventOfType<"object.updated">
 
 /** A telemetry append narrowed to one property's ontology-typed value. */
 type TelemetryEventForProperty<TToken extends PropertyToken | undefined> =
@@ -79,6 +69,47 @@ type ObjectUpsertedEventOf<TObjectType extends ObjectTypeWithTokens> = Override<
   }
 >
 
+/** An object created/updated fact with ontology-typed `payload.properties`. */
+type ObjectPropertiesEventOf<
+  TObjectType extends ObjectTypeWithTokens,
+  TEvent extends SixbEvent,
+> = Override<
+  TEvent,
+  {
+    payload: Override<
+      TEvent["payload"],
+      { properties: InferObjectProperties<TObjectType, readonly []> }
+    >
+  }
+>
+
+type ObjectCreatedEventOf<TObjectType extends ObjectTypeWithTokens> = ObjectPropertiesEventOf<
+  TObjectType,
+  StoredObjectCreatedEvent
+>
+
+type ObjectUpdatedEventOf<TObjectType extends ObjectTypeWithTokens> = ObjectPropertiesEventOf<
+  TObjectType,
+  StoredObjectUpdatedEvent
+>
+
+type EventPropertySelectorMap<TTokens, TObjectType extends ObjectTypeWithTokens> = {
+  readonly [K in keyof TTokens]: TTokens[K] extends PropertyToken
+    ? EventPropertyBuilder<TObjectType>
+    : never
+}
+
+type LinkPropertyTokens<TLink extends LinkToken> =
+  NonNullable<TLink["link"]["properties"]> extends readonly Property[]
+    ? {
+        readonly [P in NonNullable<TLink["link"]["properties"]>[number] as P["id"]]: PropertyToken<
+          TLink["objectTypeId"],
+          P["id"],
+          P
+        >
+      }
+    : Record<never, never>
+
 /** Default event union for an object-scoped builder before a channel narrows it. */
 type ObjectScopedEvent =
   | SixbEventOfTopic<"objects">
@@ -102,32 +133,72 @@ export interface EventsBuilder<
   TObjectType extends ObjectTypeWithTokens,
   TEvent extends SixbEvent = ObjectScopedEvent,
 > {
-  /** Accumulated event-filter IR. */
-  readonly ir: EventsFilterIR
+  /** Accumulated event-filter spec. */
+  readonly ir: EventsFilterSpec
+
+  /** Object property change selectors. */
+  readonly p: EventPropertySelectorMap<TObjectType["p"], TObjectType>
 
   /** Telemetry appends, optionally narrowed to one property's typed value. */
   telemetry<TToken extends PropertyToken<TObjectType["id"]> | undefined = undefined>(
     property?: TToken
   ): EventsBuilder<TObjectType, TelemetryEventForProperty<TToken>>
 
-  /** Object upserts, with ontology-typed `payload.properties`. */
+  /** @deprecated Use `.created()` or `.updated()` instead. */
   upserted(): EventsBuilder<TObjectType, ObjectUpsertedEventOf<TObjectType>>
 
-  /** Object deletions. */
+  /** Object creation facts. */
+  created(): EventsBuilder<TObjectType, ObjectCreatedEventOf<TObjectType>>
+
+  /** Object update facts. */
+  updated(): EventsBuilder<TObjectType, ObjectUpdatedEventOf<TObjectType>>
+
+  /** Object deletion facts. */
   deleted(): EventsBuilder<TObjectType, SixbEventOfType<"object.deleted">>
 
-  /**
-   * Outgoing link changes, optionally scoped to one link. The token validates
-   * the call against the object type's links; it does not narrow the payload
-   * (every link event carries the same shape).
-   */
+  /** @deprecated Use `.link(token).created()`, `.updated()`, or `.deleted()` instead. */
   linked(link?: LinkToken<TObjectType["id"]>): EventsBuilder<TObjectType, SixbEventOfTopic<"links">>
+
+  /** Outgoing link mutation facts scoped to one link token. */
+  link<TLink extends LinkToken<TObjectType["id"]>>(
+    link: TLink
+  ): EventsLinkBuilder<TObjectType, TLink>
 
   /** Scope to a single object instance (orthogonal to the channel). */
   object(primaryId: string): EventsBuilder<TObjectType, TEvent>
 
   /** Subscribe to matching events; returns an unsubscribe function. */
   subscribe(handler: (event: TEvent) => void, options?: EventSubscribeOptions): () => void
+}
+
+export interface EventsLinkBuilder<
+  TObjectType extends ObjectTypeWithTokens,
+  TLink extends LinkToken<TObjectType["id"]>,
+  TEvent extends SixbEvent =
+    | SixbEventOfType<"link.created">
+    | SixbEventOfType<"link.updated">
+    | SixbEventOfType<"link.deleted">,
+> extends SubscribableEvents<TEvent> {
+  readonly p: EventPropertySelectorMap<LinkPropertyTokens<TLink>, TObjectType>
+
+  created(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.created">>
+  updated(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.updated">>
+  deleted(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.deleted">>
+  /** @deprecated Use `.deleted()` instead. */
+  removed(): EventsLinkBuilder<TObjectType, TLink, SixbEventOfType<"link.deleted">>
+}
+
+export interface EventPropertyBuilder<
+  TObjectType extends ObjectTypeWithTokens,
+  TEvent extends SixbEvent =
+    | SixbEventOfType<"object.created">
+    | SixbEventOfType<"object.updated">
+    | SixbEventOfType<"link.created">
+    | SixbEventOfType<"link.updated">,
+> extends SubscribableEvents<TEvent> {
+  created(): EventPropertyBuilder<TObjectType, TEvent>
+  updated(): EventPropertyBuilder<TObjectType, TEvent>
+  cleared(): EventPropertyBuilder<TObjectType, TEvent>
 }
 
 /** Topic-scoped builder: `events.telemetry()`, `events.all()`, … */
@@ -179,12 +250,12 @@ export interface EventsActionBuilder<TEvent extends SixbEvent> extends Subscriba
 }
 
 /**
- * The minimal builder contract the React hooks consume: a filter IR plus a
+ * The minimal builder contract the React hooks consume: a filter spec plus a
  * typed `subscribe`. Every builder surface satisfies it, and the hooks infer
  * the event type `TEvent` from the builder they are handed.
  */
 export interface SubscribableEvents<TEvent extends SixbEvent> {
-  readonly ir: EventsFilterIR
+  readonly ir: EventsFilterSpec
   subscribe(handler: (event: TEvent) => void, options?: EventSubscribeOptions): () => void
 }
 
@@ -192,7 +263,7 @@ export interface SubscribableEvents<TEvent extends SixbEvent> {
 
 export interface EventSubscribeExecutor {
   subscribe(
-    filter: EventsFilterIR,
+    filter: EventsFilterSpec,
     handler: (event: SixbEvent) => void,
     options?: EventSubscribeOptions
   ): () => void
@@ -236,48 +307,61 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
 }
 
 /**
- * Pure predicate that narrows the live stream to the builder's IR. Scope keys
+ * Pure predicate that narrows the live stream to the builder's filter spec. Scope keys
  * are resolved by core's `scopeKeysForEvent` — the same extraction the server
  * poll loop uses — so client and server can never drift on what a topic's
  * identity fields are.
  */
-export function buildEventPredicate(filter: EventsFilterIR): (event: SixbEvent) => boolean {
-  return (event) => {
-    if (filter.topic && event.topic !== filter.topic) return false
-    if (filter.types && filter.types.length > 0 && !filter.types.includes(event.type)) return false
-
-    const scope = scopeKeysForEvent(event)
-
-    if (filter.objectTypeId !== undefined && scope.objectTypeId !== filter.objectTypeId)
-      return false
-    if (filter.primaryId !== undefined && scope.primaryId !== filter.primaryId) return false
-    if (filter.propertyId !== undefined && scope.propertyId !== filter.propertyId) return false
-    if (filter.linkId !== undefined && scope.linkId !== filter.linkId) return false
-    if (filter.runId !== undefined && scope.runId !== filter.runId) return false
-    if (filter.actionId !== undefined && scope.actionId !== filter.actionId) return false
-
-    return true
-  }
+export function buildEventPredicate(filter: EventsFilterSpec): (event: SixbEvent) => boolean {
+  const matches = buildEventSelectorPredicate(filter)
+  return (event) => matches(event)
 }
 
 // ── Runtime backing ───────────────────────────────────────────────────────────
 
 type EventsBuilderParams = {
-  readonly filter: EventsFilterIR
+  readonly filter: EventsFilterSpec
   readonly executor: EventSubscribeExecutor
+  readonly objectType?: ObjectTypeWithTokens
+  readonly linkToken?: LinkToken
+  readonly selector?: CoreMutationSelector
 }
+
+type CoreMutationSelector =
+  | CoreObjectEventSelectorBuilder<ObjectTypeWithTokens>
+  | CoreLinkEventSelectorBuilder<ObjectTypeWithTokens, LinkToken>
+  | CoreEventPropertySelector
 
 /**
  * One immutable implementation backs every builder surface. Each method returns
- * a fresh instance (copy-on-write on the IR), and the factory functions cast it
+ * a fresh instance (copy-on-write on the filter spec), and the factory functions cast it
  * to the surface that exposes the right methods — mirroring the object query
  * builder's `as unknown as` seam.
  */
 class EventsBuilderImpl {
   constructor(private readonly params: EventsBuilderParams) {}
 
-  get ir(): EventsFilterIR {
+  get ir(): EventsFilterSpec {
     return this.params.filter
+  }
+
+  get p(): Record<string, EventPropertyBuilder<ObjectTypeWithTokens>> {
+    const selector = this.params.selector
+    if (!selector || !("p" in selector)) {
+      return {}
+    }
+
+    const tokens = this.params.linkToken
+      ? createLinkPropertyTokens(this.params.linkToken)
+      : (this.params.objectType?.p ?? {})
+
+    return createPropertySelectorMap(tokens, (property) => {
+      const propertySelector = selector.p[property.id]
+      if (!propertySelector) {
+        throw new Error(`[SixbClient] Unknown event selector property '${property.id}'.`)
+      }
+      return this.withSelector(propertySelector)
+    })
   }
 
   telemetry(property?: PropertyToken): EventsBuilderImpl {
@@ -292,8 +376,28 @@ class EventsBuilderImpl {
     return this.withFilter({ topic: "objects", types: ["object.upserted"] })
   }
 
+  created(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector) {
+      return this.withSelectorSpec(selector.created())
+    }
+    return this
+  }
+
+  updated(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector) {
+      return this.withSelectorSpec(selector.updated())
+    }
+    return this
+  }
+
   deleted(): EventsBuilderImpl {
-    return this.withFilter({ topic: "objects", types: ["object.deleted"] })
+    const selector = this.params.selector
+    if (selector && "deleted" in selector) {
+      return this.withSelectorSpec(selector.deleted())
+    }
+    return this
   }
 
   linked(link?: LinkToken): EventsBuilderImpl {
@@ -302,6 +406,36 @@ class EventsBuilderImpl {
       types: ["link.upserted", "link.removed"],
       ...(link ? { linkId: link.id } : {}),
     })
+  }
+
+  link(link: LinkToken): EventsBuilderImpl {
+    const objectType = this.params.objectType
+    if (!objectType) {
+      throw new Error("[SixbClient] Link event selectors require an object type.")
+    }
+    const selector = selectEvents(objectType).link(link)
+    return new EventsBuilderImpl({
+      ...this.params,
+      linkToken: link,
+      selector,
+      filter: {
+        ...this.params.filter,
+        ...eventSelectorSpec(selector),
+        types: ["link.created", "link.updated", "link.deleted"],
+      },
+    })
+  }
+
+  removed(): EventsBuilderImpl {
+    return this.deleted()
+  }
+
+  cleared(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector && "cleared" in selector) {
+      return this.withSelectorSpec(selector.cleared())
+    }
+    return this
   }
 
   object(primaryId: string): EventsBuilderImpl {
@@ -341,19 +475,57 @@ class EventsBuilderImpl {
     return this.params.executor.subscribe(this.params.filter, handler, options)
   }
 
-  private withFilter(delta: Partial<EventsFilterIR>): EventsBuilderImpl {
+  private withFilter(delta: Partial<EventsFilterSpec>): EventsBuilderImpl {
     return new EventsBuilderImpl({
       ...this.params,
       filter: { ...this.params.filter, ...delta },
     })
   }
+
+  private withSelector(selector: CoreMutationSelector): EventsBuilderImpl {
+    return new EventsBuilderImpl({
+      ...this.params,
+      selector,
+      filter: { ...this.params.filter, ...eventSelectorSpec(selector) },
+    })
+  }
+
+  private withSelectorSpec(selector: EventSelectorSpec): EventsBuilderImpl {
+    return new EventsBuilderImpl({
+      ...this.params,
+      filter: { ...this.params.filter, ...eventSelectorSpec(selector) },
+    })
+  }
 }
 
 function createBuilder(
-  filter: EventsFilterIR,
-  options?: SixbEventsClientOptions
+  filter: EventsFilterSpec,
+  options?: SixbEventsClientOptions,
+  params: Pick<EventsBuilderParams, "objectType" | "linkToken" | "selector"> = {}
 ): EventsBuilderImpl {
-  return new EventsBuilderImpl({ filter, executor: createWsSubscribeExecutor(options) })
+  return new EventsBuilderImpl({ filter, executor: createWsSubscribeExecutor(options), ...params })
+}
+
+function createPropertySelectorMap(
+  tokens: Record<string, PropertyToken>,
+  createSelector: (property: PropertyToken) => EventsBuilderImpl
+): Record<string, EventPropertyBuilder<ObjectTypeWithTokens>> {
+  return Object.fromEntries(
+    Object.entries(tokens).map(([propertyId, token]) => [propertyId, createSelector(token)])
+  ) as Record<string, EventPropertyBuilder<ObjectTypeWithTokens>>
+}
+
+function createLinkPropertyTokens(linkToken: LinkToken): Record<string, PropertyToken> {
+  return Object.fromEntries(
+    (linkToken.link.properties ?? []).map((property) => [
+      property.id,
+      {
+        objectTypeId: linkToken.objectTypeId,
+        id: property.id,
+        property,
+      } satisfies PropertyToken,
+    ])
+  )
 }
 
 // ── Public `events` callable + topic namespace ────────────────────────────────
@@ -407,11 +579,13 @@ function actionBuilder<TEvent extends SixbEvent>(
 const eventsApi = (<TObjectType extends ObjectTypeWithTokens>(
   objectType: TObjectType,
   options?: SixbEventsClientOptions
-): EventsBuilder<TObjectType> =>
-  createBuilder(
-    { objectTypeId: objectType.id },
-    options
-  ) as unknown as EventsBuilder<TObjectType>) as SixbEventsApi
+): EventsBuilder<TObjectType> => {
+  const selector = selectEvents(objectType)
+  return createBuilder(eventSelectorSpec(selector), options, {
+    objectType,
+    selector: selector as CoreObjectEventSelectorBuilder<ObjectTypeWithTokens>,
+  }) as unknown as EventsBuilder<TObjectType>
+}) as SixbEventsApi
 
 eventsApi.all = (options) => createBuilder({}, options) as unknown as EventsTopicBuilder<SixbEvent>
 eventsApi.objects = (options) => topicBuilder("objects", options)

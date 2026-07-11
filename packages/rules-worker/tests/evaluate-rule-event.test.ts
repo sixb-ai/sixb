@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test"
 import type {
   RuleDefinition,
   Storage,
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkCreatedEvent,
+  StoredLinkDeletedEvent,
+  StoredObjectCreatedEvent,
+  StoredObjectDeletedEvent,
+  StoredObjectUpdatedEvent,
 } from "@sixb/core"
 import { EventsRuntime, InMemoryBroker, InMemoryStorage } from "@sixb/core"
 import {
@@ -64,23 +66,23 @@ describe("rule event matching", () => {
   test("buildRuleDependencyIndex indexes object and link dependencies", () => {
     const index = buildRuleDependencyIndex([postedRule, requiresDocumentRule])
 
-    expect(index.objectUpserted.get("transaction")?.map((candidate) => candidate.id)).toEqual([
+    expect(index.objectMutations.get("transaction")?.map((candidate) => candidate.id)).toEqual([
       "transaction.posted",
       "transaction.requires-document",
     ])
     expect(
-      index.linkUpserted.get("transaction:document")?.map((candidate) => candidate.id)
+      index.linkMutations.get("transaction:document")?.map((candidate) => candidate.id)
     ).toEqual(["transaction.requires-document"])
-    expect(index.linkRemoved.get("transaction:document")?.map((candidate) => candidate.id)).toEqual(
+    expect(index.linkDeletes.get("transaction:document")?.map((candidate) => candidate.id)).toEqual(
       ["transaction.requires-document"]
     )
   })
 
-  test("object upsert matches subject-object rules", () => {
+  test("object update matches subject-object rules", () => {
     const index = buildRuleDependencyIndex([postedRule])
     const [candidate] = matchRuleEvent({
       index,
-      event: objectUpsertedEvent("transaction", "tx-1"),
+      event: objectUpdatedEvent("transaction", "tx-1"),
     })
 
     expect(candidate?.rule.id).toBe("transaction.posted")
@@ -91,11 +93,11 @@ describe("rule event matching", () => {
     })
   })
 
-  test("link upsert matches rules that reference that subject link", () => {
+  test("link create matches rules that reference that subject link", () => {
     const index = buildRuleDependencyIndex([requiresDocumentRule, requiresReceiptRule])
     const candidates = matchRuleEvent({
       index,
-      event: linkUpsertedEvent("transaction", "tx-1", "document"),
+      event: linkCreatedEvent("transaction", "tx-1", "document"),
     })
 
     expect(candidates.map((candidate) => candidate.rule.id)).toEqual([
@@ -108,11 +110,11 @@ describe("rule event matching", () => {
     })
   })
 
-  test("link removed matches rules that reference that subject link", () => {
+  test("link deleted matches rules that reference that subject link", () => {
     const index = buildRuleDependencyIndex([requiresDocumentRule, requiresReceiptRule])
     const candidates = matchRuleEvent({
       index,
-      event: linkRemovedEvent("transaction", "tx-1", "document"),
+      event: linkDeletedEvent("transaction", "tx-1", "document"),
     })
 
     expect(candidates.map((candidate) => candidate.rule.id)).toEqual([
@@ -131,19 +133,19 @@ describe("rule event matching", () => {
     expect(
       matchRuleEvent({
         index,
-        event: objectUpsertedEvent("document", "doc-1"),
+        event: objectUpdatedEvent("document", "doc-1"),
       })
     ).toEqual([])
     expect(
       matchRuleEvent({
         index,
-        event: linkUpsertedEvent("transaction", "tx-1", "receipt"),
+        event: linkCreatedEvent("transaction", "tx-1", "receipt"),
       })
     ).toEqual([])
     expect(
       matchRuleEvent({
         index,
-        event: linkRemovedEvent("document", "doc-1", "transaction"),
+        event: linkDeletedEvent("document", "doc-1", "transaction"),
       })
     ).toEqual([])
   })
@@ -153,9 +155,9 @@ describe("rule event matching", () => {
     const candidates = matchRuleEvents({
       index,
       events: [
-        objectUpsertedEvent("transaction", "tx-1", "1"),
-        linkUpsertedEvent("transaction", "tx-1", "document", "2"),
-        linkRemovedEvent("transaction", "tx-1", "document", "3"),
+        objectUpdatedEvent("transaction", "tx-1", "1"),
+        linkCreatedEvent("transaction", "tx-1", "document", "2"),
+        linkDeletedEvent("transaction", "tx-1", "document", "3"),
       ],
     })
 
@@ -173,8 +175,8 @@ describe("rule event matching", () => {
 describe("rule subject evaluation", () => {
   test("new matching object emits rule.triggered", async () => {
     const runtime = createRuntime()
-    const event = objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" })
-    await runtime.storage.objects.applyObjectUpserted(event)
+    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" })
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -202,8 +204,8 @@ describe("rule subject evaluation", () => {
 
   test("still-matching active object emits no duplicate event", async () => {
     const runtime = createRuntime()
-    const event = objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" })
-    await runtime.storage.objects.applyObjectUpserted(event)
+    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" })
 
     await evaluateRuleForSubject({
       runtime,
@@ -213,8 +215,8 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    const repeatEvent = objectUpsertedEvent("transaction", "tx-1", "2", { status: "posted" })
-    await runtime.storage.objects.applyObjectUpserted(repeatEvent)
+    const repeatEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" }, "2")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -229,8 +231,8 @@ describe("rule subject evaluation", () => {
 
   test("previously active object that no longer matches emits rule.resolved", async () => {
     const runtime = createRuntime()
-    const event = objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" })
-    await runtime.storage.objects.applyObjectUpserted(event)
+    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -239,7 +241,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    const resolvingEvent = objectUpsertedEvent("transaction", "tx-1", "2", { status: "draft" })
+    const resolvingEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" })
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -264,10 +266,40 @@ describe("rule subject evaluation", () => {
     ).resolves.toBeNull()
   })
 
+  test("previously active deleted object emits rule.resolved", async () => {
+    const runtime = createRuntime()
+    const event = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" })
+    await evaluateRuleForSubject({
+      runtime,
+      rule: postedRule,
+      subject: subject("tx-1"),
+      sourceEvents: [event],
+      evaluatedAt,
+    })
+
+    const deletedEvent = objectDeletedEvent("transaction", "tx-1", "2")
+    const result = await evaluateRuleForSubject({
+      runtime,
+      rule: postedRule,
+      subject: subject("tx-1"),
+      sourceEvents: [deletedEvent],
+      evaluatedAt: "2026-05-07T10:32:00.000Z",
+    })
+
+    expect(result).toEqual({
+      ruleId: "transaction.posted",
+      subject: subject("tx-1"),
+      matched: false,
+      emitted: "resolved",
+    })
+    expect(await ruleEventTypes(runtime)).toEqual(["rule.triggered", "rule.resolved"])
+  })
+
   test("violating again after resolution emits rule.triggered again", async () => {
     const runtime = createRuntime()
-    const triggerEvent = objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" })
-    await runtime.storage.objects.applyObjectUpserted(triggerEvent)
+    const triggerEvent = objectCreatedEvent("transaction", "tx-1", "1", { status: "posted" })
+    await seedObject(runtime, "tx-1", { status: "posted" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -276,7 +308,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt,
     })
 
-    const resolveEvent = objectUpsertedEvent("transaction", "tx-1", "2", { status: "draft" })
+    const resolveEvent = objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" })
     await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -285,7 +317,7 @@ describe("rule subject evaluation", () => {
       evaluatedAt: "2026-05-07T10:31:00.000Z",
     })
 
-    const retriggerEvent = objectUpsertedEvent("transaction", "tx-1", "3", { status: "posted" })
+    const retriggerEvent = objectUpdatedEvent("transaction", "tx-1", "3", { status: "posted" })
     const result = await evaluateRuleForSubject({
       runtime,
       rule: postedRule,
@@ -302,9 +334,9 @@ describe("rule subject evaluation", () => {
     ])
   })
 
-  test("object-upsert overlay evaluates new properties before storage projects the event", async () => {
+  test("object-update overlay evaluates new properties before storage projects the event", async () => {
     const runtime = createRuntime()
-    const event = objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" })
+    const event = objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted" })
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -318,11 +350,10 @@ describe("rule subject evaluation", () => {
     expect(result.emitted).toBe("triggered")
   })
 
-  test("link-upsert overlay evaluates the new link before storage projects the event", async () => {
+  test("link-create overlay evaluates the new link before storage projects the event", async () => {
     const runtime = createRuntime()
-    const objectEvent = objectUpsertedEvent("transaction", "tx-1")
-    await runtime.storage.objects.applyObjectUpserted(objectEvent)
-    const linkEvent = linkUpsertedEvent("transaction", "tx-1", "receipt")
+    await seedObject(runtime, "tx-1")
+    const linkEvent = linkCreatedEvent("transaction", "tx-1", "receipt")
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -336,15 +367,12 @@ describe("rule subject evaluation", () => {
     expect(result.emitted).toBe("triggered")
   })
 
-  test("link-removed overlay removes the link before storage projects the event", async () => {
+  test("link-deleted overlay removes the link before storage projects the event", async () => {
     const runtime = createRuntime()
-    const objectEvent = objectUpsertedEvent("transaction", "tx-1")
-    await runtime.storage.objects.applyObjectUpserted(objectEvent)
-    await runtime.storage.objects.applyLinkUpserted(
-      linkUpsertedEvent("transaction", "tx-1", "document")
-    )
+    await seedObject(runtime, "tx-1")
+    await seedLink(runtime, "tx-1", "document")
 
-    const removeEvent = linkRemovedEvent("transaction", "tx-1", "document")
+    const removeEvent = linkDeletedEvent("transaction", "tx-1", "document")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: requiresDocumentRule,
@@ -357,18 +385,13 @@ describe("rule subject evaluation", () => {
     expect(result.emitted).toBe("triggered")
   })
 
-  test("link-removed overlay leaves other targets for the same link id visible", async () => {
+  test("link-deleted overlay leaves other targets for the same link id visible", async () => {
     const runtime = createRuntime()
-    const objectEvent = objectUpsertedEvent("transaction", "tx-1")
-    await runtime.storage.objects.applyObjectUpserted(objectEvent)
-    await runtime.storage.objects.applyLinkUpserted(
-      linkUpsertedEvent("transaction", "tx-1", "document", "1", "doc-1")
-    )
-    await runtime.storage.objects.applyLinkUpserted(
-      linkUpsertedEvent("transaction", "tx-1", "document", "2", "doc-2")
-    )
+    await seedObject(runtime, "tx-1")
+    await seedLink(runtime, "tx-1", "document", "1", "doc-1")
+    await seedLink(runtime, "tx-1", "document", "2", "doc-2")
 
-    const removeEvent = linkRemovedEvent("transaction", "tx-1", "document", "3", "doc-1")
+    const removeEvent = linkDeletedEvent("transaction", "tx-1", "document", "3", "doc-1")
     const result = await evaluateRuleForSubject({
       runtime,
       rule: hasDocumentRule,
@@ -383,8 +406,8 @@ describe("rule subject evaluation", () => {
 
   test("link-missing rule works for transaction without a document", async () => {
     const runtime = createRuntime()
-    const event = objectUpsertedEvent("transaction", "tx-1")
-    await runtime.storage.objects.applyObjectUpserted(event)
+    const event = objectCreatedEvent("transaction", "tx-1")
+    await seedObject(runtime, "tx-1")
 
     const result = await evaluateRuleForSubject({
       runtime,
@@ -406,8 +429,8 @@ describe("rule subject evaluation", () => {
       rules: [postedRule],
       index: postedIndex,
       events: [
-        objectUpsertedEvent("transaction", "tx-1", "1", { status: "draft" }),
-        objectUpsertedEvent("transaction", "tx-1", "2", { status: "posted" }),
+        objectUpdatedEvent("transaction", "tx-1", "1", { status: "draft" }),
+        objectUpdatedEvent("transaction", "tx-1", "2", { status: "posted" }),
       ],
       evaluatedAt,
     })
@@ -422,8 +445,8 @@ describe("rule subject evaluation", () => {
       rules: [postedRule],
       index: postedIndex,
       events: [
-        objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted" }),
-        objectUpsertedEvent("transaction", "tx-1", "2", { status: "draft" }),
+        objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted" }),
+        objectUpdatedEvent("transaction", "tx-1", "2", { status: "draft" }),
       ],
       evaluatedAt,
     })
@@ -435,16 +458,15 @@ describe("rule subject evaluation", () => {
 
   test("same-batch link overlays use the final edge state", async () => {
     const missingRuntime = createRuntime()
-    const missingObjectEvent = objectUpsertedEvent("transaction", "tx-1")
-    await missingRuntime.storage.objects.applyObjectUpserted(missingObjectEvent)
+    await seedObject(missingRuntime, "tx-1")
     const index = buildRuleDependencyIndex([hasDocumentRule])
     const missingResult = await evaluateRuleEvents({
       runtime: missingRuntime,
       rules: [hasDocumentRule],
       index,
       events: [
-        linkUpsertedEvent("transaction", "tx-1", "document", "1", "doc-1"),
-        linkRemovedEvent("transaction", "tx-1", "document", "2", "doc-1"),
+        linkCreatedEvent("transaction", "tx-1", "document", "1", "doc-1"),
+        linkDeletedEvent("transaction", "tx-1", "document", "2", "doc-1"),
       ],
       evaluatedAt,
     })
@@ -454,15 +476,14 @@ describe("rule subject evaluation", () => {
     expect(missingResult.evaluations[0]?.emitted).toBeNull()
 
     const existsRuntime = createRuntime()
-    const existsObjectEvent = objectUpsertedEvent("transaction", "tx-1")
-    await existsRuntime.storage.objects.applyObjectUpserted(existsObjectEvent)
+    await seedObject(existsRuntime, "tx-1")
     const existsResult = await evaluateRuleEvents({
       runtime: existsRuntime,
       rules: [hasDocumentRule],
       index,
       events: [
-        linkRemovedEvent("transaction", "tx-1", "document", "1", "doc-1"),
-        linkUpsertedEvent("transaction", "tx-1", "document", "2", "doc-1"),
+        linkDeletedEvent("transaction", "tx-1", "document", "1", "doc-1"),
+        linkCreatedEvent("transaction", "tx-1", "document", "2", "doc-1"),
       ],
       evaluatedAt,
     })
@@ -480,9 +501,9 @@ describe("rule subject evaluation", () => {
       rules: [compositeRule],
       index,
       events: [
-        objectUpsertedEvent("transaction", "tx-1", "1", { status: "posted", amount: 100 }),
-        linkUpsertedEvent("transaction", "tx-1", "document", "2", "doc-1"),
-        linkUpsertedEvent("transaction", "tx-1", "receipt", "3", "doc-2"),
+        objectUpdatedEvent("transaction", "tx-1", "1", { status: "posted", amount: 100 }),
+        linkCreatedEvent("transaction", "tx-1", "document", "2", "doc-1"),
+        linkCreatedEvent("transaction", "tx-1", "receipt", "3", "doc-2"),
       ],
       evaluatedAt,
     })
@@ -505,8 +526,8 @@ describe("rule subject evaluation", () => {
       rules: [requiresDocumentRule],
       index,
       events: [
-        objectUpsertedEvent("transaction", "tx-1", "1"),
-        linkRemovedEvent("transaction", "tx-1", "document", "2"),
+        objectUpdatedEvent("transaction", "tx-1", "1"),
+        linkDeletedEvent("transaction", "tx-1", "document", "2"),
       ],
       evaluatedAt,
     })
@@ -529,24 +550,59 @@ function rule(id: string, predicate: RuleDefinition["predicate"]): RuleDefinitio
   }
 }
 
-function objectUpsertedEvent(
+function objectUpdatedEvent(
   objectTypeId: string,
   primaryId: string,
   cursor = "1",
   properties: Record<string, unknown> = {}
-): StoredObjectUpsertedEvent {
+): StoredObjectUpdatedEvent {
   return {
     id: `event-${cursor}`,
     cursor,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "object.upserted",
+    type: "object.updated",
     topic: "objects",
     partitionKey: `${objectTypeId}:${primaryId}`,
     payload: {
       objectTypeId,
       primaryId,
       properties,
+      propertyChanges: {},
+    },
+    occurredAt: "2026-05-07T10:00:00.000Z",
+  }
+}
+
+function objectCreatedEvent(
+  objectTypeId: string,
+  primaryId: string,
+  cursor = "1",
+  properties: Record<string, unknown> = {}
+): StoredObjectCreatedEvent {
+  return {
+    ...objectUpdatedEvent(objectTypeId, primaryId, cursor, properties),
+    type: "object.created",
+  }
+}
+
+function objectDeletedEvent(
+  objectTypeId: string,
+  primaryId: string,
+  cursor = "1"
+): StoredObjectDeletedEvent {
+  return {
+    id: `event-${cursor}`,
+    cursor,
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.deleted",
+    topic: "objects",
+    partitionKey: `${objectTypeId}:${primaryId}`,
+    payload: {
+      objectTypeId,
+      primaryId,
+      propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
   }
@@ -582,19 +638,19 @@ async function ruleEventTypes(runtime: {
   return events.map((event) => event.type)
 }
 
-function linkUpsertedEvent(
+function linkCreatedEvent(
   sourceTypeId: string,
   sourceId: string,
   linkId: string,
   cursor = "1",
   targetId = "doc-1"
-): StoredLinkUpsertedEvent {
+): StoredLinkCreatedEvent {
   return {
     id: `event-${cursor}`,
     cursor,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.upserted",
+    type: "link.created",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     payload: {
@@ -603,24 +659,25 @@ function linkUpsertedEvent(
       linkId,
       targetTypeId: "document",
       targetId,
+      propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
   }
 }
 
-function linkRemovedEvent(
+function linkDeletedEvent(
   sourceTypeId: string,
   sourceId: string,
   linkId: string,
   cursor = "1",
   targetId = "doc-1"
-): StoredLinkRemovedEvent {
+): StoredLinkDeletedEvent {
   return {
     id: `event-${cursor}`,
     cursor,
     schemaVersion: 1,
     projectId: "project-a",
-    type: "link.removed",
+    type: "link.deleted",
     topic: "links",
     partitionKey: `${sourceTypeId}:${sourceId}:${linkId}`,
     payload: {
@@ -629,7 +686,57 @@ function linkRemovedEvent(
       linkId,
       targetTypeId: "document",
       targetId,
+      propertyChanges: {},
     },
     occurredAt: "2026-05-07T10:00:00.000Z",
   }
+}
+
+async function seedObject(
+  runtime: ReturnType<typeof createRuntime>,
+  primaryId: string,
+  properties: Record<string, unknown> = {},
+  cursor = "1"
+): Promise<void> {
+  await runtime.storage.objects.applyObjectUpserted({
+    id: `seed-object-${cursor}`,
+    cursor: `seed-object-${cursor}`,
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "object.upserted",
+    topic: "objects",
+    partitionKey: `transaction:${primaryId}`,
+    payload: {
+      objectTypeId: "transaction",
+      primaryId,
+      properties,
+    },
+    occurredAt: "2026-05-07T10:00:00.000Z",
+  })
+}
+
+async function seedLink(
+  runtime: ReturnType<typeof createRuntime>,
+  sourceId: string,
+  linkId: string,
+  cursor = "1",
+  targetId = "doc-1"
+): Promise<void> {
+  await runtime.storage.objects.applyLinkUpserted({
+    id: `seed-link-${cursor}`,
+    cursor: `seed-link-${cursor}`,
+    schemaVersion: 1,
+    projectId: "project-a",
+    type: "link.upserted",
+    topic: "links",
+    partitionKey: `transaction:${sourceId}:${linkId}`,
+    payload: {
+      sourceTypeId: "transaction",
+      sourceId,
+      linkId,
+      targetTypeId: "document",
+      targetId,
+    },
+    occurredAt: "2026-05-07T10:00:00.000Z",
+  })
 }

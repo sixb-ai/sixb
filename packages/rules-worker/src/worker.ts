@@ -4,9 +4,12 @@ import { buildRuleDependencyIndex, evaluateRuleEvents } from "./evaluate-rule-ev
 import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerSixb } from "./types"
 
 const ontologyEventTypes = [
-  "object.upserted",
-  "link.upserted",
-  "link.removed",
+  "object.created",
+  "object.updated",
+  "object.deleted",
+  "link.created",
+  "link.updated",
+  "link.deleted",
 ] as const satisfies readonly DomainEvent["type"][]
 
 /**
@@ -86,9 +89,12 @@ export class RulesWorker extends Worker {
 // still StoredDomainEvent[]. This guard gives the evaluator the narrower union.
 function isOntologyRuleEvent(event: StoredDomainEvent): event is OntologyRuleEvent {
   return (
-    event.type === "object.upserted" ||
-    event.type === "link.upserted" ||
-    event.type === "link.removed"
+    event.type === "object.created" ||
+    event.type === "object.updated" ||
+    event.type === "object.deleted" ||
+    event.type === "link.created" ||
+    event.type === "link.updated" ||
+    event.type === "link.deleted"
   )
 }
 

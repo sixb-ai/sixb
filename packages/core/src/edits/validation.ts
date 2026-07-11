@@ -63,12 +63,14 @@ export interface EditObjectUpsertPlan {
   readonly objectTypeId: string
   readonly primaryId: string
   readonly properties: Readonly<Record<string, JsonValue>>
+  readonly previousProperties?: Readonly<Record<string, JsonValue>>
   readonly operation: "create" | "update"
 }
 
 export interface EditObjectDeletePlan {
   readonly objectTypeId: string
   readonly primaryId: string
+  readonly previousProperties?: Readonly<Record<string, JsonValue>>
 }
 
 export interface EditLinkUpsertPlan {
@@ -76,6 +78,7 @@ export interface EditLinkUpsertPlan {
   readonly linkId: string
   readonly target: EditObjectRef
   readonly properties?: Readonly<Record<string, JsonValue>>
+  readonly previousProperties?: Readonly<Record<string, JsonValue>>
   readonly operation: "create" | "update"
 }
 
@@ -83,6 +86,7 @@ export interface EditLinkDeletePlan {
   readonly source: EditObjectRef
   readonly linkId: string
   readonly target: EditObjectRef
+  readonly previousProperties?: Readonly<Record<string, JsonValue>>
 }
 
 export interface EditCommitPlan {
@@ -934,9 +938,13 @@ function buildObjectPlan(
 
   for (const entry of diff.objects) {
     if (entry.operation === "delete") {
+      const state = states.get(objectKey(entry.objectTypeId, entry.primaryId))
       deletes.push({
         objectTypeId: entry.objectTypeId,
         primaryId: entry.primaryId,
+        ...(state?.baselineProperties !== undefined
+          ? { previousProperties: { ...state.baselineProperties } }
+          : {}),
       })
       continue
     }
@@ -951,6 +959,9 @@ function buildObjectPlan(
       objectTypeId: entry.objectTypeId,
       primaryId: entry.primaryId,
       properties: { ...state.properties },
+      ...(state.baselineProperties !== undefined
+        ? { previousProperties: { ...state.baselineProperties } }
+        : {}),
       operation: entry.operation,
     })
   }
@@ -967,10 +978,22 @@ function buildLinkPlan(diff: EditCommitDiff, linkIndex: LinkStateIndex): EditCom
 
   for (const entry of diff.links) {
     if (entry.operation === "delete") {
+      const state = linkIndex.byKey.get(
+        linkKey(
+          entry.source.objectTypeId,
+          entry.source.primaryId,
+          entry.linkId,
+          entry.target.objectTypeId,
+          entry.target.primaryId
+        )
+      )
       deletes.push({
         source: entry.source,
         linkId: entry.linkId,
         target: entry.target,
+        ...(state?.baselineProperties !== undefined
+          ? { previousProperties: { ...state.baselineProperties } }
+          : {}),
       })
       continue
     }
@@ -995,6 +1018,9 @@ function buildLinkPlan(diff: EditCommitDiff, linkIndex: LinkStateIndex): EditCom
       target: entry.target,
       ...(state.properties && Object.keys(state.properties).length > 0
         ? { properties: { ...state.properties } }
+        : {}),
+      ...(state.baselineProperties !== undefined
+        ? { previousProperties: { ...state.baselineProperties } }
         : {}),
       operation: entry.operation,
     })

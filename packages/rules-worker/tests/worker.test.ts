@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type {
   DomainEvent,
-  NewDomainEvent,
+  EventDraft,
   ObjectStorage,
   RuleDefinition,
   RulesStorage,
@@ -71,7 +71,14 @@ describe("RulesWorker", () => {
 
     expect(events.subscriptions).toEqual([
       {
-        types: ["object.upserted", "link.upserted", "link.removed"],
+        types: [
+          "object.created",
+          "object.updated",
+          "object.deleted",
+          "link.created",
+          "link.updated",
+          "link.deleted",
+        ],
       },
     ])
   })
@@ -90,7 +97,7 @@ describe("RulesWorker", () => {
     await worker.start()
 
     await events.append({
-      events: [objectUpsertedEvent("posted")],
+      events: [objectUpdatedEvent("posted")],
     })
     await rules.waitForGetActive()
 
@@ -115,7 +122,7 @@ describe("RulesWorker", () => {
     await worker.stop()
 
     await events.append({
-      events: [objectUpsertedEvent("posted")],
+      events: [objectUpdatedEvent("posted")],
     })
     await Bun.sleep(20)
 
@@ -142,12 +149,12 @@ describe("RulesWorker", () => {
       await worker.start()
 
       await events.append({
-        events: [objectUpsertedEvent("posted")],
+        events: [objectUpdatedEvent("posted")],
       })
       await waitFor(() => errors.length === 1)
 
       await events.append({
-        events: [objectUpsertedEvent("posted", "tx-2")],
+        events: [objectUpdatedEvent("posted", "tx-2")],
       })
       await worker.stop()
 
@@ -253,13 +260,14 @@ function createStorageWithoutRules(): Storage {
   })
 }
 
-function objectUpsertedEvent(status: string, primaryId = "tx-1"): NewDomainEvent {
+function objectUpdatedEvent(status: string, primaryId = "tx-1"): EventDraft {
   return {
-    type: "object.upserted",
+    type: "object.updated",
     payload: {
       objectTypeId: "transaction",
       primaryId,
       properties: { status },
+      propertyChanges: {},
     },
   }
 }

@@ -75,7 +75,7 @@ shared source (notably `@sixb/core`) once per dependent, which made the step the
 - `createSixb()` auto-discovers `ontology/`, `actions/`, `functions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
 - `sixb.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
 - Functions are defined with `defineFunction(id)` and scheduled with `.interval(ms)` or `.cron(expr)`, then given a handler with `.run(...)`. There is no `.broker(...)` or `.onAction(...)`; domain events are not function triggers.
-- Important domain events include `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested`.
+- Important domain events include `object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`, `telemetry.appended`, and `action.requested`. `object.upserted`, `link.upserted`, and `link.removed` are legacy compatibility events.
 - Convention-based discovery is the normal registration model.
 - Generated client files live in `packages/client/src/generated/`.
 - If routes, schemas, or public contracts change, run `bun run generate:client`.

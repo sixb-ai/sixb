@@ -10,7 +10,7 @@
  */
 import { createContext, createElement, type ReactNode, useContext, useEffect, useMemo } from "react"
 import type { SixbEvent } from "./events"
-import { buildEventPredicate, type EventsFilterIR } from "./events-builder"
+import { buildEventPredicate, type EventsFilterSpec } from "./events-builder"
 import { createEventSocket, type EventSocket, type EventSocketState } from "./events-transport"
 
 const DISCONNECTED: EventSocketState = { connected: false, reconnecting: false, error: null }
@@ -30,7 +30,7 @@ export interface EventsRegistrationOptions {
 export interface EventsRegistry {
   /** Register a filtered handler on the shared socket; returns an unregister fn. */
   register(
-    filter: EventsFilterIR,
+    filter: EventsFilterSpec,
     handler: (event: SixbEvent) => void,
     options?: EventsRegistrationOptions
   ): () => void

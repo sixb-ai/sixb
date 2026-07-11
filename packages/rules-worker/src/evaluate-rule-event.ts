@@ -23,32 +23,39 @@ import type {
 
 /** Build the worker's cheap event-payload lookup table from rule dependencies. */
 export function buildRuleDependencyIndex(rules: readonly RuleDefinition[]): RuleDependencyIndex {
-  const objectUpserted = new Map<string, RuleDefinition[]>()
-  const linkUpserted = new Map<string, RuleDefinition[]>()
-  const linkRemoved = new Map<string, RuleDefinition[]>()
+  const objectMutations = new Map<string, RuleDefinition[]>()
+  const linkMutations = new Map<string, RuleDefinition[]>()
+  const linkDeletes = new Map<string, RuleDefinition[]>()
 
   // The events runtime can only filter by type today, so this in-memory index is
   // the cheap payload-level filter before any object storage reads happen.
   for (const rule of rules) {
     for (const dependency of deriveRuleEventDependencies(rule)) {
-      if (dependency.type === "object.upserted") {
-        addRule(objectUpserted, dependency.objectTypeId, rule)
-        continue
-      }
-
-      const key = linkDependencyKey(dependency.sourceTypeId, dependency.linkId)
-      if (dependency.type === "link.upserted") {
-        addRule(linkUpserted, key, rule)
-      } else {
-        addRule(linkRemoved, key, rule)
+      switch (dependency.type) {
+        case "object.created":
+        case "object.updated":
+        case "object.deleted":
+          addRule(objectMutations, dependency.objectTypeId, rule)
+          break
+        case "link.created":
+        case "link.updated":
+          addRule(
+            linkMutations,
+            linkDependencyKey(dependency.sourceTypeId, dependency.linkId),
+            rule
+          )
+          break
+        case "link.deleted":
+          addRule(linkDeletes, linkDependencyKey(dependency.sourceTypeId, dependency.linkId), rule)
+          break
       }
     }
   }
 
   return {
-    objectUpserted,
-    linkUpserted,
-    linkRemoved,
+    objectMutations,
+    linkMutations,
+    linkDeletes,
   }
 }
 
@@ -151,6 +158,22 @@ export async function evaluateRuleForSubject(
   // predicate sees the same state regardless of projection timing.
   const object = await loadSubjectObjectWithOverlay(input)
   if (!object) {
+    const active = await rulesStorage.getActive({
+      projectId: input.runtime.projectId,
+      ruleId: input.rule.id,
+      subject: input.subject,
+    })
+
+    if (active) {
+      await appendResolvedRuleEvent({ evaluation: input, rulesStorage })
+      return {
+        ruleId: input.rule.id,
+        subject: input.subject,
+        matched: false,
+        emitted: "resolved",
+      }
+    }
+
     return {
       ruleId: input.rule.id,
       subject: input.subject,
@@ -198,20 +221,7 @@ export async function evaluateRuleForSubject(
   }
 
   if (!matched && active) {
-    const [stored] = await input.runtime.events.append({
-      events: [
-        {
-          type: "rule.resolved",
-          payload: {
-            ruleId: input.rule.id,
-            subject: input.subject,
-            resolvedAt: input.evaluatedAt,
-          },
-        },
-      ],
-    })
-    const event = requireRuleResolvedEvent(stored)
-    await rulesStorage.applyResolved(event)
+    await appendResolvedRuleEvent({ evaluation: input, rulesStorage })
     return {
       ruleId: input.rule.id,
       subject: input.subject,
@@ -226,6 +236,26 @@ export async function evaluateRuleForSubject(
     matched,
     emitted: null,
   }
+}
+
+async function appendResolvedRuleEvent(params: {
+  readonly evaluation: EvaluateRuleForSubjectInput
+  readonly rulesStorage: RulesStorage
+}): Promise<void> {
+  const [stored] = await params.evaluation.runtime.events.append({
+    events: [
+      {
+        type: "rule.resolved",
+        payload: {
+          ruleId: params.evaluation.rule.id,
+          subject: params.evaluation.subject,
+          resolvedAt: params.evaluation.evaluatedAt,
+        },
+      },
+    ],
+  })
+  const event = requireRuleResolvedEvent(stored)
+  await params.rulesStorage.applyResolved(event)
 }
 
 function addRule(map: Map<string, RuleDefinition[]>, key: string, rule: RuleDefinition): void {
@@ -245,17 +275,20 @@ function rulesForEvent(
   event: OntologyRuleEvent
 ): readonly RuleDefinition[] {
   switch (event.type) {
-    case "object.upserted":
-      return index.objectUpserted.get(event.payload.objectTypeId) ?? []
-    case "link.upserted":
+    case "object.created":
+    case "object.updated":
+    case "object.deleted":
+      return index.objectMutations.get(event.payload.objectTypeId) ?? []
+    case "link.created":
+    case "link.updated":
       return (
-        index.linkUpserted.get(
+        index.linkMutations.get(
           linkDependencyKey(event.payload.sourceTypeId, event.payload.linkId)
         ) ?? []
       )
-    case "link.removed":
+    case "link.deleted":
       return (
-        index.linkRemoved.get(
+        index.linkDeletes.get(
           linkDependencyKey(event.payload.sourceTypeId, event.payload.linkId)
         ) ?? []
       )
@@ -273,15 +306,22 @@ async function loadSubjectObjectWithOverlay(
 
   for (const event of input.sourceEvents) {
     if (
-      event.type !== "object.upserted" ||
+      (event.type !== "object.created" &&
+        event.type !== "object.updated" &&
+        event.type !== "object.deleted") ||
       event.payload.objectTypeId !== input.subject.objectTypeId ||
       event.payload.primaryId !== input.subject.primaryId
     ) {
       continue
     }
 
-    // An object upsert can either amend the projected row or synthesize it when
-    // the evaluator observes the append before object storage has projected it.
+    if (event.type === "object.deleted") {
+      object = null
+      continue
+    }
+
+    // An object mutation can either amend the projected row or synthesize it
+    // when the evaluator observes the append before object storage projects it.
     const occurredAt = new Date(event.occurredAt)
     object = {
       projectId: input.runtime.projectId,
@@ -321,7 +361,9 @@ async function loadLinksWithOverlay(
 
   for (const event of input.sourceEvents) {
     if (
-      (event.type !== "link.upserted" && event.type !== "link.removed") ||
+      (event.type !== "link.created" &&
+        event.type !== "link.updated" &&
+        event.type !== "link.deleted") ||
       event.payload.sourceTypeId !== input.subject.objectTypeId ||
       event.payload.sourceId !== input.subject.primaryId ||
       !linkIds.includes(event.payload.linkId)
@@ -336,7 +378,7 @@ async function loadLinksWithOverlay(
       event.payload.targetId
     )
 
-    if (event.type === "link.removed") {
+    if (event.type === "link.deleted") {
       // Remove only the target edge named by the source event; other outgoing
       // links for the same link id must remain visible to `exists` predicates.
       links.set(
@@ -346,7 +388,7 @@ async function loadLinksWithOverlay(
       continue
     }
 
-    // Link upserts replace the matching target edge if it was already
+    // Link mutations replace the matching target edge if it was already
     // projected, otherwise they add the pending edge to the overlaid view.
     const occurredAt = new Date(event.occurredAt)
     const existing = rows.find(
@@ -381,7 +423,12 @@ function referencedLinkIds(rule: RuleDefinition): readonly string[] {
   const seen = new Set<string>()
 
   for (const dependency of deriveRuleEventDependencies(rule)) {
-    if (dependency.type === "link.upserted" && !seen.has(dependency.linkId)) {
+    if (
+      (dependency.type === "link.created" ||
+        dependency.type === "link.updated" ||
+        dependency.type === "link.deleted") &&
+      !seen.has(dependency.linkId)
+    ) {
       seen.add(dependency.linkId)
       linkIds.push(dependency.linkId)
     }
@@ -393,14 +440,17 @@ function referencedLinkIds(rule: RuleDefinition): readonly string[] {
 /** Convert the source domain event into the object subject rules evaluate. */
 function subjectForEvent(event: OntologyRuleEvent): RuleEventSubject {
   switch (event.type) {
-    case "object.upserted":
+    case "object.created":
+    case "object.updated":
+    case "object.deleted":
       return {
         kind: "object",
         objectTypeId: event.payload.objectTypeId,
         primaryId: event.payload.primaryId,
       }
-    case "link.upserted":
-    case "link.removed":
+    case "link.created":
+    case "link.updated":
+    case "link.deleted":
       return {
         kind: "object",
         objectTypeId: event.payload.sourceTypeId,

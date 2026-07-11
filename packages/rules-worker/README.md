@@ -9,7 +9,7 @@ arrive.
 
 ## Responsibilities
 
-- subscribe to `object.upserted`, `link.upserted`, and `link.removed`
+- subscribe to object/link `created`, `updated`, and `deleted` events
 - match each ontology event to the rules that depend on it
 - evaluate only the affected subject object
 - overlay the source event onto projected object/link storage before evaluation
@@ -69,9 +69,9 @@ For each received ontology event batch:
 1. Build candidate evaluations from the precomputed rule dependency index.
 2. Dedupe by `ruleId + subject` within the batch.
 3. Load the subject object from `storage.objects`.
-4. Overlay any matching `object.upserted` payloads from the accepted events.
+4. Overlay any matching object mutation payloads from the accepted events.
 5. Load only the outgoing links referenced by the rule predicate.
-6. Overlay matching `link.upserted` and `link.removed` payloads.
+6. Overlay matching link mutation payloads.
 7. Evaluate the rule predicate against the overlaid object/link view.
 8. Check `storage.rules` for active state.
 9. Append and apply `rule.triggered` or `rule.resolved` only when state changes.

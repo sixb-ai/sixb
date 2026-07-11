@@ -8,7 +8,7 @@ import {
   resolveEventStorage,
 } from "./definitions"
 import { EventsError } from "./errors"
-import type { DomainEvent, EventActor, NewDomainEvent, StoredDomainEvent } from "./types"
+import type { DomainEvent, EventActor, EventDraft, StoredDomainEvent } from "./types"
 
 // Keep domain events as a short recent log. This is 2 days in milliseconds.
 export const DEFAULT_EVENTS_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
@@ -28,7 +28,7 @@ export interface EventsAppendInput {
   readonly actor?: EventActor
   readonly correlationId?: string
   readonly causationId?: string
-  readonly events: readonly NewDomainEvent[]
+  readonly events: readonly EventDraft[]
 }
 
 export interface EventsReadInput {
@@ -175,7 +175,7 @@ function toStoredEventPayload(params: {
   actor?: EventActor
   correlationId?: string
   causationId?: string
-  event: NewDomainEvent
+  event: EventDraft
 }): StoredEventPayload {
   const storage = resolveEventStorage(params.event)
   const payload: Record<string, unknown> = {
@@ -193,6 +193,7 @@ function toStoredEventPayload(params: {
   setIfDefined(payload, "causationId", params.causationId)
   setIfDefined(payload, "idempotencyKey", params.event.idempotencyKey)
   setIfDefined(payload, "actor", params.actor)
+  setIfDefined(payload, "origin", params.event.origin)
   setIfDefined(payload, "metadata", params.event.metadata)
 
   return payload as StoredEventPayload

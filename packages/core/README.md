@@ -20,7 +20,7 @@ bun add @sixb/core
 
 **Blob Storage** -- Durable immutable binary objects referenced by dataset `fileRef` values. In-memory core support is included for development and tests; durable providers can be configured separately.
 
-**Events** -- All mutations are emitted to a bounded, retained event stream for live coordination and short replay. The runtime emits `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, and `action.requested` events.
+**Events** -- All mutations are emitted to a bounded, retained event stream for live coordination and short replay. The runtime emits object/link mutation events such as `object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, and `link.deleted`, plus topic events like `telemetry.appended` and `action.requested`.
 
 **Functions** -- Scheduled and reactive logic that runs against the twin graph. Triggered by cron expressions or intervals.
 
@@ -467,7 +467,7 @@ In-memory implementations included: `InMemoryBroker`, `InMemoryObjectStorage`, `
 
 ### Events
 
-All domain events: `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, `action.requested`, `schedule.triggered`, `sync.run.finished`, `pipeline.run.finished`, `dataset.version.committed`.
+All domain events include object/link mutations (`object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`), legacy compatibility events (`object.upserted`, `link.upserted`, `link.removed`), and topic events such as `telemetry.appended`, `action.requested`, `schedule.triggered`, `sync.run.finished`, `pipeline.run.finished`, and `dataset.version.committed`.
 
 ### Units
 

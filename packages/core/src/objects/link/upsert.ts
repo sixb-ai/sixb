@@ -2,6 +2,7 @@
  * Leaf operation: upsert a single link.
  */
 import { assertPrivileged } from "../../authorization"
+import { buildLinkUpsertEvents } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
@@ -62,23 +63,20 @@ export async function upsertLink(
   }
 
   const appended = await events.append({
-    events: [
-      {
-        type: "link.upserted",
-        payload: {
-          sourceTypeId: objectType.id,
-          sourceId,
-          linkId,
-          targetTypeId,
-          targetId,
-          ...(properties !== undefined ? { properties } : {}),
-        },
-      },
-    ],
+    events: buildLinkUpsertEvents({
+      sourceTypeId: objectType.id,
+      sourceId,
+      linkId,
+      targetTypeId,
+      targetId,
+      operation: sameLink ? "update" : "create",
+      previousProperties: sameLink?.properties,
+      ...(properties !== undefined ? { properties } : {}),
+    }),
   })
 
-  const event = appended[0]
-  if (!event || event.type !== "link.upserted") {
+  const event = appended.find((candidate) => candidate.type === "link.upserted")
+  if (!event) {
     throw new ObjectError("Failed to append link.upserted event")
   }
 

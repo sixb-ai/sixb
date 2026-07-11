@@ -5,6 +5,12 @@ export interface EventActor {
   id: string
 }
 
+export type EventOrigin = {
+  kind: "action"
+  actionId: string
+  runId: string
+}
+
 export interface EventEnvelope {
   id: string
   schemaVersion: 1
@@ -14,5 +20,6 @@ export interface EventEnvelope {
   causationId?: string
   idempotencyKey?: string
   actor?: EventActor
+  origin?: EventOrigin
   metadata?: Record<string, JsonValue>
 }

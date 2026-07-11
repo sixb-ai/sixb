@@ -2,7 +2,8 @@
  * Leaf operation: batch upsert objects of a single type.
  */
 import { assertPrivileged } from "../../authorization"
-import type { NewDomainEvent } from "../../events"
+import type { EventDraft } from "../../events"
+import { buildObjectUpsertEvents } from "../../events"
 import { validateObjectBatch } from "../../ontology/validation"
 import type { BatchItemResult } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
@@ -42,14 +43,16 @@ export async function upsertObjectBatch(
   if (validation.valid.length === 0) return results
 
   // Append events, then project the stored events into object storage.
-  const events: NewDomainEvent[] = validation.valid.map(({ item }) => ({
-    type: "object.upserted",
-    payload: {
+  const events: EventDraft[] = validation.valid.flatMap(({ item }) => {
+    const existing = existingMap.get(`${objectType.id}:${item.primaryId}`)
+    return buildObjectUpsertEvents({
       objectTypeId: objectType.id,
       primaryId: item.primaryId,
+      operation: existing ? "update" : "create",
+      previousProperties: existing?.properties,
       properties: item.properties,
-    },
-  }))
+    })
+  })
 
   const appended = await eventsRuntime.append({ events })
   const objectEvents = appended.filter(

@@ -9,9 +9,10 @@ const Sensor = defineObjectType({
   name: "Sensor",
   properties: [
     prop("id", "string", { required: true, primary: true }),
+    prop("status", "string"),
     prop("indoorTemperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
   ],
-  links: [link.ref("zone", "Zone", { cardinality: "one" })],
+  links: [link.ref("zone", "Zone", { cardinality: "one", properties: [prop("rank", "integer")] })],
 })
 
 // A loose fixture builder: tests provide ad-hoc per-topic payloads, so the
@@ -42,7 +43,7 @@ const telemetryEvent = event({
   },
 })
 
-describe("events builder IR", () => {
+describe("events builder filter spec", () => {
   test("events(Type) seeds the object type id", () => {
     expect(events(Sensor).ir).toEqual({ objectTypeId: "Sensor" })
   })
@@ -67,11 +68,56 @@ describe("events builder IR", () => {
 
   test("upserted / deleted / linked set their types", () => {
     expect(events(Sensor).upserted().ir.types).toEqual(["object.upserted"])
-    expect(events(Sensor).deleted().ir.types).toEqual(["object.deleted"])
+    expect(events(Sensor).deleted().ir).toMatchObject({
+      topic: "objects",
+      types: ["object.deleted"],
+    })
     expect(events(Sensor).linked(Sensor.l.zone).ir).toMatchObject({
       topic: "links",
       types: ["link.upserted", "link.removed"],
       linkId: "zone",
+    })
+  })
+
+  test("created / updated / property / link selectors use mutation facts", () => {
+    expect(events(Sensor).created().ir).toMatchObject({
+      topic: "objects",
+      types: ["object.created"],
+    })
+    expect(events(Sensor).p.status.updated().ir).toMatchObject({
+      topic: "objects",
+      types: ["object.updated"],
+      propertyId: "status",
+      propertyOperation: "updated",
+    })
+    expect(events(Sensor).p.status.created().ir).toMatchObject({
+      topic: "objects",
+      types: ["object.created", "object.updated"],
+      propertyId: "status",
+      propertyOperation: "created",
+    })
+    expect(events(Sensor).p.status.created().updated().ir).toMatchObject({
+      types: ["object.updated"],
+      propertyOperation: "updated",
+    })
+    expect(events(Sensor).link(Sensor.l.zone).created().ir).toMatchObject({
+      topic: "links",
+      types: ["link.created"],
+      linkId: "zone",
+    })
+    expect(events(Sensor).link(Sensor.l.zone).p.rank.updated().ir).toMatchObject({
+      topic: "links",
+      types: ["link.updated"],
+      linkId: "zone",
+      propertyId: "rank",
+      propertyOperation: "updated",
+    })
+    expect(events(Sensor).link(Sensor.l.zone).p.rank.created().ir).toMatchObject({
+      topic: "links",
+      types: ["link.created", "link.updated"],
+      linkId: "zone",
+      propertyId: "rank",
+      propertyOperation: "created",
     })
   })
 
@@ -141,6 +187,37 @@ describe("buildEventPredicate", () => {
     expect(matches(linkEvent)).toBe(true)
     expect(
       matches(event({ ...linkEvent, payload: { ...linkEvent.payload, linkId: "other" } }))
+    ).toBe(false)
+  })
+
+  test("property selectors match propertyChanges", () => {
+    const matches = buildEventPredicate(events(Sensor).p.status.updated().ir)
+    const changed = event({
+      type: "object.updated",
+      topic: "objects",
+      payload: {
+        objectTypeId: "Sensor",
+        primaryId: "sensor-1",
+        properties: { status: "online" },
+        propertyChanges: {
+          status: { operation: "updated", before: "offline", after: "online" },
+        },
+      },
+    })
+
+    expect(matches(changed)).toBe(true)
+    expect(
+      matches(
+        event({
+          ...changed,
+          payload: {
+            ...changed.payload,
+            propertyChanges: {
+              status: { operation: "created", after: "online" },
+            },
+          },
+        })
+      )
     ).toBe(false)
   })
 

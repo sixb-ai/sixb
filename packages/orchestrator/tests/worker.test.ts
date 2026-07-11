@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
   type DomainEvent,
+  type EventDraft,
   EventsRuntime,
   InMemoryBroker,
   InMemoryQueues,
-  type NewDomainEvent,
 } from "@sixb/core"
 import type { OrchestratorJob, OrchestratorRouteKey, OrchestratorRoutes } from "../src/types"
 import { OrchestratorWorker } from "../src/worker"
@@ -18,7 +18,7 @@ function createEvents(projectId = PROJECT_ID, broker = new InMemoryBroker()): Ev
 function makeScheduleTriggeredEvent(
   scheduleId: string,
   occurrenceAt = "2026-04-18T02:00:00.000Z"
-): NewDomainEvent {
+): EventDraft {
   return {
     type: "schedule.triggered",
     payload: {
@@ -30,7 +30,7 @@ function makeScheduleTriggeredEvent(
   }
 }
 
-function makeObjectUpsertedEvent(): NewDomainEvent {
+function makeObjectUpsertedEvent(): EventDraft {
   return {
     type: "object.upserted",
     payload: {
@@ -41,7 +41,7 @@ function makeObjectUpsertedEvent(): NewDomainEvent {
   }
 }
 
-function makeDatasetVersionCommittedEvent(datasetId: string, versionId = "v-1"): NewDomainEvent {
+function makeDatasetVersionCommittedEvent(datasetId: string, versionId = "v-1"): EventDraft {
   return {
     type: "dataset.version.committed",
     payload: {

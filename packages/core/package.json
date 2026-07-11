@@ -29,6 +29,13 @@
       "import": "./dist/events/scope.js",
       "default": "./dist/events/scope.js"
     },
+    "./events/selectors": {
+      "types": "./dist/events/selectors/index.d.ts",
+      "browser": "./src/events/selectors/index.ts",
+      "bun": "./src/events/selectors/index.ts",
+      "import": "./dist/events/selectors/index.js",
+      "default": "./dist/events/selectors/index.js"
+    },
     "./actions/worker": {
       "types": "./dist/actions/worker.d.ts",
       "bun": "./src/actions/worker.ts",
