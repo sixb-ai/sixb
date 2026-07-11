@@ -6,7 +6,7 @@ import { docsConfig } from "./config"
 // Public origin of the hosted docs. Defaults to production; override at build time with
 // `DOCS_BASE_URL=https://preview.example.com bun run build` for previews.
 const baseUrl = (process.env.DOCS_BASE_URL ?? "https://docs.sixb.ai").replace(/\/+$/, "")
-const distDir = join(import.meta.dir, "..", "..", "dist")
+const publicDir = join(import.meta.dir, "..", "..", "public")
 
 const tagline =
   "Sixb is a TypeScript framework for operational software. Model your domain as a typed " +
@@ -51,12 +51,12 @@ const sitemap = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://w
 // robots.txt — allow all (we want crawlers and LLMs to read the docs), point at the sitemap.
 const robots = `User-agent: *\nAllow: /\n\nSitemap: ${baseUrl}/sitemap.xml\n`
 
-await mkdir(distDir, { recursive: true })
+await mkdir(publicDir, { recursive: true })
 await Promise.all([
-  writeFile(join(distDir, "llms.txt"), llms, "utf-8"),
-  writeFile(join(distDir, "llms-full.txt"), full, "utf-8"),
-  writeFile(join(distDir, "sitemap.xml"), sitemap, "utf-8"),
-  writeFile(join(distDir, "robots.txt"), robots, "utf-8"),
+  writeFile(join(publicDir, "llms.txt"), llms, "utf-8"),
+  writeFile(join(publicDir, "llms-full.txt"), full, "utf-8"),
+  writeFile(join(publicDir, "sitemap.xml"), sitemap, "utf-8"),
+  writeFile(join(publicDir, "robots.txt"), robots, "utf-8"),
 ])
 
 console.log("[SixbDocs] wrote llms.txt, llms-full.txt, sitemap.xml, robots.txt")

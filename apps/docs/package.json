@@ -5,23 +5,26 @@
   "type": "module",
   "scripts": {
     "generate:docs": "bun ./src/docs/buildDocs.ts && bun ./src/docs/buildSnippets.ts",
-    "clean:dist": "bun ./src/docs/cleanDist.ts",
-    "copy:docs": "bun ./src/docs/writeStaticDocs.ts",
+    "clean:public": "bun ./src/docs/cleanPublic.ts",
+    "copy:docs": "bun ./src/docs/writePublicDocs.ts",
     "generate:ai": "bun ./src/docs/writeAiFiles.ts",
-    "build:css": "bun ./src/buildCss.ts",
-    "dev": "NODE_ENV=development bun run generate:docs && bun run build:css && bun ./src/dev.ts",
-    "build": "NODE_ENV=production bun run generate:docs && bun run clean:dist && bun run build:css && bun build ./index.html --outdir ./dist --target browser --public-path / --minify && bun run copy:docs && bun run generate:ai",
-    "typecheck": "bun run generate:docs && tsc --noEmit"
+    "prepare:docs": "bun run generate:docs && bun run clean:public && bun run copy:docs && bun run generate:ai",
+    "dev": "NODE_ENV=development bun run prepare:docs && next dev --port 3004",
+    "build": "NODE_ENV=production bun run prepare:docs && next build",
+    "start": "next start --port 3004",
+    "typecheck": "bun run generate:docs && next typegen && tsc --noEmit"
   },
   "dependencies": {
     "@sixb/ui": "workspace:*",
     "lucide-react": "^0.562.0",
+    "next": "^16.2.10",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.2.2",
+    "@tailwindcss/postcss": "^4.3.2",
     "@types/bun": "latest",
+    "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "shiki": "^4.1.0",
