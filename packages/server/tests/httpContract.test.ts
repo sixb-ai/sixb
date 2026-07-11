@@ -1103,7 +1103,15 @@ describe("SixbServer HTTP contract", () => {
           },
           dependencies: [
             {
-              type: "object.upserted",
+              type: "object.created",
+              objectTypeId: "device",
+            },
+            {
+              type: "object.updated",
+              objectTypeId: "device",
+            },
+            {
+              type: "object.deleted",
               objectTypeId: "device",
             },
           ],

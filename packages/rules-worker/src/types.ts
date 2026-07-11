@@ -6,15 +6,21 @@ import type {
   RuleEventSubject,
   RulePredicate,
   Storage,
-  StoredLinkRemovedEvent,
-  StoredLinkUpsertedEvent,
-  StoredObjectUpsertedEvent,
+  StoredLinkCreatedEvent,
+  StoredLinkDeletedEvent,
+  StoredLinkUpdatedEvent,
+  StoredObjectCreatedEvent,
+  StoredObjectDeletedEvent,
+  StoredObjectUpdatedEvent,
 } from "@sixb/core"
 
 export type OntologyRuleEvent =
-  | StoredObjectUpsertedEvent
-  | StoredLinkUpsertedEvent
-  | StoredLinkRemovedEvent
+  | StoredObjectCreatedEvent
+  | StoredObjectUpdatedEvent
+  | StoredObjectDeletedEvent
+  | StoredLinkCreatedEvent
+  | StoredLinkUpdatedEvent
+  | StoredLinkDeletedEvent
 
 /** Outgoing links for the evaluated subject, grouped by ontology link id. */
 export type RuleLinkMap = ReadonlyMap<string, readonly ObjectLinkRow[]>
@@ -48,9 +54,9 @@ export interface RulesWorkerContext {
  * current object/link event.
  */
 export interface RuleDependencyIndex {
-  readonly objectUpserted: ReadonlyMap<string, readonly RuleDefinition[]>
-  readonly linkUpserted: ReadonlyMap<string, readonly RuleDefinition[]>
-  readonly linkRemoved: ReadonlyMap<string, readonly RuleDefinition[]>
+  readonly objectMutations: ReadonlyMap<string, readonly RuleDefinition[]>
+  readonly linkMutations: ReadonlyMap<string, readonly RuleDefinition[]>
+  readonly linkDeletes: ReadonlyMap<string, readonly RuleDefinition[]>
 }
 
 /**

@@ -3,15 +3,21 @@ import type { RuleDefinition, RuleEventDependency, RulePredicate } from "./types
 /**
  * Derive the event surface that can change whether a rule is active.
  *
- * Every object-scoped rule depends on object upserts for its subject type.
- * Link predicates also depend on link upserts/removals for the referenced
- * links. Property predicates need no extra dependency because property changes
- * arrive through `object.upserted`.
+ * Every object-scoped rule depends on object mutations for its subject type.
+ * Link predicates also depend on link mutations for the referenced links.
  */
 export function deriveRuleEventDependencies(rule: RuleDefinition): readonly RuleEventDependency[] {
   const dependencies: RuleEventDependency[] = [
     {
-      type: "object.upserted",
+      type: "object.created",
+      objectTypeId: rule.subject.objectTypeId,
+    },
+    {
+      type: "object.updated",
+      objectTypeId: rule.subject.objectTypeId,
+    },
+    {
+      type: "object.deleted",
       objectTypeId: rule.subject.objectTypeId,
     },
   ]
@@ -23,12 +29,17 @@ export function deriveRuleEventDependencies(rule: RuleDefinition): readonly Rule
   for (const linkId of linkIds) {
     dependencies.push(
       {
-        type: "link.upserted",
+        type: "link.created",
         sourceTypeId: rule.subject.objectTypeId,
         linkId,
       },
       {
-        type: "link.removed",
+        type: "link.updated",
+        sourceTypeId: rule.subject.objectTypeId,
+        linkId,
+      },
+      {
+        type: "link.deleted",
         sourceTypeId: rule.subject.objectTypeId,
         linkId,
       }

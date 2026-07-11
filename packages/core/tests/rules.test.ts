@@ -138,11 +138,13 @@ describe("rules", () => {
       .where((tx) => tx.p.status.eq("posted"))
 
     expect(deriveRuleEventDependencies(rule)).toEqual([
-      { type: "object.upserted", objectTypeId: "transaction" },
+      { type: "object.created", objectTypeId: "transaction" },
+      { type: "object.updated", objectTypeId: "transaction" },
+      { type: "object.deleted", objectTypeId: "transaction" },
     ])
   })
 
-  test("deriveRuleEventDependencies includes link upsert and remove events", () => {
+  test("deriveRuleEventDependencies includes link mutation events", () => {
     const rule = defineRule("transaction.linked-docs")
       .on(Transaction)
       .where((tx) =>
@@ -150,11 +152,15 @@ describe("rules", () => {
       )
 
     expect(deriveRuleEventDependencies(rule)).toEqual([
-      { type: "object.upserted", objectTypeId: "transaction" },
-      { type: "link.upserted", sourceTypeId: "transaction", linkId: "document" },
-      { type: "link.removed", sourceTypeId: "transaction", linkId: "document" },
-      { type: "link.upserted", sourceTypeId: "transaction", linkId: "receipt" },
-      { type: "link.removed", sourceTypeId: "transaction", linkId: "receipt" },
+      { type: "object.created", objectTypeId: "transaction" },
+      { type: "object.updated", objectTypeId: "transaction" },
+      { type: "object.deleted", objectTypeId: "transaction" },
+      { type: "link.created", sourceTypeId: "transaction", linkId: "document" },
+      { type: "link.updated", sourceTypeId: "transaction", linkId: "document" },
+      { type: "link.deleted", sourceTypeId: "transaction", linkId: "document" },
+      { type: "link.created", sourceTypeId: "transaction", linkId: "receipt" },
+      { type: "link.updated", sourceTypeId: "transaction", linkId: "receipt" },
+      { type: "link.deleted", sourceTypeId: "transaction", linkId: "receipt" },
     ])
   })
 

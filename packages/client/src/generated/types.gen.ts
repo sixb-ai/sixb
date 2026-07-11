@@ -3683,16 +3683,11 @@ export type ListRulesResponses = {
         }
     dependencies: Array<
       | {
-          type: "object.upserted"
+          type: "object.created" | "object.updated" | "object.deleted"
           objectTypeId: string
         }
       | {
-          type: "link.upserted"
-          sourceTypeId: string
-          linkId: string
-        }
-      | {
-          type: "link.removed"
+          type: "link.created" | "link.updated" | "link.deleted"
           sourceTypeId: string
           linkId: string
         }
@@ -3830,16 +3825,11 @@ export type GetRuleResponses = {
         }
     dependencies: Array<
       | {
-          type: "object.upserted"
+          type: "object.created" | "object.updated" | "object.deleted"
           objectTypeId: string
         }
       | {
-          type: "link.upserted"
-          sourceTypeId: string
-          linkId: string
-        }
-      | {
-          type: "link.removed"
+          type: "link.created" | "link.updated" | "link.deleted"
           sourceTypeId: string
           linkId: string
         }
