@@ -38,6 +38,8 @@ export interface EventSocketOptions {
   readonly limit?: number
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
+  /** Maximum time to complete the event protocol handshake. */
+  readonly handshakeTimeoutMs?: number
   /** Override the API base url. Defaults to the global client config. */
   readonly baseUrl?: string
   readonly onEvent: (event: SixbEvent) => void
@@ -82,6 +84,8 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
     url: createSixbEventsWebSocketUrl(options.baseUrl),
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
+    readyTimeoutMs: options.handshakeTimeoutMs,
+    readyTimeoutMessage: "Event websocket handshake timed out.",
     connectionErrorMessage: "Event websocket connection failed.",
     onError: options.onError,
     onStateChange: (state) => {
@@ -103,6 +107,7 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
     // The event server resolves its initial cursor before announcing readiness.
     // Waiting for that frame prevents subscribe from racing server-side state setup.
     subscribeWhen: (data) => parseEventStreamMessage(data)?.type === "connected",
+    readyWhen: (data) => parseEventStreamMessage(data)?.type === "subscribed",
     onMessage: (data, sink) => {
       const message = parseEventStreamMessage(data)
       if (!message) return

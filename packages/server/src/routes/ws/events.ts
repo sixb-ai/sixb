@@ -17,6 +17,7 @@ interface EventSubscriptionState {
   polling: boolean
   timer: ReturnType<typeof setInterval> | null
   initialized: Promise<void>
+  initializationFailureHandled: boolean
 }
 
 const SubscribeSchema = z.object({
@@ -78,11 +79,32 @@ function createDefaultState(): EventSubscriptionState {
     polling: false,
     timer: null,
     initialized: Promise.resolve(),
+    initializationFailureHandled: false,
   }
 }
 
 export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
   const states = new WeakMap<object, EventSubscriptionState>()
+
+  const awaitInitialization = async (
+    ws: { close: () => void; send: (message: string) => void },
+    state: EventSubscriptionState
+  ): Promise<boolean> => {
+    try {
+      await state.initialized
+      return true
+    } catch (error) {
+      if (state.initializationFailureHandled) return false
+      state.initializationFailureHandled = true
+      const message = error instanceof Error ? error.message : String(error)
+      safeSend(ws, {
+        type: "error",
+        message: `[SixbServer] Failed to initialize event websocket: ${message}`,
+      })
+      ws.close()
+      return false
+    }
+  }
 
   const stopPolling = (ws: object) => {
     const state = states.get(wsStateKey(ws))
@@ -160,7 +182,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       state.initialized = resolveLatestCursor(server).then((cursor) => {
         state.afterCursor = cursor
       })
-      await state.initialized
+      if (!(await awaitInitialization(ws, state))) return
       safeSend(ws, { type: "connected", channel: "events" })
     },
 
@@ -180,7 +202,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
 
       // Older clients may subscribe immediately on websocket open. Wait for the
       // initial cursor instead of allowing that message to race connection setup.
-      await state.initialized
+      if (!(await awaitInitialization(ws, state))) return
 
       if (parsed.data.type === "unsubscribe") {
         stopPolling(ws)

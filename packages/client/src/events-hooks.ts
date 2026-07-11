@@ -23,6 +23,7 @@ export interface UseEventsOptions {
   readonly limit?: number
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
+  readonly handshakeTimeoutMs?: number
   readonly onError?: (error: string) => void
 }
 
@@ -51,6 +52,7 @@ export function useEvents<TEvent extends SixbEvent>(
   const limit = options?.limit
   const reconnect = options?.reconnect
   const reconnectDelayMs = options?.reconnectDelayMs
+  const handshakeTimeoutMs = options?.handshakeTimeoutMs
   const irKey = JSON.stringify(builder.ir)
 
   // Re-subscribe only when the serialized filter IR (or a transport option)
@@ -78,10 +80,20 @@ export function useEvents<TEvent extends SixbEvent>(
       limit,
       reconnect,
       reconnectDelayMs,
+      handshakeTimeoutMs,
       onError,
       onStateChange: setState,
     })
-  }, [enabled, irKey, afterCursor, limit, reconnect, reconnectDelayMs, registry])
+  }, [
+    enabled,
+    irKey,
+    afterCursor,
+    limit,
+    reconnect,
+    reconnectDelayMs,
+    handshakeTimeoutMs,
+    registry,
+  ])
 
   return state
 }

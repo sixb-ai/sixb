@@ -233,6 +233,26 @@ describe("/ws/events subscriptions", () => {
     })
   })
 
+  test("reports initialization failures and closes the websocket", async () => {
+    await withWsServer(
+      async ({ baseUrl }) => {
+        const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+        const closed = new Promise<void>((resolve) => ws.addEventListener("close", () => resolve()))
+
+        try {
+          expect(await nextWsMessage(ws)).toEqual({
+            type: "error",
+            message: "[SixbServer] Failed to initialize event websocket: latest cursor unavailable",
+          })
+          await closed
+        } finally {
+          ws.close()
+        }
+      },
+      { broker: new FailingLatestCursorBroker() }
+    )
+  })
+
   test("scopes the stream to one object when objectTypeId/primaryId are set", async () => {
     await withWsServer(async ({ baseUrl, sixb }) => {
       const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
@@ -386,6 +406,12 @@ class SlowLatestCursorBroker extends InMemoryBroker {
   override async latestCursor(params: Parameters<InMemoryBroker["latestCursor"]>[0]) {
     await new Promise<void>((resolve) => setTimeout(resolve, 100))
     return super.latestCursor(params)
+  }
+}
+
+class FailingLatestCursorBroker extends InMemoryBroker {
+  override async latestCursor(): Promise<string | undefined> {
+    throw new Error("latest cursor unavailable")
   }
 }
 

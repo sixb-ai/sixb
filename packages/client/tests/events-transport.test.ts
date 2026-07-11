@@ -74,6 +74,7 @@ describe("createEventSocket", () => {
     expect(ws1.sent).toHaveLength(0)
     ws1.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
     expect(JSON.parse(ws1.sent[0]).afterCursor).toBeUndefined()
+    ws1.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
 
     ws1.onmessage?.({ data: JSON.stringify({ type: "event", event: telemetryEvent("c5") }) })
     expect(received).toHaveLength(1)
@@ -137,6 +138,28 @@ describe("createEventSocket", () => {
 
     ws.onmessage?.({ data: JSON.stringify({ type: "subscribed" }) })
     expect(states.at(-1)).toMatchObject({ connected: true })
+
+    socket.close()
+  })
+
+  test("closes and reconnects when the protocol handshake times out", async () => {
+    const errors: string[] = []
+    const socket = createEventSocket({
+      reconnect: true,
+      reconnectDelayMs: 1,
+      handshakeTimeoutMs: 5,
+      onEvent: () => {},
+      onError: (message) => errors.push(message),
+    })
+
+    const ws1 = FakeWebSocket.instances[0]
+    if (!ws1) throw new Error("expected a websocket")
+    ws1.onopen?.()
+    await tick(15)
+
+    expect(ws1.closed).toBe(true)
+    expect(errors).toEqual(["Event websocket handshake timed out."])
+    expect(FakeWebSocket.instances).toHaveLength(2)
 
     socket.close()
   })
