@@ -15,12 +15,10 @@ import { isLevelEnabled, normalizeLogError } from "./types"
 /** Publishes one ordered batch to the backing broker stream. */
 export type LogPublisher = (records: readonly LogRecord[]) => Promise<void>
 
-interface RunLoggerCoreOptions {
-  readonly run: LogRunRef
-  readonly provider: LoggerProvider
-  readonly publish?: LogPublisher
-  readonly captureEnabled: boolean
-  readonly captureLevel: LogLevel
+/** @internal Fixed broker-capture safeguards for one execution. */
+export interface RunLogCaptureOptions {
+  readonly publish: LogPublisher
+  readonly level: LogLevel
   readonly maxLinesPerExecution: number
   readonly maxRecordBytes: number
   readonly maxBufferedBytes: number
@@ -31,8 +29,29 @@ interface RunLoggerCoreOptions {
   readonly redactCensor: JsonValue
 }
 
-/** Shared state for every handler logger created during one worker execution. */
-class RunLoggerCore {
+/** @internal Dependencies used to create one execution-scoped log session. */
+export interface RunLogSessionOptions {
+  readonly run: LogRunRef
+  readonly provider: LoggerProvider
+  readonly capture?: RunLogCaptureOptions
+}
+
+type EmitLog = (
+  level: LogLevel,
+  message: string,
+  fields: LogFields | undefined,
+  context: Omit<LogContext, "run">
+) => void
+
+/**
+ * Internal state and lifecycle for every handler logger created during one worker execution.
+ *
+ * Handler loggers are immutable views over this session. They all share its capture quota,
+ * ordered broker queue, and final flush boundary.
+ */
+export class RunLogSession {
+  readonly logger: Logger
+
   private captured = 0
   private droppedByLineLimit = 0
   private droppedByBackpressure = 0
@@ -40,14 +59,32 @@ class RunLoggerCore {
   private pendingBytes = 0
   private bufferedBytes = 0
   private pumpPromise: Promise<void> | undefined
+  private flushPromise: Promise<void> | undefined
   private flushTimer: ReturnType<typeof setTimeout> | undefined
   private captureClosed = false
   private providerFailureReported = false
   private publisherFailureReported = false
 
-  constructor(private readonly options: RunLoggerCoreOptions) {}
+  private readonly emitFromContext: EmitLog = (level, message, fields, context) => {
+    this.emit(level, message, fields, context)
+  }
 
-  emit(
+  constructor(private readonly options: RunLogSessionOptions) {
+    this.logger = new ContextLogger(this.emitFromContext, {}, {})
+  }
+
+  /** Derive a handler logger with immutable framework-owned metadata. */
+  withContext(context: Omit<LogContext, "run">): Logger {
+    return new ContextLogger(this.emitFromContext, {}, { ...context })
+  }
+
+  /** Flush this execution's broker capture. It never flushes or closes the process provider. */
+  flush(): Promise<void> {
+    this.flushPromise ??= this.flushCapture()
+    return this.flushPromise
+  }
+
+  private emit(
     level: LogLevel,
     message: string,
     fields: LogFields | undefined,
@@ -63,28 +100,24 @@ class RunLoggerCore {
 
     this.writeToProvider(entry)
 
-    if (
-      this.captureClosed ||
-      !this.options.publish ||
-      !this.options.captureEnabled ||
-      !isLevelEnabled(level, this.options.captureLevel)
-    ) {
+    const capture = this.options.capture
+    if (this.captureClosed || !capture || !isLevelEnabled(level, capture.level)) {
       return
     }
 
-    if (this.captured >= this.options.maxLinesPerExecution) {
+    if (this.captured >= capture.maxLinesPerExecution) {
       this.droppedByLineLimit += 1
       return
     }
 
     const record = sanitizeRecord(entry, {
-      maxBytes: this.options.maxRecordBytes,
-      redactPaths: this.options.redactPaths,
-      redactCensor: this.options.redactCensor,
+      maxBytes: capture.maxRecordBytes,
+      redactPaths: capture.redactPaths,
+      redactCensor: capture.redactCensor,
     })
     const bytes = serializedBytes(record)
 
-    if (this.bufferedBytes + bytes > this.options.maxBufferedBytes) {
+    if (this.bufferedBytes + bytes > capture.maxBufferedBytes) {
       this.droppedByBackpressure += 1
       return
     }
@@ -95,8 +128,8 @@ class RunLoggerCore {
     this.bufferedBytes += bytes
 
     if (
-      this.pending.length >= this.options.batchMaxRecords ||
-      this.pendingBytes >= this.options.batchMaxBytes
+      this.pending.length >= capture.batchMaxRecords ||
+      this.pendingBytes >= capture.batchMaxBytes
     ) {
       this.startPump()
     } else {
@@ -104,15 +137,25 @@ class RunLoggerCore {
     }
   }
 
-  async flush(): Promise<void> {
-    if (!this.captureClosed) {
-      this.captureClosed = true
-      this.enqueueTruncationMarker()
-      this.startPump()
-    }
+  private async flushCapture(): Promise<void> {
+    this.captureClosed = true
+
+    // Drain ordinary records first so the truncation marker cannot exceed the hard buffer bound.
+    this.startPump()
+    await this.drain()
+    this.enqueueTruncationMarker()
+    this.startPump()
+    await this.drain()
+  }
+
+  private async drain(): Promise<void> {
     while (this.pumpPromise || this.pending.length > 0) {
       this.startPump()
-      await this.pumpPromise
+      const pump = this.pumpPromise
+      if (!pump) {
+        return
+      }
+      await pump
     }
   }
 
@@ -128,8 +171,9 @@ class RunLoggerCore {
   }
 
   private enqueueTruncationMarker(): void {
+    const capture = this.options.capture
     const droppedLines = this.droppedByLineLimit + this.droppedByBackpressure
-    if (droppedLines === 0 || !this.options.publish || !this.options.captureEnabled) {
+    if (droppedLines === 0 || !capture) {
       return
     }
 
@@ -146,12 +190,19 @@ class RunLoggerCore {
         context: { run: this.options.run },
       },
       {
-        maxBytes: this.options.maxRecordBytes,
+        maxBytes: capture.maxRecordBytes,
         redactPaths: [],
-        redactCensor: this.options.redactCensor,
+        redactCensor: capture.redactCensor,
       }
     )
     const bytes = serializedBytes(marker)
+    if (bytes > capture.maxBufferedBytes) {
+      reportLoggingFailure(
+        "broker capture",
+        new Error("The log truncation marker exceeds the internal capture buffer bound.")
+      )
+      return
+    }
     this.pending.push({ record: marker, bytes })
     this.pendingBytes += bytes
     this.bufferedBytes += bytes
@@ -161,10 +212,14 @@ class RunLoggerCore {
     if (this.flushTimer !== undefined) {
       return
     }
+    const delay = this.options.capture?.batchMaxDelayMs
+    if (delay === undefined) {
+      return
+    }
     this.flushTimer = setTimeout(() => {
       this.flushTimer = undefined
       this.startPump()
-    }, this.options.batchMaxDelayMs)
+    }, delay)
   }
 
   private startPump(): void {
@@ -172,11 +227,12 @@ class RunLoggerCore {
       clearTimeout(this.flushTimer)
       this.flushTimer = undefined
     }
-    if (this.pending.length === 0 || !this.options.publish || this.pumpPromise) {
+    const publish = this.options.capture?.publish
+    if (this.pending.length === 0 || !publish || this.pumpPromise) {
       return
     }
 
-    this.pumpPromise = this.pump().finally(() => {
+    this.pumpPromise = this.pump(publish).finally(() => {
       this.pumpPromise = undefined
       if (this.pending.length > 0) {
         this.startPump()
@@ -184,12 +240,7 @@ class RunLoggerCore {
     })
   }
 
-  private async pump(): Promise<void> {
-    const publish = this.options.publish
-    if (!publish) {
-      return
-    }
-
+  private async pump(publish: LogPublisher): Promise<void> {
     while (this.pending.length > 0) {
       const batch = this.takeBatch()
       try {
@@ -206,11 +257,16 @@ class RunLoggerCore {
   }
 
   private takeBatch(): { readonly records: readonly LogRecord[]; readonly bytes: number } {
+    const capture = this.options.capture
+    if (!capture) {
+      return { records: [], bytes: 0 }
+    }
+
     let count = 0
     let bytes = 0
-    while (count < this.pending.length && count < this.options.batchMaxRecords) {
+    while (count < this.pending.length && count < capture.batchMaxRecords) {
       const next = this.pending[count]!
-      if (count > 0 && bytes + next.bytes > this.options.batchMaxBytes) {
+      if (count > 0 && bytes + next.bytes > capture.batchMaxBytes) {
         break
       }
       bytes += next.bytes
@@ -223,10 +279,10 @@ class RunLoggerCore {
   }
 }
 
-/** Concrete handler façade: binds user fields and framework context separately. */
-class RunLoggerImpl implements Logger {
+/** Handler façade that binds user fields while preserving framework-owned context. */
+class ContextLogger implements Logger {
   constructor(
-    private readonly core: RunLoggerCore,
+    private readonly emit: EmitLog,
     private readonly fields: LogFields,
     private readonly context: Omit<LogContext, "run">
   ) {}
@@ -246,7 +302,7 @@ class RunLoggerImpl implements Logger {
   error(message: string | Error, fields?: LogFields): void {
     try {
       const normalized = normalizeLogError(message, this.merge(fields))
-      this.core.emit("error", normalized.message, normalized.fields, this.context)
+      this.emit("error", normalized.message, normalized.fields, this.context)
     } catch (error) {
       reportLoggingFailure("handler façade", error)
     }
@@ -254,7 +310,7 @@ class RunLoggerImpl implements Logger {
 
   child(bindings: LogFields): Logger {
     try {
-      return new RunLoggerImpl(this.core, { ...this.fields, ...bindings }, this.context)
+      return new ContextLogger(this.emit, { ...this.fields, ...bindings }, this.context)
     } catch (error) {
       reportLoggingFailure("handler façade", error)
       return this
@@ -263,7 +319,7 @@ class RunLoggerImpl implements Logger {
 
   private safeEmit(level: LogLevel, message: string, fields: LogFields | undefined): void {
     try {
-      this.core.emit(level, message, this.merge(fields), this.context)
+      this.emit(level, message, this.merge(fields), this.context)
     } catch (error) {
       reportLoggingFailure("handler façade", error)
     }
@@ -275,37 +331,6 @@ class RunLoggerImpl implements Logger {
     }
     return { ...this.fields, ...fields }
   }
-}
-
-/** Worker-owned logger session. Exactly one instance represents one execution. */
-export interface RunLogSession {
-  readonly logger: Logger
-  /** Derive a handler logger with immutable framework-owned metadata. */
-  withContext(context: Omit<LogContext, "run">): Logger
-  /** Flush captured broker batches. Does not flush or close the process provider. */
-  flush(): Promise<void>
-}
-
-class RunLogSessionImpl implements RunLogSession {
-  readonly logger: Logger
-
-  constructor(private readonly core: RunLoggerCore) {
-    this.logger = new RunLoggerImpl(core, {}, {})
-  }
-
-  /** Derive a handler logger with immutable framework-owned metadata. */
-  withContext(context: Omit<LogContext, "run">): Logger {
-    return new RunLoggerImpl(this.core, {}, { ...context })
-  }
-
-  /** Flush captured broker batches. Does not flush or close the process provider. */
-  flush(): Promise<void> {
-    return this.core.flush()
-  }
-}
-
-export function createRunLogSession(options: RunLoggerCoreOptions): RunLogSession {
-  return new RunLogSessionImpl(new RunLoggerCore(options))
 }
 
 function safeKeys(value: object): string[] {

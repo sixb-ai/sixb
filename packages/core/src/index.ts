@@ -437,18 +437,11 @@ export type {
   LogsObservabilityOptions,
   LogsRuntimeOptions,
   ObservabilityOptions,
-  RunLogSession,
 } from "./logging"
 export {
   ConsoleLogger,
-  DEFAULT_LOG_BATCH_MAX_BYTES,
-  DEFAULT_LOG_BATCH_MAX_DELAY_MS,
-  DEFAULT_LOG_BATCH_MAX_RECORDS,
-  DEFAULT_LOG_MAX_BUFFERED_BYTES,
   DEFAULT_LOGS_MAX_BYTES,
   DEFAULT_LOGS_RETENTION,
-  DEFAULT_MAX_LINES_PER_EXECUTION,
-  DEFAULT_MAX_LOG_RECORD_BYTES,
   isLevelEnabled,
   LOGS_STREAM,
   LogsRuntime,

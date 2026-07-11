@@ -1,5 +1,4 @@
 import type {
-  RunLogSession,
   ValueType,
   WorkflowDefinition,
   WorkflowInterventionNodeDefinition,
@@ -26,6 +25,7 @@ import type {
   RunWorkflowJobInput,
   RunWorkflowResumeJobInput,
   WorkflowJob,
+  WorkflowLogSession,
   WorkflowRunResult,
 } from "../types"
 import type { WorkflowExecutionState, WorkflowNodeExecutorRegistry } from "./node-executor"
@@ -40,7 +40,7 @@ export class WorkflowRunSession {
       readonly job: WorkflowJob
       readonly workflow: WorkflowDefinition
       readonly signal: AbortSignal
-      readonly logSession: RunLogSession
+      readonly logSession: WorkflowLogSession
       readonly valueTypesById: ReadonlyMap<string, ValueType>
       readonly workflowInputSnapshot: WorkflowIOSnapshot
       readonly state: WorkflowExecutionState

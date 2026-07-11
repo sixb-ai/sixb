@@ -12,6 +12,8 @@ import type {
   Storage,
 } from "@sixb/core"
 
+export type PipelineLogSession = ReturnType<LogsRuntime["startExecution"]>
+
 export interface PipelineWorkerContext {
   readonly id: string
   readonly pipelineRunsStorage: PipelineRunStorage

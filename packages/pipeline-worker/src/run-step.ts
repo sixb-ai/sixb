@@ -4,7 +4,6 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepRunRecord,
-  RunLogSession,
 } from "@sixb/core"
 import {
   createStepBookkeepingError,
@@ -18,6 +17,7 @@ import { executeSqlStep } from "./execute-sql-step"
 import { type ResolvedStepInput, resolveStepInputs } from "./step-inputs"
 import type {
   PipelineJob,
+  PipelineLogSession,
   PipelineStepFinishedHandler,
   PipelineStepRunResult,
   PipelineStepStartedHandler,
@@ -36,7 +36,7 @@ export async function runStep(input: {
   readonly stepIndex: number
   readonly job: PipelineJob
   readonly signal: AbortSignal
-  readonly logSession: RunLogSession
+  readonly logSession: PipelineLogSession
   readonly onStepStarted?: PipelineStepStartedHandler
   readonly onStepFinished?: PipelineStepFinishedHandler
 }): Promise<PipelineStepRunResult> {
@@ -143,7 +143,7 @@ async function executeStep(input: {
   readonly step: PipelineStepDefinition
   readonly job: PipelineJob
   readonly signal: AbortSignal
-  readonly logSession: RunLogSession
+  readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<StepExecutionResult> {

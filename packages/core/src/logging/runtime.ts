@@ -1,7 +1,7 @@
 import type { Broker, BrokerRetention, BrokerStreamDefinition } from "../broker"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
-import { ConsoleLogger, noopLoggerProvider } from "./console-logger"
-import { createRunLogSession, type LogPublisher, type RunLogSession } from "./run-logger"
+import { noopLoggerProvider } from "./console-logger"
+import { type LogPublisher, RunLogSession } from "./run-logger"
 import {
   DEFAULT_LOG_BATCH_MAX_BYTES,
   DEFAULT_LOG_BATCH_MAX_DELAY_MS,
@@ -21,22 +21,8 @@ export interface LogsObservabilityOptions {
   readonly level?: LogLevel
   /** Retention overrides merged with the bounded defaults. */
   readonly retention?: BrokerRetention
-  readonly limits?: {
-    /** Captured lines per worker execution. Defaults to 10,000. */
-    readonly maxLinesPerExecution?: number
-    /** Maximum serialized UTF-8 bytes for one broker payload. Defaults to 64 KiB. */
-    readonly maxRecordBytes?: number
-    /** Maximum pending bytes while an append is in flight. Defaults to 1 MiB. */
-    readonly maxBufferedBytes?: number
-  }
-  readonly batching?: {
-    /** Flush immediately after this many records. Defaults to 64. */
-    readonly maxRecords?: number
-    /** Flush immediately after this many serialized bytes. Defaults to 256 KiB. */
-    readonly maxBytes?: number
-    /** Flush a partial batch after this delay. Defaults to 10 ms. */
-    readonly maxDelayMs?: number
-  }
+  /** Captured lines per worker execution. Defaults to 10,000. */
+  readonly maxLinesPerExecution?: number
   readonly redact?: {
     /** Dot paths relative to `fields` (an optional `fields.` prefix is accepted). */
     readonly paths: readonly string[]
@@ -53,7 +39,7 @@ export interface LogsRuntimeOptions {
   readonly projectId: string
   /** Broker backing the `__logs` stream. Absent means output-only logging. */
   readonly broker?: Broker
-  /** Process-level output provider. Defaults to {@link ConsoleLogger}. */
+  /** Optional process-level output provider. Omit for broker-only logging. */
   readonly logger?: LoggerProvider
   readonly observability?: LogsObservabilityOptions
   /** Internal/testing stream override. */
@@ -68,11 +54,6 @@ export class LogsRuntime {
   private readonly captureEnabled: boolean
   private readonly captureLevel: LogLevel
   private readonly maxLinesPerExecution: number
-  private readonly maxRecordBytes: number
-  private readonly maxBufferedBytes: number
-  private readonly batchMaxRecords: number
-  private readonly batchMaxBytes: number
-  private readonly batchMaxDelayMs: number
   private readonly redactPaths: readonly string[]
   private readonly redactCensor: JsonValue
   private readonly stream: BrokerStreamDefinition
@@ -82,35 +63,12 @@ export class LogsRuntime {
     const config = options.observability ?? {}
     this.projectId = options.projectId
     this.broker = options.broker
-    this.provider = options.logger ?? new ConsoleLogger()
+    this.provider = options.logger ?? noopLoggerProvider
     this.captureEnabled = config.enabled ?? true
     this.captureLevel = logLevel(config.level ?? "info", "observability.logs.level")
     this.maxLinesPerExecution = nonNegativeInteger(
-      config.limits?.maxLinesPerExecution ?? DEFAULT_MAX_LINES_PER_EXECUTION,
-      "observability.logs.limits.maxLinesPerExecution"
-    )
-    this.maxRecordBytes = positiveInteger(
-      config.limits?.maxRecordBytes ?? DEFAULT_MAX_LOG_RECORD_BYTES,
-      "observability.logs.limits.maxRecordBytes"
-    )
-    if (this.maxRecordBytes < 256) {
-      throw new TypeError("observability.logs.limits.maxRecordBytes must be at least 256 bytes")
-    }
-    this.maxBufferedBytes = positiveInteger(
-      config.limits?.maxBufferedBytes ?? DEFAULT_LOG_MAX_BUFFERED_BYTES,
-      "observability.logs.limits.maxBufferedBytes"
-    )
-    this.batchMaxRecords = positiveInteger(
-      config.batching?.maxRecords ?? DEFAULT_LOG_BATCH_MAX_RECORDS,
-      "observability.logs.batching.maxRecords"
-    )
-    this.batchMaxBytes = positiveInteger(
-      config.batching?.maxBytes ?? DEFAULT_LOG_BATCH_MAX_BYTES,
-      "observability.logs.batching.maxBytes"
-    )
-    this.batchMaxDelayMs = nonNegativeInteger(
-      config.batching?.maxDelayMs ?? DEFAULT_LOG_BATCH_MAX_DELAY_MS,
-      "observability.logs.batching.maxDelayMs"
+      config.maxLinesPerExecution ?? DEFAULT_MAX_LINES_PER_EXECUTION,
+      "observability.logs.maxLinesPerExecution"
     )
     this.redactPaths = normalizeRedactPaths(config.redact?.paths ?? [])
     this.redactCensor = config.redact?.censor ?? "[REDACTED]"
@@ -120,12 +78,6 @@ export class LogsRuntime {
     )
     if (censorReason) {
       throw new TypeError(censorReason)
-    }
-
-    if (this.maxBufferedBytes < this.maxRecordBytes) {
-      throw new TypeError(
-        "observability.logs.limits.maxBufferedBytes must be greater than or equal to maxRecordBytes"
-      )
     }
 
     this.stream =
@@ -138,20 +90,24 @@ export class LogsRuntime {
 
   /** Start the single logger session owned by one worker execution. */
   startExecution(run: LogRunRef): RunLogSession {
-    return createRunLogSession({
+    const publish = this.publisher()
+    return new RunLogSession({
       run,
       provider: this.provider,
-      publish: this.publisher(),
-      captureEnabled: this.captureEnabled,
-      captureLevel: this.captureLevel,
-      maxLinesPerExecution: this.maxLinesPerExecution,
-      maxRecordBytes: this.maxRecordBytes,
-      maxBufferedBytes: this.maxBufferedBytes,
-      batchMaxRecords: this.batchMaxRecords,
-      batchMaxBytes: this.batchMaxBytes,
-      batchMaxDelayMs: this.batchMaxDelayMs,
-      redactPaths: this.redactPaths,
-      redactCensor: this.redactCensor,
+      capture: publish
+        ? {
+            publish,
+            level: this.captureLevel,
+            maxLinesPerExecution: this.maxLinesPerExecution,
+            maxRecordBytes: DEFAULT_MAX_LOG_RECORD_BYTES,
+            maxBufferedBytes: DEFAULT_LOG_MAX_BUFFERED_BYTES,
+            batchMaxRecords: DEFAULT_LOG_BATCH_MAX_RECORDS,
+            batchMaxBytes: DEFAULT_LOG_BATCH_MAX_BYTES,
+            batchMaxDelayMs: DEFAULT_LOG_BATCH_MAX_DELAY_MS,
+            redactPaths: this.redactPaths,
+            redactCensor: this.redactCensor,
+          }
+        : undefined,
     })
   }
 
@@ -241,13 +197,6 @@ function mergeLogsRetention(retention: BrokerRetention | undefined): BrokerReten
 function logLevel(value: LogLevel, path: string): LogLevel {
   if (value !== "debug" && value !== "info" && value !== "warn" && value !== "error") {
     throw new TypeError(`${path} must be one of: debug, info, warn, error`)
-  }
-  return value
-}
-
-function positiveInteger(value: number, path: string): number {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${path} must be a positive safe integer`)
   }
   return value
 }

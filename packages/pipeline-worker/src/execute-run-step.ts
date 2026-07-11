@@ -5,11 +5,10 @@ import type {
   PipelineDefinition,
   PipelineStepDefinition,
   PipelineStepRunContext,
-  RunLogSession,
 } from "@sixb/core"
 import { PipelineWorkerError, throwIfAborted } from "./errors"
 import { createStepInputs, type ResolvedStepInput } from "./step-inputs"
-import type { PipelineJob, PipelineWorkerContext } from "./types"
+import type { PipelineJob, PipelineLogSession, PipelineWorkerContext } from "./types"
 
 export async function executeRunStep(input: {
   readonly runtime: PipelineWorkerContext
@@ -17,7 +16,7 @@ export async function executeRunStep(input: {
   readonly step: PipelineStepDefinition
   readonly job: PipelineJob
   readonly signal: AbortSignal
-  readonly logSession: RunLogSession
+  readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<{ readonly version: DatasetVersion; readonly rowsWritten: number }> {

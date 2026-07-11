@@ -12,6 +12,15 @@ import {
   noopLoggerProvider,
   resolveLogsRuntime,
 } from "../src/logging"
+import { type RunLogCaptureOptions, RunLogSession } from "../src/logging/run-logger"
+import {
+  DEFAULT_LOG_BATCH_MAX_BYTES,
+  DEFAULT_LOG_BATCH_MAX_DELAY_MS,
+  DEFAULT_LOG_BATCH_MAX_RECORDS,
+  DEFAULT_LOG_MAX_BUFFERED_BYTES,
+  DEFAULT_MAX_LINES_PER_EXECUTION,
+  DEFAULT_MAX_LOG_RECORD_BYTES,
+} from "../src/logging/stream"
 
 const PROJECT = "logging-tests"
 
@@ -31,7 +40,7 @@ function recordingProvider(): { provider: LoggerProvider; entries: LogEntry[] } 
 describe("LogsRuntime broker capture", () => {
   test("publishes a routed, run-tagged record", async () => {
     const broker = new InMemoryBroker()
-    const logs = new LogsRuntime({ projectId: PROJECT, broker, logger: noopLoggerProvider })
+    const logs = new LogsRuntime({ projectId: PROJECT, broker })
     const session = logs.startExecution({ kind: "sync", id: "run-1" })
 
     session.logger.info("Reviewing invoice", { invoice: "INV-1" })
@@ -47,6 +56,25 @@ describe("LogsRuntime broker capture", () => {
       fields: { invoice: "INV-1" },
       context: { run: { kind: "sync", id: "run-1" } },
     })
+  })
+
+  test("defaults to broker-only logging without an output provider", async () => {
+    const infoSpy = spyOn(console, "info").mockImplementation(() => undefined)
+    try {
+      const broker = new InMemoryBroker()
+      const logs = new LogsRuntime({ projectId: PROJECT, broker })
+      const session = logs.startExecution({ kind: "sync", id: "broker-only" })
+
+      session.logger.info("captured without stdout")
+      await session.flush()
+
+      expect(infoSpy).not.toHaveBeenCalled()
+      expect((await readLines(broker)).map((line) => line.message)).toEqual([
+        "captured without stdout",
+      ])
+    } finally {
+      infoSpy.mockRestore()
+    }
   })
 
   test("uses a capture level independent from the output provider", async () => {
@@ -74,7 +102,7 @@ describe("LogsRuntime broker capture", () => {
       projectId: PROJECT,
       broker,
       logger: noopLoggerProvider,
-      observability: { limits: { maxLinesPerExecution: 3 } },
+      observability: { maxLinesPerExecution: 3 },
     })
     const session = logs.startExecution({ kind: "pipeline", id: "run-3" })
 
@@ -138,22 +166,23 @@ describe("LogsRuntime broker capture", () => {
       broker,
       logger: provider,
       observability: {
-        limits: { maxRecordBytes: 300, maxBufferedBytes: 1_000 },
         redact: { paths: ["credentials.token"] },
       },
     })
     const session = logs.startExecution({ kind: "sync", id: "run-6" })
-    const body = "x".repeat(1_000)
+    const body = "x".repeat(DEFAULT_MAX_LOG_RECORD_BYTES * 2)
 
     session.logger.info(body, { credentials: { token: "secret" }, body })
     await session.flush()
 
-    expect(entries[0]?.message).toHaveLength(1_000)
+    expect(entries[0]?.message).toHaveLength(DEFAULT_MAX_LOG_RECORD_BYTES * 2)
     expect((entries[0]?.fields?.credentials as { token?: string } | undefined)?.token).toBe(
       "secret"
     )
     const line = (await readLines(broker))[0]!
-    expect(new TextEncoder().encode(JSON.stringify(line)).byteLength).toBeLessThanOrEqual(300)
+    expect(new TextEncoder().encode(JSON.stringify(line)).byteLength).toBeLessThanOrEqual(
+      DEFAULT_MAX_LOG_RECORD_BYTES
+    )
     expect(line.fields).toMatchObject({ sixb_truncated: true })
   })
 
@@ -184,51 +213,56 @@ describe("LogsRuntime broker capture", () => {
   })
 
   test("batches ordered broker appends", async () => {
-    const broker = new CountingBroker()
-    const logs = new LogsRuntime({
-      projectId: PROJECT,
-      broker,
-      logger: noopLoggerProvider,
-      observability: { batching: { maxRecords: 4, maxBytes: 1_000_000, maxDelayMs: 60_000 } },
+    const batches: LogRecord[][] = []
+    const session = new RunLogSession({
+      run: { kind: "sync", id: "run-7" },
+      provider: noopLoggerProvider,
+      capture: captureOptions(
+        async (records) => {
+          batches.push([...records])
+        },
+        { batchMaxRecords: 4, batchMaxBytes: 1_000_000, batchMaxDelayMs: 60_000 }
+      ),
     })
-    const session = logs.startExecution({ kind: "sync", id: "run-7" })
 
     for (let index = 0; index < 10; index += 1) {
       session.logger.info(`line ${index}`)
     }
     await session.flush()
 
-    expect(broker.appendSizes).toEqual([4, 4, 2])
-    expect((await readLines(broker)).map((line) => line.message)).toEqual(
+    expect(batches.map((batch) => batch.length)).toEqual([4, 4, 2])
+    expect(batches.flat().map((line) => line.message)).toEqual(
       Array.from({ length: 10 }, (_, index) => `line ${index}`)
     )
   })
 
-  test("keeps one append in flight and bounds queued bytes", async () => {
-    const broker = new BlockingBroker()
-    const logs = new LogsRuntime({
-      projectId: PROJECT,
-      broker,
-      logger: noopLoggerProvider,
-      observability: {
-        limits: { maxRecordBytes: 256, maxBufferedBytes: 512 },
-        batching: { maxRecords: 1, maxBytes: 256, maxDelayMs: 60_000 },
-      },
+  test("keeps one publish in flight and bounds the truncation marker", async () => {
+    const publisher = new BlockingPublisher()
+    const session = new RunLogSession({
+      run: { kind: "sync", id: "run-backpressure" },
+      provider: noopLoggerProvider,
+      capture: captureOptions(publisher.publish, {
+        maxRecordBytes: 256,
+        maxBufferedBytes: 512,
+        batchMaxRecords: 1,
+        batchMaxBytes: 256,
+        batchMaxDelayMs: 60_000,
+      }),
     })
-    const session = logs.startExecution({ kind: "sync", id: "run-backpressure" })
 
     for (let index = 0; index < 20; index += 1) {
       session.logger.info(`line ${index}`)
     }
     const flushing = session.flush()
     await Bun.sleep(0)
-    broker.release()
+    publisher.release()
     await flushing
 
-    const lines = await readLines(broker)
-    expect(broker.maxConcurrentAppends).toBe(1)
+    const lines = publisher.records
+    expect(publisher.maxConcurrentPublishes).toBe(1)
     expect(lines.length).toBeLessThan(20)
     expect(Number(lines.at(-1)?.fields?.backpressure)).toBeGreaterThan(0)
+    expect(publisher.maxBatchBytes).toBeLessThanOrEqual(512)
   })
 
   test("can disable broker forwarding without disabling the provider", async () => {
@@ -266,6 +300,13 @@ describe("logging failure isolation and lifecycle", () => {
           observability: { retention: { maxBytes: -1 } },
         })
     ).toThrow("observability.logs.retention.maxBytes")
+    expect(
+      () =>
+        new LogsRuntime({
+          projectId: PROJECT,
+          observability: { maxLinesPerExecution: -1 },
+        })
+    ).toThrow("observability.logs.maxLinesPerExecution")
     expect(
       () =>
         new LogsRuntime({
@@ -356,23 +397,34 @@ describe("resolveLogsRuntime", () => {
   })
 })
 
-class CountingBroker extends InMemoryBroker {
-  readonly appendSizes: number[] = []
-
-  override append(params: Parameters<InMemoryBroker["append"]>[0]) {
-    this.appendSizes.push(params.records.length)
-    return super.append(params)
+function captureOptions(
+  publish: RunLogCaptureOptions["publish"],
+  overrides: Partial<RunLogCaptureOptions> = {}
+): RunLogCaptureOptions {
+  return {
+    publish,
+    level: "debug",
+    maxLinesPerExecution: DEFAULT_MAX_LINES_PER_EXECUTION,
+    maxRecordBytes: DEFAULT_MAX_LOG_RECORD_BYTES,
+    maxBufferedBytes: DEFAULT_LOG_MAX_BUFFERED_BYTES,
+    batchMaxRecords: DEFAULT_LOG_BATCH_MAX_RECORDS,
+    batchMaxBytes: DEFAULT_LOG_BATCH_MAX_BYTES,
+    batchMaxDelayMs: DEFAULT_LOG_BATCH_MAX_DELAY_MS,
+    redactPaths: [],
+    redactCensor: "[REDACTED]",
+    ...overrides,
   }
 }
 
-class BlockingBroker extends InMemoryBroker {
+class BlockingPublisher {
   private readonly gate: Promise<void>
   private releaseGate: () => void = () => undefined
-  private activeAppends = 0
-  maxConcurrentAppends = 0
+  private activePublishes = 0
+  readonly records: LogRecord[] = []
+  maxConcurrentPublishes = 0
+  maxBatchBytes = 0
 
   constructor() {
-    super()
     this.gate = new Promise((resolve) => {
       this.releaseGate = resolve
     })
@@ -382,14 +434,21 @@ class BlockingBroker extends InMemoryBroker {
     this.releaseGate()
   }
 
-  override async append(params: Parameters<InMemoryBroker["append"]>[0]) {
-    this.activeAppends += 1
-    this.maxConcurrentAppends = Math.max(this.maxConcurrentAppends, this.activeAppends)
+  readonly publish = async (records: readonly LogRecord[]): Promise<void> => {
+    this.activePublishes += 1
+    this.maxConcurrentPublishes = Math.max(this.maxConcurrentPublishes, this.activePublishes)
     try {
       await this.gate
-      return await super.append(params)
+      this.records.push(...records)
+      this.maxBatchBytes = Math.max(
+        this.maxBatchBytes,
+        records.reduce(
+          (total, record) => total + new TextEncoder().encode(JSON.stringify(record)).byteLength,
+          0
+        )
+      )
     } finally {
-      this.activeAppends -= 1
+      this.activePublishes -= 1
     }
   }
 }

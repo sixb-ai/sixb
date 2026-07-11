@@ -88,7 +88,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
-  /** Process-level output provider. Defaults to `ConsoleLogger`. */
+  /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions

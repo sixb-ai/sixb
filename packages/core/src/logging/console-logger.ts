@@ -19,7 +19,7 @@ const CONSOLE_METHOD: Record<LogLevel, "debug" | "info" | "warn" | "error"> = {
   error: "error",
 }
 
-/** Default output provider. Capture filtering is configured independently. */
+/** Opt-in console output provider. Broker capture is configured independently. */
 export class ConsoleLogger implements LoggerProvider {
   readonly level: LogLevel
 
