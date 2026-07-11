@@ -110,7 +110,7 @@ const approveInvoiceMatch = defineIntervention("approve-invoice-match", {
   })
 
 const highValueTransaction = defineSchedule("transaction.high-value")
-  .on(events(Transaction).updated())
+  .on(events.object(Transaction).updated())
   .where((event) => event.object.p.amount.gt(500))
 
 describe("defineWorkflowStep", () => {

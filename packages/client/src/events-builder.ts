@@ -1,7 +1,7 @@
 /**
  * Fluent event-subscription builder (`@sixb/client/events`).
  *
- * `events(Type)` mirrors `objects(Type)`: an immutable, generic-threaded builder
+ * `events.object(Type)` creates an immutable, generic-threaded builder
  * that accumulates an event-filter spec and types the payload from the same
  * `Type.p.*` / `Type.l.*` tokens as `expand()`. Channels (`.telemetry()`,
  * `.created()`, `.updated()`, `.link(...)`) narrow both the event type and the
@@ -177,7 +177,7 @@ export interface EventSubscribeOptions {
   readonly onStateChange?: (state: EventSocketState) => void
 }
 
-/** Object-scoped builder: `events(Type)`. Channels narrow the event + payload. */
+/** Object-scoped builder: `events.object(Type)`. Channels narrow the event + payload. */
 export interface EventsBuilder<
   TObjectType extends ObjectTypeWithTokens,
   TEvent extends SixbEvent = ObjectScopedEvent,
@@ -491,7 +491,7 @@ class EventsBuilderImpl {
     if (!objectType) {
       throw new Error("[SixbClient] Link event selectors require an object type.")
     }
-    const selector = selectEvents(objectType).link(link)
+    const selector = selectEvents.object(objectType).link(link)
     return new EventsBuilderImpl({
       ...this.params,
       linkToken: link,
@@ -634,7 +634,7 @@ function createLinkPropertyTokens(linkToken: LinkToken): Record<string, Property
   )
 }
 
-// ── Public `events` callable + topic namespace ────────────────────────────────
+// ── Public `events` namespace ────────────────────────────────────────────────
 
 export interface SixbEventsClientOptions {
   /** hey-api client override (base url). Defaults to the global client. */
@@ -643,7 +643,7 @@ export interface SixbEventsClientOptions {
 
 export interface SixbEventsApi {
   /** Events for one object type, narrowed by channel + `.object(key)`. */
-  <TObjectType extends ObjectTypeWithTokens>(
+  object<TObjectType extends ObjectTypeWithTokens>(
     objectType: TObjectType,
     options?: SixbEventsClientOptions
   ): EventsBuilder<TObjectType>
@@ -702,16 +702,15 @@ function actionBuilder<TEvent extends SixbEvent>(
   return createBuilder({ topic: "actions" }, options) as unknown as EventsActionBuilder<TEvent>
 }
 
-const eventsApi = (<TObjectType extends ObjectTypeWithTokens>(
-  objectType: TObjectType,
-  options?: SixbEventsClientOptions
-): EventsBuilder<TObjectType> => {
-  const selector = selectEvents(objectType)
+const eventsApi = {} as SixbEventsApi
+
+eventsApi.object = (objectType, options) => {
+  const selector = selectEvents.object(objectType)
   return createBuilder(eventSelectorSpec(selector), options, {
     objectType,
     selector: selector as CoreObjectEventSelectorBuilder<ObjectTypeWithTokens>,
-  }) as unknown as EventsBuilder<TObjectType>
-}) as SixbEventsApi
+  }) as unknown as EventsBuilder<typeof objectType>
+}
 
 eventsApi.all = (options) => createBuilder({}, options) as unknown as EventsTopicBuilder<SixbEvent>
 eventsApi.objects = (options) => topicBuilder("objects", options)

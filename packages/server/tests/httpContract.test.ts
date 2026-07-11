@@ -140,7 +140,7 @@ const inspectDeviceStep = defineWorkflowStep("inspect-device")
   .output({ deviceId: "string", healthy: "boolean" })
   .run(({ input }) => ({ deviceId: input.deviceId, healthy: true }))
 
-const deviceUpdated = defineSchedule("device-updated").on(events(Device).updated())
+const deviceUpdated = defineSchedule("device-updated").on(events.object(Device).updated())
 
 // Widen to the base type at the definition site: materializing these builder
 // result types against the wide ontology generic is a known TS2589 landmine.

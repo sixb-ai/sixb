@@ -73,13 +73,13 @@ function event(overrides: { type: string; topic: string } & Record<string, unkno
 
 describe("events selector builder", () => {
   test("builds object mutation selectors", () => {
-    expect(eventSelectorSpec(events(Invoice).created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).created())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.created"],
     })
 
-    expect(eventSelectorSpec(events(Invoice).p.amount.updated())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).p.amount.updated())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.updated"],
@@ -87,7 +87,7 @@ describe("events selector builder", () => {
       propertyOperation: "updated",
     })
 
-    expect(eventSelectorSpec(events(Invoice).p.amount.created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).p.amount.created())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.created", "object.updated"],
@@ -97,14 +97,16 @@ describe("events selector builder", () => {
   })
 
   test("builds link mutation selectors", () => {
-    expect(eventSelectorSpec(events(Invoice).link(Invoice.l.payments).created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).link(Invoice.l.payments).created())).toEqual({
       objectTypeId: "Invoice",
       topic: "links",
       types: ["link.created"],
       linkId: "payments",
     })
 
-    expect(eventSelectorSpec(events(Invoice).link(Invoice.l.payments).p.amount.updated())).toEqual({
+    expect(
+      eventSelectorSpec(events.object(Invoice).link(Invoice.l.payments).p.amount.updated())
+    ).toEqual({
       objectTypeId: "Invoice",
       topic: "links",
       types: ["link.updated"],
@@ -151,7 +153,7 @@ describe("events selector builder", () => {
 
 describe("buildEventSelectorPredicate", () => {
   test("matches object property changes", () => {
-    const matches = buildEventSelectorPredicate(events(Invoice).p.amount.updated())
+    const matches = buildEventSelectorPredicate(events.object(Invoice).p.amount.updated())
 
     expect(
       matches(
@@ -189,7 +191,7 @@ describe("buildEventSelectorPredicate", () => {
   })
 
   test("matches a property created on an existing object", () => {
-    const matches = buildEventSelectorPredicate(events(Invoice).p.amount.created())
+    const matches = buildEventSelectorPredicate(events.object(Invoice).p.amount.created())
 
     expect(
       matches(
@@ -211,7 +213,7 @@ describe("buildEventSelectorPredicate", () => {
 
   test("matches link property changes", () => {
     const matches = buildEventSelectorPredicate(
-      events(Invoice).link(Invoice.l.payments).p.amount.created()
+      events.object(Invoice).link(Invoice.l.payments).p.amount.created()
     )
 
     expect(

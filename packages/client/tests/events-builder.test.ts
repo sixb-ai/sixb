@@ -71,12 +71,12 @@ const telemetryEvent = event({
 })
 
 describe("events builder filter spec", () => {
-  test("events(Type) seeds the object type id", () => {
-    expect(events(Sensor).ir).toEqual({ objectTypeId: "Sensor" })
+  test("events.object(Type) seeds the object type id", () => {
+    expect(events.object(Sensor).ir).toEqual({ objectTypeId: "Sensor" })
   })
 
   test("telemetry(token) narrows topic, types and property", () => {
-    expect(events(Sensor).telemetry(Sensor.p.indoorTemperature).ir).toEqual({
+    expect(events.object(Sensor).telemetry(Sensor.p.indoorTemperature).ir).toEqual({
       objectTypeId: "Sensor",
       topic: "telemetry",
       types: ["telemetry.appended"],
@@ -85,7 +85,7 @@ describe("events builder filter spec", () => {
   })
 
   test("object(key) is orthogonal to the channel", () => {
-    expect(events(Sensor).object("sensor-1").telemetry().ir).toEqual({
+    expect(events.object(Sensor).object("sensor-1").telemetry().ir).toEqual({
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
       topic: "telemetry",
@@ -94,12 +94,12 @@ describe("events builder filter spec", () => {
   })
 
   test("upserted / deleted / linked set their types", () => {
-    expect(events(Sensor).upserted().ir.types).toEqual(["object.upserted"])
-    expect(events(Sensor).deleted().ir).toMatchObject({
+    expect(events.object(Sensor).upserted().ir.types).toEqual(["object.upserted"])
+    expect(events.object(Sensor).deleted().ir).toMatchObject({
       topic: "objects",
       types: ["object.deleted"],
     })
-    expect(events(Sensor).linked(Sensor.l.zone).ir).toMatchObject({
+    expect(events.object(Sensor).linked(Sensor.l.zone).ir).toMatchObject({
       topic: "links",
       types: ["link.upserted", "link.removed"],
       linkId: "zone",
@@ -107,39 +107,39 @@ describe("events builder filter spec", () => {
   })
 
   test("created / updated / property / link selectors use mutation facts", () => {
-    expect(events(Sensor).created().ir).toMatchObject({
+    expect(events.object(Sensor).created().ir).toMatchObject({
       topic: "objects",
       types: ["object.created"],
     })
-    expect(events(Sensor).p.status.updated().ir).toMatchObject({
+    expect(events.object(Sensor).p.status.updated().ir).toMatchObject({
       topic: "objects",
       types: ["object.updated"],
       propertyId: "status",
       propertyOperation: "updated",
     })
-    expect(events(Sensor).p.status.created().ir).toMatchObject({
+    expect(events.object(Sensor).p.status.created().ir).toMatchObject({
       topic: "objects",
       types: ["object.created", "object.updated"],
       propertyId: "status",
       propertyOperation: "created",
     })
-    expect(events(Sensor).p.status.created().updated().ir).toMatchObject({
+    expect(events.object(Sensor).p.status.created().updated().ir).toMatchObject({
       types: ["object.updated"],
       propertyOperation: "updated",
     })
-    expect(events(Sensor).link(Sensor.l.zone).created().ir).toMatchObject({
+    expect(events.object(Sensor).link(Sensor.l.zone).created().ir).toMatchObject({
       topic: "links",
       types: ["link.created"],
       linkId: "zone",
     })
-    expect(events(Sensor).link(Sensor.l.zone).p.rank.updated().ir).toMatchObject({
+    expect(events.object(Sensor).link(Sensor.l.zone).p.rank.updated().ir).toMatchObject({
       topic: "links",
       types: ["link.updated"],
       linkId: "zone",
       propertyId: "rank",
       propertyOperation: "updated",
     })
-    expect(events(Sensor).link(Sensor.l.zone).p.rank.created().ir).toMatchObject({
+    expect(events.object(Sensor).link(Sensor.l.zone).p.rank.created().ir).toMatchObject({
       topic: "links",
       types: ["link.created", "link.updated"],
       linkId: "zone",
@@ -149,7 +149,7 @@ describe("events builder filter spec", () => {
   })
 
   test("the builder is immutable (copy-on-write)", () => {
-    const base = events(Sensor)
+    const base = events.object(Sensor)
     base.telemetry()
     expect(base.ir).toEqual({ objectTypeId: "Sensor" })
   })
@@ -215,7 +215,7 @@ describe("events builder filter spec", () => {
 describe("buildEventPredicate", () => {
   test("filters telemetry by objectType, object and property", () => {
     const matches = buildEventPredicate(
-      events(Sensor).object("sensor-1").telemetry(Sensor.p.indoorTemperature).ir
+      events.object(Sensor).object("sensor-1").telemetry(Sensor.p.indoorTemperature).ir
     )
     expect(matches(telemetryEvent)).toBe(true)
     expect(matches({ ...telemetryEvent, topic: "objects" } as SixbEvent)).toBe(false)
@@ -232,7 +232,9 @@ describe("buildEventPredicate", () => {
   })
 
   test("links match on the source side", () => {
-    const matches = buildEventPredicate(events(Sensor).object("sensor-1").linked(Sensor.l.zone).ir)
+    const matches = buildEventPredicate(
+      events.object(Sensor).object("sensor-1").linked(Sensor.l.zone).ir
+    )
     const linkEvent = event({
       type: "link.upserted",
       topic: "links",
@@ -251,7 +253,7 @@ describe("buildEventPredicate", () => {
   })
 
   test("property selectors match propertyChanges", () => {
-    const matches = buildEventPredicate(events(Sensor).p.status.updated().ir)
+    const matches = buildEventPredicate(events.object(Sensor).p.status.updated().ir)
     const changed = event({
       type: "object.updated",
       topic: "objects",
@@ -411,7 +413,8 @@ describe("builder subscribe over the transport", () => {
 
   test("sends a scoped subscribe message and delivers only matching events", () => {
     const received: SixbEvent[] = []
-    const unsubscribe = events(Sensor)
+    const unsubscribe = events
+      .object(Sensor)
       .object("sensor-1")
       .telemetry(Sensor.p.indoorTemperature)
       .subscribe((event) => received.push(event))

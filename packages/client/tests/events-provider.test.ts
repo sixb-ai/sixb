@@ -83,10 +83,10 @@ describe("createEventsRegistry", () => {
   test("shares one socket and closes it after the last unregister", async () => {
     const registry = createEventsRegistry({ closeDelayMs: 0 })
 
-    const off1 = registry.register(events(Device).telemetry().ir, () => {})
+    const off1 = registry.register(events.object(Device).telemetry().ir, () => {})
     expect(FakeWebSocket.instances).toHaveLength(1)
 
-    const off2 = registry.register(events(Sensor).telemetry().ir, () => {})
+    const off2 = registry.register(events.object(Sensor).telemetry().ir, () => {})
     expect(FakeWebSocket.instances).toHaveLength(1)
 
     const ws = FakeWebSocket.instances[0]
@@ -104,13 +104,13 @@ describe("createEventsRegistry", () => {
   test("reuses the socket when a subscriber re-registers within the close window", async () => {
     const registry = createEventsRegistry({ closeDelayMs: 50 })
 
-    const off = registry.register(events(Device).telemetry().ir, () => {})
+    const off = registry.register(events.object(Device).telemetry().ir, () => {})
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
 
     off()
     // Re-register before the pending close fires.
-    registry.register(events(Sensor).telemetry().ir, () => {})
+    registry.register(events.object(Sensor).telemetry().ir, () => {})
     await tick(80)
 
     expect(ws.closed).toBe(false)
@@ -120,7 +120,7 @@ describe("createEventsRegistry", () => {
   test("resumes from the last cursor after a true close then reopen", async () => {
     const registry = createEventsRegistry({ closeDelayMs: 0 })
 
-    const off = registry.register(events(Device).telemetry().ir, () => {})
+    const off = registry.register(events.object(Device).telemetry().ir, () => {})
     const ws1 = FakeWebSocket.instances[0]
     if (!ws1) throw new Error("expected a websocket")
     ws1.onopen?.()
@@ -130,7 +130,7 @@ describe("createEventsRegistry", () => {
     await tick()
     expect(ws1.closed).toBe(true)
 
-    registry.register(events(Sensor).telemetry().ir, () => {})
+    registry.register(events.object(Sensor).telemetry().ir, () => {})
     const ws2 = FakeWebSocket.instances[1]
     if (!ws2) throw new Error("expected a reopen")
     ws2.onopen?.()
@@ -142,10 +142,10 @@ describe("createEventsRegistry", () => {
     const errors1: string[] = []
     const errors2: string[] = []
 
-    registry.register(events(Device).telemetry().ir, () => {}, {
+    registry.register(events.object(Device).telemetry().ir, () => {}, {
       onError: (message) => errors1.push(message),
     })
-    registry.register(events(Sensor).telemetry().ir, () => {}, {
+    registry.register(events.object(Sensor).telemetry().ir, () => {}, {
       onError: (message) => errors2.push(message),
     })
 
@@ -163,8 +163,8 @@ describe("createEventsRegistry", () => {
     const deviceEvents: SixbEvent[] = []
     const sensorEvents: SixbEvent[] = []
 
-    registry.register(events(Device).telemetry().ir, (event) => deviceEvents.push(event))
-    registry.register(events(Sensor).telemetry().ir, (event) => sensorEvents.push(event))
+    registry.register(events.object(Device).telemetry().ir, (event) => deviceEvents.push(event))
+    registry.register(events.object(Sensor).telemetry().ir, (event) => sensorEvents.push(event))
 
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
@@ -181,14 +181,14 @@ describe("createEventsRegistry", () => {
 
   test("syncs a late subscriber to the current connection state", () => {
     const registry = createEventsRegistry()
-    registry.register(events(Device).telemetry().ir, () => {})
+    registry.register(events.object(Device).telemetry().ir, () => {})
 
     const ws = FakeWebSocket.instances[0]
     if (!ws) throw new Error("expected a websocket")
     ws.onopen?.()
 
     const states: { connected: boolean }[] = []
-    registry.register(events(Sensor).telemetry().ir, () => {}, {
+    registry.register(events.object(Sensor).telemetry().ir, () => {}, {
       onStateChange: (state) => states.push(state),
     })
 

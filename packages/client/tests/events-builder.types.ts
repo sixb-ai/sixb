@@ -1,4 +1,4 @@
-// Typecheck-only proof for the `events(Type)` builder: channels must narrow the
+// Typecheck-only proof for the `events.object(Type)` builder: channels must narrow the
 // event AND type the payload from the ontology, wrong-channel access must error,
 // and `.upserted()` on a wide object type must survive `Object.entries().map()`
 // WITHOUT tripping TS2589 — the recursion-prone path real components hit.
@@ -52,10 +52,14 @@ const importReadings = defineSync("import-readings")
   .intoDataset(readings)
 const normalizeReadings = definePipeline("normalize-readings")
 
+// @ts-expect-error event categories are explicit; the facade is not callable
+events(Sensor)
+
 // ── Channels narrow the payload ───────────────────────────────────────────────
 
 // `.telemetry(token)` → the property's ontology-typed value.
-events(Sensor)
+events
+  .object(Sensor)
   .telemetry(Sensor.p.indoorTemperature)
   .subscribe((event) => {
     const value: number = event.payload.value
@@ -100,7 +104,8 @@ function useRunEventsTypeProof() {
 void useRunEventsTypeProof
 
 // `.telemetry(boolean prop)` → boolean value.
-events(Sensor)
+events
+  .object(Sensor)
   .telemetry(Sensor.p.online)
   .subscribe((event) => {
     const value: boolean = event.payload.value
@@ -108,7 +113,8 @@ events(Sensor)
   })
 
 // `.telemetry()` with no token → untyped value.
-events(Sensor)
+events
+  .object(Sensor)
   .telemetry()
   .subscribe((event) => {
     const value: unknown = event.payload.value
@@ -118,7 +124,8 @@ events(Sensor)
   })
 
 // `.upserted()` → ontology-typed `payload.properties`.
-events(Sensor)
+events
+  .object(Sensor)
   .upserted()
   .subscribe((event) => {
     const name: string = event.payload.properties.name
@@ -128,7 +135,8 @@ events(Sensor)
   })
 
 // `.deleted()` → identity payload, no `properties`.
-events(Sensor)
+events
+  .object(Sensor)
   .deleted()
   .subscribe((event) => {
     const primaryId: string = event.payload.primaryId
@@ -137,7 +145,8 @@ events(Sensor)
     void primaryId
   })
 
-events(Sensor)
+events
+  .object(Sensor)
   .created()
   .subscribe((event) => {
     const name: string = event.payload.properties.name
@@ -145,7 +154,8 @@ events(Sensor)
     void [name, change]
   })
 
-events(Sensor)
+events
+  .object(Sensor)
   .p.name.updated()
   .subscribe((event) => {
     const change = event.payload.propertyChanges.name
@@ -159,7 +169,8 @@ events(Sensor)
 // `.linked(token)` validates the token against the type's links and yields the
 // links event. The token does NOT narrow the payload — every link event shares
 // the same shape — so this asserts the event type, not a per-link payload.
-events(Sensor)
+events
+  .object(Sensor)
   .linked(Sensor.l.zone)
   .subscribe((event) => {
     const linkId: string = event.payload.linkId
@@ -167,7 +178,8 @@ events(Sensor)
     void [linkId, sourceId]
   })
 
-events(Sensor)
+events
+  .object(Sensor)
   .link(Sensor.l.zone)
   .created()
   .subscribe((event) => {
@@ -176,7 +188,8 @@ events(Sensor)
     void [linkId, change]
   })
 
-events(Sensor)
+events
+  .object(Sensor)
   .link(Sensor.l.zone)
   .p.rank.updated()
   .subscribe((event) => {
@@ -185,27 +198,29 @@ events(Sensor)
   })
 
 // @ts-expect-error — `.linked` requires a link token, not a property token.
-events(Sensor).linked(Sensor.p.indoorTemperature)
+events.object(Sensor).linked(Sensor.p.indoorTemperature)
 
 // @ts-expect-error — `.link` requires a link token, not a property token.
-events(Sensor).link(Sensor.p.indoorTemperature)
+events.object(Sensor).link(Sensor.p.indoorTemperature)
 
 // @ts-expect-error — missing object property.
-events(Sensor).p.missing
+events.object(Sensor).p.missing
 
 // @ts-expect-error — missing link property.
-events(Sensor).link(Sensor.l.zone).p.missing
+events.object(Sensor).link(Sensor.l.zone).p.missing
 
 // `.object(key)` is orthogonal — it preserves the channel's event type, in
 // either order.
-events(Sensor)
+events
+  .object(Sensor)
   .object("sensor-1")
   .telemetry(Sensor.p.indoorTemperature)
   .subscribe((event) => {
     const value: number = event.payload.value
     void value
   })
-events(Sensor)
+events
+  .object(Sensor)
   .telemetry(Sensor.p.indoorTemperature)
   .object("sensor-1")
   .subscribe((event) => {
@@ -215,7 +230,8 @@ events(Sensor)
 
 // ── Wrong-channel / wrong-token access is rejected ────────────────────────────
 
-events(Sensor)
+events
+  .object(Sensor)
   .telemetry()
   .subscribe((event) => {
     // @ts-expect-error — a telemetry payload has no `properties`.
@@ -223,7 +239,7 @@ events(Sensor)
   })
 
 // @ts-expect-error — a property token from another object type is rejected.
-events(Sensor).telemetry(Zone.p.label)
+events.object(Sensor).telemetry(Zone.p.label)
 
 // ── Topic namespace ───────────────────────────────────────────────────────────
 
@@ -314,7 +330,8 @@ const WideThing = defineObjectType({
   ],
 })
 
-events(WideThing)
+events
+  .object(WideThing)
   .upserted()
   .subscribe((event) => {
     const summary: string[] = Object.entries(event.payload.properties).map(
@@ -326,21 +343,21 @@ events(WideThing)
 // ── Hooks infer the builder's event type ──────────────────────────────────────
 
 function useSensorLive(): void {
-  useEvents(events(Sensor).telemetry(Sensor.p.indoorTemperature), (event) => {
+  useEvents(events.object(Sensor).telemetry(Sensor.p.indoorTemperature), (event) => {
     const value: number = event.payload.value
     void value
   })
 
-  useEvents(events(Sensor).p.name.updated(), (event) => {
+  useEvents(events.object(Sensor).p.name.updated(), (event) => {
     const change = event.payload.propertyChanges.name
     void change
   })
 
-  const { values } = useLatest(events(Sensor).object("sensor-1").telemetry())
+  const { values } = useLatest(events.object(Sensor).object("sensor-1").telemetry())
   const reading: number | string | boolean | undefined = values.indoorTemperature?.value
   void reading
 
-  const { byObject } = useLatestByObject(events(Sensor).telemetry())
+  const { byObject } = useLatestByObject(events.object(Sensor).telemetry())
   void byObject
 
   useInvalidateOnEvent(events.workflows(), (event) => [["workflow", event.payload.runId]], {

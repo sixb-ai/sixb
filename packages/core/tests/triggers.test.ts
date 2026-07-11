@@ -126,7 +126,7 @@ describe("isRunTrigger", () => {
 describe("event schedules", () => {
   test("builds an inert link event schedule with an edge condition", () => {
     const schedule = defineSchedule("invoice.high-value-payment")
-      .on(events(Invoice).link(Invoice.l.payments).created())
+      .on(events.object(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.p.amount.gt(500))
 
     expect(schedule).toEqual({
@@ -155,7 +155,7 @@ describe("event schedules", () => {
   })
 
   test("supports basic source-only schedules", () => {
-    const schedule = defineSchedule("invoice.created").on(events(Invoice).created())
+    const schedule = defineSchedule("invoice.created").on(events.object(Invoice).created())
 
     expect(schedule).toMatchObject({
       kind: "schedule",
@@ -174,7 +174,7 @@ describe("event schedules", () => {
 
   test("supports grouped object predicates", () => {
     const schedule = defineSchedule("invoice.high-value-usd")
-      .on(events(Invoice).link(Invoice.l.payments).updated())
+      .on(events.object(Invoice).link(Invoice.l.payments).updated())
       .where((event) =>
         event.link.all(event.link.p.amount.gt(500), event.link.p.currency.eq("USD"))
       )
@@ -194,7 +194,7 @@ describe("event schedules", () => {
 
   test("supports typed target identity predicates on links", () => {
     const schedule = defineSchedule("invoice.payment-target")
-      .on(events(Invoice).link(Invoice.l.payments).created())
+      .on(events.object(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.all(event.target.is(Payment), event.target.id.eq("payment-1")))
 
     expect(schedule.trigger.condition).toEqual({
@@ -244,7 +244,7 @@ describe("event schedules", () => {
 
   test("rejects empty ids and non-terminal event selectors", () => {
     expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
-    expect(() => defineSchedule("bad-source").on(events(Invoice))).toThrow(
+    expect(() => defineSchedule("bad-source").on(events.object(Invoice))).toThrow(
       "Schedule event source must select an event operation"
     )
   })
@@ -253,7 +253,7 @@ describe("event schedules", () => {
 describe("validateSchedulesAtStartup", () => {
   test("accepts schedules that reference known ontology fields", () => {
     const schedule = defineSchedule("invoice.high-value-payment")
-      .on(events(Invoice).link(Invoice.l.payments).created())
+      .on(events.object(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.p.amount.gt(500))
 
     expect(() =>
@@ -263,7 +263,7 @@ describe("validateSchedulesAtStartup", () => {
 
   test("accepts link target identity predicates", () => {
     const schedule = defineSchedule("invoice.payment-target")
-      .on(events(Invoice).link(Invoice.l.payments).created())
+      .on(events.object(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.target.is(Payment))
 
     expect(() =>
@@ -277,7 +277,7 @@ describe("validateSchedulesAtStartup", () => {
       id: "invoice.invalid-payment-target",
       trigger: {
         type: "event",
-        source: events(Invoice).link(Invoice.l.payments).created(),
+        source: events.object(Invoice).link(Invoice.l.payments).created(),
         condition: {
           kind: "becomesTrue",
           scope: "event.link",
@@ -297,8 +297,8 @@ describe("validateSchedulesAtStartup", () => {
   })
 
   test("rejects duplicate schedule ids", () => {
-    const first = defineSchedule("duplicate").on(events(Invoice).created())
-    const second = defineSchedule("duplicate").on(events(Invoice).updated())
+    const first = defineSchedule("duplicate").on(events.object(Invoice).created())
+    const second = defineSchedule("duplicate").on(events.object(Invoice).updated())
 
     expect(() =>
       validateSchedulesAtStartup(

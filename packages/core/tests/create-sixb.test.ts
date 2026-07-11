@@ -195,7 +195,7 @@ export const syncOrders = defineSync("sync-orders")
     })
 
     const schedule = defineSchedule("transaction.high-value")
-      .on(events(Transaction).updated())
+      .on(events.object(Transaction).updated())
       .where((event) => event.object.p.amount.gt(500))
 
     const sixb = await createSixb({
@@ -364,7 +364,7 @@ export const Transaction = defineObjectType({
 import { Transaction } from "../ontology/transaction"
 
 export const highValueTransaction = defineSchedule("transaction.high-value")
-  .on(events(Transaction).updated())
+  .on(events.object(Transaction).updated())
   .where((event) => event.object.p.amount.gt(500))
 `
     )

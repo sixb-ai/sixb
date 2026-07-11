@@ -21,14 +21,14 @@ import { defineSchedule, events } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
 export const highValuePaymentLinked = defineSchedule("invoice.high-value-payment-linked")
-  .on(events(Invoice).link(Invoice.l.payments).created())
+  .on(events.object(Invoice).link(Invoice.l.payments).created())
   .where((event) => event.link.p.amount.gt(500))
 ```
 
 | Part | Meaning |
 | --- | --- |
 | `defineSchedule("invoice.high-value-payment-linked")` | Names the schedule with a unique id |
-| `.on(events(Invoice).link(Invoice.l.payments).created())` | Selects the source event |
+| `.on(events.object(Invoice).link(Invoice.l.payments).created())` | Selects the source event |
 | `.where(...)` | Optional edge condition on the event payload |
 
 The `.where(...)` callback runs once at definition time. It produces serializable predicate data;
@@ -36,29 +36,29 @@ the callback itself is not stored.
 
 ## Select the source event
 
-Use the `events(...)` builder to select object or link mutation events.
+Use the `events.object(...)` builder to select object or link mutation events.
 
 ```ts
-defineSchedule("invoice.created").on(events(Invoice).created())
-defineSchedule("invoice.updated").on(events(Invoice).updated())
-defineSchedule("invoice.deleted").on(events(Invoice).deleted())
+defineSchedule("invoice.created").on(events.object(Invoice).created())
+defineSchedule("invoice.updated").on(events.object(Invoice).updated())
+defineSchedule("invoice.deleted").on(events.object(Invoice).deleted())
 ```
 
 Link events are selected from the source object type:
 
 ```ts
-defineSchedule("invoice.payment-linked").on(events(Invoice).link(Invoice.l.payments).created())
-defineSchedule("invoice.payment-updated").on(events(Invoice).link(Invoice.l.payments).updated())
-defineSchedule("invoice.payment-deleted").on(events(Invoice).link(Invoice.l.payments).deleted())
+defineSchedule("invoice.payment-linked").on(events.object(Invoice).link(Invoice.l.payments).created())
+defineSchedule("invoice.payment-updated").on(events.object(Invoice).link(Invoice.l.payments).updated())
+defineSchedule("invoice.payment-deleted").on(events.object(Invoice).link(Invoice.l.payments).deleted())
 ```
 
 You can narrow the source to a property operation:
 
 ```ts
-defineSchedule("invoice.amount-updated").on(events(Invoice).p.amount.updated())
+defineSchedule("invoice.amount-updated").on(events.object(Invoice).p.amount.updated())
 
 defineSchedule("invoice.payment-amount-created").on(
-  events(Invoice).link(Invoice.l.payments).p.amount.created()
+  events.object(Invoice).link(Invoice.l.payments).p.amount.created()
 )
 ```
 
@@ -97,13 +97,13 @@ link events, use `event.link`.
 
 ```ts
 export const highValueInvoice = defineSchedule("invoice.high-value")
-  .on(events(Invoice).updated())
+  .on(events.object(Invoice).updated())
   .where((event) => event.object.p.amount.gt(500))
 ```
 
 ```ts
 export const highValueUsdPayment = defineSchedule("invoice.high-value-usd-payment")
-  .on(events(Invoice).link(Invoice.l.payments).created())
+  .on(events.object(Invoice).link(Invoice.l.payments).created())
   .where((event) =>
     event.link.all(event.link.p.amount.gt(500), event.link.p.currency.eq("USD"))
   )
@@ -113,7 +113,7 @@ Link conditions can also select a typed target identity without loading target s
 
 ```ts
 defineSchedule("invoice.wire-payment")
-  .on(events(Invoice).link(Invoice.l.payments).created())
+  .on(events.object(Invoice).link(Invoice.l.payments).created())
   .where((event) =>
     event.link.all(event.target.is(WirePayment), event.link.p.amount.gt(500))
   )

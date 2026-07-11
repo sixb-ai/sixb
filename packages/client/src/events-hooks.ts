@@ -1,5 +1,5 @@
 /**
- * React hooks over the `events(Type)` builder (`@sixb/client/hooks`).
+ * React hooks over the `events.object(Type)` builder (`@sixb/client/hooks`).
  *
  * Each hook takes a built builder as its first argument — the same
  * `hook(builder())` shape as `useObjectsQuery(objects(Type).query())` — and
@@ -91,7 +91,7 @@ type TelemetryEvents = SubscribableEvents<SixbEventOfType<"telemetry.appended">>
 
 /**
  * Track the latest telemetry update per property. The keying is by `propertyId`,
- * so scope the builder to a single object (`events(Type).object(key).telemetry()`)
+ * so scope the builder to a single object (`events.object(Type).object(key).telemetry()`)
  * for a per-object view, or use `useLatestByObject` to bucket by object.
  */
 export function useLatest(

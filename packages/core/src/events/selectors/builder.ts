@@ -419,14 +419,8 @@ class PipelineEventSelectorBuilderImpl<TPipeline extends PipelineEventToken>
   }
 }
 
-function objectEvents<TObjectType extends ObjectTypeWithTokens>(
-  objectType: TObjectType
-): ObjectEventSelectorBuilder<TObjectType> {
-  return new ObjectEventSelectorBuilderImpl(objectType, { objectTypeId: objectType.id })
-}
-
 export interface EventSelectors {
-  <TObjectType extends ObjectTypeWithTokens>(
+  object<TObjectType extends ObjectTypeWithTokens>(
     objectType: TObjectType
   ): ObjectEventSelectorBuilder<TObjectType>
   rule<TRule extends RuleDefinition>(rule: TRule): RuleEventSelectorBuilder<TRule>
@@ -442,7 +436,12 @@ export interface EventSelectors {
   ): PipelineEventSelectorBuilder<TPipeline>
 }
 
-export const events = Object.assign(objectEvents, {
+export const events: EventSelectors = {
+  object<TObjectType extends ObjectTypeWithTokens>(
+    objectType: TObjectType
+  ): ObjectEventSelectorBuilder<TObjectType> {
+    return new ObjectEventSelectorBuilderImpl(objectType, { objectTypeId: objectType.id })
+  },
   rule<TRule extends RuleDefinition>(rule: TRule): RuleEventSelectorBuilder<TRule> {
     return new RuleEventSelectorBuilderImpl({
       topic: "rules",
@@ -479,7 +478,7 @@ export const events = Object.assign(objectEvents, {
       pipelineId: pipeline.id,
     } as EventSelectorSpec<PipelineEventSelectorContext<TPipeline>>)
   },
-}) satisfies EventSelectors
+}
 
 function createPropertySelectorMap(
   tokens: Record<string, PropertyToken>,

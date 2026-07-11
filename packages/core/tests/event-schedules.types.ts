@@ -34,7 +34,7 @@ const Invoice = defineObjectType({
 })
 
 const highValuePayment = defineSchedule("invoice.high-value-payment")
-  .on(events(Invoice).link(Invoice.l.payments).created())
+  .on(events.object(Invoice).link(Invoice.l.payments).created())
   .where((event) => {
     event.link.p.amount.gt(500)
     event.link.p.currency.eq("USD")
@@ -71,7 +71,7 @@ const atRiskTriggered = defineSchedule("invoice.at-risk-triggered").on(
 atRiskTriggered.where(() => ({ kind: "becomesTrue" }))
 
 defineSchedule("invoice.object-updated")
-  .on(events(Invoice).updated())
+  .on(events.object(Invoice).updated())
   .where((event) => {
     event.object.p.status.eq("posted")
     event.object.p.amount.gte(500)

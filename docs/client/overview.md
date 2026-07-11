@@ -37,7 +37,7 @@ layer and never touch the transport directly. In a standalone app, configure
 | `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, and the UI models from `/models` |
 | `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
-| `@sixb/client/events` | `SixbEvent` types and the `events(...)` builder |
+| `@sixb/client/events` | `SixbEvent` types and the `events.object(...)` builder |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
 | `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
 
@@ -162,7 +162,7 @@ high-frequency control, and manual invalidation patterns.
 ## /events: live WebSocket
 
 `@sixb/client/events` carries the `SixbEvent` union types, the `isSixbEvent`
-guard, and the fluent `events(...)` builder. React apps use the builder through
+guard, and the fluent `events.object(...)` builder. React apps use the builder through
 hooks re-exported from `/hooks`: `useEvents`, `useLatest`, `useLatestByObject`,
 and `useInvalidateOnEvent`.
 
@@ -170,7 +170,7 @@ and `useInvalidateOnEvent`.
 import { events, useEvents } from "@sixb/client/hooks"
 import { Invoice } from "../ontology/invoice"
 
-useEvents(events(Invoice).object(invoiceId).upserted(), (event) => {
+useEvents(events.object(Invoice).object(invoiceId).upserted(), (event) => {
   console.log(event.payload.properties)
 })
 ```
@@ -233,7 +233,7 @@ so they are safe to pass through URLs and route params.
 | Typed object query, no React | `@sixb/client/query` |
 | React component reading data | `@sixb/client/hooks` |
 | React action button with terminal loading/error state | `useActionRunMutation` (`@sixb/client/hooks`) |
-| Live updates in React | `events(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
+| Live updates in React | `events.object(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
 | Bootstrap a standalone browser client | `@sixb/client/browser` |
 | Encode/decode ids or fire actions | `@sixb/client/models` |
 

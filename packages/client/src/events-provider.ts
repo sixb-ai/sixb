@@ -1,5 +1,5 @@
 /**
- * Shared event socket for the `events(Type)` hooks (`@sixb/client/hooks`).
+ * Shared event socket for the `events.object(Type)` hooks (`@sixb/client/hooks`).
  *
  * Without a provider, each hook opens its own WebSocket. `SixbEventsProvider`
  * multiplexes them onto a single socket: it subscribes broadly and fans each
@@ -148,7 +148,7 @@ export function useEventsRegistry(): EventsRegistry | null {
 }
 
 /**
- * Multiplex every `events(Type)` hook beneath it onto one shared WebSocket.
+ * Multiplex every `events.object(Type)` hook beneath it onto one shared WebSocket.
  * Optional: hooks work without it (one socket each). `baseUrl` defaults to the
  * global client config.
  */
