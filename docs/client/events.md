@@ -78,6 +78,7 @@ Common options:
 | `limit` | Limit replayed events on subscribe. |
 | `reconnect` | Enable or disable reconnects. |
 | `reconnectDelayMs` | Delay before reconnecting. |
+| `handshakeTimeoutMs` | Maximum time to establish and acknowledge the event subscription. |
 | `onError` | Receive socket or subscription errors. |
 
 ## Latest Telemetry

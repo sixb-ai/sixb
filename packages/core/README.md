@@ -453,7 +453,7 @@ src/
 | Interface | Description |
 |---|---|
 | `Broker` | Retained stream provider used by runtime services |
-| `EventsRuntime` | Project-scoped domain event API with append, read, and subscribe |
+| `EventsRuntime` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
 | `ObjectStorage` | Latest-state projection storage for objects and links |
 | `TimeseriesStorage` | Time-series storage for telemetry history |
 | `MigrationSet<TContext>` | Ordered migration steps owned by one durable adapter |

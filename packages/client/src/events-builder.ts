@@ -92,6 +92,7 @@ export interface EventSubscribeOptions {
   readonly limit?: number
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
+  readonly handshakeTimeoutMs?: number
   readonly onError?: (error: string) => void
   readonly onStateChange?: (state: EventSocketState) => void
 }
@@ -221,6 +222,7 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
         limit: subscribeOptions?.limit,
         reconnect: subscribeOptions?.reconnect,
         reconnectDelayMs: subscribeOptions?.reconnectDelayMs,
+        handshakeTimeoutMs: subscribeOptions?.handshakeTimeoutMs,
         baseUrl: typeof baseUrl === "string" ? baseUrl : undefined,
         onEvent: (event) => {
           if (matches(event)) handler(event)

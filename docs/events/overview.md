@@ -78,6 +78,10 @@ for (const event of recent) {
 }
 ```
 
+`sixb.events.latestCursor()` returns the newest retained cursor without loading event payloads.
+It is intended for efficient subscription baselines and returns `undefined` when the retained
+stream is empty.
+
 | Option | Type | Notes |
 | --- | --- | --- |
 | `topics` | `readonly Topic[]` | Filter by topic (e.g. `"objects"`) |

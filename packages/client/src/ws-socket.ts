@@ -11,6 +11,7 @@ import { client } from "./generated/client.gen"
 
 const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
+const DEFAULT_READY_TIMEOUT_MS = 10_000
 
 export interface ReconnectingSocketState {
   readonly connected: boolean
@@ -35,6 +36,11 @@ export interface ReconnectingSocketOptions {
    * soon as the websocket opens.
    */
   readonly subscribeWhen?: (data: unknown) => boolean
+  /** Inbound message that marks the protocol handshake as complete. */
+  readonly readyWhen?: (data: unknown) => boolean
+  /** Close and reconnect when `readyWhen` does not pass within this duration. */
+  readonly readyTimeoutMs?: number
+  readonly readyTimeoutMessage?: string
   /** Handle one inbound message; call `sink.reportError` for stream-level error frames. */
   readonly onMessage: (data: unknown, sink: ReconnectingSocketErrorSink) => void
   /** Message surfaced when the socket itself errors (connection failure). */
@@ -81,7 +87,15 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     const ws = new WebSocket(options.url)
     socket = ws
     let subscribed = false
+    let readyTimer: ReturnType<typeof setTimeout> | null = null
     setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
+
+    const clearReadyTimer = () => {
+      if (readyTimer) {
+        clearTimeout(readyTimer)
+        readyTimer = null
+      }
+    }
 
     const subscribe = () => {
       if (stopped || subscribed || socket !== ws) return
@@ -94,11 +108,27 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
       openedOnce = true
       setState({ connected: true, reconnecting: false, error: null })
       if (!options.subscribeWhen) subscribe()
+      if (options.readyWhen) {
+        readyTimer = setTimeout(
+          () => {
+            if (stopped || socket !== ws) return
+            try {
+              sink.reportError(
+                options.readyTimeoutMessage ?? "Websocket protocol handshake timed out."
+              )
+            } finally {
+              ws.close()
+            }
+          },
+          Math.max(0, options.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS)
+        )
+      }
     }
 
     ws.onmessage = (messageEvent) => {
       if (stopped) return
       if (options.subscribeWhen?.(messageEvent.data)) subscribe()
+      if (options.readyWhen?.(messageEvent.data)) clearReadyTimer()
       options.onMessage(messageEvent.data, sink)
     }
 
@@ -108,6 +138,7 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     }
 
     ws.onclose = () => {
+      clearReadyTimer()
       if (socket === ws) {
         socket = null
       }
