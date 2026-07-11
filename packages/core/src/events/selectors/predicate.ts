@@ -2,7 +2,7 @@ import { scopeKeysForEvent } from "../scope"
 import type { DomainEvent } from "../types"
 import type { EventSelectorSpec } from "./types"
 
-export function eventSelectorSpec(selector: EventSelectorSpec): EventSelectorSpec {
+export function eventSelectorSpec(selector: EventSelectorSpec<unknown>): EventSelectorSpec {
   return {
     ...(selector.topic !== undefined ? { topic: selector.topic } : {}),
     ...(selector.types !== undefined ? { types: selector.types } : {}),
@@ -13,13 +13,18 @@ export function eventSelectorSpec(selector: EventSelectorSpec): EventSelectorSpe
       ? { propertyOperation: selector.propertyOperation }
       : {}),
     ...(selector.linkId !== undefined ? { linkId: selector.linkId } : {}),
+    ...(selector.ruleId !== undefined ? { ruleId: selector.ruleId } : {}),
     ...(selector.actionId !== undefined ? { actionId: selector.actionId } : {}),
+    ...(selector.datasetId !== undefined ? { datasetId: selector.datasetId } : {}),
+    ...(selector.syncId !== undefined ? { syncId: selector.syncId } : {}),
+    ...(selector.pipelineId !== undefined ? { pipelineId: selector.pipelineId } : {}),
+    ...(selector.runStatus !== undefined ? { runStatus: selector.runStatus } : {}),
     ...(selector.runId !== undefined ? { runId: selector.runId } : {}),
   }
 }
 
 export function buildEventSelectorPredicate(
-  selector: EventSelectorSpec
+  selector: EventSelectorSpec<unknown>
 ): (event: DomainEvent) => boolean {
   const filter = eventSelectorSpec(selector)
 
@@ -33,13 +38,28 @@ export function buildEventSelectorPredicate(
       return false
     if (filter.primaryId !== undefined && scope.primaryId !== filter.primaryId) return false
     if (filter.linkId !== undefined && scope.linkId !== filter.linkId) return false
+    if (filter.ruleId !== undefined && scope.ruleId !== filter.ruleId) return false
     if (filter.runId !== undefined && scope.runId !== filter.runId) return false
     if (filter.actionId !== undefined && scope.actionId !== filter.actionId) return false
+    if (filter.datasetId !== undefined && scope.datasetId !== filter.datasetId) return false
+    if (filter.syncId !== undefined && scope.syncId !== filter.syncId) return false
+    if (filter.pipelineId !== undefined && scope.pipelineId !== filter.pipelineId) return false
+    if (filter.runStatus !== undefined && !matchesRunStatus(event, filter.runStatus)) return false
 
     if (!matchesPropertyChange(event, filter)) return false
 
     return true
   }
+}
+
+function matchesRunStatus(
+  event: DomainEvent,
+  status: NonNullable<EventSelectorSpec["runStatus"]>
+): boolean {
+  return (
+    (event.type === "sync.run.finished" || event.type === "pipeline.run.finished") &&
+    event.payload.status === status
+  )
 }
 
 function matchesPropertyChange(event: DomainEvent, filter: EventSelectorSpec): boolean {

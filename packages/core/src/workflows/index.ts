@@ -57,6 +57,8 @@ export type {
   WorkflowMapperContext,
   WorkflowNodeDefinition,
   WorkflowRunSource,
+  WorkflowScheduleMapper,
+  WorkflowScheduleTriggerDefinition,
   WorkflowStepMapper,
   WorkflowStepNodeDefinition,
   WorkflowStepOutputs,

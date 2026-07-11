@@ -1,8 +1,42 @@
 export type {
+  ActionEventSelectorBuilder,
+  DatasetEventSelectorBuilder,
   EventPropertySelector,
+  EventSelectors,
   LinkEventSelectorBuilder,
   ObjectEventSelectorBuilder,
+  PipelineEventSelectorBuilder,
+  RuleEventSelectorBuilder,
+  SyncEventSelectorBuilder,
 } from "./builder"
 export { events } from "./builder"
 export { buildEventSelectorPredicate, eventSelectorSpec } from "./predicate"
-export type { EventSelectorSpec } from "./types"
+export type {
+  ActionEventSelectorContext,
+  ActionEventSelectorEvent,
+  ActionEventSelectorOperation,
+  ActionEventToken,
+  ActionEventTokenOf,
+  DatasetEventSelectorContext,
+  DatasetEventSelectorEvent,
+  DatasetEventToken,
+  EventSelectorContext,
+  EventSelectorEvent,
+  EventSelectorSpec,
+  InferEventSelectorContext,
+  InferEventSelectorEvent,
+  LinkEventSelectorContext,
+  LinkEventSelectorEvent,
+  ObjectEventSelectorContext,
+  ObjectEventSelectorEvent,
+  PipelineEventSelectorContext,
+  PipelineEventSelectorEvent,
+  PipelineEventToken,
+  RuleEventSelectorContext,
+  RuleEventSelectorEvent,
+  RuleEventSelectorOperation,
+  RunEventSelectorOperation,
+  SyncEventSelectorContext,
+  SyncEventSelectorEvent,
+  SyncEventToken,
+} from "./types"

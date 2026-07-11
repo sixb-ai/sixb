@@ -128,7 +128,10 @@ function makeWorkflowWithSchedule(id: string, schedule: ScheduleDefinition) {
 }
 
 function makeWorkflowWithRequiredInput(id: string, schedule: ScheduleDefinition) {
-  return defineWorkflow(id).input({ accountId: "string" }).when(schedule).then(workflowStep)
+  return defineWorkflow(id)
+    .input({ accountId: "string" })
+    .when(schedule as never)
+    .then(workflowStep)
 }
 
 function makeObjectProjection(id: string, datasetId: string) {

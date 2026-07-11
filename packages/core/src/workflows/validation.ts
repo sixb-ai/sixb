@@ -1,6 +1,7 @@
 import { isActionDefinition } from "../actions"
 import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
+import type { ScheduleDefinition } from "../schedules"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 import type {
   InterventionDefinition,
@@ -93,14 +94,19 @@ export function validateWorkflowDefinition(value: unknown): asserts value is Wor
 
 export function validateWorkflowsAtStartup(options: {
   workflows: readonly WorkflowDefinition[]
-  registeredScheduleIds: ReadonlySet<string>
+  registeredSchedules: ReadonlyMap<string, ScheduleDefinition>
   registeredActionIds: ReadonlySet<string>
 }): readonly WorkflowDefinition[] {
   for (const workflow of options.workflows) {
     validateWorkflowDefinition(workflow)
 
     for (const trigger of workflow.triggers) {
-      validateWorkflowTriggerAtStartup(workflow.id, trigger, options.registeredScheduleIds)
+      validateWorkflowTriggerAtStartup(
+        workflow.id,
+        trigger,
+        options.registeredSchedules,
+        Object.keys(workflow.input)
+      )
     }
 
     for (const node of workflow.nodes) {
@@ -203,23 +209,49 @@ export function validateWorkflowInterventionDefaultResponse(params: {
 function validateWorkflowTriggerAtStartup(
   workflowId: string,
   trigger: WorkflowTriggerDefinition,
-  registeredScheduleIds: ReadonlySet<string>
+  registeredSchedules: ReadonlyMap<string, ScheduleDefinition>,
+  inputFields: readonly string[]
 ): void {
   if (!isRecord(trigger) || trigger.type !== "schedule") {
-    throw new WorkflowDefinitionError(
-      `Workflow "${workflowId}" contains an unsupported trigger. V1 only supports schedule triggers.`
-    )
+    throw new WorkflowDefinitionError(`Workflow "${workflowId}" contains an unsupported trigger.`)
   }
+  validateScheduleWorkflowTrigger(workflowId, trigger, registeredSchedules, inputFields)
+}
 
+function validateScheduleWorkflowTrigger(
+  workflowId: string,
+  trigger: Extract<WorkflowTriggerDefinition, { readonly type: "schedule" }>,
+  registeredSchedules: ReadonlyMap<string, ScheduleDefinition>,
+  inputFields: readonly string[]
+): void {
   if (typeof trigger.scheduleId !== "string" || !trigger.scheduleId.trim()) {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" contains a schedule trigger with an empty schedule id.`
     )
   }
 
-  if (!registeredScheduleIds.has(trigger.scheduleId)) {
+  const schedule = registeredSchedules.get(trigger.scheduleId)
+  if (!schedule) {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" references unknown schedule "${trigger.scheduleId}". Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
+    )
+  }
+
+  if (trigger.mapper !== undefined && typeof trigger.mapper !== "function") {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" schedule "${trigger.scheduleId}" mapper must be a function.`
+    )
+  }
+
+  if (trigger.mapper !== undefined && schedule.trigger.type !== "event") {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" cron schedule "${trigger.scheduleId}" does not accept a mapper.`
+    )
+  }
+
+  if (trigger.mapper === undefined && inputFields.length > 0) {
+    throw new WorkflowDefinitionError(
+      `Workflow "${workflowId}" schedule "${trigger.scheduleId}" requires a mapper because workflow input is not empty: ${inputFields.join(", ")}.`
     )
   }
 }

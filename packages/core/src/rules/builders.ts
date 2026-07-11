@@ -1,3 +1,11 @@
+import {
+  allPredicates,
+  anyPredicates,
+  createLinkPredicateBuilder as createSharedLinkPredicateBuilder,
+  createPropertyPredicateBuilder as createSharedPropertyPredicateBuilder,
+  notPredicate,
+  type RuntimePropertyPredicateBuilder,
+} from "../predicates"
 import { RuleValidationError } from "./errors"
 import type {
   RuleBuilder,
@@ -5,11 +13,9 @@ import type {
   RuleLinkPredicateBuilder,
   RuleObjectType,
   RulePredicate,
-  RulePropertyOperator,
   RulePropertyPredicate,
-  RuleValue,
 } from "./types"
-import { assertRulePredicateShape, isRuleValue } from "./validation"
+import { assertRulePredicateShape } from "./validation"
 
 /**
  * Runtime builders stay deliberately concrete.
@@ -19,16 +25,7 @@ import { assertRulePredicateShape, isRuleValue } from "./validation"
  * TypeScript to instantiate the full ontology mapped type while checking this
  * file.
  */
-type RuntimeRulePropertyPredicateBuilder = {
-  eq(value: RuleValue): RulePropertyPredicate
-  notEq(value: RuleValue): RulePropertyPredicate
-  gt(value: RuleValue): RulePropertyPredicate
-  gte(value: RuleValue): RulePropertyPredicate
-  lt(value: RuleValue): RulePropertyPredicate
-  lte(value: RuleValue): RulePropertyPredicate
-  isPresent(): RulePropertyPredicate
-  isMissing(): RulePropertyPredicate
-}
+type RuntimeRulePropertyPredicateBuilder = RuntimePropertyPredicateBuilder<RulePropertyPredicate>
 
 type RuntimeRuleSubjectBuilder = {
   p: Record<string, RuntimeRulePropertyPredicateBuilder>
@@ -44,83 +41,17 @@ function assertNonEmpty(value: string, field: string): void {
   }
 }
 
-function assertSerializableRuleValue(value: RuleValue): void {
-  if (!isRuleValue(value)) {
-    throw new RuleValidationError("Rule predicate values must be serializable scalar values.")
-  }
-}
-
-/** Lower a single property method call into its serializable AST node. */
-function createPropertyPredicate(
-  propertyId: string,
-  op: RulePropertyOperator,
-  value: RuleValue
-): RulePropertyPredicate {
-  assertSerializableRuleValue(value)
-  return {
-    kind: "property",
-    propertyId,
-    op,
-    value,
-  }
-}
-
 /** Build the `tx.p.<propertyId>` API for one ontology property. */
 function createPropertyPredicateBuilder(propertyId: string): RuntimeRulePropertyPredicateBuilder {
-  return {
-    eq(value) {
-      return createPropertyPredicate(propertyId, "eq", value)
-    },
-    notEq(value) {
-      return createPropertyPredicate(propertyId, "notEq", value)
-    },
-    gt(value) {
-      return createPropertyPredicate(propertyId, "gt", value)
-    },
-    gte(value) {
-      return createPropertyPredicate(propertyId, "gte", value)
-    },
-    lt(value) {
-      return createPropertyPredicate(propertyId, "lt", value)
-    },
-    lte(value) {
-      return createPropertyPredicate(propertyId, "lte", value)
-    },
-    isPresent() {
-      return {
-        kind: "property",
-        propertyId,
-        op: "isPresent",
-      }
-    },
-    isMissing() {
-      return {
-        kind: "property",
-        propertyId,
-        op: "isMissing",
-      }
-    },
-  }
+  return createSharedPropertyPredicateBuilder(propertyId, {
+    subject: "Rule",
+    createError: (message) => new RuleValidationError(message),
+  })
 }
 
 /** Build the `tx.l.<linkId>` API for one ontology link. */
 function createLinkPredicateBuilder(linkId: string): RuleLinkPredicateBuilder {
-  return {
-    exists() {
-      return {
-        kind: "link",
-        linkId,
-        op: "exists",
-      }
-    },
-    isMissing() {
-      return {
-        kind: "link",
-        linkId,
-        op: "isMissing",
-      }
-    },
-  }
+  return createSharedLinkPredicateBuilder(linkId)
 }
 
 /**
@@ -148,22 +79,13 @@ function createRuleSubjectBuilder<TObjectType extends RuleObjectType>(
     p: properties,
     l: links,
     all(...predicates: RulePredicate[]): RulePredicate {
-      return {
-        kind: "all",
-        predicates: [...predicates],
-      }
+      return allPredicates(predicates)
     },
     any(...predicates: RulePredicate[]): RulePredicate {
-      return {
-        kind: "any",
-        predicates: [...predicates],
-      }
+      return anyPredicates(predicates)
     },
     not(predicate: RulePredicate): RulePredicate {
-      return {
-        kind: "not",
-        predicate,
-      }
+      return notPredicate(predicate)
     },
   }
 }

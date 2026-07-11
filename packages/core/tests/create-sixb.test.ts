@@ -6,11 +6,13 @@ import { pathToFileURL } from "node:url"
 import {
   col,
   createSixb,
+  defineAction,
   defineConnector,
   defineDataset,
   defineLinkProjection,
   defineObjectType,
   defineProjection,
+  defineRule,
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
@@ -18,6 +20,7 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   EVENTS_STREAM,
+  events,
   fromForeignKey,
   link,
   ProjectionValidationError,
@@ -179,6 +182,67 @@ export const syncOrders = defineSync("sync-orders")
     expect(sixb.workflows.getById("missing-workflow")).toBeNull()
   })
 
+  test("uses explicit event schedules when provided", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    const Transaction = defineObjectType({
+      id: "Transaction",
+      name: "Transaction",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "double"),
+      ],
+    })
+
+    const schedule = defineSchedule("transaction.high-value")
+      .on(events.object(Transaction).updated())
+      .where((event) => event.object.p.amount.gt(500))
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Transaction],
+      schedules: [schedule],
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getScheduleDefinitions()).toEqual([schedule])
+    expect(sixb.getScheduleById("transaction.high-value")).toBe(schedule)
+  })
+
+  test("validates rule and action event schedules against registered definitions", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const Invoice = defineObjectType({
+      id: "Invoice",
+      name: "Invoice",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("amount", "double"),
+      ],
+    })
+    const invoiceAtRisk = defineRule("invoice.at-risk")
+      .on(Invoice)
+      .where((invoice) => invoice.p.amount.gt(500))
+    const approveInvoice = defineAction("approve-invoice")
+      .on(Invoice)
+      .params({})
+      .writeback(async () => {})
+    const schedules = [
+      defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
+      defineSchedule("invoice.approved").on(events.action(approveInvoice).completed()),
+    ]
+
+    const sixb = await createSixb({
+      projectRoot,
+      ontologies: [Invoice],
+      actions: [approveInvoice],
+      rules: [invoiceAtRisk],
+      schedules,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getScheduleDefinitions()).toEqual(schedules)
+  })
+
   test("discovers workflows from workflows directory", async () => {
     const projectRoot = await createTempProjectRoot()
 
@@ -234,28 +298,24 @@ import { Invoice, Transaction } from "../ontology/transaction"
 import { daily } from "../schedules/daily"
 
 const findBestInvoice = defineWorkflowStep("find-best-invoice")
-  .input({
-    transaction: ref(Transaction),
-  })
+  .input({})
   .output({
     transaction: ref(Transaction),
     invoice: ref(Invoice),
     confidence: "double",
   })
-  .run(({ input }) => ({
-    transaction: input.transaction,
+  .run(() => ({
+    transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
     invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
     confidence: 0.98,
   }))
 
 export const reconcileTransaction = defineWorkflow("reconcile-transaction")
-  .input({
-    transaction: ref(Transaction),
-  })
+  .input({})
   .when(daily)
   .then(findBestInvoice)
-  .then(attachInvoice, ({ input, steps }) => ({
-    target: input.transaction,
+  .then(attachInvoice, ({ steps }) => ({
+    target: steps.findBestInvoice.transaction,
     params: {
       invoice: steps.findBestInvoice.invoice,
     },
@@ -275,6 +335,78 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     expect(sixb.workflows.getById("reconcile-transaction")?.nodes.map((node) => node.id)).toEqual([
       "find-best-invoice",
       "attach-invoice",
+    ])
+  })
+
+  test("discovers event schedules from schedules directory", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/transaction.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+
+export const Transaction = defineObjectType({
+  id: "Transaction",
+  name: "Transaction",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "double"),
+  ],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "schedules/highValueTransaction.ts",
+      `import { defineSchedule, events } from "${coreModuleUrl}"
+import { Transaction } from "../ontology/transaction"
+
+export const highValueTransaction = defineSchedule("transaction.high-value")
+  .on(events.object(Transaction).updated())
+  .where((event) => event.object.p.amount.gt(500))
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "workflows/reviewHighValueTransaction.ts",
+      `import { defineWorkflow, defineWorkflowStep, ref } from "${coreModuleUrl}"
+import { Transaction } from "../ontology/transaction"
+import { highValueTransaction } from "../schedules/highValueTransaction"
+
+const reviewTransaction = defineWorkflowStep("review-transaction")
+  .input({
+    transaction: ref(Transaction),
+  })
+  .output({})
+  .run(() => ({}))
+
+export const reviewHighValueTransaction = defineWorkflow("review-high-value-transaction")
+  .input({
+    transaction: ref(Transaction),
+  })
+  .when(highValueTransaction, ({ event }) => ({
+    transaction: {
+      objectTypeId: "Transaction",
+      primaryId: event.object.primaryId,
+    },
+  }))
+  .then(reviewTransaction)
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.getScheduleDefinitions().map((schedule) => schedule.id)).toEqual([
+      "transaction.high-value",
+    ])
+    expect(sixb.workflows.getById("review-high-value-transaction")?.triggers).toMatchObject([
+      { type: "schedule", scheduleId: "transaction.high-value" },
     ])
   })
 

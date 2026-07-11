@@ -1,5 +1,5 @@
 import type { EventsRuntime } from "../events"
-import type { ScheduleDefinition } from "../schedules"
+import type { CronScheduleDefinition, ScheduleDefinition } from "../schedules"
 import { nextCronOccurrence } from "../schedules"
 import { SchedulerValidationError } from "./errors"
 
@@ -10,7 +10,7 @@ export interface SchedulerRuntimeOptions {
 }
 
 export class SchedulerRuntime {
-  private readonly schedules: readonly ScheduleDefinition[]
+  private readonly schedules: readonly CronScheduleDefinition[]
   private readonly events: EventsRuntime
   private readonly now: () => Date
   private started = false
@@ -18,7 +18,7 @@ export class SchedulerRuntime {
   private readonly nextOccurrences = new Map<string, Date>()
 
   constructor(options: SchedulerRuntimeOptions) {
-    this.schedules = options.schedules
+    this.schedules = options.schedules.filter(isCronSchedule)
     this.events = options.events
     this.now = options.now ?? (() => new Date())
   }
@@ -76,7 +76,7 @@ export class SchedulerRuntime {
     const now = this.now()
 
     // Collect all due schedules
-    const dueSchedules: Array<{ schedule: ScheduleDefinition; occurrenceAt: Date }> = []
+    const dueSchedules: Array<{ schedule: CronScheduleDefinition; occurrenceAt: Date }> = []
     for (const schedule of this.schedules) {
       const occurrence = this.nextOccurrences.get(schedule.id)
       if (occurrence && occurrence.getTime() <= now.getTime()) {
@@ -127,4 +127,8 @@ export class SchedulerRuntime {
 
     this.armTimer()
   }
+}
+
+function isCronSchedule(schedule: ScheduleDefinition): schedule is CronScheduleDefinition {
+  return schedule.trigger.type === "cron"
 }

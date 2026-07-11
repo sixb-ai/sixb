@@ -344,7 +344,7 @@ export default function UnitDetail() {
   })
   const object = objectQuery.data
 
-  const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
+  const { values: liveState, connected } = useLatest(events.telemetry().byId(objectKey ?? ""))
   const { mutate: sendAction, isPending: actionPending } = useActionRunMutation({
     invalidateOnCommit: true,
   })

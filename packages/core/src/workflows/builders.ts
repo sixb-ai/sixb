@@ -1,7 +1,7 @@
 import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
 import type { SchemaOrRef } from "../ontology"
-import type { ScheduleDefinition } from "../schedules"
+import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
 import { WorkflowDefinitionError } from "./errors"
 import type {
@@ -15,12 +15,31 @@ import type {
   WorkflowBuilder,
   WorkflowChainDefinition,
   WorkflowNodeDefinition,
+  WorkflowScheduleMapper,
   WorkflowTriggerDefinition,
 } from "./types"
 import { assertNonEmpty, isInterventionDefinition, isStepDefinition } from "./validation"
 
 type InterventionOptions = {
   description?: string
+}
+
+type RuntimeWorkflowInput = Record<string, SchemaOrRef>
+type RuntimeWorkflowValueInput = Record<string, unknown>
+type RuntimeWorkflowMapper = (...args: never[]) => unknown
+type RuntimeWorkflowScheduleMapper = WorkflowScheduleMapper<unknown, RuntimeWorkflowValueInput>
+type RuntimeWorkflowThenDefinition = StepDefinition | InterventionDefinition | ActionDefinition
+type RuntimeWorkflowThen = (
+  nodeDefinition: RuntimeWorkflowThenDefinition,
+  mapper?: RuntimeWorkflowMapper
+) => WorkflowChainDefinition
+type RuntimeWorkflowDraftBuilder = {
+  when(schedule: ScheduleDefinition): RuntimeWorkflowDraftBuilder
+  when(
+    schedule: ScheduleDefinitionForEvent,
+    mapper: RuntimeWorkflowScheduleMapper
+  ): RuntimeWorkflowDraftBuilder
+  readonly then: RuntimeWorkflowThen
 }
 
 /**
@@ -63,9 +82,9 @@ export function defineWorkflowStep<const TId extends string>(id: TId): StepBuild
   assertNonEmpty(id, "Step", "id")
 
   return {
-    input(input: Record<string, SchemaOrRef>): unknown {
+    input(input: RuntimeWorkflowInput): unknown {
       return {
-        output(output: Record<string, SchemaOrRef>): unknown {
+        output(output: RuntimeWorkflowInput): unknown {
           return {
             run(handler: StepHandler<Record<string, unknown>, Record<string, unknown>>): unknown {
               return {
@@ -90,7 +109,7 @@ export function defineIntervention<const TId extends string>(
   assertNonEmpty(id, "Intervention", "id")
 
   return {
-    input(input: Record<string, SchemaOrRef>): unknown {
+    input(input: RuntimeWorkflowInput): unknown {
       return {
         response(response: Record<string, unknown>): unknown {
           return createInterventionDefinition({
@@ -109,13 +128,16 @@ export function defineWorkflow<const TId extends string>(id: TId): WorkflowBuild
   assertNonEmpty(id, "Workflow", "id")
 
   return {
-    input(input: Record<string, SchemaOrRef>): unknown {
+    input(input: RuntimeWorkflowInput): unknown {
       return createWorkflowDraftBuilder(id, input)
     },
-  } as WorkflowBuilder<TId>
+  } as unknown as WorkflowBuilder<TId>
 }
 
-function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRef>): unknown {
+function createWorkflowDraftBuilder(
+  id: string,
+  input: RuntimeWorkflowInput
+): RuntimeWorkflowDraftBuilder {
   const triggers: WorkflowTriggerDefinition[] = []
   const nodes: WorkflowNodeDefinition[] = []
   let definition: WorkflowChainDefinition | null = null
@@ -130,7 +152,7 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
     }
 
     if (isStepDefinition(nodeDefinition)) {
-      if (mapper !== undefined && typeof mapper !== "function") {
+      if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
         throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
@@ -140,7 +162,7 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
     }
 
     if (isInterventionDefinition(nodeDefinition)) {
-      if (mapper !== undefined && typeof mapper !== "function") {
+      if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
         throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
@@ -150,7 +172,7 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
     }
 
     if (isActionDefinition(nodeDefinition)) {
-      if (mapper !== undefined && typeof mapper !== "function") {
+      if (mapper !== undefined && !isRuntimeWorkflowMapper(mapper)) {
         throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
       }
 
@@ -162,17 +184,43 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
     throw new WorkflowDefinitionError(`Invalid workflow "${id}" .then(...) call.`)
   }
 
-  const draft = {
-    when(schedule: ScheduleDefinition): unknown {
-      if (!isScheduleDefinition(schedule)) {
-        throw new WorkflowDefinitionError(
-          `Workflow "${id}" .when(...) only accepts schedule definitions in V1.`
-        )
+  let draft: RuntimeWorkflowDraftBuilder
+
+  function when(schedule: ScheduleDefinition): RuntimeWorkflowDraftBuilder
+  function when(
+    schedule: ScheduleDefinitionForEvent,
+    mapper: RuntimeWorkflowScheduleMapper
+  ): RuntimeWorkflowDraftBuilder
+  function when(
+    schedule: unknown,
+    mapper?: unknown,
+    ...extraArgs: unknown[]
+  ): RuntimeWorkflowDraftBuilder {
+    if (extraArgs.length > 0) {
+      throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) call.`)
+    }
+
+    if (isScheduleDefinition(schedule)) {
+      if (mapper !== undefined && schedule.trigger.type !== "event") {
+        throw new WorkflowDefinitionError(`Workflow "${id}" cron schedules do not accept a mapper.`)
+      }
+      if (mapper !== undefined && !isRuntimeWorkflowScheduleMapper(mapper)) {
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) schedule mapper.`)
       }
 
-      triggers.push({ type: "schedule", scheduleId: schedule.id })
+      triggers.push({
+        type: "schedule",
+        scheduleId: schedule.id,
+        ...(mapper !== undefined ? { mapper } : {}),
+      })
       return draft
-    },
+    }
+
+    throw new WorkflowDefinitionError(`Workflow "${id}" .when(...) only accepts schedules.`)
+  }
+
+  draft = {
+    when,
     // biome-ignore lint/suspicious/noThenProperty: Workflows intentionally expose a chainable .then(...) DSL.
     then: appendNode,
   }
@@ -182,7 +230,7 @@ function createWorkflowDraftBuilder(id: string, input: Record<string, SchemaOrRe
 
 function createWorkflowDefinition(
   id: string,
-  input: Record<string, SchemaOrRef>,
+  input: RuntimeWorkflowInput,
   triggers: readonly WorkflowTriggerDefinition[],
   nodes: readonly WorkflowNodeDefinition[],
   then: (
@@ -205,7 +253,7 @@ function createStepNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
   step: StepDefinition,
-  mapper: unknown
+  mapper: RuntimeWorkflowMapper | undefined
 ): WorkflowNodeDefinition {
   const key = deriveWorkflowNodeKey(step.id)
   assertNodeKey(workflowId, step.id, key)
@@ -222,7 +270,7 @@ function createStepNode(
 
 function createInterventionDefinition(input: {
   readonly id: string
-  readonly input: Record<string, SchemaOrRef>
+  readonly input: RuntimeWorkflowInput
   readonly response: Record<string, unknown>
   readonly description?: string
 }): unknown {
@@ -260,7 +308,7 @@ function createActionNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
   action: ActionDefinition,
-  mapper: unknown
+  mapper: RuntimeWorkflowMapper | undefined
 ): WorkflowNodeDefinition {
   const key = deriveWorkflowNodeKey(action.id)
   assertNodeKey(workflowId, action.id, key)
@@ -279,7 +327,7 @@ function createInterventionNode(
   workflowId: string,
   nodes: readonly WorkflowNodeDefinition[],
   intervention: InterventionDefinition,
-  mapper: unknown
+  mapper: RuntimeWorkflowMapper | undefined
 ): WorkflowNodeDefinition {
   const key = deriveWorkflowNodeKey(intervention.id)
   assertNodeKey(workflowId, intervention.id, key)
@@ -343,4 +391,12 @@ function uncapitalize(value: string): string {
 
 function capitalize(value: string): string {
   return value.length === 0 ? value : `${value[0].toUpperCase()}${value.slice(1)}`
+}
+
+function isRuntimeWorkflowMapper(value: unknown): value is RuntimeWorkflowMapper {
+  return typeof value === "function"
+}
+
+function isRuntimeWorkflowScheduleMapper(value: unknown): value is RuntimeWorkflowScheduleMapper {
+  return typeof value === "function"
 }

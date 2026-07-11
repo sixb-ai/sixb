@@ -51,6 +51,7 @@ import { validateRulesAtStartup } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
+import { validateSchedulesAtStartup } from "../schedules"
 import type {
   GroupDefinition,
   MembershipPolicyDefinition,
@@ -266,9 +267,17 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       this.rulesById.set(rule.id, rule)
     }
 
+    validateSchedulesAtStartup([...this.schedulesById.values()], this.ontology, {
+      registeredRuleIds: new Set(this.rulesById.keys()),
+      registeredActionIds,
+      registeredDatasetIds: new Set(this.datasetsById.keys()),
+      registeredSyncIds: new Set(this.syncsById.keys()),
+      registeredPipelineIds: new Set(this.pipelinesById.keys()),
+    })
+
     const workflows = validateWorkflowsAtStartup({
       workflows: options.workflows ?? [],
-      registeredScheduleIds: new Set(this.schedulesById.keys()),
+      registeredSchedules: this.schedulesById,
       registeredActionIds,
     })
 
@@ -289,6 +298,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       blobStorage: this.blobStorage,
       queues: this.queues,
       sandboxes: this.sandboxes,
+      rules: this.rules,
     }
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)

@@ -5,9 +5,29 @@ export { CronValidationError, ScheduleValidationError } from "./errors"
 export { nextCronOccurrence } from "./next-occurrence"
 export type {
   CronScheduleBuilder,
+  CronScheduleDefinition,
   CronScheduleTriggerDefinition,
+  EventScheduleBuilder,
+  EventScheduleCondition,
+  EventScheduleConditionFor,
+  EventScheduleConditionScope,
+  EventScheduleDefinition,
+  EventSchedulePredicateContext,
+  EventSchedulePropertyPredicateBuilder,
+  EventScheduleSourceBuilder,
+  EventScheduleTargetPredicateSubject,
+  EventScheduleTriggerDefinition,
+  EventScheduleWhereBuilder,
+  InferScheduleEvent,
   ScheduleBuilder,
   ScheduleDefinition,
+  ScheduleDefinitionForEvent,
+  ScheduleReference,
   ScheduleTriggerDefinition,
 } from "./types"
-export { isScheduleDefinition } from "./types"
+export type { ValidateSchedulesAtStartupOptions } from "./validation"
+export {
+  assertScheduleDefinition,
+  isScheduleDefinition,
+  validateSchedulesAtStartup,
+} from "./validation"

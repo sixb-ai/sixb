@@ -8,7 +8,7 @@ import type { JsonValue } from "../json"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { Sixb } from "../runtime/sixb"
 import type { OntologySource } from "../runtime/types"
-import type { ScheduleDefinition } from "../schedules"
+import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type Append<TValues extends readonly unknown[], TValue> = [...TValues, TValue]
@@ -86,10 +86,22 @@ export interface StepBuilder<TId extends string> {
   ): StepOutputBuilder<TId, TInput>
 }
 
-export type WorkflowTriggerDefinition = {
+export type WorkflowScheduleMapper<
+  TEvent = unknown,
+  TInput extends Record<string, unknown> = Record<string, unknown>,
+> = (context: { readonly event: TEvent }) => TInput
+
+export type WorkflowScheduleTriggerDefinition<
+  TMapper extends ((...args: never[]) => unknown) | undefined =
+    | ((...args: never[]) => unknown)
+    | undefined,
+> = {
   readonly type: "schedule"
   readonly scheduleId: string
+  readonly mapper?: TMapper
 }
+
+export type WorkflowTriggerDefinition = WorkflowScheduleTriggerDefinition
 
 /**
  * Origin of a workflow run request.
@@ -326,6 +338,10 @@ type DirectActionDataflowGuard<
       : never
     : never
 
+type EmptyWorkflowInputGuard<TInput extends Record<string, unknown>> = keyof TInput extends never
+  ? unknown
+  : never
+
 export interface WorkflowStepNodeDefinition<
   TStep extends StepDefinition = StepDefinition,
   TMapper = unknown,
@@ -502,7 +518,13 @@ export interface WorkflowDraftBuilder<
   TCurrent extends Record<string, unknown> = InferSchemaOrRefRecord<TInput>,
   TSteps extends WorkflowStepOutputs = Record<never, never>,
 > {
-  when(schedule: ScheduleDefinition): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
+  when(
+    schedule: ScheduleDefinition & EmptyWorkflowInputGuard<TInput>
+  ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
+  when<const TEvent>(
+    schedule: ScheduleDefinitionForEvent<TEvent>,
+    mapper: WorkflowScheduleMapper<TEvent, InferSchemaOrRefRecord<TInput>>
+  ): WorkflowDraftBuilder<TId, TInput, TCurrent, TSteps>
   then<const TStep extends StepDefinition>(
     step: TStep & DirectDataflowGuard<TCurrent, TStep>
   ): WorkflowChainDefinition<

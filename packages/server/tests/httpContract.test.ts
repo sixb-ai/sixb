@@ -20,6 +20,7 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   type EventsRuntime,
+  events,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -139,11 +140,13 @@ const inspectDeviceStep = defineWorkflowStep("inspect-device")
   .output({ deviceId: "string", healthy: "boolean" })
   .run(({ input }) => ({ deviceId: input.deviceId, healthy: true }))
 
+const deviceUpdated = defineSchedule("device-updated").on(events.object(Device).updated())
+
 // Widen to the base type at the definition site: materializing these builder
 // result types against the wide ontology generic is a known TS2589 landmine.
 const inspectDeviceWorkflow: WorkflowDefinition = defineWorkflow("inspect-device-workflow")
   .input({ deviceId: "string" })
-  .when(nightlyGithub)
+  .when(deviceUpdated, ({ event }) => ({ deviceId: event.object.primaryId }))
   .then(inspectDeviceStep)
 
 const reviewDeviceHealth = defineIntervention("review-device-health", {
@@ -329,7 +332,7 @@ describe("SixbServer HTTP contract", () => {
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),
       connectors: [githubConnector],
-      schedules: [nightlyGithub],
+      schedules: [nightlyGithub, deviceUpdated],
       datasets: [githubEventsDataset, auditLogDataset, cleanGithubEventsDataset],
       syncs: [githubEventsSync],
       pipelines: [githubEventsPipeline],
@@ -994,7 +997,7 @@ describe("SixbServer HTTP contract", () => {
         {
           id: "inspect-device-workflow",
           input: { deviceId: "string" },
-          triggers: [{ type: "schedule", scheduleId: "nightly-github" }],
+          triggers: [{ type: "schedule", scheduleId: "device-updated" }],
           nodes: [
             {
               type: "step",

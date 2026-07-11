@@ -15,8 +15,12 @@ export interface EventScopeKeys {
   readonly primaryId?: string
   readonly propertyId?: string
   readonly linkId?: string
+  readonly ruleId?: string
   readonly runId?: string
   readonly actionId?: string
+  readonly datasetId?: string
+  readonly syncId?: string
+  readonly pipelineId?: string
 }
 
 export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
@@ -36,9 +40,11 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
         linkId: event.payload.linkId,
       }
     case "workflows":
-    case "pipelines":
-    case "syncs":
       return { runId: event.payload.runId }
+    case "pipelines":
+      return { pipelineId: event.payload.pipelineId, runId: event.payload.runId }
+    case "syncs":
+      return { syncId: event.payload.syncId, runId: event.payload.runId }
     case "actions":
       return {
         actionId: event.payload.actionId,
@@ -50,10 +56,12 @@ export function scopeKeysForEvent(event: DomainEvent): EventScopeKeys {
             }
           : {}),
       }
-    case "schedules":
-    case "datasets":
     case "rules":
+      return { ruleId: event.payload.ruleId }
+    case "schedules":
       return {}
+    case "datasets":
+      return { datasetId: event.payload.datasetId }
     default: {
       // Exhaustiveness guard: a new topic must extend the switch above.
       const _exhaustive: never = event

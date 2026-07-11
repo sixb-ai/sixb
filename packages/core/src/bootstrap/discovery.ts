@@ -382,6 +382,7 @@ async function loadModuleExports(options: {
     | "schedule"
     | "pipeline"
     | "rule"
+    | "trigger"
     | "group"
     | "role"
     | "membershipPolicy"

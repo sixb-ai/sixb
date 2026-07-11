@@ -1,6 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { buildEventSelectorPredicate, type DomainEvent, eventSelectorSpec, events } from "../src"
+import {
+  buildEventSelectorPredicate,
+  col,
+  type DomainEvent,
+  defineAction,
+  defineConnector,
+  defineDataset,
+  definePipeline,
+  defineSync,
+  eventSelectorSpec,
+  events,
+  param,
+} from "../src"
 import { defineObjectType, link, prop } from "../src/ontology"
+import { defineRule } from "../src/rules"
 
 const Payment = defineObjectType({
   id: "Payment",
@@ -23,6 +36,31 @@ const Invoice = defineObjectType({
   ],
 })
 
+const invoiceAtRisk = defineRule("invoice.at-risk")
+  .on(Invoice)
+  .where((invoice) => invoice.p.amount.gt(500))
+
+const approveInvoice = defineAction("approve-invoice")
+  .on(Invoice)
+  .params({ reason: param("string") })
+  .writeback(async () => {})
+
+const rawInvoices = defineDataset("raw.invoices", {
+  schema: [col("id", "string")],
+})
+
+const erp = defineConnector("erp", {
+  type: "test",
+  connect: () => ({}),
+})
+
+const importInvoices = defineSync("import-invoices")
+  .from(erp)
+  .read(() => [])
+  .intoDataset(rawInvoices)
+
+const normalizeInvoices = definePipeline("normalize-invoices")
+
 function event(overrides: { type: string; topic: string } & Record<string, unknown>): DomainEvent {
   const { type, topic, ...rest } = overrides
   return {
@@ -35,13 +73,20 @@ function event(overrides: { type: string; topic: string } & Record<string, unkno
 
 describe("events selector builder", () => {
   test("builds object mutation selectors", () => {
-    expect(eventSelectorSpec(events(Invoice).created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).created())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.created"],
     })
 
-    expect(eventSelectorSpec(events(Invoice).p.amount.updated())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).byId("inv-1").updated())).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv-1",
+      topic: "objects",
+      types: ["object.updated"],
+    })
+
+    expect(eventSelectorSpec(events.object(Invoice).p.amount.updated())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.updated"],
@@ -49,7 +94,7 @@ describe("events selector builder", () => {
       propertyOperation: "updated",
     })
 
-    expect(eventSelectorSpec(events(Invoice).p.amount.created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).p.amount.created())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
       types: ["object.created", "object.updated"],
@@ -59,14 +104,26 @@ describe("events selector builder", () => {
   })
 
   test("builds link mutation selectors", () => {
-    expect(eventSelectorSpec(events(Invoice).link(Invoice.l.payments).created())).toEqual({
+    expect(eventSelectorSpec(events.object(Invoice).link(Invoice.l.payments).created())).toEqual({
       objectTypeId: "Invoice",
       topic: "links",
       types: ["link.created"],
       linkId: "payments",
     })
 
-    expect(eventSelectorSpec(events(Invoice).link(Invoice.l.payments).p.amount.updated())).toEqual({
+    expect(
+      eventSelectorSpec(events.object(Invoice).byId("inv-1").link(Invoice.l.payments).created())
+    ).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv-1",
+      topic: "links",
+      types: ["link.created"],
+      linkId: "payments",
+    })
+
+    expect(
+      eventSelectorSpec(events.object(Invoice).link(Invoice.l.payments).p.amount.updated())
+    ).toEqual({
       objectTypeId: "Invoice",
       topic: "links",
       types: ["link.updated"],
@@ -75,11 +132,45 @@ describe("events selector builder", () => {
       propertyOperation: "updated",
     })
   })
+
+  test("builds rule and action selectors from definition tokens", () => {
+    expect(eventSelectorSpec(events.rule(invoiceAtRisk).triggered())).toEqual({
+      topic: "rules",
+      types: ["rule.triggered"],
+      ruleId: "invoice.at-risk",
+    })
+
+    expect(eventSelectorSpec(events.action(approveInvoice).completed())).toEqual({
+      topic: "actions",
+      types: ["action.completed"],
+      actionId: "approve-invoice",
+    })
+  })
+
+  test("builds dataset, sync, and pipeline selectors from definition tokens", () => {
+    expect(eventSelectorSpec(events.dataset(rawInvoices).updated())).toEqual({
+      topic: "datasets",
+      types: ["dataset.version.committed"],
+      datasetId: "raw.invoices",
+    })
+    expect(eventSelectorSpec(events.sync(importInvoices).succeeded())).toEqual({
+      topic: "syncs",
+      types: ["sync.run.finished"],
+      syncId: "import-invoices",
+      runStatus: "succeeded",
+    })
+    expect(eventSelectorSpec(events.pipeline(normalizeInvoices).failed())).toEqual({
+      topic: "pipelines",
+      types: ["pipeline.run.finished"],
+      pipelineId: "normalize-invoices",
+      runStatus: "failed",
+    })
+  })
 })
 
 describe("buildEventSelectorPredicate", () => {
   test("matches object property changes", () => {
-    const matches = buildEventSelectorPredicate(events(Invoice).p.amount.updated())
+    const matches = buildEventSelectorPredicate(events.object(Invoice).p.amount.updated())
 
     expect(
       matches(
@@ -116,8 +207,42 @@ describe("buildEventSelectorPredicate", () => {
     ).toBe(false)
   })
 
+  test("matches a selected object id", () => {
+    const matches = buildEventSelectorPredicate(events.object(Invoice).byId("inv-1").updated())
+
+    expect(
+      matches(
+        event({
+          type: "object.updated",
+          topic: "objects",
+          payload: {
+            objectTypeId: "Invoice",
+            primaryId: "inv-1",
+            properties: { amount: 700 },
+            propertyChanges: {},
+          },
+        })
+      )
+    ).toBe(true)
+
+    expect(
+      matches(
+        event({
+          type: "object.updated",
+          topic: "objects",
+          payload: {
+            objectTypeId: "Invoice",
+            primaryId: "inv-2",
+            properties: { amount: 700 },
+            propertyChanges: {},
+          },
+        })
+      )
+    ).toBe(false)
+  })
+
   test("matches a property created on an existing object", () => {
-    const matches = buildEventSelectorPredicate(events(Invoice).p.amount.created())
+    const matches = buildEventSelectorPredicate(events.object(Invoice).p.amount.created())
 
     expect(
       matches(
@@ -139,7 +264,7 @@ describe("buildEventSelectorPredicate", () => {
 
   test("matches link property changes", () => {
     const matches = buildEventSelectorPredicate(
-      events(Invoice).link(Invoice.l.payments).p.amount.created()
+      events.object(Invoice).link(Invoice.l.payments).p.amount.created()
     )
 
     expect(
@@ -177,6 +302,84 @@ describe("buildEventSelectorPredicate", () => {
             propertyChanges: {
               amount: { operation: "created", after: 700 },
             },
+          },
+        })
+      )
+    ).toBe(false)
+  })
+
+  test("matches rule and action definition ids", () => {
+    const matchesRule = buildEventSelectorPredicate(events.rule(invoiceAtRisk).triggered())
+    const matchesAction = buildEventSelectorPredicate(events.action(approveInvoice).completed())
+
+    expect(
+      matchesRule(
+        event({
+          type: "rule.triggered",
+          topic: "rules",
+          payload: {
+            ruleId: invoiceAtRisk.id,
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            triggeredAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(true)
+    expect(
+      matchesRule(
+        event({
+          type: "rule.triggered",
+          topic: "rules",
+          payload: {
+            ruleId: "invoice.other",
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            triggeredAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(false)
+
+    expect(
+      matchesAction(
+        event({
+          type: "action.completed",
+          topic: "actions",
+          payload: {
+            actionId: approveInvoice.id,
+            runId: "run-1",
+            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
+            finishedAt: "2026-07-09T18:00:00.000Z",
+          },
+        })
+      )
+    ).toBe(true)
+  })
+
+  test("matches typed run outcomes", () => {
+    const matches = buildEventSelectorPredicate(events.sync(importInvoices).succeeded())
+
+    expect(
+      matches(
+        event({
+          type: "sync.run.finished",
+          topic: "syncs",
+          payload: {
+            syncId: importInvoices.id,
+            runId: "run-1",
+            status: "succeeded",
+          },
+        })
+      )
+    ).toBe(true)
+    expect(
+      matches(
+        event({
+          type: "sync.run.finished",
+          topic: "syncs",
+          payload: {
+            syncId: importInvoices.id,
+            runId: "run-2",
+            status: "failed",
           },
         })
       )

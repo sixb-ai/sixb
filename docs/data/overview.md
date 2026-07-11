@@ -96,9 +96,8 @@ filter, rename, or join rows before they become objects.
   one dataset, and a projection writes one object type.
 - **Definitions are reused, not redeclared.** A dataset is defined once and referenced by syncs,
   pipelines, and projections so the schema stays in sync.
-- **Steps are event-driven.** Use `.when(...)` to chain work: a sync can run on a
-  [schedule](../schedules/overview.md) or after another sync (`syncFinished`), and a pipeline runs
-  when a dataset gets a new committed version (`datasetUpdated`). See [events](../events/overview.md).
+- **Steps are event-driven.** Use named [schedules](../schedules/overview.md) with `.when(...)`;
+  `events.sync(sync).succeeded()` and `events.dataset(dataset).updated()` describe chained work.
 
 ## When to use what
 

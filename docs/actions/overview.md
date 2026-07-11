@@ -313,7 +313,7 @@ builder can scope action events by run, action id, or object subject:
 ```tsx
 events.actions().run(runId).terminal()
 events.actions().action("markPaid").completed()
-events.actions().subject(Invoice).object("inv-1").failed()
+events.actions().subject(Invoice).byId("inv-1").failed()
 ```
 
 To react to a run on the server, subscribe through `sixb.events`, or model the reaction as a

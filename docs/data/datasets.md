@@ -87,7 +87,14 @@ A [pipeline](./pipelines.md) reads datasets and writes new ones, keeping raw sou
 
 ```ts
 import type { DatasetRow } from "@sixb/core"
-import { col, datasetUpdated, defineDataset, definePipeline, definePipelineStep } from "@sixb/core"
+import {
+  col,
+  defineDataset,
+  definePipeline,
+  definePipelineStep,
+  defineSchedule,
+  events,
+} from "@sixb/core"
 import { rawInvoicesDataset } from "../datasets/erp"
 
 export const paidInvoicesDataset = defineDataset("invoices.paid", {
@@ -119,8 +126,12 @@ export const paidInvoicesStep = definePipelineStep("paid-invoices")
     await output.writeRows(paidInvoices(inputs.invoices.readRows()))
   })
 
+export const rawInvoicesUpdated = defineSchedule("raw-invoices-updated").on(
+  events.dataset(rawInvoicesDataset).updated()
+)
+
 export const paidInvoicesPipeline = definePipeline("paid-invoices")
-  .when(datasetUpdated(rawInvoicesDataset.id))
+  .when(rawInvoicesUpdated)
   .then(paidInvoicesStep)
 ```
 

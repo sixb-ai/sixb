@@ -36,7 +36,7 @@ This runs every hour, calls `listInvoices()` on the connector's client, and writ
 | Step | Meaning |
 | --- | --- |
 | `defineSync("sync-erp-invoices", { mode })` | Names the sync; `mode` is `"snapshot"` (default) or `"append"` |
-| `.when(trigger)` | Declares when the sync runs; callable multiple times (OR semantics) |
+| `.when(schedule)` | Declares when the sync runs; callable multiple times (OR semantics) |
 | `.checkpoint<T>()` | Opts into a typed incremental checkpoint (optional) |
 | `.from(connector)` | Chooses the source connector |
 | `.read((client, context) => ...)` | Fetches rows from the connector's client |
@@ -45,19 +45,19 @@ This runs every hour, calls `listInvoices()` on the connector's client, and writ
 The read handler receives the `client` returned by the connector's `connect()` and a `context`. It
 may return one row, an iterable, or an async iterable.
 
-## Triggers
+## Schedules
 
-Every sync declares when it runs with `.when(...)`. Call it more than once to add triggers — they
-use OR semantics, so any matching trigger requests a run independently.
+Every sync declares when it runs with `.when(...)`. Call it more than once to add schedules; they
+use OR semantics.
 
-A trigger is either a [schedule](../schedules/overview.md) or a run trigger:
+A schedule can observe time or a typed event:
 
-| Trigger | Fires when |
+| Schedule | Fires when |
 | --- | --- |
-| a `defineSchedule(...)` value | the schedule's cron expression elapses |
-| `syncFinished(syncId)` | a named sync run succeeds |
-| `pipelineFinished(pipelineId)` | a named [pipeline](./pipelines.md) run succeeds |
-| `datasetUpdated(datasetId)` | a [dataset](./datasets.md) receives a new committed version |
+| `defineSchedule(...).cron(...)` | its cron expression elapses |
+| `defineSchedule(...).on(events.sync(sync).succeeded())` | a named sync succeeds |
+| `defineSchedule(...).on(events.pipeline(pipeline).succeeded())` | a pipeline succeeds |
+| `defineSchedule(...).on(events.dataset(dataset).updated())` | a dataset commits a version |
 
 Schedule a sync by attaching a reusable schedule:
 
@@ -74,12 +74,16 @@ Chain one sync after another so each run requests the next — useful when later
 earlier ones (invoices reference customers, customers reference employees):
 
 ```ts
-import { defineSync, syncFinished } from "@sixb/core"
+import { defineSchedule, defineSync, events } from "@sixb/core"
 import { acmeErpConnector } from "../connectors/acme-erp"
 import { erpCustomersDataset } from "../datasets/erp"
 
+export const employeesImported = defineSchedule("erp-employees-imported").on(
+  events.sync(syncErpEmployees).succeeded()
+)
+
 export const syncErpCustomers = defineSync("sync-erp-customers")
-  .when(syncFinished(syncErpEmployees.id))
+  .when(employeesImported)
   .from(acmeErpConnector)
   .read((erp) => erp.listCustomers())
   .intoDataset(erpCustomersDataset)

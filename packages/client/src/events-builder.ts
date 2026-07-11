@@ -1,24 +1,38 @@
 /**
  * Fluent event-subscription builder (`@sixb/client/events`).
  *
- * `events(Type)` mirrors `objects(Type)`: an immutable, generic-threaded builder
+ * `events.object(Type)` creates an immutable, generic-threaded builder
  * that accumulates an event-filter spec and types the payload from the same
  * `Type.p.*` / `Type.l.*` tokens as `expand()`. Channels (`.telemetry()`,
  * `.created()`, `.updated()`, `.link(...)`) narrow both the event type and the
- * payload; `.object(key)` scopes to one instance. The single core terminal is
+ * payload; `.byId(key)` scopes to one instance. The single core terminal is
  * `.subscribe(handler) => unsubscribe`, which runs a client-side predicate over
  * the live stream. The builder is browser-safe and React-free — hooks live in
  * `@sixb/client/hooks`.
  */
 
-import type { InferObjectProperties, InferPropertyValue } from "@sixb/core"
+import type {
+  ActionDefinition,
+  DatasetDefinition,
+  InferObjectProperties,
+  InferPropertyValue,
+  PipelineDefinition,
+  RuleDefinition,
+  SyncDefinition,
+} from "@sixb/core"
 import {
   buildEventSelectorPredicate,
+  type DatasetEventSelectorBuilder as CoreDatasetEventSelectorBuilder,
   type EventPropertySelector as CoreEventPropertySelector,
   type LinkEventSelectorBuilder as CoreLinkEventSelectorBuilder,
   type ObjectEventSelectorBuilder as CoreObjectEventSelectorBuilder,
+  type PipelineEventSelectorBuilder as CorePipelineEventSelectorBuilder,
+  type SyncEventSelectorBuilder as CoreSyncEventSelectorBuilder,
+  type DatasetEventToken,
   type EventSelectorSpec,
   eventSelectorSpec,
+  type PipelineEventToken,
+  type SyncEventToken,
   events as selectEvents,
 } from "@sixb/core/events/selectors"
 import type { LinkToken, ObjectTypeWithTokens, Property, PropertyToken } from "@sixb/core/ontology"
@@ -43,6 +57,42 @@ type StoredTelemetryEvent = SixbEventOfType<"telemetry.appended">
 type StoredObjectUpsertedEvent = SixbEventOfType<"object.upserted">
 type StoredObjectCreatedEvent = SixbEventOfType<"object.created">
 type StoredObjectUpdatedEvent = SixbEventOfType<"object.updated">
+
+type DatasetUpdatedEventOf<TDataset extends DatasetDefinition> = Override<
+  SixbEventOfType<"dataset.version.committed">,
+  {
+    payload: Override<
+      SixbEventOfType<"dataset.version.committed">["payload"],
+      { datasetId: TDataset["id"] }
+    >
+  }
+>
+
+type SyncFinishedEventOf<
+  TSync extends SyncDefinition,
+  TStatus extends "succeeded" | "failed" | "cancelled",
+> = Override<
+  SixbEventOfType<"sync.run.finished">,
+  {
+    payload: Override<
+      SixbEventOfType<"sync.run.finished">["payload"],
+      { syncId: TSync["id"]; status: TStatus }
+    >
+  }
+>
+
+type PipelineFinishedEventOf<
+  TPipeline extends PipelineDefinition,
+  TStatus extends "succeeded" | "failed" | "cancelled",
+> = Override<
+  SixbEventOfType<"pipeline.run.finished">,
+  {
+    payload: Override<
+      SixbEventOfType<"pipeline.run.finished">["payload"],
+      { pipelineId: TPipeline["id"]; status: TStatus }
+    >
+  }
+>
 
 /** A telemetry append narrowed to one property's ontology-typed value. */
 type TelemetryEventForProperty<TToken extends PropertyToken | undefined> =
@@ -128,7 +178,7 @@ export interface EventSubscribeOptions {
   readonly onStateChange?: (state: EventSocketState) => void
 }
 
-/** Object-scoped builder: `events(Type)`. Channels narrow the event + payload. */
+/** Object-scoped builder: `events.object(Type)`. Channels narrow the event + payload. */
 export interface EventsBuilder<
   TObjectType extends ObjectTypeWithTokens,
   TEvent extends SixbEvent = ObjectScopedEvent,
@@ -165,7 +215,7 @@ export interface EventsBuilder<
   ): EventsLinkBuilder<TObjectType, TLink>
 
   /** Scope to a single object instance (orthogonal to the channel). */
-  object(primaryId: string): EventsBuilder<TObjectType, TEvent>
+  byId(primaryId: string): EventsBuilder<TObjectType, TEvent>
 
   /** Subscribe to matching events; returns an unsubscribe function. */
   subscribe(handler: (event: TEvent) => void, options?: EventSubscribeOptions): () => void
@@ -204,7 +254,7 @@ export interface EventPropertyBuilder<
 /** Topic-scoped builder: `events.telemetry()`, `events.all()`, … */
 export interface EventsTopicBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
   /** Scope to a single object instance (objects / telemetry / links topics). */
-  object(primaryId: string): EventsTopicBuilder<TEvent>
+  byId(primaryId: string): EventsTopicBuilder<TEvent>
 }
 
 /** Run-scoped topic builder: `events.workflows()`, `events.pipelines()`, `events.syncs()`. */
@@ -213,11 +263,11 @@ export interface EventsRunBuilder<TEvent extends SixbEvent> extends Subscribable
   run(runId: string): EventsRunBuilder<TEvent>
 }
 
-/** Object-subject scope builder for action events: `events.actions().subject(Type).object(id)`. */
+/** Object-subject scope builder for action events: `events.actions().subject(Type).byId(id)`. */
 export interface EventsActionSubjectBuilder<TEvent extends SixbEvent>
   extends SubscribableEvents<TEvent> {
   /** Scope to a single action subject object. */
-  object(primaryId: string): EventsActionBuilder<TEvent>
+  byId(primaryId: string): EventsActionBuilder<TEvent>
 }
 
 /** Action-scoped topic builder: `events.actions().run(runId).completed()`. */
@@ -247,6 +297,33 @@ export interface EventsActionBuilder<TEvent extends SixbEvent> extends Subscriba
   terminal(): EventsActionBuilder<
     SixbEventOfType<"action.completed"> | SixbEventOfType<"action.failed">
   >
+}
+
+/** Rule-scoped topic builder: `events.rule(rule).triggered()`. */
+export interface EventsRuleBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
+  triggered(): EventsRuleBuilder<SixbEventOfType<"rule.triggered">>
+  resolved(): EventsRuleBuilder<SixbEventOfType<"rule.resolved">>
+}
+
+export interface EventsDatasetBuilder<TDataset extends DatasetDefinition, TEvent extends SixbEvent>
+  extends SubscribableEvents<TEvent> {
+  updated(): EventsDatasetBuilder<TDataset, DatasetUpdatedEventOf<TDataset>>
+}
+
+export interface EventsSyncBuilder<TSync extends SyncDefinition, TEvent extends SixbEvent>
+  extends SubscribableEvents<TEvent> {
+  succeeded(): EventsSyncBuilder<TSync, SyncFinishedEventOf<TSync, "succeeded">>
+  failed(): EventsSyncBuilder<TSync, SyncFinishedEventOf<TSync, "failed">>
+  cancelled(): EventsSyncBuilder<TSync, SyncFinishedEventOf<TSync, "cancelled">>
+}
+
+export interface EventsPipelineBuilder<
+  TPipeline extends PipelineDefinition,
+  TEvent extends SixbEvent,
+> extends SubscribableEvents<TEvent> {
+  succeeded(): EventsPipelineBuilder<TPipeline, PipelineFinishedEventOf<TPipeline, "succeeded">>
+  failed(): EventsPipelineBuilder<TPipeline, PipelineFinishedEventOf<TPipeline, "failed">>
+  cancelled(): EventsPipelineBuilder<TPipeline, PipelineFinishedEventOf<TPipeline, "cancelled">>
 }
 
 /**
@@ -324,13 +401,16 @@ type EventsBuilderParams = {
   readonly executor: EventSubscribeExecutor
   readonly objectType?: ObjectTypeWithTokens
   readonly linkToken?: LinkToken
-  readonly selector?: CoreMutationSelector
+  readonly selector?: CoreEventSelector
 }
 
-type CoreMutationSelector =
+type CoreEventSelector =
   | CoreObjectEventSelectorBuilder<ObjectTypeWithTokens>
   | CoreLinkEventSelectorBuilder<ObjectTypeWithTokens, LinkToken>
   | CoreEventPropertySelector
+  | CoreDatasetEventSelectorBuilder<DatasetEventToken>
+  | CoreSyncEventSelectorBuilder<SyncEventToken>
+  | CorePipelineEventSelectorBuilder<PipelineEventToken>
 
 /**
  * One immutable implementation backs every builder surface. Each method returns
@@ -378,7 +458,7 @@ class EventsBuilderImpl {
 
   created(): EventsBuilderImpl {
     const selector = this.params.selector
-    if (selector) {
+    if (selector && "created" in selector) {
       return this.withSelectorSpec(selector.created())
     }
     return this
@@ -386,7 +466,7 @@ class EventsBuilderImpl {
 
   updated(): EventsBuilderImpl {
     const selector = this.params.selector
-    if (selector) {
+    if (selector && "updated" in selector) {
       return this.withSelectorSpec(selector.updated())
     }
     return this
@@ -413,7 +493,7 @@ class EventsBuilderImpl {
     if (!objectType) {
       throw new Error("[SixbClient] Link event selectors require an object type.")
     }
-    const selector = selectEvents(objectType).link(link)
+    const selector = selectEvents.object(objectType).link(link)
     return new EventsBuilderImpl({
       ...this.params,
       linkToken: link,
@@ -438,7 +518,7 @@ class EventsBuilderImpl {
     return this
   }
 
-  object(primaryId: string): EventsBuilderImpl {
+  byId(primaryId: string): EventsBuilderImpl {
     return this.withFilter({ primaryId })
   }
 
@@ -464,11 +544,39 @@ class EventsBuilderImpl {
   }
 
   failed(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector && "failed" in selector) {
+      return this.withSelectorSpec(selector.failed())
+    }
     return this.withFilter({ topic: "actions", types: ["action.failed"] })
+  }
+
+  succeeded(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector && "succeeded" in selector) {
+      return this.withSelectorSpec(selector.succeeded())
+    }
+    return this
+  }
+
+  cancelled(): EventsBuilderImpl {
+    const selector = this.params.selector
+    if (selector && "cancelled" in selector) {
+      return this.withSelectorSpec(selector.cancelled())
+    }
+    return this
   }
 
   terminal(): EventsBuilderImpl {
     return this.withFilter({ topic: "actions", types: ["action.completed", "action.failed"] })
+  }
+
+  triggered(): EventsBuilderImpl {
+    return this.withFilter({ topic: "rules", types: ["rule.triggered"] })
+  }
+
+  resolved(): EventsBuilderImpl {
+    return this.withFilter({ topic: "rules", types: ["rule.resolved"] })
   }
 
   subscribe(handler: (event: SixbEvent) => void, options?: EventSubscribeOptions): () => void {
@@ -482,7 +590,7 @@ class EventsBuilderImpl {
     })
   }
 
-  private withSelector(selector: CoreMutationSelector): EventsBuilderImpl {
+  private withSelector(selector: CoreEventSelector): EventsBuilderImpl {
     return new EventsBuilderImpl({
       ...this.params,
       selector,
@@ -490,7 +598,7 @@ class EventsBuilderImpl {
     })
   }
 
-  private withSelectorSpec(selector: EventSelectorSpec): EventsBuilderImpl {
+  private withSelectorSpec(selector: EventSelectorSpec<unknown>): EventsBuilderImpl {
     return new EventsBuilderImpl({
       ...this.params,
       filter: { ...this.params.filter, ...eventSelectorSpec(selector) },
@@ -528,7 +636,7 @@ function createLinkPropertyTokens(linkToken: LinkToken): Record<string, Property
   )
 }
 
-// ── Public `events` callable + topic namespace ────────────────────────────────
+// ── Public `events` namespace ────────────────────────────────────────────────
 
 export interface SixbEventsClientOptions {
   /** hey-api client override (base url). Defaults to the global client. */
@@ -536,8 +644,8 @@ export interface SixbEventsClientOptions {
 }
 
 export interface SixbEventsApi {
-  /** Events for one object type, narrowed by channel + `.object(key)`. */
-  <TObjectType extends ObjectTypeWithTokens>(
+  /** Events for one object type, narrowed by channel + `.byId(key)`. */
+  object<TObjectType extends ObjectTypeWithTokens>(
     objectType: TObjectType,
     options?: SixbEventsClientOptions
   ): EventsBuilder<TObjectType>
@@ -548,6 +656,26 @@ export interface SixbEventsApi {
   telemetry(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"telemetry">>
   links(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"links">>
   actions(options?: SixbEventsClientOptions): EventsActionBuilder<SixbEventOfTopic<"actions">>
+  action<TAction extends ActionDefinition>(
+    action: TAction,
+    options?: SixbEventsClientOptions
+  ): EventsActionBuilder<SixbEventOfTopic<"actions">>
+  rule<TRule extends RuleDefinition>(
+    rule: TRule,
+    options?: SixbEventsClientOptions
+  ): EventsRuleBuilder<SixbEventOfTopic<"rules">>
+  dataset<TDataset extends DatasetDefinition>(
+    dataset: TDataset,
+    options?: SixbEventsClientOptions
+  ): EventsDatasetBuilder<TDataset, SixbEventOfTopic<"datasets">>
+  sync<TSync extends SyncDefinition>(
+    sync: TSync,
+    options?: SixbEventsClientOptions
+  ): EventsSyncBuilder<TSync, SixbEventOfTopic<"syncs">>
+  pipeline<TPipeline extends PipelineDefinition>(
+    pipeline: TPipeline,
+    options?: SixbEventsClientOptions
+  ): EventsPipelineBuilder<TPipeline, SixbEventOfTopic<"pipelines">>
   schedules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"schedules">>
   rules(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"rules">>
   datasets(options?: SixbEventsClientOptions): EventsTopicBuilder<SixbEventOfTopic<"datasets">>
@@ -576,22 +704,48 @@ function actionBuilder<TEvent extends SixbEvent>(
   return createBuilder({ topic: "actions" }, options) as unknown as EventsActionBuilder<TEvent>
 }
 
-const eventsApi = (<TObjectType extends ObjectTypeWithTokens>(
-  objectType: TObjectType,
-  options?: SixbEventsClientOptions
-): EventsBuilder<TObjectType> => {
-  const selector = selectEvents(objectType)
+const eventsApi = {} as SixbEventsApi
+
+eventsApi.object = (objectType, options) => {
+  const selector = selectEvents.object(objectType)
   return createBuilder(eventSelectorSpec(selector), options, {
     objectType,
     selector: selector as CoreObjectEventSelectorBuilder<ObjectTypeWithTokens>,
-  }) as unknown as EventsBuilder<TObjectType>
-}) as SixbEventsApi
+  }) as unknown as EventsBuilder<typeof objectType>
+}
 
 eventsApi.all = (options) => createBuilder({}, options) as unknown as EventsTopicBuilder<SixbEvent>
 eventsApi.objects = (options) => topicBuilder("objects", options)
 eventsApi.telemetry = (options) => topicBuilder("telemetry", options)
 eventsApi.links = (options) => topicBuilder("links", options)
 eventsApi.actions = (options) => actionBuilder(options)
+eventsApi.action = (action, options) =>
+  createBuilder(
+    { topic: "actions", actionId: action.id },
+    options
+  ) as unknown as EventsActionBuilder<SixbEventOfTopic<"actions">>
+eventsApi.rule = (rule, options) =>
+  createBuilder({ topic: "rules", ruleId: rule.id }, options) as unknown as EventsRuleBuilder<
+    SixbEventOfTopic<"rules">
+  >
+eventsApi.dataset = (dataset, options) => {
+  const selector = selectEvents.dataset(dataset)
+  return createBuilder(eventSelectorSpec(selector), options, {
+    selector: selector as CoreDatasetEventSelectorBuilder<DatasetEventToken>,
+  }) as unknown as EventsDatasetBuilder<typeof dataset, SixbEventOfTopic<"datasets">>
+}
+eventsApi.sync = (sync, options) => {
+  const selector = selectEvents.sync(sync)
+  return createBuilder(eventSelectorSpec(selector), options, {
+    selector: selector as CoreSyncEventSelectorBuilder<SyncEventToken>,
+  }) as unknown as EventsSyncBuilder<typeof sync, SixbEventOfTopic<"syncs">>
+}
+eventsApi.pipeline = (pipeline, options) => {
+  const selector = selectEvents.pipeline(pipeline)
+  return createBuilder(eventSelectorSpec(selector), options, {
+    selector: selector as CorePipelineEventSelectorBuilder<PipelineEventToken>,
+  }) as unknown as EventsPipelineBuilder<typeof pipeline, SixbEventOfTopic<"pipelines">>
+}
 eventsApi.schedules = (options) => topicBuilder("schedules", options)
 eventsApi.rules = (options) => topicBuilder("rules", options)
 eventsApi.datasets = (options) => topicBuilder("datasets", options)

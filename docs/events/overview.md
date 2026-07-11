@@ -4,14 +4,15 @@ Sixb has two event surfaces. Reach for **domain events** to read, stream, or aud
 happened inside a project. Reach for **webhooks** to receive deliveries from an external
 provider.
 
-- **Domain events** — an append-only log of everything the runtime does (objects upserted,
+- **Domain events** — an append-only log of everything the runtime does (objects changed,
   telemetry appended, runs started and finished, and so on). Access them through `sixb.events`.
 - **Webhooks** — inbound HTTP endpoints owned by a [connector](../data/connectors.md) that
   receive provider deliveries and run a handler.
 
-> Domain events are an **observability log, not a trigger**. Appending an event does **not**
-> run any [rule](../rules/overview.md) or [workflow](../workflows/overview.md). They are
-> emitted as a side effect of the runtime's work so you can read, stream, and audit it.
+> The event log API is an **observability surface, not a trigger API**. Appending an event does
+> not directly run a [rule](../rules/overview.md) or [workflow](../workflows/overview.md).
+> Declarative [event schedules](../schedules/events.md) use event selectors, but they are defined and
+> registered separately from manual event appends.
 
 ## Domain events
 
@@ -22,11 +23,13 @@ the core event registry.
 
 | Type | Topic | Payload highlights |
 | --- | --- | --- |
-| `object.upserted` | `objects` | `objectTypeId`, `primaryId`, `properties` |
-| `object.deleted` | `objects` | `objectTypeId`, `primaryId` |
+| `object.created` | `objects` | `objectTypeId`, `primaryId`, `properties`, `propertyChanges` |
+| `object.updated` | `objects` | `objectTypeId`, `primaryId`, `properties`, `propertyChanges` |
+| `object.deleted` | `objects` | `objectTypeId`, `primaryId`, `propertyChanges` |
 | `telemetry.appended` | `telemetry` | `objectTypeId`, `objectId`, `propertyId`, `value`, `unit?`, `at` |
-| `link.upserted` | `links` | `sourceTypeId`, `sourceId`, `linkId`, `targetTypeId`, `targetId`, `properties?` |
-| `link.removed` | `links` | `sourceTypeId`, `sourceId`, `linkId`, `targetTypeId`, `targetId` |
+| `link.created` | `links` | `sourceTypeId`, `sourceId`, `linkId`, `targetTypeId`, `targetId`, `properties?`, `propertyChanges` |
+| `link.updated` | `links` | `sourceTypeId`, `sourceId`, `linkId`, `targetTypeId`, `targetId`, `properties?`, `propertyChanges` |
+| `link.deleted` | `links` | `sourceTypeId`, `sourceId`, `linkId`, `targetTypeId`, `targetId`, `propertyChanges` |
 | `action.requested` | `actions` | `actionId`, `subject`, `params`, `runId` |
 | `action.completed` | `actions` | `actionId`, `runId`, `subject`, `finishedAt` |
 | `action.failed` | `actions` | `actionId`, `runId`, `subject`, `error`, `finishedAt` |
@@ -37,6 +40,9 @@ the core event registry.
 | `workflow.run.*` (queued, started, node.started, waiting, node.waiting, node.finished, finished) | `workflows` | `workflowId`, `runId` |
 | `workflow.intervention.*` (requested, submitted, cancelled, expired) | `workflows` | `workflowId`, `runId` |
 | `dataset.version.committed` | `datasets` | `datasetId` |
+
+`object.upserted`, `link.upserted`, and `link.removed` are legacy compatibility events. Prefer
+`created`, `updated`, and `deleted` selectors for new code.
 
 `EVENT_TYPES` and `EVENT_TOPICS` are exported from `@sixb/core` for the canonical lists at
 runtime.
@@ -69,7 +75,7 @@ and/or `types` and paged with `afterCursor`.
 
 ```ts
 const recent = await sixb.events.read({
-  types: ["object.upserted", "telemetry.appended"],
+  types: ["object.updated", "telemetry.appended"],
   limit: 100,
 })
 
@@ -225,8 +231,9 @@ webhook delivery storage to be configured.
 
 - [Connectors](../data/connectors.md) — where webhooks live
 - [Client events](../client/events.md) — event builders and React hooks for apps
-- [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative
-  reactions to object state and multi-step processes
+- [Event schedules](../schedules/events.md) — start work from typed events
+- [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative state
+  and multi-step processes
 - [Running actions from apps](../apps/actions.md) — action button state and scoped action events
 - [Server](../server/overview.md) — the HTTP/WebSocket API
 - [Authorization](../auth/authorization.md) — how `/api/events` is scoped

@@ -177,7 +177,7 @@ broader live coordination:
 ```tsx
 import { events, useEvents } from "@sixb/client/hooks"
 
-useEvents(events.actions().subject(Quote).object(quoteId).terminal(), (event) => {
+useEvents(events.actions().subject(Quote).byId(quoteId).terminal(), (event) => {
   console.log("quote action finished", event.payload.runId)
 })
 
@@ -192,7 +192,7 @@ Useful scopes are:
 | --- | --- |
 | `events.actions().run(runId)` | One action run |
 | `events.actions().action("approveQuote")` | One action definition |
-| `events.actions().subject(Quote).object(quoteId)` | Actions against one object |
+| `events.actions().subject(Quote).byId(quoteId)` | Actions against one object |
 | `.requested()` | Only enqueue events |
 | `.completed()` | Successful terminal events |
 | `.failed()` | Failed or cancelled terminal events |

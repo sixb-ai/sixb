@@ -1,68 +1,45 @@
 import type { ObjectLink, ObjectType, Property } from "../ontology/types"
+import type {
+  AllPredicate,
+  AnyPredicate,
+  LinkPredicate,
+  LinkPredicateBuilder,
+  LinkPredicateOperator,
+  NotPredicate,
+  Predicate,
+  PredicateValue,
+  PropertyPredicate,
+  PropertyPredicateBuilder,
+  PropertyPredicateOperator,
+} from "../predicates"
 
-export interface RuleDefinition<TId extends string = string> {
+export interface RuleDefinition<
+  TId extends string = string,
+  TObjectType extends RuleObjectType = RuleObjectType,
+> {
   /** Inert marker used by discovery and runtime registration. */
   readonly kind: "rule"
   readonly id: TId
   /** The ontology entity kind this rule evaluates against. V1 supports objects only. */
-  readonly subject: RuleSubject
+  readonly subject: RuleSubject<TObjectType["id"]>
   /** Serializable predicate AST. No executable callbacks are retained after `.where(...)`. */
   readonly predicate: RulePredicate
 }
 
-export type RuleSubject = {
+export type RuleSubject<TObjectTypeId extends string = string> = {
   readonly kind: "object"
-  readonly objectTypeId: string
+  readonly objectTypeId: TObjectTypeId
 }
 
-export type RulePredicate =
-  | RuleAllPredicate
-  | RuleAnyPredicate
-  | RuleNotPredicate
-  | RulePropertyPredicate
-  | RuleLinkPredicate
-
-export interface RuleAllPredicate {
-  readonly kind: "all"
-  readonly predicates: readonly RulePredicate[]
-}
-
-export interface RuleAnyPredicate {
-  readonly kind: "any"
-  readonly predicates: readonly RulePredicate[]
-}
-
-export interface RuleNotPredicate {
-  readonly kind: "not"
-  readonly predicate: RulePredicate
-}
-
-export type RulePropertyOperator =
-  | "eq"
-  | "notEq"
-  | "gt"
-  | "gte"
-  | "lt"
-  | "lte"
-  | "isPresent"
-  | "isMissing"
-
-export interface RulePropertyPredicate {
-  readonly kind: "property"
-  readonly propertyId: string
-  readonly op: RulePropertyOperator
-  readonly value?: RuleValue
-}
-
-export type RuleLinkOperator = "exists" | "isMissing"
-
-export interface RuleLinkPredicate {
-  readonly kind: "link"
-  readonly linkId: string
-  readonly op: RuleLinkOperator
-}
-
-export type RuleValue = string | number | boolean | null
+export type RulePredicate = Predicate
+export type RuleAllPredicate = AllPredicate
+export type RuleAnyPredicate = AnyPredicate
+export type RuleNotPredicate = NotPredicate
+export type RulePropertyOperator = PropertyPredicateOperator
+export type RulePropertyPredicate = PropertyPredicate
+export type RuleLinkOperator = LinkPredicateOperator
+export type RuleLinkPredicate = LinkPredicate
+export type RuleValue = PredicateValue
 
 /**
  * Minimal event filters a future rule runtime can use before evaluation.
@@ -97,21 +74,11 @@ type LinkById<TObjectType extends RuleObjectType, TLinkId extends LinkIdOf<TObje
   { id: TLinkId }
 >
 
-export interface RulePropertyPredicateBuilder<_TProperty extends Property = Property> {
-  eq(value: RuleValue): RulePropertyPredicate
-  notEq(value: RuleValue): RulePropertyPredicate
-  gt(value: number): RulePropertyPredicate
-  gte(value: number): RulePropertyPredicate
-  lt(value: number): RulePropertyPredicate
-  lte(value: number): RulePropertyPredicate
-  isPresent(): RulePropertyPredicate
-  isMissing(): RulePropertyPredicate
-}
+export type RulePropertyPredicateBuilder<_TProperty extends Property = Property> =
+  PropertyPredicateBuilder<_TProperty>
 
-export interface RuleLinkPredicateBuilder<_TLink extends ObjectLink = ObjectLink> {
-  exists(): RuleLinkPredicate
-  isMissing(): RuleLinkPredicate
-}
+export type RuleLinkPredicateBuilder<_TLink extends ObjectLink = ObjectLink> =
+  LinkPredicateBuilder<_TLink>
 
 export type RuleSubjectBuilder<TObjectType extends RuleObjectType> = {
   /** Property predicates keyed by the selected object type's property ids. */
@@ -134,7 +101,9 @@ export type RuleSubjectBuilder<TObjectType extends RuleObjectType> = {
 }
 
 export interface RuleWhereBuilder<TId extends string, TObjectType extends RuleObjectType> {
-  where(predicate: (subject: RuleSubjectBuilder<TObjectType>) => RulePredicate): RuleDefinition<TId>
+  where(
+    predicate: (subject: RuleSubjectBuilder<TObjectType>) => RulePredicate
+  ): RuleDefinition<TId, TObjectType>
 }
 
 export interface RuleBuilder<TId extends string> {

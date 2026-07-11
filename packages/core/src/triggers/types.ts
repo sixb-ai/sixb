@@ -1,12 +1,6 @@
 /**
- * Declarative trigger that can request a sync or pipeline run.
- *
- * Multiple triggers on the same definition use OR semantics: any matching
- * trigger can request a run independently.
- *
- * The `status` field on `sync.finished` and `pipeline.finished` is currently
- * limited to `"succeeded"`. Future versions may extend this to `"failed"` or
- * `"any"` to support error-driven workflows.
+ * @deprecated Define a named event schedule with `defineSchedule(...).on(events.*)` instead.
+ * Kept temporarily while existing sync and pipeline bindings migrate.
  */
 export type RunTrigger =
   | { readonly type: "schedule"; readonly scheduleId: string }
@@ -18,7 +12,7 @@ export type RunTrigger =
     }
   | { readonly type: "dataset.updated"; readonly datasetId: string }
 
-/** Runtime type guard for values discovered as triggers. */
+/** @deprecated Internal compatibility guard for legacy run triggers. */
 export function isRunTrigger(value: unknown): value is RunTrigger {
   if (!isRecord(value)) return false
 
