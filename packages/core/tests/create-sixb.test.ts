@@ -491,7 +491,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
           projectId: "broker-backed-runtime",
           streamId: EVENTS_STREAM.id,
         })
-      ).map((record) => record.name)
+      ).records.map((record) => record.name)
       expect(brokerRecordNames).toEqual(eventTypes)
     } finally {
       await sixb.stopScheduler()

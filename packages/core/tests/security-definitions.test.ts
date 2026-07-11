@@ -400,6 +400,15 @@ describe("role definitions", () => {
     })
   })
 
+  test("can.observe exposes the explicit project log capability", () => {
+    expect(can.observe("logs")).toEqual({
+      kind: "grant",
+      capability: "observe",
+      target: "logs",
+      selection: { all: false, ids: ["logs"] },
+    })
+  })
+
   test("can.run supports sync, pipeline, and agent definitions and scopes", () => {
     expect(can.run(syncAccounts)).toEqual({
       kind: "grant",

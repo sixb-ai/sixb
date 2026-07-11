@@ -149,7 +149,7 @@ describe("ActionWorker", () => {
     await worker.stop()
 
     const broker = (sixb as unknown as { readonly broker: Broker }).broker
-    const records = await broker.read({
+    const { records } = await broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
       names: ["action.info"],

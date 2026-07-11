@@ -47,7 +47,7 @@ describe("RedisBroker", () => {
         records: [{ name: "object.upserted", payload: { id: "room-1" } }],
       })
 
-      expect(await broker.read({ projectId, streamId: stream.id })).toEqual([record])
+      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([record])
     } finally {
       await broker.close()
       if (previousRedisUrl === undefined) {
@@ -89,7 +89,7 @@ describe("RedisBroker", () => {
       expect(first).toBeDefined()
       expect(second?.cursor).toBe(first?.cursor)
       expect(second?.payload).toEqual({ id: "room-1" })
-      expect(await broker.read({ projectId, streamId: stream.id })).toEqual([first])
+      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([first])
     } finally {
       await cleanup()
     }
@@ -127,7 +127,7 @@ describe("RedisBroker", () => {
       expect(results.slice(0, appendTasks.length).flat()).toHaveLength(100)
 
       const retained = await broker.read({ projectId, streamId: stream.id, limit: 200 })
-      expect(retained).toHaveLength(100)
+      expect(retained.records).toHaveLength(100)
     } finally {
       await cleanup()
     }
@@ -152,7 +152,9 @@ describe("RedisBroker", () => {
       expect(duplicate?.payload).toEqual({ id: "old" })
       expect(newest?.payload).toEqual({ id: "new" })
       expect(
-        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+        (await broker.read({ projectId, streamId: stream.id })).records.map(
+          (record) => record.payload
+        )
       ).toEqual([{ id: "new" }])
     } finally {
       await cleanup()
@@ -181,7 +183,9 @@ describe("RedisBroker", () => {
       await waitUntil(() => received.length === 3, 5_000)
       expect(received).toEqual(["one", "two", "three"])
       expect(
-        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+        (await broker.read({ projectId, streamId: stream.id })).records.map(
+          (record) => record.payload
+        )
       ).toEqual(["three"])
     } finally {
       unsubscribe?.()
@@ -206,7 +210,9 @@ describe("RedisBroker", () => {
       })
 
       expect(
-        (await broker.read({ projectId, streamId: stream.id })).map((record) => record.payload)
+        (await broker.read({ projectId, streamId: stream.id })).records.map(
+          (record) => record.payload
+        )
       ).toEqual(["three"])
       await expect(
         broker.read({ projectId, streamId: stream.id, afterCursor: first?.cursor })
@@ -255,9 +261,9 @@ describe("RedisBroker", () => {
 
       const retained = await broker.read({ projectId, streamId: stream.id })
 
-      expect(retained.map((record) => (record.payload as { label: string }).label)).toEqual([
-        "new-two",
-      ])
+      expect(retained.records.map((record) => (record.payload as { label: string }).label)).toEqual(
+        ["new-two"]
+      )
     } finally {
       await cleanup()
     }
@@ -379,7 +385,7 @@ describe("RedisBroker", () => {
         records: [{ payload: "two" }, { payload: "three" }],
       })
 
-      const records = await broker.read({
+      const { records } = await broker.read({
         projectId,
         streamId: stream.id,
         afterCursor: first?.cursor,
@@ -412,13 +418,15 @@ describe("RedisBroker", () => {
         })
       ).rejects.toThrow("outside the retained range")
       expect(
-        await broker.read({
-          projectId,
-          streamId: stream.id,
-          afterCursor: old?.cursor,
-        })
+        (
+          await broker.read({
+            projectId,
+            streamId: stream.id,
+            afterCursor: old?.cursor,
+          })
+        ).records
       ).toEqual([])
-      expect(await broker.read({ projectId, streamId: stream.id })).toEqual([])
+      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([])
     } finally {
       await cleanup()
     }

@@ -153,7 +153,7 @@ describe("PipelineWorker", () => {
       await worker.stop()
     }
 
-    const records = await sixb.broker.read({
+    const { records } = await sixb.broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
       names: ["pipeline.info"],

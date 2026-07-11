@@ -8,6 +8,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  isAllowed,
   type OntologySource,
   resolveAuthorizationContext,
   resolveMembershipPolicyScope,
@@ -117,6 +118,8 @@ describe("auth example Atlas authorization", () => {
       })
     ).resolves.toMatchObject({ runId: expect.any(String) })
     expect((await admin.readEvents()).map((event) => event.type)).toContain("object.upserted")
+    expect(isAllowed(atlasContext(sixb, ["security-admins"]), { kind: "logs.observe" })).toBe(true)
+    expect(isAllowed(atlasContext(sixb, ["team-members"]), { kind: "logs.observe" })).toBe(false)
 
     expect(await noGroups.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
     expect(noGroups.listActions()).toEqual([])

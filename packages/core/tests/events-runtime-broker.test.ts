@@ -62,10 +62,11 @@ describe("EventsRuntime broker backing", () => {
       idempotencyKey: "object.upserted:room-1",
     })
 
-    const [record] = await broker.read({
+    const { records } = await broker.read({
       projectId: "project-a",
       streamId: EVENTS_STREAM.id,
     })
+    const [record] = records
     expect(record).toMatchObject({
       streamId: "__events",
       cursor: "1",
@@ -188,7 +189,9 @@ describe("EventsRuntime broker backing", () => {
 
     expect(await runtime.append({ events: [] })).toEqual([])
     await broker.ensureStream({ projectId: "project-a", stream: EVENTS_STREAM })
-    expect(await broker.read({ projectId: "project-a", streamId: EVENTS_STREAM.id })).toEqual([])
+    expect(
+      (await broker.read({ projectId: "project-a", streamId: EVENTS_STREAM.id })).records
+    ).toEqual([])
   })
 
   test("rejects malformed broker records", async () => {

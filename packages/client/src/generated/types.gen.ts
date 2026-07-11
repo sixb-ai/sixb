@@ -6370,6 +6370,69 @@ export type ListEventsResponses = {
 
 export type ListEventsResponse = ListEventsResponses[keyof ListEventsResponses]
 
+export type ListLogsData = {
+  body?: never
+  path?: never
+  query?: {
+    kind?: "sync" | "pipeline" | "workflow" | "action"
+    runId?: string
+    level?: "debug" | "info" | "warn" | "error"
+    direction?: "forward" | "backward"
+    afterCursor?: string
+    beforeCursor?: string
+    limit?: number
+  }
+  url: "/api/logs"
+}
+
+export type ListLogsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 403
+   */
+  403: {
+    error: string
+  }
+}
+
+export type ListLogsError = ListLogsErrors[keyof ListLogsErrors]
+
+export type ListLogsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    count: number
+    lines: Array<{
+      level: "debug" | "info" | "warn" | "error"
+      message: string
+      fields?: {
+        [key: string]: unknown
+      }
+      at: string
+      context: {
+        run: {
+          kind: "sync" | "pipeline" | "workflow" | "action"
+          id: string
+        }
+        stepId?: string
+        phase?: string
+        attempt?: number
+      }
+      cursor: string
+    }>
+    cursor?: string
+    hasMore: boolean
+  }
+}
+
+export type ListLogsResponse = ListLogsResponses[keyof ListLogsResponses]
+
 export type ListProjectionsData = {
   body?: never
   path?: never

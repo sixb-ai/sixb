@@ -46,7 +46,7 @@ describe("NatsBroker", () => {
       expect(first).toBeDefined()
       expect(second?.cursor).toBe(first?.cursor)
       expect(second?.payload).toEqual({ id: "room-1" })
-      expect(await broker.read({ projectId, streamId: stream.id })).toEqual([first])
+      expect((await broker.read({ projectId, streamId: stream.id })).records).toEqual([first])
     } finally {
       await cleanup()
     }

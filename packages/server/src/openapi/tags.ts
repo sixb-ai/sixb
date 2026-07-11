@@ -119,6 +119,10 @@ export const OPENAPI_TAGS = {
     name: "Events",
     description: "Domain event stream",
   },
+  logs: {
+    name: "Logs",
+    description: "Run log stream",
+  },
   authSessions: {
     name: "Auth Sessions",
     description: "Authentication sessions and sign-out",

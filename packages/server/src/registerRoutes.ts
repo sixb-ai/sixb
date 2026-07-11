@@ -9,6 +9,7 @@ import { registerDatasetRoutes } from "./routes/datasets"
 import { registerEventRoutes } from "./routes/events"
 import { registerFileRoutes } from "./routes/files"
 import { registerLinkRoutes } from "./routes/links"
+import { registerLogRoutes } from "./routes/logs"
 import { registerObjectRoutes } from "./routes/objects"
 import { registerOntologyRoutes } from "./routes/ontology"
 import { registerPipelineRoutes } from "./routes/pipelines"
@@ -40,6 +41,7 @@ export function registerHttpRoutes(app: Elysia, sixb: Sixb<readonly OntologySour
   registerLinkRoutes(app, sixb)
   registerTelemetryRoutes(app, sixb)
   registerEventRoutes(app, sixb)
+  registerLogRoutes(app, sixb)
   registerProjectionRoutes(app, sixb)
   registerWebhookRunRoutes(app, sixb)
 

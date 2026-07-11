@@ -105,7 +105,7 @@ export class EventsRuntime {
     }
 
     await this.ensureStream()
-    const records = await this.broker.read({
+    const page = await this.broker.read({
       projectId: this.projectId,
       streamId: this.stream.id,
       afterCursor: input.afterCursor,
@@ -113,7 +113,7 @@ export class EventsRuntime {
       names,
     })
 
-    return records.map(hydrateEventRecord)
+    return page.records.map(hydrateEventRecord)
   }
 
   async latestCursor(): Promise<string | undefined> {

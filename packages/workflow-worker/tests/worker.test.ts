@@ -215,7 +215,7 @@ describe("WorkflowWorker", () => {
       (value) => value?.status === "succeeded"
     )
 
-    const records = await sixb.broker.read({
+    const { records } = await sixb.broker.read({
       projectId: sixb.id,
       streamId: LOGS_STREAM.id,
       names: ["workflow.info"],

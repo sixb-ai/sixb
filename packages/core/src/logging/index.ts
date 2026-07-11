@@ -6,8 +6,12 @@ export {
 } from "./console-logger"
 export {
   type LogsObservabilityOptions,
+  type LogsPage,
+  type LogsReadInput,
   LogsRuntime,
   type LogsRuntimeOptions,
+  type LogsSubscribeInput,
+  type LogsTailInput,
   type ObservabilityOptions,
   resolveLogsRuntime,
 } from "./runtime"
@@ -18,6 +22,12 @@ export {
 } from "./stream"
 export {
   isLevelEnabled,
+  isLogLevel,
+  isLogRecord,
+  isLogRunKind,
+  isStoredLogLine,
+  LOG_LEVELS,
+  LOG_RUN_KINDS,
   type LogContext,
   type LogEntry,
   type LogFields,
@@ -27,5 +37,7 @@ export {
   type LogRecord,
   type LogRunKind,
   type LogRunRef,
+  logLevelsAtOrAbove,
   normalizeLogError,
+  type StoredLogLine,
 } from "./types"

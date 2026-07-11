@@ -209,6 +209,9 @@ import type {
   ListEventsData,
   ListEventsErrors,
   ListEventsResponses,
+  ListLogsData,
+  ListLogsErrors,
+  ListLogsResponses,
   ListObjectLinksData,
   ListObjectLinksErrors,
   ListObjectLinksResponses,
@@ -1807,6 +1810,18 @@ export const listEvents = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<ListEventsResponses, ListEventsErrors, ThrowOnError>({
     security: [{ scheme: "bearer", type: "http" }],
     url: "/api/events",
+    ...options,
+  })
+
+/**
+ * Read run logs
+ */
+export const listLogs = <ThrowOnError extends boolean = false>(
+  options?: Options<ListLogsData, ThrowOnError>
+) =>
+  (options?.client ?? client).get<ListLogsResponses, ListLogsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/logs",
     ...options,
   })
 

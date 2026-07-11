@@ -74,6 +74,7 @@ import {
   listDatasets,
   listDatasetVersions,
   listEvents,
+  listLogs,
   listObjectLinks,
   listObjects,
   listObjectTypes,
@@ -300,6 +301,9 @@ import type {
   ListEventsData,
   ListEventsError,
   ListEventsResponse,
+  ListLogsData,
+  ListLogsError,
+  ListLogsResponse,
   ListObjectLinksData,
   ListObjectLinksError,
   ListObjectLinksResponse,
@@ -3439,6 +3443,31 @@ export const listEventsOptions = (options?: Options<ListEventsData>) =>
       return data
     },
     queryKey: listEventsQueryKey(options),
+  })
+
+export const listLogsQueryKey = (options?: Options<ListLogsData>) =>
+  createQueryKey("listLogs", options)
+
+/**
+ * Read run logs
+ */
+export const listLogsOptions = (options?: Options<ListLogsData>) =>
+  queryOptions<
+    ListLogsResponse,
+    ListLogsError,
+    ListLogsResponse,
+    ReturnType<typeof listLogsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listLogs({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listLogsQueryKey(options),
   })
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>

@@ -1,5 +1,12 @@
-import type { Broker, BrokerRecord, BrokerRecordInput, BrokerStreamDefinition } from "@sixb/core"
-import { cloneJsonValue } from "@sixb/core"
+import {
+  type Broker,
+  BrokerCursorExpiredError,
+  type BrokerPage,
+  type BrokerRecord,
+  type BrokerRecordInput,
+  type BrokerStreamDefinition,
+  cloneJsonValue,
+} from "@sixb/core"
 import {
   type RedisBrokerClient,
   type RedisBrokerConnectionOptions,
@@ -177,19 +184,20 @@ export class RedisBroker implements Broker {
     afterCursor?: string
     limit?: number
     names?: readonly string[]
-  }): Promise<readonly BrokerRecord[]> {
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
     this.assertOpen()
     validateProjectId(params.projectId)
     assertStreamId(params.streamId)
     assertCursor(params.afterCursor)
 
     if (params.limit !== undefined && params.limit <= 0) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
     const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
     if (ensured === null) {
-      return []
+      return { records: [], cursor: params.afterCursor, hasMore: false }
     }
 
     await this.connectionManager.useCommandClient((client) =>
@@ -201,7 +209,9 @@ export class RedisBroker implements Broker {
     this.assertCursorInRetainedRange(ensured.streamId, params.afterCursor, lastTrimmedId)
 
     const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
+    const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
     const records: BrokerRecord[] = []
+    const target = params.limit === undefined ? undefined : params.limit + 1
     // Redis makes range starts exclusive by prefixing the id with "(".
     let start =
       params.afterCursor === undefined
@@ -210,7 +220,9 @@ export class RedisBroker implements Broker {
           : `(${lastTrimmedId}`
         : `(${params.afterCursor}`
 
-    while (params.limit === undefined || records.length < params.limit) {
+    let cursor = params.afterCursor
+    let reachedTarget = false
+    while (!reachedTarget) {
       const entries = await this.connectionManager.useCommandClient((client) =>
         this.readRange(client, ensured, start, this.readBatchSize)
       )
@@ -221,6 +233,7 @@ export class RedisBroker implements Broker {
       let lastScannedId: string | undefined
       for (const entry of entries) {
         lastScannedId = entry.id
+        cursor = entry.id
         const record = decodeRecord({
           streamId: ensured.streamId,
           body: bodyFromEntry(entry),
@@ -230,23 +243,110 @@ export class RedisBroker implements Broker {
 
         // Redis Streams cannot filter by arbitrary entry fields. Keep scanning
         // until the caller's limit is met after application-level name filtering.
-        if (names && (!record.name || !names.has(record.name))) {
+        if (!matchesFilters(record, names, keys)) {
           continue
         }
 
         records.push(record)
-        if (params.limit !== undefined && records.length >= params.limit) {
+        if (target !== undefined && records.length >= target) {
+          reachedTarget = true
           break
         }
       }
 
-      if (lastScannedId === undefined || entries.length < this.readBatchSize) {
+      if (reachedTarget || lastScannedId === undefined || entries.length < this.readBatchSize) {
         break
       }
       start = `(${lastScannedId}`
     }
 
-    return records
+    const hasMore = params.limit !== undefined && records.length > params.limit
+    const pageRecords = hasMore ? records.slice(0, params.limit) : records
+    return {
+      records: pageRecords,
+      cursor: hasMore ? (pageRecords.at(-1)?.cursor ?? params.afterCursor) : cursor,
+      hasMore,
+    }
+  }
+
+  async tail(params: {
+    projectId: string
+    streamId: string
+    beforeCursor?: string
+    limit?: number
+    names?: readonly string[]
+    keys?: readonly string[]
+  }): Promise<BrokerPage> {
+    this.assertOpen()
+    validateProjectId(params.projectId)
+    assertStreamId(params.streamId)
+    assertCursor(params.beforeCursor)
+
+    if (params.limit !== undefined && params.limit <= 0) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    const ensured = await this.streamManager.getExistingStream(params.projectId, params.streamId)
+    if (ensured === null) {
+      return { records: [], cursor: params.beforeCursor, hasMore: false }
+    }
+
+    const lastTrimmedId = await this.connectionManager.useCommandClient(async (client) => {
+      await this.enforceAgeRetention(client, ensured)
+      return this.readLastTrimmedId(client, ensured)
+    })
+    this.assertTailCursorInRetainedRange(ensured.streamId, params.beforeCursor, lastTrimmedId)
+
+    const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
+    const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
+    const reversed: BrokerRecord[] = []
+    const target = params.limit === undefined ? undefined : params.limit + 1
+    let cursor = params.beforeCursor
+    let start = params.beforeCursor === undefined ? "+" : `(${params.beforeCursor}`
+    const end = lastTrimmedId === undefined ? "-" : `(${lastTrimmedId}`
+    let reachedTarget = false
+
+    while (!reachedTarget) {
+      const entries = await this.connectionManager.useCommandClient((client) =>
+        this.readReverseRange(client, ensured, start, end, this.readBatchSize)
+      )
+      if (entries.length === 0) {
+        break
+      }
+
+      let lastScannedId: string | undefined
+      for (const entry of entries) {
+        lastScannedId = entry.id
+        cursor = entry.id
+        const record = decodeRecord({
+          streamId: ensured.streamId,
+          body: bodyFromEntry(entry),
+          cursor: entry.id,
+          fallbackPublishedAt: new Date().toISOString(),
+        })
+        if (!matchesFilters(record, names, keys)) {
+          continue
+        }
+        reversed.push(record)
+        if (target !== undefined && reversed.length >= target) {
+          reachedTarget = true
+          break
+        }
+      }
+
+      if (reachedTarget || lastScannedId === undefined || entries.length < this.readBatchSize) {
+        break
+      }
+      start = `(${lastScannedId}`
+    }
+
+    const hasMore = params.limit !== undefined && reversed.length > params.limit
+    const pageRecords = (hasMore ? reversed.slice(0, params.limit) : reversed).reverse()
+    return {
+      records: pageRecords,
+      cursor: hasMore ? (pageRecords[0]?.cursor ?? params.beforeCursor) : cursor,
+      hasMore,
+    }
   }
 
   async latestCursor(params: { projectId: string; streamId: string }): Promise<string | undefined> {
@@ -273,6 +373,7 @@ export class RedisBroker implements Broker {
       from?: "latest" | "earliest"
       afterCursor?: string
       names?: readonly string[]
+      keys?: readonly string[]
     },
     handler: (records: readonly BrokerRecord[]) => void
   ): Promise<() => void> {
@@ -309,6 +410,7 @@ export class RedisBroker implements Broker {
 
     try {
       const names = params.names && params.names.length > 0 ? new Set(params.names) : undefined
+      const keys = params.keys && params.keys.length > 0 ? new Set(params.keys) : undefined
       // Resolve "latest" to a concrete id once. Reusing "$" after each BLOCK
       // timeout can skip records written between two XREAD calls.
       let lastSeenId =
@@ -342,7 +444,7 @@ export class RedisBroker implements Broker {
                 continue
               }
 
-              if (names && (!record.name || !names.has(record.name))) {
+              if (!matchesFilters(record, names, keys)) {
                 continue
               }
               records.push(record)
@@ -589,8 +691,24 @@ export class RedisBroker implements Broker {
     // The append/trim scripts record the latest id removed from the logical
     // retained range; only cursors older than that represent unavailable history.
     if (lastTrimmedId !== undefined && compareStreamIds(afterCursor, lastTrimmedId) < 0) {
-      throw new RedisBrokerError(
+      throw new BrokerCursorExpiredError(
         `afterCursor '${afterCursor}' is outside the retained range for stream ` +
+          `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
+      )
+    }
+  }
+
+  private assertTailCursorInRetainedRange(
+    streamId: string,
+    beforeCursor: string | undefined,
+    lastTrimmedId: string | undefined
+  ): void {
+    if (beforeCursor === undefined) {
+      return
+    }
+    if (lastTrimmedId !== undefined && compareStreamIds(beforeCursor, lastTrimmedId) <= 0) {
+      throw new BrokerCursorExpiredError(
+        `beforeCursor '${beforeCursor}' is outside the retained range for stream ` +
           `'${streamId}'. The latest trimmed cursor is '${lastTrimmedId}'.`
       )
     }
@@ -608,6 +726,17 @@ function positiveInteger(value: number): number {
     throw new RedisBrokerError("broker numeric options must be positive finite integers")
   }
   return value
+}
+
+function matchesFilters(
+  record: BrokerRecord,
+  names: ReadonlySet<string> | undefined,
+  keys: ReadonlySet<string> | undefined
+): boolean {
+  return (
+    (!names || (!!record.name && names.has(record.name))) &&
+    (!keys || (!!record.key && keys.has(record.key)))
+  )
 }
 
 function parseAppendBatchReply(reply: unknown): readonly AppendBatchResult[] {

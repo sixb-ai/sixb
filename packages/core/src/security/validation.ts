@@ -167,8 +167,15 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} must contain only grant definitions from 'can'.`)
   }
 
-  if (value.capability !== "view" && value.capability !== "apply" && value.capability !== "run") {
-    throw createError(`[Sixb] ${field} grant capability must be 'view', 'apply', or 'run'.`)
+  if (
+    value.capability !== "view" &&
+    value.capability !== "apply" &&
+    value.capability !== "run" &&
+    value.capability !== "observe"
+  ) {
+    throw createError(
+      `[Sixb] ${field} grant capability must be 'view', 'apply', 'run', or 'observe'.`
+    )
   }
 
   if (value.capability === "view" && value.target !== "object" && value.target !== "dataset") {
@@ -185,6 +192,10 @@ export function assertGrantDefinition(
     throw createError(
       `[Sixb] ${field} run grant target must be 'workflow', 'sync', 'pipeline', or 'agent'.`
     )
+  }
+
+  if (value.capability === "observe" && value.target !== "logs") {
+    throw createError(`[Sixb] ${field} observe grant target must be 'logs'.`)
   }
 
   assertSelection(value.selection, field, createError)
@@ -262,6 +273,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly pipelineIds?: ReadonlySet<string>
   /** Registered agent ids — when provided, agent run grants must reference them. */
   readonly agentIds?: ReadonlySet<string>
+  /** Registered observability surfaces. */
+  readonly observableIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()

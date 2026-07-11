@@ -1,5 +1,5 @@
 import type { SecurityContext } from "../src"
-import { defineGroup, defineMembershipPolicy } from "../src"
+import { can, defineGroup, defineMembershipPolicy } from "../src"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -7,6 +7,10 @@ type Expect<T extends true> = T
 
 const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
+
+can.observe("logs")
+// @ts-expect-error observe only accepts registered observability surfaces.
+can.observe("events")
 
 type _groupId = Expect<Equal<typeof commercial.id, "commercial">>
 

@@ -250,7 +250,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               projectId: "project-a",
               streamId: "missing",
             })
-          ).toEqual([])
+          ).toEqual({ records: [], cursor: undefined, hasMore: false })
           expect(
             await readRecords(broker, { projectId: "project-a", stream: eventsStream, limit: 0 })
           ).toEqual([])
@@ -293,6 +293,125 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               readRecords(broker, { projectId: "project-a", stream: { id: "stream-b" } })
             )
           ).toEqual([{ value: "c" }])
+        })
+      })
+
+      test("advances the page cursor when filters match no records", async () => {
+        await withBroker(async (broker) => {
+          const appended = await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { name: "one", payload: 1 },
+              { name: "two", payload: 2 },
+            ],
+          })
+
+          const page = await broker.read({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            names: ["missing"],
+            limit: 1,
+          })
+
+          expect(page.records).toEqual([])
+          expect(page.cursor).toBe(appended.at(-1)?.cursor)
+          expect(page.hasMore).toBe(false)
+        })
+      })
+
+      test("filters by record key before applying the page limit", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { key: "sync:a", payload: "a1" },
+              { key: "sync:b", payload: "b" },
+              { key: "sync:a", payload: "a2" },
+            ],
+          })
+
+          const page = await broker.read({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            keys: ["sync:a"],
+            limit: 2,
+          })
+          expect(page.records.map((record) => record.payload)).toEqual(["a1", "a2"])
+        })
+      })
+
+      test("reports no forward page when only filtered-out records remain", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { key: "target", payload: "match" },
+              { key: "other", payload: "filtered-one" },
+              { key: "other", payload: "filtered-two" },
+            ],
+          })
+
+          const page = await broker.read({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            keys: ["target"],
+            limit: 1,
+          })
+          expect(page.records.map((record) => record.payload)).toEqual(["match"])
+          expect(page.hasMore).toBe(false)
+        })
+      })
+
+      test("reports no backward page when only filtered-out records remain", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [
+              { key: "other", payload: "filtered-one" },
+              { key: "other", payload: "filtered-two" },
+              { key: "target", payload: "match" },
+            ],
+          })
+
+          const page = await broker.tail({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            keys: ["target"],
+            limit: 1,
+          })
+          expect(page.records.map((record) => record.payload)).toEqual(["match"])
+          expect(page.hasMore).toBe(false)
+        })
+      })
+
+      test("tails recent records and paginates toward older history", async () => {
+        await withBroker(async (broker) => {
+          await appendRecords(broker, {
+            projectId: "project-a",
+            stream: eventsStream,
+            records: [1, 2, 3, 4, 5].map((payload) => ({ payload })),
+          })
+
+          const recent = await broker.tail({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            limit: 2,
+          })
+          expect(recent.records.map((record) => record.payload)).toEqual([4, 5])
+          expect(recent.hasMore).toBe(true)
+
+          const older = await broker.tail({
+            projectId: "project-a",
+            streamId: eventsStream.id,
+            beforeCursor: recent.cursor,
+            limit: 2,
+          })
+          expect(older.records.map((record) => record.payload)).toEqual([2, 3])
+          expect(older.hasMore).toBe(true)
         })
       })
     })
@@ -408,15 +527,15 @@ export function runBrokerContractSuite<TBroker extends Broker>(
         })
       })
 
-      test("can subscribe after a cursor and filter by name", async () => {
+      test("can subscribe after a cursor and filter by name and key", async () => {
         await withBroker(async (broker) => {
           const [first] = await appendRecords(broker, {
             projectId: "project-a",
             stream: eventsStream,
             records: [
-              { name: "object.upserted", payload: "one" },
-              { name: "telemetry.appended", payload: "two" },
-              { name: "object.upserted", payload: "three" },
+              { name: "object.upserted", key: "other", payload: "one" },
+              { name: "telemetry.appended", key: "target", payload: "two" },
+              { name: "object.upserted", key: "target", payload: "three" },
             ],
           })
 
@@ -428,6 +547,7 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               stream: eventsStream,
               afterCursor: first?.cursor,
               names: ["object.upserted"],
+              keys: ["target"],
             },
             (records) => {
               received.push(...records.map((record) => String(record.payload)))
@@ -534,9 +654,9 @@ export function runBrokerContractSuite<TBroker extends Broker>(
             projectId: "project-a",
             streamId: stream.id,
           })
-          expect(records.length).toBeGreaterThan(0)
-          expect(records.length).toBeLessThan(3)
-          expect(records.at(-1)?.name).toBe("three")
+          expect(records.records.length).toBeGreaterThan(0)
+          expect(records.records.length).toBeLessThan(3)
+          expect(records.records.at(-1)?.name).toBe("three")
         })
       })
 
@@ -575,6 +695,14 @@ export function runBrokerContractSuite<TBroker extends Broker>(
               projectId: "project-a",
               stream: retainedStream,
               afterCursor: first?.cursor,
+            })
+          ).rejects.toBeInstanceOf(BrokerError)
+
+          await expect(
+            broker.tail({
+              projectId: "project-a",
+              streamId: retainedStream.id,
+              beforeCursor: first?.cursor,
             })
           ).rejects.toBeInstanceOf(BrokerError)
         })
@@ -634,16 +762,20 @@ async function readRecords(
     afterCursor?: string
     limit?: number
     names?: readonly string[]
+    keys?: readonly string[]
   }
 ): Promise<readonly BrokerRecord[]> {
   await broker.ensureStream({ projectId: params.projectId, stream: params.stream })
-  return broker.read({
-    projectId: params.projectId,
-    streamId: params.stream.id,
-    afterCursor: params.afterCursor,
-    limit: params.limit,
-    names: params.names,
-  })
+  return (
+    await broker.read({
+      projectId: params.projectId,
+      streamId: params.stream.id,
+      afterCursor: params.afterCursor,
+      limit: params.limit,
+      names: params.names,
+      keys: params.keys,
+    })
+  ).records
 }
 
 async function subscribeRecords(
@@ -654,6 +786,7 @@ async function subscribeRecords(
     from?: "latest" | "earliest"
     afterCursor?: string
     names?: readonly string[]
+    keys?: readonly string[]
   },
   handler: (records: readonly BrokerRecord[]) => void
 ): Promise<() => void> {
@@ -665,6 +798,7 @@ async function subscribeRecords(
       from: params.from,
       afterCursor: params.afterCursor,
       names: params.names,
+      keys: params.keys,
     },
     handler
   )

@@ -22,6 +22,8 @@ export type {
   GroupDefinition,
   MembershipOperation,
   MembershipPolicyDefinition,
+  ObserveGrant,
+  ObserveGrantTarget,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,
