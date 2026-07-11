@@ -138,7 +138,7 @@ background work or screens that immediately navigate to a run detail view.
 ### Domain events
 
 Subscribe with the fluent `events.object(Type)` builder (mirrors `objects(Type)`):
-channels narrow the event and type the payload, `.object(key)` scopes to one
+channels narrow the event and type the payload, `.byId(key)` scopes to one
 instance, and the hooks take a built builder as their first argument.
 
 ```tsx
@@ -153,7 +153,7 @@ function LiveDashboard() {
   )
 
   // Latest value per property for a single object.
-  const { values } = useLatest(events.object(Thermostat).object("living-room").telemetry())
+  const { values } = useLatest(events.object(Thermostat).byId("living-room").telemetry())
 
   return <div>{connected ? "Connected" : "Disconnected"}</div>
 }
@@ -167,7 +167,7 @@ useEvents(events.actions().run("run_123").terminal(), (event) => {
   console.log("action finished", event.payload.runId)
 })
 
-useEvents(events.actions().subject(Thermostat).object("living-room").completed(), () => {
+useEvents(events.actions().subject(Thermostat).byId("living-room").completed(), () => {
   console.log("thermostat action succeeded")
 })
 ```

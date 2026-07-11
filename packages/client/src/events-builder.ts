@@ -5,7 +5,7 @@
  * that accumulates an event-filter spec and types the payload from the same
  * `Type.p.*` / `Type.l.*` tokens as `expand()`. Channels (`.telemetry()`,
  * `.created()`, `.updated()`, `.link(...)`) narrow both the event type and the
- * payload; `.object(key)` scopes to one instance. The single core terminal is
+ * payload; `.byId(key)` scopes to one instance. The single core terminal is
  * `.subscribe(handler) => unsubscribe`, which runs a client-side predicate over
  * the live stream. The builder is browser-safe and React-free — hooks live in
  * `@sixb/client/hooks`.
@@ -214,7 +214,7 @@ export interface EventsBuilder<
   ): EventsLinkBuilder<TObjectType, TLink>
 
   /** Scope to a single object instance (orthogonal to the channel). */
-  object(primaryId: string): EventsBuilder<TObjectType, TEvent>
+  byId(primaryId: string): EventsBuilder<TObjectType, TEvent>
 
   /** Subscribe to matching events; returns an unsubscribe function. */
   subscribe(handler: (event: TEvent) => void, options?: EventSubscribeOptions): () => void
@@ -253,7 +253,7 @@ export interface EventPropertyBuilder<
 /** Topic-scoped builder: `events.telemetry()`, `events.all()`, … */
 export interface EventsTopicBuilder<TEvent extends SixbEvent> extends SubscribableEvents<TEvent> {
   /** Scope to a single object instance (objects / telemetry / links topics). */
-  object(primaryId: string): EventsTopicBuilder<TEvent>
+  byId(primaryId: string): EventsTopicBuilder<TEvent>
 }
 
 /** Run-scoped topic builder: `events.workflows()`, `events.pipelines()`, `events.syncs()`. */
@@ -262,11 +262,11 @@ export interface EventsRunBuilder<TEvent extends SixbEvent> extends Subscribable
   run(runId: string): EventsRunBuilder<TEvent>
 }
 
-/** Object-subject scope builder for action events: `events.actions().subject(Type).object(id)`. */
+/** Object-subject scope builder for action events: `events.actions().subject(Type).byId(id)`. */
 export interface EventsActionSubjectBuilder<TEvent extends SixbEvent>
   extends SubscribableEvents<TEvent> {
   /** Scope to a single action subject object. */
-  object(primaryId: string): EventsActionBuilder<TEvent>
+  byId(primaryId: string): EventsActionBuilder<TEvent>
 }
 
 /** Action-scoped topic builder: `events.actions().run(runId).completed()`. */
@@ -516,7 +516,7 @@ class EventsBuilderImpl {
     return this
   }
 
-  object(primaryId: string): EventsBuilderImpl {
+  byId(primaryId: string): EventsBuilderImpl {
     return this.withFilter({ primaryId })
   }
 
@@ -642,7 +642,7 @@ export interface SixbEventsClientOptions {
 }
 
 export interface SixbEventsApi {
-  /** Events for one object type, narrowed by channel + `.object(key)`. */
+  /** Events for one object type, narrowed by channel + `.byId(key)`. */
   object<TObjectType extends ObjectTypeWithTokens>(
     objectType: TObjectType,
     options?: SixbEventsClientOptions

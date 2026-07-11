@@ -79,6 +79,13 @@ describe("events selector builder", () => {
       types: ["object.created"],
     })
 
+    expect(eventSelectorSpec(events.object(Invoice).byId("inv-1").updated())).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv-1",
+      topic: "objects",
+      types: ["object.updated"],
+    })
+
     expect(eventSelectorSpec(events.object(Invoice).p.amount.updated())).toEqual({
       objectTypeId: "Invoice",
       topic: "objects",
@@ -99,6 +106,16 @@ describe("events selector builder", () => {
   test("builds link mutation selectors", () => {
     expect(eventSelectorSpec(events.object(Invoice).link(Invoice.l.payments).created())).toEqual({
       objectTypeId: "Invoice",
+      topic: "links",
+      types: ["link.created"],
+      linkId: "payments",
+    })
+
+    expect(
+      eventSelectorSpec(events.object(Invoice).byId("inv-1").link(Invoice.l.payments).created())
+    ).toEqual({
+      objectTypeId: "Invoice",
+      primaryId: "inv-1",
       topic: "links",
       types: ["link.created"],
       linkId: "payments",
@@ -184,6 +201,40 @@ describe("buildEventSelectorPredicate", () => {
             propertyChanges: {
               status: { operation: "updated", before: "draft", after: "paid" },
             },
+          },
+        })
+      )
+    ).toBe(false)
+  })
+
+  test("matches a selected object id", () => {
+    const matches = buildEventSelectorPredicate(events.object(Invoice).byId("inv-1").updated())
+
+    expect(
+      matches(
+        event({
+          type: "object.updated",
+          topic: "objects",
+          payload: {
+            objectTypeId: "Invoice",
+            primaryId: "inv-1",
+            properties: { amount: 700 },
+            propertyChanges: {},
+          },
+        })
+      )
+    ).toBe(true)
+
+    expect(
+      matches(
+        event({
+          type: "object.updated",
+          topic: "objects",
+          payload: {
+            objectTypeId: "Invoice",
+            primaryId: "inv-2",
+            properties: { amount: 700 },
+            propertyChanges: {},
           },
         })
       )

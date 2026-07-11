@@ -14,10 +14,10 @@ screen is about one object family:
 import { events } from "@sixb/client/hooks"
 import { Device } from "../ontology/device"
 
-events.object(Device).object(deviceId).telemetry()
+events.object(Device).byId(deviceId).telemetry()
 events.object(Device).telemetry(Device.p.temperature)
-events.object(Device).object(deviceId).upserted()
-events.object(Device).object(deviceId).deleted()
+events.object(Device).byId(deviceId).upserted()
+events.object(Device).byId(deviceId).deleted()
 events.object(Device).linked(Device.l.installedIn)
 ```
 
@@ -27,7 +27,7 @@ the event payload to that property, and `upserted()` types `payload.properties` 
 Use topic builders when the screen is broader or dynamic:
 
 ```tsx
-events.telemetry().object(deviceId)
+events.telemetry().byId(deviceId)
 events.objects()
 events.links()
 events.datasets()
@@ -42,7 +42,7 @@ Action events have extra scopes:
 ```tsx
 events.actions().run(runId).terminal()
 events.actions().action("approveQuote").completed()
-events.actions().subject(Quote).object(quoteId).failed()
+events.actions().subject(Quote).byId(quoteId).failed()
 events.actions().requested()
 ```
 
@@ -58,7 +58,7 @@ import { events, useEvents } from "@sixb/client/hooks"
 import { Invoice } from "../ontology/invoice"
 
 function InvoiceActivity({ invoiceId }: { invoiceId: string }) {
-  const state = useEvents(events.object(Invoice).object(invoiceId).upserted(), (event) => {
+  const state = useEvents(events.object(Invoice).byId(invoiceId).upserted(), (event) => {
     console.log("invoice changed", event.payload.properties)
   })
 
@@ -89,7 +89,7 @@ import { events, useLatest } from "@sixb/client/hooks"
 import { Device } from "../ontology/device"
 
 function DeviceReading({ deviceId }: { deviceId: string }) {
-  const { values, connected } = useLatest(events.object(Device).object(deviceId).telemetry())
+  const { values, connected } = useLatest(events.object(Device).byId(deviceId).telemetry())
   const temperature = values[Device.p.temperature.id]?.value
 
   return (

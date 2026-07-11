@@ -170,7 +170,7 @@ and `useInvalidateOnEvent`.
 import { events, useEvents } from "@sixb/client/hooks"
 import { Invoice } from "../ontology/invoice"
 
-useEvents(events.object(Invoice).object(invoiceId).upserted(), (event) => {
+useEvents(events.object(Invoice).byId(invoiceId).upserted(), (event) => {
   console.log(event.payload.properties)
 })
 ```

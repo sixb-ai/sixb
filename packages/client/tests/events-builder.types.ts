@@ -55,6 +55,9 @@ const normalizeReadings = definePipeline("normalize-readings")
 // @ts-expect-error event categories are explicit; the facade is not callable
 events(Sensor)
 
+// @ts-expect-error object instances are selected with .byId(), not .object()
+events.object(Sensor).object("sensor-1")
+
 // ── Channels narrow the payload ───────────────────────────────────────────────
 
 // `.telemetry(token)` → the property's ontology-typed value.
@@ -209,11 +212,11 @@ events.object(Sensor).p.missing
 // @ts-expect-error — missing link property.
 events.object(Sensor).link(Sensor.l.zone).p.missing
 
-// `.object(key)` is orthogonal — it preserves the channel's event type, in
+// `.byId(key)` is orthogonal — it preserves the channel's event type, in
 // either order.
 events
   .object(Sensor)
-  .object("sensor-1")
+  .byId("sensor-1")
   .telemetry(Sensor.p.indoorTemperature)
   .subscribe((event) => {
     const value: number = event.payload.value
@@ -222,7 +225,7 @@ events
 events
   .object(Sensor)
   .telemetry(Sensor.p.indoorTemperature)
-  .object("sensor-1")
+  .byId("sensor-1")
   .subscribe((event) => {
     const value: number = event.payload.value
     void value
@@ -256,7 +259,7 @@ events.telemetry().subscribe((event) => {
 // Topic builders can scope to a single instance without importing the type.
 events
   .telemetry()
-  .object("sensor-1")
+  .byId("sensor-1")
   .subscribe((event) => {
     const value: unknown = event.payload.value
     void value
@@ -275,7 +278,7 @@ events
   .run("act-1")
   .action("approveQuote")
   .subject(Sensor)
-  .object("sensor-1")
+  .byId("sensor-1")
   .completed()
   .subscribe((event) => {
     const runId: string = event.payload.runId
@@ -289,7 +292,7 @@ events
 events
   .actions()
   .subject("Sensor")
-  .object("sensor-1")
+  .byId("sensor-1")
   .failed()
   .subscribe((event) => {
     const message: string = event.payload.error.message
@@ -353,7 +356,7 @@ function useSensorLive(): void {
     void change
   })
 
-  const { values } = useLatest(events.object(Sensor).object("sensor-1").telemetry())
+  const { values } = useLatest(events.object(Sensor).byId("sensor-1").telemetry())
   const reading: number | string | boolean | undefined = values.indoorTemperature?.value
   void reading
 

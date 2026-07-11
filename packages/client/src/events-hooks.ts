@@ -91,7 +91,7 @@ type TelemetryEvents = SubscribableEvents<SixbEventOfType<"telemetry.appended">>
 
 /**
  * Track the latest telemetry update per property. The keying is by `propertyId`,
- * so scope the builder to a single object (`events.object(Type).object(key).telemetry()`)
+ * so scope the builder to a single object (`events.object(Type).byId(key).telemetry()`)
  * for a per-object view, or use `useLatestByObject` to bucket by object.
  */
 export function useLatest(

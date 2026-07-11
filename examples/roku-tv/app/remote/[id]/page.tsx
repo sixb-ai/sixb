@@ -121,7 +121,7 @@ export default function RemoteControl() {
     })
   )
 
-  const { values: liveState, connected } = useLatest(events.telemetry().object(objectKey ?? ""))
+  const { values: liveState, connected } = useLatest(events.telemetry().byId(objectKey ?? ""))
 
   const { mutateAsync: sendAction } = useActionRunMutation<{
     button: RokuKey

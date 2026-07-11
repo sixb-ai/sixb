@@ -26,7 +26,7 @@ export function useObjectTelemetryUpdates(
   options: { enabled?: boolean } = {}
 ): Record<string, TelemetryUpdate> {
   const parsed = objectId ? decodeObjectId(objectId) : null
-  const builder = parsed ? events.telemetry().object(parsed.primaryId) : events.telemetry()
+  const builder = parsed ? events.telemetry().byId(parsed.primaryId) : events.telemetry()
   const { byObject } = useLatestByObject(builder, {
     enabled: Boolean(projectName && parsed) && (options.enabled ?? true),
   })

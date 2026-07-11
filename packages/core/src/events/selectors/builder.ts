@@ -40,6 +40,9 @@ export interface ObjectEventSelectorBuilder<TObjectType extends ObjectTypeWithTo
   extends EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {
   readonly p: EventPropertySelectorMap<TObjectType["p"], ObjectEventSelectorContext<TObjectType>>
 
+  /** Scope to a single object instance. */
+  byId(primaryId: string): ObjectEventSelectorBuilder<TObjectType>
+
   created(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   updated(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
   deleted(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>>
@@ -184,6 +187,13 @@ class ObjectEventSelectorBuilderImpl<TObjectType extends ObjectTypeWithTokens>
           propertyId: property.id,
         })
     ) as EventPropertySelectorMap<TObjectType["p"], ObjectEventSelectorContext<TObjectType>>
+  }
+
+  byId(primaryId: string): ObjectEventSelectorBuilder<TObjectType> {
+    return new ObjectEventSelectorBuilderImpl(this.objectType, {
+      ...this.spec,
+      primaryId,
+    })
   }
 
   created(): EventSelectorSpec<ObjectEventSelectorContext<TObjectType>> {

@@ -84,8 +84,8 @@ describe("events builder filter spec", () => {
     })
   })
 
-  test("object(key) is orthogonal to the channel", () => {
-    expect(events.object(Sensor).object("sensor-1").telemetry().ir).toEqual({
+  test("byId(key) is orthogonal to the channel", () => {
+    expect(events.object(Sensor).byId("sensor-1").telemetry().ir).toEqual({
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
       topic: "telemetry",
@@ -164,13 +164,13 @@ describe("events builder filter spec", () => {
       actionId: "approveQuote",
       types: ["action.completed", "action.failed"],
     })
-    expect(events.actions().subject(Sensor).object("sensor-1").completed().ir).toEqual({
+    expect(events.actions().subject(Sensor).byId("sensor-1").completed().ir).toEqual({
       topic: "actions",
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
       types: ["action.completed"],
     })
-    expect(events.actions().subject("Sensor").object("sensor-1").failed().ir).toEqual({
+    expect(events.actions().subject("Sensor").byId("sensor-1").failed().ir).toEqual({
       topic: "actions",
       objectTypeId: "Sensor",
       primaryId: "sensor-1",
@@ -215,7 +215,7 @@ describe("events builder filter spec", () => {
 describe("buildEventPredicate", () => {
   test("filters telemetry by objectType, object and property", () => {
     const matches = buildEventPredicate(
-      events.object(Sensor).object("sensor-1").telemetry(Sensor.p.indoorTemperature).ir
+      events.object(Sensor).byId("sensor-1").telemetry(Sensor.p.indoorTemperature).ir
     )
     expect(matches(telemetryEvent)).toBe(true)
     expect(matches({ ...telemetryEvent, topic: "objects" } as SixbEvent)).toBe(false)
@@ -233,7 +233,7 @@ describe("buildEventPredicate", () => {
 
   test("links match on the source side", () => {
     const matches = buildEventPredicate(
-      events.object(Sensor).object("sensor-1").linked(Sensor.l.zone).ir
+      events.object(Sensor).byId("sensor-1").linked(Sensor.l.zone).ir
     )
     const linkEvent = event({
       type: "link.upserted",
@@ -298,7 +298,7 @@ describe("buildEventPredicate", () => {
 
   test("actions match run, action id and object subject scope", () => {
     const matches = buildEventPredicate(
-      events.actions().run("act-1").action("approveQuote").subject(Sensor).object("sensor-1").ir
+      events.actions().run("act-1").action("approveQuote").subject(Sensor).byId("sensor-1").ir
     )
     const actionCompleted = event({
       type: "action.completed",
@@ -415,7 +415,7 @@ describe("builder subscribe over the transport", () => {
     const received: SixbEvent[] = []
     const unsubscribe = events
       .object(Sensor)
-      .object("sensor-1")
+      .byId("sensor-1")
       .telemetry(Sensor.p.indoorTemperature)
       .subscribe((event) => received.push(event))
 
@@ -456,7 +456,7 @@ describe("builder subscribe over the transport", () => {
       .run("act-1")
       .action("approveQuote")
       .subject(Sensor)
-      .object("sensor-1")
+      .byId("sensor-1")
       .terminal()
       .subscribe(() => undefined)
 

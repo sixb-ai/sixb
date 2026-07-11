@@ -18,6 +18,7 @@ events(Invoice)
 events.object(Invoice).created()
 events.object(Invoice).updated()
 events.object(Invoice).deleted()
+events.object(Invoice).byId("inv-1").updated()
 events.object(Invoice).p.amount.created()
 events.object(Invoice).p.amount.updated()
 events.object(Invoice).p.amount.cleared()
@@ -29,6 +30,9 @@ events.object(Invoice).link(Invoice.l.payments).p.amount.updated()
 
 // @ts-expect-error missing object property
 events.object(Invoice).p.missing
+
+// @ts-expect-error object instances are selected with .byId(), not .object()
+events.object(Invoice).object("inv-1")
 
 // @ts-expect-error missing link property
 events.object(Invoice).link(Invoice.l.payments).p.missing
