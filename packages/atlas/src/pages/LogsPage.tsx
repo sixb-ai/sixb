@@ -69,41 +69,50 @@ export function LogsPage() {
     <PageFrame
       title="Logs"
       description="Live run output across syncs, pipelines, workflows, and actions."
-      actions={
-        <div className="flex flex-wrap gap-2">
-          <Select value={kind} onValueChange={(next) => setParam("kind", next)}>
-            <SelectTrigger size="sm" className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {KIND_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {kindLabels[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={level} onValueChange={(next) => setParam("level", next)}>
-            <SelectTrigger size="sm" className="w-[150px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LEVEL_FILTERS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {levelLabels[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      }
+      contentClassName="max-w-6xl"
     >
       <LogConsole
         builder={builder}
         showKind
         showRun
-        className="h-[70vh] max-h-[46rem] min-h-[24rem]"
-        emptyLabel="No logs match this filter yet."
+        filters={
+          <>
+            <Select value={kind} onValueChange={(next) => setParam("kind", next)}>
+              <SelectTrigger
+                size="sm"
+                className="min-w-[8.5rem] flex-1 sm:flex-none"
+                aria-label="Filter logs by kind"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {KIND_FILTERS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {kindLabels[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={level} onValueChange={(next) => setParam("level", next)}>
+              <SelectTrigger
+                size="sm"
+                className="min-w-[8.5rem] flex-1 sm:flex-none"
+                aria-label="Filter logs by severity"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LEVEL_FILTERS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {levelLabels[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        }
+        className="h-[calc(100dvh-13rem)] min-h-[28rem] md:h-[calc(100dvh-8rem)]"
+        emptyLabel="No logs match these filters yet."
       />
     </PageFrame>
   )
