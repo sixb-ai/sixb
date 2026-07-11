@@ -28,6 +28,7 @@ import {
   LayoutGrid,
   ListChecks,
   RefreshCw,
+  ScrollText,
   Settings,
   Workflow,
 } from "lucide-react"
@@ -42,6 +43,7 @@ export type ViewMode =
   | "workflows"
   | "actions"
   | "agents"
+  | "logs"
   | "rules"
   | "ontology"
   | "settings"
@@ -63,6 +65,7 @@ const projectNavItems: NavItem[] = [
   { id: "actions", label: "Actions", Icon: Bolt },
   { id: "workflows", label: "Workflows", Icon: GitBranch },
   { id: "agents", label: "Agents", Icon: Bot },
+  { id: "logs", label: "Logs", Icon: ScrollText },
   { id: "rules", label: "Rules", Icon: ListChecks },
   { id: "settings", label: "Settings", Icon: Settings },
 ]

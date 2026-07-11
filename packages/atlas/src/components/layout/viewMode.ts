@@ -11,6 +11,7 @@ export const KNOWN_VIEWS = new Set([
   "actions",
   "runs",
   "agents",
+  "logs",
   "rules",
   "ontology",
   "settings",

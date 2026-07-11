@@ -36,7 +36,17 @@ function parseDemoSyncDelayMs(value: string | undefined): number {
 export const syncErpDepartments = defineSync("sync-erp-departments")
   .when(hourlyErpSync)
   .from(acmeErpConnector)
-  .read((client) => readWithDemoDelay("departments", () => client.listDepartments()))
+  .read((client, ctx) => {
+    const logger = ctx.logger
+
+    logger.info(`[AcmeCorp] Starting sync of ERP departments`)
+    logger.debug(`[AcmeCorp] Using demo sync delay of ${demoSyncDelayMs}ms`)
+    logger.warn(`[AcmeCorp] This is a demo sync. In production, you would remove the demo delay.`)
+    logger.error(`[AcmeCorp] This is a demo sync. In production, you would remove the demo delay.`)
+    logger.child({ sync: "erp-departments" }).info(`[AcmeCorp] Starting sync of ERP departments`)
+
+    return readWithDemoDelay("departments", () => client.listDepartments())
+  })
   .intoDataset(erpDepartmentsDataset)
 
 export const afterDepartmentsSync = defineSchedule("after-erp-departments").on(
