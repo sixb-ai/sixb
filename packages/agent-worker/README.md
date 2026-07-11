@@ -66,11 +66,13 @@ The terminal run state is stored on the run record:
   `SIXB_SKILLS_DIR`, and creates the sandbox with a restricted network policy allowing the server
   origin. The gateway authorizes scoped ontology, object, telemetry read, and action routes from the
   run lease and managed agent service account; no bearer token is exposed to the sandbox.
+- `skillsDir`: optional project Agent Skills directory. Defaults to `<projectRoot>/skills`. Set to
+  `false` to install only the built-in Sixb skills.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
 - `leaseMs`: run lease and queue visibility duration; defaults to 60 seconds.
 - `heartbeatMs`: lease renewal interval; defaults to one third of `leaseMs`.
 - `turnTimeoutMs`: wall-clock turn budget; defaults to 5 minutes.
-- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `8`.
+- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `25`.
 - `idlePollMs`: queue polling interval while idle.

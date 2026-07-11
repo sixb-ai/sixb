@@ -53,6 +53,26 @@ Requests run under the agent's [execution identity](./authorization.md), so the 
 and act on what its groups allow — the same checks as any other caller, and only while the run is
 active.
 
+## Agent Skills in the sandbox
+
+Every run also gets Agent Skills under `$SIXB_SKILLS_DIR`. Sixb installs built-in API skills such as
+`sixb-query`, `sixb-telemetry`, and `sixb-actions`, then adds project skills from
+`skills/<name>/SKILL.md` when that folder exists.
+
+A project skill follows the Agent Skills folder format:
+
+```txt
+skills/acme-writing-style/
+├── SKILL.md
+└── references/
+    └── examples.md
+```
+
+`SKILL.md` starts with `name` and `description` frontmatter. Only those metadata fields are listed in
+the model's always-on catalog; the agent reads the full `SKILL.md` and any referenced files from
+`$SIXB_SKILLS_DIR/<name>` only when the task matches. Use skills for company standards, examples,
+templates, and multi-step procedures that should not live in every agent's base prompt.
+
 ## Related
 
 - [Sandboxes](../sandboxes/overview.md)

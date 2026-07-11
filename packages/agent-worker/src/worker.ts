@@ -1,3 +1,4 @@
+import { join } from "node:path"
 import type {
   AgentDefinition,
   AgentRunLease,
@@ -15,6 +16,7 @@ import {
   SYSTEM_PRINCIPAL,
   subscribeAgentRunCancel,
 } from "@sixb/core"
+import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import {
   AgentFinalizationError,
@@ -95,6 +97,13 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     this.sixb = sixb
     this.idleWithoutAgents = sixb.agents.list().length === 0
     this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options, leaseMs)
+  }
+
+  override async start(): Promise<void> {
+    if (this.context) {
+      await this.context.agentSkills
+    }
+    await super.start()
   }
 
   protected override async run(signal: AbortSignal): Promise<void> {
@@ -418,6 +427,14 @@ function buildAgentContext(
       "Agent workers require createSixb({ sandboxes }) for the built-in bash tool."
     )
   }
+  const agentSkills = loadAgentSkills({
+    projectSkillsDir:
+      options.skillsDir === undefined
+        ? join(sixb.projectRoot ?? process.cwd(), "skills")
+        : options.skillsDir,
+  })
+  agentSkills.catch(() => {})
+
   return {
     id: sixb.id,
     storage: storage as AgentWorkerStorage,
@@ -430,6 +447,7 @@ function buildAgentContext(
     streamSink: isolateStreamSink(
       options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
     ),
+    agentSkills,
     leaseMs,
     heartbeatMs: options.heartbeatMs ?? Math.max(1, Math.floor(leaseMs / 3)),
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,

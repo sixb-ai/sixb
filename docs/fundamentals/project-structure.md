@@ -1,9 +1,10 @@
 # Project Structure
 
 A Sixb project is a set of convention folders plus one entry file. [`createSixb()`](../runtime/overview.md)
-scans well-known directories under your project root, loads every module it finds, and
-registers the definitions you export. There is no central manifest: you write a definition,
-export it from the matching folder, and it is wired in.
+scans definition directories under your project root, loads every module it finds, and registers the
+definitions you export. Other runtime components can recognize their own folders too; for example,
+the agent worker reads `skills/` as Agent Skills. There is no central manifest: you write the file in
+the matching folder, and Sixb wires it in.
 
 ## Directory tree
 
@@ -35,6 +36,11 @@ acme-corp/
 │   └── invoice-reminder.ts
 ├── agents/
 │   └── invoice-assistant.ts
+├── skills/
+│   └── acme-writing-style/
+│       ├── SKILL.md
+│       └── references/
+│           └── examples.md
 ├── security/
 │   ├── groups/
 │   │   └── finance-admins.ts
@@ -51,9 +57,11 @@ of these definitions in-line to `createSixb()` instead of (or alongside) the fol
 
 ## Discovered folders
 
-`createSixb()` discovers exactly these folders. Each scan recurses into subdirectories and
-loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files. The folder selects the *kind*:
-a definition picked up depends on where it lives, not what the file is named.
+Sixb recognizes these convention folders. Most are `createSixb()` definition folders: each scan
+recurses into subdirectories and loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` files. The
+folder selects the *kind*: a definition picked up depends on where it lives, not what the file is
+named. `skills/` is different: the agent worker reads Agent Skill folders and materializes them into
+agent sandboxes.
 
 | Folder | Holds | Related page |
 | --- | --- | --- |
@@ -69,6 +77,7 @@ a definition picked up depends on where it lives, not what the file is named.
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
 | `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
 | `agents/` | Agent definitions | [Agents](../agents/overview.md) |
+| `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
 | `security/policies/` | Membership-policy definitions | [Authorization](../auth/authorization.md) |

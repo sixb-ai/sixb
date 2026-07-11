@@ -10,6 +10,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import type { ToolSet } from "ai"
+import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { BashSandboxHandle } from "./bash-tool"
 import type { StreamSink } from "./stream-sink"
@@ -34,6 +35,7 @@ export interface AgentWorkerSixb {
   readonly agents: AgentsRuntime
   readonly blobStorage: BlobStorage
   readonly sandboxes?: SandboxFactory
+  readonly projectRoot?: string
 }
 
 /**
@@ -49,6 +51,7 @@ export interface AgentWorkerContext {
   readonly baseTools: ToolSet
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
+  readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly leaseMs: number
   readonly heartbeatMs: number
   readonly defaultMaxSteps: number
@@ -94,6 +97,8 @@ export interface AgentWorkerOptions {
   readonly apiBaseUrl: string
   /** Tools exposed to the model in addition to the built-in `bash` tool. */
   readonly tools?: ToolSet
+  /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
+  readonly skillsDir?: string | false
   /** Maximum number of agent run jobs this worker claims and executes at once. Defaults to 4. */
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
