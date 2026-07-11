@@ -4,7 +4,7 @@ import {
   type LogRunKind,
   type LogRunRef,
   type StoredLogLine,
-} from "@sixb/core"
+} from "@sixb/core/logging"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,

@@ -36,6 +36,13 @@
       "import": "./dist/events/selectors/index.js",
       "default": "./dist/events/selectors/index.js"
     },
+    "./logging": {
+      "types": "./dist/logging/types.d.ts",
+      "browser": "./src/logging/types.ts",
+      "bun": "./src/logging/types.ts",
+      "import": "./dist/logging/types.js",
+      "default": "./dist/logging/types.js"
+    },
     "./actions/worker": {
       "types": "./dist/actions/worker.d.ts",
       "bun": "./src/actions/worker.ts",

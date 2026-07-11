@@ -4,7 +4,7 @@ import {
   type LogRunRef,
   logLevelsAtOrAbove,
   type StoredLogLine,
-} from "@sixb/core"
+} from "@sixb/core/logging"
 import { listLogs } from "./generated"
 import type { Client } from "./generated/client"
 import { createLogSocket, type LogSocketState } from "./logs-transport"

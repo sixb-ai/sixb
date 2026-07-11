@@ -37,6 +37,7 @@
       "@sixb/core/agents/streams": ["./packages/core/src/agents/streams.ts"],
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],
       "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
+      "@sixb/core/logging": ["./packages/core/src/logging/types.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/testing": ["./packages/core/src/testing/index.ts"],
