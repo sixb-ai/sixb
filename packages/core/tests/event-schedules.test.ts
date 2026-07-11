@@ -46,7 +46,7 @@ const approveInvoice = defineAction("approve-invoice")
 describe("evaluateEventSchedule", () => {
   test("returns the typed post-mutation context only on a false-to-true edge", async () => {
     const schedule = defineSchedule("invoice.high-value")
-      .on(events(Invoice).updated())
+      .on(events.object(Invoice).updated())
       .where((event) => event.object.p.amount.gt(500))
     const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
     const [crossed] = await runtime.append({

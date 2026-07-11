@@ -32,7 +32,7 @@ const Invoice = defineObjectType({
 })
 
 const highValueInvoice = defineSchedule("invoice.high-value")
-  .on(events(Invoice).updated())
+  .on(events.object(Invoice).updated())
   .where((event) => event.object.p.amount.gt(500))
 
 const captureInvoice = defineWorkflowStep("capture-invoice")

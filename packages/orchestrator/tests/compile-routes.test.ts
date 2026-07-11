@@ -49,7 +49,7 @@ const Room = defineObjectType({
 
 const daily = defineSchedule("daily").cron("0 2 * * *")
 const highTemperature = defineSchedule("room.high-temperature")
-  .on(events(Room).updated())
+  .on(events.object(Room).updated())
   .where((event) => event.object.p.temperature.gt(30))
 
 const highTemperatureRule = defineRule("room.high-temperature-rule")
