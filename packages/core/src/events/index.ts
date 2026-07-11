@@ -18,6 +18,20 @@ export {
   WORKFLOW_EVENT_DEFINITIONS,
 } from "./definitions"
 export { EventsError } from "./errors"
+export type {
+  EditCommitPlanEventsInput,
+  LinkRemovedEventsInput,
+  LinkUpsertEventsInput,
+  ObjectDeletedEventsInput,
+  ObjectUpsertEventsInput,
+} from "./mutation-events"
+export {
+  buildEditCommitPlanEvents,
+  buildLinkRemovedEvents,
+  buildLinkUpsertEvents,
+  buildObjectDeletedEvents,
+  buildObjectUpsertEvents,
+} from "./mutation-events"
 export { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
 export {
   DEFAULT_EVENTS_RETENTION_MS,

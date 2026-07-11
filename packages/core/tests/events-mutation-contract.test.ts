@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test"
 import {
-  buildLinkRemovedMutationEvents,
-  buildObjectDeletedMutationEvents,
-  buildObjectUpsertMutationEvents,
+  buildLinkRemovedEvents,
+  buildObjectDeletedEvents,
+  buildObjectUpsertEvents,
   EventsRuntime,
   InMemoryBroker,
   scopeKeysForEvent,
 } from "../src"
 
-describe("object/link mutation events", () => {
+describe("object/link event drafts", () => {
   test("carries typed mutation origin instead of generic metadata", () => {
-    const [, event] = buildObjectUpsertMutationEvents({
+    const [, event] = buildObjectUpsertEvents({
       objectTypeId: "Invoice",
       primaryId: "inv-1",
       operation: "update",
@@ -33,7 +33,7 @@ describe("object/link mutation events", () => {
 
   test("builds deleted mutation events from previous properties", () => {
     expect(
-      buildObjectDeletedMutationEvents({
+      buildObjectDeletedEvents({
         objectTypeId: "Invoice",
         primaryId: "inv-1",
         previousProperties: { amount: 700 },
@@ -48,7 +48,7 @@ describe("object/link mutation events", () => {
     })
 
     expect(
-      buildLinkRemovedMutationEvents({
+      buildLinkRemovedEvents({
         sourceTypeId: "Invoice",
         sourceId: "inv-1",
         linkId: "payments",

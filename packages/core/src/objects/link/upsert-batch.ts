@@ -7,7 +7,7 @@
 
 import { assertPrivileged } from "../../authorization"
 import type { EventDraft } from "../../events"
-import { buildLinkUpsertMutationEvents } from "../../mutations"
+import { buildLinkUpsertEvents } from "../../events"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { validateLinkBatch } from "../../ontology/validation"
 import type { BatchItemResult, SixbRuntimeContext } from "../../runtime/types"
@@ -84,7 +84,7 @@ export async function upsertLinkBatch(
       (candidate) =>
         candidate.targetTypeId === item.targetTypeId && candidate.targetId === item.targetId
     )
-    return buildLinkUpsertMutationEvents({
+    return buildLinkUpsertEvents({
       sourceTypeId: item.objectType.id,
       sourceId: item.sourceId,
       linkId: item.linkId,

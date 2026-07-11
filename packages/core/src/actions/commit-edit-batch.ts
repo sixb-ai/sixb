@@ -1,7 +1,6 @@
 import type { EditBatchInput, EditCommitDiff } from "../edits"
 import { planEditBatch } from "../edits"
-import type { EventDraft } from "../events"
-import { buildEditCommitPlanMutationEvents } from "../mutations"
+import { buildEditCommitPlanEvents, type EventDraft } from "../events"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { ActionRunRecord, ActionRunStorage } from "../storage/action-runs"
 import { actionSubjectsEqual } from "../storage/action-runs"
@@ -194,7 +193,7 @@ async function commitActionEditBatchOnce(
         committedAt,
         diff: plan.diff,
       })
-      const mutationEvents = buildEditCommitPlanMutationEvents({
+      const domainEvents = buildEditCommitPlanEvents({
         plan,
         idempotencyKeyPrefix: `action.commit:${input.runId}`,
         origin: {
@@ -208,7 +207,7 @@ async function commitActionEditBatchOnce(
         run: committedRun,
         commit: {
           diff: plan.diff,
-          events: mutationEvents,
+          events: domainEvents,
           committedAt,
           created: true,
         },

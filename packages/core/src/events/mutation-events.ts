@@ -1,26 +1,21 @@
 import type { EditCommitPlan } from "../edits"
-import {
-  clearedPropertyChanges,
-  diffPropertyChanges,
-  type EventDraft,
-  type EventOrigin,
-  type PropertyChangeMap,
-} from "../events"
+import { clearedPropertyChanges, diffPropertyChanges } from "./property-changes"
+import type { EventDraft, EventOrigin, PropertyChangeMap } from "./types"
 
-type ObjectMutationOperation = "create" | "update"
-type LinkMutationOperation = "create" | "update"
+type ObjectUpsertOperation = "create" | "update"
+type LinkUpsertOperation = "create" | "update"
 
-export interface ObjectMutationEventInput {
+export interface ObjectUpsertEventsInput {
   readonly objectTypeId: string
   readonly primaryId: string
-  readonly operation: ObjectMutationOperation
+  readonly operation: ObjectUpsertOperation
   readonly properties: Record<string, unknown>
   readonly previousProperties?: Record<string, unknown>
   readonly idempotencyKeyPrefix?: string
   readonly origin?: EventOrigin
 }
 
-export interface ObjectDeleteMutationEventInput {
+export interface ObjectDeletedEventsInput {
   readonly objectTypeId: string
   readonly primaryId: string
   readonly previousProperties?: Record<string, unknown>
@@ -28,20 +23,20 @@ export interface ObjectDeleteMutationEventInput {
   readonly origin?: EventOrigin
 }
 
-export interface LinkMutationEventInput {
+export interface LinkUpsertEventsInput {
   readonly sourceTypeId: string
   readonly sourceId: string
   readonly linkId: string
   readonly targetTypeId: string
   readonly targetId: string
-  readonly operation: LinkMutationOperation
+  readonly operation: LinkUpsertOperation
   readonly properties?: Record<string, unknown>
   readonly previousProperties?: Record<string, unknown>
   readonly idempotencyKeyPrefix?: string
   readonly origin?: EventOrigin
 }
 
-export interface LinkRemoveMutationEventInput {
+export interface LinkRemovedEventsInput {
   readonly sourceTypeId: string
   readonly sourceId: string
   readonly linkId: string
@@ -52,20 +47,18 @@ export interface LinkRemoveMutationEventInput {
   readonly origin?: EventOrigin
 }
 
-export interface EditCommitPlanMutationEventsInput {
+export interface EditCommitPlanEventsInput {
   readonly plan: EditCommitPlan
   readonly idempotencyKeyPrefix?: string
   readonly origin?: EventOrigin
 }
 
-export function buildEditCommitPlanMutationEvents(
-  input: EditCommitPlanMutationEventsInput
-): readonly EventDraft[] {
+export function buildEditCommitPlanEvents(input: EditCommitPlanEventsInput): readonly EventDraft[] {
   const events: EventDraft[] = []
 
   for (const objectDelete of input.plan.objects.deletes) {
     events.push(
-      ...buildObjectDeletedMutationEvents({
+      ...buildObjectDeletedEvents({
         objectTypeId: objectDelete.objectTypeId,
         primaryId: objectDelete.primaryId,
         previousProperties: objectDelete.previousProperties
@@ -79,7 +72,7 @@ export function buildEditCommitPlanMutationEvents(
 
   for (const objectUpsert of input.plan.objects.upserts) {
     events.push(
-      ...buildObjectUpsertMutationEvents({
+      ...buildObjectUpsertEvents({
         objectTypeId: objectUpsert.objectTypeId,
         primaryId: objectUpsert.primaryId,
         operation: objectUpsert.operation,
@@ -95,7 +88,7 @@ export function buildEditCommitPlanMutationEvents(
 
   for (const linkDelete of input.plan.links.deletes) {
     events.push(
-      ...buildLinkRemovedMutationEvents({
+      ...buildLinkRemovedEvents({
         sourceTypeId: linkDelete.source.objectTypeId,
         sourceId: linkDelete.source.primaryId,
         linkId: linkDelete.linkId,
@@ -112,7 +105,7 @@ export function buildEditCommitPlanMutationEvents(
 
   for (const linkUpsert of input.plan.links.upserts) {
     events.push(
-      ...buildLinkUpsertMutationEvents({
+      ...buildLinkUpsertEvents({
         sourceTypeId: linkUpsert.source.objectTypeId,
         sourceId: linkUpsert.source.primaryId,
         linkId: linkUpsert.linkId,
@@ -134,8 +127,8 @@ export function buildEditCommitPlanMutationEvents(
   return events
 }
 
-export function buildObjectUpsertMutationEvents(
-  input: ObjectMutationEventInput
+export function buildObjectUpsertEvents(
+  input: ObjectUpsertEventsInput
 ): readonly [EventDraft, EventDraft] {
   const legacyPayload = {
     objectTypeId: input.objectTypeId,
@@ -163,9 +156,7 @@ export function buildObjectUpsertMutationEvents(
   ]
 }
 
-export function buildObjectDeletedMutationEvents(
-  input: ObjectDeleteMutationEventInput
-): readonly [EventDraft] {
+export function buildObjectDeletedEvents(input: ObjectDeletedEventsInput): readonly [EventDraft] {
   const payload = {
     objectTypeId: input.objectTypeId,
     primaryId: input.primaryId,
@@ -182,8 +173,8 @@ export function buildObjectDeletedMutationEvents(
   ]
 }
 
-export function buildLinkUpsertMutationEvents(
-  input: LinkMutationEventInput
+export function buildLinkUpsertEvents(
+  input: LinkUpsertEventsInput
 ): readonly [EventDraft, EventDraft] {
   const legacyPayload = {
     sourceTypeId: input.sourceTypeId,
@@ -216,8 +207,8 @@ export function buildLinkUpsertMutationEvents(
   ]
 }
 
-export function buildLinkRemovedMutationEvents(
-  input: LinkRemoveMutationEventInput
+export function buildLinkRemovedEvents(
+  input: LinkRemovedEventsInput
 ): readonly [EventDraft, EventDraft] {
   const payload = {
     sourceTypeId: input.sourceTypeId,

@@ -277,6 +277,7 @@ export type {
   DatasetEvent,
   DatasetVersionCommittedEvent,
   DomainEvent,
+  EditCommitPlanEventsInput,
   EventActor,
   EventDefinition,
   EventDefinitionGroup,
@@ -296,13 +297,17 @@ export type {
   LinkEvent,
   LinkEventSelectorBuilder,
   LinkRemovedEvent,
+  LinkRemovedEventsInput,
   LinkUpdatedEvent,
+  LinkUpsertEventsInput,
   LinkUpsertedEvent,
   ObjectCreatedEvent,
   ObjectDeletedEvent,
+  ObjectDeletedEventsInput,
   ObjectEvent,
   ObjectEventSelectorBuilder,
   ObjectUpdatedEvent,
+  ObjectUpsertEventsInput,
   ObjectUpsertedEvent,
   PipelineEvent,
   PipelineRunFinishedEvent,
@@ -360,7 +365,12 @@ export type {
   WorkflowRunStartedEvent,
 } from "./events"
 export {
+  buildEditCommitPlanEvents,
   buildEventSelectorPredicate,
+  buildLinkRemovedEvents,
+  buildLinkUpsertEvents,
+  buildObjectDeletedEvents,
+  buildObjectUpsertEvents,
   clearedPropertyChanges,
   DEFAULT_EVENTS_RETENTION_MS,
   diffPropertyChanges,
@@ -378,23 +388,6 @@ export {
   scopeKeysForEvent,
   toStoredEvent,
 } from "./events"
-
-// ── Mutations ───────────────────────────────────────────────
-
-export type {
-  EditCommitPlanMutationEventsInput,
-  LinkMutationEventInput,
-  LinkRemoveMutationEventInput,
-  ObjectDeleteMutationEventInput,
-  ObjectMutationEventInput,
-} from "./mutations"
-export {
-  buildEditCommitPlanMutationEvents,
-  buildLinkRemovedMutationEvents,
-  buildLinkUpsertMutationEvents,
-  buildObjectDeletedMutationEvents,
-  buildObjectUpsertMutationEvents,
-} from "./mutations"
 
 // ── Rules ──────────────────────────────────────────────────
 

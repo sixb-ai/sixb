@@ -2,7 +2,7 @@
  * Leaf operation: upsert a single link.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkUpsertMutationEvents } from "../../mutations"
+import { buildLinkUpsertEvents } from "../../events"
 import { OntologyValidationError } from "../../ontology/errors"
 import { assertLinkTargetType, validateLinkProperties } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
@@ -63,7 +63,7 @@ export async function upsertLink(
   }
 
   const appended = await events.append({
-    events: buildLinkUpsertMutationEvents({
+    events: buildLinkUpsertEvents({
       sourceTypeId: objectType.id,
       sourceId,
       linkId,

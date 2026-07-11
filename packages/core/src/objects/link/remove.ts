@@ -2,7 +2,7 @@
  * Leaf operation: remove a single link.
  */
 import { assertPrivileged } from "../../authorization"
-import { buildLinkRemovedMutationEvents } from "../../mutations"
+import { buildLinkRemovedEvents } from "../../events"
 import { assertLinkTargetType } from "../../ontology/validation"
 import type { ResolvedLinkContext } from "../context"
 import { ObjectError } from "../errors"
@@ -25,7 +25,7 @@ export async function removeLink(
   )
 
   const appended = await events.append({
-    events: buildLinkRemovedMutationEvents({
+    events: buildLinkRemovedEvents({
       sourceTypeId: objectType.id,
       sourceId,
       linkId,

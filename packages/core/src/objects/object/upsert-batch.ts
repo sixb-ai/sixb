@@ -3,7 +3,7 @@
  */
 import { assertPrivileged } from "../../authorization"
 import type { EventDraft } from "../../events"
-import { buildObjectUpsertMutationEvents } from "../../mutations"
+import { buildObjectUpsertEvents } from "../../events"
 import { validateObjectBatch } from "../../ontology/validation"
 import type { BatchItemResult } from "../../runtime/types"
 import type { ObjectRow } from "../../storage"
@@ -45,7 +45,7 @@ export async function upsertObjectBatch(
   // Append events, then project the stored events into object storage.
   const events: EventDraft[] = validation.valid.flatMap(({ item }) => {
     const existing = existingMap.get(`${objectType.id}:${item.primaryId}`)
-    return buildObjectUpsertMutationEvents({
+    return buildObjectUpsertEvents({
       objectTypeId: objectType.id,
       primaryId: item.primaryId,
       operation: existing ? "update" : "create",
