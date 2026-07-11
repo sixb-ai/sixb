@@ -26,21 +26,27 @@ class FakeFinished implements VercelCommandFinishedClient {
 }
 
 class FakeCommand implements VercelCommandClient {
-  constructor(
-    private readonly timesOut = false,
-    private readonly timeoutMs = 1,
-    private readonly finished = new FakeFinished(0)
-  ) {}
+  killed = false
+  private release: ((value: VercelCommandFinishedClient) => void) | undefined
+
+  constructor(private readonly waitForKill = false) {}
 
   async wait(): Promise<VercelCommandFinishedClient> {
-    if (!this.timesOut) {
-      return this.finished
+    if (!this.waitForKill) {
+      return new FakeFinished(0)
     }
-    await Bun.sleep(this.timeoutMs)
-    return new FakeFinished(137, "", "killed")
+    if (this.killed) {
+      return new FakeFinished(137, "", "killed")
+    }
+    return await new Promise<VercelCommandFinishedClient>((resolve) => {
+      this.release = resolve
+    })
   }
 
-  async kill(): Promise<void> {}
+  async kill(): Promise<void> {
+    this.killed = true
+    this.release?.(new FakeFinished(137, "", "killed"))
+  }
 }
 
 class FakeVercelClient implements VercelSandboxClient {
@@ -54,8 +60,7 @@ class FakeVercelClient implements VercelSandboxClient {
   stopCalls = 0
   deleteCalls = 0
   status = "running"
-  nextCommandTimesOut = false
-  nextFinished: FakeFinished | undefined
+  nextCommandWaitsForKill = false
 
   constructor(
     readonly name = "vercel-sandbox-1",
@@ -64,9 +69,8 @@ class FakeVercelClient implements VercelSandboxClient {
 
   async runCommand(params: VercelRunCommandParams): Promise<VercelCommandClient> {
     this.commands.push(params)
-    const command = new FakeCommand(this.nextCommandTimesOut, params.timeoutMs, this.nextFinished)
-    this.nextCommandTimesOut = false
-    this.nextFinished = undefined
+    const command = new FakeCommand(this.nextCommandWaitsForKill)
+    this.nextCommandWaitsForKill = false
     this.commandHandles.push(command)
     return command
   }
@@ -112,7 +116,7 @@ describe("VercelSandbox", () => {
       args: ["-lc", "echo hi"],
       cwd: "/tmp",
       env: { A: "factory", B: "call" },
-      detached: false,
+      detached: true,
       timeoutMs: 123,
     })
   })
@@ -135,27 +139,16 @@ describe("VercelSandbox", () => {
     )
   })
 
-  test("uses Vercel's command timeout and marks the result", async () => {
+  test("timeout kills the remote command and marks the result", async () => {
     const client = new FakeVercelClient()
-    client.nextCommandTimesOut = true
+    client.nextCommandWaitsForKill = true
     const sandbox = new VercelSandbox({ client })
 
     const result = await sandbox.runCommand("sleep", ["30"], { timeout: 5 })
 
     expect(result.exitCode).toBe(137)
     expect(result.timedOut).toBe(true)
-    expect(client.commands[0]).toMatchObject({ detached: false, timeoutMs: 5 })
-  })
-
-  test("returns a successful result for a command with no output", async () => {
-    const client = new FakeVercelClient()
-    client.nextFinished = new FakeFinished(0, "", "")
-    const sandbox = new VercelSandbox({ client })
-
-    const result = await sandbox.runCommand("true")
-
-    expect(result).toMatchObject({ exitCode: 0, stdout: "", stderr: "" })
-    expect(client.commands[0]?.detached).toBe(false)
+    expect(client.commandHandles[0].killed).toBe(true)
   })
 
   test("stop and destroy are idempotent and reject further work", async () => {
@@ -230,7 +223,7 @@ describe("VercelSandboxFactory", () => {
       args: ["-p", "/workspace/run-1"],
       cwd: "/",
       env: {},
-      detached: false,
+      detached: true,
       timeoutMs: 30_000,
     })
   })

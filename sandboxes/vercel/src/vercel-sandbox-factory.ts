@@ -226,7 +226,7 @@ async function ensureWorkingDirectory(input: {
     args: ["-p", input.workingDirectory],
     cwd: "/",
     env: {},
-    detached: false,
+    detached: true,
     timeoutMs: input.setupTimeoutMs,
   })
   const finished = await command.wait()

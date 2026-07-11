@@ -1638,11 +1638,14 @@ describe("AgentWorker", () => {
       }
       const stored = await sixb.blobStorage.open(filePart.fileRef.blobId)
       expect(await new Response(stored).text()).toBe("generated report")
-      expect(
-        sandboxes.sandboxes[0]?.commands.some((command) =>
-          String(command.args.at(-1)).includes("sixb-list-agent-output-files")
-        )
-      ).toBe(true)
+      const listCommand = sandboxes.sandboxes[0]?.commands.find((command) =>
+        String(command.args.at(-1)).includes("sixb-list-agent-output-files")
+      )
+      expect(listCommand).toBeDefined()
+      // Vercel's stock sandbox image has no /dev/fd, so Bash process substitution is unavailable.
+      const listScript = String(listCommand?.args.at(-1))
+      expect(listScript).toContain('find "$dir" -type f -print0 | while')
+      expect(listScript).not.toContain("< <(")
     } finally {
       await worker.stop()
     }

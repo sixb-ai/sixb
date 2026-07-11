@@ -423,7 +423,7 @@ if [ -z "$dir" ] || [ ! -d "$dir" ]; then
   exit 0
 fi
 count=0
-while IFS= read -r -d '' path; do
+find "$dir" -type f -print0 | while IFS= read -r -d '' path; do
   rel="\${path#"$dir"/}"
   if [ "$rel" = ".keep" ]; then
     continue
@@ -436,7 +436,7 @@ while IFS= read -r -d '' path; do
   size="$(wc -c < "$path" | tr -d ' ')"
   rel64="$(printf '%s' "$rel" | base64 | tr -d '\\n')"
   printf '%s\\t%s\\n' "$size" "$rel64"
-done < <(find "$dir" -type f -print0)`
+done`
 
 const READ_OUTPUT_FILE_SCRIPT = `# sixb-read-agent-output-file
 set -euo pipefail
