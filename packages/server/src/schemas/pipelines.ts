@@ -50,26 +50,10 @@ const DatasetDefinitionSchema = z.object({
   }),
 })
 
-const PipelineTriggerSchema = z.union([
-  z.object({
-    type: z.literal("schedule"),
-    scheduleId: z.string(),
-  }),
-  z.object({
-    type: z.literal("sync.finished"),
-    syncId: z.string(),
-    status: z.literal("succeeded"),
-  }),
-  z.object({
-    type: z.literal("pipeline.finished"),
-    pipelineId: z.string(),
-    status: z.literal("succeeded"),
-  }),
-  z.object({
-    type: z.literal("dataset.updated"),
-    datasetId: z.string(),
-  }),
-])
+const PipelineTriggerSchema = z.object({
+  type: z.literal("schedule"),
+  scheduleId: z.string(),
+})
 
 const PipelineStepExecutorSchema = z.union([
   z.object({

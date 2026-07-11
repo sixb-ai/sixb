@@ -84,6 +84,14 @@ export async function upsertLinkBatch(
       (candidate) =>
         candidate.targetTypeId === item.targetTypeId && candidate.targetId === item.targetId
     )
+    const mergedProperties =
+      item.properties !== undefined || sameLink?.properties !== undefined
+        ? {
+            ...(sameLink?.properties ?? {}),
+            ...(item.properties ?? {}),
+          }
+        : undefined
+
     return buildLinkUpsertEvents({
       sourceTypeId: item.objectType.id,
       sourceId: item.sourceId,
@@ -92,7 +100,7 @@ export async function upsertLinkBatch(
       targetId: item.targetId,
       operation: sameLink ? "update" : "create",
       previousProperties: sameLink?.properties,
-      ...(item.properties !== undefined ? { properties: item.properties } : {}),
+      ...(mergedProperties !== undefined ? { properties: mergedProperties } : {}),
     })
   })
 

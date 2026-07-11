@@ -262,6 +262,7 @@ export class WorkflowRunSession {
   async start(): Promise<void> {
     await this.dependencies.recorder.startRun({
       input: this.dependencies.workflowInputSnapshot,
+      source: this.dependencies.job.source,
     })
   }
 

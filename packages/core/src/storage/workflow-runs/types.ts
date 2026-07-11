@@ -48,6 +48,7 @@ export interface StartWorkflowRunInput {
   readonly workflowId: string
   readonly input: WorkflowIOSnapshot
   readonly startedAt?: Date
+  readonly source?: WorkflowRunSource
 }
 
 export interface QueueWorkflowRunInput {
@@ -173,6 +174,7 @@ export interface WorkflowRunStorage {
   readonly nodes: WorkflowNodeRunStorage
 
   queue(input: QueueWorkflowRunInput): Promise<WorkflowRunRecord>
+  /** Atomically claims a queued run by transitioning it to running; competing claims must fail. */
   start(input: StartWorkflowRunInput): Promise<WorkflowRunRecord>
   wait(input: WaitWorkflowRunInput): Promise<WorkflowRunRecord>
   resume(input: ResumeWorkflowRunInput): Promise<WorkflowRunRecord>

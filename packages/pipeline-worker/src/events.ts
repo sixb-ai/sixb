@@ -122,7 +122,7 @@ export async function emitDatasetVersionCommitted(
   if (!sixb.events) return
 
   try {
-    // Emit step outputs immediately so datasetUpdated routes can react before later steps finish.
+    // Emit step outputs immediately so dataset event schedules can react before later steps finish.
     await sixb.events.append({
       events: [
         {

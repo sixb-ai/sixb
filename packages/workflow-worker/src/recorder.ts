@@ -4,6 +4,7 @@ import type {
   WorkflowIOSnapshot,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
+  WorkflowRunSource,
   WorkflowRunStorage,
 } from "@sixb/core"
 import type { WorkflowNodeLifecycleContext, WorkflowRunObserver } from "./types"
@@ -55,12 +56,16 @@ export class WorkflowRunRecorder {
     return [...this.nodeRuns]
   }
 
-  async startRun(params: { readonly input: WorkflowIOSnapshot }): Promise<WorkflowRunRecord> {
+  async startRun(params: {
+    readonly input: WorkflowIOSnapshot
+    readonly source?: WorkflowRunSource
+  }): Promise<WorkflowRunRecord> {
     const run = await this.dependencies.workflowRuns.start({
       projectId: this.dependencies.projectId,
       id: this.dependencies.runId,
       workflowId: this.dependencies.workflow.id,
       input: params.input,
+      source: params.source,
     })
     this.started = true
     await this.notify(() => this.dependencies.observer.onRunStarted(run))

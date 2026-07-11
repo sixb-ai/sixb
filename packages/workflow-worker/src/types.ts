@@ -7,6 +7,7 @@ import type {
   WorkflowInterventionRecord,
   WorkflowNodeRunRecord,
   WorkflowRunRecord,
+  WorkflowRunSource,
   WorkflowRunStorage,
   WorkflowStepOutputs,
   WorkflowsRuntime,
@@ -31,6 +32,7 @@ export interface WorkflowJob {
   readonly id: string
   readonly workflowId: string
   readonly input?: Readonly<Record<string, unknown>>
+  readonly source?: WorkflowRunSource
 }
 
 export interface WorkflowResumeJob {
@@ -56,7 +58,7 @@ export interface RunWorkflowResumeJobInput {
 export interface WorkflowRunResult {
   readonly id: string
   readonly workflowId: string
-  readonly status: "succeeded" | "waiting"
+  readonly status: WorkflowRunRecord["status"]
   readonly run: WorkflowRunRecord
   readonly nodes: readonly WorkflowNodeRunRecord[]
   readonly steps: WorkflowStepOutputs

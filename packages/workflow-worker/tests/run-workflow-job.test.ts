@@ -18,6 +18,7 @@ import {
   prop,
   ref,
   Sixb,
+  SYSTEM_PRINCIPAL,
   type WorkflowDefinition,
   type WorkflowRunStorage,
   WorkflowValidationError,
@@ -416,6 +417,76 @@ describe("runWorkflowJob", () => {
       "node-finished:0:succeeded",
       "run-finished:succeeded",
     ])
+  })
+
+  test("persists workflow run source from the requested queue job", async () => {
+    const workflow = defineWorkflow("triggered-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const source = {
+      type: "schedule" as const,
+      scheduleId: "transaction.high-value",
+      eventId: "evt-1",
+      principal: SYSTEM_PRINCIPAL,
+    }
+    const workflowInput = {
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    }
+
+    await runWorkflowJob({
+      runtime: createRuntime(sixb),
+      job: {
+        id: "wfrun_triggered",
+        workflowId: workflow.id,
+        input: workflowInput,
+        source,
+      },
+    })
+
+    const run = await sixb.storage.workflowRuns!.getById({
+      projectId: sixb.id,
+      id: "wfrun_triggered",
+    })
+
+    expect(run?.source).toEqual(source)
+  })
+
+  test("treats duplicate requested jobs for an existing run as no-op", async () => {
+    const workflow = defineWorkflow("idempotent-workflow")
+      .input({
+        transaction: ref(Transaction),
+      })
+      .then(findBestInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const job = {
+      id: "wfrun_idempotent",
+      workflowId: workflow.id,
+      input: {
+        transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+      },
+    }
+
+    const first = await runWorkflowJob({
+      runtime: createRuntime(sixb),
+      job,
+    })
+    const second = await runWorkflowJob({
+      runtime: createRuntime(sixb),
+      job,
+    })
+
+    expect(first.status).toBe("succeeded")
+    expect(second.status).toBe("succeeded")
+    expect(second.nodes).toHaveLength(1)
+
+    const nodes = await sixb.storage.workflowRuns!.nodes.list({
+      projectId: sixb.id,
+      workflowRunId: job.id,
+    })
+    expect(nodes.total).toBe(1)
   })
 
   test("does not fail a workflow when lifecycle observer notification fails", async () => {

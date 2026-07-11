@@ -70,7 +70,7 @@ async function main() {
   console.log(`[AcmeCorp] Root sync: ${result.syncId}`)
   console.log(`[AcmeCorp] Root run: ${result.runId}`)
   console.log(`[AcmeCorp] Root job: ${result.jobId}`)
-  console.log("[AcmeCorp] Downstream syncs will be requested by syncFinished triggers.")
+  console.log("[AcmeCorp] Downstream syncs will be requested by event schedules.")
   console.log(
     "[AcmeCorp] To slow each sync read for Atlas realtime checks, set ACME_SYNC_DELAY_MS."
   )

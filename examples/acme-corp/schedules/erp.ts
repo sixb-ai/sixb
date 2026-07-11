@@ -1,5 +1,11 @@
-import { defineSchedule } from "@sixb/core"
-
-export const hourlyErpSync = defineSchedule("hourly-erp-sync").cron("0 * * * *", {
-  timezone: "Europe/Paris",
-})
+export {
+  afterCustomersSync,
+  afterDepartmentsSync,
+  afterDocumentsSync,
+  afterEmployeesSync,
+  afterInvoicesSync,
+  afterProjectMembersSync,
+  afterProjectsSync,
+  afterTasksSync,
+} from "../syncs/erp"
+export { hourlyErpSync } from "./hourly-erp"

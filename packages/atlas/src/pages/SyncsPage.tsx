@@ -117,22 +117,13 @@ function QueuedRunBadge() {
 function syncSummary(sync: SyncSummary): string {
   const parts = [`${sync.mode} sync`, sync.connector.id, sync.target.dataset.id]
   if (sync.triggers.length > 0) {
-    parts.push(`${sync.triggers.length} trigger${sync.triggers.length === 1 ? "" : "s"}`)
+    parts.push(`${sync.triggers.length} schedule${sync.triggers.length === 1 ? "" : "s"}`)
   }
   return parts.join(" / ")
 }
 
-function triggerLabel(trigger: SyncSummary["triggers"][number]): string {
-  switch (trigger.type) {
-    case "schedule":
-      return `Schedule ${trigger.scheduleId}`
-    case "sync.finished":
-      return `After ${trigger.syncId}`
-    case "pipeline.finished":
-      return `After ${trigger.pipelineId}`
-    case "dataset.updated":
-      return `Dataset ${trigger.datasetId}`
-  }
+function scheduleLabel(schedule: SyncSummary["triggers"][number]): string {
+  return `Schedule ${schedule.scheduleId}`
 }
 
 function runDuration(run: SyncRun): string {
@@ -217,7 +208,7 @@ function SyncTableView({
             <TableHead className="hidden sm:table-cell">Dataset</TableHead>
             <TableHead className="hidden md:table-cell">Connector</TableHead>
             <TableHead>Latest Run</TableHead>
-            <TableHead className="hidden text-right lg:table-cell">Triggers</TableHead>
+            <TableHead className="hidden text-right lg:table-cell">Schedules</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -862,18 +853,18 @@ export function SyncDetailPage() {
             </dl>
           </DetailSurface>
 
-          <DetailSurface title="Triggers">
+          <DetailSurface title="Schedules">
             {sync.triggers.length === 0 ? (
               <p className="text-sm text-muted-foreground">None</p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {sync.triggers.map((trigger) => (
                   <span
-                    key={triggerLabel(trigger)}
+                    key={scheduleLabel(trigger)}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 py-1.5 text-sm text-foreground"
                   >
                     <Clock3 className="h-3.5 w-3.5 text-muted-foreground" />
-                    {triggerLabel(trigger)}
+                    {scheduleLabel(trigger)}
                   </span>
                 ))}
               </div>

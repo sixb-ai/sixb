@@ -1,4 +1,4 @@
-import { defineSync, syncFinished } from "@sixb/core"
+import { defineSchedule, defineSync, events } from "@sixb/core"
 import { acmeErpConnector } from "../connectors/acme-erp"
 import {
   erpCustomersDataset,
@@ -12,7 +12,7 @@ import {
   erpTasksDataset,
 } from "../datasets/erp"
 import { createSampleAttachmentForDocument } from "../lib/sample-files"
-import { hourlyErpSync } from "../schedules/erp"
+import { hourlyErpSync } from "../schedules/hourly-erp"
 
 const demoSyncDelayMs = parseDemoSyncDelayMs(process.env.ACME_SYNC_DELAY_MS)
 
@@ -39,32 +39,52 @@ export const syncErpDepartments = defineSync("sync-erp-departments")
   .read((client) => readWithDemoDelay("departments", () => client.listDepartments()))
   .intoDataset(erpDepartmentsDataset)
 
+export const afterDepartmentsSync = defineSchedule("after-erp-departments").on(
+  events.sync(syncErpDepartments).succeeded()
+)
+
 export const syncErpEmployees = defineSync("sync-erp-employees")
-  .when(syncFinished(syncErpDepartments.id))
+  .when(afterDepartmentsSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("employees", () => client.listEmployees()))
   .intoDataset(erpEmployeesDataset)
 
+export const afterEmployeesSync = defineSchedule("after-erp-employees").on(
+  events.sync(syncErpEmployees).succeeded()
+)
+
 export const syncErpCustomers = defineSync("sync-erp-customers")
-  .when(syncFinished(syncErpEmployees.id))
+  .when(afterEmployeesSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("customers", () => client.listCustomers()))
   .intoDataset(erpCustomersDataset)
 
+export const afterCustomersSync = defineSchedule("after-erp-customers").on(
+  events.sync(syncErpCustomers).succeeded()
+)
+
 export const syncErpProjects = defineSync("sync-erp-projects")
-  .when(syncFinished(syncErpCustomers.id))
+  .when(afterCustomersSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("projects", () => client.listProjects()))
   .intoDataset(erpProjectsDataset)
 
+export const afterProjectsSync = defineSchedule("after-erp-projects").on(
+  events.sync(syncErpProjects).succeeded()
+)
+
 export const syncErpProjectMembers = defineSync("sync-erp-project-members")
-  .when(syncFinished(syncErpProjects.id))
+  .when(afterProjectsSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("project members", () => client.listProjectMembers()))
   .intoDataset(erpProjectMembersDataset)
 
+export const afterProjectMembersSync = defineSchedule("after-erp-project-members").on(
+  events.sync(syncErpProjectMembers).succeeded()
+)
+
 export const syncErpDocuments = defineSync("sync-erp-documents")
-  .when(syncFinished(syncErpProjectMembers.id))
+  .when(afterProjectMembersSync)
   .from(acmeErpConnector)
   .read(async (client, context) => {
     const rows = await readWithDemoDelay("documents", () => client.listDocuments())
@@ -77,20 +97,32 @@ export const syncErpDocuments = defineSync("sync-erp-documents")
   })
   .intoDataset(erpDocumentsDataset)
 
+export const afterDocumentsSync = defineSchedule("after-erp-documents").on(
+  events.sync(syncErpDocuments).succeeded()
+)
+
 export const syncErpInvoices = defineSync("sync-erp-invoices")
-  .when(syncFinished(syncErpDocuments.id))
+  .when(afterDocumentsSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("invoices", () => client.listInvoices()))
   .intoDataset(erpInvoicesDataset)
 
+export const afterInvoicesSync = defineSchedule("after-erp-invoices").on(
+  events.sync(syncErpInvoices).succeeded()
+)
+
 export const syncErpTasks = defineSync("sync-erp-tasks")
-  .when(syncFinished(syncErpInvoices.id))
+  .when(afterInvoicesSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("tasks", () => client.listTasks()))
   .intoDataset(erpTasksDataset)
 
+export const afterTasksSync = defineSchedule("after-erp-tasks").on(
+  events.sync(syncErpTasks).succeeded()
+)
+
 export const syncErpProjectProgress = defineSync("sync-erp-project-progress")
-  .when(syncFinished(syncErpTasks.id))
+  .when(afterTasksSync)
   .from(acmeErpConnector)
   .read((client) => readWithDemoDelay("project progress", () => client.listProjectProgress()))
   .intoDataset(erpProjectProgressDataset)

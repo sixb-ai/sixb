@@ -110,6 +110,8 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
         startedAt: new Date(input.startedAt ?? new Date()),
         finishedAt: undefined,
         error: undefined,
+        source:
+          existing.source ?? (input.source === undefined ? undefined : cloneRecord(input.source)),
       }
 
       this.runs.set(key, cloneRecord(next))
@@ -123,6 +125,7 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       status: "running",
       input: cloneRecord(input.input),
       startedAt: new Date(input.startedAt ?? new Date()),
+      ...(input.source ? { source: cloneRecord(input.source) } : {}),
     }
 
     this.runs.set(key, cloneRecord(record))

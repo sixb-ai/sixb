@@ -102,7 +102,11 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             input = ${serializeRecord(input.input)}::text::jsonb,
             started_at = ${startedAt},
             finished_at = ${null},
-            error = ${null}
+            error = ${null},
+            source = COALESCE(
+              source,
+              ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
+            )
           WHERE project_id = ${input.projectId} AND id = ${input.id}
           RETURNING *
         `
@@ -118,14 +122,16 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
             workflow_id,
             status,
             input,
-            started_at
+            started_at,
+            source
           ) VALUES (
             ${input.projectId},
             ${input.id},
             ${input.workflowId},
             ${"running"},
             ${serializeRecord(input.input)}::text::jsonb,
-            ${startedAt}
+            ${startedAt},
+            ${input.source ? JSON.stringify(input.source) : null}::text::jsonb
           )
           RETURNING *
         `

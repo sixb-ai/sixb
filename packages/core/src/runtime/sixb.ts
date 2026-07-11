@@ -286,6 +286,12 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       registeredSyncIds: new Set(this.syncsById.keys()),
       registeredPipelineIds: new Set(this.pipelinesById.keys()),
     })
+    for (const sync of this.syncsById.values()) {
+      validateScheduleReferences("Sync", sync.id, sync.triggers, this.schedulesById)
+    }
+    for (const pipeline of this.pipelinesById.values()) {
+      validateScheduleReferences("Pipeline", pipeline.id, pipeline.triggers, this.schedulesById)
+    }
 
     const workflows = validateWorkflowsAtStartup({
       workflows: options.workflows ?? [],
@@ -661,6 +667,21 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   isValidLinkTarget(expected: string | string[], actual: string): boolean {
     return this.ontology.isValidLinkTarget(expected, actual)
+  }
+}
+
+function validateScheduleReferences(
+  consumerKind: "Sync" | "Pipeline",
+  consumerId: string,
+  references: readonly { readonly scheduleId: string }[],
+  schedulesById: ReadonlyMap<string, ScheduleDefinition>
+): void {
+  for (const reference of references) {
+    if (!schedulesById.has(reference.scheduleId)) {
+      throw new RuntimeError(
+        `${consumerKind} '${consumerId}' references unknown schedule '${reference.scheduleId}'. Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
+      )
+    }
   }
 }
 

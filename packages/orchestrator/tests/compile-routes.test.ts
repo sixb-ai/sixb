@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   col,
-  type DomainEvent,
-  datasetUpdated,
+  defineAction,
   defineConnector,
   defineDataset,
   defineLinkProjection,
@@ -10,22 +9,20 @@ import {
   definePipeline,
   definePipelineStep,
   defineProjection,
+  defineRule,
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
   defineWorkflow,
   defineWorkflowStep,
+  events,
   link,
   prop,
-  type RunTrigger,
   type ScheduleDefinition,
-  syncFinished,
+  type WorkflowDefinition,
 } from "@sixb/core"
 import { compileRoutes, compileRoutesWithDiagnostics } from "../src/compile-routes"
-import type { OrchestratorRouteKey, OrchestratorRoutes } from "../src/types"
-
-const daily = defineSchedule("daily").cron("0 2 * * *")
-const hourly = defineSchedule("hourly").cron("0 * * * *")
+import type { CompileRoutesParams, OrchestratorRouteKey } from "../src/types"
 
 const erpDb = defineConnector("erpDb", {
   type: "sql",
@@ -50,523 +47,263 @@ const Room = defineObjectType({
   links: [link("hasSensors", Sensor, { cardinality: "many" })],
 })
 
+const daily = defineSchedule("daily").cron("0 2 * * *")
+const highTemperature = defineSchedule("room.high-temperature")
+  .on(events.object(Room).updated())
+  .where((event) => event.object.p.temperature.gt(30))
+
+const highTemperatureRule = defineRule("room.high-temperature-rule")
+  .on(Room)
+  .where((room) => room.p.temperature.gt(30))
+const acknowledgeRoom = defineAction("acknowledge-room")
+  .on(Room)
+  .params({})
+  .writeback(async () => {})
+const ruleTriggered = defineSchedule("room.rule-triggered").on(
+  events.rule(highTemperatureRule).triggered()
+)
+const actionCompleted = defineSchedule("room.acknowledged").on(
+  events.action(acknowledgeRoom).completed()
+)
+
 function makeDataset(id: string) {
-  return defineDataset(id, {
-    schema: [col("id", "string", { nullable: true })],
-  })
+  return defineDataset(id, { schema: [col("id", "string", { nullable: true })] })
 }
 
-function makeJoinDataset(id: string) {
-  return defineDataset(id, {
-    schema: [col("room_id", "string"), col("sensor_id", "string")],
-  })
-}
+const rawRooms = makeDataset("raw.rooms")
+const cleanRooms = makeDataset("clean.rooms")
+const rawRoomsUpdated = defineSchedule("raw-rooms-updated").on(events.dataset(rawRooms).updated())
 
-function makeTelemetryDataset(id: string) {
-  return defineDataset(id, {
-    schema: [
-      col("room_id", "string"),
-      col("observed_at", "timestamp"),
-      col("temperature", "float64"),
-    ],
-  })
-}
-
-function makeSyncWithSchedule(id: string, schedule: ScheduleDefinition) {
-  return defineSync(id)
-    .when(schedule)
+function makeSync(id: string, schedule?: ScheduleDefinition) {
+  const builder = defineSync(id)
+  const scheduled = schedule ? builder.when(schedule) : builder
+  return scheduled
     .from(erpDb)
     .read(() => [])
-    .intoDataset(makeDataset(`raw.${id}`))
+    .intoDataset(rawRooms)
 }
 
-function makeSyncWithoutSchedule(id: string) {
-  return defineSync(id)
-    .from(erpDb)
-    .read(() => [])
-    .intoDataset(makeDataset(`raw.${id}`))
-}
-
-function makePipelineWithSchedule(id: string, schedule: ScheduleDefinition) {
-  return definePipeline(id).when(schedule).then(makePipelineStep(id))
-}
-
-function makePipelineWithoutSchedule(id: string) {
-  return definePipeline(id).then(makePipelineStep(id))
-}
-
-function makeSyncWithTrigger(id: string, trigger: RunTrigger) {
-  return defineSync(id)
-    .when(trigger)
-    .from(erpDb)
-    .read(() => [])
-    .intoDataset(makeDataset(`raw.${id}`))
-}
-
-function makePipelineWithTrigger(id: string, trigger: RunTrigger) {
-  return definePipeline(id).when(trigger).then(makePipelineStep(id))
-}
-
-function makePipelineStep(id: string) {
+function makeStep(id: string) {
   return definePipelineStep(`${id}-step`)
-    .inputs({ source: makeDataset("source") })
-    .output(makeDataset(`clean.${id}`))
+    .inputs({ source: rawRooms })
+    .output(cleanRooms)
     .run(() => {})
 }
 
-const workflowStep = defineWorkflowStep("workflow-route-step")
+function makePipeline(id: string, schedule?: ScheduleDefinition) {
+  const pipeline = definePipeline(id)
+  return (schedule ? pipeline.when(schedule) : pipeline).then(makeStep(id))
+}
+
+const workflowStep = defineWorkflowStep("route-step")
   .input({})
   .output({})
   .run(() => ({}))
 
-function makeWorkflowWithoutTriggers(id: string) {
-  return defineWorkflow(id).input({}).then(workflowStep)
+function makeWorkflow(id: string, schedule?: ScheduleDefinition) {
+  const workflow = defineWorkflow(id).input({})
+  return (schedule ? workflow.when(schedule) : workflow).then(workflowStep)
 }
 
-function makeWorkflowWithSchedule(id: string, schedule: ScheduleDefinition) {
-  return defineWorkflow(id).input({}).when(schedule).then(workflowStep)
+function compile(overrides: Partial<CompileRoutesParams> = {}) {
+  return compileRoutes({
+    schedules: [],
+    syncs: [],
+    pipelines: [],
+    ...overrides,
+  })
 }
 
-function makeWorkflowWithRequiredInput(id: string, schedule: ScheduleDefinition) {
-  return defineWorkflow(id)
-    .input({ accountId: "string" })
-    .when(schedule as never)
-    .then(workflowStep)
-}
-
-function makeObjectProjection(id: string, datasetId: string) {
-  return defineProjection(id, Room).fromDataset(makeDataset(datasetId)).properties({ id: "id" })
-}
-
-function makeLinkProjection(id: string, datasetId: string) {
-  return defineLinkProjection(id, Room.l.hasSensors)
-    .fromDataset(makeJoinDataset(datasetId))
-    .sourceField("room_id")
-    .targetField("sensor_id")
-}
-
-function makeTelemetryProjection(id: string, datasetId: string) {
-  return defineTelemetryProjection(id, Room.p.temperature)
-    .fromDataset(makeTelemetryDataset(datasetId))
-    .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
-}
-
-function getJobs(routes: OrchestratorRoutes, key: OrchestratorRouteKey) {
-  const route = routes.get(key)
-  expect(route).toBeDefined()
-  return route!.jobs
-}
-
-function expectEventType(
-  routes: OrchestratorRoutes,
-  key: OrchestratorRouteKey,
-  eventType: DomainEvent["type"]
-) {
-  expect(routes.get(key)?.eventType).toBe(eventType)
+function jobsFor(overrides: Partial<CompileRoutesParams>, key: OrchestratorRouteKey) {
+  return compile(overrides).get(key)?.jobs ?? []
 }
 
 describe("compileRoutes", () => {
-  test("syncs without schedule produce an empty map", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithoutSchedule("sync-a")],
-      pipelines: [],
-    })
-    expect(routes.size).toBe(0)
+  test("definitions without schedules produce no routes", () => {
+    expect(
+      compile({
+        syncs: [makeSync("sync-rooms")],
+        pipelines: [makePipeline("clean-rooms")],
+        workflows: [makeWorkflow("inspect-rooms")],
+      }).size
+    ).toBe(0)
   })
 
-  test("pipelines without schedule produce an empty map", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [makePipelineWithoutSchedule("pipe-a")],
-    })
-    expect(routes.size).toBe(0)
-  })
-
-  test("workflows without triggers produce an empty map", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      workflows: [makeWorkflowWithoutTriggers("workflow-a")],
+  test("one cron schedule fans out to sync, pipeline, and workflow queues", () => {
+    const routes = compile({
+      schedules: [daily],
+      syncs: [makeSync("sync-rooms", daily)],
+      pipelines: [makePipeline("clean-rooms", daily)],
+      workflows: [makeWorkflow("inspect-rooms", daily)],
     })
 
-    expect(routes.size).toBe(0)
-  })
-
-  test("one sync with schedule produces one entry in syncRuns", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithSchedule("sync-orders", daily)],
-      pipelines: [],
-    })
-
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(1)
-    expectEventType(routes, "schedule.triggered:daily", "schedule.triggered")
-    expect(jobs![0]).toEqual({
-      queue: "syncRuns",
-      job: { type: "sync.run.requested", payload: { syncId: "sync-orders" } },
-    })
-  })
-
-  test("one pipeline with schedule produces one entry in pipelines", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [makePipelineWithSchedule("pipe-clean", daily)],
-    })
-
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(1)
-    expectEventType(routes, "schedule.triggered:daily", "schedule.triggered")
-    expect(jobs![0]).toEqual({
-      queue: "pipelines",
-      job: { type: "pipeline.run.requested", payload: { pipelineId: "pipe-clean" } },
-    })
-  })
-
-  test("one scheduled empty-input workflow produces one entry in workflows", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      workflows: [makeWorkflowWithSchedule("nightly-reconciliation", daily)],
-    })
-
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(1)
-    expectEventType(routes, "schedule.triggered:daily", "schedule.triggered")
-    expect(jobs![0]).toEqual({
-      queue: "workflows",
-      job: {
-        type: "workflow.run.requested",
-        payload: {
-          workflowId: "nightly-reconciliation",
-          input: {},
+    expect(routes.get("schedule.triggered:daily")?.jobs).toEqual([
+      {
+        queue: "syncRuns",
+        job: { type: "sync.run.requested", payload: { syncId: "sync-rooms" } },
+      },
+      {
+        queue: "pipelines",
+        job: { type: "pipeline.run.requested", payload: { pipelineId: "clean-rooms" } },
+      },
+      {
+        queue: "workflows",
+        job: {
+          type: "workflow.run.requested",
+          payload: { workflowId: "inspect-rooms", input: {} },
         },
       },
-    })
+    ])
   })
 
-  test("scheduled non-empty-input workflow is skipped by compileRoutes", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      workflows: [makeWorkflowWithRequiredInput("reconcile-transaction", daily)],
-    })
+  test("an event schedule is compiled once with all workflow consumers", () => {
+    const first: WorkflowDefinition = defineWorkflow("first-alert")
+      .input({ roomId: "string" })
+      .when(highTemperature, ({ event }) => ({ roomId: event.object.primaryId }))
+      .then(workflowStep)
+    const second: WorkflowDefinition = defineWorkflow("second-alert")
+      .input({ roomId: "string" })
+      .when(highTemperature, ({ event }) => ({ roomId: event.object.primaryId }))
+      .then(workflowStep)
 
-    expect(routes.size).toBe(0)
-    expect(routes.has("schedule.triggered:daily")).toBe(false)
+    const route = compile({
+      schedules: [highTemperature],
+      workflows: [first, second],
+    }).get("event-schedule:object.updated:room")
+
+    expect(route?.eventType).toBe("object.updated")
+    expect(route?.eventSchedules).toHaveLength(1)
+    expect(route?.eventSchedules?.[0]?.schedule.id).toBe(highTemperature.id)
+    expect(route?.eventSchedules?.[0]?.targets.map((target) => target.queue)).toEqual([
+      "workflows",
+      "workflows",
+    ])
   })
 
-  test("scheduled non-empty-input workflow reports diagnostics", () => {
+  test("rule and action event schedules use source-scoped routes", () => {
+    const ruleRoutes = compile({
+      schedules: [ruleTriggered],
+      workflows: [makeWorkflow("rule-alert", ruleTriggered)],
+    })
+    const actionRoutes = compile({
+      schedules: [actionCompleted],
+      workflows: [makeWorkflow("action-alert", actionCompleted)],
+    })
+
+    expect(ruleRoutes.has("event-schedule:rule.triggered:room.high-temperature-rule")).toBe(true)
+    expect(actionRoutes.has("event-schedule:action.completed:acknowledge-room")).toBe(true)
+  })
+
+  test("dataset, sync, and pipeline event schedules can target downstream work", () => {
+    const upstreamSync = makeSync("upstream-sync")
+    const upstreamPipeline = makePipeline("upstream-pipeline")
+    const syncSucceeded = defineSchedule("upstream-sync-succeeded").on(
+      events.sync(upstreamSync).succeeded()
+    )
+    const pipelineSucceeded = defineSchedule("upstream-pipeline-succeeded").on(
+      events.pipeline(upstreamPipeline).succeeded()
+    )
+
+    const routes = compile({
+      schedules: [rawRoomsUpdated, syncSucceeded, pipelineSucceeded],
+      syncs: [makeSync("from-dataset", rawRoomsUpdated)],
+      pipelines: [makePipeline("from-sync", syncSucceeded)],
+      workflows: [makeWorkflow("from-pipeline", pipelineSucceeded)],
+    })
+
+    expect(routes.has("event-schedule:dataset.version.committed:raw.rooms")).toBe(true)
+    expect(routes.has("event-schedule:sync.run.finished:upstream-sync")).toBe(true)
+    expect(routes.has("event-schedule:pipeline.run.finished:upstream-pipeline")).toBe(true)
+  })
+
+  test("unknown schedule references produce one consumer-aware diagnostic", () => {
+    const unknown = defineSchedule("missing").cron("0 * * * *")
     const result = compileRoutesWithDiagnostics({
-      syncs: [],
+      schedules: [],
+      syncs: [makeSync("sync-rooms", unknown)],
       pipelines: [],
-      workflows: [makeWorkflowWithRequiredInput("reconcile-transaction", daily)],
     })
 
     expect(result.routes.size).toBe(0)
     expect(result.diagnostics).toEqual([
       {
+        type: "schedule.reference.unknown",
+        scheduleId: "missing",
+        consumerKind: "sync",
+        consumerId: "sync-rooms",
+      },
+    ])
+  })
+
+  test("required workflow input without an event mapper is diagnosed", () => {
+    const workflow = defineWorkflow("invalid-input")
+      .input({ roomId: "string" })
+      .when(highTemperature as never)
+      .then(workflowStep)
+    const result = compileRoutesWithDiagnostics({
+      schedules: [highTemperature],
+      syncs: [],
+      pipelines: [],
+      workflows: [workflow],
+    })
+
+    expect(result.diagnostics).toEqual([
+      {
         type: "workflow.schedule.input-required",
-        workflowId: "reconcile-transaction",
-        scheduleId: "daily",
-        inputFields: ["accountId"],
+        workflowId: "invalid-input",
+        scheduleId: "room.high-temperature",
+        inputFields: ["roomId"],
       },
     ])
   })
 
-  test("fan-out: one schedule shared by 1 sync + 2 pipelines produces 1 key with 3 jobs", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithSchedule("sync-a", daily)],
-      pipelines: [
-        makePipelineWithSchedule("pipe-b", daily),
-        makePipelineWithSchedule("pipe-c", daily),
-      ],
-    })
+  test("dataset projections keep their direct version-scoped route", () => {
+    const projection = defineProjection("rooms-projection", Room)
+      .fromDataset(rawRooms)
+      .properties({ id: "id" })
 
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(3)
-    // Order: syncs first, then pipelines in declaration order
-    expect(jobs![0]!.queue).toBe("syncRuns")
-    expect(jobs![1]!.queue).toBe("pipelines")
-    expect(jobs![2]!.queue).toBe("pipelines")
-  })
-
-  test("fan-out: sync + pipeline + workflow sharing one schedule preserve deterministic order", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithSchedule("sync-a", daily)],
-      pipelines: [makePipelineWithSchedule("pipe-b", daily)],
-      workflows: [makeWorkflowWithSchedule("workflow-c", daily)],
-    })
-
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(3)
-    expect(jobs![0]!.queue).toBe("syncRuns")
-    expect(jobs![1]!.queue).toBe("pipelines")
-    expect(jobs![2]!.queue).toBe("workflows")
-  })
-
-  test("two empty-input workflows on the same schedule produce two workflow jobs", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      workflows: [
-        makeWorkflowWithSchedule("workflow-a", daily),
-        makeWorkflowWithSchedule("workflow-b", daily),
-      ],
-    })
-
-    expect(routes.size).toBe(1)
-
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(2)
-    expect(jobs).toEqual([
-      {
-        queue: "workflows",
-        job: { type: "workflow.run.requested", payload: { workflowId: "workflow-a", input: {} } },
-      },
-      {
-        queue: "workflows",
-        job: { type: "workflow.run.requested", payload: { workflowId: "workflow-b", input: {} } },
-      },
-    ])
-  })
-
-  test("two distinct schedules produce two independent keys", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithSchedule("sync-a", daily)],
-      pipelines: [makePipelineWithSchedule("pipe-b", hourly)],
-    })
-
-    expect(routes.size).toBe(2)
-    expect(getJobs(routes, "schedule.triggered:daily")).toHaveLength(1)
-    expect(getJobs(routes, "schedule.triggered:hourly")).toHaveLength(1)
-  })
-
-  test("duplicate sync ids with the same schedule accumulate in the same bucket", () => {
-    // This situation is impossible via Sixb's constructor (it rejects duplicate ids),
-    // but we document the behavior: compileRoutes is a pure function and does not validate.
-    const syncA = makeSyncWithSchedule("sync-dup", daily)
-    const syncB = makeSyncWithSchedule("sync-dup", daily)
-
-    const routes = compileRoutes({
-      syncs: [syncA, syncB],
-      pipelines: [],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "schedule.triggered:daily")
-    expect(jobs).toHaveLength(2)
-  })
-
-  test("mixed: some definitions with schedule, some without", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithSchedule("sync-a", daily), makeSyncWithoutSchedule("sync-b")],
-      pipelines: [
-        makePipelineWithoutSchedule("pipe-c"),
-        makePipelineWithSchedule("pipe-d", hourly),
-      ],
-    })
-
-    expect(routes.size).toBe(2)
-    expect(getJobs(routes, "schedule.triggered:daily")).toHaveLength(1)
-    expect(getJobs(routes, "schedule.triggered:hourly")).toHaveLength(1)
-  })
-
-  test("empty syncs and pipelines produce an empty map", () => {
-    const routes = compileRoutes({ syncs: [], pipelines: [] })
-    expect(routes.size).toBe(0)
-  })
-
-  test("sync with syncFinished trigger produces sync.run.finished route key", () => {
-    const routes = compileRoutes({
-      syncs: [makeSyncWithTrigger("sync-lines", syncFinished("sync-orders"))],
-      pipelines: [],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "sync.run.finished:sync-orders:succeeded")
-    expect(jobs).toHaveLength(1)
-    expectEventType(routes, "sync.run.finished:sync-orders:succeeded", "sync.run.finished")
-    expect(jobs![0]).toEqual({
-      queue: "syncRuns",
-      job: { type: "sync.run.requested", payload: { syncId: "sync-lines" } },
-    })
-  })
-
-  test("pipeline with datasetUpdated trigger produces dataset.version.committed route key", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [makePipelineWithTrigger("normalize", datasetUpdated("raw.erp.orders"))],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:raw.erp.orders")
-    expect(jobs).toHaveLength(1)
-    expectEventType(routes, "dataset.version.committed:raw.erp.orders", "dataset.version.committed")
-    expect(jobs![0]).toEqual({
-      queue: "pipelines",
-      job: { type: "pipeline.run.requested", payload: { pipelineId: "normalize" } },
-    })
-  })
-
-  test("one object projection produces one projection route", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      projections: [makeObjectProjection("room-proj", "canonical.rooms")],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:canonical.rooms")
-    expect(jobs).toHaveLength(1)
-    expectEventType(
-      routes,
-      "dataset.version.committed:canonical.rooms",
-      "dataset.version.committed"
-    )
-    expect(jobs![0]).toEqual({
-      queue: "projections",
-      job: {
-        type: "projection.run.requested",
-        payload: {
-          projectionId: "room-proj",
-          projectionKind: "object",
-          datasetId: "canonical.rooms",
-        },
-      },
-    })
-  })
-
-  test("one link projection produces one projection route", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      projections: [makeLinkProjection("room-sensors", "join.room-sensors")],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:join.room-sensors")
-    expect(jobs).toHaveLength(1)
-    expect(jobs![0]).toEqual({
-      queue: "projections",
-      job: {
-        type: "projection.run.requested",
-        payload: {
-          projectionId: "room-sensors",
-          projectionKind: "link",
-          datasetId: "join.room-sensors",
-        },
-      },
-    })
-  })
-
-  test("one telemetry projection produces one projection route", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      projections: [makeTelemetryProjection("room-temperature", "canonical.room-readings")],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:canonical.room-readings")
-    expect(jobs).toHaveLength(1)
-    expect(jobs![0]).toEqual({
-      queue: "projections",
-      job: {
-        type: "projection.run.requested",
-        payload: {
-          projectionId: "room-temperature",
-          projectionKind: "telemetry",
-          datasetId: "canonical.room-readings",
-        },
-      },
-    })
-  })
-
-  test("object and link projections on the same dataset share one route", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      projections: [
-        makeObjectProjection("room-proj", "canonical.rooms"),
-        makeLinkProjection("room-sensors", "canonical.rooms"),
-      ],
-    })
-
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:canonical.rooms")
-    expect(jobs).toHaveLength(2)
-    expect(jobs).toEqual([
+    expect(jobsFor({ projections: [projection] }, "dataset.version.committed:raw.rooms")).toEqual([
       {
         queue: "projections",
         job: {
           type: "projection.run.requested",
           payload: {
-            projectionId: "room-proj",
+            projectionId: "rooms-projection",
             projectionKind: "object",
-            datasetId: "canonical.rooms",
-          },
-        },
-      },
-      {
-        queue: "projections",
-        job: {
-          type: "projection.run.requested",
-          payload: {
-            projectionId: "room-sensors",
-            projectionKind: "link",
-            datasetId: "canonical.rooms",
+            datasetId: "raw.rooms",
           },
         },
       },
     ])
   })
 
-  test("projection on unrelated dataset does not create another dataset route", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [],
-      projections: [makeObjectProjection("room-proj", "canonical.rooms")],
+  test("link and telemetry projections compile with their projection kind", () => {
+    const joins = defineDataset("raw.room-sensors", {
+      schema: [col("room_id", "string"), col("sensor_id", "string")],
     })
-
-    expect(routes.has("dataset.version.committed:raw.erp.orders")).toBe(false)
-  })
-
-  test("pipeline dataset trigger and projection on same dataset share a route bucket", () => {
-    const routes = compileRoutes({
-      syncs: [],
-      pipelines: [makePipelineWithTrigger("normalize", datasetUpdated("canonical.rooms"))],
-      projections: [makeObjectProjection("room-proj", "canonical.rooms")],
+    const telemetry = defineDataset("raw.room-temperature", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("temperature", "float64"),
+      ],
     })
+    const linkProjection = defineLinkProjection("room-sensors", Room.l.hasSensors)
+      .fromDataset(joins)
+      .sourceField("room_id")
+      .targetField("sensor_id")
+    const telemetryProjection = defineTelemetryProjection("room-temperature", Room.p.temperature)
+      .fromDataset(telemetry)
+      .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
-    expect(routes.size).toBe(1)
-    const jobs = getJobs(routes, "dataset.version.committed:canonical.rooms")
-    expect(jobs).toHaveLength(2)
-    expect(jobs![0]!.queue).toBe("pipelines")
-    expect(jobs![1]!.queue).toBe("projections")
-  })
-
-  test("definition with multiple triggers produces multiple route keys", () => {
-    const sync = defineSync("sync-multi")
-      .when(daily)
-      .when(syncFinished("sync-upstream"))
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(makeDataset("raw.multi"))
-
-    const routes = compileRoutes({ syncs: [sync], pipelines: [] })
-
-    expect(routes.size).toBe(2)
-    expect(getJobs(routes, "schedule.triggered:daily")).toHaveLength(1)
-    expect(getJobs(routes, "sync.run.finished:sync-upstream:succeeded")).toHaveLength(1)
+    expect(
+      jobsFor({ projections: [linkProjection] }, "dataset.version.committed:raw.room-sensors")[0]
+    ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "link" } } })
+    expect(
+      jobsFor(
+        { projections: [telemetryProjection] },
+        "dataset.version.committed:raw.room-temperature"
+      )[0]
+    ).toMatchObject({ queue: "projections", job: { payload: { projectionKind: "telemetry" } } })
   })
 })

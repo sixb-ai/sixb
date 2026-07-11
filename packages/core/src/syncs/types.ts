@@ -8,9 +8,8 @@ import {
 import type { DatasetDefinition } from "../datasets"
 import { isDatasetDefinition } from "../datasets"
 import type { Logger } from "../logging"
-import type { ScheduleDefinition } from "../schedules"
-import type { RunTrigger } from "../triggers"
-import { isRunTrigger } from "../triggers"
+import type { ScheduleDefinition, ScheduleReference } from "../schedules"
+import { isScheduleReference } from "../schedules"
 
 /** Blob operations available to sync read handlers. */
 export type SyncBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
@@ -78,7 +77,7 @@ export interface SyncDefinition<
   readonly kind: "sync"
   readonly id: TId
   readonly config: BatchSyncDefinitionConfig
-  readonly triggers: readonly RunTrigger[]
+  readonly triggers: readonly ScheduleReference[]
   readonly connector: TConnector
   readonly read: SyncReadHandler<TConnector["adapter"], TCheckpoint>
   readonly target: DatasetSyncTarget
@@ -103,7 +102,7 @@ export interface SyncReadBuilder<
 }
 
 export interface SyncBuilder<TId extends string = string, TCheckpoint = never> {
-  when(trigger: ScheduleDefinition | RunTrigger): SyncBuilder<TId, TCheckpoint>
+  when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint>
   checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint>
   from<TConnector extends ConnectorDefinition>(
     connector: TConnector
@@ -123,7 +122,7 @@ export function isSyncDefinition(value: unknown): value is SyncDefinition {
     value.config.kind === "batch" &&
     (value.config.mode === "snapshot" || value.config.mode === "append") &&
     Array.isArray(value.triggers) &&
-    (value.triggers as unknown[]).every((t) => isRunTrigger(t)) &&
+    (value.triggers as unknown[]).every((reference) => isScheduleReference(reference)) &&
     isConnectorDefinition(value.connector) &&
     typeof value.read === "function" &&
     isRecord(value.target) &&

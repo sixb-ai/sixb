@@ -53,7 +53,7 @@ export async function upsertObject(
       primaryId,
       operation: existing ? "update" : "create",
       previousProperties: existing?.properties,
-      properties: normalizedProperties,
+      properties: mergedProperties,
     }),
   })
 

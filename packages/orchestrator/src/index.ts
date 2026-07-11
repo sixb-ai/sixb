@@ -4,6 +4,8 @@ export type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
   CompileRoutesResult,
+  OrchestratorEventScheduleBinding,
+  OrchestratorEventScheduleTarget,
   OrchestratorJob,
   OrchestratorRoute,
   OrchestratorRouteKey,

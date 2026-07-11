@@ -4,6 +4,11 @@ import { statusForFailure, toWorkflowRunError } from "./normalize"
 import type { RunWorkflowJobInput, RunWorkflowResumeJobInput, WorkflowRunResult } from "./types"
 
 export async function runWorkflowJob(input: RunWorkflowJobInput): Promise<WorkflowRunResult> {
+  const existing = await completedWorkflowRunResult(input)
+  if (existing) {
+    return existing
+  }
+
   let session: WorkflowRunSession
   try {
     session = WorkflowRunSession.create(input, {
@@ -52,6 +57,39 @@ export async function runWorkflowResumeJob(
     throw error
   } finally {
     await session.flushLogs()
+  }
+}
+
+async function completedWorkflowRunResult(
+  input: RunWorkflowJobInput
+): Promise<WorkflowRunResult | null> {
+  const run = await input.runtime.workflowRuns.getById({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
+  if (!run || run.status === "queued") {
+    return null
+  }
+
+  if (run.workflowId !== input.job.workflowId) {
+    throw new Error(
+      `[SixbWorkflowWorker] Workflow run '${input.job.id}' belongs to workflow '${run.workflowId}', not '${input.job.workflowId}'.`
+    )
+  }
+
+  const nodes = await input.runtime.workflowRuns.nodes.list({
+    projectId: input.runtime.projectId,
+    workflowRunId: run.id,
+    order: "asc",
+  })
+
+  return {
+    id: input.job.id,
+    workflowId: input.job.workflowId,
+    status: run.status,
+    run,
+    nodes: nodes.nodes,
+    steps: {},
   }
 }
 

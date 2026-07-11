@@ -11,6 +11,14 @@ import {
 import { runStep } from "./run-step"
 import type { PipelineRunResult, PipelineStepRunResult, RunPipelineJobInput } from "./types"
 
+export class PipelineRunAlreadyStartedError extends Error {
+  override readonly name = "PipelineRunAlreadyStartedError"
+
+  constructor(readonly run: PipelineRunRecord) {
+    super(`[SixbPipelineWorker] Pipeline run '${run.id}' has already started.`)
+  }
+}
+
 export async function runPipelineJob(input: RunPipelineJobInput): Promise<PipelineRunResult> {
   const { runtime, job } = input
   const signal = input.signal ?? new AbortController().signal
@@ -27,11 +35,22 @@ export async function runPipelineJob(input: RunPipelineJobInput): Promise<Pipeli
   throwIfAborted(signal)
 
   try {
-    startedRun = await runtime.pipelineRunsStorage.start({
-      projectId: runtime.id,
-      id: job.id,
-      pipelineId: pipeline.id,
-    })
+    try {
+      startedRun = await runtime.pipelineRunsStorage.start({
+        projectId: runtime.id,
+        id: job.id,
+        pipelineId: pipeline.id,
+      })
+    } catch (error) {
+      const existing = await runtime.pipelineRunsStorage.getById({
+        projectId: runtime.id,
+        id: job.id,
+      })
+      if (existing?.pipelineId === pipeline.id) {
+        throw new PipelineRunAlreadyStartedError(existing)
+      }
+      throw error
+    }
     await input.onRunStarted?.(startedRun)
 
     for (const [stepIndex, node] of pipeline.graph.nodes.entries()) {

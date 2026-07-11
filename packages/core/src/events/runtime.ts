@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import type { Broker, BrokerRecord, BrokerStreamDefinition } from "../broker"
+import type { Broker, BrokerCursor, BrokerRecord, BrokerStreamDefinition } from "../broker"
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import {
   EVENT_DEFINITIONS,
@@ -39,6 +39,9 @@ export interface EventsReadInput {
 }
 
 export interface EventsSubscribeInput {
+  /** Defaults to live-only delivery. `afterCursor` takes precedence when provided. */
+  readonly from?: "latest" | "earliest"
+  readonly afterCursor?: BrokerCursor
   readonly types?: readonly DomainEvent["type"][]
 }
 
@@ -130,6 +133,8 @@ export class EventsRuntime {
       {
         projectId: this.projectId,
         streamId: this.stream.id,
+        from: input.from,
+        afterCursor: input.afterCursor,
         names: input.types,
       },
       (records) => {

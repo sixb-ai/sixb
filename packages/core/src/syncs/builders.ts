@@ -1,8 +1,7 @@
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
-import type { ScheduleDefinition } from "../schedules"
+import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import type { RunTrigger } from "../triggers"
 import { SyncValidationError } from "./errors"
 import type {
   BatchSyncConfig,
@@ -51,16 +50,15 @@ export function defineSync<TId extends string>(
   assertNonEmpty(id, "id")
 
   const config = normalizeBatchSyncConfig(options)
-  const triggers: RunTrigger[] = []
+  const triggers: ScheduleReference[] = []
 
   function createBuilder<TCheckpoint>(): SyncBuilder<TId, TCheckpoint> {
     const builder: SyncBuilder<TId, TCheckpoint> = {
-      when(trigger: ScheduleDefinition | RunTrigger): SyncBuilder<TId, TCheckpoint> {
-        if (isScheduleDefinition(trigger)) {
-          triggers.push({ type: "schedule", scheduleId: trigger.id })
-        } else {
-          triggers.push(trigger)
+      when(schedule: ScheduleDefinition): SyncBuilder<TId, TCheckpoint> {
+        if (!isScheduleDefinition(schedule)) {
+          throw new SyncValidationError("Sync .when(...) only accepts schedules.")
         }
+        triggers.push({ type: "schedule", scheduleId: schedule.id })
         return builder
       },
       checkpoint<TNextCheckpoint>(): SyncBuilder<TId, TNextCheckpoint> {

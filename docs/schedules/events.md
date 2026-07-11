@@ -1,14 +1,13 @@
 # Event schedules
 
-An event schedule describes *when* a domain event should start work. Use one when a
-[workflow](../workflows/overview.md) should react to a typed object, link, rule, or action event.
+An event schedule describes *when* a domain event should start work. Attach one to a sync,
+pipeline, or [workflow](../workflows/overview.md) that should react to a typed event.
 
 Like a cron schedule, it is declarative and has no handler. It adds a source event selector and an
-optional condition, then is passed to a workflow with `.when(schedule, mapper?)`.
+optional condition, then is passed to a consumer with `.when(schedule, mapper?)`.
 
-> V1 note: event schedule definitions, discovery, validation, and workflow `.when(...)` bindings are
-> available. Runtime evaluation and automatic workflow enqueueing from event schedules land in the
-> worker slice; until then, workflows can still be requested manually.
+The orchestrator evaluates event schedules and enqueues matching work. Retained events are replayed
+after downtime, and generated run ids are deterministic per schedule, consumer, and source event.
 
 ## Define an event schedule
 
@@ -186,6 +185,12 @@ If the workflow input is `{}`, the mapper is optional:
 
 ```ts
 defineWorkflow("refresh-dashboard").input({}).when(highValuePaymentLinked)
+```
+
+Syncs and pipelines use the same schedule definition without a mapper:
+
+```ts
+definePipeline("normalize-invoices").when(invoicesUpdated).then(normalizeInvoices)
 ```
 
 ## Register schedules

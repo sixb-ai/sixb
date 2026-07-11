@@ -4,6 +4,7 @@ import type {
   InferActionParams,
   ObjectActionDefinition,
 } from "../actions"
+import type { Principal } from "../auth"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
 import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
@@ -120,6 +121,12 @@ export type WorkflowRunSource =
       readonly connectorId: string
       readonly webhookId: string
       readonly deliveryId?: string
+    }
+  | {
+      readonly type: "schedule"
+      readonly scheduleId: string
+      readonly eventId: string
+      readonly principal: Principal
     }
 
 export type InferStepInput<TStep extends StepDefinition> = TStep extends {

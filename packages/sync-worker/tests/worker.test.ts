@@ -367,6 +367,43 @@ describe("SyncWorker", () => {
     expect(payload.versionId).toBe(datasetPayload.versionId)
   })
 
+  test("treats duplicate deterministic run ids as no-op deliveries", async () => {
+    const sync = defineSync("sync-orders")
+      .from(erpDb)
+      .read(() => [{ orderId: "ord_1" }])
+      .intoDataset(defineDataset("raw.erp.orders", { schema: [col("orderId", "string")] }))
+    const sixb = createSixbForSync(sync)
+    const worker = new SyncWorker(sixb)
+
+    await sixb.queues.syncRuns.enqueue({
+      projectId: sixb.id,
+      jobs: [
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "schedule-run" },
+        },
+        {
+          type: "sync.run.requested",
+          payload: { syncId: sync.id, runId: "schedule-run" },
+        },
+      ],
+    })
+
+    await worker.start()
+    await waitFor(
+      () => sixb.storage.syncRuns!.getById({ projectId: sixb.id, id: "schedule-run" }),
+      (run) => run?.status === "succeeded"
+    )
+    await Bun.sleep(50)
+    await worker.stop()
+
+    const events = await sixb.events.read({
+      types: ["sync.run.started", "sync.run.finished"],
+    })
+    expect(events.map((event) => event.type)).toEqual(["sync.run.started", "sync.run.finished"])
+    expect(events[1]?.payload).toMatchObject({ status: "succeeded" })
+  })
+
   test("does not crash when retry fails on shutdown", async () => {
     const rawOrdersDataset = makeDataset("raw.erp.orders")
     const sync = defineSync("sync-orders")

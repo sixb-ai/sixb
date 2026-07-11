@@ -48,6 +48,93 @@ describe("PgWorkflowRunStorage", () => {
     expect(stored?.finishedAt?.toISOString()).toBe("2026-05-08T10:00:04.500Z")
   })
 
+  test("persists workflow run source when starting directly or from a queued run", async () => {
+    const scheduleSource = {
+      type: "schedule",
+      scheduleId: "invoice-payment-linked",
+      eventId: "evt_1",
+      principal: { type: "system", id: "sixb-orchestrator" },
+    } as const
+
+    const started = await storage.workflowRuns.start({
+      id: "wf-run-triggered",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_123" },
+      source: scheduleSource,
+    })
+
+    expect(started.source).toEqual(scheduleSource)
+    expect(
+      await storage.workflowRuns.getById({
+        projectId: "my-app",
+        id: "wf-run-triggered",
+      })
+    ).toMatchObject({ source: scheduleSource })
+
+    await storage.workflowRuns.queue({
+      id: "wf-run-queued-without-source",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_456" },
+    })
+
+    const running = await storage.workflowRuns.start({
+      id: "wf-run-queued-without-source",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_456" },
+      source: scheduleSource,
+    })
+
+    expect(running.source).toEqual(scheduleSource)
+
+    await storage.workflowRuns.queue({
+      id: "wf-run-queued-with-source",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_789" },
+      source: { type: "manual" },
+    })
+
+    const alreadySourced = await storage.workflowRuns.start({
+      id: "wf-run-queued-with-source",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: { transactionId: "txn_789" },
+      source: scheduleSource,
+    })
+
+    expect(alreadySourced.source).toEqual({ type: "manual" })
+  })
+
+  test("allows exactly one concurrent claim of a queued workflow run", async () => {
+    await storage.workflowRuns.queue({
+      id: "wf-run-claim",
+      projectId: "my-app",
+      workflowId: "reconcile-transaction",
+      input: {},
+    })
+
+    const results = await Promise.allSettled([
+      storage.workflowRuns.start({
+        id: "wf-run-claim",
+        projectId: "my-app",
+        workflowId: "reconcile-transaction",
+        input: {},
+      }),
+      storage.workflowRuns.start({
+        id: "wf-run-claim",
+        projectId: "my-app",
+        workflowId: "reconcile-transaction",
+        input: {},
+      }),
+    ])
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1)
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
+  })
+
   test("waits and resumes workflow and intervention node runs", async () => {
     await storage.workflowRuns.start({
       id: "wf-run-waiting",

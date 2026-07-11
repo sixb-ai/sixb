@@ -16,7 +16,7 @@ import type {
   SyncRunRequestedQueueJob,
 } from "@sixb/core"
 import { QueueWorker } from "@sixb/core"
-import { runSyncJob } from "./run-sync-job"
+import { runSyncJob, SyncRunAlreadyStartedError } from "./run-sync-job"
 import type { SyncJob, SyncRunResult, SyncWorkerContext } from "./types"
 
 export interface SyncWorkerSixb {
@@ -66,12 +66,18 @@ export class SyncWorker extends QueueWorker<SyncRunRequestedQueueJob> {
       commitMessage: job.payload.commitMessage,
     }
 
-    const result = await runSyncJob({
-      runtime: this.context,
-      job: syncJob,
-      signal,
-      onRunStarted: (run) => emitSyncRunStarted(this.sixb, run),
-    })
+    let result: SyncRunResult
+    try {
+      result = await runSyncJob({
+        runtime: this.context,
+        job: syncJob,
+        signal,
+        onRunStarted: (run) => emitSyncRunStarted(this.sixb, run),
+      })
+    } catch (error) {
+      if (error instanceof SyncRunAlreadyStartedError) return
+      throw error
+    }
 
     await emitSyncSucceededEvents(this.sixb, syncJob, result)
   }
