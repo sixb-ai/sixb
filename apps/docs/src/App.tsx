@@ -1,3 +1,5 @@
+"use client"
+
 import {
   Button,
   CommandDialog,
@@ -47,7 +49,9 @@ import {
   Workflow,
   Zap,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { searchDocs } from "./docs/search"
 import { docs } from "./generated/docs"
 import { heroSnippets } from "./generated/snippets"
 
@@ -121,11 +125,16 @@ function RawHtml({
   return <div className={className} onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
-export function App() {
+export function App({ initialPath }: { initialPath: string }) {
+  const router = useRouter()
   const groups = useMemo(groupDocs, [])
-  const [path, setPath] = useState(() => normalize(window.location.pathname))
+  const [path, setPath] = useState(() => normalize(initialPath))
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    setPath(normalize(initialPath))
+  }, [initialPath])
 
   useEffect(() => {
     const onPop = () => setPath(normalize(window.location.pathname))
@@ -144,23 +153,26 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey)
   }, [])
 
-  const navigate = useCallback<Navigate>((href) => {
-    const [rawPath, hash] = href.split("#")
-    const next = normalize(rawPath ?? "/")
-    const samePage = next === normalize(window.location.pathname)
-    if (!samePage) {
-      window.history.pushState(null, "", hash ? `${next}#${hash}` : next)
-    }
-    setPath(next)
-    setSearchOpen(false)
-    setMenuOpen(false)
-    // Switching pages jumps to the top instantly; only same-page anchors animate.
-    const behavior: ScrollBehavior = samePage ? "smooth" : "instant"
-    requestAnimationFrame(() => {
-      if (hash) document.getElementById(hash)?.scrollIntoView({ behavior })
-      else window.scrollTo({ top: 0, behavior })
-    })
-  }, [])
+  const navigate = useCallback<Navigate>(
+    (href) => {
+      const [rawPath, hash] = href.split("#")
+      const next = normalize(rawPath ?? "/")
+      const samePage = next === normalize(window.location.pathname)
+      if (!samePage) {
+        router.push(hash ? `${next}#${hash}` : next, { scroll: false })
+      }
+      setPath(next)
+      setSearchOpen(false)
+      setMenuOpen(false)
+      // Switching pages jumps to the top instantly; only same-page anchors animate.
+      const behavior: ScrollBehavior = samePage ? "smooth" : "instant"
+      requestAnimationFrame(() => {
+        if (hash) document.getElementById(hash)?.scrollIntoView({ behavior })
+        else window.scrollTo({ top: 0, behavior })
+      })
+    },
+    [router]
+  )
 
   const current = docs.find((doc) => doc.routePath === path)
 
@@ -880,27 +892,47 @@ function SearchPalette({
   groups: NavGroup[]
   navigate: Navigate
 }) {
+  const [query, setQuery] = useState("")
+  const hasQuery = query.trim().length > 0
+  const results = useMemo(
+    () => (hasQuery ? searchDocs(docs, query).slice(0, 20) : []),
+    [hasQuery, query]
+  )
+  const visibleGroups = hasQuery ? [{ title: "Results", items: results }] : groups
+
+  useEffect(() => {
+    if (!open) setQuery("")
+  }, [open])
+
   return (
     <CommandDialog
       open={open}
       onOpenChange={setOpen}
       title="Search docs"
       description="Search the documentation"
+      shouldFilter={false}
     >
-      <CommandInput placeholder="Search documentation..." />
+      <CommandInput value={query} onValueChange={setQuery} placeholder="Search documentation..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
-        {groups.map((group) => (
+        {visibleGroups.map((group) => (
           <CommandGroup key={group.title} heading={group.title}>
             {group.items.map((doc) => (
               <CommandItem
                 key={doc.routePath}
-                value={`${doc.title} ${doc.summary} ${doc.headings.map((heading) => heading.text).join(" ")}`}
+                value={doc.routePath}
                 onSelect={() => navigate(doc.routePath)}
               >
                 <FileText />
                 <span className="flex min-w-0 flex-col">
-                  <span>{doc.title}</span>
+                  <span className="flex items-center gap-2">
+                    <span>{doc.title}</span>
+                    {hasQuery && doc.section !== doc.title ? (
+                      <span className="text-[11px] font-normal text-muted-foreground">
+                        {doc.section}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="line-clamp-1 text-xs text-muted-foreground">{doc.summary}</span>
                 </span>
               </CommandItem>
