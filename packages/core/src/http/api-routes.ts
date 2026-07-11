@@ -317,13 +317,6 @@ export const SIXB_API_ROUTES: readonly SixbApiRoute[] = [
     accessToken: true,
     agentApi: false,
   },
-  {
-    operationId: "createLogStreamTicket",
-    method: "POST",
-    path: "/api/logs/stream-ticket",
-    accessToken: true,
-    agentApi: false,
-  },
 ]
 
 // Enforce the subset invariant at module load: a gateway-proxied route must also be a bearer route,

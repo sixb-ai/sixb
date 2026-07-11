@@ -3,6 +3,10 @@ import { createServer } from "node:net"
 import {
   type AuthorizationContext,
   type BrokerRecord,
+  can,
+  createSessionCredential,
+  defineGroup,
+  defineRole,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -15,7 +19,6 @@ import {
   type SixbOptions,
 } from "@sixb/core"
 import { Elysia } from "elysia"
-import { LogStreamTicketStore } from "../src/auth/log-stream-tickets"
 import { registerLogRoutes } from "../src/routes/logs"
 import { parseLogSubscriptionMessage } from "../src/routes/ws/logs"
 import { SixbServer } from "../src/server"
@@ -66,23 +69,6 @@ describe("parseLogSubscriptionMessage", () => {
   })
 })
 
-describe("LogStreamTicketStore", () => {
-  test("issues opaque, single-use tickets and rejects expired tickets", async () => {
-    const store = new LogStreamTicketStore(5, 2)
-    const first = store.issue(null)
-    const request = ticketRequest(first.ticket)
-
-    expect(store.consume(request)).toEqual({ ticket: first.ticket, authz: null })
-    expect(store.consume(request)).toBeNull()
-
-    const expired = store.issue(null)
-    store.issue(null)
-    expect(() => store.issue(null)).toThrow("Too many outstanding log stream tickets")
-    await Bun.sleep(10)
-    expect(store.consume(ticketRequest(expired.ticket))).toBeNull()
-  })
-})
-
 describe("GET /api/logs", () => {
   test("returns pages, enforces kind+run, level, and recent-history semantics", async () => {
     await withServer(async ({ baseUrl, sixb }) => {
@@ -114,40 +100,40 @@ describe("GET /api/logs", () => {
     })
   })
 
-  test("requires observe:logs for history and ticket issuance", async () => {
+  test("requires observe:logs for history", async () => {
     const sixb = createTestSixb()
     const denied = logRoutesWithAuthz(sixb, authzWithoutLogs())
     expect((await denied.handle(new Request("http://localhost/api/logs"))).status).toBe(403)
-    expect(
-      (
-        await denied.handle(
-          new Request("http://localhost/api/logs/stream-ticket", { method: "POST" })
-        )
-      ).status
-    ).toBe(403)
 
     const allowed = logRoutesWithAuthz(sixb, authzWithLogs())
     expect((await allowed.handle(new Request("http://localhost/api/logs"))).status).toBe(200)
-    expect(
-      (
-        await allowed.handle(
-          new Request("http://localhost/api/logs/stream-ticket", { method: "POST" })
-        )
-      ).status
-    ).toBe(200)
   })
 })
 
 describe("/ws/logs", () => {
-  test("requires a ticket, batches lines, filters server-side, and rejects ticket reuse", async () => {
-    await withServer(async ({ baseUrl, sixb }) => {
+  test("uses the session handshake and requires observe:logs", async () => {
+    await withAuthenticatedServer(async ({ baseUrl, allowedHeaders, deniedHeaders }) => {
       await expectWsRejected(new WebSocket(wsUrl(baseUrl)))
 
-      const ticket = await issueTicket(baseUrl)
-      const ws = new WebSocket(wsUrl(baseUrl), [ticket])
+      const denied = webSocketWithHeaders(wsUrl(baseUrl), deniedHeaders)
+      const deniedClose = await nextWsClose(denied)
+      expect(deniedClose.code).toBe(1008)
+      expect(deniedClose.reason).toContain("observe:logs")
+
+      const allowed = webSocketWithHeaders(wsUrl(baseUrl), allowedHeaders)
+      try {
+        expect(await nextWsMessage(allowed)).toEqual({ type: "connected", channel: "logs" })
+      } finally {
+        allowed.close()
+      }
+    })
+  })
+
+  test("batches lines and filters server-side", async () => {
+    await withServer(async ({ baseUrl, sixb }) => {
+      const ws = new WebSocket(wsUrl(baseUrl))
       try {
         expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "logs" })
-        expect(ws.protocol).toBe(ticket)
 
         ws.send(
           JSON.stringify({
@@ -173,18 +159,6 @@ describe("/ws/logs", () => {
       } finally {
         ws.close()
       }
-
-      await expectWsRejected(new WebSocket(wsUrl(baseUrl), [ticket]))
-    })
-  })
-
-  test("checks observe:logs again when consuming an authorized ticket", async () => {
-    await withServer(async ({ baseUrl, server }) => {
-      const denied = server.issueLogStreamTicket(authzWithoutLogs()).ticket
-      const ws = new WebSocket(wsUrl(baseUrl), [denied])
-      const close = await nextWsClose(ws)
-      expect(close.code).toBe(1008)
-      expect(close.reason).toContain("observe:logs")
     })
   })
 
@@ -197,9 +171,9 @@ describe("/ws/logs", () => {
         if (!cursor) throw new Error("expected a cursor")
         await seed(sixb, { kind: "workflow", id: "w1" }, "after cursor", "info")
 
-        const first = new WebSocket(wsUrl(baseUrl), [await issueTicket(baseUrl)])
+        const first = new WebSocket(wsUrl(baseUrl))
         const firstConnected = nextWsMessage(first)
-        const second = new WebSocket(wsUrl(baseUrl), [await issueTicket(baseUrl)])
+        const second = new WebSocket(wsUrl(baseUrl))
         const secondConnected = nextWsMessage(second)
         try {
           await Promise.all([firstConnected, secondConnected])
@@ -251,12 +225,6 @@ async function readLogs(
   return (await response.json()) as LogsResponse
 }
 
-async function issueTicket(baseUrl: string): Promise<string> {
-  const response = await fetch(`${baseUrl}/api/logs/stream-ticket`, { method: "POST" })
-  expect(response.ok).toBe(true)
-  return ((await response.json()) as { ticket: string }).ticket
-}
-
 async function seed(
   sixb: Sixb<readonly OntologySource[]>,
   run: LogRunRef,
@@ -305,19 +273,96 @@ async function withServer(
 }
 
 function createTestSixb(
-  broker: InMemoryBroker = new InMemoryBroker()
+  broker: InMemoryBroker = new InMemoryBroker(),
+  options: {
+    readonly storage?: InMemoryStorage
+    readonly auth?: boolean
+  } = {}
 ): Sixb<readonly OntologySource[]> {
+  const logsViewers = defineGroup("logs-viewers")
+  const logsObserver = defineRole("logs.observer", {
+    grantedTo: [logsViewers],
+    grants: [can.observe("logs")],
+  })
   return createSixbInstance<readonly OntologySource[]>({
     id: "logs-test-project",
     ontology: [],
     broker,
-    storage: new InMemoryStorage(),
+    storage: options.storage ?? new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     observability: { logs: { level: "debug" } },
     logger: noopLoggerProvider,
+    ...(options.auth
+      ? {
+          groups: [logsViewers],
+          roles: [logsObserver],
+          auth: { id: "test", kind: "dev" as const },
+        }
+      : {}),
   })
+}
+
+async function withAuthenticatedServer(
+  run: (context: {
+    readonly baseUrl: string
+    readonly allowedHeaders: Record<string, string>
+    readonly deniedHeaders: Record<string, string>
+  }) => Promise<void>
+): Promise<void> {
+  const port = await getFreePort()
+  const baseUrl = `http://127.0.0.1:${port}`
+  const storage = new InMemoryStorage()
+  const sixb = createTestSixb(new InMemoryBroker(), { storage, auth: true })
+  const allowedHeaders = await seedLogSession(storage, "allowed", ["logs-viewers"])
+  const deniedHeaders = await seedLogSession(storage, "denied", [])
+  const server = new SixbServer({
+    sixb,
+    host: "127.0.0.1",
+    port,
+    quiet: true,
+    browser: createTestBrowserPolicy({ apiOrigin: baseUrl, atlasOrigin: baseUrl }),
+  })
+
+  await server.start()
+  try {
+    await run({ baseUrl, allowedHeaders, deniedHeaders })
+  } finally {
+    await server.stop()
+  }
+}
+
+async function seedLogSession(
+  storage: InMemoryStorage,
+  userId: string,
+  groupIds: readonly string[]
+): Promise<Record<string, string>> {
+  const credential = createSessionCredential(`ses_logs_${userId}`)
+  await storage.auth.users.create({
+    id: userId,
+    projectId: "logs-test-project",
+    email: `${userId}@example.test`,
+  })
+  for (const groupId of groupIds) {
+    await storage.auth.groupMemberships.upsert({
+      projectId: "logs-test-project",
+      userId,
+      groupId,
+      source: "manual",
+    })
+  }
+  await storage.auth.sessions.create({
+    id: credential.sessionId,
+    projectId: "logs-test-project",
+    userId,
+    strategyId: "test",
+    audience: "atlas",
+    tokenHash: credential.tokenHash,
+    createdAt: new Date("2026-07-11T00:00:00.000Z"),
+    expiresAt: new Date("2099-07-11T00:00:00.000Z"),
+  })
+  return { cookie: `sixb_session=${credential.cookieValue}` }
 }
 
 class CountingBroker extends InMemoryBroker {
@@ -360,20 +405,15 @@ function authzWithLogs(): AuthorizationContext {
 
 function logRoutesWithAuthz(sixb: Sixb<readonly OntologySource[]>, authz: AuthorizationContext) {
   const app = new Elysia().derive(() => ({ authz, scoped: sixb.as(authz) }))
-  return registerLogRoutes(app as unknown as Elysia, sixb, () => ({
-    ticket: "sixb.logs.ticket.test",
-    expiresAt: new Date(Date.now() + 30_000).toISOString(),
-  }))
-}
-
-function ticketRequest(ticket: string): Request {
-  return new Request("http://localhost/ws/logs", {
-    headers: { "sec-websocket-protocol": ticket },
-  })
+  return registerLogRoutes(app as unknown as Elysia, sixb)
 }
 
 function wsUrl(baseUrl: string): string {
   return `${baseUrl.replace("http://", "ws://")}/ws/logs`
+}
+
+function webSocketWithHeaders(url: string, headers: Record<string, string>): WebSocket {
+  return new WebSocket(url, { headers } as unknown as string[])
 }
 
 async function getFreePort(): Promise<number> {
@@ -432,32 +472,36 @@ async function nextWsClose(ws: WebSocket): Promise<CloseEvent> {
       resolvePromise(event)
     })
     ws.addEventListener("error", () => {
-      // A failed handshake may emit error before close; close carries the policy result.
+      // A policy close may emit error before close; close carries the useful result.
     })
   })
 }
 
 async function expectWsRejected(ws: WebSocket): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {
-    const timeout = setTimeout(
-      () => reject(new Error("Timed out waiting for websocket rejection")),
-      3_000
-    )
+    const timeout = setTimeout(() => {
+      cleanup()
+      ws.close()
+      reject(new Error("Timed out waiting for websocket rejection"))
+    }, 3_000)
     const done = () => {
-      clearTimeout(timeout)
+      cleanup()
       resolvePromise()
+    }
+    const opened = () => {
+      cleanup()
+      ws.close()
+      reject(new Error("WebSocket unexpectedly opened"))
+    }
+    const cleanup = () => {
+      clearTimeout(timeout)
+      ws.removeEventListener("error", done)
+      ws.removeEventListener("close", done)
+      ws.removeEventListener("open", opened)
     }
     ws.addEventListener("error", done, { once: true })
     ws.addEventListener("close", done, { once: true })
-    ws.addEventListener(
-      "open",
-      () => {
-        clearTimeout(timeout)
-        ws.close()
-        reject(new Error("WebSocket unexpectedly opened"))
-      },
-      { once: true }
-    )
+    ws.addEventListener("open", opened, { once: true })
   })
 }
 

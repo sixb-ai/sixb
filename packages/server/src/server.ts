@@ -1,11 +1,6 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
-import {
-  type AuthorizationContext,
-  CSRF_HEADER_NAME,
-  type OntologySource,
-  type Sixb,
-} from "@sixb/core"
+import { CSRF_HEADER_NAME, type OntologySource, type Sixb } from "@sixb/core"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -23,13 +18,6 @@ import {
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
 import { ServerAuthGuard } from "./auth/guard"
-import {
-  type ConsumedLogStreamTicket,
-  type IssuedLogStreamTicket,
-  isLogStreamRequest,
-  LogStreamTicketStore,
-} from "./auth/log-stream-tickets"
-import { websocketAuthFailedResponse } from "./auth/responses"
 import { consumeInternalRequestAuthState } from "./auth/scope"
 import {
   SIXB_BEARER_SECURITY_SCHEME,
@@ -65,7 +53,6 @@ export class SixbServer {
   private readonly apiBrowserPolicy: ResolvedSixbApiBrowserPolicy
   private readonly authContextResolver: ResolveRequestAuthContext
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
-  private readonly logStreamTickets = new LogStreamTicketStore()
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
 
@@ -87,14 +74,6 @@ export class SixbServer {
 
   getPort(): number {
     return this.port
-  }
-
-  issueLogStreamTicket(authz: AuthorizationContext | null): IssuedLogStreamTicket {
-    return this.logStreamTickets.issue(authz)
-  }
-
-  consumeLogStreamTicket(request: Request): ConsumedLogStreamTicket | null {
-    return this.logStreamTickets.consume(request)
   }
 
   resolveAuthContext(request: Request): RequestAuthContext {
@@ -189,22 +168,6 @@ export function createSixbApi(server: SixbServer) {
         return { auth: { kind: "allow" as const, session: null }, ...internalAuthState }
       }
 
-      if (isLogStreamRequest(request)) {
-        const ticket = server.consumeLogStreamTicket(request)
-        if (!ticket) {
-          return {
-            auth: { kind: "deny" as const, response: websocketAuthFailedResponse() },
-            authz: null,
-            scoped: null,
-          }
-        }
-        return {
-          auth: { kind: "allow" as const, session: null },
-          authz: ticket.authz,
-          scoped: ticket.authz ? sixb.as(ticket.authz) : null,
-        }
-      }
-
       const auth = await guard.resolve(request)
       if (auth.kind === "deny" || !auth.session?.authenticated) {
         return { auth, authz: null, scoped: null }
@@ -254,9 +217,7 @@ export function createSixbApi(server: SixbServer) {
       server.resolveAuthRedirectContext(request, input),
     resolveAuthRequestOrigin: (request) => server.resolveAuthRequestOrigin(request),
   })
-  registerHttpRoutes(app, sixb, {
-    issueLogStreamTicket: (authz) => server.issueLogStreamTicket(authz),
-  })
+  registerHttpRoutes(app, sixb)
   registerWebhookRoutes(app, sixb)
   registerWebSocketRoutes(app, server)
 

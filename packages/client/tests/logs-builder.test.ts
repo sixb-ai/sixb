@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { SixbApiError } from "../src/api"
 import type { Client } from "../src/generated/client"
 import { logs, type SixbLogLine } from "../src/logs"
 import { parseLogStreamMessage } from "../src/logs-transport"
@@ -44,7 +43,6 @@ function line(cursor: string, message = "hello"): SixbLogLine {
 
 function fakeClient() {
   const calls: Array<{ method: "get" | "post"; options: Record<string, unknown> }> = []
-  let tickets = 0
   const client = {
     getConfig: () => ({ baseUrl: "https://api.example.test" }),
     get: async (options: Record<string, unknown>) => {
@@ -53,18 +51,8 @@ function fakeClient() {
         data: { lines: [line("c1")], cursor: "c1", hasMore: false, count: 1 },
       }
     },
-    post: async (options: Record<string, unknown>) => {
-      calls.push({ method: "post", options })
-      tickets += 1
-      return {
-        data: {
-          ticket: `sixb.logs.ticket.ticket${tickets}`,
-          expiresAt: "2026-01-01T00:00:30.000Z",
-        },
-      }
-    },
   } as unknown as Client
-  return { client, calls, ticketCount: () => tickets }
+  return { client, calls }
 }
 
 describe("logs builder", () => {
@@ -120,7 +108,7 @@ describe("log transport", () => {
     globalThis.WebSocket = originalWebSocket
   })
 
-  test("authenticates every connection with a fresh ticket and resumes batched frames", async () => {
+  test("uses the configured API origin and resumes batched frames with cookie auth", async () => {
     const fake = fakeClient()
     const received: SixbLogLine[] = []
     const unsubscribe = logs
@@ -133,7 +121,7 @@ describe("log transport", () => {
     const first = FakeWebSocket.instances[0]
     if (!first) throw new Error("expected a websocket")
     expect(first.url).toBe("wss://api.example.test/ws/logs")
-    expect(first.protocols).toEqual(["sixb.logs.ticket.ticket1"])
+    expect(first.protocols).toBeUndefined()
     first.onopen?.()
     expect(JSON.parse(first.sent[0])).toEqual({
       type: "subscribe",
@@ -151,10 +139,9 @@ describe("log transport", () => {
     await new Promise((resolve) => setTimeout(resolve, 5))
     const second = FakeWebSocket.instances[1]
     if (!second) throw new Error("expected a reconnect")
-    expect(second.protocols).toEqual(["sixb.logs.ticket.ticket2"])
+    expect(second.protocols).toBeUndefined()
     second.onopen?.()
     expect(JSON.parse(second.sent[0]).afterCursor).toBe("c2")
-    expect(fake.ticketCount()).toBe(2)
 
     unsubscribe()
   })
@@ -170,25 +157,5 @@ describe("log transport", () => {
       )
     ).toEqual({ type: "reset", reason: "cursor_expired", cursor: "c9" })
     expect(parseLogStreamMessage(JSON.stringify({ type: "logs", logs: [{}] }))).toBeNull()
-  })
-
-  test("does not retry a forbidden ticket request", async () => {
-    const client = {
-      getConfig: () => ({ baseUrl: "https://api.example.test" }),
-      post: async () => {
-        throw new SixbApiError("forbidden", { status: 403 })
-      },
-    } as unknown as Client
-
-    const errors: string[] = []
-    const unsubscribe = logs.all({ client }).subscribe(() => undefined, {
-      reconnectDelayMs: 1,
-      onError: (error) => errors.push(error),
-    })
-    await new Promise((resolve) => setTimeout(resolve, 5))
-
-    expect(FakeWebSocket.instances).toHaveLength(0)
-    expect(errors).toEqual(["forbidden"])
-    unsubscribe()
   })
 })

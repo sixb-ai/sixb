@@ -77,8 +77,3 @@ export const LogsResponseSchema = z.object({
   cursor: z.string().optional(),
   hasMore: z.boolean(),
 })
-
-export const LogStreamTicketResponseSchema = z.object({
-  ticket: z.string(),
-  expiresAt: z.string(),
-})

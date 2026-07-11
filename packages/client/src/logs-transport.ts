@@ -1,6 +1,3 @@
-import { isSixbApiError } from "./api"
-import type { Client } from "./generated/client"
-import { createLogStreamTicket } from "./generated/sdk.gen"
 import {
   isSixbLogLine,
   type LogLevel,
@@ -23,7 +20,8 @@ export interface LogSocketOptions {
   readonly afterCursor?: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  readonly client?: Client
+  /** API origin override. Authentication uses the browser session cookie. */
+  readonly baseUrl?: string
   readonly onLog: (line: SixbLogLine) => void
   readonly onError?: (error: string) => void
   readonly onReset?: (cursor?: string) => void
@@ -44,16 +42,7 @@ export function createLogSocket(options: LogSocketOptions): LogSocket {
   let latestCursor = options.afterCursor
 
   return createReconnectingSocket({
-    url: createSixbLogsWebSocketUrl(options.client?.getConfig().baseUrl),
-    protocols: async () => {
-      const { data } = await createLogStreamTicket({
-        ...(options.client ? { client: options.client } : {}),
-        throwOnError: true,
-      })
-      if (!data?.ticket) throw new Error("Log stream ticket response was empty")
-      return [data.ticket]
-    },
-    shouldReconnectAfterSetupError: isRetryableTicketError,
+    url: createSixbLogsWebSocketUrl(options.baseUrl),
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     connectionErrorMessage: "Log websocket connection failed.",
@@ -83,11 +72,6 @@ export function createLogSocket(options: LogSocketOptions): LogSocket {
       }
     },
   })
-}
-
-function isRetryableTicketError(error: unknown): boolean {
-  if (!isSixbApiError(error)) return true
-  return error.status === 408 || error.status === 429 || error.status >= 500
 }
 
 export function createSixbLogsWebSocketUrl(baseUrl?: string): string {

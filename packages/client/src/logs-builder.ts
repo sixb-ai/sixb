@@ -38,7 +38,7 @@ export interface SixbLogsPage {
 }
 
 export interface SixbLogsClientOptions {
-  /** Authenticated hey-api client override. Defaults to the global client. */
+  /** HTTP client override for reads. Its base URL is also used by the cookie-authenticated WS. */
   readonly client?: Client
 }
 
@@ -80,7 +80,7 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
       afterCursor: options?.afterCursor,
       reconnect: options?.reconnect,
       reconnectDelayMs: options?.reconnectDelayMs,
-      client: this.options?.client,
+      baseUrl: this.options?.client?.getConfig().baseUrl,
       onLog: handler,
       onError: options?.onError,
       onReset: options?.onReset,

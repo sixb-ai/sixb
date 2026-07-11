@@ -6433,44 +6433,6 @@ export type ListLogsResponses = {
 
 export type ListLogsResponse = ListLogsResponses[keyof ListLogsResponses]
 
-export type CreateLogStreamTicketData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/api/logs/stream-ticket"
-}
-
-export type CreateLogStreamTicketErrors = {
-  /**
-   * Response for status 403
-   */
-  403: {
-    error: string
-  }
-  /**
-   * Response for status 503
-   */
-  503: {
-    error: string
-  }
-}
-
-export type CreateLogStreamTicketError =
-  CreateLogStreamTicketErrors[keyof CreateLogStreamTicketErrors]
-
-export type CreateLogStreamTicketResponses = {
-  /**
-   * Response for status 200
-   */
-  200: {
-    ticket: string
-    expiresAt: string
-  }
-}
-
-export type CreateLogStreamTicketResponse =
-  CreateLogStreamTicketResponses[keyof CreateLogStreamTicketResponses]
-
 export type ListProjectionsData = {
   body?: never
   path?: never

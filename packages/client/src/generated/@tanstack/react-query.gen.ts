@@ -22,7 +22,6 @@ import {
   createAuthServiceAccount,
   createAuthServiceAccountAccessToken,
   createFileUpload,
-  createLogStreamTicket,
   disableAuthServiceAccount,
   existsObjects,
   facetObjects,
@@ -152,9 +151,6 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
-  CreateLogStreamTicketData,
-  CreateLogStreamTicketError,
-  CreateLogStreamTicketResponse,
   DisableAuthServiceAccountData,
   DisableAuthServiceAccountError,
   DisableAuthServiceAccountResponse,
@@ -3473,33 +3469,6 @@ export const listLogsOptions = (options?: Options<ListLogsData>) =>
     },
     queryKey: listLogsQueryKey(options),
   })
-
-/**
- * Create a log stream ticket
- */
-export const createLogStreamTicketMutation = (
-  options?: Partial<Options<CreateLogStreamTicketData>>
-): UseMutationOptions<
-  CreateLogStreamTicketResponse,
-  CreateLogStreamTicketError,
-  Options<CreateLogStreamTicketData>
-> => {
-  const mutationOptions: UseMutationOptions<
-    CreateLogStreamTicketResponse,
-    CreateLogStreamTicketError,
-    Options<CreateLogStreamTicketData>
-  > = {
-    mutationFn: async (fnOptions) => {
-      const { data } = await createLogStreamTicket({
-        ...options,
-        ...fnOptions,
-        throwOnError: true,
-      })
-      return data
-    },
-  }
-  return mutationOptions
-}
 
 export const listProjectionsQueryKey = (options?: Options<ListProjectionsData>) =>
   createQueryKey("listProjections", options)

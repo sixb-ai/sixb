@@ -1,7 +1,6 @@
 import { isAllowed, type LogLevel } from "@sixb/core"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { extractLogStreamTicketProtocol } from "../../auth/log-stream-tickets"
 import { LOG_LEVELS, LOG_RUN_KINDS } from "../../schemas/logs"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
@@ -54,13 +53,6 @@ export function registerLogStreamRoutes(app: Elysia, server: SixbServer) {
 
   app.onStop(() => hub.close())
   return app.ws("/ws/logs", {
-    upgrade(context) {
-      const ticket = extractLogStreamTicketProtocol(
-        context.request.headers.get("sec-websocket-protocol")
-      )
-      if (ticket) context.set.headers["sec-websocket-protocol"] = ticket
-    },
-
     open(ws) {
       if (!isAllowed(wsAuthz(ws), { kind: "logs.observe" })) {
         ws.close(1008, "Missing required capability 'observe:logs'.")
