@@ -226,6 +226,43 @@ describe("RedisBroker", () => {
     }
   })
 
+  test("does not regress logical byte retention while enforcing age retention", async () => {
+    const { broker, projectId, cleanup } = createTestBroker()
+    const brokerWithTrimDisabled = broker as unknown as { trimRetention: () => Promise<void> }
+    brokerWithTrimDisabled.trimRetention = async () => {}
+    const stream = {
+      id: "__logical_byte_and_age_retained",
+      retention: { maxAgeMs: 100, maxBytes: 1_024 },
+    }
+
+    try {
+      await broker.ensureStream({ projectId, stream })
+      await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: [{ payload: { label: "old", body: "x".repeat(600) } }],
+      })
+
+      await Bun.sleep(250)
+
+      await broker.append({
+        projectId,
+        streamId: stream.id,
+        records: ["new-one", "new-two"].map((label) => ({
+          payload: { label, body: "x".repeat(600) },
+        })),
+      })
+
+      const retained = await broker.read({ projectId, streamId: stream.id })
+
+      expect(retained.map((record) => (record.payload as { label: string }).label)).toEqual([
+        "new-two",
+      ])
+    } finally {
+      await cleanup()
+    }
+  })
+
   test("close drains active subscriptions and rejects later operations", async () => {
     const { broker, projectId } = createTestBroker()
     const stream = { id: "__events" }

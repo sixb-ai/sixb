@@ -50,8 +50,22 @@ local function entry_bytes(entry)
   return 0
 end
 
+local function id_is_newer(candidate, current)
+  if not current then
+    return true
+  end
+  local candidate_ms, candidate_seq = string.match(candidate, "^(%d+)%-(%d+)$")
+  local current_ms, current_seq = string.match(current, "^(%d+)%-(%d+)$")
+  candidate_ms = tonumber(candidate_ms)
+  candidate_seq = tonumber(candidate_seq)
+  current_ms = tonumber(current_ms)
+  current_seq = tonumber(current_seq)
+  return candidate_ms > current_ms or (candidate_ms == current_ms and candidate_seq > current_seq)
+end
+
 local function advance_boundary(candidate)
-  if candidate then
+  local current = redis.call("HGET", meta_key, "lastTrimmedId")
+  if candidate and id_is_newer(candidate, current) then
     redis.call("HSET", meta_key, "lastTrimmedId", candidate)
   end
 end
@@ -125,6 +139,26 @@ end
 
 local last_trimmed_id = nil
 local retained_bytes = tonumber(redis.call("HGET", meta_key, "retainedBytes") or "0")
+
+local function id_is_newer(candidate, current)
+  if not current then
+    return true
+  end
+  local candidate_ms, candidate_seq = string.match(candidate, "^(%d+)%-(%d+)$")
+  local current_ms, current_seq = string.match(current, "^(%d+)%-(%d+)$")
+  candidate_ms = tonumber(candidate_ms)
+  candidate_seq = tonumber(candidate_seq)
+  current_ms = tonumber(current_ms)
+  current_seq = tonumber(current_seq)
+  return candidate_ms > current_ms or (candidate_ms == current_ms and candidate_seq > current_seq)
+end
+
+local function advance_boundary(candidate)
+  local current = redis.call("HGET", meta_key, "lastTrimmedId")
+  if candidate and id_is_newer(candidate, current) then
+    redis.call("HSET", meta_key, "lastTrimmedId", candidate)
+  end
+end
 
 local function record_removed(entries)
   for index = 1, #entries do
@@ -224,9 +258,7 @@ if max_bytes then
 end
 
 redis.call("HSET", meta_key, "retainedBytes", tostring(retained_bytes))
-if last_trimmed_id then
-  redis.call("HSET", meta_key, "lastTrimmedId", last_trimmed_id)
-end
+advance_boundary(last_trimmed_id)
 return last_trimmed_id
 `
 
