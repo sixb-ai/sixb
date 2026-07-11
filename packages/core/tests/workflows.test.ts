@@ -4,7 +4,6 @@ import {
   defineIntervention,
   defineObjectType,
   defineSchedule,
-  defineTrigger,
   defineWorkflow,
   defineWorkflowStep,
   events,
@@ -110,7 +109,7 @@ const approveInvoiceMatch = defineIntervention("approve-invoice-match", {
     reviewerNote: interventionField("string", { required: false }),
   })
 
-const highValueTransaction = defineTrigger("transaction.high-value")
+const highValueTransaction = defineSchedule("transaction.high-value")
   .on(events(Transaction).updated())
   .where((event) => event.object.p.amount.gt(500))
 
@@ -231,20 +230,20 @@ describe("defineWorkflow", () => {
     expect(isWorkflowDefinition(workflow)).toBe(true)
   })
 
-  test("attaches domain triggers through .when()", () => {
+  test("attaches event schedules through .when()", () => {
     const workflow = runtimeDefineWorkflow("review-high-value-transaction")
       .input({
         transaction: ref(Transaction),
       })
-      .when(highValueTransaction, (event: { object: { primaryId: string } }) => ({
+      .when(highValueTransaction, ({ event }: { event: { object: { primaryId: string } } }) => ({
         transaction: { objectTypeId: "Transaction", primaryId: event.object.primaryId },
       }))
       .then(findBestInvoice)
 
     expect(workflow.triggers).toHaveLength(1)
     expect(workflow.triggers[0]).toMatchObject({
-      type: "trigger",
-      triggerId: "transaction.high-value",
+      type: "schedule",
+      scheduleId: "transaction.high-value",
     })
     expect(typeof (workflow.triggers[0] as { mapper?: unknown }).mapper).toBe("function")
   })
@@ -438,7 +437,7 @@ describe("defineWorkflow", () => {
 
     expect(() => when(highValueTransaction, "mapper")).toThrow(WorkflowDefinitionError)
     expect(() => when(highValueTransaction, () => ({}), "extra")).toThrow(WorkflowDefinitionError)
-    expect(() => when({ kind: "trigger" })).toThrow(WorkflowDefinitionError)
+    expect(() => when({ kind: "schedule" })).toThrow(WorkflowDefinitionError)
   })
 })
 
@@ -464,12 +463,16 @@ describe("validateWorkflowDefinition", () => {
 
 describe("Sixb workflow registration", () => {
   test("exposes registered workflow definitions and lookup by id", () => {
-    const daily = defineSchedule("daily-reconciliation").cron("0 6 * * *")
     const workflow = defineWorkflow("reconcile-transaction")
       .input({
         transaction: ref(Transaction),
       })
-      .when(daily)
+      .when(highValueTransaction, ({ event }) => ({
+        transaction: {
+          objectTypeId: "Transaction",
+          primaryId: event.object.primaryId,
+        },
+      }))
       .then(findBestInvoice)
       .then(attachInvoice, ({ input, steps }) => ({
         subject: input.transaction,
@@ -481,7 +484,7 @@ describe("Sixb workflow registration", () => {
     const sixb = new Sixb({
       ontology: [Transaction, Invoice],
       actions: [attachInvoice],
-      schedules: [daily],
+      schedules: [highValueTransaction],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
@@ -564,7 +567,7 @@ describe("Sixb workflow registration", () => {
 
   test("rejects workflows referencing unknown schedules", () => {
     const missing = defineSchedule("missing-schedule").cron("0 6 * * *")
-    const workflow = defineWorkflow("unknown-schedule")
+    const workflow = runtimeDefineWorkflow("unknown-schedule")
       .input({
         transaction: ref(Transaction),
       })
@@ -574,25 +577,25 @@ describe("Sixb workflow registration", () => {
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],
-        workflows: [workflow],
+        workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(WorkflowDefinitionError)
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],
-        workflows: [workflow],
+        workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
       })
     }).toThrow('Workflow "unknown-schedule" references unknown schedule "missing-schedule"')
   })
 
-  test("accepts workflows referencing registered triggers", () => {
-    const workflow = defineWorkflow("registered-domain-trigger")
+  test("accepts workflows referencing registered event schedules", () => {
+    const workflow = defineWorkflow("registered-event-schedule")
       .input({
         transaction: ref(Transaction),
       })
-      .when(highValueTransaction, (event) => ({
+      .when(highValueTransaction, ({ event }) => ({
         transaction: {
           objectTypeId: "Transaction",
           primaryId: event.object.primaryId,
@@ -602,22 +605,22 @@ describe("Sixb workflow registration", () => {
 
     const sixb = new Sixb({
       ontology: [Transaction, Invoice],
-      triggers: [highValueTransaction],
+      schedules: [highValueTransaction],
       workflows: [workflow],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getTriggerDefinitions()).toEqual([highValueTransaction])
-    expect(sixb.getTriggerById("transaction.high-value")).toBe(highValueTransaction)
-    expect(sixb.workflows.getById("registered-domain-trigger")).toBe(workflow)
+    expect(sixb.getScheduleDefinitions()).toEqual([highValueTransaction])
+    expect(sixb.getScheduleById("transaction.high-value")).toBe(highValueTransaction)
+    expect(sixb.workflows.getById("registered-event-schedule")).toBe(workflow)
   })
 
-  test("rejects workflows referencing unknown triggers", () => {
-    const workflow = defineWorkflow("unknown-domain-trigger")
+  test("rejects workflows referencing unknown event schedules", () => {
+    const workflow = defineWorkflow("unknown-event-schedule")
       .input({
         transaction: ref(Transaction),
       })
-      .when(highValueTransaction, (event) => ({
+      .when(highValueTransaction, ({ event }) => ({
         transaction: {
           objectTypeId: "Transaction",
           primaryId: event.object.primaryId,
@@ -632,12 +635,12 @@ describe("Sixb workflow registration", () => {
         ...createTestRuntimeDeps(),
       })
     }).toThrow(
-      'Workflow "unknown-domain-trigger" references unknown trigger "transaction.high-value"'
+      'Workflow "unknown-event-schedule" references unknown schedule "transaction.high-value"'
     )
   })
 
-  test("rejects trigger-driven workflows with input and no mapper at runtime", () => {
-    const workflow = runtimeDefineWorkflow("missing-trigger-mapper")
+  test("rejects event-scheduled workflows with input and no mapper at runtime", () => {
+    const workflow = runtimeDefineWorkflow("missing-schedule-mapper")
       .input({
         transaction: ref(Transaction),
       })
@@ -647,12 +650,12 @@ describe("Sixb workflow registration", () => {
     expect(() => {
       new Sixb({
         ontology: [Transaction, Invoice],
-        triggers: [highValueTransaction],
+        schedules: [highValueTransaction],
         workflows: [workflow as unknown as WorkflowDefinition],
         ...createTestRuntimeDeps(),
       })
     }).toThrow(
-      'Workflow "missing-trigger-mapper" trigger "transaction.high-value" requires a mapper'
+      'Workflow "missing-schedule-mapper" schedule "transaction.high-value" requires a mapper'
     )
   })
 

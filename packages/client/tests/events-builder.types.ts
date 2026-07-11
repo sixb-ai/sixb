@@ -3,7 +3,16 @@
 // and `.upserted()` on a wide object type must survive `Object.entries().map()`
 // WITHOUT tripping TS2589 — the recursion-prone path real components hit.
 // Checked by `cd packages/client && bun run typecheck` (tests are in the program).
-import { defineAction, defineRule, param } from "@sixb/core"
+import {
+  col,
+  defineAction,
+  defineConnector,
+  defineDataset,
+  definePipeline,
+  defineRule,
+  defineSync,
+  param,
+} from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import { events } from "../src/events-builder"
 import { useEvents, useInvalidateOnEvent, useLatest, useLatestByObject } from "../src/events-hooks"
@@ -35,6 +44,14 @@ const acknowledgeSensor = defineAction("acknowledge-sensor")
   .params({ note: param("string") })
   .writeback(async () => {})
 
+const readings = defineDataset("sensor.readings", { schema: [col("id", "string")] })
+const source = defineConnector("sensor-source", { type: "test", connect: () => ({}) })
+const importReadings = defineSync("import-readings")
+  .from(source)
+  .read(() => [])
+  .intoDataset(readings)
+const normalizeReadings = definePipeline("normalize-readings")
+
 // ── Channels narrow the payload ───────────────────────────────────────────────
 
 // `.telemetry(token)` → the property's ontology-typed value.
@@ -62,6 +79,25 @@ function useActionEventsTypeProof() {
 }
 
 void useActionEventsTypeProof
+
+function useRunEventsTypeProof() {
+  useEvents(events.dataset(readings).updated(), (event) => {
+    const datasetId: "sensor.readings" = event.payload.datasetId
+    void datasetId
+  })
+  useEvents(events.sync(importReadings).succeeded(), (event) => {
+    const syncId: "import-readings" = event.payload.syncId
+    const status: "succeeded" = event.payload.status
+    void [syncId, status]
+  })
+  useEvents(events.pipeline(normalizeReadings).failed(), (event) => {
+    const pipelineId: "normalize-readings" = event.payload.pipelineId
+    const status: "failed" = event.payload.status
+    void [pipelineId, status]
+  })
+}
+
+void useRunEventsTypeProof
 
 // `.telemetry(boolean prop)` → boolean value.
 events(Sensor)

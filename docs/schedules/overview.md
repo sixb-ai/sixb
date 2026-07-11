@@ -1,15 +1,12 @@
 # Schedules
 
-A schedule is a reusable, named trigger. It defines *when* work should run, never *what* — you
-attach it to a sync, pipeline, or workflow, and that work runs on the schedule. Reach for a
-schedule whenever something needs to fire on a clock: an hourly ERP sync, a nightly report, an
-end-of-month rollup.
+A schedule is a reusable, named definition of *when* work should run, never *what*. It can observe
+a cron expression or a typed event, then be attached to a sync, pipeline, or workflow.
 
 ## Defining a schedule
 
-Build one with `defineSchedule(id)`. The only trigger is `.cron(...)`, with an optional
-timezone. It returns an inert `ScheduleDefinition` that does nothing until something references
-it.
+Build one with `defineSchedule(id)`. Use `.cron(...)` for time or `.on(events.*)` for an event. It
+returns an inert `ScheduleDefinition` that does nothing until something references it.
 
 ```ts
 // schedules/erp.ts
@@ -23,6 +20,7 @@ export const hourlyErpSync = defineSchedule("hourly-erp-sync").cron("0 * * * *",
 | Method | Signature | Notes |
 | --- | --- | --- |
 | `.cron(expression, options?)` | `expression: string`, `options?: { timezone?: string }` | `timezone` is validated against `Intl.DateTimeFormat`; an invalid zone throws |
+| `.on(selector)` | A terminal `events.*` selector | Creates a typed [event schedule](./events.md) |
 
 The `id` must be unique and non-empty. An invalid cron expression or timezone throws at
 definition time, so a malformed schedule fails fast rather than silently never firing.
@@ -46,10 +44,8 @@ export const syncErpInvoices = defineSync("sync-erp-invoices")
   .intoDataset(erpInvoicesDataset)
 ```
 
-`.when(...)` on [syncs](../data/syncs.md) and [pipelines](../data/pipelines.md) also accepts
-run triggers — `syncFinished(id)`, `pipelineFinished(id)`, `datasetUpdated(id)` — to chain runs
-off other runs. [Workflows](../workflows/overview.md) accept schedule definitions only.
-Multiple triggers on the same target use OR semantics: any one can request a run.
+Every `.when(...)` receives a named schedule definition. Multiple schedules on the same target use
+OR semantics: any one can request a run.
 
 ## Cron dialect
 
@@ -89,7 +85,8 @@ schedule takes effect only through the sync, pipeline, or workflow that referenc
 ```txt
 my-project/
   schedules/
-    erp.ts    # defineSchedule(...).cron(...)
+    erp.ts       # defineSchedule(...).cron(...)
+    invoices.ts  # defineSchedule(...).on(events.*)
 ```
 
 ## Related
@@ -97,4 +94,5 @@ my-project/
 - [Syncs](../data/syncs.md) — pull external data on a schedule
 - [Pipelines](../data/pipelines.md) — transform datasets on a schedule
 - [Workflows](../workflows/overview.md) — run multi-step processes on a schedule
+- [Event schedules](./events.md) — react to typed domain events
 - [Project structure](../fundamentals/project-structure.md) — the full folder layout

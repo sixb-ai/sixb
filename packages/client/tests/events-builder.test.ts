@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { defineAction, defineRule, param } from "@sixb/core"
+import {
+  col,
+  defineAction,
+  defineConnector,
+  defineDataset,
+  definePipeline,
+  defineRule,
+  defineSync,
+  param,
+} from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import type { SixbEvent } from "../src/events"
 import { buildEventPredicate, events } from "../src/events-builder"
@@ -24,6 +33,14 @@ const acknowledgeSensor = defineAction("acknowledge-sensor")
   .on(Sensor)
   .params({ note: param("string") })
   .writeback(async () => {})
+
+const readings = defineDataset("sensor.readings", { schema: [col("id", "string")] })
+const source = defineConnector("sensor-source", { type: "test", connect: () => ({}) })
+const importReadings = defineSync("import-readings")
+  .from(source)
+  .read(() => [])
+  .intoDataset(readings)
+const normalizeReadings = definePipeline("normalize-readings")
 
 // A loose fixture builder: tests provide ad-hoc per-topic payloads, so the
 // override bag is intentionally untyped and cast to `SixbEvent` on the way out.
@@ -171,6 +188,26 @@ describe("events builder filter spec", () => {
       topic: "actions",
       actionId: "acknowledge-sensor",
       types: ["action.completed"],
+    })
+  })
+
+  test("definition-scoped dataset, sync, and pipeline builders", () => {
+    expect(events.dataset(readings).updated().ir).toEqual({
+      topic: "datasets",
+      datasetId: "sensor.readings",
+      types: ["dataset.version.committed"],
+    })
+    expect(events.sync(importReadings).succeeded().ir).toEqual({
+      topic: "syncs",
+      syncId: "import-readings",
+      types: ["sync.run.finished"],
+      runStatus: "succeeded",
+    })
+    expect(events.pipeline(normalizeReadings).cancelled().ir).toEqual({
+      topic: "pipelines",
+      pipelineId: "normalize-readings",
+      types: ["pipeline.run.finished"],
+      runStatus: "cancelled",
     })
   })
 })

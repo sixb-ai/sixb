@@ -16,7 +16,7 @@ billable invoices, then derives a finance summary table.
 File: `pipelines/invoice-reporting.ts`
 
 ```ts
-import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
+import { definePipeline, definePipelineStep, defineSchedule, events } from "@sixb/core"
 import {
   erpBillableInvoicesDataset,
   erpInvoiceSummariesDataset,
@@ -40,8 +40,12 @@ export const invoiceSummariesStep = definePipelineStep("invoice-summaries")
     from ${invoices}
   `)
 
+export const invoicesUpdated = defineSchedule("erp-invoices-updated").on(
+  events.dataset(erpInvoicesDataset).updated()
+)
+
 export const invoiceReportingPipeline = definePipeline("invoice-reporting")
-  .when(datasetUpdated(erpInvoicesDataset.id))
+  .when(invoicesUpdated)
   .then(billableInvoicesStep)
   .then(invoiceSummariesStep)
 ```
@@ -56,7 +60,7 @@ invoices; the second reads that output and writes a trimmed summary.
 | `.output(dataset)` | The dataset the step writes |
 | `.sql(...)` / `.run(...)` | The transform (terminal — pick one) |
 | `definePipeline("invoice-reporting")` | Names the pipeline |
-| `.when(datasetUpdated(...))` | Trigger that runs the pipeline |
+| `.when(schedule)` | Named schedule that runs the pipeline |
 | `.then(step)` | Appends a step to the sequence |
 
 ## Step builder
@@ -144,22 +148,22 @@ dataset an earlier step wrote, so chains build progressively richer tables.
 
 ```ts
 export const invoiceReportingPipeline = definePipeline("invoice-reporting")
-  .when(datasetUpdated(erpInvoicesDataset.id))
+  .when(invoicesUpdated)
   .then(billableInvoicesStep)
   .then(invoiceSummariesStep)
 ```
 
-## Triggers
+## Schedules
 
-Pass `.when(...)` a [trigger](../schedules/overview.md) or a [schedule](../schedules/overview.md).
-Add more than one `.when(...)` to run on multiple triggers.
+Pass `.when(...)` a named [schedule](../schedules/overview.md). Add more than one to run from
+multiple schedules.
 
-| Trigger | Runs when |
+| Schedule source | Runs when |
 | --- | --- |
-| `datasetUpdated(datasetId)` | A dataset commits a new version |
-| `syncFinished(syncId)` | A sync run finishes successfully |
-| `pipelineFinished(pipelineId)` | Another pipeline finishes successfully |
-| a [schedule](../schedules/overview.md) | The schedule fires |
+| `defineSchedule(...).on(events.dataset(dataset).updated())` | A dataset commits a version |
+| `defineSchedule(...).on(events.sync(sync).succeeded())` | A sync succeeds |
+| `defineSchedule(...).on(events.pipeline(pipeline).succeeded())` | A pipeline succeeds |
+| `defineSchedule(...).cron(...)` | A cron expression elapses |
 
 ```ts
 import { defineSchedule } from "@sixb/core"

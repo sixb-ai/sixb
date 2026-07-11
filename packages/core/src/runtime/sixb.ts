@@ -51,6 +51,7 @@ import { validateRulesAtStartup } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import { SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
+import { validateSchedulesAtStartup } from "../schedules"
 import type {
   GroupDefinition,
   MembershipPolicyDefinition,
@@ -60,8 +61,6 @@ import type {
 import { createRuntimeSecurityRegistry } from "../security/runtime"
 import type { ObjectRow, Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
-import type { TriggerDefinition } from "../triggers"
-import { validateTriggersAtStartup } from "../triggers"
 import type { RegisteredWebhook } from "../webhooks"
 import { registerWebhooks, WebhookValidationError, webhookRoute } from "../webhooks"
 import type { WorkflowDefinition } from "../workflows"
@@ -98,7 +97,6 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   pipelines?: readonly PipelineDefinition[]
   projections?: readonly ProjectionDefinition[]
   rules?: readonly RuleDefinition[]
-  triggers?: readonly TriggerDefinition[]
   workflows?: readonly WorkflowDefinition[]
   agents?: readonly AgentDefinition[]
   groups?: readonly GroupDefinition[]
@@ -118,7 +116,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   private readonly syncsById = new Map<string, SyncDefinition>()
   private readonly pipelinesById = new Map<string, PipelineDefinition>()
   private readonly rulesById = new Map<string, RuleDefinition>()
-  private readonly triggersById = new Map<string, TriggerDefinition>()
   private readonly connectorRuntime: ConnectorRuntime
   private readonly webhooksByRoute = new Map<string, RegisteredWebhook>()
   private readonly webhooks: readonly RegisteredWebhook[]
@@ -140,7 +137,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
   readonly rules: readonly RuleDefinition[]
-  readonly triggers: readonly TriggerDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
   private functionRuntime: FunctionRuntime | null = null
@@ -158,7 +154,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.queues = options.queues
     this.sandboxes = options.sandboxes
     this.rules = options.rules ?? []
-    this.triggers = options.triggers ?? []
     // Ontology and actions resolve first so every later registry (security,
     // rules, workflows, projections) can validate its references against them.
     this.ontology = new OntologyRegistry({ sources: this.ontologySources })
@@ -272,18 +267,17 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       this.rulesById.set(rule.id, rule)
     }
 
-    validateTriggersAtStartup(this.triggers, this.ontology, {
+    validateSchedulesAtStartup([...this.schedulesById.values()], this.ontology, {
       registeredRuleIds: new Set(this.rulesById.keys()),
       registeredActionIds,
+      registeredDatasetIds: new Set(this.datasetsById.keys()),
+      registeredSyncIds: new Set(this.syncsById.keys()),
+      registeredPipelineIds: new Set(this.pipelinesById.keys()),
     })
-    for (const trigger of this.triggers) {
-      this.triggersById.set(trigger.id, trigger)
-    }
 
     const workflows = validateWorkflowsAtStartup({
       workflows: options.workflows ?? [],
-      registeredScheduleIds: new Set(this.schedulesById.keys()),
-      registeredTriggerIds: new Set(this.triggersById.keys()),
+      registeredSchedules: this.schedulesById,
       registeredActionIds,
     })
 
@@ -305,7 +299,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
       queues: this.queues,
       sandboxes: this.sandboxes,
       rules: this.rules,
-      triggers: this.triggers,
     }
     this.actions = new ActionsRuntime(this.runtimeContext)
     this.workflows = new WorkflowsRuntime(this.runtimeContext, workflows)
@@ -419,14 +412,6 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
 
   getRuleById(ruleId: string): RuleDefinition | null {
     return this.rulesById.get(ruleId) ?? null
-  }
-
-  getTriggerDefinitions(): readonly TriggerDefinition[] {
-    return [...this.triggersById.values()]
-  }
-
-  getTriggerById(triggerId: string): TriggerDefinition | null {
-    return this.triggersById.get(triggerId) ?? null
   }
 
   /** All connector definitions registered with this runtime. */

@@ -1,10 +1,8 @@
 import type { ActionDefinition } from "../actions"
 import { isActionDefinition } from "../actions"
 import type { SchemaOrRef } from "../ontology"
-import type { ScheduleDefinition } from "../schedules"
+import type { ScheduleDefinition, ScheduleDefinitionForEvent } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import type { TriggerDefinition } from "../triggers"
-import { isTriggerDefinition } from "../triggers"
 import { WorkflowDefinitionError } from "./errors"
 import type {
   InterventionBuilder,
@@ -16,8 +14,8 @@ import type {
   StepHandler,
   WorkflowBuilder,
   WorkflowChainDefinition,
-  WorkflowDomainTriggerMapper,
   WorkflowNodeDefinition,
+  WorkflowScheduleMapper,
   WorkflowTriggerDefinition,
 } from "./types"
 import { assertNonEmpty, isInterventionDefinition, isStepDefinition } from "./validation"
@@ -29,10 +27,7 @@ type InterventionOptions = {
 type RuntimeWorkflowInput = Record<string, SchemaOrRef>
 type RuntimeWorkflowValueInput = Record<string, unknown>
 type RuntimeWorkflowMapper = (...args: never[]) => unknown
-type RuntimeWorkflowDomainTriggerMapper = WorkflowDomainTriggerMapper<
-  TriggerDefinition,
-  RuntimeWorkflowValueInput
->
+type RuntimeWorkflowScheduleMapper = WorkflowScheduleMapper<unknown, RuntimeWorkflowValueInput>
 type RuntimeWorkflowThenDefinition = StepDefinition | InterventionDefinition | ActionDefinition
 type RuntimeWorkflowThen = (
   nodeDefinition: RuntimeWorkflowThenDefinition,
@@ -40,10 +35,9 @@ type RuntimeWorkflowThen = (
 ) => WorkflowChainDefinition
 type RuntimeWorkflowDraftBuilder = {
   when(schedule: ScheduleDefinition): RuntimeWorkflowDraftBuilder
-  when(trigger: TriggerDefinition): RuntimeWorkflowDraftBuilder
   when(
-    trigger: TriggerDefinition,
-    mapper: RuntimeWorkflowDomainTriggerMapper
+    schedule: ScheduleDefinitionForEvent,
+    mapper: RuntimeWorkflowScheduleMapper
   ): RuntimeWorkflowDraftBuilder
   readonly then: RuntimeWorkflowThen
 }
@@ -193,13 +187,12 @@ function createWorkflowDraftBuilder(
   let draft: RuntimeWorkflowDraftBuilder
 
   function when(schedule: ScheduleDefinition): RuntimeWorkflowDraftBuilder
-  function when(trigger: TriggerDefinition): RuntimeWorkflowDraftBuilder
   function when(
-    trigger: TriggerDefinition,
-    mapper: RuntimeWorkflowDomainTriggerMapper
+    schedule: ScheduleDefinitionForEvent,
+    mapper: RuntimeWorkflowScheduleMapper
   ): RuntimeWorkflowDraftBuilder
   function when(
-    trigger: unknown,
+    schedule: unknown,
     mapper?: unknown,
     ...extraArgs: unknown[]
   ): RuntimeWorkflowDraftBuilder {
@@ -207,33 +200,23 @@ function createWorkflowDraftBuilder(
       throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) call.`)
     }
 
-    if (isScheduleDefinition(trigger)) {
-      if (mapper !== undefined) {
-        throw new WorkflowDefinitionError(
-          `Workflow "${id}" schedule triggers do not accept a mapper.`
-        )
+    if (isScheduleDefinition(schedule)) {
+      if (mapper !== undefined && schedule.trigger.type !== "event") {
+        throw new WorkflowDefinitionError(`Workflow "${id}" cron schedules do not accept a mapper.`)
       }
-
-      triggers.push({ type: "schedule", scheduleId: trigger.id })
-      return draft
-    }
-
-    if (isTriggerDefinition(trigger)) {
-      if (mapper !== undefined && !isRuntimeWorkflowDomainTriggerMapper(mapper)) {
-        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) trigger mapper.`)
+      if (mapper !== undefined && !isRuntimeWorkflowScheduleMapper(mapper)) {
+        throw new WorkflowDefinitionError(`Invalid workflow "${id}" .when(...) schedule mapper.`)
       }
 
       triggers.push({
-        type: "trigger",
-        triggerId: trigger.id,
+        type: "schedule",
+        scheduleId: schedule.id,
         ...(mapper !== undefined ? { mapper } : {}),
       })
       return draft
     }
 
-    throw new WorkflowDefinitionError(
-      `Workflow "${id}" .when(...) only accepts schedule or trigger definitions.`
-    )
+    throw new WorkflowDefinitionError(`Workflow "${id}" .when(...) only accepts schedules.`)
   }
 
   draft = {
@@ -414,8 +397,6 @@ function isRuntimeWorkflowMapper(value: unknown): value is RuntimeWorkflowMapper
   return typeof value === "function"
 }
 
-function isRuntimeWorkflowDomainTriggerMapper(
-  value: unknown
-): value is RuntimeWorkflowDomainTriggerMapper {
+function isRuntimeWorkflowScheduleMapper(value: unknown): value is RuntimeWorkflowScheduleMapper {
   return typeof value === "function"
 }

@@ -4,7 +4,7 @@ import {
   defineAction,
   defineObjectType,
   defineRule,
-  defineTrigger,
+  defineSchedule,
   events,
   isRunTrigger,
   link,
@@ -12,9 +12,10 @@ import {
   param,
   pipelineFinished,
   prop,
+  ScheduleValidationError,
   syncFinished,
   TriggerValidationError,
-  validateTriggersAtStartup,
+  validateSchedulesAtStartup,
 } from "../src"
 
 const Payment = defineObjectType({
@@ -122,57 +123,63 @@ describe("isRunTrigger", () => {
   })
 })
 
-describe("defineTrigger", () => {
-  test("builds an inert link trigger with an edge condition", () => {
-    const trigger = defineTrigger("invoice.high-value-payment")
+describe("event schedules", () => {
+  test("builds an inert link event schedule with an edge condition", () => {
+    const schedule = defineSchedule("invoice.high-value-payment")
       .on(events(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.p.amount.gt(500))
 
-    expect(trigger).toEqual({
-      kind: "trigger",
+    expect(schedule).toEqual({
+      kind: "schedule",
       id: "invoice.high-value-payment",
-      source: {
-        objectTypeId: "Invoice",
-        topic: "links",
-        types: ["link.created"],
-        linkId: "payments",
-      },
-      condition: {
-        kind: "becomesTrue",
-        scope: "event.link",
-        predicate: {
-          kind: "property",
-          propertyId: "amount",
-          op: "gt",
-          value: 500,
+      trigger: {
+        type: "event",
+        source: {
+          objectTypeId: "Invoice",
+          topic: "links",
+          types: ["link.created"],
+          linkId: "payments",
+        },
+        condition: {
+          kind: "becomesTrue",
+          scope: "event.link",
+          predicate: {
+            kind: "property",
+            propertyId: "amount",
+            op: "gt",
+            value: 500,
+          },
         },
       },
     })
   })
 
-  test("supports basic source-only triggers", () => {
-    const trigger = defineTrigger("invoice.created").on(events(Invoice).created())
+  test("supports basic source-only schedules", () => {
+    const schedule = defineSchedule("invoice.created").on(events(Invoice).created())
 
-    expect(trigger).toMatchObject({
-      kind: "trigger",
+    expect(schedule).toMatchObject({
+      kind: "schedule",
       id: "invoice.created",
-      source: {
-        objectTypeId: "Invoice",
-        topic: "objects",
-        types: ["object.created"],
+      trigger: {
+        type: "event",
+        source: {
+          objectTypeId: "Invoice",
+          topic: "objects",
+          types: ["object.created"],
+        },
       },
     })
-    expect(typeof trigger.where).toBe("function")
+    expect(typeof schedule.where).toBe("function")
   })
 
   test("supports grouped object predicates", () => {
-    const trigger = defineTrigger("invoice.high-value-usd")
+    const schedule = defineSchedule("invoice.high-value-usd")
       .on(events(Invoice).link(Invoice.l.payments).updated())
       .where((event) =>
         event.link.all(event.link.p.amount.gt(500), event.link.p.currency.eq("USD"))
       )
 
-    expect(trigger.condition).toEqual({
+    expect(schedule.trigger.condition).toEqual({
       kind: "becomesTrue",
       scope: "event.link",
       predicate: {
@@ -186,11 +193,11 @@ describe("defineTrigger", () => {
   })
 
   test("supports typed target identity predicates on links", () => {
-    const trigger = defineTrigger("invoice.payment-target")
+    const schedule = defineSchedule("invoice.payment-target")
       .on(events(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.all(event.target.is(Payment), event.target.id.eq("payment-1")))
 
-    expect(trigger.condition).toEqual({
+    expect(schedule.trigger.condition).toEqual({
       kind: "becomesTrue",
       scope: "event.link",
       predicate: {
@@ -214,125 +221,131 @@ describe("defineTrigger", () => {
   })
 
   test("supports rule and action event sources without conditions", () => {
-    const ruleTrigger = defineTrigger("invoice.at-risk-triggered").on(
+    const ruleSchedule = defineSchedule("invoice.at-risk-triggered").on(
       events.rule(invoiceAtRisk).triggered()
     )
-    const actionTrigger = defineTrigger("invoice.approved").on(
+    const actionSchedule = defineSchedule("invoice.approved").on(
       events.action(approveInvoice).completed()
     )
 
-    expect(ruleTrigger.source).toEqual({
+    expect(ruleSchedule.trigger.source).toEqual({
       topic: "rules",
       types: ["rule.triggered"],
       ruleId: invoiceAtRisk.id,
     })
-    expect(actionTrigger.source).toEqual({
+    expect(actionSchedule.trigger.source).toEqual({
       topic: "actions",
       types: ["action.completed"],
       actionId: approveInvoice.id,
     })
-    expect("where" in ruleTrigger).toBe(false)
-    expect("where" in actionTrigger).toBe(false)
+    expect("where" in ruleSchedule).toBe(false)
+    expect("where" in actionSchedule).toBe(false)
   })
 
   test("rejects empty ids and non-terminal event selectors", () => {
-    expect(() => defineTrigger("")).toThrow(TriggerValidationError)
-    expect(() => defineTrigger("bad-source").on(events(Invoice))).toThrow(
-      "Trigger source must select an event operation"
+    expect(() => defineSchedule("")).toThrow(ScheduleValidationError)
+    expect(() => defineSchedule("bad-source").on(events(Invoice))).toThrow(
+      "Schedule event source must select an event operation"
     )
   })
 })
 
-describe("validateTriggersAtStartup", () => {
-  test("accepts triggers that reference known ontology fields", () => {
-    const trigger = defineTrigger("invoice.high-value-payment")
+describe("validateSchedulesAtStartup", () => {
+  test("accepts schedules that reference known ontology fields", () => {
+    const schedule = defineSchedule("invoice.high-value-payment")
       .on(events(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.link.p.amount.gt(500))
 
     expect(() =>
-      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
+      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).not.toThrow()
   })
 
   test("accepts link target identity predicates", () => {
-    const trigger = defineTrigger("invoice.payment-target")
+    const schedule = defineSchedule("invoice.payment-target")
       .on(events(Invoice).link(Invoice.l.payments).created())
       .where((event) => event.target.is(Payment))
 
     expect(() =>
-      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
+      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).not.toThrow()
   })
 
   test("rejects link target types outside the selected link", () => {
-    const trigger = {
-      kind: "trigger",
+    const schedule = {
+      kind: "schedule",
       id: "invoice.invalid-payment-target",
-      source: events(Invoice).link(Invoice.l.payments).created(),
-      condition: {
-        kind: "becomesTrue",
-        scope: "event.link",
-        predicate: {
-          kind: "field",
-          field: "target.objectTypeId",
-          op: "eq",
-          value: "Invoice",
+      trigger: {
+        type: "event",
+        source: events(Invoice).link(Invoice.l.payments).created(),
+        condition: {
+          kind: "becomesTrue",
+          scope: "event.link",
+          predicate: {
+            kind: "field",
+            field: "target.objectTypeId",
+            op: "eq",
+            value: "Invoice",
+          },
         },
       },
     } as const
 
     expect(() =>
-      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
+      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
     ).toThrow('object type "Invoice" is not a target of link "payments"')
   })
 
-  test("rejects duplicate trigger ids", () => {
-    const first = defineTrigger("duplicate").on(events(Invoice).created())
-    const second = defineTrigger("duplicate").on(events(Invoice).updated())
+  test("rejects duplicate schedule ids", () => {
+    const first = defineSchedule("duplicate").on(events(Invoice).created())
+    const second = defineSchedule("duplicate").on(events(Invoice).updated())
 
     expect(() =>
-      validateTriggersAtStartup(
+      validateSchedulesAtStartup(
         [first, second],
         new OntologyRegistry({ sources: [Invoice, Payment] })
       )
-    ).toThrow("Duplicate trigger id: duplicate")
+    ).toThrow("Duplicate schedule id: duplicate")
   })
 
   test("rejects condition properties unknown to the selected link", () => {
-    const trigger = {
-      kind: "trigger",
+    const schedule = {
+      kind: "schedule",
       id: "bad-link-property",
-      source: {
-        objectTypeId: "Invoice",
-        topic: "links",
-        types: ["link.created"],
-        linkId: "payments",
-      },
-      condition: {
-        kind: "becomesTrue",
-        scope: "event.link",
-        predicate: {
-          kind: "property",
-          propertyId: "missing",
-          op: "eq",
-          value: "x",
+      trigger: {
+        type: "event",
+        source: {
+          objectTypeId: "Invoice",
+          topic: "links",
+          types: ["link.created"],
+          linkId: "payments",
+        },
+        condition: {
+          kind: "becomesTrue",
+          scope: "event.link",
+          predicate: {
+            kind: "property",
+            propertyId: "missing",
+            op: "eq",
+            value: "x",
+          },
         },
       },
     } as const
 
     expect(() =>
-      validateTriggersAtStartup([trigger], new OntologyRegistry({ sources: [Invoice, Payment] }))
-    ).toThrow('Trigger "bad-link-property": unknown property "missing" on link "payments"')
+      validateSchedulesAtStartup([schedule], new OntologyRegistry({ sources: [Invoice, Payment] }))
+    ).toThrow('Schedule "bad-link-property": unknown property "missing" on link "payments"')
   })
 
   test("validates registered rule and action sources", () => {
-    const triggers = [
-      defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
-      defineTrigger("invoice.approved").on(events.action(approveInvoice).completed()),
+    const schedules = [
+      defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
+      defineSchedule("invoice.approved").on(events.action(approveInvoice).completed()),
     ]
 
     expect(() =>
-      validateTriggersAtStartup(triggers, new OntologyRegistry({ sources: [Invoice, Payment] }), {
+      validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }), {
         registeredRuleIds: new Set([invoiceAtRisk.id]),
         registeredActionIds: new Set([approveInvoice.id]),
       })
@@ -343,17 +356,36 @@ describe("validateTriggersAtStartup", () => {
     const ontology = new OntologyRegistry({ sources: [Invoice, Payment] })
 
     expect(() =>
-      validateTriggersAtStartup(
-        [defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered())],
+      validateSchedulesAtStartup(
+        [defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered())],
         ontology
       )
     ).toThrow('unknown rule "invoice.at-risk"')
 
     expect(() =>
-      validateTriggersAtStartup(
-        [defineTrigger("invoice.approved").on(events.action(approveInvoice).completed())],
+      validateSchedulesAtStartup(
+        [defineSchedule("invoice.approved").on(events.action(approveInvoice).completed())],
         ontology
       )
     ).toThrow('unknown action "approve-invoice"')
+  })
+
+  test("validates dataset, sync, and pipeline event sources", () => {
+    const dataset = { kind: "dataset", id: "raw.invoices" } as const
+    const sync = { kind: "sync", id: "import-invoices" } as const
+    const pipeline = { kind: "pipeline", id: "normalize-invoices" } as const
+    const schedules = [
+      defineSchedule("invoices-updated").on(events.dataset(dataset).updated()),
+      defineSchedule("import-succeeded").on(events.sync(sync).succeeded()),
+      defineSchedule("normalization-failed").on(events.pipeline(pipeline).failed()),
+    ]
+
+    expect(() =>
+      validateSchedulesAtStartup(schedules, new OntologyRegistry({ sources: [Invoice, Payment] }), {
+        registeredDatasetIds: new Set([dataset.id]),
+        registeredSyncIds: new Set([sync.id]),
+        registeredPipelineIds: new Set([pipeline.id]),
+      })
+    ).not.toThrow()
   })
 })

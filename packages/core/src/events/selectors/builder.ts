@@ -6,10 +6,17 @@ import type {
   ActionEventSelectorContext,
   ActionEventToken,
   ActionEventTokenOf,
+  DatasetEventSelectorContext,
+  DatasetEventToken,
   EventSelectorSpec,
   LinkEventSelectorContext,
   ObjectEventSelectorContext,
+  PipelineEventSelectorContext,
+  PipelineEventToken,
   RuleEventSelectorContext,
+  RunEventSelectorOperation,
+  SyncEventSelectorContext,
+  SyncEventToken,
 } from "./types"
 
 type EventPropertySelectorMap<TTokens, TContext> = {
@@ -77,6 +84,25 @@ export interface ActionEventSelectorBuilder<TAction extends ActionEventToken>
   failed(): EventSelectorSpec<ActionEventSelectorContext<TAction, "failed">>
 }
 
+export interface DatasetEventSelectorBuilder<TDataset extends DatasetEventToken>
+  extends EventSelectorSpec<DatasetEventSelectorContext<TDataset>> {
+  updated(): EventSelectorSpec<DatasetEventSelectorContext<TDataset>>
+}
+
+export interface SyncEventSelectorBuilder<TSync extends SyncEventToken>
+  extends EventSelectorSpec<SyncEventSelectorContext<TSync>> {
+  succeeded(): EventSelectorSpec<SyncEventSelectorContext<TSync, "succeeded">>
+  failed(): EventSelectorSpec<SyncEventSelectorContext<TSync, "failed">>
+  cancelled(): EventSelectorSpec<SyncEventSelectorContext<TSync, "cancelled">>
+}
+
+export interface PipelineEventSelectorBuilder<TPipeline extends PipelineEventToken>
+  extends EventSelectorSpec<PipelineEventSelectorContext<TPipeline>> {
+  succeeded(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "succeeded">>
+  failed(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "failed">>
+  cancelled(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "cancelled">>
+}
+
 abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TContext> {
   constructor(protected readonly spec: EventSelectorSpec<TContext>) {}
 
@@ -114,6 +140,22 @@ abstract class EventSelectorSpecView<TContext> implements EventSelectorSpec<TCon
 
   get actionId(): EventSelectorSpec["actionId"] {
     return this.spec.actionId
+  }
+
+  get datasetId(): EventSelectorSpec["datasetId"] {
+    return this.spec.datasetId
+  }
+
+  get syncId(): EventSelectorSpec["syncId"] {
+    return this.spec.syncId
+  }
+
+  get pipelineId(): EventSelectorSpec["pipelineId"] {
+    return this.spec.pipelineId
+  }
+
+  get runStatus(): EventSelectorSpec["runStatus"] {
+    return this.spec.runStatus
   }
 
   get runId(): EventSelectorSpec["runId"] {
@@ -314,6 +356,69 @@ class ActionEventSelectorBuilderImpl<TAction extends ActionEventToken>
   }
 }
 
+class DatasetEventSelectorBuilderImpl<TDataset extends DatasetEventToken>
+  extends EventSelectorSpecView<DatasetEventSelectorContext<TDataset>>
+  implements DatasetEventSelectorBuilder<TDataset>
+{
+  updated(): EventSelectorSpec<DatasetEventSelectorContext<TDataset>> {
+    return { ...this.spec, types: ["dataset.version.committed"] }
+  }
+}
+
+class SyncEventSelectorBuilderImpl<TSync extends SyncEventToken>
+  extends EventSelectorSpecView<SyncEventSelectorContext<TSync>>
+  implements SyncEventSelectorBuilder<TSync>
+{
+  succeeded(): EventSelectorSpec<SyncEventSelectorContext<TSync, "succeeded">> {
+    return this.withStatus("succeeded")
+  }
+
+  failed(): EventSelectorSpec<SyncEventSelectorContext<TSync, "failed">> {
+    return this.withStatus("failed")
+  }
+
+  cancelled(): EventSelectorSpec<SyncEventSelectorContext<TSync, "cancelled">> {
+    return this.withStatus("cancelled")
+  }
+
+  private withStatus<TOperation extends RunEventSelectorOperation>(
+    runStatus: TOperation
+  ): EventSelectorSpec<SyncEventSelectorContext<TSync, TOperation>> {
+    return {
+      ...this.spec,
+      types: ["sync.run.finished"],
+      runStatus,
+    } as EventSelectorSpec<SyncEventSelectorContext<TSync, TOperation>>
+  }
+}
+
+class PipelineEventSelectorBuilderImpl<TPipeline extends PipelineEventToken>
+  extends EventSelectorSpecView<PipelineEventSelectorContext<TPipeline>>
+  implements PipelineEventSelectorBuilder<TPipeline>
+{
+  succeeded(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "succeeded">> {
+    return this.withStatus("succeeded")
+  }
+
+  failed(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "failed">> {
+    return this.withStatus("failed")
+  }
+
+  cancelled(): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, "cancelled">> {
+    return this.withStatus("cancelled")
+  }
+
+  private withStatus<TOperation extends RunEventSelectorOperation>(
+    runStatus: TOperation
+  ): EventSelectorSpec<PipelineEventSelectorContext<TPipeline, TOperation>> {
+    return {
+      ...this.spec,
+      types: ["pipeline.run.finished"],
+      runStatus,
+    } as EventSelectorSpec<PipelineEventSelectorContext<TPipeline, TOperation>>
+  }
+}
+
 function objectEvents<TObjectType extends ObjectTypeWithTokens>(
   objectType: TObjectType
 ): ObjectEventSelectorBuilder<TObjectType> {
@@ -328,6 +433,13 @@ export interface EventSelectors {
   action<TAction extends ActionDefinition>(
     action: TAction
   ): ActionEventSelectorBuilder<ActionEventTokenOf<TAction>>
+  dataset<TDataset extends DatasetEventToken>(
+    dataset: TDataset
+  ): DatasetEventSelectorBuilder<TDataset>
+  sync<TSync extends SyncEventToken>(sync: TSync): SyncEventSelectorBuilder<TSync>
+  pipeline<TPipeline extends PipelineEventToken>(
+    pipeline: TPipeline
+  ): PipelineEventSelectorBuilder<TPipeline>
 }
 
 export const events = Object.assign(objectEvents, {
@@ -344,6 +456,28 @@ export const events = Object.assign(objectEvents, {
       topic: "actions",
       actionId: action.id,
     } as EventSelectorSpec<ActionEventSelectorContext<ActionEventTokenOf<TAction>>>)
+  },
+  dataset<TDataset extends DatasetEventToken>(
+    dataset: TDataset
+  ): DatasetEventSelectorBuilder<TDataset> {
+    return new DatasetEventSelectorBuilderImpl({
+      topic: "datasets",
+      datasetId: dataset.id,
+    } as EventSelectorSpec<DatasetEventSelectorContext<TDataset>>)
+  },
+  sync<TSync extends SyncEventToken>(sync: TSync): SyncEventSelectorBuilder<TSync> {
+    return new SyncEventSelectorBuilderImpl({
+      topic: "syncs",
+      syncId: sync.id,
+    } as EventSelectorSpec<SyncEventSelectorContext<TSync>>)
+  },
+  pipeline<TPipeline extends PipelineEventToken>(
+    pipeline: TPipeline
+  ): PipelineEventSelectorBuilder<TPipeline> {
+    return new PipelineEventSelectorBuilderImpl({
+      topic: "pipelines",
+      pipelineId: pipeline.id,
+    } as EventSelectorSpec<PipelineEventSelectorContext<TPipeline>>)
   },
 }) satisfies EventSelectors
 

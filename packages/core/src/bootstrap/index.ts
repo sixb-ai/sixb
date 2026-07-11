@@ -13,7 +13,6 @@ export {
   discoverRules,
   discoverSchedules,
   discoverSyncs,
-  discoverTriggers,
   discoverWorkflows,
 } from "./discovery"
 export type {

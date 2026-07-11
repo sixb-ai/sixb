@@ -16,7 +16,6 @@ import {
   defineSchedule,
   defineSync,
   defineTelemetryProjection,
-  defineTrigger,
   defineValueType,
   defineWorkflow,
   defineWorkflowStep,
@@ -183,7 +182,7 @@ export const syncOrders = defineSync("sync-orders")
     expect(sixb.workflows.getById("missing-workflow")).toBeNull()
   })
 
-  test("uses explicit triggers when provided", async () => {
+  test("uses explicit event schedules when provided", async () => {
     const projectRoot = await createTempProjectRoot()
 
     const Transaction = defineObjectType({
@@ -195,22 +194,22 @@ export const syncOrders = defineSync("sync-orders")
       ],
     })
 
-    const trigger = defineTrigger("transaction.high-value")
+    const schedule = defineSchedule("transaction.high-value")
       .on(events(Transaction).updated())
       .where((event) => event.object.p.amount.gt(500))
 
     const sixb = await createSixb({
       projectRoot,
       ontologies: [Transaction],
-      triggers: [trigger],
+      schedules: [schedule],
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getTriggerDefinitions()).toEqual([trigger])
-    expect(sixb.getTriggerById("transaction.high-value")).toBe(trigger)
+    expect(sixb.getScheduleDefinitions()).toEqual([schedule])
+    expect(sixb.getScheduleById("transaction.high-value")).toBe(schedule)
   })
 
-  test("validates rule and action trigger sources against registered definitions", async () => {
+  test("validates rule and action event schedules against registered definitions", async () => {
     const projectRoot = await createTempProjectRoot()
     const Invoice = defineObjectType({
       id: "Invoice",
@@ -227,9 +226,9 @@ export const syncOrders = defineSync("sync-orders")
       .on(Invoice)
       .params({})
       .writeback(async () => {})
-    const triggers = [
-      defineTrigger("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
-      defineTrigger("invoice.approved").on(events.action(approveInvoice).completed()),
+    const schedules = [
+      defineSchedule("invoice.at-risk-triggered").on(events.rule(invoiceAtRisk).triggered()),
+      defineSchedule("invoice.approved").on(events.action(approveInvoice).completed()),
     ]
 
     const sixb = await createSixb({
@@ -237,11 +236,11 @@ export const syncOrders = defineSync("sync-orders")
       ontologies: [Invoice],
       actions: [approveInvoice],
       rules: [invoiceAtRisk],
-      triggers,
+      schedules,
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getTriggerDefinitions()).toEqual(triggers)
+    expect(sixb.getScheduleDefinitions()).toEqual(schedules)
   })
 
   test("discovers workflows from workflows directory", async () => {
@@ -299,28 +298,24 @@ import { Invoice, Transaction } from "../ontology/transaction"
 import { daily } from "../schedules/daily"
 
 const findBestInvoice = defineWorkflowStep("find-best-invoice")
-  .input({
-    transaction: ref(Transaction),
-  })
+  .input({})
   .output({
     transaction: ref(Transaction),
     invoice: ref(Invoice),
     confidence: "double",
   })
-  .run(({ input }) => ({
-    transaction: input.transaction,
+  .run(() => ({
+    transaction: { objectTypeId: "Transaction", primaryId: "transaction:1" },
     invoice: { objectTypeId: "Invoice", primaryId: "invoice:1" },
     confidence: 0.98,
   }))
 
 export const reconcileTransaction = defineWorkflow("reconcile-transaction")
-  .input({
-    transaction: ref(Transaction),
-  })
+  .input({})
   .when(daily)
   .then(findBestInvoice)
-  .then(attachInvoice, ({ input, steps }) => ({
-    target: input.transaction,
+  .then(attachInvoice, ({ steps }) => ({
+    target: steps.findBestInvoice.transaction,
     params: {
       invoice: steps.findBestInvoice.invoice,
     },
@@ -343,7 +338,7 @@ export const reconcileTransaction = defineWorkflow("reconcile-transaction")
     ])
   })
 
-  test("discovers triggers from triggers directory", async () => {
+  test("discovers event schedules from schedules directory", async () => {
     const projectRoot = await createTempProjectRoot()
 
     await writeProjectFile(
@@ -364,11 +359,11 @@ export const Transaction = defineObjectType({
 
     await writeProjectFile(
       projectRoot,
-      "triggers/highValueTransaction.ts",
-      `import { defineTrigger, events } from "${coreModuleUrl}"
+      "schedules/highValueTransaction.ts",
+      `import { defineSchedule, events } from "${coreModuleUrl}"
 import { Transaction } from "../ontology/transaction"
 
-export const highValueTransaction = defineTrigger("transaction.high-value")
+export const highValueTransaction = defineSchedule("transaction.high-value")
   .on(events(Transaction).updated())
   .where((event) => event.object.p.amount.gt(500))
 `
@@ -379,7 +374,7 @@ export const highValueTransaction = defineTrigger("transaction.high-value")
       "workflows/reviewHighValueTransaction.ts",
       `import { defineWorkflow, defineWorkflowStep, ref } from "${coreModuleUrl}"
 import { Transaction } from "../ontology/transaction"
-import { highValueTransaction } from "../triggers/highValueTransaction"
+import { highValueTransaction } from "../schedules/highValueTransaction"
 
 const reviewTransaction = defineWorkflowStep("review-transaction")
   .input({
@@ -392,7 +387,7 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
   .input({
     transaction: ref(Transaction),
   })
-  .when(highValueTransaction, (event) => ({
+  .when(highValueTransaction, ({ event }) => ({
     transaction: {
       objectTypeId: "Transaction",
       primaryId: event.object.primaryId,
@@ -407,11 +402,11 @@ export const reviewHighValueTransaction = defineWorkflow("review-high-value-tran
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.getTriggerDefinitions().map((trigger) => trigger.id)).toEqual([
+    expect(sixb.getScheduleDefinitions().map((schedule) => schedule.id)).toEqual([
       "transaction.high-value",
     ])
     expect(sixb.workflows.getById("review-high-value-transaction")?.triggers).toMatchObject([
-      { type: "trigger", triggerId: "transaction.high-value" },
+      { type: "schedule", scheduleId: "transaction.high-value" },
     ])
   })
 

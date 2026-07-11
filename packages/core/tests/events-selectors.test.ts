@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import {
   buildEventSelectorPredicate,
+  col,
   type DomainEvent,
   defineAction,
+  defineConnector,
+  defineDataset,
+  definePipeline,
+  defineSync,
   eventSelectorSpec,
   events,
   param,
@@ -39,6 +44,22 @@ const approveInvoice = defineAction("approve-invoice")
   .on(Invoice)
   .params({ reason: param("string") })
   .writeback(async () => {})
+
+const rawInvoices = defineDataset("raw.invoices", {
+  schema: [col("id", "string")],
+})
+
+const erp = defineConnector("erp", {
+  type: "test",
+  connect: () => ({}),
+})
+
+const importInvoices = defineSync("import-invoices")
+  .from(erp)
+  .read(() => [])
+  .intoDataset(rawInvoices)
+
+const normalizeInvoices = definePipeline("normalize-invoices")
 
 function event(overrides: { type: string; topic: string } & Record<string, unknown>): DomainEvent {
   const { type, topic, ...rest } = overrides
@@ -104,6 +125,26 @@ describe("events selector builder", () => {
       topic: "actions",
       types: ["action.completed"],
       actionId: "approve-invoice",
+    })
+  })
+
+  test("builds dataset, sync, and pipeline selectors from definition tokens", () => {
+    expect(eventSelectorSpec(events.dataset(rawInvoices).updated())).toEqual({
+      topic: "datasets",
+      types: ["dataset.version.committed"],
+      datasetId: "raw.invoices",
+    })
+    expect(eventSelectorSpec(events.sync(importInvoices).succeeded())).toEqual({
+      topic: "syncs",
+      types: ["sync.run.finished"],
+      syncId: "import-invoices",
+      runStatus: "succeeded",
+    })
+    expect(eventSelectorSpec(events.pipeline(normalizeInvoices).failed())).toEqual({
+      topic: "pipelines",
+      types: ["pipeline.run.finished"],
+      pipelineId: "normalize-invoices",
+      runStatus: "failed",
     })
   })
 })
@@ -259,5 +300,36 @@ describe("buildEventSelectorPredicate", () => {
         })
       )
     ).toBe(true)
+  })
+
+  test("matches typed run outcomes", () => {
+    const matches = buildEventSelectorPredicate(events.sync(importInvoices).succeeded())
+
+    expect(
+      matches(
+        event({
+          type: "sync.run.finished",
+          topic: "syncs",
+          payload: {
+            syncId: importInvoices.id,
+            runId: "run-1",
+            status: "succeeded",
+          },
+        })
+      )
+    ).toBe(true)
+    expect(
+      matches(
+        event({
+          type: "sync.run.finished",
+          topic: "syncs",
+          payload: {
+            syncId: importInvoices.id,
+            runId: "run-2",
+            status: "failed",
+          },
+        })
+      )
+    ).toBe(false)
   })
 })

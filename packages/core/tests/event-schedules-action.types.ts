@@ -1,8 +1,8 @@
-import type { InferTriggerEvent, ObjectRef } from "../src"
+import type { InferScheduleEvent, ObjectRef } from "../src"
 import {
   defineAction,
   defineObjectType,
-  defineTrigger,
+  defineSchedule,
   defineWorkflow,
   events,
   param,
@@ -21,22 +21,22 @@ const approveInvoice = defineAction("approve-invoice")
   .params({ reason: param("string") })
   .writeback(async () => {})
 
-const approvalRequested = defineTrigger("invoice.approval-requested").on(
+const approvalRequested = defineSchedule("invoice.approval-requested").on(
   events.action(approveInvoice).requested()
 )
 
-const approvalCompleted = defineTrigger("invoice.approval-completed").on(
+const approvalCompleted = defineSchedule("invoice.approval-completed").on(
   events.action(approveInvoice).completed()
 )
 
 // @ts-expect-error action sources do not expose state predicates
 approvalCompleted.where(() => ({ kind: "becomesTrue" }))
 
-declare const requestedEvent: InferTriggerEvent<typeof approvalRequested>
+declare const requestedEvent: InferScheduleEvent<typeof approvalRequested>
 const requestedInvoice: ObjectRef<"Invoice"> = requestedEvent.subject
 const requestedReason: string = requestedEvent.params.reason
 
-declare const completedEvent: InferTriggerEvent<typeof approvalCompleted>
+declare const completedEvent: InferScheduleEvent<typeof approvalCompleted>
 const completedInvoice: ObjectRef<"Invoice"> = completedEvent.subject
 
 // @ts-expect-error completed action events do not carry request params
@@ -51,11 +51,11 @@ void completedInvoice
 
 defineWorkflow("observe-approval-request")
   .input({ invoice: ref(Invoice), reason: "string" })
-  .when(approvalRequested, (event) => ({
+  .when(approvalRequested, ({ event }) => ({
     invoice: event.subject,
     reason: event.params.reason,
   }))
 
 defineWorkflow("observe-approval-completion")
   .input({ invoice: ref(Invoice) })
-  .when(approvalCompleted, (event) => ({ invoice: event.subject }))
+  .when(approvalCompleted, ({ event }) => ({ invoice: event.subject }))

@@ -11,7 +11,7 @@ provider.
 
 > The event log API is an **observability surface, not a trigger API**. Appending an event does
 > not directly run a [rule](../rules/overview.md) or [workflow](../workflows/overview.md).
-> Declarative [triggers](../triggers/overview.md) use event selectors, but they are defined and
+> Declarative [event schedules](../schedules/events.md) use event selectors, but they are defined and
 > registered separately from manual event appends.
 
 ## Domain events
@@ -227,7 +227,7 @@ webhook delivery storage to be configured.
 
 - [Connectors](../data/connectors.md) — where webhooks live
 - [Client events](../client/events.md) — event builders and React hooks for apps
-- [Triggers](../triggers/overview.md) — start workflows from object or link events
+- [Event schedules](../schedules/events.md) — start work from typed events
 - [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative state
   and multi-step processes
 - [Running actions from apps](../apps/actions.md) — action button state and scoped action events

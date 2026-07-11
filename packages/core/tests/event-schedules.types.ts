@@ -2,7 +2,7 @@ import type { ObjectRef } from "../src"
 import {
   defineObjectType,
   defineRule,
-  defineTrigger,
+  defineSchedule,
   defineWorkflow,
   defineWorkflowStep,
   events,
@@ -33,7 +33,7 @@ const Invoice = defineObjectType({
   ],
 })
 
-const highValuePayment = defineTrigger("invoice.high-value-payment")
+const highValuePayment = defineSchedule("invoice.high-value-payment")
   .on(events(Invoice).link(Invoice.l.payments).created())
   .where((event) => {
     event.link.p.amount.gt(500)
@@ -63,14 +63,14 @@ const invoiceAtRisk = defineRule("invoice.at-risk")
   .on(Invoice)
   .where((invoice) => invoice.p.amount.gt(500))
 
-const atRiskTriggered = defineTrigger("invoice.at-risk-triggered").on(
+const atRiskTriggered = defineSchedule("invoice.at-risk-triggered").on(
   events.rule(invoiceAtRisk).triggered()
 )
 
 // @ts-expect-error rule sources do not expose state predicates
 atRiskTriggered.where(() => ({ kind: "becomesTrue" }))
 
-defineTrigger("invoice.object-updated")
+defineSchedule("invoice.object-updated")
   .on(events(Invoice).updated())
   .where((event) => {
     event.object.p.status.eq("posted")
@@ -97,7 +97,7 @@ defineWorkflow("review-high-payment")
     payment: ref(Payment),
     amount: "double",
   })
-  .when(highValuePayment, (event) => {
+  .when(highValuePayment, ({ event }) => {
     const invoice: ObjectRef<"Invoice"> = event.source
     const payment: ObjectRef<"Payment"> = event.target
     const amount: number = event.link.p.amount
@@ -120,7 +120,7 @@ defineWorkflow("missing-trigger-mapper")
 
 defineWorkflow("collect-at-risk-invoice")
   .input({ invoice: ref(Invoice) })
-  .when(atRiskTriggered, (event) => {
+  .when(atRiskTriggered, ({ event }) => {
     const invoice: ObjectRef<"Invoice"> = event.subject
     const ruleId: "invoice.at-risk" = event.ruleId
 

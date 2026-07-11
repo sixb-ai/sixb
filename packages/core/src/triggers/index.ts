@@ -1,31 +1,8 @@
-export { datasetUpdated, defineTrigger, pipelineFinished, syncFinished } from "./builders"
+/** @deprecated Use named schedules and the `events.*` facade. */
+export { datasetUpdated, pipelineFinished, syncFinished } from "./builders"
+/** @deprecated Removed with the legacy run-trigger helpers. */
 export { TriggerValidationError } from "./errors"
-export type {
-  InferTriggerEvent,
-  RunTrigger,
-  TriggerActionEventContext,
-  TriggerBuilder,
-  TriggerCondition,
-  TriggerConditionScope,
-  TriggerDefinition,
-  TriggerDefinition as DomainTriggerDefinition,
-  TriggerDefinitionForEvent,
-  TriggerDefinitionWithEvent,
-  TriggerEventContext,
-  TriggerLinkEventContext,
-  TriggerObjectEventContext,
-  TriggerPredicateContext,
-  TriggerPropertyPredicateBuilder,
-  TriggerRuleEventContext,
-  TriggerScopedPredicate,
-  TriggerSourceBuilder,
-  TriggerTargetPredicateSubject,
-  TriggerWhereBuilder,
-} from "./types"
+/** @deprecated Use `ScheduleReference` for normalized schedule bindings. */
+export type { RunTrigger } from "./types"
+/** @deprecated Internal compatibility guard for legacy run triggers. */
 export { isRunTrigger } from "./types"
-export type { ValidateTriggersAtStartupOptions } from "./validation"
-export {
-  assertTriggerDefinition,
-  isTriggerDefinition,
-  validateTriggersAtStartup,
-} from "./validation"

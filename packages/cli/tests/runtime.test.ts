@@ -637,46 +637,6 @@ describe("startSixbRuntime", () => {
     }
   })
 
-  test("warns and skips scheduled workflows with non-empty input", async () => {
-    const daily = defineSchedule("runtime-required-workflow-daily").cron("0 2 * * *")
-    const workflow = defineWorkflow("runtime-required-workflow")
-      .input({ accountId: "string" })
-      .when(daily)
-      .then(workflowStep, () => ({}))
-    const sixb = new Sixb({
-      id: "cli-with-skipped-workflow-route",
-      ontology: [Zone],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: createLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      schedules: [daily],
-      workflows: [workflow],
-    })
-
-    let runtime: Awaited<ReturnType<typeof startSixbRuntime>> | null = null
-    try {
-      runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
-
-      expect(runtime.workflowWorker).not.toBeNull()
-      expect(runtime.orchestratorWorker).toBeNull()
-      expect(runtime.warnings).toContain(
-        "[Sixb] Workflow 'runtime-required-workflow' is scheduled but has non-empty input (accountId); it was not auto-routed."
-      )
-
-      await appendScheduleTriggered(sixb, daily.id)
-
-      const workflowJobs = await sixb.queues.workflows.claim({
-        projectId: sixb.id,
-        workerId: "observer",
-      })
-      expect(workflowJobs).toHaveLength(0)
-    } finally {
-      await runtime?.stop()
-    }
-  })
-
   test("co-hosts the rules worker when rules are registered", async () => {
     const broker = new InMemoryBroker()
     const sixb = new Sixb({

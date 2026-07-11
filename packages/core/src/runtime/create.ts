@@ -18,7 +18,6 @@ import {
   discoverRules,
   discoverSchedules,
   discoverSyncs,
-  discoverTriggers,
   discoverWorkflows,
 } from "../bootstrap"
 import type { Broker } from "../broker"
@@ -35,7 +34,6 @@ import type { ScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
-import type { TriggerDefinition } from "../triggers"
 import type { WorkflowDefinition } from "../workflows"
 import { RuntimeError } from "./errors"
 import { Sixb } from "./sixb"
@@ -62,7 +60,6 @@ export interface CreateSixbOptions {
   pipelines?: readonly PipelineDefinition[]
   projections?: readonly ProjectionDefinition[]
   rules?: readonly RuleDefinition[]
-  triggers?: readonly TriggerDefinition[]
   workflows?: readonly WorkflowDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
@@ -76,7 +73,7 @@ export interface CreateSixbOptions {
  *
  * Sixb auto-discovers exported definitions from `ontology/`, `actions/`, `functions/`,
  * `datasets/`, `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `triggers/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
+ * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
@@ -103,7 +100,6 @@ export async function createSixb(
     pipelines,
     datasets,
     rules,
-    triggers,
     workflows,
     groups,
     roles,
@@ -119,7 +115,6 @@ export async function createSixb(
     discoverPipelines(projectRoot),
     discoverDatasets(projectRoot),
     discoverRules(projectRoot),
-    discoverTriggers(projectRoot),
     discoverWorkflows(projectRoot),
     discoverGroups(projectRoot),
     discoverRoles(projectRoot),
@@ -147,7 +142,6 @@ export async function createSixb(
     pipelines: [...(options.pipelines ?? []), ...pipelines],
     projections,
     rules: [...(options.rules ?? []), ...rules],
-    triggers: [...(options.triggers ?? []), ...triggers],
     workflows: [...(options.workflows ?? []), ...workflows],
     groups: [...(options.groups ?? []), ...groups],
     roles: [...(options.roles ?? []), ...roles],
