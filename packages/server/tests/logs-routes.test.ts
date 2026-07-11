@@ -198,9 +198,11 @@ describe("/ws/logs", () => {
         await seed(sixb, { kind: "workflow", id: "w1" }, "after cursor", "info")
 
         const first = new WebSocket(wsUrl(baseUrl), [await issueTicket(baseUrl)])
+        const firstConnected = nextWsMessage(first)
         const second = new WebSocket(wsUrl(baseUrl), [await issueTicket(baseUrl)])
+        const secondConnected = nextWsMessage(second)
         try {
-          await Promise.all([nextWsMessage(first), nextWsMessage(second)])
+          await Promise.all([firstConnected, secondConnected])
           first.send(
             JSON.stringify({
               type: "subscribe",
