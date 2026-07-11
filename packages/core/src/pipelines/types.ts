@@ -12,9 +12,8 @@ import {
   type SqlTransformBody,
 } from "../lake-storage/sql-transforms"
 import type { Logger } from "../logging"
-import type { ScheduleDefinition } from "../schedules"
-import type { RunTrigger } from "../triggers"
-import { isRunTrigger } from "../triggers"
+import type { ScheduleDefinition, ScheduleReference } from "../schedules"
+import { isScheduleReference } from "../schedules"
 
 // ── Step execution ─────────────────────────────────────────
 
@@ -93,7 +92,7 @@ export type PipelineGraph = PipelineSequenceGraph
 export interface PipelineDefinition<TId extends string = string> {
   readonly kind: "pipeline"
   readonly id: TId
-  readonly triggers: readonly RunTrigger[]
+  readonly triggers: readonly ScheduleReference[]
   readonly graph: PipelineGraph
 }
 
@@ -128,7 +127,7 @@ export interface PipelineStepOutputOptions {
 }
 
 export interface PipelineBuilder<TId extends string = string> extends PipelineDefinition<TId> {
-  when(trigger: ScheduleDefinition | RunTrigger): PipelineBuilder<TId>
+  when(schedule: ScheduleDefinition): PipelineBuilder<TId>
   then(step: PipelineStepDefinition): PipelineBuilder<TId>
 }
 
@@ -141,7 +140,7 @@ export function isPipelineDefinition(value: unknown): value is PipelineDefinitio
     value.kind === "pipeline" &&
     typeof value.id === "string" &&
     Array.isArray(value.triggers) &&
-    value.triggers.every(isRunTrigger) &&
+    value.triggers.every(isScheduleReference) &&
     isPipelineGraph(value.graph)
   )
 }

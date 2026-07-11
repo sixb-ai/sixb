@@ -23,26 +23,10 @@ export const RequestSyncRunBodySchema = z.object({
   commitMessage: z.string().optional(),
 })
 
-const SyncTriggerSchema = z.union([
-  z.object({
-    type: z.literal("schedule"),
-    scheduleId: z.string(),
-  }),
-  z.object({
-    type: z.literal("sync.finished"),
-    syncId: z.string(),
-    status: z.literal("succeeded"),
-  }),
-  z.object({
-    type: z.literal("pipeline.finished"),
-    pipelineId: z.string(),
-    status: z.literal("succeeded"),
-  }),
-  z.object({
-    type: z.literal("dataset.updated"),
-    datasetId: z.string(),
-  }),
-])
+const SyncTriggerSchema = z.object({
+  type: z.literal("schedule"),
+  scheduleId: z.string(),
+})
 
 export const SyncRunSchema = z.object({
   id: z.string(),

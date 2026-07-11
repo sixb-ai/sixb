@@ -4,6 +4,16 @@ export { createCronFieldMatcher, createCronMatcher } from "./cron"
 export { CronValidationError, ScheduleValidationError } from "./errors"
 export { nextCronOccurrence } from "./next-occurrence"
 export type {
+  EventScheduleEvaluationResult,
+  RuntimeEventScheduleContext,
+  RuntimeEventScheduleDefinition,
+} from "./runtime"
+export {
+  buildEventScheduleContext,
+  evaluateEventSchedule,
+  eventScheduleSubscribedEventTypes,
+} from "./runtime"
+export type {
   CronScheduleBuilder,
   CronScheduleDefinition,
   CronScheduleTriggerDefinition,
@@ -25,6 +35,7 @@ export type {
   ScheduleReference,
   ScheduleTriggerDefinition,
 } from "./types"
+export { isScheduleReference } from "./types"
 export type { ValidateSchedulesAtStartupOptions } from "./validation"
 export {
   assertScheduleDefinition,

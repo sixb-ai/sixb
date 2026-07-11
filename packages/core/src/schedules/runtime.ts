@@ -1,86 +1,68 @@
-import { buildEventSelectorPredicate } from "../events/selectors"
+import { buildEventSelectorPredicate, type EventSelectorSpec } from "../events/selectors"
 import type { DomainEvent, PropertyChange, PropertyChangeMap } from "../events/types"
 import { evaluatePredicate } from "../predicates"
-import type { ActionRunFailure } from "../storage"
-import type { TriggerConditionScope, TriggerDefinition } from "./types"
+import type { EventScheduleConditionScope, EventScheduleTriggerDefinition } from "./types"
 
-export type RuntimeTriggerEventContext =
-  | {
-      readonly object: {
-        readonly objectTypeId: string
-        readonly primaryId: string
-        readonly p: Readonly<Record<string, unknown>>
-      }
-    }
-  | {
-      readonly source: { readonly objectTypeId: string; readonly primaryId: string }
-      readonly target: { readonly objectTypeId: string; readonly primaryId: string }
-      readonly link: {
-        readonly id: string
-        readonly p: Readonly<Record<string, unknown>>
-      }
-    }
-  | {
-      readonly ruleId: string
-      readonly subject: { readonly objectTypeId: string; readonly primaryId: string }
-    }
-  | RuntimeActionTriggerEventContext
+export type RuntimeEventScheduleContext = Readonly<Record<string, unknown>>
 
-type RuntimeActionTriggerEventContext = {
-  readonly actionId: string
-  readonly runId: string
-  readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
-} & (
-  | { readonly params: Readonly<Record<string, unknown>> }
-  | { readonly error: ActionRunFailure }
-  | Record<never, never>
-)
-
-export interface TriggerEvaluationResult {
-  readonly trigger: TriggerDefinition
-  readonly event: RuntimeTriggerEventContext
+export interface RuntimeEventScheduleDefinition {
+  readonly kind: "schedule"
+  readonly id: string
+  readonly trigger: EventScheduleTriggerDefinition<EventSelectorSpec<unknown>>
 }
 
-export function triggerSubscribedEventTypes(
-  trigger: TriggerDefinition
+export interface EventScheduleEvaluationResult<TEvent = unknown> {
+  readonly schedule: RuntimeEventScheduleDefinition
+  readonly event: TEvent
+}
+
+export function eventScheduleSubscribedEventTypes(
+  schedule: RuntimeEventScheduleDefinition
 ): readonly DomainEvent["type"][] {
-  return trigger.source.types ?? []
+  return schedule.trigger.source.types ?? []
 }
 
-export function evaluateTrigger(
-  trigger: TriggerDefinition,
+export function evaluateEventSchedule(
+  schedule: RuntimeEventScheduleDefinition,
   event: DomainEvent
-): TriggerEvaluationResult | null {
-  if (!buildEventSelectorPredicate(trigger.source)(event)) {
+): EventScheduleEvaluationResult | null {
+  if (!buildEventSelectorPredicate(schedule.trigger.source)(event)) {
     return null
   }
 
-  const eventContext = buildTriggerEventContext(event)
+  const eventContext = buildEventScheduleContext(event)
   if (!eventContext) {
     return null
   }
 
-  if (!trigger.condition) {
-    return { trigger, event: eventContext }
+  const condition = schedule.trigger.condition
+  if (!condition) {
+    return {
+      schedule,
+      event: eventContext,
+    }
   }
 
-  const afterProperties = propertiesForScope(event, trigger.condition.scope)
+  const afterProperties = propertiesForScope(event, condition.scope)
   const fields = fieldsForEvent(event)
-  if (!evaluatePredicate(trigger.condition.predicate, { properties: afterProperties, fields })) {
+  if (!evaluatePredicate(condition.predicate, { properties: afterProperties, fields })) {
     return null
   }
 
   if (isUpdateEvent(event)) {
     const beforeProperties = previousProperties(afterProperties, event.payload.propertyChanges)
-    if (evaluatePredicate(trigger.condition.predicate, { properties: beforeProperties, fields })) {
+    if (evaluatePredicate(condition.predicate, { properties: beforeProperties, fields })) {
       return null
     }
   }
 
-  return { trigger, event: eventContext }
+  return {
+    schedule,
+    event: eventContext,
+  }
 }
 
-export function buildTriggerEventContext(event: DomainEvent): RuntimeTriggerEventContext | null {
+export function buildEventScheduleContext(event: DomainEvent): RuntimeEventScheduleContext | null {
   switch (event.type) {
     case "object.created":
     case "object.updated":
@@ -138,6 +120,12 @@ export function buildTriggerEventContext(event: DomainEvent): RuntimeTriggerEven
         ...actionSubjectContext(event.payload.subject),
         error: event.payload.error,
       }
+    case "dataset.version.committed":
+      return { ...event.payload }
+    case "sync.run.finished":
+      return { ...event.payload }
+    case "pipeline.run.finished":
+      return { ...event.payload }
     default:
       return null
   }
@@ -177,7 +165,7 @@ function fieldsForEvent(event: DomainEvent): Readonly<Record<string, unknown>> {
 
 function propertiesForScope(
   event: DomainEvent,
-  scope: TriggerConditionScope
+  scope: EventScheduleConditionScope
 ): Readonly<Record<string, unknown>> {
   if (scope === "event.object" && event.topic !== "objects") {
     return {}

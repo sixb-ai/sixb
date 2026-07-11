@@ -1,21 +1,21 @@
 import type {
   DatasetVersionCommittedEvent,
   DomainEvent,
-  DomainTriggerDefinition,
   EventsRuntime,
   NewQueueJob,
   PipelineDefinition,
-  PipelineRunFinishedEvent,
   PipelineRunRequestedQueueJob,
   ProjectionDefinition,
   ProjectionRunRequestedQueueJob,
   Queues,
+  RuntimeEventScheduleDefinition,
+  ScheduleDefinition,
   ScheduleTriggeredEvent,
   SyncDefinition,
-  SyncRunFinishedEvent,
   SyncRunRequestedQueueJob,
   WorkflowDefinition,
   WorkflowRunRequestedQueueJob,
+  WorkflowScheduleTriggerDefinition,
 } from "@sixb/core"
 
 export type RoutableProjectionDefinition = ProjectionDefinition
@@ -23,22 +23,14 @@ export type RoutableProjectionDefinition = ProjectionDefinition
 type ScheduleTriggeredRouteKey =
   `${ScheduleTriggeredEvent["type"]}:${ScheduleTriggeredEvent["payload"]["scheduleId"]}`
 
-type SyncRunFinishedRouteKey =
-  `${SyncRunFinishedEvent["type"]}:${SyncRunFinishedEvent["payload"]["syncId"]}:${SyncRunFinishedEvent["payload"]["status"]}`
-
-type PipelineRunFinishedRouteKey =
-  `${PipelineRunFinishedEvent["type"]}:${PipelineRunFinishedEvent["payload"]["pipelineId"]}:${PipelineRunFinishedEvent["payload"]["status"]}`
-
 type DatasetVersionCommittedRouteKey =
   `${DatasetVersionCommittedEvent["type"]}:${DatasetVersionCommittedEvent["payload"]["datasetId"]}`
-type TriggerEventRouteKey = `trigger:${DomainEvent["type"]}:${string}`
+type EventScheduleRouteKey = `event-schedule:${DomainEvent["type"]}:${string}`
 
 export type OrchestratorRouteKey =
   | ScheduleTriggeredRouteKey
-  | SyncRunFinishedRouteKey
-  | PipelineRunFinishedRouteKey
   | DatasetVersionCommittedRouteKey
-  | TriggerEventRouteKey
+  | EventScheduleRouteKey
 
 export type ProjectionRunRequestedJobTemplate = Omit<
   NewQueueJob<ProjectionRunRequestedQueueJob>,
@@ -53,38 +45,50 @@ export type OrchestratorJob =
   | { readonly queue: "projections"; readonly job: ProjectionRunRequestedJobTemplate }
   | { readonly queue: "workflows"; readonly job: NewQueueJob<WorkflowRunRequestedQueueJob> }
 
-export interface OrchestratorWorkflowTriggerBinding {
-  readonly workflowId: string
-  readonly triggerId: string
+export type OrchestratorEventScheduleTarget =
+  | { readonly queue: "syncRuns"; readonly syncId: string }
+  | { readonly queue: "pipelines"; readonly pipelineId: string }
+  | {
+      readonly queue: "workflows"
+      readonly workflowId: string
+      readonly mapper?: WorkflowScheduleTriggerDefinition["mapper"]
+    }
+
+export interface OrchestratorEventScheduleBinding {
+  readonly schedule: RuntimeEventScheduleDefinition
+  readonly targets: readonly OrchestratorEventScheduleTarget[]
 }
 
 export interface OrchestratorRoute {
   readonly eventType: DomainEvent["type"]
   readonly jobs: readonly OrchestratorJob[]
-  readonly workflowTriggers?: readonly OrchestratorWorkflowTriggerBinding[]
+  readonly eventSchedules?: readonly OrchestratorEventScheduleBinding[]
 }
 
 export type OrchestratorRoutes = ReadonlyMap<OrchestratorRouteKey, OrchestratorRoute>
 
 export interface CompileRoutesParams {
+  readonly schedules: readonly ScheduleDefinition[]
   readonly syncs: readonly SyncDefinition[]
   readonly pipelines: readonly PipelineDefinition[]
   readonly projections?: readonly RoutableProjectionDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
-  readonly triggers?: readonly DomainTriggerDefinition[]
 }
 
+export type ScheduleConsumerKind = "sync" | "pipeline" | "workflow"
+
 export type CompileRoutesDiagnostic =
+  | {
+      readonly type: "schedule.reference.unknown"
+      readonly scheduleId: string
+      readonly consumerKind: ScheduleConsumerKind
+      readonly consumerId: string
+    }
   | {
       readonly type: "workflow.schedule.input-required"
       readonly workflowId: string
       readonly scheduleId: string
       readonly inputFields: readonly string[]
-    }
-  | {
-      readonly type: "workflow.trigger.unknown"
-      readonly workflowId: string
-      readonly triggerId: string
     }
 
 export interface CompileRoutesResult {
@@ -97,6 +101,4 @@ export interface OrchestratorRuntimeOptions {
   readonly events: EventsRuntime
   readonly queues: Queues
   readonly routes: OrchestratorRoutes
-  readonly workflows?: readonly WorkflowDefinition[]
-  readonly triggers?: readonly DomainTriggerDefinition[]
 }

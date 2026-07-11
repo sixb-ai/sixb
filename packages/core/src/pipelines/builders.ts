@@ -1,10 +1,8 @@
 import type { DatasetDefinition } from "../datasets"
 import type { DatasetWriteMode } from "../lake-storage"
 import { SQL_DIALECT } from "../lake-storage/sql-transforms"
-import type { ScheduleDefinition } from "../schedules"
+import type { ScheduleDefinition, ScheduleReference } from "../schedules"
 import { isScheduleDefinition } from "../schedules"
-import type { RunTrigger } from "../triggers"
-import { isRunTrigger } from "../triggers"
 import { PipelineError } from "./errors"
 import type {
   PipelineBuilder,
@@ -46,16 +44,11 @@ function assertInputs(inputs: Readonly<Record<string, DatasetDefinition>>): void
   }
 }
 
-function normalizeTrigger(trigger: ScheduleDefinition | RunTrigger): RunTrigger {
-  if (isScheduleDefinition(trigger)) {
-    return { type: "schedule", scheduleId: trigger.id }
+function scheduleReference(schedule: ScheduleDefinition): ScheduleReference {
+  if (!isScheduleDefinition(schedule)) {
+    throw new PipelineError("Pipeline .when(...) only accepts schedules.")
   }
-
-  if (isRunTrigger(trigger)) {
-    return trigger
-  }
-
-  throw new PipelineError("Pipeline trigger is invalid.")
+  return { type: "schedule", scheduleId: schedule.id }
 }
 
 function createPipelineBuilder<TId extends string>(
@@ -63,10 +56,10 @@ function createPipelineBuilder<TId extends string>(
 ): PipelineBuilder<TId> {
   return {
     ...definition,
-    when(trigger: ScheduleDefinition | RunTrigger): PipelineBuilder<TId> {
+    when(schedule: ScheduleDefinition): PipelineBuilder<TId> {
       return createPipelineBuilder({
         ...definition,
-        triggers: [...definition.triggers, normalizeTrigger(trigger)],
+        triggers: [...definition.triggers, scheduleReference(schedule)],
       })
     },
     // biome-ignore lint/suspicious/noThenProperty: Pipeline composition intentionally uses `.then(step)`.

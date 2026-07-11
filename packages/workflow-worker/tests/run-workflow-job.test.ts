@@ -427,8 +427,8 @@ describe("runWorkflowJob", () => {
       .then(findBestInvoice)
     const sixb = createSixb({ workflows: [workflow] })
     const source = {
-      type: "trigger" as const,
-      triggerId: "transaction.high-value",
+      type: "schedule" as const,
+      scheduleId: "transaction.high-value",
       eventId: "evt-1",
       principal: SYSTEM_PRINCIPAL,
     }

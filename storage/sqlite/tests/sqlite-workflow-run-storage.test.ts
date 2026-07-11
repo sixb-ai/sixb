@@ -46,9 +46,9 @@ describe("SqliteWorkflowRunStorage", () => {
   })
 
   test("persists workflow run source when starting directly or from a queued run", async () => {
-    const triggerSource = {
-      type: "trigger",
-      triggerId: "trigger.invoice-payment-linked",
+    const scheduleSource = {
+      type: "schedule",
+      scheduleId: "invoice-payment-linked",
       eventId: "evt_1",
       principal: { type: "system", id: "sixb-orchestrator" },
     } as const
@@ -58,16 +58,16 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_123" },
-      source: triggerSource,
+      source: scheduleSource,
     })
 
-    expect(started.source).toEqual(triggerSource)
+    expect(started.source).toEqual(scheduleSource)
     expect(
       await storage.getById({
         projectId: "my-app",
         id: "wf-run-triggered",
       })
-    ).toMatchObject({ source: triggerSource })
+    ).toMatchObject({ source: scheduleSource })
 
     await storage.queue({
       id: "wf-run-queued-without-source",
@@ -81,10 +81,10 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_456" },
-      source: triggerSource,
+      source: scheduleSource,
     })
 
-    expect(running.source).toEqual(triggerSource)
+    expect(running.source).toEqual(scheduleSource)
 
     await storage.queue({
       id: "wf-run-queued-with-source",
@@ -99,7 +99,7 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_789" },
-      source: triggerSource,
+      source: scheduleSource,
     })
 
     expect(alreadySourced.source).toEqual({ type: "manual" })

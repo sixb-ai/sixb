@@ -123,8 +123,8 @@ export type WorkflowRunSource =
       readonly deliveryId?: string
     }
   | {
-      readonly type: "trigger"
-      readonly triggerId: string
+      readonly type: "schedule"
+      readonly scheduleId: string
       readonly eventId: string
       readonly principal: Principal
     }

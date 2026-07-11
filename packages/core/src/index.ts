@@ -1272,6 +1272,7 @@ export type {
   EventScheduleConditionFor,
   EventScheduleConditionScope,
   EventScheduleDefinition,
+  EventScheduleEvaluationResult,
   EventSchedulePredicateContext,
   EventSchedulePropertyPredicateBuilder,
   EventScheduleSourceBuilder,
@@ -1279,6 +1280,8 @@ export type {
   EventScheduleTriggerDefinition,
   EventScheduleWhereBuilder,
   InferScheduleEvent,
+  RuntimeEventScheduleContext,
+  RuntimeEventScheduleDefinition,
   ScheduleBuilder,
   ScheduleDefinition,
   ScheduleDefinitionForEvent,
@@ -1288,22 +1291,15 @@ export type {
 } from "./schedules"
 export {
   assertScheduleDefinition,
+  buildEventScheduleContext,
   defineSchedule,
+  evaluateEventSchedule,
+  eventScheduleSubscribedEventTypes,
   isScheduleDefinition,
+  isScheduleReference,
   ScheduleValidationError,
   validateSchedulesAtStartup,
 } from "./schedules"
-
-// ── Triggers ───────────────────────────────────────────────
-
-export type { RunTrigger } from "./triggers"
-export {
-  datasetUpdated,
-  isRunTrigger,
-  pipelineFinished,
-  syncFinished,
-  TriggerValidationError,
-} from "./triggers"
 
 // ── Pipelines ───────────────────────────────────────────────
 

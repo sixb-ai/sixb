@@ -5,7 +5,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   col,
-  datasetUpdated,
   defineAction,
   defineConnector,
   defineDataset,
@@ -114,6 +113,10 @@ const cleanGithubEventsDataset = defineDataset("clean.github.events", {
   schema: [col("eventId", "string"), col("action", "string", { nullable: true })],
 })
 
+const githubEventsUpdated = defineSchedule("github-events-updated").on(
+  events.dataset(githubEventsDataset).updated()
+)
+
 const githubEventsSync = defineSync("sync-github-events", { mode: "append" })
   .when(nightlyGithub)
   .from(githubConnector)
@@ -132,7 +135,7 @@ const cleanGithubEventsStep = definePipelineStep("clean-github-events")
   )
 
 const githubEventsPipeline = definePipeline("github-events-pipeline")
-  .when(datasetUpdated(githubEventsDataset.id))
+  .when(githubEventsUpdated)
   .then(cleanGithubEventsStep)
 
 const inspectDeviceStep = defineWorkflowStep("inspect-device")
@@ -332,7 +335,7 @@ describe("SixbServer HTTP contract", () => {
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),
       connectors: [githubConnector],
-      schedules: [nightlyGithub, deviceUpdated],
+      schedules: [nightlyGithub, deviceUpdated, githubEventsUpdated],
       datasets: [githubEventsDataset, auditLogDataset, cleanGithubEventsDataset],
       syncs: [githubEventsSync],
       pipelines: [githubEventsPipeline],
@@ -871,7 +874,7 @@ describe("SixbServer HTTP contract", () => {
       expect(pipelinesResponse.status).toBe(200)
       const pipelines = (await pipelinesResponse.json()) as Array<{
         id: string
-        triggers: Array<{ type: string; datasetId?: string }>
+        triggers: Array<{ type: string; scheduleId?: string }>
         graph: {
           nodes: Array<{
             step: {
@@ -888,7 +891,7 @@ describe("SixbServer HTTP contract", () => {
       expect(pipelines).toEqual([
         expect.objectContaining({
           id: "github-events-pipeline",
-          triggers: [{ type: "dataset.updated", datasetId: "raw.github.events" }],
+          triggers: [{ type: "schedule", scheduleId: "github-events-updated" }],
           graph: {
             kind: "sequence",
             nodes: [

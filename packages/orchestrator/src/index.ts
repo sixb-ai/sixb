@@ -4,12 +4,13 @@ export type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
   CompileRoutesResult,
+  OrchestratorEventScheduleBinding,
+  OrchestratorEventScheduleTarget,
   OrchestratorJob,
   OrchestratorRoute,
   OrchestratorRouteKey,
   OrchestratorRoutes,
   OrchestratorRuntimeOptions,
-  OrchestratorWorkflowTriggerBinding,
   ProjectionRunRequestedJobTemplate,
 } from "./types"
 export { OrchestratorWorker } from "./worker"

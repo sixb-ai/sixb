@@ -1,5 +1,5 @@
 import type { DatasetRow } from "@sixb/core"
-import { datasetUpdated, definePipeline, definePipelineStep } from "@sixb/core"
+import { definePipeline, definePipelineStep, defineSchedule, events } from "@sixb/core"
 import {
   erpActiveProjectsDataset,
   erpProjectSummariesDataset,
@@ -41,7 +41,11 @@ export const projectSummariesStep = definePipelineStep("project-summaries")
     await output.writeRows(projectSummaries(inputs.projects.readRows()))
   })
 
+export const erpProjectsUpdated = defineSchedule("erp-projects-updated").on(
+  events.dataset(erpProjectsDataset).updated()
+)
+
 export const projectReportingPipeline = definePipeline("project-reporting")
-  .when(datasetUpdated(erpProjectsDataset.id))
+  .when(erpProjectsUpdated)
   .then(activeProjectsStep)
   .then(projectSummariesStep)

@@ -12,8 +12,13 @@ import {
   emitPipelineRunStepFinished,
   emitPipelineRunStepStarted,
 } from "./events"
-import { runPipelineJob } from "./run-pipeline-job"
-import type { PipelineJob, PipelineWorkerContext, PipelineWorkerSixb } from "./types"
+import { PipelineRunAlreadyStartedError, runPipelineJob } from "./run-pipeline-job"
+import type {
+  PipelineJob,
+  PipelineRunResult,
+  PipelineWorkerContext,
+  PipelineWorkerSixb,
+} from "./types"
 
 export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
   private readonly context: PipelineWorkerContext
@@ -49,16 +54,23 @@ export class PipelineWorker extends QueueWorker<PipelineRunRequestedQueueJob> {
       pipelineId: job.payload.pipelineId,
     }
 
-    const result = await runPipelineJob({
-      runtime: this.context,
-      job: pipelineJob,
-      signal,
-      onRunStarted: (run) => emitPipelineRunStarted(this.sixb.events, run),
-      onStepStarted: (step, context) => emitPipelineRunStepStarted(this.sixb.events, step, context),
-      onStepFinished: (step, context) =>
-        emitPipelineRunStepFinished(this.sixb.events, step, context),
-      onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb, pipelineJob, step),
-    })
+    let result: PipelineRunResult
+    try {
+      result = await runPipelineJob({
+        runtime: this.context,
+        job: pipelineJob,
+        signal,
+        onRunStarted: (run) => emitPipelineRunStarted(this.sixb.events, run),
+        onStepStarted: (step, context) =>
+          emitPipelineRunStepStarted(this.sixb.events, step, context),
+        onStepFinished: (step, context) =>
+          emitPipelineRunStepFinished(this.sixb.events, step, context),
+        onStepCommitted: (step) => emitDatasetVersionCommitted(this.sixb, pipelineJob, step),
+      })
+    } catch (error) {
+      if (error instanceof PipelineRunAlreadyStartedError) return
+      throw error
+    }
 
     await emitPipelineRunFinished(this.sixb.events, {
       id: pipelineJob.id,

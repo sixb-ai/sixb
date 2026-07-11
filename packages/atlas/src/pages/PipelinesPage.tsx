@@ -95,25 +95,16 @@ function pipelineName(pipeline: Pick<PipelineSummary, "id">): string {
 
 function pipelineSummary(pipeline: PipelineSummary): string {
   const stepCount = pipeline.graph.nodes.length
-  const triggerCount = pipeline.triggers.length
+  const scheduleCount = pipeline.triggers.length
   const parts = [`${stepCount} step${stepCount === 1 ? "" : "s"}`]
-  if (triggerCount > 0) {
-    parts.push(`${triggerCount} trigger${triggerCount === 1 ? "" : "s"}`)
+  if (scheduleCount > 0) {
+    parts.push(`${scheduleCount} schedule${scheduleCount === 1 ? "" : "s"}`)
   }
   return parts.join(" · ")
 }
 
-function triggerLabel(trigger: PipelineSummary["triggers"][number]): string {
-  switch (trigger.type) {
-    case "schedule":
-      return `Schedule ${trigger.scheduleId}`
-    case "sync.finished":
-      return `After ${trigger.syncId}`
-    case "pipeline.finished":
-      return `After ${trigger.pipelineId}`
-    case "dataset.updated":
-      return `Dataset ${trigger.datasetId}`
-  }
+function scheduleLabel(schedule: PipelineSummary["triggers"][number]): string {
+  return `Schedule ${schedule.scheduleId}`
 }
 
 function runStatusLabel(status: PipelineRunStatus): string {
@@ -251,7 +242,7 @@ function PipelineTableView({
           <TableRow>
             <TableHead>Pipeline</TableHead>
             <TableHead className="hidden sm:table-cell">Steps</TableHead>
-            <TableHead className="hidden md:table-cell">Triggers</TableHead>
+            <TableHead className="hidden md:table-cell">Schedules</TableHead>
             <TableHead>Latest Run</TableHead>
           </TableRow>
         </TableHeader>
@@ -1396,11 +1387,11 @@ export function PipelineDetailPage() {
                       <span>{pipelineSummary(pipeline)}</span>
                       {pipeline.triggers.map((trigger) => (
                         <span
-                          key={triggerLabel(trigger)}
+                          key={scheduleLabel(trigger)}
                           className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5"
                         >
                           <Clock3 className="h-3 w-3" />
-                          {triggerLabel(trigger)}
+                          {scheduleLabel(trigger)}
                         </span>
                       ))}
                     </div>

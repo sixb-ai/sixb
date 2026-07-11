@@ -1,37 +1,36 @@
 import {
   type DomainEvent,
-  type DomainTriggerDefinition,
+  eventScheduleSubscribedEventTypes,
   projectionKindOf,
-  type RunTrigger,
-  triggerSubscribedEventTypes,
+  type ScheduleDefinition,
+  type ScheduleReference,
 } from "@sixb/core"
 import { OrchestratorError } from "./errors"
-import { triggerRouteKeyForSelector } from "./route-key"
+import { eventScheduleRouteKeyForSelector } from "./route-key"
 import type {
   CompileRoutesDiagnostic,
   CompileRoutesParams,
   CompileRoutesResult,
+  OrchestratorEventScheduleBinding,
+  OrchestratorEventScheduleTarget,
   OrchestratorJob,
   OrchestratorRouteKey,
   OrchestratorRoutes,
-  OrchestratorWorkflowTriggerBinding,
+  ScheduleConsumerKind,
 } from "./types"
 
 type MutableOrchestratorRoute = {
   eventType: DomainEvent["type"]
   jobs: OrchestratorJob[]
-  workflowTriggers?: OrchestratorWorkflowTriggerBinding[]
+  eventSchedules?: Array<{
+    schedule: OrchestratorEventScheduleBinding["schedule"]
+    targets: OrchestratorEventScheduleTarget[]
+  }>
 }
 
 type MutableOrchestratorRoutes = Map<OrchestratorRouteKey, MutableOrchestratorRoute>
-type NonScheduleRunTrigger = Exclude<RunTrigger, { readonly type: "schedule" }>
 
-/**
- * Compiles a static routing table from declared syncs, pipelines, workflows, and projections.
- * Syncs and pipelines are routed from their triggers; workflows are routed from eligible
- * schedule triggers; projections are routed by dataset id.
- * Safe to call at startup; the result is frozen at compile time.
- */
+/** Compiles the declarative schedule graph into event-scoped queue routes. */
 export function compileRoutes(params: CompileRoutesParams): OrchestratorRoutes {
   return compileRoutesWithDiagnostics(params).routes
 }
@@ -39,67 +38,60 @@ export function compileRoutes(params: CompileRoutesParams): OrchestratorRoutes {
 export function compileRoutesWithDiagnostics(params: CompileRoutesParams): CompileRoutesResult {
   const routes: MutableOrchestratorRoutes = new Map()
   const diagnostics: CompileRoutesDiagnostic[] = []
-  const triggersById = new Map((params.triggers ?? []).map((trigger) => [trigger.id, trigger]))
+  const schedulesById = new Map(params.schedules.map((schedule) => [schedule.id, schedule]))
 
   for (const sync of params.syncs) {
-    for (const trigger of sync.triggers) {
-      addRouteJob(routes, trigger, {
-        queue: "syncRuns",
-        job: { type: "sync.run.requested", payload: { syncId: sync.id } },
+    for (const reference of sync.triggers) {
+      addScheduleTarget({
+        routes,
+        diagnostics,
+        schedulesById,
+        reference,
+        consumerKind: "sync",
+        consumerId: sync.id,
+        target: { queue: "syncRuns", syncId: sync.id },
       })
     }
   }
 
   for (const pipeline of params.pipelines) {
-    for (const trigger of pipeline.triggers) {
-      addRouteJob(routes, trigger, {
-        queue: "pipelines",
-        job: { type: "pipeline.run.requested", payload: { pipelineId: pipeline.id } },
+    for (const reference of pipeline.triggers) {
+      addScheduleTarget({
+        routes,
+        diagnostics,
+        schedulesById,
+        reference,
+        consumerKind: "pipeline",
+        consumerId: pipeline.id,
+        target: { queue: "pipelines", pipelineId: pipeline.id },
       })
     }
   }
 
   for (const workflow of params.workflows ?? []) {
-    for (const trigger of workflow.triggers) {
-      if (trigger.type === "trigger") {
-        const definition = triggersById.get(trigger.triggerId)
-        if (!definition) {
-          diagnostics.push({
-            type: "workflow.trigger.unknown",
-            workflowId: workflow.id,
-            triggerId: trigger.triggerId,
-          })
-          continue
-        }
-
-        addTriggerWorkflowRouteBinding(routes, definition, {
-          workflowId: workflow.id,
-          triggerId: trigger.triggerId,
-        })
-        continue
-      }
-
-      if (trigger.type !== "schedule") continue
-
+    for (const reference of workflow.triggers) {
       const inputFields = Object.keys(workflow.input)
-      if (inputFields.length > 0) {
+      if (reference.mapper === undefined && inputFields.length > 0) {
         diagnostics.push({
           type: "workflow.schedule.input-required",
           workflowId: workflow.id,
-          scheduleId: trigger.scheduleId,
+          scheduleId: reference.scheduleId,
           inputFields,
         })
         continue
       }
 
-      addScheduleRouteJob(routes, trigger.scheduleId, {
-        queue: "workflows",
-        job: {
-          type: "workflow.run.requested",
-          payload: {
-            workflowId: workflow.id,
-            input: {},
-          },
+      addScheduleTarget({
+        routes,
+        diagnostics,
+        schedulesById,
+        reference,
+        consumerKind: "workflow",
+        consumerId: workflow.id,
+        target: {
+          queue: "workflows",
+          workflowId: workflow.id,
+          ...(reference.mapper !== undefined ? { mapper: reference.mapper } : {}),
         },
       })
     }
@@ -122,18 +114,65 @@ export function compileRoutesWithDiagnostics(params: CompileRoutesParams): Compi
   return { routes, diagnostics }
 }
 
-function addRouteJob(
-  routes: MutableOrchestratorRoutes,
-  trigger: RunTrigger,
-  job: OrchestratorJob
-): void {
-  if (trigger.type === "schedule") {
-    addScheduleRouteJob(routes, trigger.scheduleId, job)
+function addScheduleTarget(input: {
+  routes: MutableOrchestratorRoutes
+  diagnostics: CompileRoutesDiagnostic[]
+  schedulesById: ReadonlyMap<string, ScheduleDefinition>
+  reference: ScheduleReference
+  consumerKind: ScheduleConsumerKind
+  consumerId: string
+  target: OrchestratorEventScheduleTarget
+}): void {
+  const schedule = input.schedulesById.get(input.reference.scheduleId)
+  if (!schedule) {
+    input.diagnostics.push({
+      type: "schedule.reference.unknown",
+      scheduleId: input.reference.scheduleId,
+      consumerKind: input.consumerKind,
+      consumerId: input.consumerId,
+    })
     return
   }
 
-  const route = triggerToRoute(trigger)
-  addCompiledRouteJob(routes, route, job)
+  if (schedule.trigger.type === "cron") {
+    addScheduleRouteJob(input.routes, schedule.id, eventScheduleTargetToJob(input.target))
+    return
+  }
+
+  const eventSchedule = schedule as OrchestratorEventScheduleBinding["schedule"]
+
+  for (const eventType of eventScheduleSubscribedEventTypes(eventSchedule)) {
+    const key = eventScheduleRouteKeyForSelector(eventType, eventSchedule.trigger.source)
+    if (!key) {
+      throw new OrchestratorError(
+        `Schedule '${schedule.id}' source cannot be compiled into a scoped route.`
+      )
+    }
+    addCompiledEventSchedule(input.routes, { key, eventType }, eventSchedule, input.target)
+  }
+}
+
+function eventScheduleTargetToJob(target: OrchestratorEventScheduleTarget): OrchestratorJob {
+  switch (target.queue) {
+    case "syncRuns":
+      return {
+        queue: "syncRuns",
+        job: { type: "sync.run.requested", payload: { syncId: target.syncId } },
+      }
+    case "pipelines":
+      return {
+        queue: "pipelines",
+        job: { type: "pipeline.run.requested", payload: { pipelineId: target.pipelineId } },
+      }
+    case "workflows":
+      return {
+        queue: "workflows",
+        job: {
+          type: "workflow.run.requested",
+          payload: { workflowId: target.workflowId, input: {} },
+        },
+      }
+  }
 }
 
 function addScheduleRouteJob(
@@ -143,10 +182,7 @@ function addScheduleRouteJob(
 ): void {
   addCompiledRouteJob(
     routes,
-    {
-      key: `schedule.triggered:${scheduleId}`,
-      eventType: "schedule.triggered",
-    },
+    { key: `schedule.triggered:${scheduleId}`, eventType: "schedule.triggered" },
     job
   )
 }
@@ -161,53 +197,32 @@ function addCompiledRouteJob(
     existing.jobs.push(job)
     return
   }
-
-  routes.set(route.key, {
-    eventType: route.eventType,
-    jobs: [job],
-  })
+  routes.set(route.key, { eventType: route.eventType, jobs: [job] })
 }
 
-function addTriggerWorkflowRouteBinding(
-  routes: MutableOrchestratorRoutes,
-  trigger: DomainTriggerDefinition,
-  binding: OrchestratorWorkflowTriggerBinding
-): void {
-  for (const eventType of triggerSubscribedEventTypes(trigger)) {
-    const key = triggerRouteKeyForSelector(eventType, trigger.source)
-    if (!key) {
-      throw new OrchestratorError(
-        `Trigger '${trigger.id}' source cannot be compiled into a scoped route.`
-      )
-    }
-    addCompiledRouteWorkflowTrigger(
-      routes,
-      {
-        key,
-        eventType,
-      },
-      binding
-    )
-  }
-}
-
-function addCompiledRouteWorkflowTrigger(
+function addCompiledEventSchedule(
   routes: MutableOrchestratorRoutes,
   route: { key: OrchestratorRouteKey; eventType: DomainEvent["type"] },
-  binding: OrchestratorWorkflowTriggerBinding
+  schedule: OrchestratorEventScheduleBinding["schedule"],
+  target: OrchestratorEventScheduleTarget
 ): void {
   const existing = routes.get(route.key)
-  if (existing) {
-    existing.workflowTriggers ??= []
-    existing.workflowTriggers.push(binding)
+  if (!existing) {
+    routes.set(route.key, {
+      eventType: route.eventType,
+      jobs: [],
+      eventSchedules: [{ schedule, targets: [target] }],
+    })
     return
   }
 
-  routes.set(route.key, {
-    eventType: route.eventType,
-    jobs: [],
-    workflowTriggers: [binding],
-  })
+  existing.eventSchedules ??= []
+  const binding = existing.eventSchedules.find((candidate) => candidate.schedule.id === schedule.id)
+  if (binding) {
+    binding.targets.push(target)
+    return
+  }
+  existing.eventSchedules.push({ schedule, targets: [target] })
 }
 
 function addDatasetVersionCommittedRouteJob(
@@ -223,27 +238,4 @@ function addDatasetVersionCommittedRouteJob(
     },
     job
   )
-}
-
-function triggerToRoute(trigger: NonScheduleRunTrigger): {
-  key: OrchestratorRouteKey
-  eventType: DomainEvent["type"]
-} {
-  switch (trigger.type) {
-    case "sync.finished":
-      return {
-        key: `sync.run.finished:${trigger.syncId}:${trigger.status}`,
-        eventType: "sync.run.finished",
-      }
-    case "pipeline.finished":
-      return {
-        key: `pipeline.run.finished:${trigger.pipelineId}:${trigger.status}`,
-        eventType: "pipeline.run.finished",
-      }
-    case "dataset.updated":
-      return {
-        key: `dataset.version.committed:${trigger.datasetId}`,
-        eventType: "dataset.version.committed",
-      }
-  }
 }

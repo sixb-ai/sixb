@@ -35,6 +35,18 @@ export interface ScheduleReference {
   readonly scheduleId: string
 }
 
+export function isScheduleReference(value: unknown): value is ScheduleReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "type" in value &&
+    value.type === "schedule" &&
+    "scheduleId" in value &&
+    typeof value.scheduleId === "string" &&
+    value.scheduleId.trim().length > 0
+  )
+}
+
 /** Inert, reusable definition of when work should run. */
 export interface ScheduleDefinition<TId extends string = string, TEvent = unknown> {
   readonly [scheduleEventType]?: TEvent

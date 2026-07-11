@@ -3,7 +3,6 @@ import {
   col,
   type DatasetDefinition,
   type DatasetRow,
-  datasetUpdated,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -15,6 +14,7 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   type EventsRuntime,
+  events,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -380,9 +380,10 @@ describe("startSixbRuntime", () => {
 
         await output.writeRows(rows())
       })
-    const pipeline = definePipeline("normalize-orders")
-      .when(datasetUpdated(rawOrdersDataset.id))
-      .then(normalizeStep)
+    const rawOrdersUpdated = defineSchedule("raw-orders-updated").on(
+      events.dataset(rawOrdersDataset).updated()
+    )
+    const pipeline = definePipeline("normalize-orders").when(rawOrdersUpdated).then(normalizeStep)
     const sixb = new Sixb({
       id: "cli-with-pipeline-worker",
       ontology: [Zone],
@@ -392,6 +393,7 @@ describe("startSixbRuntime", () => {
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
+      schedules: [rawOrdersUpdated],
       pipelines: [pipeline],
     })
 
@@ -518,9 +520,10 @@ describe("startSixbRuntime", () => {
 
         await output.writeRows(rows())
       })
-    const pipeline = definePipeline("normalize-orders")
-      .when(datasetUpdated("raw.erp.orders"))
-      .then(normalizeOrders)
+    const rawOrdersUpdated = defineSchedule("raw-orders-updated").on(
+      events.dataset(rawOrdersDataset).updated()
+    )
+    const pipeline = definePipeline("normalize-orders").when(rawOrdersUpdated).then(normalizeOrders)
     const sixb = new Sixb({
       id: "cli-with-pipeline-route",
       ontology: [Zone],
@@ -530,6 +533,7 @@ describe("startSixbRuntime", () => {
       blobStorage: new InMemoryBlobStorage(),
       queues: new InMemoryQueues(),
       datasets: [rawOrdersDataset, canonicalOrdersDataset],
+      schedules: [rawOrdersUpdated],
       pipelines: [pipeline],
     })
 

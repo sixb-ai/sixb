@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import {
   col,
-  datasetUpdated,
   defineDataset,
   defineObjectType,
   definePipeline,
   definePipelineStep,
   defineSchedule,
+  events,
   isPipelineDefinition,
   isPipelineStepDefinition,
   type PipelineDefinition,
@@ -169,16 +169,19 @@ describe("definePipeline", () => {
     })
   })
 
-  test("attaches schedule and run triggers via .when()", () => {
+  test("attaches cron and event schedules via .when()", () => {
     const hourly = defineSchedule("hourly").cron("0 * * * *")
+    const rawOrdersUpdated = defineSchedule("raw-orders-updated").on(
+      events.dataset(rawOrdersDataset).updated()
+    )
     const pipeline = definePipeline("scheduled-pipeline")
       .when(hourly)
-      .when(datasetUpdated(rawOrdersDataset.id))
+      .when(rawOrdersUpdated)
       .then(makeRunStep())
 
     expect(pipeline.triggers).toEqual([
       { type: "schedule", scheduleId: "hourly" },
-      { type: "dataset.updated", datasetId: "raw.orders" },
+      { type: "schedule", scheduleId: "raw-orders-updated" },
     ])
   })
 })
@@ -376,5 +379,20 @@ describe("Sixb pipeline registration", () => {
     ).toThrow(
       "Pipeline 'orders' step 'normalize-orders' outputs unknown dataset 'canonical.orders'"
     )
+  })
+
+  test("rejects references to unregistered schedules", () => {
+    const missing = defineSchedule("missing").cron("0 * * * *")
+    const pipeline = definePipeline("orders").when(missing).then(makeRunStep())
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [],
+          datasets: [rawOrdersDataset, canonicalOrdersDataset],
+          pipelines: [pipeline],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("Pipeline 'orders' references unknown schedule 'missing'")
   })
 })

@@ -2080,26 +2080,10 @@ export type ListSyncsResponses = {
         }
       }
     }
-    triggers: Array<
-      | {
-          type: "schedule"
-          scheduleId: string
-        }
-      | {
-          type: "sync.finished"
-          syncId: string
-          status: "succeeded"
-        }
-      | {
-          type: "pipeline.finished"
-          pipelineId: string
-          status: "succeeded"
-        }
-      | {
-          type: "dataset.updated"
-          datasetId: string
-        }
-    >
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
     latestRun: {
       id: string
       projectId: string
@@ -2181,26 +2165,10 @@ export type GetSyncResponses = {
         }
       }
     }
-    triggers: Array<
-      | {
-          type: "schedule"
-          scheduleId: string
-        }
-      | {
-          type: "sync.finished"
-          syncId: string
-          status: "succeeded"
-        }
-      | {
-          type: "pipeline.finished"
-          pipelineId: string
-          status: "succeeded"
-        }
-      | {
-          type: "dataset.updated"
-          datasetId: string
-        }
-    >
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
     latestRun: {
       id: string
       projectId: string
@@ -2349,26 +2317,10 @@ export type ListPipelinesResponses = {
    */
   200: Array<{
     id: string
-    triggers: Array<
-      | {
-          type: "schedule"
-          scheduleId: string
-        }
-      | {
-          type: "sync.finished"
-          syncId: string
-          status: "succeeded"
-        }
-      | {
-          type: "pipeline.finished"
-          pipelineId: string
-          status: "succeeded"
-        }
-      | {
-          type: "dataset.updated"
-          datasetId: string
-        }
-    >
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
     graph: {
       kind: "sequence"
       nodes: Array<{
@@ -2479,26 +2431,10 @@ export type GetPipelineResponses = {
    */
   200: {
     id: string
-    triggers: Array<
-      | {
-          type: "schedule"
-          scheduleId: string
-        }
-      | {
-          type: "sync.finished"
-          syncId: string
-          status: "succeeded"
-        }
-      | {
-          type: "pipeline.finished"
-          pipelineId: string
-          status: "succeeded"
-        }
-      | {
-          type: "dataset.updated"
-          datasetId: string
-        }
-    >
+    triggers: Array<{
+      type: "schedule"
+      scheduleId: string
+    }>
     graph: {
       kind: "sequence"
       nodes: Array<{

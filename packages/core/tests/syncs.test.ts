@@ -6,12 +6,12 @@ import {
   defineObjectType,
   defineSchedule,
   defineSync,
+  events,
   noopLogger,
   prop,
   Sixb,
   type SyncDefinition,
   type SyncReadContext,
-  syncFinished,
 } from "../src"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -97,29 +97,30 @@ describe("defineSync", () => {
 
   test("accumulates multiple triggers via .when() (OR semantics)", () => {
     const hourly = defineSchedule("hourly").cron("0 * * * *")
+    const upstream = defineSync("sync-upstream")
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(rawOrdersDataset)
+    const upstreamSucceeded = defineSchedule("upstream-succeeded").on(
+      events.sync(upstream).succeeded()
+    )
     const sync = defineSync("sync-order-events")
       .when(hourly)
-      .when(syncFinished("sync-upstream"))
+      .when(upstreamSucceeded)
       .from(erpDb)
       .read(() => [])
       .intoDataset(defineDataset("raw.erp.order-events", { schema: [col("id", "string")] }))
 
     expect(sync.triggers).toEqual([
       { type: "schedule", scheduleId: "hourly" },
-      { type: "sync.finished", syncId: "sync-upstream", status: "succeeded" },
+      { type: "schedule", scheduleId: "upstream-succeeded" },
     ])
   })
 
-  test("accepts RunTrigger directly via .when()", () => {
-    const sync = defineSync("sync-order-events")
-      .when(syncFinished("sync-other"))
-      .from(erpDb)
-      .read(() => [])
-      .intoDataset(defineDataset("raw.erp.order-events", { schema: [col("id", "string")] }))
-
-    expect(sync.triggers).toEqual([
-      { type: "sync.finished", syncId: "sync-other", status: "succeeded" },
-    ])
+  test("rejects non-schedule values in .when()", () => {
+    expect(() =>
+      defineSync("sync-order-events").when({ type: "dataset.updated" } as never)
+    ).toThrow("Sync .when(...) only accepts schedules")
   })
 
   test("rejects invalid modes", () => {
@@ -247,5 +248,24 @@ describe("Sixb sync registration", () => {
           ...runtimeDeps,
         })
     ).toThrow("Duplicate sync id: sync-orders")
+  })
+
+  test("rejects references to unregistered schedules", () => {
+    const missing = defineSchedule("missing").cron("0 * * * *")
+    const sync = defineSync("sync-orders")
+      .when(missing)
+      .from(erpDb)
+      .read(() => [])
+      .intoDataset(rawOrdersDataset)
+
+    expect(
+      () =>
+        new Sixb<readonly []>({
+          ontology: [],
+          datasets: [rawOrdersDataset],
+          syncs: [sync],
+          ...createTestRuntimeDeps(),
+        })
+    ).toThrow("Sync 'sync-orders' references unknown schedule 'missing'")
   })
 })

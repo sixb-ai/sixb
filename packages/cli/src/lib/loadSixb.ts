@@ -8,7 +8,6 @@ import type {
   ConnectorClient,
   ConnectorDefinition,
   DatasetDefinition,
-  DomainTriggerDefinition,
   FunctionDefinition,
   LinkProjectionDefinition,
   ObjectProjectionDefinition,
@@ -42,7 +41,6 @@ export interface LoadedSixb extends SixbRuntimeContext {
   getTelemetryProjections(): readonly TelemetryProjectionDefinition[]
   getDatasetDefinitions(): readonly DatasetDefinition[]
   getRuleDefinitions(): readonly RuleDefinition[]
-  getTriggerDefinitions(): readonly DomainTriggerDefinition[]
   getDatasetById(datasetId: string): DatasetDefinition | null
   getProjectionById(projectionId: string): ProjectionDefinition | null
   getSyncById(syncId: string): SyncDefinition | null

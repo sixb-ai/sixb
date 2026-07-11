@@ -1,20 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import {
-  datasetUpdated,
   defineAction,
   defineObjectType,
   defineRule,
   defineSchedule,
+  EventsRuntime,
+  evaluateEventSchedule,
   events,
-  isRunTrigger,
+  InMemoryBroker,
   link,
   OntologyRegistry,
   param,
-  pipelineFinished,
   prop,
   ScheduleValidationError,
-  syncFinished,
-  TriggerValidationError,
   validateSchedulesAtStartup,
 } from "../src"
 
@@ -45,81 +43,71 @@ const approveInvoice = defineAction("approve-invoice")
   .params({ reason: param("string") })
   .writeback(async () => {})
 
-describe("syncFinished", () => {
-  test("returns a sync.finished trigger", () => {
-    expect(syncFinished("sync-orders")).toEqual({
-      type: "sync.finished",
-      syncId: "sync-orders",
-      status: "succeeded",
+describe("evaluateEventSchedule", () => {
+  test("returns the typed post-mutation context only on a false-to-true edge", async () => {
+    const schedule = defineSchedule("invoice.high-value")
+      .on(events(Invoice).updated())
+      .where((event) => event.object.p.amount.gt(500))
+    const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const [crossed] = await runtime.append({
+      events: [
+        {
+          type: "object.updated",
+          payload: {
+            objectTypeId: Invoice.id,
+            primaryId: "inv-1",
+            properties: { id: "inv-1", amount: 700 },
+            propertyChanges: {
+              amount: { operation: "updated", before: 400, after: 700 },
+            },
+          },
+        },
+      ],
     })
-  })
-
-  test("rejects empty syncId", () => {
-    expect(() => syncFinished("")).toThrow(TriggerValidationError)
-    expect(() => syncFinished("   ")).toThrow("Trigger syncId must not be empty")
-  })
-})
-
-describe("pipelineFinished", () => {
-  test("returns a pipeline.finished trigger", () => {
-    expect(pipelineFinished("normalize-orders")).toEqual({
-      type: "pipeline.finished",
-      pipelineId: "normalize-orders",
-      status: "succeeded",
+    const [remainedTrue] = await runtime.append({
+      events: [
+        {
+          type: "object.updated",
+          payload: {
+            objectTypeId: Invoice.id,
+            primaryId: "inv-1",
+            properties: { id: "inv-1", amount: 800 },
+            propertyChanges: {
+              amount: { operation: "updated", before: 700, after: 800 },
+            },
+          },
+        },
+      ],
     })
-  })
 
-  test("rejects empty pipelineId", () => {
-    expect(() => pipelineFinished("")).toThrow(TriggerValidationError)
-    expect(() => pipelineFinished("  ")).toThrow("Trigger pipelineId must not be empty")
-  })
-})
-
-describe("datasetUpdated", () => {
-  test("returns a dataset.updated trigger", () => {
-    expect(datasetUpdated("raw.erp.orders")).toEqual({
-      type: "dataset.updated",
-      datasetId: "raw.erp.orders",
+    expect(evaluateEventSchedule(schedule, crossed!)).toMatchObject({
+      event: { object: { primaryId: "inv-1", p: { id: "inv-1", amount: 700 } } },
     })
+    expect(evaluateEventSchedule(schedule, remainedTrue!)).toBeNull()
   })
 
-  test("rejects empty datasetId", () => {
-    expect(() => datasetUpdated("")).toThrow(TriggerValidationError)
-    expect(() => datasetUpdated("  ")).toThrow("Trigger datasetId must not be empty")
-  })
-})
+  test("builds dataset occurrence context from the selected event", async () => {
+    const invoices = { kind: "dataset", id: "raw.invoices" } as const
+    const schedule = defineSchedule("invoices-updated").on(events.dataset(invoices).updated())
+    const runtime = new EventsRuntime({ projectId: "test", broker: new InMemoryBroker() })
+    const [event] = await runtime.append({
+      events: [
+        {
+          type: "dataset.version.committed",
+          payload: {
+            datasetId: invoices.id,
+            versionId: "version-1",
+            producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
+          },
+        },
+      ],
+    })
 
-describe("isRunTrigger", () => {
-  test("returns true for valid schedule trigger", () => {
-    expect(isRunTrigger({ type: "schedule", scheduleId: "daily" })).toBe(true)
-  })
-
-  test("returns true for valid sync.finished trigger", () => {
-    expect(isRunTrigger({ type: "sync.finished", syncId: "s1", status: "succeeded" })).toBe(true)
-  })
-
-  test("returns true for valid pipeline.finished trigger", () => {
-    expect(isRunTrigger({ type: "pipeline.finished", pipelineId: "p1", status: "succeeded" })).toBe(
-      true
-    )
-  })
-
-  test("returns true for valid dataset.updated trigger", () => {
-    expect(isRunTrigger({ type: "dataset.updated", datasetId: "raw.orders" })).toBe(true)
-  })
-
-  test("returns false for null", () => {
-    expect(isRunTrigger(null)).toBe(false)
-  })
-
-  test("returns false for unknown type", () => {
-    expect(isRunTrigger({ type: "unknown", id: "x" })).toBe(false)
-  })
-
-  test("returns false for missing required fields", () => {
-    expect(isRunTrigger({ type: "schedule" })).toBe(false)
-    expect(isRunTrigger({ type: "sync.finished", syncId: "s1" })).toBe(false)
-    expect(isRunTrigger({ type: "dataset.updated" })).toBe(false)
+    expect(evaluateEventSchedule(schedule, event!)?.event).toEqual({
+      datasetId: invoices.id,
+      versionId: "version-1",
+      producer: { kind: "sync", id: "sync-invoices", runId: "run-1" },
+    })
   })
 })
 

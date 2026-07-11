@@ -15,6 +15,14 @@ import {
 import { assertDatasetRow, normalizeReadResult, throwIfAborted } from "./normalize"
 import type { RunSyncJobInput, SyncRunResult } from "./types"
 
+export class SyncRunAlreadyStartedError extends Error {
+  override readonly name = "SyncRunAlreadyStartedError"
+
+  constructor(readonly run: SyncRunRecord) {
+    super(`[SixbSyncWorker] Sync run '${run.id}' has already started.`)
+  }
+}
+
 function toSyncRunFailure(error: unknown): SyncRunFailure {
   if (error instanceof Error) {
     return {
@@ -130,15 +138,24 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
 
   throwIfAborted(signal)
 
-  const startedRun = await syncRunsStorage.start({
-    projectId: runtime.id,
-    id: job.id,
-    syncId: sync.id,
-    datasetId: dataset.id,
-    mode: sync.config.mode,
-    expectedLatestVersionId: job.expectedLatestVersionId,
-    commitMessage: job.commitMessage,
-  })
+  let startedRun: SyncRunRecord
+  try {
+    startedRun = await syncRunsStorage.start({
+      projectId: runtime.id,
+      id: job.id,
+      syncId: sync.id,
+      datasetId: dataset.id,
+      mode: sync.config.mode,
+      expectedLatestVersionId: job.expectedLatestVersionId,
+      commitMessage: job.commitMessage,
+    })
+  } catch (error) {
+    const existing = await syncRunsStorage.getById({ projectId: runtime.id, id: job.id })
+    if (existing?.syncId === sync.id && existing.datasetId === dataset.id) {
+      throw new SyncRunAlreadyStartedError(existing)
+    }
+    throw error
+  }
   await input.onRunStarted?.(startedRun)
 
   const logSession = resolveLogsRuntime(runtime.id, runtime.logs).startExecution({
