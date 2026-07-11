@@ -10,7 +10,7 @@ and [Mastra](https://mastra.ai/).
 
 <h3>
 
-[Documentation](https://docs.sixb.ai) | [Examples](https://docs.sixb.ai/examples/overview) | [Contributing](./CONTRIBUTING.md)
+[Documentation](https://docs.sixb.ai) | [Examples](https://docs.sixb.ai/examples) | [Contributing](./CONTRIBUTING.md)
 
 </h3>
 
