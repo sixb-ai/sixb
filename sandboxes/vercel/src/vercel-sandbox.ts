@@ -18,8 +18,9 @@ export interface VercelRunCommandParams {
   readonly args?: readonly string[]
   readonly cwd?: string
   readonly env?: Readonly<Record<string, string>>
-  readonly detached: true
+  readonly detached?: false
   readonly timeoutMs?: number
+  readonly signal?: AbortSignal
 }
 
 export interface VercelCommandFinishedClient {
@@ -65,7 +66,6 @@ export class VercelSandbox implements Sandbox {
   private readonly client: VercelSandboxClient
   private readonly sandboxEnv: Readonly<Record<string, string>>
   private readonly defaultTimeoutMs: number | undefined
-  private readonly inFlight = new Set<VercelCommandClient>()
   private destroyed = false
 
   constructor(options: VercelSandboxOptions) {
@@ -107,57 +107,29 @@ export class VercelSandbox implements Sandbox {
       return abortedResult(start)
     }
 
-    let timedOut = false
-    let aborted = false
-    let killStarted = false
-    let commandHandle: VercelCommandClient
-
     try {
-      commandHandle = await this.client.runCommand({
+      // Use the SDK's awaited path. It returns stdout/stderr with the command response, including
+      // the valid empty-output case. The detached path requires a later logs request, which can
+      // fail when a command produced no log stream.
+      const commandHandle = await this.client.runCommand({
         cmd: command,
         args: [...args],
         cwd,
         env,
-        detached: true,
+        detached: false,
         ...(timeoutMs !== undefined && timeoutMs > 0 ? { timeoutMs } : {}),
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
       })
-    } catch (error) {
-      throw new SandboxError(
-        `[Sandbox] vercel runCommand failed for ${this.id}: ${errorMessage(error)}`
-      )
-    }
-
-    this.inFlight.add(commandHandle)
-
-    const kill = (): void => {
-      if (killStarted) {
-        return
+      const finished = await commandHandle.wait({ signal: options.signal })
+      const [stdout, stderr] = await Promise.all([
+        finished.stdout({ signal: options.signal }),
+        finished.stderr({ signal: options.signal }),
+      ])
+      if (options.signal?.aborted) {
+        return abortedResult(start)
       }
-      killStarted = true
-      commandHandle.kill("SIGKILL").catch(() => {})
-    }
-
-    const timer =
-      timeoutMs !== undefined && timeoutMs > 0
-        ? setTimeout(() => {
-            timedOut = true
-            kill()
-          }, timeoutMs)
-        : undefined
-
-    const onAbort = (): void => {
-      aborted = true
-      kill()
-    }
-    options.signal?.addEventListener("abort", onAbort)
-    if (options.signal?.aborted) {
-      onAbort()
-    }
-
-    try {
-      const finished = await commandHandle.wait()
-      const [stdout, stderr] = await Promise.all([finished.stdout(), finished.stderr()])
-      const exitCode = normalizeExitCode(finished.exitCode, killStarted)
+      const exitCode = normalizeExitCode(finished.exitCode)
+      const timedOut = timeoutMs !== undefined && timeoutMs > 0 && exitCode === KILLED_EXIT_CODE
       return {
         exitCode,
         stdout,
@@ -166,26 +138,12 @@ export class VercelSandbox implements Sandbox {
         ...(timedOut ? { timedOut: true } : {}),
       }
     } catch (error) {
-      if (timedOut || aborted) {
-        return {
-          exitCode: KILLED_EXIT_CODE,
-          stdout: "",
-          stderr: timedOut
-            ? `[Sandbox] command timed out after ${timeoutMs}ms`
-            : "[Sandbox] command aborted",
-          durationMs: Date.now() - start,
-          ...(timedOut ? { timedOut: true } : {}),
-        }
+      if (options.signal?.aborted) {
+        return abortedResult(start)
       }
       throw new SandboxError(
         `[Sandbox] vercel command failed for ${this.id}: ${errorMessage(error)}`
       )
-    } finally {
-      if (timer !== undefined) {
-        clearTimeout(timer)
-      }
-      options.signal?.removeEventListener("abort", onAbort)
-      this.inFlight.delete(commandHandle)
     }
   }
 
@@ -215,10 +173,6 @@ export class VercelSandbox implements Sandbox {
       return
     }
     this.currentStatus = "stopped"
-    for (const commandHandle of this.inFlight) {
-      commandHandle.kill("SIGKILL").catch(() => {})
-    }
-    this.inFlight.clear()
     try {
       await this.client.stop()
     } catch (error) {
@@ -274,11 +228,8 @@ function normalizeWorkingDirectory(value: string | undefined): string {
   return value && value.length > 0 ? posix.resolve("/", value) : DEFAULT_WORKING_DIRECTORY
 }
 
-function normalizeExitCode(exitCode: number | null | undefined, killed: boolean): number {
-  if (typeof exitCode === "number") {
-    return killed && exitCode === 0 ? KILLED_EXIT_CODE : exitCode
-  }
-  return killed ? KILLED_EXIT_CODE : 1
+function normalizeExitCode(exitCode: number | null | undefined): number {
+  return typeof exitCode === "number" ? exitCode : 1
 }
 
 function abortedResult(start: number): CommandResult {

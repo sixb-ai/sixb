@@ -16,6 +16,11 @@ guard("VercelSandbox (live)", () => {
       expect(echo.exitCode).toBe(0)
       expect(echo.stdout.trim()).toBe("vercel-ok")
 
+      // Regression: detached commands required a second logs request, which could fail when a command
+      // (such as an empty generated-file scan) emitted no stdout or stderr.
+      const silent = await sandbox.runCommand("true")
+      expect(silent).toMatchObject({ exitCode: 0, stdout: "", stderr: "" })
+
       const path = posix.join(sandbox.workingDirectory, "sixb-live.txt")
       await sandbox.writeFiles([{ path, contents: "from-sixb" }])
       const cat = await sandbox.runCommand("cat", [path])
