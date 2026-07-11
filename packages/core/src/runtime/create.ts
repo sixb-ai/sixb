@@ -140,6 +140,7 @@ export async function createSixb(
     sandboxes: options.sandboxes,
     logger: options.logger,
     observability: options.observability,
+    projectRoot,
     actions,
     datasets: [...(options.datasets ?? []), ...datasets],
     connectors: [...(options.connectors ?? []), ...connectors],

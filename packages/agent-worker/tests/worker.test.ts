@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type {
   LanguageModelV4,
@@ -48,6 +50,7 @@ import {
   createBrokerStreamSink,
   NOOP_STREAM_SINK,
 } from "../src"
+import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
@@ -55,7 +58,7 @@ import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createAgentRunEnvironment } from "../src/run-environment"
-import { waitFor } from "./helpers"
+import { waitFor, writeProjectSkill } from "./helpers"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
@@ -193,11 +196,14 @@ function outputBashThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function apiBashThenAnswerModel(): MockLanguageModelV4 {
+function apiBashThenAnswerModel(
+  captureSystem?: (system: string | undefined) => void
+): MockLanguageModelV4 {
   let call = 0
   return new MockLanguageModelV4({
     modelId: "mock-model",
-    doStream: async () => {
+    doStream: async (options) => {
+      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
       call += 1
       if (call === 1) {
         return stream([
@@ -350,6 +356,7 @@ const echoTool: ToolSet = {
 // action-worker tests do).
 interface TestSixb {
   readonly id: string
+  readonly projectRoot: string
   readonly broker: Broker
   readonly events: EventsRuntime
   readonly storage: Storage
@@ -587,6 +594,7 @@ function buildSixb(
   options: {
     readonly reasoning?: AgentReasoningLevel
     readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
+    readonly projectRoot?: string
   } = {}
 ): TestSixb {
   const agent = defineAgent("assistant", {
@@ -609,6 +617,7 @@ function buildSixb(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     sandboxes,
+    ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
   })
 }
 
@@ -665,6 +674,7 @@ function buildAgentWorkerContext(
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
+    agentSkills: loadAgentSkills({ projectSkillsDir: false }),
     leaseMs: 60_000,
     heartbeatMs: 20_000,
     defaultMaxSteps: 4,
@@ -871,6 +881,28 @@ describe("AgentWorker", () => {
     expect(() => new AgentWorker(sixb, { apiBaseUrl: "" })).toThrow(
       "Agent workers require options.apiBaseUrl."
     )
+  })
+
+  test("fails startup when a project Agent Skill is invalid", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-startup-"))
+    try {
+      await writeProjectSkill(
+        projectRoot,
+        "acme-style",
+        ["---", "name: acme-style", "---", "", "# Acme Style"].join("\n")
+      )
+      const worker = new AgentWorker(
+        buildSixb(toolThenAnswerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
+          projectRoot,
+        }),
+        workerOptions()
+      )
+
+      await expect(worker.start()).rejects.toThrow("[SixbAgentWorker] Agent skill")
+      await worker.stop()
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true })
+    }
   })
 
   test("attributes a managed service account to the agent worker, not to system at large", async () => {
@@ -1727,6 +1759,84 @@ describe("AgentWorker", () => {
       ).toBe(false)
     } finally {
       await worker.stop()
+    }
+  })
+
+  test("advertises and materializes project Agent Skills", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-agent-skills-"))
+    try {
+      await writeProjectSkill(
+        projectRoot,
+        "acme-style",
+        [
+          "---",
+          "name: acme-style",
+          "description: >",
+          "  Use when drafting Acme customer-facing",
+          "  messages.",
+          "---",
+          "",
+          "# Acme Style",
+          "",
+          "Read references/examples.md before drafting customer-facing copy.",
+        ].join("\n"),
+        { "references/examples.md": "Prefer concise, operational summaries." }
+      )
+
+      let capturedSystem: string | undefined
+      const sandboxes = new RecordingSandboxFactory()
+      const sixb = buildSixb(
+        apiBashThenAnswerModel((system) => {
+          capturedSystem = system
+        }),
+        new InMemoryBroker(),
+        sandboxes,
+        { projectRoot }
+      )
+      const storage = agentStorageOf(sixb)
+      const worker = new AgentWorker(sixb, workerOptions())
+      await worker.start()
+      try {
+        const { threadId } = await sixb.agents.request({
+          agentId: "assistant",
+          text: "draft a note",
+        })
+        const run = await waitFor(
+          async () => {
+            const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
+            const found = list.runs[0]
+            return found && found.status !== "running" ? found : null
+          },
+          { label: "project skills run terminal" }
+        )
+        expect(run.status).toBe("succeeded")
+        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/acme-style")
+        expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
+        expect(capturedSystem).toContain("Path: $SIXB_SKILLS_DIR/sixb-query")
+
+        const command = sandboxes.sandboxes[0]?.commands[0]
+        const skillsDir = command?.options.env?.SIXB_SKILLS_DIR
+        if (!skillsDir) {
+          throw new Error("Expected project skill sandbox env.")
+        }
+        const sandbox = sandboxes.sandboxes[0]
+        if (!sandbox) {
+          throw new Error("Expected project skill sandbox.")
+        }
+        expect(sandbox.readFileContents(join(skillsDir, "acme-style", "SKILL.md"))).toContain(
+          "# Acme Style"
+        )
+        expect(
+          sandbox.readFileContents(join(skillsDir, "acme-style", "references", "examples.md"))
+        ).toContain("Prefer concise")
+        expect(sandbox.readFileContents(join(skillsDir, "sixb-query", "SKILL.md"))).toContain(
+          "name: sixb-query"
+        )
+      } finally {
+        await worker.stop()
+      }
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true })
     }
   })
 

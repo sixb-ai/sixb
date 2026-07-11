@@ -6,6 +6,7 @@
  * `sixb.broker`, `sixb.events`, `sixb.storage`, and `sixb.queues`.
  */
 
+import { resolve } from "node:path"
 import { ActionRegistry, ActionsRuntime } from "../actions"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinition } from "../agents"
@@ -92,6 +93,7 @@ export interface SixbOptions<TOntologySources extends readonly OntologySource[]>
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
   observability?: ObservabilityOptions
+  projectRoot?: string
   actions?: readonly ActionDefinition[]
   datasets?: readonly DatasetDefinition[]
   /** Connector definitions registered with this runtime. */
@@ -142,6 +144,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
   readonly blobStorage: BlobStorage
   readonly queues: Queues
   readonly sandboxes?: SandboxFactory
+  readonly projectRoot: string
   readonly rules: readonly RuleDefinition[]
   readonly security: SecurityRegistry
   readonly auth: AuthRuntime
@@ -165,6 +168,7 @@ export class Sixb<TOntologySources extends readonly OntologySource[]>
     this.blobStorage = options.blobStorage
     this.queues = options.queues
     this.sandboxes = options.sandboxes
+    this.projectRoot = resolve(options.projectRoot ?? process.cwd())
     this.rules = options.rules ?? []
     // Ontology and actions resolve first so every later registry (security,
     // rules, workflows, projections) can validate its references against them.

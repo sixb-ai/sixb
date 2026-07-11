@@ -1,6 +1,6 @@
 import { join } from "node:path"
 import type { Sandbox } from "@sixb/core"
-import { buildAgentSkillFiles } from "./agent-skills"
+import { type AgentSkill, buildAgentSkillFiles } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 
 export interface AgentSandboxApiContext {
@@ -15,6 +15,7 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly threadId: string
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
+  readonly skills: readonly AgentSkill[]
 }
 
 export async function prepareAgentSandboxApiContext(
@@ -51,7 +52,7 @@ export async function prepareAgentSandboxApiContext(
   // filesystem, so any provider (including non-host-path ones like smolvm) places the bytes in the
   // guest. Awaited before the bash tool runs, so the agent never sees an un-provisioned sandbox.
   await input.sandbox.writeFiles([
-    ...(await buildAgentSkillFiles(skillsDir)),
+    ...buildAgentSkillFiles(skillsDir, input.skills),
     { path: runContextPath, contents: runContext },
     {
       path: attachmentsManifestPath,

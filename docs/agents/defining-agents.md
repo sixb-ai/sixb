@@ -50,6 +50,21 @@ model: gateway("deepseek/deepseek-v4-flash")
 model: gateway("openai/gpt-5.5")
 ```
 
+## Instructions vs Agent Skills
+
+Keep `instructions` short and always relevant: the agent role, hard behavioral rules, and domain
+boundaries. Put larger company standards, examples, templates, and repeatable procedures in Agent
+Skills instead:
+
+```txt
+skills/acme-writing-style/SKILL.md
+skills/acme-writing-style/references/examples.md
+```
+
+Project skills are installed into each run sandbox under `$SIXB_SKILLS_DIR`. The worker advertises
+only each skill's `name` and `description` up front, and the agent reads the full `SKILL.md` when the
+skill is relevant.
+
 ## Loop
 
 An agent runs a tool-calling loop: the model produces output, may call tools, sees the results, and

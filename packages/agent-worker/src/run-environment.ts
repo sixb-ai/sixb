@@ -26,10 +26,10 @@ export interface CreateAgentRunEnvironmentInput {
 /**
  * Build the per-run turn context.
  *
- * Attachment preparation runs first so the same manifest drives both model projection and sandbox
- * files. Sandbox creation (boot + writing the run's API context) is still kicked off here without
- * awaiting: the bash tool awaits the sandbox on first use, while the ~boot latency overlaps the
- * model's first response when bash is not immediately needed. dispose() awaits or tracks teardown.
+ * Attachment preparation and the cached skill catalog resolve first. Sandbox creation (boot plus
+ * writing the run context, attachments, and skills) is then kicked off without awaiting: the bash
+ * tool awaits the sandbox on first use, while boot latency overlaps the model's first response when
+ * bash is not immediately needed. dispose() awaits or tracks teardown.
  */
 export async function createAgentRunEnvironment(
   input: CreateAgentRunEnvironmentInput
@@ -42,6 +42,7 @@ export async function createAgentRunEnvironment(
     run,
   })
   const apiOrigin = new URL(apiBaseUrl).origin
+  const skills = await context.agentSkills
 
   const history = await context.storage.agents.messages.list({
     projectId: context.id,
@@ -58,7 +59,15 @@ export async function createAgentRunEnvironment(
   })
 
   // Provision concurrently; do NOT await. The bash tool, the turn, and dispose() await this.
-  const ready = provisionSandbox({ context, agent, run, apiBaseUrl, apiOrigin, attachmentContext })
+  const ready = provisionSandbox({
+    context,
+    agent,
+    run,
+    apiBaseUrl,
+    apiOrigin,
+    attachmentContext,
+    skills,
+  })
   let sandboxWasUsed = false
   // Creation failure is surfaced where it is awaited (turn / bash tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -84,7 +93,7 @@ export async function createAgentRunEnvironment(
           return ready
         }),
       },
-      systemAddendum: renderAgentSkillCatalog(),
+      systemAddendum: renderAgentSkillCatalog(skills),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
@@ -104,10 +113,11 @@ interface ProvisionSandboxInput {
   readonly apiBaseUrl: string
   readonly apiOrigin: string
   readonly attachmentContext: Awaited<ReturnType<typeof prepareAgentAttachments>>
+  readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandboxHandle> {
-  const { context, agent, run, apiBaseUrl, apiOrigin } = input
+  const { context, agent, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
     sandbox = await context.sandboxes.create({
@@ -121,6 +131,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<BashSandb
       threadId: run.threadId,
       runId: run.id,
       attachments: input.attachmentContext,
+      skills,
     })
     return { sandbox, env: apiContext.env }
   } catch (error) {
