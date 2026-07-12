@@ -50,7 +50,7 @@ origins are shown as invitation destinations and participate in `can.access(appl
 | `POST` | `/api/actions/:actionId` | Request an action (`subject` is optional for global actions) |
 | `GET` | `/api/object-types` | List registered object types |
 | `GET` | `/api/object-types/:objectTypeId` | Get object type definition |
-| `GET` | `/api/objects` | List objects (`?objectTypeId=&keyPrefix=&limit=&offset=&orderBy=&order=`) |
+| `GET` | `/api/objects` | List objects (`?objectTypeId=&idPrefix=&limit=&offset=&orderBy=&order=`) |
 | `GET` | `/api/objects/:objectTypeId/:objectKey` | Get object by key |
 | `PUT` | `/api/objects/:objectTypeId/:objectKey` | Create or update object |
 | `GET` | `/api/objects/:objectTypeId/:objectKey/links` | List object links (`?linkId=`) |

@@ -11,19 +11,84 @@ export const ObjectParamsSchema = z.object({
   objectId: z.string().min(1),
 })
 
-export const ObjectsQuerySchema = z.object({
-  objectTypeId: z.string().optional(),
-  idPrefix: z.string().optional(),
-  idSuffix: z.string().optional(),
-  updatedAfter: z.string().optional(),
-  updatedBefore: z.string().optional(),
-  createdAfter: z.string().optional(),
-  createdBefore: z.string().optional(),
-  limit: z.string().optional(),
-  offset: z.string().optional(),
-  orderBy: z.enum(["createdAt", "updatedAt", "primaryId"]).optional(),
-  order: z.enum(["asc", "desc"]).optional(),
-})
+const OBJECT_LIST_MAX_LIMIT = 1_000
+const Rfc3339DateSchema = z.string().datetime({ offset: true })
+
+function objectListDateSchema(parameter: string) {
+  return z
+    .string()
+    .refine((value) => Rfc3339DateSchema.safeParse(value).success, {
+      message: `Invalid query parameter '${parameter}': expected an RFC 3339 timestamp.`,
+    })
+    .transform((value) => new Date(value))
+}
+
+const ObjectListLimitSchema = z
+  .string()
+  .refine(
+    (value) => {
+      if (!/^\d+$/.test(value)) return false
+      const parsed = Number(value)
+      return Number.isSafeInteger(parsed) && parsed <= OBJECT_LIST_MAX_LIMIT
+    },
+    {
+      message: `Invalid query parameter 'limit': expected an integer between 0 and ${OBJECT_LIST_MAX_LIMIT}.`,
+    }
+  )
+  .transform(Number)
+
+const ObjectListOffsetSchema = z
+  .string()
+  .refine((value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)), {
+    message: "Invalid query parameter 'offset': expected a non-negative safe integer.",
+  })
+  .transform(Number)
+
+export const ObjectsQuerySchema = z
+  .object({
+    objectTypeId: z.string().optional(),
+    idPrefix: z.string().optional(),
+    idSuffix: z.string().optional(),
+    updatedAfter: objectListDateSchema("updatedAfter").optional(),
+    updatedBefore: objectListDateSchema("updatedBefore").optional(),
+    createdAfter: objectListDateSchema("createdAfter").optional(),
+    createdBefore: objectListDateSchema("createdBefore").optional(),
+    limit: ObjectListLimitSchema.optional(),
+    offset: ObjectListOffsetSchema.optional(),
+    orderBy: z
+      .enum(["createdAt", "updatedAt", "primaryId"], {
+        errorMap: () => ({
+          message:
+            "Invalid query parameter 'orderBy': expected one of createdAt, updatedAt, or primaryId.",
+        }),
+      })
+      .optional(),
+    order: z
+      .enum(["asc", "desc"], {
+        errorMap: () => ({
+          message: "Invalid query parameter 'order': expected 'asc' or 'desc'.",
+        }),
+      })
+      .optional(),
+  })
+  .superRefine((query, context) => {
+    if (query.updatedAfter && query.updatedBefore && query.updatedAfter > query.updatedBefore) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["updatedAfter"],
+        message:
+          "Invalid query parameter range: 'updatedAfter' must be before or equal to 'updatedBefore'.",
+      })
+    }
+    if (query.createdAfter && query.createdBefore && query.createdAfter > query.createdBefore) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["createdAfter"],
+        message:
+          "Invalid query parameter range: 'createdAfter' must be before or equal to 'createdBefore'.",
+      })
+    }
+  })
 
 export const UpsertObjectBodySchema = z.object({
   properties: z.record(z.unknown()),

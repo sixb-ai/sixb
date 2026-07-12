@@ -38,7 +38,7 @@ import {
   TwinObjectSchema,
   UpsertObjectBodySchema,
 } from "../schemas/objects"
-import { parseDate, parseOptionalInt, toIsoString } from "../utils/http"
+import { toIsoString } from "../utils/http"
 
 const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
   path: z
@@ -218,19 +218,18 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
         const { scoped } = requestAuthState(context)
 
         try {
-          const parsed = ObjectsQuerySchema.parse(query)
           const params = {
-            objectTypeIds: parsed.objectTypeId ? [parsed.objectTypeId] : undefined,
-            idPrefix: parsed.idPrefix,
-            idSuffix: parsed.idSuffix,
-            updatedAfter: parseDate(parsed.updatedAfter),
-            updatedBefore: parseDate(parsed.updatedBefore),
-            createdAfter: parseDate(parsed.createdAfter),
-            createdBefore: parseDate(parsed.createdBefore),
-            limit: parseOptionalInt(parsed.limit),
-            offset: parseOptionalInt(parsed.offset),
-            orderBy: parsed.orderBy,
-            order: parsed.order,
+            objectTypeIds: query.objectTypeId === undefined ? undefined : [query.objectTypeId],
+            idPrefix: query.idPrefix,
+            idSuffix: query.idSuffix,
+            updatedAfter: query.updatedAfter,
+            updatedBefore: query.updatedBefore,
+            createdAfter: query.createdAfter,
+            createdBefore: query.createdBefore,
+            limit: query.limit,
+            offset: query.offset,
+            orderBy: query.orderBy,
+            order: query.order,
           }
           const result = scoped ? await scoped.list(params) : await sixb.list(params)
 
@@ -255,6 +254,12 @@ export function registerObjectRoutes(app: Elysia, sixb: Sixb<readonly OntologySo
           200: ObjectListResponseSchema,
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
+        },
+        error: ({ code, error, set }) => {
+          if (code !== "VALIDATION" || error.type !== "query") return
+
+          set.status = 400
+          return { error: error.all[0]?.message ?? "Invalid object list query parameters." }
         },
         detail: {
           summary: "List objects",

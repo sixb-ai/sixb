@@ -5,3 +5,7 @@
 export class OntologyValidationError extends Error {
   readonly name = "OntologyValidationError"
 }
+
+export function formatUnknownObjectTypeMessage(objectTypeId: string): string {
+  return `Unknown object type '${objectTypeId}'. Object type IDs are case-sensitive.`
+}

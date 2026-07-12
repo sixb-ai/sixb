@@ -60,6 +60,12 @@ function resolveAuthorizedTypeFilter(
   runtime: SixbRuntimeContext,
   requested: readonly string[] | undefined
 ): readonly string[] | undefined {
+  if (requested) {
+    for (const objectTypeId of requested) {
+      runtime.ontology.resolveObjectType(objectTypeId)
+    }
+  }
+
   const expanded = requested
     ? [...new Set(requested.flatMap((id) => [id, ...runtime.ontology.getSubTypes(id)]))]
     : undefined
