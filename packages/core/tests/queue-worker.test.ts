@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   type ClaimedQueueJob,
   InMemoryQueues,
@@ -157,6 +157,98 @@ describe("QueueWorker", () => {
     })
 
     await worker.stop()
+  })
+
+  test("renews leases while jobs remain in flight", async () => {
+    const queues = new InMemoryQueues()
+    const originalRenew = queues.syncRuns.renewLease?.bind(queues.syncRuns)
+    if (!originalRenew) throw new Error("Expected in-memory queue lease renewal support.")
+    let renewals = 0
+    queues.syncRuns.renewLease = async (params) => {
+      renewals += 1
+      return originalRenew(params)
+    }
+
+    const originalComplete = queues.syncRuns.complete.bind(queues.syncRuns)
+    let completed = false
+    queues.syncRuns.complete = async (params) => {
+      await originalComplete(params)
+      completed = true
+    }
+
+    class SlowWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+      protected async execute(): Promise<void> {
+        await Bun.sleep(240)
+      }
+    }
+
+    const worker = new SlowWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      workerId: "w",
+      leaseMs: 90,
+      idlePollMs: 10,
+    })
+
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "slow" } }],
+    })
+
+    await worker.start()
+    try {
+      await waitFor(() => completed)
+      expect(renewals).toBeGreaterThanOrEqual(2)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("continues processing after a completion acknowledgement error", async () => {
+    const queues = new InMemoryQueues()
+    const originalComplete = queues.syncRuns.complete.bind(queues.syncRuns)
+    let completionCalls = 0
+    queues.syncRuns.complete = async (params) => {
+      await originalComplete(params)
+      completionCalls += 1
+      if (completionCalls === 1) {
+        throw new Error("connection dropped after acknowledgement")
+      }
+    }
+
+    const processed: string[] = []
+    class ResilientWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+      protected async execute(claimed: ClaimedQueueJob<SyncRunRequestedQueueJob>): Promise<void> {
+        processed.push(claimed.job.payload.syncId)
+      }
+    }
+
+    const worker = new ResilientWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      workerId: "w",
+      idlePollMs: 10,
+    })
+    const consoleError = spyOn(console, "error").mockImplementation(() => {})
+
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "first" } }],
+    })
+
+    await worker.start()
+    try {
+      await waitFor(() => processed.includes("first") && completionCalls === 1)
+      await queues.syncRuns.enqueue({
+        projectId: PROJECT_ID,
+        jobs: [{ type: "sync.run.requested", payload: { syncId: "second" } }],
+      })
+      await waitFor(() => processed.includes("second"))
+      expect(consoleError).toHaveBeenCalled()
+    } finally {
+      await worker.stop()
+      consoleError.mockRestore()
+    }
   })
 
   test("claimLimit batches and executes multiple jobs concurrently", async () => {
