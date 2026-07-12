@@ -70,8 +70,17 @@ export interface ImapEnvelope {
 export interface ImapBodyPart {
   readonly part: string | null
   readonly type: string
+  /** Parameters declared in the source MIME Content-Type header. */
   readonly parameters: Readonly<Record<string, string>>
+  /**
+   * Charset declared in the source MIME Content-Type header.
+   *
+   * This describes the original message representation, not necessarily the bytes emitted by
+   * `downloadPart().content`. Use `ImapDownloadedPart.meta.contentCharset` to decode that stream.
+   */
+  readonly declaredCharset: string | null
   readonly id: string | null
+  /** Content-Transfer-Encoding declared in the source MIME part. */
   readonly encoding: string | null
   readonly size: number | null
   readonly disposition: string | null
@@ -115,10 +124,19 @@ export interface ImapDownloadedPart {
     /** ImapFlow's server-reported size; it may describe the full message, not this MIME part. */
     readonly expectedSize: number
     readonly contentType: string
-    readonly charset: string | null
+    /**
+     * Charset of the bytes emitted by `content` after ImapFlow decodes the MIME part.
+     *
+     * Use this value, rather than `ImapBodyPart.declaredCharset`, to decode the returned stream.
+     */
+    readonly contentCharset: string | null
     readonly disposition: string | null
     readonly filename: string | null
-    readonly encoding: string | null
+    /**
+     * Content-Transfer-Encoding declared in the source MIME part. The returned stream has already
+     * been transfer-decoded.
+     */
+    readonly transferEncoding: string | null
   }
   readonly content: Readable
 }
