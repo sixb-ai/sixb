@@ -77,6 +77,114 @@ describe("teamleader connector", () => {
     expect(response.data).toEqual([{ id: "deal-1" }])
   })
 
+  test("supports documented deal actions", async () => {
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/deals.create") {
+          return Promise.resolve(
+            jsonResponse({ data: { type: "deal", id: "deal-1" } }, { status: 201 })
+          )
+        }
+
+        return Promise.resolve(new Response(undefined, { status: 204 }))
+      }),
+    })
+
+    const created = await client.deals.create({
+      lead: {
+        customer: { type: "company", id: "company-1" },
+        contact_person_id: "contact-1",
+      },
+      title: "Interesting business deal",
+      summary: "Additional information",
+      source_id: "source-1",
+      department_id: "department-1",
+      responsible_user_id: "user-1",
+      phase_id: "phase-1",
+      estimated_value: { amount: 123.3, currency: "EUR" },
+      estimated_probability: 0.75,
+      estimated_closing_date: "2017-05-09",
+      custom_fields: [{ id: "field-1", value: "BeHome" }],
+      currency: { code: "EUR", exchange_rate: 1 },
+      purchase_order_number: "000023",
+    })
+    await client.deals.update({
+      id: "deal-1",
+      title: "Updated deal",
+      summary: null,
+      source_id: null,
+      department_id: null,
+      responsible_user_id: null,
+      estimated_value: null,
+      estimated_probability: null,
+      estimated_closing_date: null,
+      custom_fields: [{ id: "field-1", value: ["BeHome", "Placard"] }],
+      currency: { code: "EUR", exchange_rate: 1 },
+      purchase_order_number: null,
+    })
+    await client.deals.move({ id: "deal-1", phase_id: "phase-2" })
+    await client.deals.win({ id: "deal-1" })
+    await client.deals.lose({
+      id: "deal-1",
+      reason_id: "lost-reason-1",
+      extra_info: "Decision postponed",
+    })
+    await client.deals.delete({ id: "deal-1" })
+
+    expect(created.data).toEqual({ type: "deal", id: "deal-1" })
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/deals.create",
+      "/deals.update",
+      "/deals.move",
+      "/deals.win",
+      "/deals.lose",
+      "/deals.delete",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        lead: {
+          customer: { type: "company", id: "company-1" },
+          contact_person_id: "contact-1",
+        },
+        title: "Interesting business deal",
+        summary: "Additional information",
+        source_id: "source-1",
+        department_id: "department-1",
+        responsible_user_id: "user-1",
+        phase_id: "phase-1",
+        estimated_value: { amount: 123.3, currency: "EUR" },
+        estimated_probability: 0.75,
+        estimated_closing_date: "2017-05-09",
+        custom_fields: [{ id: "field-1", value: "BeHome" }],
+        currency: { code: "EUR", exchange_rate: 1 },
+        purchase_order_number: "000023",
+      },
+      {
+        id: "deal-1",
+        title: "Updated deal",
+        summary: null,
+        source_id: null,
+        department_id: null,
+        responsible_user_id: null,
+        estimated_value: null,
+        estimated_probability: null,
+        estimated_closing_date: null,
+        custom_fields: [{ id: "field-1", value: ["BeHome", "Placard"] }],
+        currency: { code: "EUR", exchange_rate: 1 },
+        purchase_order_number: null,
+      },
+      { id: "deal-1", phase_id: "phase-2" },
+      { id: "deal-1" },
+      { id: "deal-1", reason_id: "lost-reason-1", extra_info: "Decision postponed" },
+      { id: "deal-1" },
+    ])
+  })
+
   test("supports documented quotation actions", async () => {
     const requests: CapturedRequest[] = []
     const client = createTeamleaderClient({

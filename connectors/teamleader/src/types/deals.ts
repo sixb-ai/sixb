@@ -1,11 +1,12 @@
 import type {
+  TeamleaderCurrencyCode,
   TeamleaderCurrencyExchangeRate,
   TeamleaderMoney,
   TeamleaderPage,
   TeamleaderSort,
   TeamleaderTypeAndId,
 } from "./common"
-import type { TeamleaderCustomField } from "./custom-fields"
+import type { TeamleaderCustomField, TeamleaderCustomFieldInput } from "./custom-fields"
 
 export type TeamleaderDealStatus = "new" | "open" | "won" | "lost"
 
@@ -33,6 +34,59 @@ export interface TeamleaderDealsListRequest {
 export interface TeamleaderLead {
   readonly customer?: TeamleaderTypeAndId<"contact" | "company">
   readonly contact_person?: TeamleaderTypeAndId
+}
+
+export interface TeamleaderDealLeadRequest {
+  readonly customer: TeamleaderTypeAndId<"contact" | "company">
+  readonly contact_person_id?: string
+}
+
+export interface TeamleaderDealCurrencyRequest {
+  readonly code: TeamleaderCurrencyCode
+  readonly exchange_rate: number
+}
+
+export interface TeamleaderDealCreateRequest {
+  readonly lead: TeamleaderDealLeadRequest
+  readonly title: string
+  readonly summary?: string
+  readonly source_id?: string
+  readonly department_id?: string
+  readonly responsible_user_id?: string
+  readonly phase_id?: string
+  readonly estimated_value?: TeamleaderMoney | null
+  readonly estimated_probability?: number
+  readonly estimated_closing_date?: string
+  readonly custom_fields?: readonly TeamleaderCustomFieldInput[]
+  readonly currency?: TeamleaderDealCurrencyRequest
+  readonly purchase_order_number?: string | null
+}
+
+export interface TeamleaderDealUpdateRequest {
+  readonly id: string
+  readonly lead?: TeamleaderDealLeadRequest
+  readonly title?: string
+  readonly summary?: string | null
+  readonly source_id?: string | null
+  readonly department_id?: string | null
+  readonly responsible_user_id?: string | null
+  readonly estimated_value?: TeamleaderMoney | null
+  readonly estimated_probability?: number | null
+  readonly estimated_closing_date?: string | null
+  readonly custom_fields?: readonly TeamleaderCustomFieldInput[]
+  readonly currency?: TeamleaderDealCurrencyRequest
+  readonly purchase_order_number?: string | null
+}
+
+export interface TeamleaderDealMoveRequest {
+  readonly id: string
+  readonly phase_id: string
+}
+
+export interface TeamleaderDealLoseRequest {
+  readonly id: string
+  readonly reason_id?: string
+  readonly extra_info?: string
 }
 
 export interface TeamleaderDealListItem {
