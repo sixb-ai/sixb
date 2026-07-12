@@ -33,3 +33,8 @@ npm-debug.log*
 .tsbuild/
 apps/docs/src/generated/
 apps/docs/public/
+
+# Vercel
+.vercel/
+.vercel
+.env*
