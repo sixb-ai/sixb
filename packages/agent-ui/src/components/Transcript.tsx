@@ -16,6 +16,8 @@ import {
   LiveAssistant,
   MessageView,
   ReconnectingMarker,
+  RunCancelledMarker,
+  RunFailureMarker,
   ThinkingMarker,
   UserFileAttachment,
 } from "./MessageView"
@@ -31,6 +33,13 @@ export interface TranscriptProps {
   readonly anchorCurrentTurn?: boolean
   /** A run is requested but the live stream hasn't produced content yet — show a thinking shimmer. */
   readonly awaitingResponse?: boolean
+  /** The queued run has crossed the conversational delay threshold. */
+  readonly waitingLonger?: boolean
+  /** The newest run failed before it produced a durable assistant message. */
+  readonly failedBeforeResponse?: boolean
+  readonly cancelledBeforeResponse?: boolean
+  readonly onRetry?: () => void
+  readonly retrying?: boolean
   /** The active run's stream dropped and is re-subscribing — surface a transient notice. */
   readonly reconnecting?: boolean
 }
@@ -43,6 +52,11 @@ export function Transcript({
   pendingUserAttachments = [],
   anchorCurrentTurn,
   awaitingResponse,
+  waitingLonger,
+  failedBeforeResponse,
+  cancelledBeforeResponse,
+  onRetry,
+  retrying,
   reconnecting,
 }: TranscriptProps) {
   // Keep the live row until the finalized assistant message is present in durable state, so the
@@ -138,11 +152,24 @@ export function Transcript({
               // The answer is not a turn anchor — it grows into the space below the anchored user
               // message, so streaming never yanks the reader away from where the turn started.
               <MessageScrollerItem messageId="live">
-                <LiveAssistant live={live} keepWorkOpen={handoffPending} />
+                <LiveAssistant
+                  live={live}
+                  keepWorkOpen={handoffPending}
+                  onRetry={onRetry}
+                  retrying={retrying}
+                />
               </MessageScrollerItem>
             ) : showThinking ? (
               <MessageScrollerItem messageId="thinking">
-                <ThinkingMarker />
+                <ThinkingMarker takingLonger={waitingLonger} />
+              </MessageScrollerItem>
+            ) : failedBeforeResponse ? (
+              <MessageScrollerItem messageId="run-failed">
+                <RunFailureMarker onRetry={onRetry} retrying={retrying} />
+              </MessageScrollerItem>
+            ) : cancelledBeforeResponse ? (
+              <MessageScrollerItem messageId="run-cancelled">
+                <RunCancelledMarker />
               </MessageScrollerItem>
             ) : null}
             {live.active && reconnecting ? (

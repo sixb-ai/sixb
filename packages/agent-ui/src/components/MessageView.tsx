@@ -1,6 +1,13 @@
 import { client } from "@sixb/client"
-import { Bubble, BubbleContent, Marker, MarkerContent, MarkerIcon } from "@sixb/ui/components"
-import { AlertTriangle } from "lucide-react"
+import {
+  Bubble,
+  BubbleContent,
+  Button,
+  Marker,
+  MarkerContent,
+  MarkerIcon,
+} from "@sixb/ui/components"
+import { AlertTriangle, RotateCcw } from "lucide-react"
 import { isAwaitingFirstToken, type LiveRunState } from "../liveRun"
 import { normalizeDurableParts } from "../parts"
 import type { AgentFileRef, AgentMessage } from "../types"
@@ -81,29 +88,71 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
 export function LiveAssistant({
   live,
   keepWorkOpen = false,
+  onRetry,
+  retrying = false,
 }: {
   live: LiveRunState
   keepWorkOpen?: boolean
+  onRetry?: () => void
+  retrying?: boolean
 }) {
   if (isAwaitingFirstToken(live)) {
     return <ThinkingMarker />
+  }
+  if (live.finishStatus === "failed" && live.parts.length === 0) {
+    return <RunFailureMarker onRetry={onRetry} retrying={retrying} />
+  }
+  if (live.finishStatus === "cancelled" && live.parts.length === 0) {
+    return <RunCancelledMarker />
   }
 
   return (
     <div className="flex flex-col gap-2">
       <AssistantBody parts={live.parts} live={live.active || keepWorkOpen} />
       {live.finishStatus === "failed" ? (
-        <RunErrorMarker message={live.finishError ?? "The agent run failed."} />
+        <RunErrorMarker message="I couldn’t finish that response." />
+      ) : null}
+      {live.finishStatus === "cancelled" ? <RunCancelledMarker /> : null}
+    </div>
+  )
+}
+
+export function ThinkingMarker({ takingLonger = false }: { takingLonger?: boolean }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <Marker role="status" aria-label="Agent is thinking">
+        <MarkerContent className="shimmer">Thinking…</MarkerContent>
+      </Marker>
+      {takingLonger ? (
+        <p className="pl-6 text-xs text-muted-foreground" role="status">
+          Taking a little longer than usual…
+        </p>
       ) : null}
     </div>
   )
 }
 
-export function ThinkingMarker() {
+export function RunCancelledMarker() {
+  return <p className="text-sm text-muted-foreground">Stopped.</p>
+}
+
+export function RunFailureMarker({
+  onRetry,
+  retrying = false,
+}: {
+  onRetry?: () => void
+  retrying?: boolean
+}) {
   return (
-    <Marker role="status" aria-label="Agent is thinking">
-      <MarkerContent className="shimmer">Thinking…</MarkerContent>
-    </Marker>
+    <div className="flex flex-wrap items-center gap-2" role="status">
+      <p className="text-sm text-muted-foreground">I couldn’t get a response started.</p>
+      {onRetry ? (
+        <Button variant="outline" size="sm" onClick={onRetry} disabled={retrying}>
+          <RotateCcw aria-hidden="true" />
+          {retrying ? "Retrying…" : "Retry"}
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

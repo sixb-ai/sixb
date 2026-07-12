@@ -37,6 +37,11 @@ export interface ConversationPanelProps {
   readonly anchorCurrentTurn?: boolean
   /** A run has been requested and we're waiting on it — show the thinking shimmer immediately. */
   readonly awaitingResponse: boolean
+  readonly waitingLonger?: boolean
+  readonly failedBeforeResponse?: boolean
+  readonly cancelledBeforeResponse?: boolean
+  readonly onRetry?: () => void
+  readonly retrying?: boolean
   /** The active run's stream dropped and is re-subscribing. */
   readonly reconnecting: boolean
   /** A failed send to surface above the composer, or null. English, user-facing. */
@@ -77,6 +82,11 @@ export function ConversationPanel({
   pendingUserAttachments = [],
   anchorCurrentTurn,
   awaitingResponse,
+  waitingLonger,
+  failedBeforeResponse,
+  cancelledBeforeResponse,
+  onRetry,
+  retrying,
   reconnecting,
   sendError,
   agents,
@@ -184,6 +194,11 @@ export function ConversationPanel({
                 pendingUserAttachments={pendingUserAttachments}
                 anchorCurrentTurn={anchorCurrentTurn}
                 awaitingResponse={awaitingResponse}
+                waitingLonger={waitingLonger}
+                failedBeforeResponse={failedBeforeResponse}
+                cancelledBeforeResponse={cancelledBeforeResponse}
+                onRetry={onRetry}
+                retrying={retrying}
                 reconnecting={reconnecting}
               />
             )}
