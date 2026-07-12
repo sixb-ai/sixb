@@ -57,12 +57,12 @@ Open:
 
 - [Get started](https://docs.sixb.ai)
 - [Project structure](https://docs.sixb.ai/fundamentals/project-structure)
-- [Ontology](https://docs.sixb.ai/ontology/overview)
-- [Objects](https://docs.sixb.ai/objects/overview)
-- [Actions](https://docs.sixb.ai/actions/overview)
-- [Data integrations](https://docs.sixb.ai/data/overview)
-- [Apps](https://docs.sixb.ai/apps/overview)
-- [Deployment](https://docs.sixb.ai/deployment/overview)
+- [Ontology](https://docs.sixb.ai/ontology)
+- [Objects](https://docs.sixb.ai/objects)
+- [Actions](https://docs.sixb.ai/actions)
+- [Data integrations](https://docs.sixb.ai/data)
+- [Apps](https://docs.sixb.ai/apps)
+- [Deployment](https://docs.sixb.ai/deployment)
 
 ## Develop this repo
 
