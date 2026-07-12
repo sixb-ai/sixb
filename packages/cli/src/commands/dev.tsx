@@ -119,14 +119,17 @@ export async function runDev(options: DevOptions = {}) {
       />
     )
 
-    await runUntilSignal(async () => {
-      app.unmount()
-      console.log("\nShutting down...")
-      await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-      await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-      await stopQuietly(() => server?.stop() ?? Promise.resolve())
-      await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-    })
+    await Promise.race([
+      runUntilSignal(async () => {
+        app.unmount()
+        console.log("\nShutting down...")
+        await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
+        await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
+        await stopQuietly(() => server?.stop() ?? Promise.resolve())
+        await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
+      }),
+      runtime.waitForWorkerFailure(),
+    ])
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())

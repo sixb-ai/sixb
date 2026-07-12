@@ -6,6 +6,7 @@ import {
   startRulesRuntime,
   stopQuietly,
   stopSixbProviders,
+  waitForWorkerFailure,
 } from "../lib/runtime"
 import { ErrorView, LoadingView, RoleView, renderPersistent, renderStatic } from "../ui"
 
@@ -40,15 +41,18 @@ export async function runRules(options: RulesOptions = {}) {
       />
     )
 
-    await runUntilSignal(async () => {
-      app.unmount()
-      console.log("\nShutting down rules...")
-      await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
-      if (sixb) {
-        await stopSixbProviders(sixb)
-      }
-      sixb = null
-    })
+    await Promise.race([
+      runUntilSignal(async () => {
+        app.unmount()
+        console.log("\nShutting down rules...")
+        await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
+        if (sixb) {
+          await stopSixbProviders(sixb)
+        }
+        sixb = null
+      }),
+      waitForWorkerFailure(runtime.rulesWorker),
+    ])
   } catch (error) {
     app.unmount()
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())

@@ -46,15 +46,18 @@ export async function runWorker(options: WorkerOptions = {}) {
     const workerId = `${workerType}-worker-${sixb.id}`
     app.rerender(<WorkerView name={sixb.id} workerId={workerId} />)
 
-    await runUntilSignal(async () => {
-      app.unmount()
-      console.log("\nShutting down worker...")
-      await stopQuietly(() => worker?.stop() ?? Promise.resolve())
-      if (sixb) {
-        await stopSixbProviders(sixb)
-      }
-      sixb = null
-    })
+    await Promise.race([
+      runUntilSignal(async () => {
+        app.unmount()
+        console.log("\nShutting down worker...")
+        await stopQuietly(() => worker?.stop() ?? Promise.resolve())
+        if (sixb) {
+          await stopSixbProviders(sixb)
+        }
+        sixb = null
+      }),
+      worker.wait(),
+    ])
   } catch (error) {
     app.unmount()
     await stopQuietly(() => worker?.stop() ?? Promise.resolve())

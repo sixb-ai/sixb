@@ -1147,6 +1147,7 @@ export {
   QueueWorker,
   Worker,
   WorkerAbortError,
+  WorkerUnhealthyError,
 } from "./workers"
 
 // ── HTTP ──────────────────────────────────────────────

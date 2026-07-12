@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
-import { assertLakeDatasetDefinitionsCompatible, migrateStorage } from "@sixb/core"
+import { assertLakeDatasetDefinitionsCompatible, migrateStorage, type Worker } from "@sixb/core"
 import {
   type CompileRoutesDiagnostic,
   compileRoutesWithDiagnostics,
@@ -13,6 +13,12 @@ import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import type { LoadedSixb } from "./loadSixb"
+
+export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
+  return new Promise<never>((_resolve, reject) => {
+    worker?.wait().catch(reject)
+  })
+}
 
 export async function stopQuietly(stopFn: (() => Promise<void>) | undefined | null): Promise<void> {
   if (!stopFn) return
@@ -35,6 +41,7 @@ export interface RunningSixbRuntime {
   readonly workflowWorker: WorkflowWorker | null
   readonly orchestratorWorker: OrchestratorWorker | null
   readonly warnings: readonly string[]
+  waitForWorkerFailure(): Promise<never>
   stop(): Promise<void>
 }
 
@@ -272,6 +279,19 @@ export async function startSixbRuntime(
     throw error
   }
 
+  const activeWorkers = (): Worker[] => {
+    const workers: Worker[] = []
+    if (rulesWorker) workers.push(rulesWorker)
+    if (syncWorker) workers.push(syncWorker)
+    if (actionWorker) workers.push(actionWorker)
+    if (agentWorker) workers.push(agentWorker)
+    if (projectionWorker) workers.push(projectionWorker)
+    if (pipelineWorker) workers.push(pipelineWorker)
+    if (workflowWorker) workers.push(workflowWorker)
+    if (orchestratorWorker) workers.push(orchestratorWorker)
+    return workers
+  }
+
   return {
     rulesWorker,
     syncWorker,
@@ -282,6 +302,9 @@ export async function startSixbRuntime(
     workflowWorker,
     orchestratorWorker,
     warnings,
+    waitForWorkerFailure() {
+      return Promise.race(activeWorkers().map(waitForWorkerFailure))
+    },
     stop,
   }
 }
