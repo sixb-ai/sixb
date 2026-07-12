@@ -86,7 +86,7 @@ function createQueueJob<TQueueJob extends QueueJob>(
   parseTimestamp(availableAt, "availableAt")
 
   return {
-    id: randomUUID(),
+    id: newJob.id ?? randomUUID(),
     projectId,
     createdAt,
     availableAt,
@@ -183,11 +183,17 @@ class InMemoryQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob> {
       return []
     }
 
-    const createdJobs = params.jobs.map((job) => createQueueJob(params.projectId, job))
+    const createdJobs = params.jobs.map((job) => {
+      if (job.id !== undefined) assertNonEmpty(job.id, "job.id")
+      const existing = job.id
+        ? this.store.find<TQueueJob>(params.projectId, this.queueId, job.id)
+        : null
+      if (existing) return existing.job
 
-    for (const job of createdJobs) {
-      this.store.add(params.projectId, this.queueId, job)
-    }
+      const created = createQueueJob(params.projectId, job)
+      this.store.add(params.projectId, this.queueId, created)
+      return created
+    })
 
     return createdJobs.map((job) => structuredClone(job))
   }

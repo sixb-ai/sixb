@@ -19,7 +19,7 @@ export function buildEnvelope<TQueueJob extends QueueJob>(
   const createdAt = new Date().toISOString()
   const availableAt = newJob.availableAt ?? createdAt
   const availableAtMs = parseTimestamp(availableAt, "availableAt")
-  const id = randomUUID()
+  const id = newJob.id ?? randomUUID()
 
   const job = {
     id,

@@ -71,6 +71,26 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
+      test("deduplicates repeated enqueue with a caller-supplied id", async () => {
+        await withQueues(async (queues) => {
+          const input = {
+            id: "dispatch-run-1",
+            type: "sync.run.requested" as const,
+            payload: { syncId: "sync-1" },
+          }
+          const [[first], [second]] = await Promise.all([
+            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
+            queues.syncRuns.enqueue({ projectId: "project-a", jobs: [input] }),
+          ])
+
+          expect(first?.id).toBe(input.id)
+          expect(second?.id).toBe(input.id)
+          await expect(
+            queues.syncRuns.claim({ projectId: "project-a", workerId: "worker-1", limit: 2 })
+          ).resolves.toHaveLength(1)
+        })
+      })
+
       test("returns empty array when no jobs are passed", async () => {
         await withQueues(async (queues) => {
           const result = await queues.syncRuns.enqueue({ projectId: "project-a", jobs: [] })

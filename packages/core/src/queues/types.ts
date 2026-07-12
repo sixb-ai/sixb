@@ -21,6 +21,8 @@ export interface QueueJob<TType extends string = string, TPayload = unknown>
 export type NewQueueJob<TQueueJob extends QueueJob> =
   TQueueJob extends QueueJob<infer TType, infer TPayload>
     ? {
+        /** Stable provider-level id used to make enqueue idempotent when supplied. */
+        readonly id?: string
         readonly type: TType
         readonly payload: TPayload
         readonly availableAt?: string
@@ -43,7 +45,10 @@ export interface ClaimedQueueJob<TQueueJob extends QueueJob = QueueJob> {
 }
 
 export interface Queue<TQueueJob extends QueueJob> {
-  /** Adds durable work to the lane. Jobs become claimable at `availableAt`, or immediately. */
+  /**
+   * Adds durable work to the lane. Jobs become claimable at `availableAt`, or immediately.
+   * Repeating a caller-supplied job id is idempotent while that job remains in the provider.
+   */
   enqueue(params: {
     projectId: string
     jobs: readonly NewQueueJob<TQueueJob>[]
@@ -163,9 +168,8 @@ export interface ActionRunRequestedQueueJob
   > {}
 
 /**
- * An agent turn is requested for a thread. The payload carries the *intent* plus the request-time
- * run id — the worker reserves the run row at claim time (reserve-at-claim), so it owns the
- * `agent_runs` lease from birth and there is never an orphan run between request and pickup.
+ * An agent turn is requested for a thread. The payload carries the intent plus the request-time run
+ * id; the worker reserves the run row when it claims the queue job.
  */
 export interface AgentRunRequestedQueueJob
   extends QueueJob<
