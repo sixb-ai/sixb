@@ -139,7 +139,7 @@ async function closeClient(state: ConnectionState): Promise<void> {
 
     state.client.once("close", finish)
     state.client.once("error", forceClose)
-    state.client.end()
+    state.client.destroy()
   })
 }
 
