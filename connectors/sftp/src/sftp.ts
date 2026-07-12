@@ -124,13 +124,17 @@ async function closeClient(state: ConnectionState): Promise<void> {
       resolve()
     }
 
+    const forceClose = () => {
+      state.client.destroy()
+    }
+
     const cleanup = () => {
       state.client.off("close", finish)
-      state.client.off("error", finish)
+      state.client.off("error", forceClose)
     }
 
     state.client.once("close", finish)
-    state.client.once("error", finish)
+    state.client.once("error", forceClose)
     state.client.end()
   })
 }
