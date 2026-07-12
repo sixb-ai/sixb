@@ -1,4 +1,5 @@
 import type { ObjectType, OntologyRegistry, Property, Schema, ValueType } from "../../ontology"
+import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { ObjectQueryValidationError } from "./errors"
 import type {
@@ -203,7 +204,7 @@ function validateStart(
   }
 
   if (!ctx.ontology.getObjectTypeById(objectTypeId)) {
-    addIssue(ctx, path, "unknown_object_type", `Unknown object type '${objectTypeId}'`)
+    addIssue(ctx, path, "unknown_object_type", formatUnknownObjectTypeMessage(objectTypeId))
     return { result: { objectTypeIds: [] }, query: { kind: "start", objectTypeId } }
   }
 

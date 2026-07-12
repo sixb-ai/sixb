@@ -657,6 +657,10 @@ describe("Sixb runtime", () => {
     const roomObjects = await sixb.list({ objectTypeIds: ["Room"], limit: 10 })
     expect(roomObjects.objects).toHaveLength(3)
 
+    await expect(sixb.list({ objectTypeIds: ["room"] })).rejects.toThrow(
+      "Unknown object type 'room'. Object type IDs are case-sensitive."
+    )
+
     // Test ordering
     const orderedByKey = await sixb.objects(Room).list({
       orderBy: "primaryId",

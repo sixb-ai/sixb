@@ -20,8 +20,8 @@ registered ontology.
 | `POST /api/objects/query/exists` | `{ query }` | `{ exists, plan }` |
 | `POST /api/objects/query/facets` | `{ query, facets }` | `{ facets, plan }` |
 
-Set `includeTotal: true` on the query route to also count the full matching set; it is omitted
-by default because counting is more expensive than fetching a page.
+The query route includes `total` by default. Set `includeTotal: false` to omit the full matching
+count when it is not needed, because counting can be more expensive than fetching a page.
 
 Every response carries a diagnostic `plan` object for debugging. Application code ignores it and
 reads the result fields above. Validation and planning failures return HTTP 400 with a structured

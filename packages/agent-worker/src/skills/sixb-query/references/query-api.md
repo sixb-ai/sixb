@@ -13,15 +13,19 @@ links, and applicable actions that are visible to the agent.
 
 ## List Objects
 
-This is the only list-by-type route. Put the object type id in the `objectTypeId` query param
-using the exact casing from the ontology. Do not use `/api/objects/{objectTypeId}` to list
-objects; that path is not an API route.
+Use `GET /api/objects` for simple storage-backed browsing with offset pagination. Put the object
+type id in the `objectTypeId` query parameter using the exact casing from the ontology. A supplied
+type includes its registered subtypes; omitting it lists objects across all types visible to the
+agent. Do not use `/api/objects/{objectTypeId}` to list objects; that path is not an API route.
 
 ```bash
 curl -sS "$SIXB_API_BASE_URL/api/objects?objectTypeId=customer&limit=20"
 ```
 
-Common query params: `objectTypeId`, `limit`, `offset`, `orderBy`, `order`, `idPrefix`, `idSuffix`, `createdAfter`, `createdBefore`, `updatedAfter`, `updatedBefore`.
+The response always includes `total` and `hasMore`. Common query parameters are `objectTypeId`,
+`limit`, `offset`, `orderBy`, `order`, `idPrefix`, `idSuffix`, `createdAfter`, `createdBefore`,
+`updatedAfter`, and `updatedBefore`. `limit` must be an integer from 0 through 1000, `offset` must
+be a non-negative integer, and date filters must be RFC 3339 timestamps.
 
 ## Get One Object
 
@@ -34,16 +38,21 @@ It is not the collection route for a type.
 
 ## Object Query
 
-POST query bodies only accept `query` and optional `includeTotal` at the top level. Result
-bounds go inside the nested query shape: use a `limit` node for a fixed cap, or a `page`
-node with `pageSize` and optional `pageToken` for pagination. Do not send top-level
-`limit`, `cursor`, `pageSize`, or `pageToken` fields to this endpoint.
+Use `POST /api/objects/query` for ontology-property filters, search, sorting, graph traversal,
+expansion, or token pagination. POST query bodies only accept `query` and optional `includeTotal`
+at the top level. Responses include `total` by default; set `includeTotal: false` when the answer
+does not need a full count.
+
+Result bounds go inside the nested query shape: use a `limit` node for a fixed cap, or a `page`
+node with `pageSize` and optional `pageToken` for pagination. A `start` node only includes the exact
+object type unless it sets `includeSubtypes: true`. Do not send top-level `limit`, `cursor`,
+`pageSize`, or `pageToken` fields to this endpoint.
 
 ```bash
 curl -sS \
   -H "Content-Type: application/json" \
   -X POST "$SIXB_API_BASE_URL/api/objects/query" \
-  --data '{"query":{"kind":"limit","input":{"kind":"start","objectTypeId":"customer"},"limit":20},"includeTotal":true}'
+  --data '{"query":{"kind":"limit","input":{"kind":"start","objectTypeId":"customer"},"limit":20},"includeTotal":false}'
 ```
 
 ## Count, Exists, Facets

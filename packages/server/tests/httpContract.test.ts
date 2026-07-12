@@ -1294,6 +1294,108 @@ describe("SixbServer HTTP contract", () => {
         },
       })
 
+      const unknownObjectTypeResponse = await fetch(`${baseUrl}/api/objects?objectTypeId=Device`)
+      expect(unknownObjectTypeResponse.status).toBe(400)
+      expect(await unknownObjectTypeResponse.json()).toEqual({
+        error: "Unknown object type 'Device'. Object type IDs are case-sensitive.",
+      })
+
+      const emptyObjectTypeResponse = await fetch(`${baseUrl}/api/objects?objectTypeId=`)
+      expect(emptyObjectTypeResponse.status).toBe(400)
+      expect(await emptyObjectTypeResponse.json()).toEqual({
+        error: "Unknown object type ''. Object type IDs are case-sensitive.",
+      })
+
+      const invalidObjectListQueries: {
+        query: Record<string, string>
+        error: string
+      }[] = [
+        {
+          query: { limit: "10abc" },
+          error: "Invalid query parameter 'limit': expected an integer between 0 and 1000.",
+        },
+        {
+          query: { limit: "1.5" },
+          error: "Invalid query parameter 'limit': expected an integer between 0 and 1000.",
+        },
+        {
+          query: { limit: "-1" },
+          error: "Invalid query parameter 'limit': expected an integer between 0 and 1000.",
+        },
+        {
+          query: { limit: "1001" },
+          error: "Invalid query parameter 'limit': expected an integer between 0 and 1000.",
+        },
+        {
+          query: { offset: "-1" },
+          error: "Invalid query parameter 'offset': expected a non-negative safe integer.",
+        },
+        {
+          query: { offset: "9007199254740992" },
+          error: "Invalid query parameter 'offset': expected a non-negative safe integer.",
+        },
+        {
+          query: { orderBy: "name" },
+          error:
+            "Invalid query parameter 'orderBy': expected one of createdAt, updatedAt, or primaryId.",
+        },
+        {
+          query: { order: "newest" },
+          error: "Invalid query parameter 'order': expected 'asc' or 'desc'.",
+        },
+        {
+          query: { createdAfter: "not-a-date" },
+          error: "Invalid query parameter 'createdAfter': expected an RFC 3339 timestamp.",
+        },
+        {
+          query: { updatedBefore: "2026-07-12" },
+          error: "Invalid query parameter 'updatedBefore': expected an RFC 3339 timestamp.",
+        },
+        {
+          query: {
+            createdAfter: "2026-07-13T00:00:00Z",
+            createdBefore: "2026-07-12T00:00:00Z",
+          },
+          error:
+            "Invalid query parameter range: 'createdAfter' must be before or equal to 'createdBefore'.",
+        },
+        {
+          query: {
+            updatedAfter: "2026-07-13T00:00:00Z",
+            updatedBefore: "2026-07-12T00:00:00Z",
+          },
+          error:
+            "Invalid query parameter range: 'updatedAfter' must be before or equal to 'updatedBefore'.",
+        },
+      ]
+
+      for (const invalid of invalidObjectListQueries) {
+        const search = new URLSearchParams(invalid.query)
+        const response = await fetch(`${baseUrl}/api/objects?${search}`)
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: invalid.error })
+      }
+
+      const zeroLimitResponse = await fetch(
+        `${baseUrl}/api/objects?objectTypeId=device&limit=0&offset=0`
+      )
+      expect(zeroLimitResponse.status).toBe(200)
+      expect(await zeroLimitResponse.json()).toMatchObject({
+        objects: [],
+        hasMore: true,
+        total: 1,
+      })
+
+      const validObjectListSearch = new URLSearchParams({
+        objectTypeId: "device",
+        limit: "1000",
+        offset: "0",
+        createdAfter: "1970-01-01T00:00:00Z",
+        updatedBefore: "2100-01-01T00:00:00+04:00",
+      })
+      const validObjectListResponse = await fetch(`${baseUrl}/api/objects?${validObjectListSearch}`)
+      expect(validObjectListResponse.status).toBe(200)
+
       const queryObjectsResponse = await fetch(`${baseUrl}/api/objects/query`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -1414,6 +1516,7 @@ describe("SixbServer HTTP contract", () => {
           {
             path: "$.input",
             code: "unknown_object_type",
+            message: "Unknown object type 'missing'. Object type IDs are case-sensitive.",
           },
         ],
       })
