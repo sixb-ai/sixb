@@ -12,7 +12,13 @@ import type {
   MailboxObject,
   SearchObject,
 } from "imapflow"
-import { ImapAbortedError, ImapConnectorError, ImapDownloadTooLargeError, imap } from "../src"
+import {
+  ImapAbortedError,
+  ImapConnectorError,
+  ImapDownloadTooLargeError,
+  ImapPartUnavailableError,
+  imap,
+} from "../src"
 import { createImapClient, type ImapTransport } from "../src/client"
 import type { ImapConnection, ImapMailboxSession } from "../src/types"
 
@@ -328,6 +334,44 @@ describe("imap connector", () => {
     expect(source.destroyed).toBe(true)
   })
 
+  test("reports an unavailable part when the server returns no content", async () => {
+    const fixture = clientFixture()
+    fixture.configure = (transport) => {
+      // ImapFlow resolves an empty object when the requested part is absent.
+      transport.downloadResult = {}
+    }
+
+    await expect(
+      fixture.client.withMailbox("INBOX", (mailbox) =>
+        mailbox.downloadPart({ uid: 7, part: "2", maxBytes: 5 })
+      )
+    ).rejects.toBeInstanceOf(ImapPartUnavailableError)
+
+    // Teardown must surface the typed error, not a masking `source.destroy` TypeError
+    // from an entry poisoned with an undefined stream.
+    expect(fixture.transports[0]?.events).toEqual([
+      "connect",
+      "lock:INBOX:true",
+      "download",
+      "release:INBOX",
+      "logout",
+    ])
+  })
+
+  test("reports an unavailable part for a partial download result", async () => {
+    const fixture = clientFixture()
+    fixture.configure = (transport) => {
+      // The `part === "1"` fetch-miss path resolves { response: false, chunk: false }.
+      transport.downloadResult = { response: false, chunk: false } as Partial<DownloadObject>
+    }
+
+    await expect(
+      fixture.client.withMailbox("INBOX", (mailbox) =>
+        mailbox.downloadPart({ uid: 7, part: "1", maxBytes: 5 })
+      )
+    ).rejects.toBeInstanceOf(ImapPartUnavailableError)
+  })
+
   test("makes a mailbox session unusable after its callback", async () => {
     const fixture = clientFixture()
     let escaped: ImapMailboxSession | undefined
@@ -454,7 +498,7 @@ class FakeTransport implements ImapTransport {
   mailboxes: ListResponse[] = []
   searchResult: number[] | false = []
   messages: FetchMessageObject[] = []
-  downloadResult: DownloadObject = download([], 0)
+  downloadResult: Partial<DownloadObject> = download([], 0)
   searchQuery?: SearchObject
   fetchRange?: string | number[] | SearchObject
   fetchQuery?: FetchQueryObject
@@ -546,7 +590,7 @@ class FakeTransport implements ImapTransport {
     range: string | number | bigint,
     part = "",
     options: { uid?: boolean; maxBytes?: number; chunkSize?: number } = {}
-  ): Promise<DownloadObject> {
+  ): Promise<Partial<DownloadObject>> {
     this.events.push("download")
     this.downloadRequest = { uid: Number(range), part, options }
     return this.downloadResult
