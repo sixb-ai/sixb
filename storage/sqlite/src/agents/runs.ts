@@ -4,11 +4,13 @@ import {
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
+  type CreateAgentRunInput,
   type FinishAgentRunInput,
+  type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
-  type ReserveAgentRunInput,
+  type StartAgentRunInput,
 } from "@sixb/core"
 import {
   appendRunListFilters,
@@ -24,9 +26,8 @@ const SQLITE_RUN_ID_BATCH_SIZE = 500
 export class SqliteAgentRunStore implements AgentRunStore {
   constructor(private readonly db: Database) {}
 
-  async reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord> {
+  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
-    const startedAt = input.startedAt ?? createdAt
 
     return this.db.transaction(() => {
       const thread = this.db
@@ -39,6 +40,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
+
       if (thread.active_run_id !== null) {
         throw new AgentStorageError(
           "active_run_exists",
@@ -51,12 +53,17 @@ export class SqliteAgentRunStore implements AgentRunStore {
           .query(
             `
             INSERT INTO agent_runs (
-              project_id, id, thread_id, agent_id, trigger_message_id,
-              requested_by_principal_type, requested_by_principal_id,
-              execution_principal_type, execution_principal_id,
-              status, model_id, attempt, execution_token,
-              execution_queue_lease_expires_at, created_at, started_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?)
+              project_id,
+              id,
+              thread_id,
+              agent_id,
+              trigger_message_id,
+              requested_by_principal_type,
+              requested_by_principal_id,
+              status,
+              attempt,
+              created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -67,13 +74,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.triggerMessageId,
             input.requestedByPrincipal.type,
             input.requestedByPrincipal.id,
-            input.executionPrincipal?.type ?? null,
-            input.executionPrincipal?.id ?? null,
-            input.modelId ?? null,
-            input.execution.token,
-            input.execution.queueLeaseExpiresAt.toISOString(),
-            createdAt.toISOString(),
-            startedAt.toISOString()
+            createdAt.toISOString()
           )
       } catch (error) {
         if (isUniqueConstraintError(error)) {
@@ -82,6 +83,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
             `[SixbSqlite] Agent run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
+
         throw error
       }
 
@@ -90,6 +92,66 @@ export class SqliteAgentRunStore implements AgentRunStore {
           "UPDATE agent_threads SET active_run_id = ?, updated_at = ? WHERE project_id = ? AND id = ?"
         )
         .run(input.id, createdAt.toISOString(), input.projectId, input.threadId)
+
+      return this.requireRun(input.projectId, input.id)
+    })()
+  }
+
+  async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
+    const startedAt = input.startedAt ?? new Date()
+    return this.db.transaction(() => {
+      this.requireStatus(input.projectId, input.id, "queued")
+      this.db
+        .query(
+          `
+          UPDATE agent_runs
+          SET
+            status = 'running',
+            execution_principal_type = ?,
+            execution_principal_id = ?,
+            model_id = ?,
+            attempt = 1,
+            execution_token = ?,
+            execution_queue_lease_expires_at = ?,
+            started_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.executionPrincipal?.type ?? null,
+          input.executionPrincipal?.id ?? null,
+          input.modelId ?? null,
+          input.execution.token,
+          input.execution.queueLeaseExpiresAt.toISOString(),
+          startedAt.toISOString(),
+          input.projectId,
+          input.id
+        )
+
+      return this.requireRun(input.projectId, input.id)
+    })()
+  }
+
+  async finishQueued(input: FinishQueuedAgentRunInput): Promise<AgentRunRecord> {
+    const completedAt = input.completedAt ?? new Date()
+    return this.db.transaction(() => {
+      const run = this.requireStatus(input.projectId, input.id, "queued")
+      this.db
+        .query(
+          `
+          UPDATE agent_runs
+          SET status = ?, error = ?, completed_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.status,
+          input.error ?? null,
+          completedAt.toISOString(),
+          input.projectId,
+          input.id
+        )
+      this.releaseThread(run, completedAt)
       return this.requireRun(input.projectId, input.id)
     })()
   }

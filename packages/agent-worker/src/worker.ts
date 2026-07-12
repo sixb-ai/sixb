@@ -12,20 +12,15 @@ import type {
 import {
   AgentStorageError,
   createAgentRunExecutionToken,
+  dispatchQueuedAgentRuns,
   isAbortError,
   QueueDeliveryLeaseLostError,
   QueueWorker,
-  SYSTEM_PRINCIPAL,
   subscribeAgentRunCancel,
 } from "@sixb/core"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentLeaseHeldError,
-  AgentWorkerError,
-} from "./errors"
+import { AgentExecutionLostError, AgentFinalizationError, AgentWorkerError } from "./errors"
 import { finishRunOrThrow } from "./finalize"
 import { reconcileAgentExecutionIdentities, reconcileAgentExecutionIdentity } from "./identity"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
@@ -41,19 +36,17 @@ import type {
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
-const SHORT_BACKOFF_MS = 250
+const AGENT_DISPATCH_POLL_MS = 1_000
+const MAX_AGENT_DISPATCH_BACKOFF_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
-/**
- * Cap on redeliveries for a run we cannot finalize. Beyond it the job is marked failed instead of
- * retrying forever; the run remains non-terminal until storage recovery or explicit repair.
- */
-const MAX_FINALIZE_ATTEMPTS = 10
+const PRESTART_RETRY_BACKOFF_MS = 5_000
+/** Cap retries for persistent setup or finalization failures so jobs cannot churn forever. */
+const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 
 /** Outcome of trying to own a run for a claimed job. */
 type Reservation =
   | { readonly kind: "run"; readonly run: AgentRunRecord }
-  | { readonly kind: "held"; readonly availableAt: string }
   | { readonly kind: "skip" }
 
 type QueuedRun = {
@@ -64,12 +57,11 @@ type QueuedRun = {
 }
 
 /**
- * Cohosted worker that turns `agent.run.requested` jobs into persisted agent runs.
+ * Cohosted worker that turns durable queued agent runs into executing turns.
  *
- * The queue delivery is the sole liveness authority. The worker reserves the run at claim time and
- * installs an execution token that fences durable writes. Queue redelivery rotates that token, so a
- * stale delivery cannot append or finalize after ownership moves. A run's terminal fate lives on its
- * record (like the action worker), so a
+ * The queue delivery owns liveness and redelivery. Each claim installs a fresh execution token on
+ * the durable run; storage checks that token to fence late writes from stale deliveries. A run's
+ * terminal fate lives on its record (like the action worker), so a
  * model/tool failure that we successfully record still acknowledges the job. The job is only left
  * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
@@ -109,12 +101,22 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
   protected override async run(signal: AbortSignal): Promise<void> {
     if (!this.idleWithoutAgents) {
+      const context = this.requireContext()
       await reconcileAgentExecutionIdentities(
-        this.requireContext().storage,
+        context.storage,
         this.sixb.id,
         this.sixb.agents.list()
       )
-      await super.run(signal)
+
+      const stopDispatch = new AbortController()
+      const workerSignal = AbortSignal.any([signal, stopDispatch.signal])
+      const dispatchLoop = this.runDispatchLoop(context, workerSignal)
+      try {
+        await super.run(workerSignal)
+      } finally {
+        stopDispatch.abort()
+        await dispatchLoop
+      }
       return
     }
     await new Promise<void>((resolve) => {
@@ -154,27 +156,36 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     const { agentId, threadId, runId, triggerMessageId } = job.payload
     const agent = this.sixb.agents.getById(agentId)
     if (!agent) {
+      const run = await context.storage.agents.runs.getById({ projectId: context.id, id: runId })
+      if (
+        run?.status === "queued" &&
+        run.agentId === agentId &&
+        run.threadId === threadId &&
+        run.triggerMessageId === triggerMessageId
+      ) {
+        const failed = await context.storage.agents.runs.finishQueued({
+          projectId: context.id,
+          id: run.id,
+          status: "failed",
+          error: `Agent '${agentId}' is not registered.`,
+        })
+        await context.streamSink.publishRunFinished(failed)
+        return
+      }
       throw new AgentWorkerError(`Unknown agent '${agentId}'.`)
     }
     const identity = await reconcileAgentExecutionIdentity(context.storage, context.id, agent)
 
-    const reservation = await this.reserveOrReclaim(context, {
+    const reservation = await this.startOrReclaim(context, {
       agent,
       threadId,
       runId,
       triggerMessageId,
-      requestedByPrincipal: job.payload.requestedByPrincipal ?? SYSTEM_PRINCIPAL,
       executionPrincipal: identity.principal,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
       return
-    }
-    if (reservation.kind === "held") {
-      throw new AgentLeaseHeldError(
-        reservation.availableAt,
-        `Agent thread '${threadId}' has a live active run; retrying.`
-      )
     }
     const run = reservation.run
     const executionToken = run.execution?.token
@@ -189,8 +200,8 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     const cancel = await this.watchForCancel(run.id)
 
     try {
-      // Persist the queue's latest confirmed expiration for API-gateway authorization without
-      // introducing another heartbeat or ownership clock.
+      // The queue remains the sole source of ownership timing. Persist its latest confirmed
+      // expiration so the API gateway can fail closed without maintaining another heartbeat.
       stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
         void this.confirmExecutionOwnership(
           context,
@@ -206,6 +217,8 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
           }
         })
       })
+      // Catch a renewal that completed between starting/reclaiming the run and attaching the
+      // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
       await context.streamSink.publishStarted(run)
@@ -222,8 +235,8 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         signal: AbortSignal.any([signal, cancel.signal]),
       })
     } catch (error) {
-      // Queue ownership or the durable execution token was lost. Touch nothing; the current queue
-      // owner will reclaim the run with a fresh token.
+      // Queue ownership or the durable execution token was lost. Touch nothing; the current
+      // delivery will reconcile the run.
       if (
         error instanceof AgentExecutionLostError ||
         error instanceof QueueDeliveryLeaseLostError ||
@@ -263,20 +276,45 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     }
   }
 
-  protected override onExecutionError(
+  protected override async onExecutionError(
     claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
     error: unknown
-  ): QueueWorkerFailureDecision {
-    if (error instanceof AgentLeaseHeldError) {
-      return { kind: "retry", availableAt: error.availableAt }
-    }
+  ): Promise<QueueWorkerFailureDecision> {
     // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
     // fate — but cap the redeliveries so a persistent failure dead-letters instead of churning.
     if (error instanceof AgentFinalizationError) {
-      if (claimed.job.attempt < MAX_FINALIZE_ATTEMPTS) {
+      if (claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
         return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
       }
       return { kind: "fail" }
+    }
+    if (error instanceof AgentWorkerError) {
+      return { kind: "fail" }
+    }
+
+    // Storage/identity setup failed before queued→running. Keep the deterministic queue job alive;
+    // if the dependency never recovers, record a visible pre-stream failure before dead-lettering.
+    if (claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
+      return { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
+    }
+    const { agentId, threadId, runId, triggerMessageId } = claimed.job.payload
+    const run = await this.requireContext().storage.agents.runs.getById({
+      projectId: this.sixb.id,
+      id: runId,
+    })
+    if (
+      run?.status === "queued" &&
+      run.agentId === agentId &&
+      run.threadId === threadId &&
+      run.triggerMessageId === triggerMessageId
+    ) {
+      const failed = await this.requireContext().storage.agents.runs.finishQueued({
+        projectId: this.sixb.id,
+        id: run.id,
+        status: "failed",
+        error: toErrorMessage(error),
+      })
+      await this.requireContext().streamSink.publishRunFinished(failed)
     }
     return { kind: "fail" }
   }
@@ -293,6 +331,42 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     return { kind: "fail" }
   }
 
+  /** Re-publish queued runs until their deterministic queue jobs are accepted. */
+  private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
+    let consecutiveFailures = 0
+
+    while (!signal.aborted) {
+      try {
+        const result = await dispatchQueuedAgentRuns({
+          projectId: context.id,
+          storage: context.storage.agents,
+          queue: this.sixb.queues.agents,
+        })
+        if (result.failures.length === 0) {
+          consecutiveFailures = 0
+        } else {
+          consecutiveFailures += 1
+          console.error(
+            `[SixbAgentWorker] Could not dispatch ${result.failures.length} queued agent run(s); retrying.`,
+            result.failures[0]?.error
+          )
+        }
+      } catch (error) {
+        consecutiveFailures += 1
+        console.error("[SixbAgentWorker] Could not scan queued agent runs; retrying.", error)
+      }
+
+      const delayMs =
+        consecutiveFailures === 0
+          ? AGENT_DISPATCH_POLL_MS
+          : Math.min(
+              AGENT_DISPATCH_POLL_MS * 2 ** (consecutiveFailures - 1),
+              MAX_AGENT_DISPATCH_BACKOFF_MS
+            )
+      await waitForAbort(delayMs, signal)
+    }
+  }
+
   private requireContext(): AgentWorkerContext {
     if (!this.context) {
       throw new AgentWorkerError("Agent worker has no agent storage configured.")
@@ -300,76 +374,38 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     return this.context
   }
 
-  private async reserveOrReclaim(
+  private async startOrReclaim(
     context: AgentWorkerContext,
-    input: {
-      agent: AgentDefinition
-      threadId: string
-      runId: string
-      triggerMessageId: string
-      requestedByPrincipal: Principal
+    input: QueuedRun & {
       executionPrincipal: Extract<Principal, { readonly type: "serviceAccount" }>
       execution: AgentRunExecution
     }
-  ): Promise<Reservation> {
-    try {
-      const run = await context.storage.agents.runs.reserve({
-        id: input.runId,
-        projectId: context.id,
-        threadId: input.threadId,
-        agentId: input.agent.id,
-        triggerMessageId: input.triggerMessageId,
-        requestedByPrincipal: input.requestedByPrincipal,
-        executionPrincipal: input.executionPrincipal,
-        modelId: input.agent.model.modelId,
-        execution: input.execution,
-      })
-      return { kind: "run", run }
-    } catch (error) {
-      if (!(error instanceof AgentStorageError)) {
-        throw error
-      }
-      if (error.code === "active_run_exists") {
-        const thread = await context.storage.agents.threads.getById({
-          projectId: context.id,
-          id: input.threadId,
-        })
-        const activeRunId = thread?.activeRunId
-        if (!activeRunId) {
-          // The active run cleared between our reserve and this read; bounce briefly and try to win.
-          return { kind: "held", availableAt: backoff(SHORT_BACKOFF_MS) }
-        }
-        if (activeRunId !== input.runId) {
-          // A different turn owns the thread (single-flight): wait for it to clear.
-          return { kind: "held", availableAt: backoff(this.config.leaseMs) }
-        }
-        return this.reclaimOrSkipQueuedRun(context, input)
-      }
-      if (error.code === "duplicate_id") {
-        return this.reclaimOrSkipQueuedRun(context, input)
-      }
-      throw error
-    }
-  }
-
-  private async reclaimOrSkipQueuedRun(
-    context: AgentWorkerContext,
-    input: QueuedRun & { readonly execution: AgentRunExecution }
   ): Promise<Reservation> {
     const run = await context.storage.agents.runs.getById({
       projectId: context.id,
       id: input.runId,
     })
     if (!run) {
-      return { kind: "held", availableAt: backoff(SHORT_BACKOFF_MS) }
+      throw new AgentWorkerError(`Queued agent run '${input.runId}' was not found.`)
     }
     if (
-      run.id !== input.runId ||
       run.threadId !== input.threadId ||
       run.agentId !== input.agent.id ||
       run.triggerMessageId !== input.triggerMessageId
     ) {
       throw new AgentWorkerError(`Agent run '${input.runId}' does not match its queued request.`)
+    }
+    if (run.status === "queued") {
+      return {
+        kind: "run",
+        run: await context.storage.agents.runs.start({
+          projectId: context.id,
+          id: input.runId,
+          executionPrincipal: input.executionPrincipal,
+          modelId: input.agent.model.modelId,
+          execution: input.execution,
+        }),
+      }
     }
     if (run.status !== "running") {
       return { kind: "skip" }
@@ -524,6 +560,19 @@ function normalizeRequiredString(value: string | undefined): string {
     throw new AgentWorkerError("Agent workers require options.apiBaseUrl.")
   }
   return trimmed
+}
+
+async function waitForAbort(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, ms)
+    function finish(): void {
+      clearTimeout(timer)
+      signal.removeEventListener("abort", finish)
+      resolve()
+    }
+    signal.addEventListener("abort", finish, { once: true })
+  })
 }
 
 function normalizeConcurrency(value: number | undefined): number {

@@ -2,9 +2,9 @@
 
 Runs `agent.run.requested` queue jobs for a Sixb project.
 
-The worker claims queued intents created by `sixb.agents.request(...)`, reserves or reclaims the run
-record, renews queue ownership while the model is streaming, writes the final assistant message, and
-finalizes the run.
+The worker claims durable queued runs created by `sixb.agents.request(...)`, starts or reclaims the
+run record, renews queue ownership while the model is streaming, writes the final assistant message,
+and finalizes the run.
 
 ## Usage
 
@@ -24,8 +24,10 @@ await worker.start()
 
 ## Execution Model
 
-- User requests persist the user message and enqueue a run intent.
-- The worker reserves the run at claim time or reclaims it after queue redelivery.
+- User requests atomically persist the user message and a `queued` run before dispatch.
+- The queued run is the dispatch intent; workers republish it with a deterministic queue job id until
+  it is claimed, without a parallel outbox table.
+- The worker transitions the durable run from `queued` to `running` when it claims the job.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.

@@ -53,7 +53,7 @@ export interface ListAgentThreadsResult {
 
 // ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
 
-export type AgentRunStatus = "running" | "succeeded" | "failed" | "cancelled"
+export type AgentRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
 
 /**
  * Why a run ended — our own SDK-independent vocabulary (it mirrors the AI SDK unified finish
@@ -146,7 +146,7 @@ export interface AgentRunRecord {
   readonly diagnostics?: readonly AgentRunDiagnostic[]
   /** Failure message when the run did not succeed. */
   readonly error?: string
-  /** Execution attempts: `1` on initial reservation, incremented on redelivery. */
+  /** Execution attempts: `0` while queued, `1` on first start, incremented on redelivery. */
   readonly attempt: number
   readonly execution?: AgentRunExecution
   readonly createdAt: Date
@@ -154,18 +154,31 @@ export interface AgentRunRecord {
   readonly completedAt?: Date
 }
 
-export interface ReserveAgentRunInput {
+export interface CreateAgentRunInput {
   readonly id: string
   readonly projectId: string
   readonly threadId: string
   readonly agentId: string
   readonly triggerMessageId: string
   readonly requestedByPrincipal: Principal
+  readonly createdAt?: Date
+}
+
+export interface StartAgentRunInput {
+  readonly id: string
+  readonly projectId: string
   readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
   readonly execution: AgentRunExecution
-  readonly createdAt?: Date
   readonly startedAt?: Date
+}
+
+export interface FinishQueuedAgentRunInput {
+  readonly id: string
+  readonly projectId: string
+  readonly status: "failed" | "cancelled"
+  readonly error?: string
+  readonly completedAt?: Date
 }
 
 export interface ReclaimAgentRunInput {
@@ -287,8 +300,12 @@ export interface AgentThreadStore {
 }
 
 export interface AgentRunStore {
-  /** Temporary reserve-at-claim bridge: claim the thread and install the first execution token. */
-  reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord>
+  /** Persist a queued run and atomically claim the thread's single-flight slot. */
+  create(input: CreateAgentRunInput): Promise<AgentRunRecord>
+  /** Transition a queued run to running and install the first delivery's execution token. */
+  start(input: StartAgentRunInput): Promise<AgentRunRecord>
+  /** Finish a queued run before execution and release the thread's single-flight slot. */
+  finishQueued(input: FinishQueuedAgentRunInput): Promise<AgentRunRecord>
   /** Rotate the execution token for a redelivered running job (`attempt++`). */
   reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord>
   /**

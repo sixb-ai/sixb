@@ -6,17 +6,6 @@ export class AgentWorkerError extends Error {
   }
 }
 
-/** A different run still owns the thread's single-flight slot. */
-export class AgentLeaseHeldError extends Error {
-  readonly name = "AgentLeaseHeldError"
-  constructor(
-    readonly availableAt: string,
-    message: string
-  ) {
-    super(`[SixbAgentWorker] ${message}`)
-  }
-}
-
 /** This delivery's execution token is stale, so it must make no further durable writes. */
 export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"

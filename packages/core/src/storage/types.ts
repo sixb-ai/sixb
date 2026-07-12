@@ -35,8 +35,10 @@ export type {
   AgentThreadRecord,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentRunInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
+  FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -44,7 +46,7 @@ export type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  ReserveAgentRunInput,
+  StartAgentRunInput,
 } from "./agents"
 export { AgentStorageError } from "./agents"
 export type {

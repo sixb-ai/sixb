@@ -1,4 +1,3 @@
-import type { Principal } from "../auth"
 import type { JsonValue } from "../json"
 import type { WorkflowRunSource } from "../workflows/types"
 
@@ -168,8 +167,9 @@ export interface ActionRunRequestedQueueJob
   > {}
 
 /**
- * An agent turn is requested for a thread. The payload carries the intent plus the request-time run
- * id; the worker reserves the run row when it claims the queue job.
+ * An agent turn is requested for a thread. The payload points to the durable queued run created
+ * with the user message; the worker transitions it to running and installs the delivery's execution
+ * token when this job is claimed.
  */
 export interface AgentRunRequestedQueueJob
   extends QueueJob<
@@ -179,7 +179,6 @@ export interface AgentRunRequestedQueueJob
       readonly threadId: string
       readonly runId: string
       readonly triggerMessageId: string
-      readonly requestedByPrincipal?: Principal
     }
   > {}
 

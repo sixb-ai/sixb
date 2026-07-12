@@ -127,7 +127,7 @@ class BrokerStreamSink implements StreamSink {
   }
 
   async publishRunFinished(run: AgentRunRecord): Promise<void> {
-    if (run.status === "running") {
+    if (run.status === "queued" || run.status === "running") {
       return
     }
     await this.publish({

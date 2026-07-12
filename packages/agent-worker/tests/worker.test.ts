@@ -389,7 +389,11 @@ const SixbCtor = Sixb as unknown as new (options: Record<string, unknown>) => Te
 function workerOptions(
   options: Omit<AgentWorkerOptions, "apiBaseUrl"> & { readonly apiBaseUrl?: string } = {}
 ): AgentWorkerOptions {
-  return { ...options, apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL }
+  return {
+    ...options,
+    apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
+    idlePollMs: options.idlePollMs ?? 5,
+  }
 }
 
 interface RecordedCommand {
@@ -698,22 +702,21 @@ function buildAgentWorkerContext(
   }
 }
 
-function execution(queueLeaseExpiresAt = new Date(Date.now() + 60_000)) {
-  return { token: createAgentRunExecutionToken(), queueLeaseExpiresAt }
+function freshTestExecution() {
+  return {
+    token: createAgentRunExecutionToken(),
+    queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+  }
 }
 
 async function reserveRequestedRun(
   sixb: TestSixb,
   input: { readonly threadId: string; readonly runId: string; readonly triggerMessageId: string }
 ) {
-  return agentStorageOf(sixb).runs.reserve({
+  return agentStorageOf(sixb).runs.start({
     id: input.runId,
     projectId: PROJECT_ID,
-    threadId: input.threadId,
-    agentId: "assistant",
-    triggerMessageId: input.triggerMessageId,
-    requestedByPrincipal: REQUESTER,
-    execution: execution(),
+    execution: freshTestExecution(),
   })
 }
 
@@ -779,7 +782,9 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     threads: agents.threads,
     messages: agents.messages,
     runs: {
-      reserve: (input) => agents.runs.reserve(input),
+      create: (input) => agents.runs.create(input),
+      start: (input) => agents.runs.start(input),
+      finishQueued: (input) => agents.runs.finishQueued(input),
       reclaim: (input) => agents.runs.reclaim(input),
       confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
@@ -817,7 +822,9 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     threads: agents.threads,
     messages: agents.messages,
     runs: {
-      reserve: (input) => agents.runs.reserve(input),
+      create: (input) => agents.runs.create(input),
+      start: (input) => agents.runs.start(input),
+      finishQueued: (input) => agents.runs.finishQueued(input),
       reclaim: (input) => agents.runs.reclaim(input),
       confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
@@ -1375,7 +1382,7 @@ describe("AgentWorker", () => {
     expect(recording.sandboxes[0]?.destroyed).toBe(true)
   })
 
-  test("trigger persists the user message and enqueues an intent without creating a run", async () => {
+  test("trigger atomically persists the user message and queued run before dispatch", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
@@ -1387,6 +1394,7 @@ describe("AgentWorker", () => {
 
     expect(result.createdThread).toBe(true)
     expect(result.jobId).toBeDefined()
+    expect(result.status).toBe("queued")
     expect(result.runId.startsWith("agt_run_")).toBe(true)
 
     const messages = await listMessages(storage, result.threadId)
@@ -1395,14 +1403,84 @@ describe("AgentWorker", () => {
     expect(messages[0]?.authorPrincipal).toEqual(REQUESTER)
     expect(messages[0]?.parts).toEqual([{ type: "text", text: "hello" }])
 
-    // Reserve-at-claim: no run record exists yet, and the thread is still idle.
     const runs = await storage.runs.list({ projectId: PROJECT_ID, threadId: result.threadId })
-    expect(runs.runs).toHaveLength(0)
+    expect(runs.runs).toHaveLength(1)
+    expect(runs.runs[0]).toMatchObject({ id: result.runId, status: "queued", attempt: 0 })
     const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: result.threadId })
-    expect(thread?.activeRunId).toBeNull()
+    expect(thread?.activeRunId).toBe(result.runId)
   })
 
-  test("runs a full multi-step turn: reserves, persists the assistant message, finalizes with usage", async () => {
+  test("keeps the queued run visible when dispatch fails", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    sixb.queues.agents.enqueue = () => Promise.reject(new Error("queue unavailable"))
+
+    const originalConsoleError = console.error
+    console.error = () => {}
+    let result: Awaited<ReturnType<typeof sixb.agents.request>>
+    try {
+      result = await sixb.agents.request({
+        agentId: "assistant",
+        text: "persist me",
+        principal: REQUESTER,
+      })
+    } finally {
+      console.error = originalConsoleError
+    }
+    expect(result.status).toBe("queued")
+    expect(result.jobId).toBeUndefined()
+
+    const threads = await storage.threads.list({ projectId: PROJECT_ID })
+    expect(threads.threads).toHaveLength(1)
+    const thread = threads.threads[0]
+    if (!thread) throw new Error("expected durable thread")
+    const runs = await storage.runs.list({ projectId: PROJECT_ID, threadId: thread.id })
+    expect(runs.runs).toHaveLength(1)
+    expect(runs.runs[0]).toMatchObject({ status: "queued", attempt: 0 })
+    expect(thread.activeRunId).toBe(runs.runs[0]?.id)
+    expect(await listMessages(storage, thread.id)).toHaveLength(1)
+  })
+
+  test("dispatches a durable queued run after the request-time enqueue fails", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const originalEnqueue = queue.enqueue.bind(queue)
+    let enqueueCalls = 0
+    queue.enqueue = (params) => {
+      enqueueCalls += 1
+      if (enqueueCalls === 1) return Promise.reject(new Error("queue unavailable"))
+      return originalEnqueue(params)
+    }
+
+    const originalConsoleError = console.error
+    console.error = () => {}
+    let request: Awaited<ReturnType<typeof sixb.agents.request>>
+    try {
+      request = await sixb.agents.request({ agentId: "assistant", text: "recover me" })
+    } finally {
+      console.error = originalConsoleError
+    }
+    expect(request.jobId).toBeUndefined()
+
+    const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
+    await worker.start()
+    try {
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "recovered dispatch terminal" }
+      )
+      expect(run.status).toBe("succeeded")
+      expect(enqueueCalls).toBeGreaterThanOrEqual(2)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("runs a full multi-step turn: starts, persists the assistant message, finalizes with usage", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
@@ -1424,7 +1502,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run terminal" }
       )
@@ -1522,6 +1600,114 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("projects successful queue renewals onto execution authorization", async () => {
+    const sixb = buildSixb(slowAnswerModel(300))
+    const storage = agentStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const originalRenew = queue.renewLease?.bind(queue)
+    if (!originalRenew) throw new Error("expected queue lease renewal")
+
+    let firstRenewedExpiration: string | undefined
+    queue.renewLease = async (params) => {
+      const renewed = await originalRenew(params)
+      firstRenewedExpiration ??= renewed?.leaseExpiresAt
+      return renewed
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90, idlePollMs: 5 }))
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({ agentId: "assistant", text: "keep owning" })
+      await waitFor(
+        async () => {
+          if (!firstRenewedExpiration) return null
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          const projected = run?.execution?.queueLeaseExpiresAt.getTime()
+          return projected !== undefined && projected >= Date.parse(firstRenewedExpiration)
+            ? run
+            : null
+        },
+        { label: "queue ownership projection" }
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("continues processing after a turn outlives its initial queue lease", async () => {
+    const sixb = buildSixb(slowAnswerModel(120))
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+
+    await worker.start()
+    try {
+      const first = await sixb.agents.request({ agentId: "assistant", text: "first" })
+      const firstRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: first.runId })
+          return run && run.status !== "queued" && run.status !== "running" ? run : null
+        },
+        { label: "slow first run terminal" }
+      )
+      expect(firstRun.status).toBe("succeeded")
+
+      const second = await sixb.agents.request({
+        agentId: "assistant",
+        threadId: first.threadId,
+        text: "second",
+      })
+      const secondRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: second.runId })
+          return run && run.status !== "queued" && run.status !== "running" ? run : null
+        },
+        { label: "slow second run terminal" }
+      )
+      expect(secondRun.status).toBe("succeeded")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("redelivers with a fresh execution token after queue ownership is lost", async () => {
+    const sixb = buildSixb(slowAnswerModel(120))
+    const storage = agentStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const originalRenew = queue.renewLease?.bind(queue)
+    if (!originalRenew) throw new Error("expected queue lease renewal")
+
+    let renewals = 0
+    queue.renewLease = async (params) => {
+      renewals += 1
+      if (renewals === 1) return null
+      return originalRenew(params)
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+    const originalConsoleError = console.error
+    console.error = () => {}
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({ agentId: "assistant", text: "recover" })
+      const finalRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          return run && run.status !== "queued" && run.status !== "running" ? run : null
+        },
+        { label: "redelivered run terminal" }
+      )
+
+      expect(finalRun).toMatchObject({ status: "succeeded", attempt: 2 })
+      const assistants = (await listMessages(storage, request.threadId)).filter(
+        (message) => message.role === "assistant"
+      )
+      expect(assistants).toHaveLength(1)
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
+    }
+  })
+
   test("adds visible guidance when the step limit is reached before an answer", async () => {
     const sixb = buildSixb(toolOnlyModel())
     const storage = agentStorageOf(sixb)
@@ -1543,7 +1729,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "tool-only run terminal" }
       )
@@ -1585,7 +1771,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "bash run terminal" }
       )
@@ -1668,7 +1854,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "output attachment run terminal" }
       )
@@ -1727,7 +1913,7 @@ describe("AgentWorker", () => {
             projectId: PROJECT_ID,
             id: request.runId,
           })
-          return record && record.status !== "running" ? record : null
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
         { label: "cancel during output collection" }
       )
@@ -1757,7 +1943,7 @@ describe("AgentWorker", () => {
             projectId: PROJECT_ID,
             id: request.runId,
           })
-          return record && record.status !== "running" ? record : null
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
         { label: "diagnostic output run terminal" }
       )
@@ -1828,7 +2014,7 @@ describe("AgentWorker", () => {
           async () => {
             const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
             const found = list.runs[0]
-            return found && found.status !== "running" ? found : null
+            return found && found.status !== "queued" && found.status !== "running" ? found : null
           },
           { label: "project skills run terminal" }
         )
@@ -1881,7 +2067,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "api bash run terminal" }
       )
@@ -2100,7 +2286,7 @@ describe("AgentWorker", () => {
               projectId: PROJECT_ID,
               id: firstRequest.runId,
             })
-            return run && run.status !== "running" ? run : null
+            return run && run.status !== "queued" && run.status !== "running" ? run : null
           },
           { label: "first concurrent run terminal" }
         ),
@@ -2110,7 +2296,7 @@ describe("AgentWorker", () => {
               projectId: PROJECT_ID,
               id: secondRequest.runId,
             })
-            return run && run.status !== "running" ? run : null
+            return run && run.status !== "queued" && run.status !== "running" ? run : null
           },
           { label: "second concurrent run terminal" }
         ),
@@ -2167,7 +2353,7 @@ describe("AgentWorker", () => {
       const run = await waitFor(
         async () => {
           const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
-          return record && record.status !== "running" ? record : null
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
         { label: "run terminal after cancel" }
       )
@@ -2217,7 +2403,7 @@ describe("AgentWorker", () => {
       const run = await waitFor(
         async () => {
           const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
-          return record && record.status !== "running" ? record : null
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
         },
         { label: "run terminal after cancel" }
       )
@@ -2278,7 +2464,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run terminal" }
       )
@@ -2287,114 +2473,6 @@ describe("AgentWorker", () => {
       expect(finalizedBeforeAssistantAppend).toBe(false)
     } finally {
       await worker.stop()
-    }
-  })
-
-  test("projects successful queue renewals onto execution authorization", async () => {
-    const sixb = buildSixb(slowAnswerModel(300))
-    const storage = agentStorageOf(sixb)
-    const queue = sixb.queues.agents
-    const originalRenew = queue.renewLease?.bind(queue)
-    if (!originalRenew) throw new Error("expected queue lease renewal")
-
-    let firstRenewedExpiration: string | undefined
-    queue.renewLease = async (params) => {
-      const renewed = await originalRenew(params)
-      firstRenewedExpiration ??= renewed?.leaseExpiresAt
-      return renewed
-    }
-
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90, idlePollMs: 5 }))
-    await worker.start()
-    try {
-      const request = await sixb.agents.request({ agentId: "assistant", text: "keep owning" })
-      await waitFor(
-        async () => {
-          if (!firstRenewedExpiration) return null
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
-          const projected = run?.execution?.queueLeaseExpiresAt.getTime()
-          return projected !== undefined && projected >= Date.parse(firstRenewedExpiration)
-            ? run
-            : null
-        },
-        { label: "queue ownership projection" }
-      )
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("continues processing after a turn outlives its initial queue lease", async () => {
-    const sixb = buildSixb(slowAnswerModel(120))
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
-
-    await worker.start()
-    try {
-      const first = await sixb.agents.request({ agentId: "assistant", text: "first" })
-      const firstRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: first.runId })
-          return run && run.status !== "running" ? run : null
-        },
-        { label: "slow first run terminal" }
-      )
-      expect(firstRun.status).toBe("succeeded")
-
-      const second = await sixb.agents.request({
-        agentId: "assistant",
-        threadId: first.threadId,
-        text: "second",
-      })
-      const secondRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: second.runId })
-          return run && run.status !== "running" ? run : null
-        },
-        { label: "slow second run terminal" }
-      )
-      expect(secondRun.status).toBe("succeeded")
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("redelivers with a fresh execution token after queue ownership is lost", async () => {
-    const sixb = buildSixb(slowAnswerModel(120))
-    const storage = agentStorageOf(sixb)
-    const queue = sixb.queues.agents
-    const originalRenew = queue.renewLease?.bind(queue)
-    if (!originalRenew) throw new Error("expected queue lease renewal")
-
-    let renewals = 0
-    queue.renewLease = async (params) => {
-      renewals += 1
-      if (renewals === 1) return null
-      return originalRenew(params)
-    }
-
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
-    const originalConsoleError = console.error
-    console.error = () => {}
-    await worker.start()
-    try {
-      const request = await sixb.agents.request({ agentId: "assistant", text: "recover" })
-      const finalRun = await waitFor(
-        async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
-          return run && run.status !== "running" ? run : null
-        },
-        { label: "redelivered run terminal" }
-      )
-
-      expect(finalRun).toMatchObject({ status: "succeeded", attempt: 2 })
-      const assistants = (await listMessages(storage, request.threadId)).filter(
-        (message) => message.role === "assistant"
-      )
-      expect(assistants).toHaveLength(1)
-    } finally {
-      await worker.stop()
-      console.error = originalConsoleError
     }
   })
 
@@ -2412,7 +2490,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run terminal despite stream publish failures" }
       )
@@ -2461,7 +2539,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run terminal despite custom stream sink failures" }
       )
@@ -2481,14 +2559,10 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const request = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
-    const run = await storage.runs.reserve({
+    const run = await storage.runs.start({
       id: request.runId,
       projectId: PROJECT_ID,
-      threadId: request.threadId,
-      agentId: "assistant",
-      triggerMessageId: request.triggerMessageId,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(),
+      execution: freshTestExecution(),
     })
 
     const circular: Record<string, unknown> = {}
@@ -2519,16 +2593,12 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    // Open a thread and simulate an in-flight run by reserving directly.
+    // Open a thread and simulate a worker starting its queued run.
     const first = await sixb.agents.request({ agentId: "assistant", text: "first" })
-    await storage.runs.reserve({
+    await storage.runs.start({
       id: first.runId,
       projectId: PROJECT_ID,
-      threadId: first.threadId,
-      agentId: "assistant",
-      triggerMessageId: first.triggerMessageId,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(),
+      execution: freshTestExecution(),
     })
 
     const promise = sixb.agents.request({
@@ -2544,21 +2614,17 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    // Trigger normally, then simulate a worker that crashed mid-run. Queue redelivery is now the
-    // authority to reclaim the matching active run.
-    const { threadId, runId, triggerMessageId } = await sixb.agents.request({
+    // Trigger normally, then simulate a worker that crashed after starting the durable run. The
+    // redelivered queue job rotates its execution token before continuing.
+    const { runId } = await sixb.agents.request({
       agentId: "assistant",
       text: "echo hi",
     })
     const crashedRunId = runId
-    await storage.runs.reserve({
+    await storage.runs.start({
       id: crashedRunId,
       projectId: PROJECT_ID,
-      threadId,
-      agentId: "assistant",
-      triggerMessageId,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(new Date(Date.now() - 1_000)),
+      execution: freshTestExecution(),
     })
 
     const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
@@ -2567,7 +2633,7 @@ describe("AgentWorker", () => {
       const reclaimed = await waitFor(
         async () => {
           const run = await storage.runs.getById({ projectId: PROJECT_ID, id: crashedRunId })
-          return run && run.status !== "running" ? run : null
+          return run && run.status !== "queued" && run.status !== "running" ? run : null
         },
         { label: "crashed run reclaimed + finished" }
       )
@@ -2595,29 +2661,25 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("a worker whose execution token was reclaimed writes nothing (fencing)", async () => {
+  test("a worker whose execution token was rotated writes nothing (fencing)", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    const { threadId, runId, triggerMessageId } = await sixb.agents.request({
+    const { threadId, runId } = await sixb.agents.request({
       agentId: "assistant",
       text: "echo hi",
     })
 
-    // This worker reserved the run, but another queue delivery reclaimed its execution token.
-    const staleRun = await storage.runs.reserve({
+    // This worker started the run, but another delivery rotated its execution token.
+    const staleRun = await storage.runs.start({
       id: runId,
       projectId: PROJECT_ID,
-      threadId,
-      agentId: "assistant",
-      triggerMessageId,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(new Date(Date.now() - 1_000)),
+      execution: freshTestExecution(),
     })
     await storage.runs.reclaim({
       projectId: PROJECT_ID,
       id: runId,
-      execution: execution(),
+      execution: freshTestExecution(),
     })
 
     const promise = runAgentTurn({
@@ -2759,7 +2821,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run failed" }
       )
@@ -2809,7 +2871,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run failed" }
       )
@@ -2904,7 +2966,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run finalized after blip" }
       )
@@ -2928,14 +2990,10 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const request = await sixb.agents.request({ agentId: "assistant", text: "echo hi" })
-    const run = await storage.runs.reserve({
+    const run = await storage.runs.start({
       id: request.runId,
       projectId: PROJECT_ID,
-      threadId: request.threadId,
-      agentId: "assistant",
-      triggerMessageId: request.triggerMessageId,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(),
+      execution: freshTestExecution(),
     })
 
     const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
@@ -2974,7 +3032,7 @@ describe("AgentWorker", () => {
     const reclaimed = await storage.runs.reclaim({
       projectId: PROJECT_ID,
       id: request.runId,
-      execution: execution(),
+      execution: freshTestExecution(),
     })
     await runAgentTurn({
       context: {
@@ -3033,7 +3091,7 @@ describe("AgentWorker", () => {
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
           const found = list.runs[0]
-          return found && found.status !== "running" ? found : null
+          return found && found.status !== "queued" && found.status !== "running" ? found : null
         },
         { label: "run timed out" }
       )
@@ -3060,16 +3118,72 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("holds a different turn behind a live active run without stealing it (single-flight, worker layer)", async () => {
+  test("records a durable failure when the queued agent is no longer registered", async () => {
+    const sixb = buildSixb(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const threadId = "thread-missing-agent"
+    const runId = createAgentRunId()
+    const triggerMessageId = "message-missing-agent"
+    await storage.threads.create({
+      id: threadId,
+      projectId: PROJECT_ID,
+      agentId: "removed-agent",
+      ownerPrincipal: REQUESTER,
+    })
+    await storage.messages.append({
+      id: triggerMessageId,
+      projectId: PROJECT_ID,
+      threadId,
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text: "hello" }],
+    })
+    await storage.runs.create({
+      id: runId,
+      projectId: PROJECT_ID,
+      threadId,
+      agentId: "removed-agent",
+      triggerMessageId,
+      requestedByPrincipal: REQUESTER,
+    })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        {
+          type: "agent.run.requested",
+          payload: { agentId: "removed-agent", threadId, runId, triggerMessageId },
+        },
+      ],
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      const failed = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: runId })
+          return run?.status === "failed" ? run : null
+        },
+        { label: "missing agent run failed" }
+      )
+      expect(failed).toMatchObject({ status: "failed", attempt: 0 })
+      expect(failed.error).toContain("not registered")
+      await expect(
+        storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
+      ).resolves.toMatchObject({
+        activeRunId: null,
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("rejects an orphan queue job without stealing the thread's durable active run", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    // A live run owns the thread, triggered by message "A".
-    const {
-      threadId,
-      runId: activeRunId,
-      triggerMessageId: triggerA,
-    } = await sixb.agents.request({
+    // A running durable run owns the thread, triggered by message "A".
+    const { threadId, runId: activeRunId } = await sixb.agents.request({
       agentId: "assistant",
       text: "first",
     })
@@ -3088,18 +3202,14 @@ describe("AgentWorker", () => {
       leaseId: queuedA.leaseId,
     })
 
-    await storage.runs.reserve({
+    await storage.runs.start({
       id: activeRunId,
       projectId: PROJECT_ID,
-      threadId,
-      agentId: "assistant",
-      triggerMessageId: triggerA,
-      requestedByPrincipal: REQUESTER,
-      execution: execution(new Date(Date.now() + 300_000)),
+      execution: freshTestExecution(),
     })
 
-    // A job for a *different* trigger lands while that run is live. The worker must hold it
-    // (single-flight) rather than reclaiming another run.
+    // A malformed legacy job with no durable run lands while that run is live. The worker must fail
+    // it without touching the current run.
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
       jobs: [
@@ -3118,8 +3228,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
     await worker.start()
     try {
-      // Let the worker claim + hold the job (held jobs are rescheduled a full lease out, so B will
-      // not run again inside the test window). The active run must be untouched: not reclaimed, no
+      // Let the worker reject the orphan job. The active run must be untouched: not reclaimed, no
       // second run created, and no assistant message written.
       await Bun.sleep(150)
 

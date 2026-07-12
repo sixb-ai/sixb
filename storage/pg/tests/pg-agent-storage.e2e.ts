@@ -41,17 +41,13 @@ describe("PostgresStorage agents", () => {
 
       await expect(
         storage.transaction(async (tx) => {
-          await tx.agents?.runs.reserve({
+          await tx.agents?.runs.create({
             id: "run_1",
             projectId: "p",
             threadId: "thr_1",
             agentId: "sales",
             triggerMessageId: "msg_1",
             requestedByPrincipal: { type: "user", id: "usr_1" },
-            execution: {
-              token: "exec_1",
-              queueLeaseExpiresAt: new Date("2026-06-23T10:05:00.000Z"),
-            },
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })
           await tx.agents?.messages.append({
