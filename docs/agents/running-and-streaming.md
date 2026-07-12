@@ -23,27 +23,36 @@ thread, post a message, follow the run — and stream the run live over a websoc
 | `GET` | `/api/agent-threads/:threadId` | Get a thread. |
 | `GET` | `/api/agent-threads/:threadId/messages` | List a thread's messages. |
 | `POST` | `/api/agent-threads/:threadId/messages` | Post a user message — **triggers a run**. |
+| `GET` | `/api/agent-threads/:threadId/runs` | List a thread's runs. |
+| `POST` | `/api/agent-threads/:threadId/runs/:runId/retry` | Retry a failed run without adding another user message. |
+| `POST` | `/api/agent-threads/:threadId/cancel` | Cancel the thread's queued or running run (`{ runId }`). |
 | `GET` | `/api/agent-runs/:runId` | Get a run's status. |
-| `POST` | `/api/agent-threads/:threadId/cancel` | Cancel the thread's active run (`{ runId }`). |
 | `GET` | `/api/agent-threads/:threadId/messages/:messageId/files/content` | Download a file attached to a message. |
 
 ## Trigger a run
 
-There is no "run" endpoint — posting a message is the trigger. The `202` response returns the ids
-you need to follow it:
+There is no separate run-trigger endpoint — posting a message is the trigger. The `202` response
+returns the canonical durable run:
 
 ```jsonc
 // POST /api/agent-threads/:threadId/messages   { "text": "Which invoices are overdue?" }
 {
-  "threadId": "thr_...",
-  "runId": "run_...",
-  "triggerMessageId": "msg_...",
-  "streamId": "agents.runs.run_...",
-  "createdThread": false
+  "run": {
+    "id": "run_...",
+    "threadId": "thr_...",
+    "agentId": "accounts",
+    "triggerMessageId": "msg_...",
+    "requestedByPrincipal": { "type": "user", "id": "usr_..." },
+    "status": "queued",
+    "attempt": 0,
+    "streamId": "agents.runs.run_...",
+    "createdAt": "2026-07-11T20:00:00.000Z"
+  }
 }
 ```
 
-The `runId` and `streamId` come back right away, so you can open the stream before the turn starts.
+The run and user message are durable before this response returns, so you can immediately read the
+run or subscribe to its stream even when queue publication is temporarily unavailable.
 A thread runs **one turn at a time** — posting while a run is active returns `409`; wait for it to
 finish first.
 
@@ -67,6 +76,7 @@ Attachments — and any files the agent produces — appear as `file` parts on t
 
 | Status | Meaning |
 | --- | --- |
+| `queued` | The request is durable and waiting to start. |
 | `running` | The turn is in progress. |
 | `succeeded` | The turn completed and the reply was persisted. |
 | `failed` | A model/tool error or the turn timeout ended it (`error` has details). |
@@ -76,8 +86,11 @@ A finished run also carries `finishReason` (`stop`, `length`, `tool-calls`, `con
 `error`, `other`, `unknown`), `usage` token counts (`inputTokens`, `outputTokens`, `totalTokens`,
 `reasoningTokens`, `cachedInputTokens`), and `modelId`.
 
-Cancel an in-flight run with `POST /api/agent-threads/:threadId/cancel` (body `{ runId }`); it ends
-as `cancelled`.
+Cancel a queued or running run with `POST /api/agent-threads/:threadId/cancel` (body `{ runId }`);
+it ends as `cancelled`.
+
+Retrying a failed run creates a new queued run that points to the failed run's existing
+`triggerMessageId`. The original user message is not appended again.
 
 ## Stream a run
 
@@ -85,17 +98,21 @@ Connect to `/ws/agents` and send JSON commands; the server replies with JSON eve
 
 | Command | Fields | Purpose |
 | --- | --- | --- |
-| `subscribe` | `runId`, `threadId?`, `afterCursor?` | Follow a run live. |
-| `replay` | `runId`, `threadId?`, `afterCursor?`, `limit?` | Read past records once. |
+| `subscribe` | `runId`, `afterCursor?` | Follow a run live. |
+| `replay` | `runId`, `afterCursor?`, `limit?` | Read past records once. |
 | `unsubscribe` | `runId?` | Stop the subscription. |
 
 ```jsonc
-// follow from the start (pass threadId so the server can authorize you before the run row exists)
-{ "type": "subscribe", "runId": "run_...", "threadId": "thr_..." }
+// follow from the start
+{ "type": "subscribe", "runId": "run_..." }
 
 // resume after a disconnect, from the last cursor you saw
 { "type": "subscribe", "runId": "run_...", "afterCursor": "..." }
 ```
+
+After replaying retained records, the server sends a `run.snapshot` frame containing the current
+durable run. A new run therefore streams `status: "queued"` before any worker lifecycle record, and
+a reconnect can recover terminal state even if no live record was observed.
 
 Each `record` frame carries an `AgentRunStreamEvent`:
 
