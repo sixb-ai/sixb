@@ -1,5 +1,6 @@
 import type { ClaimedQueueJob, Queue, QueueJob, QueueJobError } from "../queues"
 import { WorkerAbortError } from "./errors"
+import { createQueueDelivery, type QueueDelivery } from "./queue-delivery"
 import { Worker } from "./worker"
 
 export interface QueueWorkerConfig<TJob extends QueueJob> {
@@ -70,7 +71,11 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
     }
   }
 
-  protected abstract execute(claimed: ClaimedQueueJob<TJob>, signal: AbortSignal): Promise<void>
+  protected abstract execute(
+    claimed: ClaimedQueueJob<TJob>,
+    signal: AbortSignal,
+    delivery: QueueDelivery<TJob>
+  ): Promise<void>
 
   protected onExecutionError(
     _claimed: ClaimedQueueJob<TJob>,
@@ -113,55 +118,96 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
   }
 
   private async handle(claimed: ClaimedQueueJob<TJob>, signal: AbortSignal): Promise<void> {
-    const { projectId, queue } = this.config
-    const jobId = claimed.job.id
-    const leaseId = claimed.leaseId
+    const delivery = createQueueDelivery({
+      queue: this.config.queue,
+      claimed,
+      leaseMs: this.config.leaseMs,
+      signal,
+      onLeaseLost: () => {
+        console.error(
+          `[SixbQueueWorker] Lost lease for queue job '${claimed.job.id}'; leaving it for redelivery.`
+        )
+      },
+      onRenewalError: (error) => {
+        console.error(
+          `[SixbQueueWorker] Could not renew lease for queue job '${claimed.job.id}'; retrying.`,
+          error
+        )
+      },
+    })
 
     try {
-      await this.execute(claimed, signal)
-      await queue.complete({ projectId, jobId, leaseId })
-      return
-    } catch (error) {
-      if (signal.aborted || isAbortError(error)) {
-        const decision = await this.onAbortError(claimed, error)
-        await this.applyFailureDecision({ decision, projectId, jobId, leaseId, error }).catch(
-          () => {}
-        )
+      let outcome: { readonly ok: true } | { readonly ok: false; readonly error: unknown }
+      try {
+        await this.execute(claimed, delivery.signal, delivery)
+        outcome = { ok: true }
+      } catch (error) {
+        outcome = { ok: false, error }
+      }
+
+      if (delivery.state === "lost") return
+
+      if (outcome.ok) {
+        await settleOrLog(delivery, "complete", () => delivery.complete())
         return
       }
 
-      const decision = await this.onExecutionError(claimed, error)
-      await this.applyFailureDecision({ decision, projectId, jobId, leaseId, error })
+      const error = outcome.error
+      if (signal.aborted || isAbortError(error)) {
+        try {
+          const decision = await this.onAbortError(claimed, error)
+          await this.applyFailureDecision(delivery, decision, error)
+        } catch {
+          // Shutdown is already in progress. The unacknowledged job becomes visible after its lease.
+        }
+        return
+      }
+
+      try {
+        const decision = await this.onExecutionError(claimed, error)
+        await this.applyFailureDecision(delivery, decision, error)
+      } catch (settlementError) {
+        logQueueOperationError("apply failure decision to", claimed, settlementError)
+      }
+    } finally {
+      await delivery.close()
     }
   }
 
-  private async applyFailureDecision(input: {
-    readonly decision: QueueWorkerFailureDecision
-    readonly projectId: string
-    readonly jobId: string
-    readonly leaseId: string
-    readonly error: unknown
-  }): Promise<void> {
-    const { queue } = this.config
-
-    if (input.decision.kind === "retry") {
-      await queue.retry({
-        projectId: input.projectId,
-        jobId: input.jobId,
-        leaseId: input.leaseId,
-        availableAt: input.decision.availableAt,
-        error: toQueueJobError(input.error),
+  private async applyFailureDecision(
+    delivery: QueueDelivery<TJob>,
+    decision: QueueWorkerFailureDecision,
+    error: unknown
+  ): Promise<void> {
+    if (decision.kind === "retry") {
+      await delivery.retry({
+        availableAt: decision.availableAt,
+        error: toQueueJobError(error),
       })
       return
     }
 
-    await queue.fail({
-      projectId: input.projectId,
-      jobId: input.jobId,
-      leaseId: input.leaseId,
-      error: toQueueJobError(input.error),
-    })
+    await delivery.fail(toQueueJobError(error))
   }
+}
+
+async function settleOrLog<TJob extends QueueJob>(
+  delivery: QueueDelivery<TJob>,
+  operation: string,
+  settle: () => Promise<void>
+): Promise<void> {
+  try {
+    await settle()
+  } catch (error) {
+    logQueueOperationError(operation, delivery.claimed, error)
+  }
+}
+
+function logQueueOperationError(operation: string, claimed: ClaimedQueueJob, error: unknown): void {
+  console.error(
+    `[SixbQueueWorker] Could not ${operation} queue job '${claimed.job.id}'; it may be redelivered.`,
+    error
+  )
 }
 
 function toQueueJobError(error: unknown): QueueJobError {

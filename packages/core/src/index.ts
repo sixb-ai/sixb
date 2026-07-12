@@ -1138,8 +1138,19 @@ export { InMemoryQueues, QueueError } from "./queues"
 
 // ── Workers ────────────────────────────────────────────────
 
-export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./workers"
-export { isAbortError, QueueWorker, Worker, WorkerAbortError } from "./workers"
+export type {
+  QueueDelivery,
+  QueueDeliveryState,
+  QueueWorkerConfig,
+  QueueWorkerFailureDecision,
+} from "./workers"
+export {
+  isAbortError,
+  QueueDeliveryLeaseLostError,
+  QueueWorker,
+  Worker,
+  WorkerAbortError,
+} from "./workers"
 
 // ── HTTP ──────────────────────────────────────────────
 
