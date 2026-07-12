@@ -5,6 +5,7 @@ Teamleader Focus connector for Sixb.
 V1 covers:
 
 - Deals
+- Deal actions
 - Quotations
 - Quotation actions
 - Quotation reference data
@@ -56,6 +57,12 @@ Responses keep the Teamleader envelope:
 client.deals.list(...)
 client.deals.listAll(...)
 client.deals.info(...)
+client.deals.create(...)
+client.deals.update(...)
+client.deals.move(...)
+client.deals.win(...)
+client.deals.lose(...)
+client.deals.delete(...)
 
 client.quotations.list(...)
 client.quotations.listAll(...)

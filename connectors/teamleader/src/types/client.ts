@@ -23,7 +23,15 @@ import type {
   TeamleaderCustomFieldDefinition,
   TeamleaderCustomFieldDefinitionListRequest,
 } from "./custom-fields"
-import type { TeamleaderDeal, TeamleaderDealListItem, TeamleaderDealsListRequest } from "./deals"
+import type {
+  TeamleaderDeal,
+  TeamleaderDealCreateRequest,
+  TeamleaderDealListItem,
+  TeamleaderDealLoseRequest,
+  TeamleaderDealMoveRequest,
+  TeamleaderDealsListRequest,
+  TeamleaderDealUpdateRequest,
+} from "./deals"
 import type {
   TeamleaderProduct,
   TeamleaderProductInfoRequest,
@@ -77,6 +85,15 @@ export interface TeamleaderClient {
       request: TeamleaderInfoRequest,
       options?: TeamleaderRequestOptions
     ): Promise<TeamleaderSingleResponse<TeamleaderDeal>>
+    create(
+      request: TeamleaderDealCreateRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<TeamleaderSingleResponse<TeamleaderTypeAndId<"deal">>>
+    update(request: TeamleaderDealUpdateRequest, options?: TeamleaderRequestOptions): Promise<void>
+    move(request: TeamleaderDealMoveRequest, options?: TeamleaderRequestOptions): Promise<void>
+    win(request: TeamleaderInfoRequest, options?: TeamleaderRequestOptions): Promise<void>
+    lose(request: TeamleaderDealLoseRequest, options?: TeamleaderRequestOptions): Promise<void>
+    delete(request: TeamleaderInfoRequest, options?: TeamleaderRequestOptions): Promise<void>
   }
   readonly quotations: {
     list(
