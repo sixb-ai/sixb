@@ -226,10 +226,10 @@ export function AgentChat({
           path: { threadId: targetThreadId },
           body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
         })
-        setPendingSend({ threadId: response.threadId, runId: response.runId })
+        setPendingSend({ threadId: response.run.threadId, runId: response.run.id })
         setPendingUser((current) =>
-          current && current.threadId === response.threadId
-            ? { ...current, messageId: response.triggerMessageId }
+          current && current.threadId === response.run.threadId
+            ? { ...current, messageId: response.run.triggerMessageId }
             : current
         )
         await Promise.all([
@@ -253,10 +253,10 @@ export function AgentChat({
         path: { threadId: newThreadId },
         body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
       })
-      setPendingSend({ threadId: newThreadId, runId: response.runId })
+      setPendingSend({ threadId: newThreadId, runId: response.run.id })
       setPendingUser((current) =>
         current && current.threadId === newThreadId
-          ? { ...current, messageId: response.triggerMessageId }
+          ? { ...current, messageId: response.run.triggerMessageId }
           : current
       )
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
