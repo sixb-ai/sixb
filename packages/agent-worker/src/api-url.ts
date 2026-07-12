@@ -17,17 +17,17 @@ export function createAgentApiGatewayBaseUrl(input: {
   readonly projectId: string
   readonly run: AgentRunRecord
 }): string {
-  const lease = input.run.lease
-  if (!lease) {
+  const execution = input.run.execution
+  if (!execution) {
     throw new Error(
-      `[SixbAgentWorker] Agent run '${input.run.id}' must hold a lease before creating API gateway access.`
+      `[SixbAgentWorker] Agent run '${input.run.id}' must hold an execution token before creating API gateway access.`
     )
   }
 
   const capability = createAgentApiGatewayCapability({
     projectId: input.projectId,
     runId: input.run.id,
-    leaseId: lease.id,
+    executionToken: execution.token,
   })
   // apiBaseUrl is already normalized at the worker's server-base boundary (buildAgentContext), so
   // it is appended verbatim rather than normalized again here.

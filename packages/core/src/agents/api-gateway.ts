@@ -9,7 +9,7 @@ const AGENT_API_GATEWAY_CAPABILITY_PREFIX = "sixb_agw_v1_"
 export interface AgentApiGatewayCapabilityInput {
   readonly projectId: string
   readonly runId: string
-  readonly leaseId: string
+  readonly executionToken: string
 }
 
 export interface AgentApiRoute {
@@ -51,7 +51,7 @@ export function isAllowedAgentApiRequest(method: string, pathname: string): bool
 }
 
 function capabilityDigest(input: AgentApiGatewayCapabilityInput): string {
-  return createHmac("sha256", input.leaseId)
+  return createHmac("sha256", input.executionToken)
     .update(`agent-api-gateway:${input.projectId}:${input.runId}`)
     .digest("base64url")
 }

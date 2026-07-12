@@ -721,7 +721,9 @@ CREATE TABLE IF NOT EXISTS agent_runs (
     execution_principal_type IS NULL OR execution_principal_type = 'serviceAccount'
   ),
   execution_principal_id TEXT,
-  status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed', 'cancelled')),
+  status TEXT NOT NULL CHECK (
+    status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')
+  ),
   model_id TEXT,
   finish_reason TEXT,
   usage_input_tokens INTEGER CHECK (usage_input_tokens IS NULL OR usage_input_tokens >= 0),
@@ -733,23 +735,26 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   ),
   error TEXT,
   diagnostics TEXT,
-  attempt INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
-  lease_id TEXT,
-  lease_expires_at TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+  execution_token TEXT,
+  execution_queue_lease_expires_at TEXT,
   created_at TEXT NOT NULL,
   started_at TEXT,
   completed_at TEXT,
-  PRIMARY KEY (project_id, id)
+  PRIMARY KEY (project_id, id),
+  CHECK (
+    (execution_token IS NULL) = (execution_queue_lease_expires_at IS NULL)
+  )
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project_started
-  ON agent_runs(project_id, started_at DESC);
+  ON agent_runs(project_id, COALESCE(started_at, created_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project_thread_started
-  ON agent_runs(project_id, thread_id, started_at DESC);
+  ON agent_runs(project_id, thread_id, COALESCE(started_at, created_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project_agent_started
-  ON agent_runs(project_id, agent_id, started_at DESC);
+  ON agent_runs(project_id, agent_id, COALESCE(started_at, created_at) DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_project_status_started
-  ON agent_runs(project_id, status, started_at DESC);
+  ON agent_runs(project_id, status, COALESCE(started_at, created_at) DESC);
 
 CREATE TABLE IF NOT EXISTS agent_messages (
   project_id TEXT NOT NULL,

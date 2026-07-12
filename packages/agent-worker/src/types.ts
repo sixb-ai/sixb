@@ -52,8 +52,6 @@ export interface AgentWorkerContext {
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
   readonly agentSkills: Promise<readonly AgentSkill[]>
-  readonly leaseMs: number
-  readonly heartbeatMs: number
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }
@@ -74,22 +72,15 @@ export interface AgentTurnContext {
   readonly sandboxReady?: Promise<BashSandboxHandle>
   readonly sandboxWasUsed?: () => boolean
   readonly streamSink: StreamSink
-  readonly leaseMs: number
-  readonly heartbeatMs: number
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
 }
 
 export interface AgentWorkerOptions {
-  /**
-   * The `agent_runs` lease duration, in ms. Also used as the queue visibility timeout so that, on
-   * redelivery, the run lease is already reclaimable. Defaults to 60s.
-   */
+  /** Queue visibility duration, renewed automatically while a turn executes. Defaults to 60s. */
   readonly leaseMs?: number
   /** Idle poll interval when the queue is empty, in ms. */
   readonly idlePollMs?: number
-  /** Lease heartbeat interval during a turn, in ms. Defaults to `leaseMs / 3`. */
-  readonly heartbeatMs?: number
   /**
    * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3002`.
    * The sandbox receives a run-scoped gateway URL under this origin.

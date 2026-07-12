@@ -9,8 +9,8 @@ export type {
   AgentRunDiagnostic,
   AgentRunDiagnosticCode,
   AgentRunDiagnosticSeverity,
+  AgentRunExecution,
   AgentRunFinishReason,
-  AgentRunLease,
   AgentRunRecord,
   AgentRunStatus,
   AgentRunStore,
@@ -20,6 +20,7 @@ export type {
   AgentThreadStatus,
   AgentThreadStore,
   AppendAgentMessageInput,
+  ConfirmAgentRunExecutionOwnershipInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
   ListAgentMessagesInput,
@@ -29,7 +30,6 @@ export type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  RenewAgentRunLeaseInput,
   ReserveAgentRunInput,
 } from "./types"
 export {

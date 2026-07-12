@@ -50,8 +50,8 @@ export interface AgentRunRow {
   error: string | null
   diagnostics: AgentRunDiagnostic[] | string | null
   attempt: number | string
-  lease_id: string | null
-  lease_expires_at: Date | string | null
+  execution_token: string | null
+  execution_queue_lease_expires_at: Date | string | null
   created_at: Date | string
   started_at: Date | string | null
   completed_at: Date | string | null
@@ -112,9 +112,12 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     error: row.error ?? undefined,
     diagnostics: normalizeDiagnostics(row.diagnostics),
     attempt: Number(row.attempt),
-    lease:
-      row.lease_id && row.lease_expires_at
-        ? { id: row.lease_id, expiresAt: new Date(row.lease_expires_at) }
+    execution:
+      row.execution_token && row.execution_queue_lease_expires_at
+        ? {
+            token: row.execution_token,
+            queueLeaseExpiresAt: new Date(row.execution_queue_lease_expires_at),
+          }
         : undefined,
     createdAt: new Date(row.created_at),
     startedAt: row.started_at ? new Date(row.started_at) : undefined,

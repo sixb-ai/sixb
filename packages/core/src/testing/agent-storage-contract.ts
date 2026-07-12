@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { Principal } from "../auth"
 import {
-  type AgentRunLease,
+  type AgentRunExecution,
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
@@ -47,11 +47,16 @@ function threadInput(overrides: Partial<CreateAgentThreadInput> = {}): CreateAge
   }
 }
 
-function lease(id: string, expiresAt: string): AgentRunLease {
-  return { id, expiresAt: at(expiresAt) }
+function execution(
+  token: string,
+  queueLeaseExpiresAt = at("2026-06-23T10:05:00.000Z")
+): AgentRunExecution {
+  return { token, queueLeaseExpiresAt }
 }
 
-function reserveInput(overrides: Partial<ReserveAgentRunInput> = {}): ReserveAgentRunInput {
+type TestRunInput = ReserveAgentRunInput
+
+function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
   return {
     id: "run_1",
     projectId,
@@ -59,17 +64,24 @@ function reserveInput(overrides: Partial<ReserveAgentRunInput> = {}): ReserveAge
     agentId: "sales",
     triggerMessageId: "msg_user_1",
     requestedByPrincipal: owner,
-    lease: lease("lease_1", "2026-06-23T10:05:00.000Z"),
+    execution: execution("exec_1"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,
   }
+}
+
+async function createAndStartRun(
+  storage: AgentStorage,
+  input: TestRunInput
+): Promise<Awaited<ReturnType<AgentStorage["runs"]["reserve"]>>> {
+  return storage.runs.reserve(input)
 }
 
 /**
  * Runs the shared `AgentStorage` contract against any storage implementation.
  *
  * This is the storage-independent specification for Sixb agent persistence: thread lifecycle and
- * project isolation, single-flight run reservation, lease renewal / reclaim, run finalization with
+ * project isolation, single-flight run reservation, execution reclaim, run finalization with
  * execution metadata, and message append with thread-stats bookkeeping.
  */
 export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
@@ -181,46 +193,40 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       })
     })
 
-    // ── single-flight reservation ───────────────────────────────────────────────────────────────
+    // ── single-flight execution ─────────────────────────────────────────────────────────────────
 
-    test("reserves a single active run per thread (single-flight)", async () => {
+    test("allows a single active run per thread", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
 
-        const run = await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        const run = await createAndStartRun(storage, runInput({ id: "run_1" }))
         expect(run).toMatchObject({ status: "running", attempt: 1, threadId: "thr_1" })
         expect(run.requestedByPrincipal).toEqual(owner)
-        expect(run.lease?.id).toBe("lease_1")
+        expect(run.execution?.token).toBe("exec_1")
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: "run_1",
         })
 
         await expectAgentError(
-          storage.runs.reserve(
-            reserveInput({ id: "run_2", lease: lease("lease_2", "2026-06-23T10:06:00.000Z") })
-          ),
+          createAndStartRun(storage, runInput({ id: "run_2", execution: execution("exec_2") })),
           "active_run_exists"
         )
 
         // Reservation against an unknown thread / duplicate run id.
         await expectAgentError(
-          storage.runs.reserve(reserveInput({ id: "run_x", threadId: "ghost" })),
+          createAndStartRun(storage, runInput({ id: "run_x", threadId: "ghost" })),
           "thread_not_found"
         )
       })
     })
 
-    test("never lets two concurrent reservations both win", async () => {
+    test("never lets two concurrent reservations both claim one thread", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
 
         const results = await Promise.allSettled([
-          storage.runs.reserve(
-            reserveInput({ id: "run_a", lease: lease("lease_a", "2026-06-23T10:05:00.000Z") })
-          ),
-          storage.runs.reserve(
-            reserveInput({ id: "run_b", lease: lease("lease_b", "2026-06-23T10:05:00.000Z") })
-          ),
+          createAndStartRun(storage, runInput({ id: "run_a", execution: execution("exec_a") })),
+          createAndStartRun(storage, runInput({ id: "run_b", execution: execution("exec_b") })),
         ])
         const fulfilled = results.filter((result) => result.status === "fulfilled")
         const rejected = results.filter(
@@ -233,110 +239,93 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       })
     })
 
-    // ── lease renewal + reclaim ─────────────────────────────────────────────────────────────────
+    // ── execution reclaim ───────────────────────────────────────────────────────────────────────
 
-    test("renews a lease and rejects a stale lease id", async () => {
+    test("reclaim rotates the execution token and bumps the attempt", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
-        await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        await createAndStartRun(storage, runInput({ id: "run_1" }))
 
-        const renewed = await storage.runs.renewLease({
+        const reclaimed = await storage.runs.reclaim({
           projectId,
           id: "run_1",
-          leaseId: "lease_1",
-          expiresAt: at("2026-06-23T10:10:00.000Z"),
+          execution: execution("exec_2"),
         })
-        expect(renewed.lease?.expiresAt.toISOString()).toBe("2026-06-23T10:10:00.000Z")
+        expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
+        expect(reclaimed.execution?.token).toBe("exec_2")
 
         await expectAgentError(
-          storage.runs.renewLease({
+          storage.runs.finish({
             projectId,
             id: "run_1",
-            leaseId: "wrong-lease",
-            expiresAt: at("2026-06-23T10:11:00.000Z"),
+            executionToken: "exec_1",
+            status: "succeeded",
           }),
-          "lease_lost"
-        )
-        await expectAgentError(
-          storage.runs.renewLease({
-            projectId,
-            id: "ghost",
-            leaseId: "lease_1",
-            expiresAt: at("2026-06-23T10:11:00.000Z"),
-          }),
-          "run_not_found"
+          "execution_lost"
         )
       })
     })
 
-    test("reclaims only an expired lease and bumps the attempt", async () => {
+    test("projects confirmed queue ownership monotonically and fences stale executions", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
-        await storage.runs.reserve(
-          reserveInput({ id: "run_1", lease: lease("lease_1", "2026-06-23T10:05:00.000Z") })
-        )
-
-        // Lease still valid → cannot reclaim.
-        await expectAgentError(
-          storage.runs.reclaim({
-            projectId,
+        await createAndStartRun(
+          storage,
+          runInput({
             id: "run_1",
-            lease: lease("lease_2", "2026-06-23T10:15:00.000Z"),
-            now: at("2026-06-23T10:04:00.000Z"),
-          }),
-          "lease_not_expired"
+            execution: execution("exec_1", at("2026-06-23T10:02:00.000Z")),
+          })
         )
 
-        // Lease expired → reclaim succeeds, new lease, attempt++.
-        const reclaimed = await storage.runs.reclaim({
+        const confirmed = await storage.runs.confirmExecutionOwnership({
           projectId,
           id: "run_1",
-          lease: lease("lease_2", "2026-06-23T10:15:00.000Z"),
-          now: at("2026-06-23T10:06:00.000Z"),
+          executionToken: "exec_1",
+          queueLeaseExpiresAt: at("2026-06-23T10:03:00.000Z"),
         })
-        expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
-        expect(reclaimed.lease?.id).toBe("lease_2")
-
-        // The old lease can no longer renew or finish the run.
-        await expectAgentError(
-          storage.runs.renewLease({
-            projectId,
-            id: "run_1",
-            leaseId: "lease_1",
-            expiresAt: at("2026-06-23T10:20:00.000Z"),
-          }),
-          "lease_lost"
-        )
-      })
-    })
-
-    test("reclaims a lease at the exact expiry boundary (expiresAt === now)", async () => {
-      await withStorage(async (storage) => {
-        await storage.threads.create(threadInput())
-        await storage.runs.reserve(
-          reserveInput({ id: "run_1", lease: lease("lease_1", "2026-06-23T10:05:00.000Z") })
+        expect(confirmed.execution?.queueLeaseExpiresAt.toISOString()).toBe(
+          "2026-06-23T10:03:00.000Z"
         )
 
-        // Boundary: a lease is reclaimable when expiresAt <= now (pins `<=`, not strict `<`).
-        const reclaimed = await storage.runs.reclaim({
+        const older = await storage.runs.confirmExecutionOwnership({
           projectId,
           id: "run_1",
-          lease: lease("lease_2", "2026-06-23T10:15:00.000Z"),
-          now: at("2026-06-23T10:05:00.000Z"),
+          executionToken: "exec_1",
+          queueLeaseExpiresAt: at("2026-06-23T10:02:30.000Z"),
         })
-        expect(reclaimed).toMatchObject({ status: "running", attempt: 2 })
+        expect(older.execution?.queueLeaseExpiresAt.toISOString()).toBe("2026-06-23T10:03:00.000Z")
+
+        await storage.runs.reclaim({
+          projectId,
+          id: "run_1",
+          execution: execution("exec_2", at("2026-06-23T10:04:00.000Z")),
+        })
+        await expectAgentError(
+          storage.runs.confirmExecutionOwnership({
+            projectId,
+            id: "run_1",
+            executionToken: "exec_1",
+            queueLeaseExpiresAt: at("2026-06-23T10:05:00.000Z"),
+          }),
+          "execution_lost"
+        )
       })
     })
 
     test("does not alias stored run records to callers", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
-        const run = await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        const run = await createAndStartRun(storage, runInput({ id: "run_1" }))
 
-        // Mutating the returned record must not bleed into the store.
-        run.lease?.expiresAt.setTime(0)
+        const mutableExecution = run.execution as
+          | { token: string; queueLeaseExpiresAt: Date }
+          | undefined
+        if (mutableExecution) {
+          mutableExecution.token = "mutated"
+          mutableExecution.queueLeaseExpiresAt.setTime(0)
+        }
         const reread = await storage.runs.getById({ projectId, id: "run_1" })
-        expect(reread?.lease?.expiresAt.toISOString()).toBe("2026-06-23T10:05:00.000Z")
+        expect(reread?.execution?.token).toBe("exec_1")
       })
     })
 
@@ -346,19 +335,20 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput({ id: "thr_1" }))
         await storage.threads.create(threadInput({ id: "thr_2" }))
-        await storage.runs.reserve(reserveInput({ id: "run_1", threadId: "thr_1" }))
-        await storage.runs.reserve(
-          reserveInput({
+        await createAndStartRun(storage, runInput({ id: "run_1", threadId: "thr_1" }))
+        await createAndStartRun(
+          storage,
+          runInput({
             id: "run_2",
             threadId: "thr_2",
-            lease: lease("lease_2", "2026-06-23T10:05:00.000Z"),
+            execution: execution("exec_2"),
           })
         )
 
         await storage.runs.finish({
           projectId,
           id: "run_1",
-          leaseId: "lease_1",
+          executionToken: "exec_1",
           status: "succeeded",
         })
 
@@ -375,12 +365,12 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
     test("finishes a run, records execution metadata, and releases the thread", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
-        await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        await createAndStartRun(storage, runInput({ id: "run_1" }))
 
         const finished = await storage.runs.finish({
           projectId,
           id: "run_1",
-          leaseId: "lease_1",
+          executionToken: "exec_1",
           status: "succeeded",
           modelId: "claude-haiku-4-5",
           finishReason: "stop",
@@ -414,41 +404,39 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         await expect(
           storage.runs.getByIds({ projectId, ids: ["run_1", "missing", "run_1"] })
         ).resolves.toEqual([finished])
-        expect(finished.lease).toBeUndefined()
+        expect(finished.execution).toBeUndefined()
         expect(finished.completedAt?.toISOString()).toBe("2026-06-23T10:07:00.000Z")
 
-        // The thread is released → a new run can be reserved.
+        // The thread is released, so a new run can be reserved.
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: null,
         })
         await expect(
-          storage.runs.reserve(
-            reserveInput({ id: "run_2", lease: lease("lease_2", "2026-06-23T11:05:00.000Z") })
-          )
+          createAndStartRun(storage, runInput({ id: "run_2", execution: execution("exec_2") }))
         ).resolves.toMatchObject({ status: "running" })
       })
     })
 
-    test("records failure detail and rejects finishing a non-running or wrong-lease run", async () => {
+    test("records failure detail and rejects a non-running run or stale execution", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
-        await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        await createAndStartRun(storage, runInput({ id: "run_1" }))
 
         await expectAgentError(
           storage.runs.finish({
             projectId,
             id: "run_1",
-            leaseId: "wrong",
+            executionToken: "wrong",
             status: "failed",
             error: "boom",
           }),
-          "lease_lost"
+          "execution_lost"
         )
 
         const failed = await storage.runs.finish({
           projectId,
           id: "run_1",
-          leaseId: "lease_1",
+          executionToken: "exec_1",
           status: "failed",
           error: "ProviderError: boom",
           completedAt: at("2026-06-23T10:08:00.000Z"),
@@ -458,7 +446,12 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
 
         // Already terminal → cannot finish again.
         await expectAgentError(
-          storage.runs.finish({ projectId, id: "run_1", leaseId: "lease_1", status: "succeeded" }),
+          storage.runs.finish({
+            projectId,
+            id: "run_1",
+            executionToken: "exec_1",
+            status: "succeeded",
+          }),
           "invalid_state"
         )
       })
@@ -469,8 +462,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         await storage.threads.create(threadInput({ id: "thr_1" }))
         await storage.threads.create(threadInput({ id: "thr_2" }))
 
-        await storage.runs.reserve(
-          reserveInput({
+        await createAndStartRun(
+          storage,
+          runInput({
             id: "run_1",
             threadId: "thr_1",
             createdAt: at("2026-06-23T10:00:00.000Z"),
@@ -479,22 +473,24 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         await storage.runs.finish({
           projectId,
           id: "run_1",
-          leaseId: "lease_1",
+          executionToken: "exec_1",
           status: "succeeded",
         })
-        await storage.runs.reserve(
-          reserveInput({
+        await createAndStartRun(
+          storage,
+          runInput({
             id: "run_2",
             threadId: "thr_1",
-            lease: lease("lease_2", "2026-06-23T11:00:00.000Z"),
+            execution: execution("exec_2"),
             createdAt: at("2026-06-23T10:30:00.000Z"),
           })
         )
-        await storage.runs.reserve(
-          reserveInput({
+        await createAndStartRun(
+          storage,
+          runInput({
             id: "run_3",
             threadId: "thr_2",
-            lease: lease("lease_3", "2026-06-23T11:00:00.000Z"),
+            execution: execution("exec_3"),
             createdAt: at("2026-06-23T10:45:00.000Z"),
           })
         )
@@ -529,8 +525,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         expect(userMessage).toMatchObject({ seq: 1, role: "user", runId: null, contentVersion: 1 })
         expect(userMessage.authorPrincipal).toEqual(owner)
 
-        const run = await storage.runs.reserve(
-          reserveInput({
+        const run = await createAndStartRun(
+          storage,
+          runInput({
             id: "run_1",
             executionPrincipal: serviceAccount,
           })
@@ -594,7 +591,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
           parts: [{ type: "text", text: "one" }],
           createdAt: at("2026-06-23T10:00:00.000Z"),
         })
-        await storage.runs.reserve(reserveInput({ id: "run_1" }))
+        await createAndStartRun(storage, runInput({ id: "run_1" }))
         await storage.messages.append({
           id: "m2",
           projectId,

@@ -117,12 +117,12 @@ async function resolveAgentRunAuthState(
   if (
     !run ||
     run.status !== "running" ||
-    !run.lease ||
-    run.lease.expiresAt.getTime() <= Date.now() ||
+    !run.execution ||
+    run.execution.queueLeaseExpiresAt.getTime() <= Date.now() ||
     !isValidAgentApiGatewayCapability({
       projectId: sixb.id,
       runId: run.id,
-      leaseId: run.lease.id,
+      executionToken: run.execution.token,
       capability: input.capability,
     })
   ) {

@@ -204,7 +204,10 @@ describe("canAccessAgentRunStream", () => {
       agentId,
       triggerMessageId: "msg_ws_1",
       requestedByPrincipal: owner,
-      lease: { id: "lease_ws_1", expiresAt: new Date("2099-01-01T00:00:00.000Z") },
+      execution: {
+        token: "exec_ws_1",
+        queueLeaseExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      },
     })
 
     await expect(

@@ -1,17 +1,19 @@
 import { join } from "node:path"
 import type {
   AgentDefinition,
-  AgentRunLease,
+  AgentRunExecution,
   AgentRunRecord,
   AgentRunRequestedQueueJob,
   ClaimedQueueJob,
   Principal,
+  QueueDelivery,
   QueueWorkerFailureDecision,
 } from "@sixb/core"
 import {
   AgentStorageError,
-  createAgentRunLeaseId,
+  createAgentRunExecutionToken,
   isAbortError,
+  QueueDeliveryLeaseLostError,
   QueueWorker,
   SYSTEM_PRINCIPAL,
   subscribeAgentRunCancel,
@@ -19,9 +21,9 @@ import {
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import {
+  AgentExecutionLostError,
   AgentFinalizationError,
   AgentLeaseHeldError,
-  AgentLeaseLostError,
   AgentWorkerError,
 } from "./errors"
 import { finishRunOrThrow } from "./finalize"
@@ -36,7 +38,7 @@ import type {
   AgentWorkerStorage,
 } from "./types"
 
-const DEFAULT_AGENT_LEASE_MS = 60_000
+const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 5 * 60_000
 const SHORT_BACKOFF_MS = 250
@@ -64,10 +66,10 @@ type QueuedRun = {
 /**
  * Cohosted worker that turns `agent.run.requested` jobs into persisted agent runs.
  *
- * Liveness is two-layered: the queue lane delivers (and redelivers on lease expiry), while the
- * `agent_runs` lease is the sole authority on who may execute and finalize a run. The worker
- * reserves the run at claim time, owns its lease, heartbeats it during the turn, and fences every
- * write on the lease id. A run's terminal fate lives on its record (like the action worker), so a
+ * The queue delivery is the sole liveness authority. The worker reserves the run at claim time and
+ * installs an execution token that fences durable writes. Queue redelivery rotates that token, so a
+ * stale delivery cannot append or finalize after ownership moves. A run's terminal fate lives on its
+ * record (like the action worker), so a
  * model/tool failure that we successfully record still acknowledges the job. The job is only left
  * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
  * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
@@ -83,20 +85,19 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   private readonly pendingTeardowns = new Set<Promise<void>>()
 
   constructor(sixb: AgentWorkerSixb, options: AgentWorkerOptions) {
-    const leaseMs = options.leaseMs ?? DEFAULT_AGENT_LEASE_MS
+    const leaseMs = options.leaseMs ?? DEFAULT_AGENT_QUEUE_LEASE_MS
     super({
       projectId: sixb.id,
       queue: sixb.queues.agents,
       workerId: `agent-worker-${sixb.id}`,
       claimLimit: normalizeConcurrency(options.concurrency),
-      // Queue visibility ≥ run lease so a redelivered run is already reclaimable.
       leaseMs,
       idlePollMs: options.idlePollMs,
     })
 
     this.sixb = sixb
     this.idleWithoutAgents = sixb.agents.list().length === 0
-    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options, leaseMs)
+    this.context = this.idleWithoutAgents ? null : buildAgentContext(sixb, options)
   }
 
   override async start(): Promise<void> {
@@ -141,7 +142,8 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
   protected async execute(
     claimed: ClaimedQueueJob<AgentRunRequestedQueueJob>,
-    signal: AbortSignal
+    signal: AbortSignal,
+    delivery: QueueDelivery<AgentRunRequestedQueueJob>
   ): Promise<void> {
     const context = this.requireContext()
     const { job } = claimed
@@ -163,6 +165,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       triggerMessageId,
       requestedByPrincipal: job.payload.requestedByPrincipal ?? SYSTEM_PRINCIPAL,
       executionPrincipal: identity.principal,
+      execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
       return
@@ -174,13 +177,37 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       )
     }
     const run = reservation.run
-    const leaseId = run.lease?.id
+    const executionToken = run.execution?.token
+    if (!executionToken) {
+      throw new AgentWorkerError(`Agent run '${run.id}' has no execution token.`)
+    }
+
     let environment: AgentRunEnvironment | null = null
+    let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
     const cancel = await this.watchForCancel(run.id)
 
     try {
+      // Persist the queue's latest confirmed expiration for API-gateway authorization without
+      // introducing another heartbeat or ownership clock.
+      stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {
+        void this.confirmExecutionOwnership(
+          context,
+          run.id,
+          executionToken,
+          renewed.leaseExpiresAt
+        ).catch((error) => {
+          if (!isExecutionGone(error)) {
+            console.error(
+              `[SixbAgentWorker] Could not project queue ownership for agent run '${run.id}'.`,
+              error
+            )
+          }
+        })
+      })
+      await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
+
       await context.streamSink.publishStarted(run)
       environment = await createAgentRunEnvironment({
         context,
@@ -195,16 +222,18 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         signal: AbortSignal.any([signal, cancel.signal]),
       })
     } catch (error) {
-      // The run was reclaimed out from under us; this delivery is a duplicate. Ack, touch nothing.
-      if (error instanceof AgentLeaseLostError) {
+      // Queue ownership or the durable execution token was lost. Touch nothing; the current queue
+      // owner will reclaim the run with a fresh token.
+      if (
+        error instanceof AgentExecutionLostError ||
+        error instanceof QueueDeliveryLeaseLostError ||
+        signal.reason instanceof QueueDeliveryLeaseLostError
+      ) {
         return
       }
       // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
       // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
       if (error instanceof AgentFinalizationError) {
-        throw error
-      }
-      if (!leaseId) {
         throw error
       }
       // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
@@ -215,7 +244,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       const finalized = await this.recordFate(
         context,
         run.id,
-        leaseId,
+        executionToken,
         aborted ? "cancelled" : "failed",
         error
       )
@@ -228,6 +257,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         throw error
       }
     } finally {
+      stopOwnershipProjection?.()
       cancel.stop()
       await environment?.dispose()
     }
@@ -279,6 +309,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       triggerMessageId: string
       requestedByPrincipal: Principal
       executionPrincipal: Extract<Principal, { readonly type: "serviceAccount" }>
+      execution: AgentRunExecution
     }
   ): Promise<Reservation> {
     try {
@@ -291,7 +322,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         requestedByPrincipal: input.requestedByPrincipal,
         executionPrincipal: input.executionPrincipal,
         modelId: input.agent.model.modelId,
-        lease: freshLease(context.leaseMs),
+        execution: input.execution,
       })
       return { kind: "run", run }
     } catch (error) {
@@ -310,7 +341,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
         }
         if (activeRunId !== input.runId) {
           // A different turn owns the thread (single-flight): wait for it to clear.
-          return { kind: "held", availableAt: backoff(context.leaseMs) }
+          return { kind: "held", availableAt: backoff(this.config.leaseMs) }
         }
         return this.reclaimOrSkipQueuedRun(context, input)
       }
@@ -323,7 +354,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
 
   private async reclaimOrSkipQueuedRun(
     context: AgentWorkerContext,
-    input: QueuedRun
+    input: QueuedRun & { readonly execution: AgentRunExecution }
   ): Promise<Reservation> {
     const run = await context.storage.agents.runs.getById({
       projectId: context.id,
@@ -347,13 +378,10 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       const reclaimed = await context.storage.agents.runs.reclaim({
         projectId: context.id,
         id: input.runId,
-        lease: freshLease(context.leaseMs),
+        execution: input.execution,
       })
       return { kind: "run", run: reclaimed }
     } catch (error) {
-      if (error instanceof AgentStorageError && error.code === "lease_not_expired") {
-        return { kind: "held", availableAt: backoff(context.leaseMs) }
-      }
       if (error instanceof AgentStorageError && error.code === "invalid_state") {
         return { kind: "skip" }
       }
@@ -384,10 +412,24 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
     return { signal: controller.signal, stop: () => unsubscribe?.() }
   }
 
+  private confirmExecutionOwnership(
+    context: AgentWorkerContext,
+    runId: string,
+    executionToken: string,
+    queueLeaseExpiresAt: string
+  ): Promise<AgentRunRecord> {
+    return context.storage.agents.runs.confirmExecutionOwnership({
+      projectId: context.id,
+      id: runId,
+      executionToken,
+      queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
+    })
+  }
+
   private async recordFate(
     context: AgentWorkerContext,
     runId: string,
-    leaseId: string,
+    executionToken: string,
     status: "failed" | "cancelled",
     error: unknown
   ): Promise<AgentRunRecord | undefined> {
@@ -395,13 +437,13 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
       return await finishRunOrThrow(context.storage.agents, {
         projectId: context.id,
         id: runId,
-        leaseId,
+        executionToken,
         status,
         error: toErrorMessage(error),
       })
     } catch (finalizeError) {
-      // Lease already lost / run already terminal — nothing more to record, the delivery is acked.
-      if (finalizeError instanceof AgentLeaseLostError) {
+      // Execution already lost / run already terminal — nothing more to record.
+      if (finalizeError instanceof AgentExecutionLostError) {
         return undefined
       }
       // Storage stayed unavailable across retries: propagate so the job is redelivered, not acked.
@@ -410,11 +452,7 @@ export class AgentWorker extends QueueWorker<AgentRunRequestedQueueJob> {
   }
 }
 
-function buildAgentContext(
-  sixb: AgentWorkerSixb,
-  options: AgentWorkerOptions,
-  leaseMs: number
-): AgentWorkerContext {
+function buildAgentContext(sixb: AgentWorkerSixb, options: AgentWorkerOptions): AgentWorkerContext {
   const storage = sixb.storage
   if (!storage.agents) {
     throw new AgentWorkerError("Agent workers require storage.agents support.")
@@ -448,15 +486,25 @@ function buildAgentContext(
       options.streamSink ?? createBrokerStreamSink({ broker: sixb.broker, projectId: sixb.id })
     ),
     agentSkills,
-    leaseMs,
-    heartbeatMs: options.heartbeatMs ?? Math.max(1, Math.floor(leaseMs / 3)),
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs: options.turnTimeoutMs ?? DEFAULT_TURN_TIMEOUT_MS,
   }
 }
 
-function freshLease(leaseMs: number): AgentRunLease {
-  return { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + leaseMs) }
+function freshExecution(queueLeaseExpiresAt: string): AgentRunExecution {
+  return {
+    token: createAgentRunExecutionToken(),
+    queueLeaseExpiresAt: new Date(queueLeaseExpiresAt),
+  }
+}
+
+function isExecutionGone(error: unknown): boolean {
+  return (
+    error instanceof AgentStorageError &&
+    (error.code === "execution_lost" ||
+      error.code === "invalid_state" ||
+      error.code === "run_not_found")
+  )
 }
 
 function backoff(ms: number): string {

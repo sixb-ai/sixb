@@ -6,10 +6,7 @@ export class AgentWorkerError extends Error {
   }
 }
 
-/**
- * The thread's active run is still held by a live worker (its `agent_runs` lease has not expired),
- * so this delivery cannot take it over yet. The worker retries the job at {@link availableAt}.
- */
+/** A different run still owns the thread's single-flight slot. */
 export class AgentLeaseHeldError extends Error {
   readonly name = "AgentLeaseHeldError"
   constructor(
@@ -20,15 +17,11 @@ export class AgentLeaseHeldError extends Error {
   }
 }
 
-/**
- * This worker lost the run's lease mid-turn (it was reclaimed by another worker after a crash was
- * suspected). The run now belongs to someone else, so this worker writes nothing further and simply
- * acknowledges its — now duplicate — delivery.
- */
-export class AgentLeaseLostError extends Error {
-  readonly name = "AgentLeaseLostError"
+/** This delivery's execution token is stale, so it must make no further durable writes. */
+export class AgentExecutionLostError extends Error {
+  readonly name = "AgentExecutionLostError"
   constructor(readonly runId: string) {
-    super(`[SixbAgentWorker] Lost the lease on agent run '${runId}'; another worker owns it.`)
+    super(`[SixbAgentWorker] Lost execution ownership of agent run '${runId}'.`)
   }
 }
 
@@ -36,7 +29,7 @@ export class AgentLeaseLostError extends Error {
  * Recording a run's terminal state failed on a non-terminal (infra) error that persisted across
  * in-place retries. The run is still `running` and its thread is still locked, so the worker must
  * **not** acknowledge the job: it lets the queue redeliver it, so a later delivery can finalize the
- * run once storage recovers. Distinct from {@link AgentLeaseLostError} (run no longer ours → ack).
+ * run once storage recovers. Distinct from {@link AgentExecutionLostError} (run no longer ours → ack).
  */
 export class AgentFinalizationError extends Error {
   readonly name = "AgentFinalizationError"

@@ -10,6 +10,7 @@ import type {
   AgentThreadRecord,
   AgentThreadStore,
   AppendAgentMessageInput,
+  ConfirmAgentRunExecutionOwnershipInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
   ListAgentMessagesInput,
@@ -19,7 +20,6 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  RenewAgentRunLeaseInput,
   ReserveAgentRunInput,
 } from "./types"
 
@@ -150,8 +150,8 @@ class InMemoryAgentRunStore implements AgentRunStore {
   constructor(private readonly state: AgentStoreState) {}
 
   async reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord> {
-    // No `await` between read and write: the in-memory critical section is atomic, so two concurrent
-    // reservations on the same thread cannot both win — the second observes `activeRunId` set.
+    // Temporary reserve-at-claim bridge. No `await` between read and write: the in-memory critical
+    // section is atomic, so concurrent reservations cannot both claim the thread.
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {
@@ -189,59 +189,48 @@ class InMemoryAgentRunStore implements AgentRunStore {
       status: "running",
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       attempt: 1,
-      lease: clone(input.lease),
+      execution: clone(input.execution),
       createdAt,
       startedAt: new Date(input.startedAt ?? createdAt),
     }
     this.state.runs.set(runKey, clone(run))
-
-    const updatedThread: AgentThreadRecord = {
-      ...thread,
-      activeRunId: run.id,
-      updatedAt: createdAt,
-    }
-    this.state.threads.set(threadKey, clone(updatedThread))
-
+    this.state.threads.set(
+      threadKey,
+      clone({ ...thread, activeRunId: run.id, updatedAt: createdAt })
+    )
     return clone(run)
   }
 
-  async renewLease(input: RenewAgentRunLeaseInput): Promise<AgentRunRecord> {
+  async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
-    if (!run.lease || run.lease.id !== input.leaseId) {
-      throw new AgentStorageError(
-        "lease_lost",
-        `[Sixb] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
-      )
-    }
-
     const next: AgentRunRecord = {
       ...run,
-      lease: { id: run.lease.id, expiresAt: new Date(input.expiresAt) },
+      attempt: run.attempt + 1,
+      execution: clone(input.execution),
     }
     this.state.runs.set(key(input.projectId, input.id), clone(next))
     return clone(next)
   }
 
-  async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
+  async confirmExecutionOwnership(
+    input: ConfirmAgentRunExecutionOwnershipInput
+  ): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
-    const now = new Date(input.now ?? new Date())
-    if (!run.lease) {
+    if (!run.execution || run.execution.token !== input.executionToken) {
       throw new AgentStorageError(
-        "invalid_state",
-        `[Sixb] Agent run '${input.id}' has no lease to reclaim.`
-      )
-    }
-    if (run.lease.expiresAt.getTime() > now.getTime()) {
-      throw new AgentStorageError(
-        "lease_not_expired",
-        `[Sixb] Lease on agent run '${input.id}' has not expired yet.`
+        "execution_lost",
+        `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
     }
 
     const next: AgentRunRecord = {
       ...run,
-      attempt: run.attempt + 1,
-      lease: clone(input.lease),
+      execution: {
+        ...run.execution,
+        queueLeaseExpiresAt: new Date(
+          Math.max(run.execution.queueLeaseExpiresAt.getTime(), input.queueLeaseExpiresAt.getTime())
+        ),
+      },
     }
     this.state.runs.set(key(input.projectId, input.id), clone(next))
     return clone(next)
@@ -249,10 +238,10 @@ class InMemoryAgentRunStore implements AgentRunStore {
 
   async finish(input: FinishAgentRunInput): Promise<AgentRunRecord> {
     const run = this.requireRunning(input.projectId, input.id)
-    if (!run.lease || run.lease.id !== input.leaseId) {
+    if (!run.execution || run.execution.token !== input.executionToken) {
       throw new AgentStorageError(
-        "lease_lost",
-        `[Sixb] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
+        "execution_lost",
+        `[Sixb] Execution token is no longer current on agent run '${input.id}'.`
       )
     }
 
@@ -265,19 +254,12 @@ class InMemoryAgentRunStore implements AgentRunStore {
       ...(input.usage === undefined ? {} : { usage: clone(input.usage) }),
       ...(input.diagnostics === undefined ? {} : { diagnostics: clone(input.diagnostics) }),
       ...(input.status === "succeeded" || input.error === undefined ? {} : { error: input.error }),
-      lease: undefined,
+      execution: undefined,
       completedAt,
     }
     this.state.runs.set(key(input.projectId, input.id), clone(next))
 
-    const threadKey = key(input.projectId, run.threadId)
-    const thread = this.state.threads.get(threadKey)
-    if (thread && thread.activeRunId === run.id) {
-      this.state.threads.set(
-        threadKey,
-        clone({ ...thread, activeRunId: null, updatedAt: completedAt })
-      )
-    }
+    this.releaseThread(run, completedAt)
 
     return clone(next)
   }
@@ -321,6 +303,14 @@ class InMemoryAgentRunStore implements AgentRunStore {
   }
 
   private requireRunning(projectId: string, id: string): AgentRunRecord {
+    return this.requireStatus(projectId, id, "running")
+  }
+
+  private requireStatus(
+    projectId: string,
+    id: string,
+    status: AgentRunRecord["status"]
+  ): AgentRunRecord {
     const run = this.state.runs.get(key(projectId, id))
     if (!run) {
       throw new AgentStorageError(
@@ -328,13 +318,24 @@ class InMemoryAgentRunStore implements AgentRunStore {
         `[Sixb] Agent run '${id}' not found for project '${projectId}'.`
       )
     }
-    if (run.status !== "running") {
+    if (run.status !== status) {
       throw new AgentStorageError(
         "invalid_state",
-        `[Sixb] Agent run '${id}' is not running (status '${run.status}').`
+        `[Sixb] Agent run '${id}' is not ${status} (status '${run.status}').`
       )
     }
     return run
+  }
+
+  private releaseThread(run: AgentRunRecord, completedAt: Date): void {
+    const threadKey = key(run.projectId, run.threadId)
+    const thread = this.state.threads.get(threadKey)
+    if (thread && thread.activeRunId === run.id) {
+      this.state.threads.set(
+        threadKey,
+        clone({ ...thread, activeRunId: null, updatedAt: completedAt })
+      )
+    }
   }
 }
 

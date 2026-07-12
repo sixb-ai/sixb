@@ -31,7 +31,10 @@ describe("InMemoryStorage agents", () => {
           agentId: "sales",
           triggerMessageId: "msg_1",
           requestedByPrincipal: { type: "user", id: "usr_1" },
-          lease: { id: "lease_1", expiresAt: new Date("2026-06-23T10:05:00.000Z") },
+          execution: {
+            token: "exec_1",
+            queueLeaseExpiresAt: new Date("2026-06-23T10:05:00.000Z"),
+          },
           createdAt: new Date("2026-06-23T10:00:10.000Z"),
         })
         await tx.agents?.messages.append({
@@ -69,7 +72,10 @@ describe("InMemoryStorage agents", () => {
       agentId: "sales",
       triggerMessageId: "msg_1",
       requestedByPrincipal: { type: "user", id: "usr_1" },
-      lease: { id: "lease_1", expiresAt: new Date("2026-06-23T10:05:00.000Z") },
+      execution: {
+        token: "exec_1",
+        queueLeaseExpiresAt: new Date("2026-06-23T10:05:00.000Z"),
+      },
       createdAt: new Date("2026-06-23T10:00:10.000Z"),
     })
 
@@ -86,7 +92,7 @@ describe("InMemoryStorage agents", () => {
       await tx.agents?.runs.finish({
         projectId: "p",
         id: "run_1",
-        leaseId: "lease_1",
+        executionToken: "exec_1",
         status: "succeeded",
         completedAt: new Date("2026-06-23T10:01:01.000Z"),
       })
@@ -134,8 +140,8 @@ describe("InMemoryStorage agents", () => {
   })
 
   test("exposes the AgentStorageError code surface", () => {
-    const error = new AgentStorageError("lease_lost", "[Sixb] gone")
-    expect(error.code).toBe("lease_lost")
+    const error = new AgentStorageError("execution_lost", "[Sixb] gone")
+    expect(error.code).toBe("execution_lost")
     expect(error.name).toBe("AgentStorageError")
   })
 })

@@ -21,8 +21,8 @@ import {
   type Broker,
   type CommandResult,
   type CreateSandboxOptions,
+  createAgentRunExecutionToken,
   createAgentRunId,
-  createAgentRunLeaseId,
   defineAgent,
   defineGroup,
   type EventsRuntime,
@@ -53,7 +53,7 @@ import {
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
-import { AgentFinalizationError, AgentLeaseLostError } from "../src/errors"
+import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { reconcileAgentExecutionIdentity } from "../src/identity"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -108,6 +108,24 @@ function toolThenAnswerModel(): MockLanguageModelV4 {
         { type: "text-start", id: "t" },
         { type: "text-delta", id: "t", delta: "Echoed hi" },
         { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
+  let call = 0
+  return new MockLanguageModelV4({
+    modelId: "mock-model",
+    doStream: async () => {
+      call += 1
+      await Bun.sleep(delayMs)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: `slow-${call}` },
+        { type: "text-delta", id: `slow-${call}`, delta: `Slow answer ${call}` },
+        { type: "text-end", id: `slow-${call}` },
         finish("stop"),
       ])
     },
@@ -675,11 +693,13 @@ function buildAgentWorkerContext(
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
     agentSkills: loadAgentSkills({ projectSkillsDir: false }),
-    leaseMs: 60_000,
-    heartbeatMs: 20_000,
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
   }
+}
+
+function execution(queueLeaseExpiresAt = new Date(Date.now() + 60_000)) {
+  return { token: createAgentRunExecutionToken(), queueLeaseExpiresAt }
 }
 
 async function reserveRequestedRun(
@@ -693,7 +713,7 @@ async function reserveRequestedRun(
     agentId: "assistant",
     triggerMessageId: input.triggerMessageId,
     requestedByPrincipal: REQUESTER,
-    lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+    execution: execution(),
   })
 }
 
@@ -760,8 +780,8 @@ function withFlakyAgentFinishStorage(storage: Storage, failTimes: number): Stora
     messages: agents.messages,
     runs: {
       reserve: (input) => agents.runs.reserve(input),
-      renewLease: (input) => agents.runs.renewLease(input),
       reclaim: (input) => agents.runs.reclaim(input),
+      confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
       getByIds: (params) => agents.runs.getByIds(params),
       list: (input) => agents.runs.list(input),
@@ -798,8 +818,8 @@ function withAlwaysFailingTransactionalFinish(storage: Storage): Storage {
     messages: agents.messages,
     runs: {
       reserve: (input) => agents.runs.reserve(input),
-      renewLease: (input) => agents.runs.renewLease(input),
       reclaim: (input) => agents.runs.reclaim(input),
+      confirmExecutionOwnership: (input) => agents.runs.confirmExecutionOwnership(input),
       getById: (params) => agents.runs.getById(params),
       getByIds: (params) => agents.runs.getByIds(params),
       list: (input) => agents.runs.list(input),
@@ -2270,6 +2290,114 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("projects successful queue renewals onto execution authorization", async () => {
+    const sixb = buildSixb(slowAnswerModel(300))
+    const storage = agentStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const originalRenew = queue.renewLease?.bind(queue)
+    if (!originalRenew) throw new Error("expected queue lease renewal")
+
+    let firstRenewedExpiration: string | undefined
+    queue.renewLease = async (params) => {
+      const renewed = await originalRenew(params)
+      firstRenewedExpiration ??= renewed?.leaseExpiresAt
+      return renewed
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90, idlePollMs: 5 }))
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({ agentId: "assistant", text: "keep owning" })
+      await waitFor(
+        async () => {
+          if (!firstRenewedExpiration) return null
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          const projected = run?.execution?.queueLeaseExpiresAt.getTime()
+          return projected !== undefined && projected >= Date.parse(firstRenewedExpiration)
+            ? run
+            : null
+        },
+        { label: "queue ownership projection" }
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("continues processing after a turn outlives its initial queue lease", async () => {
+    const sixb = buildSixb(slowAnswerModel(120))
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+
+    await worker.start()
+    try {
+      const first = await sixb.agents.request({ agentId: "assistant", text: "first" })
+      const firstRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: first.runId })
+          return run && run.status !== "running" ? run : null
+        },
+        { label: "slow first run terminal" }
+      )
+      expect(firstRun.status).toBe("succeeded")
+
+      const second = await sixb.agents.request({
+        agentId: "assistant",
+        threadId: first.threadId,
+        text: "second",
+      })
+      const secondRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: second.runId })
+          return run && run.status !== "running" ? run : null
+        },
+        { label: "slow second run terminal" }
+      )
+      expect(secondRun.status).toBe("succeeded")
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("redelivers with a fresh execution token after queue ownership is lost", async () => {
+    const sixb = buildSixb(slowAnswerModel(120))
+    const storage = agentStorageOf(sixb)
+    const queue = sixb.queues.agents
+    const originalRenew = queue.renewLease?.bind(queue)
+    if (!originalRenew) throw new Error("expected queue lease renewal")
+
+    let renewals = 0
+    queue.renewLease = async (params) => {
+      renewals += 1
+      if (renewals === 1) return null
+      return originalRenew(params)
+    }
+
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+    const originalConsoleError = console.error
+    console.error = () => {}
+    await worker.start()
+    try {
+      const request = await sixb.agents.request({ agentId: "assistant", text: "recover" })
+      const finalRun = await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.runId })
+          return run && run.status !== "running" ? run : null
+        },
+        { label: "redelivered run terminal" }
+      )
+
+      expect(finalRun).toMatchObject({ status: "succeeded", attempt: 2 })
+      const assistants = (await listMessages(storage, request.threadId)).filter(
+        (message) => message.role === "assistant"
+      )
+      expect(assistants).toHaveLength(1)
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
+    }
+  })
+
   test("continues the turn when broker run stream publishing fails", async () => {
     const sixb = buildSixb(toolThenAnswerModel(), new FailingRunStreamBroker())
     const storage = agentStorageOf(sixb)
@@ -2360,7 +2488,7 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId: request.triggerMessageId,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: execution(),
     })
 
     const circular: Record<string, unknown> = {}
@@ -2400,7 +2528,7 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId: first.triggerMessageId,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: execution(),
     })
 
     const promise = sixb.agents.request({
@@ -2416,8 +2544,8 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    // Trigger normally, then simulate a worker that crashed mid-run: an active run whose lease has
-    // already expired, with the same trigger message the redelivered job carries.
+    // Trigger normally, then simulate a worker that crashed mid-run. Queue redelivery is now the
+    // authority to reclaim the matching active run.
     const { threadId, runId, triggerMessageId } = await sixb.agents.request({
       agentId: "assistant",
       text: "echo hi",
@@ -2430,7 +2558,7 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() - 1_000) },
+      execution: execution(new Date(Date.now() - 1_000)),
     })
 
     const worker = new AgentWorker(sixb, workerOptions({ tools: echoTool }))
@@ -2467,7 +2595,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("a worker whose lease was reclaimed writes nothing (fencing)", async () => {
+  test("a worker whose execution token was reclaimed writes nothing (fencing)", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
@@ -2476,7 +2604,7 @@ describe("AgentWorker", () => {
       text: "echo hi",
     })
 
-    // This worker reserved the run, but its lease already expired and another worker reclaimed it.
+    // This worker reserved the run, but another queue delivery reclaimed its execution token.
     const staleRun = await storage.runs.reserve({
       id: runId,
       projectId: PROJECT_ID,
@@ -2484,12 +2612,12 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() - 1_000) },
+      execution: execution(new Date(Date.now() - 1_000)),
     })
     await storage.runs.reclaim({
       projectId: PROJECT_ID,
       id: runId,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: execution(),
     })
 
     const promise = runAgentTurn({
@@ -2499,8 +2627,6 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: echoTool,
         streamSink: NOOP_STREAM_SINK,
-        leaseMs: 60_000,
-        heartbeatMs: 20_000,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -2508,7 +2634,7 @@ describe("AgentWorker", () => {
       run: staleRun,
       signal: new AbortController().signal,
     })
-    await expect(promise).rejects.toBeInstanceOf(AgentLeaseLostError)
+    await expect(promise).rejects.toBeInstanceOf(AgentExecutionLostError)
 
     // No assistant message was written; the run is still owned by the reclaiming worker.
     const messages = await listMessages(storage, threadId)
@@ -2544,8 +2670,6 @@ describe("AgentWorker", () => {
         tools: {},
         systemAddendum: "Extra sandbox context.",
         streamSink: NOOP_STREAM_SINK,
-        leaseMs: 60_000,
-        heartbeatMs: 20_000,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -2600,8 +2724,6 @@ describe("AgentWorker", () => {
         blobStorage: sixb.blobStorage,
         tools: {},
         streamSink: NOOP_STREAM_SINK,
-        leaseMs: 60_000,
-        heartbeatMs: 20_000,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -2813,7 +2935,7 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId: request.triggerMessageId,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: execution(),
     })
 
     const failingStorage = withAlwaysFailingTransactionalFinish(sixb.storage)
@@ -2828,8 +2950,6 @@ describe("AgentWorker", () => {
             broker: sixb.broker,
             projectId: PROJECT_ID,
           }),
-          leaseMs: 60_000,
-          heartbeatMs: 20_000,
           defaultMaxSteps: 4,
           turnTimeoutMs: 60_000,
         },
@@ -2854,8 +2974,7 @@ describe("AgentWorker", () => {
     const reclaimed = await storage.runs.reclaim({
       projectId: PROJECT_ID,
       id: request.runId,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
-      now: new Date(Date.now() + 120_000),
+      execution: execution(),
     })
     await runAgentTurn({
       context: {
@@ -2867,8 +2986,6 @@ describe("AgentWorker", () => {
           broker: sixb.broker,
           projectId: PROJECT_ID,
         }),
-        leaseMs: 60_000,
-        heartbeatMs: 20_000,
         defaultMaxSteps: 4,
         turnTimeoutMs: 60_000,
       },
@@ -2947,7 +3064,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
 
-    // A live run (valid, far-future lease) owns the thread, triggered by message "A".
+    // A live run owns the thread, triggered by message "A".
     const {
       threadId,
       runId: activeRunId,
@@ -2978,11 +3095,11 @@ describe("AgentWorker", () => {
       agentId: "assistant",
       triggerMessageId: triggerA,
       requestedByPrincipal: REQUESTER,
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 300_000) },
+      execution: execution(new Date(Date.now() + 300_000)),
     })
 
-    // A redelivered job for a *different* trigger lands while that run is live. The worker must hold
-    // it (single-flight), never reclaiming the still-leased run.
+    // A job for a *different* trigger lands while that run is live. The worker must hold it
+    // (single-flight) rather than reclaiming another run.
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
       jobs: [
@@ -3029,7 +3146,7 @@ describe("finishRunOrThrow", () => {
   const succeededInput = {
     projectId: PROJECT_ID,
     id: "agt_run_x",
-    leaseId: "agt_lease_x",
+    executionToken: "agt_exec_x",
     status: "succeeded",
   } as const
 
@@ -3040,12 +3157,12 @@ describe("finishRunOrThrow", () => {
     )
   })
 
-  test("raises AgentLeaseLostError when the run is no longer ours (terminal storage error)", async () => {
+  test("raises AgentExecutionLostError when the run is no longer ours", async () => {
     const storage = finishingStorage(() =>
-      Promise.reject(new AgentStorageError("lease_lost", "gone"))
+      Promise.reject(new AgentStorageError("execution_lost", "gone"))
     )
     await expect(finishRunOrThrow(storage, succeededInput)).rejects.toBeInstanceOf(
-      AgentLeaseLostError
+      AgentExecutionLostError
     )
   })
 })
