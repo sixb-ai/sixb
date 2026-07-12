@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   type AgentStorage,
   agentRunControlStreamId,
+  agentRunStreamId,
   agents as agentScope,
   can,
   createAgentRunExecutionToken,
@@ -30,6 +31,10 @@ const model = {
 
 type StartedRunInput = Parameters<AgentStorage["runs"]["create"]>[0] &
   Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
+
+function testExecution(token = createAgentRunExecutionToken()) {
+  return { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) }
+}
 
 async function createStartedRun(storage: AgentStorage, input: StartedRunInput) {
   await storage.runs.create(input)
@@ -251,7 +256,7 @@ describe("agent routes", () => {
     expect(allowedThread.status).toBe(201)
   })
 
-  test("creates a thread, atomically persists a queued run, and dispatches it", async () => {
+  test("creates a thread, posts a message, and exposes a durable queued run", async () => {
     const { app, storage, sixb } = createApp()
 
     const createThreadResponse = await app.fetch(
@@ -290,35 +295,39 @@ describe("agent routes", () => {
     )
     expect(postMessageResponse.status).toBe(202)
     const postMessageBody = (await postMessageResponse.json()) as {
-      threadId: string
-      runId: string
-      triggerMessageId: string
-      jobId?: string
-      createdThread: boolean
-      streamId: string
+      run: {
+        id: string
+        threadId: string
+        triggerMessageId: string
+        status: "queued"
+        attempt: number
+        streamId: string
+      }
     }
     expect(postMessageBody).toMatchObject({
-      threadId: createThreadBody.thread.id,
-      createdThread: false,
-      streamId: `agents.runs.${postMessageBody.runId}`,
+      run: {
+        threadId: createThreadBody.thread.id,
+        status: "queued",
+        attempt: 0,
+        streamId: `agents.runs.${postMessageBody.run.id}`,
+      },
     })
-    expect(postMessageBody.jobId).toBeTruthy()
 
     await expect(
-      storage.agents.runs.getById({ projectId: sixb.id, id: postMessageBody.runId })
-    ).resolves.toMatchObject({
-      id: postMessageBody.runId,
-      threadId: createThreadBody.thread.id,
-      status: "queued",
-      attempt: 0,
-    })
+      storage.agents.runs.getById({ projectId: sixb.id, id: postMessageBody.run.id })
+    ).resolves.toMatchObject({ status: "queued", attempt: 0 })
 
-    // The next stack slice adds queued runs to the public schema. Preserve the old pre-claim 404
-    // contract until then even though the backend state is now durable.
-    const queuedRunResponse = await app.fetch(
-      new Request(`http://localhost/api/agent-runs/${postMessageBody.runId}`)
+    const runsResponse = await app.fetch(
+      new Request(
+        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/runs?status=queued&limit=1`
+      )
     )
-    expect(queuedRunResponse.status).toBe(404)
+    expect(runsResponse.status).toBe(200)
+    expect(await runsResponse.json()).toMatchObject({
+      runs: [{ id: postMessageBody.run.id, status: "queued", attempt: 0 }],
+      hasMore: false,
+      total: 1,
+    })
 
     const [queuedRun] = await sixb.queues.agents.claim({
       projectId: sixb.id,
@@ -327,8 +336,8 @@ describe("agent routes", () => {
     expect(queuedRun?.job.payload).toEqual({
       agentId: "assistant",
       threadId: createThreadBody.thread.id,
-      runId: postMessageBody.runId,
-      triggerMessageId: postMessageBody.triggerMessageId,
+      runId: postMessageBody.run.id,
+      triggerMessageId: postMessageBody.run.triggerMessageId,
     })
 
     const messagesResponse = await app.fetch(
@@ -339,7 +348,7 @@ describe("agent routes", () => {
       total: 1,
       messages: [
         {
-          id: postMessageBody.triggerMessageId,
+          id: postMessageBody.run.triggerMessageId,
           runId: null,
           role: "user",
           authorPrincipal: { type: "system", id: "system" },
@@ -352,7 +361,7 @@ describe("agent routes", () => {
       ],
     })
 
-    const contentUrl = `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+    const contentUrl = `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.run.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
     const contentResponse = await app.fetch(new Request(contentUrl))
     expect(contentResponse.status).toBe(200)
     expect(contentResponse.headers.get("content-type")).toBe("text/plain")
@@ -366,14 +375,14 @@ describe("agent routes", () => {
 
     const invalidRoot = await app.fetch(
       new Request(
-        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/metadata/file")}`
+        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.run.triggerMessageId}/files/content?path=${encodeURIComponent("/metadata/file")}`
       )
     )
     expect(invalidRoot.status).toBe(400)
 
     const nonFile = await app.fetch(
       new Request(
-        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/0/text")}`
+        `http://localhost/api/agent-threads/${createThreadBody.thread.id}/messages/${postMessageBody.run.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/0/text")}`
       )
     )
     expect(nonFile.status).toBe(404)
@@ -414,10 +423,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
       requestedByPrincipal: { type: "system", id: "system" },
-      execution: {
-        token: executionToken,
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(executionToken),
     })
     await storage.agents.messages.append({
       id: "msg-diagnostics",
@@ -478,10 +484,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-existing",
       requestedByPrincipal: { type: "system", id: "system" },
-      execution: {
-        token: createAgentRunExecutionToken(),
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(),
     })
 
     const response = await app.fetch(
@@ -496,7 +499,123 @@ describe("agent routes", () => {
     })
   })
 
-  test("reads agent runs without exposing execution details", async () => {
+  test("cancels a queued run before a worker starts it", async () => {
+    const { app, storage, sixb } = createApp()
+    const request = await sixb.agents.request({ agentId: "assistant", text: "wait" })
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${request.threadId}/cancel`, "POST", {
+        runId: request.runId,
+      })
+    )
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({
+      run: { id: request.runId, status: "cancelled", attempt: 0 },
+    })
+    await expect(
+      storage.agents.runs.getById({ projectId: sixb.id, id: request.runId })
+    ).resolves.toMatchObject({ status: "cancelled", attempt: 0 })
+    await expect(
+      storage.agents.threads.getById({ projectId: sixb.id, id: request.threadId })
+    ).resolves.toMatchObject({ activeRunId: null })
+    const runsResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${request.threadId}/runs?status=cancelled`)
+    )
+    expect(runsResponse.status).toBe(200)
+    expect(await runsResponse.json()).toMatchObject({
+      runs: [{ id: request.runId, status: "cancelled", attempt: 0 }],
+      total: 1,
+    })
+    await expect(
+      sixb.broker.read({
+        projectId: sixb.id,
+        streamId: agentRunStreamId(request.runId),
+      })
+    ).resolves.toMatchObject({
+      records: [
+        {
+          name: "agent.run.finished",
+          payload: { runId: request.runId, status: "cancelled", attempt: 0 },
+        },
+      ],
+    })
+  })
+
+  test("cancels a run when worker startup races queued cancellation", async () => {
+    const { app, storage, sixb } = createApp()
+    const request = await sixb.agents.request({ agentId: "assistant", text: "pick this up" })
+    const originalFinishQueued = storage.agents.runs.finishQueued.bind(storage.agents.runs)
+    let raceStartup = true
+    storage.agents.runs.finishQueued = async (input) => {
+      if (raceStartup) {
+        raceStartup = false
+        await storage.agents.runs.start({
+          projectId: sixb.id,
+          id: request.runId,
+          execution: testExecution(),
+        })
+      }
+      return originalFinishQueued(input)
+    }
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${request.threadId}/cancel`, "POST", {
+        runId: request.runId,
+      })
+    )
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({
+      run: { id: request.runId, status: "running", attempt: 1 },
+    })
+    await expect(
+      storage.agents.runs.getById({ projectId: sixb.id, id: request.runId })
+    ).resolves.toMatchObject({ status: "running", attempt: 1 })
+    await expect(
+      sixb.broker.read({
+        projectId: sixb.id,
+        streamId: agentRunControlStreamId(request.runId),
+      })
+    ).resolves.toMatchObject({
+      records: [{ name: "agent.run.cancel", payload: { runId: request.runId } }],
+    })
+  })
+
+  test("retries a failed run without duplicating its trigger message", async () => {
+    const { app, storage, sixb } = createApp()
+    const request = await sixb.agents.request({ agentId: "assistant", text: "try this" })
+    await storage.agents.runs.finishQueued({
+      id: request.runId,
+      projectId: sixb.id,
+      status: "failed",
+      error: "dispatch failed",
+    })
+
+    const response = await app.fetch(
+      jsonRequest(`/api/agent-threads/${request.threadId}/runs/${request.runId}/retry`, "POST", {})
+    )
+    expect(response.status).toBe(202)
+    const body = (await response.json()) as {
+      run: { id: string; status: string; triggerMessageId: string }
+    }
+    expect(body.run).toMatchObject({
+      status: "queued",
+      triggerMessageId: request.triggerMessageId,
+    })
+    expect(body.run.id).not.toBe(request.runId)
+
+    await expect(
+      storage.agents.messages.list({ projectId: sixb.id, threadId: request.threadId })
+    ).resolves.toMatchObject({
+      messages: [{ id: request.triggerMessageId, role: "user" }],
+      total: 1,
+    })
+    await expect(
+      storage.agents.threads.getById({ projectId: sixb.id, id: request.threadId })
+    ).resolves.toMatchObject({ activeRunId: body.run.id })
+  })
+
+  test("reads agent runs without exposing execution tokens", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({
       id: "thread-run",
@@ -512,10 +631,7 @@ describe("agent routes", () => {
       triggerMessageId: "msg-user",
       requestedByPrincipal: { type: "system", id: "system" },
       modelId: "test-model",
-      execution: {
-        token: createAgentRunExecutionToken(),
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
       startedAt: new Date("2026-06-27T10:00:01.000Z"),
     })
@@ -552,10 +668,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-user",
       requestedByPrincipal: { type: "system", id: "system" },
-      execution: {
-        token: createAgentRunExecutionToken(),
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(),
     })
 
     // A running run: 202, and the stop signal lands on the run's control stream for the worker.
@@ -563,7 +676,7 @@ describe("agent routes", () => {
       jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: run.id })
     )
     expect(ok.status).toBe(202)
-    expect(await ok.json()).toEqual({ runId: run.id })
+    expect(await ok.json()).toMatchObject({ run: { id: run.id, status: "running" } })
     const { records: control } = await sixb.broker.read({
       projectId: sixb.id,
       streamId: agentRunControlStreamId(run.id),
@@ -596,10 +709,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-other",
       requestedByPrincipal: { type: "system", id: "system" },
-      execution: {
-        token: createAgentRunExecutionToken(),
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(),
     })
     const crossThread = await app.fetch(
       jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: otherRun.id })
@@ -678,8 +788,7 @@ describe("agent routes", () => {
     )
     expect(postMessageResponse.status).toBe(202)
     const postMessageBody = (await postMessageResponse.json()) as {
-      runId: string
-      triggerMessageId: string
+      run: { id: string; triggerMessageId: string }
     }
 
     const [queuedRun] = await sixb.queues.agents.claim({
@@ -689,25 +798,29 @@ describe("agent routes", () => {
     expect(queuedRun?.job.payload).toEqual({
       agentId: "assistant",
       threadId: ownerThread.thread.id,
-      runId: postMessageBody.runId,
-      triggerMessageId: postMessageBody.triggerMessageId,
+      runId: postMessageBody.run.id,
+      triggerMessageId: postMessageBody.run.triggerMessageId,
     })
 
     await storage.agents.runs.start({
-      id: postMessageBody.runId,
+      id: postMessageBody.run.id,
       projectId: sixb.id,
-      execution: {
-        token: createAgentRunExecutionToken(),
-        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
-      },
+      execution: testExecution(),
     })
 
     const hiddenRun = await app.fetch(
-      new Request(`http://localhost/api/agent-runs/${postMessageBody.runId}`, {
+      new Request(`http://localhost/api/agent-runs/${postMessageBody.run.id}`, {
         headers: other.headers,
       })
     )
     expect(hiddenRun.status).toBe(404)
+
+    const hiddenRuns = await app.fetch(
+      new Request(`http://localhost/api/agent-threads/${ownerThread.thread.id}/runs`, {
+        headers: other.headers,
+      })
+    )
+    expect(hiddenRuns.status).toBe(404)
 
     const hiddenMessages = await app.fetch(
       new Request(`http://localhost/api/agent-threads/${ownerThread.thread.id}/messages`, {
@@ -716,7 +829,7 @@ describe("agent routes", () => {
     )
     expect(hiddenMessages.status).toBe(404)
 
-    const fileContentUrl = `http://localhost/api/agent-threads/${ownerThread.thread.id}/messages/${postMessageBody.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
+    const fileContentUrl = `http://localhost/api/agent-threads/${ownerThread.thread.id}/messages/${postMessageBody.run.triggerMessageId}/files/content?path=${encodeURIComponent("/parts/1/fileRef")}`
     const hiddenFileContent = await app.fetch(
       new Request(fileContentUrl, { headers: other.headers })
     )
