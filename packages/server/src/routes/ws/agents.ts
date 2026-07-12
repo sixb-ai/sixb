@@ -10,6 +10,7 @@ import type { Elysia } from "elysia"
 import { z } from "zod"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsAuthz, wsStateKey } from "../../utils/ws"
+import { serializeAgentRun } from "../agents"
 
 interface AgentStreamSubscriptionState {
   runId: string | null
@@ -19,19 +20,12 @@ interface AgentStreamSubscriptionState {
 const SubscribeSchema = z.object({
   type: z.literal("subscribe"),
   runId: z.string().min(1),
-  /**
-   * Optional because a run row is not reserved until the worker claims the job.
-   * Authenticated callers should include the thread id returned by POST
-   * /api/agent-threads/:threadId/messages when subscribing before pickup.
-   */
-  threadId: z.string().min(1).optional(),
   afterCursor: z.string().min(1).optional(),
 })
 
 const ReplaySchema = z.object({
   type: z.literal("replay"),
   runId: z.string().min(1),
-  threadId: z.string().min(1).optional(),
   afterCursor: z.string().min(1).optional(),
   limit: z.number().int().positive().max(500).optional(),
 })
@@ -75,34 +69,27 @@ export async function canAccessAgentRunStream(
   sixb: Sixb<readonly OntologySource[]>,
   input: {
     readonly runId: string
-    readonly threadId?: string
     readonly authz: AuthorizationContext | null
   }
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  // Auth-disabled development runtimes are privileged, matching the existing
-  // HTTP agent routes. The server auth guard ensures auth-enabled websocket
-  // requests are authenticated before they reach this route.
-  if (!input.authz) {
-    return { ok: true }
-  }
-
   const storage = sixb.storage.agents
   if (!storage) {
     return { ok: false, message: "Agent storage is not configured." }
   }
 
   const run = await storage.runs.getById({ projectId: sixb.id, id: input.runId })
-  const threadId = run?.threadId ?? input.threadId
-  if (!threadId) {
-    return {
-      ok: false,
-      message: "Agent run not found. Include threadId when subscribing before the run starts.",
-    }
+  if (!run) {
+    return { ok: false, message: "Agent run not found." }
+  }
+
+  // Auth-disabled development runtimes are privileged, matching the existing HTTP agent routes.
+  if (!input.authz) {
+    return { ok: true }
   }
 
   // Reuse the one owner + `run:agent` rule instead of re-implementing it here: the scoped surface
   // returns null for a thread the caller may not read (absent, not owner, or ungranted).
-  const thread = await sixb.as(input.authz).getThread(threadId)
+  const thread = await sixb.as(input.authz).getThread(run.threadId)
   if (!thread) {
     return { ok: false, message: "Agent run not found." }
   }
@@ -156,7 +143,6 @@ async function subscribeAgentStream(
   const sixb = server.getSixb()
   const access = await canAccessAgentRunStream(sixb, {
     runId: message.runId,
-    threadId: message.threadId,
     authz: wsAuthz(ws),
   })
   if (!access.ok) {
@@ -211,8 +197,13 @@ async function subscribeAgentStream(
     runId: message.runId,
     afterCursor: message.afterCursor ?? null,
   })
+  sendRecords(ws, buffered.splice(0))
+  if (!(await sendRunSnapshot(sixb, ws, message.runId))) {
+    stopSubscription(state)
+    return
+  }
   live = true
-  sendRecords(ws, buffered)
+  sendRecords(ws, buffered.splice(0))
 }
 
 async function replayAgentStream(
@@ -223,7 +214,6 @@ async function replayAgentStream(
   const sixb = server.getSixb()
   const access = await canAccessAgentRunStream(sixb, {
     runId: message.runId,
-    threadId: message.threadId,
     authz: wsAuthz(ws),
   })
   if (!access.ok) {
@@ -250,6 +240,7 @@ async function replayAgentStream(
       afterCursor: page.cursor ?? message.afterCursor ?? null,
       count: page.records.length,
     })
+    await sendRunSnapshot(sixb, ws, message.runId)
   } catch (error) {
     safeSend(ws, { type: "error", message: errorMessage(error) })
   }
@@ -280,6 +271,25 @@ function stopSubscription(state: AgentStreamSubscriptionState | undefined): void
   state.unsubscribe?.()
   state.unsubscribe = null
   state.runId = null
+}
+
+async function sendRunSnapshot(
+  sixb: Sixb<readonly OntologySource[]>,
+  ws: { send: (message: string) => void },
+  runId: string
+): Promise<boolean> {
+  try {
+    const run = await sixb.storage.agents?.runs.getById({ projectId: sixb.id, id: runId })
+    if (!run) {
+      safeSend(ws, { type: "error", message: "Agent run not found." })
+      return false
+    }
+    safeSend(ws, { type: "run.snapshot", run: serializeAgentRun(run) })
+    return true
+  } catch (error) {
+    safeSend(ws, { type: "error", message: errorMessage(error) })
+    return false
+  }
 }
 
 function sendRecords(

@@ -181,24 +181,17 @@ export const PostAgentMessageBodySchema = z.object({
   messageId: z.string().trim().min(1).optional(),
 })
 
-export const PostAgentMessageResponseSchema = z.object({
-  threadId: z.string(),
-  runId: z.string(),
-  triggerMessageId: z.string(),
-  jobId: z.string().optional(),
-  createdThread: z.boolean(),
-  streamId: z.string(),
-})
-
 export const CancelAgentRunBodySchema = z.object({
   runId: z.string().trim().min(1),
 })
 
-export const CancelAgentRunResponseSchema = z.object({
-  runId: z.string(),
-})
-
-export const AgentRunStatusSchema = z.enum(["running", "succeeded", "failed", "cancelled"])
+export const AgentRunStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+])
 
 export const AgentRunFinishReasonSchema = z.enum([
   "stop",
@@ -237,4 +230,29 @@ export const AgentRunSchema = z.object({
   createdAt: z.string(),
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
+})
+
+export const PostAgentMessageResponseSchema = z.object({
+  run: AgentRunSchema,
+})
+
+export const CancelAgentRunResponseSchema = z.object({
+  run: AgentRunSchema,
+})
+
+export const RetryAgentRunResponseSchema = z.object({
+  run: AgentRunSchema,
+})
+
+export const AgentRunListQuerySchema = z.object({
+  status: AgentRunStatusSchema.optional(),
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+  order: z.enum(["asc", "desc"]).optional(),
+})
+
+export const AgentRunListResponseSchema = z.object({
+  runs: z.array(AgentRunSchema),
+  hasMore: z.boolean(),
+  total: z.number(),
 })

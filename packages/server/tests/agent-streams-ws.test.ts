@@ -29,11 +29,9 @@ const agentId = "business-analyst"
 
 describe("parseAgentStreamMessage", () => {
   test("accepts subscribe, replay, and unsubscribe messages", () => {
-    expect(
-      parseAgentStreamMessage({ type: "subscribe", runId, threadId, afterCursor: "1" })
-    ).toEqual({
+    expect(parseAgentStreamMessage({ type: "subscribe", runId, afterCursor: "1" })).toEqual({
       ok: true,
-      data: { type: "subscribe", runId, threadId, afterCursor: "1" },
+      data: { type: "subscribe", runId, afterCursor: "1" },
     })
     expect(parseAgentStreamMessage({ type: "replay", runId, limit: 25 })).toEqual({
       ok: true,
@@ -77,6 +75,10 @@ describe("/ws/agents", () => {
           type: "record",
           record: { cursor: started?.cursor, name: "agent.run.started" },
         })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "run.snapshot",
+          run: { id: runId, status: "running", attempt: 1 },
+        })
 
         const [chunk] = await appendAgentStreamRecord(sixb, {
           type: "agent.ui.chunk",
@@ -92,6 +94,44 @@ describe("/ws/agents", () => {
         expect(await nextWsMessage(ws)).toEqual({ type: "unsubscribed", runId })
 
         await appendAgentStreamRecord(sixb, { type: "agent.run.finished", runId })
+        await expectNoWsMessage(ws)
+      } finally {
+        ws.close()
+      }
+    })
+  })
+
+  test("streams a durable queued snapshot before the worker starts", async () => {
+    await withAgentWsServer(async ({ baseUrl, sixb }) => {
+      const agents = agentStorage(sixb)
+      await agents.threads.create({
+        id: threadId,
+        projectId,
+        agentId,
+        ownerPrincipal: { type: "system", id: "system" },
+      })
+      await agents.runs.create({
+        id: runId,
+        projectId,
+        threadId,
+        agentId,
+        triggerMessageId: "msg_queued",
+        requestedByPrincipal: { type: "system", id: "system" },
+      })
+      const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/agents`)
+
+      try {
+        expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "agents" })
+        ws.send(JSON.stringify({ type: "subscribe", runId }))
+        expect(await nextWsMessage(ws)).toEqual({
+          type: "subscribed",
+          runId,
+          afterCursor: null,
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "run.snapshot",
+          run: { id: runId, status: "queued", attempt: 0 },
+        })
         await expectNoWsMessage(ws)
       } finally {
         ws.close()
@@ -120,6 +160,10 @@ describe("/ws/agents", () => {
           runId: "agt_run_ws_replay",
           afterCursor: started?.cursor,
           count: 1,
+        })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "run.snapshot",
+          run: { id: "agt_run_ws_replay", status: "running", attempt: 1 },
         })
 
         await appendAgentStreamRecord(sixb, {
@@ -164,6 +208,10 @@ describe("/ws/agents", () => {
           type: "record",
           record: { cursor: finished?.cursor, name: "agent.run.finished" },
         })
+        expect(await nextWsMessage(ws)).toMatchObject({
+          type: "run.snapshot",
+          run: { id: "agt_run_ws_cursor", status: "succeeded", attempt: 1 },
+        })
       } finally {
         ws.close()
       }
@@ -205,14 +253,6 @@ describe("canAccessAgentRunStream", () => {
       triggerMessageId: "msg_ws_1",
       requestedByPrincipal: owner,
     })
-    await agents.runs.start({
-      id: runId,
-      projectId,
-      execution: {
-        token: "exec_ws_1",
-        queueLeaseExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
-      },
-    })
 
     await expect(
       canAccessAgentRunStream(sixb, { runId, authz: authz(owner, [agentId]) })
@@ -231,7 +271,7 @@ describe("canAccessAgentRunStream", () => {
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
 
-  test("allows pre-claim subscriptions when the thread is owned and runnable", async () => {
+  test("rejects unknown run ids instead of authorizing them through a supplied thread", async () => {
     const sixb = createSixbInstance<readonly OntologySource[]>({
       id: projectId,
       ontology: [],
@@ -243,8 +283,7 @@ describe("canAccessAgentRunStream", () => {
       auth: { id: "test", kind: "dev" },
     })
     const owner: Principal = { type: "user", id: "usr_owner" }
-    const agents = agentStorage(sixb)
-    await agents.threads.create({
+    await agentStorage(sixb).threads.create({
       id: threadId,
       projectId,
       agentId,
@@ -253,61 +292,8 @@ describe("canAccessAgentRunStream", () => {
 
     await expect(
       canAccessAgentRunStream(sixb, {
-        runId: "agt_run_not_reserved",
-        threadId,
+        runId: "agt_run_missing",
         authz: authz(owner, [agentId]),
-      })
-    ).resolves.toEqual({ ok: true })
-    await expect(
-      canAccessAgentRunStream(sixb, {
-        runId: "agt_run_not_reserved",
-        threadId,
-        authz: authz(owner),
-      })
-    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
-  })
-
-  test("rejects pre-claim subscriptions that cannot be resolved or owned", async () => {
-    const sixb = createSixbInstance<readonly OntologySource[]>({
-      id: projectId,
-      ontology: [],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      auth: { id: "test", kind: "dev" },
-    })
-    const owner: Principal = { type: "user", id: "usr_owner" }
-    const agents = agentStorage(sixb)
-    await agents.threads.create({ id: threadId, projectId, agentId, ownerPrincipal: owner })
-
-    // No run reserved and no threadId supplied: the caller must include one to subscribe early.
-    await expect(
-      canAccessAgentRunStream(sixb, {
-        runId: "agt_run_not_reserved",
-        authz: authz(owner, [agentId]),
-      })
-    ).resolves.toEqual({
-      ok: false,
-      message: "Agent run not found. Include threadId when subscribing before the run starts.",
-    })
-
-    // threadId points at a non-existent thread.
-    await expect(
-      canAccessAgentRunStream(sixb, {
-        runId: "agt_run_not_reserved",
-        threadId: "thr_missing",
-        authz: authz(owner, [agentId]),
-      })
-    ).resolves.toEqual({ ok: false, message: "Agent run not found." })
-
-    // threadId points at a thread owned by a different principal.
-    await expect(
-      canAccessAgentRunStream(sixb, {
-        runId: "agt_run_not_reserved",
-        threadId,
-        authz: authz({ type: "user", id: "usr_other" }, [agentId]),
       })
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
@@ -377,6 +363,7 @@ async function appendAgentStreamRecord(
     | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
     | { readonly type: "agent.run.finished"; readonly runId: string }
 ) {
+  await advanceDurableRun(sixb, input)
   await sixb.broker.ensureStream({
     projectId: sixb.id,
     stream: agentRunStreamDefinition(input.runId),
@@ -394,6 +381,58 @@ async function appendAgentStreamRecord(
       },
     ],
   })
+}
+
+async function advanceDurableRun(
+  sixb: Sixb<readonly OntologySource[]>,
+  input:
+    | { readonly type: "agent.run.started"; readonly runId: string }
+    | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
+    | { readonly type: "agent.run.finished"; readonly runId: string }
+): Promise<void> {
+  const agents = agentStorage(sixb)
+  const existingThread = await agents.threads.getById({ projectId, id: threadId })
+  if (!existingThread) {
+    await agents.threads.create({
+      id: threadId,
+      projectId,
+      agentId,
+      ownerPrincipal: { type: "system", id: "system" },
+    })
+  }
+
+  let run = await agents.runs.getById({ projectId, id: input.runId })
+  const executionToken = `exec_${input.runId}`
+  if (!run) {
+    run = await agents.runs.create({
+      id: input.runId,
+      projectId,
+      threadId,
+      agentId,
+      triggerMessageId: `msg_${input.runId}`,
+      requestedByPrincipal: { type: "system", id: "system" },
+    })
+  }
+  if (run.status === "queued") {
+    run = await agents.runs.start({
+      id: run.id,
+      projectId,
+      execution: {
+        token: executionToken,
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+      },
+      modelId: "test-model",
+    })
+  }
+  if (input.type === "agent.run.finished" && run.status === "running") {
+    await agents.runs.finish({
+      id: run.id,
+      projectId,
+      executionToken,
+      status: "succeeded",
+      finishReason: "stop",
+    })
+  }
 }
 
 function agentStreamPayload(

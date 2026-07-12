@@ -1,4 +1,5 @@
 import {
+  AGENT_RUN_STREAM_SCHEMA_VERSION,
   type AgentDefinition,
   type AgentMessageRecord,
   AgentRequestError,
@@ -8,9 +9,13 @@ import {
   AgentStorageError,
   type AgentThreadRecord,
   type AuthorizationContext,
+  agentRunStreamDefinition,
   agentRunStreamId,
+  createAgentRunId,
   createAgentThreadId,
+  dispatchQueuedAgentRuns,
   type FileRef,
+  type JsonValue,
   type OntologySource,
   type Principal,
   publishAgentRunCancel,
@@ -37,6 +42,8 @@ import {
   AgentMessageListResponseSchema,
   AgentMessageSchema,
   AgentMessagesQuerySchema,
+  AgentRunListQuerySchema,
+  AgentRunListResponseSchema,
   AgentRunParamsSchema,
   AgentRunSchema,
   AgentThreadListQuerySchema,
@@ -49,6 +56,7 @@ import {
   CreateAgentThreadResponseSchema,
   PostAgentMessageBodySchema,
   PostAgentMessageResponseSchema,
+  RetryAgentRunResponseSchema,
 } from "../schemas/agents"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -110,7 +118,7 @@ function serializeMessage(
   })
 }
 
-function serializeRun(run: AgentRunRecord): ReturnType<typeof AgentRunSchema.parse> {
+export function serializeAgentRun(run: AgentRunRecord): ReturnType<typeof AgentRunSchema.parse> {
   return AgentRunSchema.parse({
     id: run.id,
     projectId: run.projectId,
@@ -173,6 +181,44 @@ function principalForRequest(authz: AuthorizationContext | null): Principal {
   return authz?.principal ?? SYSTEM_PRINCIPAL
 }
 
+async function publishQueuedRunCancellation(
+  sixb: Sixb<readonly OntologySource[]>,
+  run: AgentRunRecord
+): Promise<void> {
+  const event = {
+    schemaVersion: AGENT_RUN_STREAM_SCHEMA_VERSION,
+    type: "agent.run.finished" as const,
+    projectId: sixb.id,
+    runId: run.id,
+    threadId: run.threadId,
+    agentId: run.agentId,
+    attempt: run.attempt,
+    status: "cancelled" as const,
+    occurredAt: new Date().toISOString(),
+  }
+
+  try {
+    await sixb.broker.ensureStream({
+      projectId: sixb.id,
+      stream: agentRunStreamDefinition(run.id),
+    })
+    await sixb.broker.append({
+      projectId: sixb.id,
+      streamId: agentRunStreamId(run.id),
+      records: [
+        {
+          name: event.type,
+          key: run.id,
+          payload: event as JsonValue,
+          idempotencyKey: `${run.id}:${run.attempt}:finished:cancelled`,
+        },
+      ],
+    })
+  } catch (error) {
+    console.error(`[SixbServer] Agent run '${run.id}' cancellation stream publish failed:`, error)
+  }
+}
+
 function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string }
@@ -182,6 +228,10 @@ function handleAgentRouteError(
   if (error instanceof AgentStorageError && error.code === "duplicate_id") {
     set.status = 409
     return { error: "Agent thread already exists" }
+  }
+  if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+    set.status = 409
+    return { error: "This conversation already has a response in progress" }
   }
 
   if (error instanceof AgentRequestError) {
@@ -592,10 +642,12 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             : sixb.agents.request(requestInput))
 
           set.status = 202
-          return PostAgentMessageResponseSchema.parse({
-            ...result,
-            streamId: agentRunStreamId(result.runId),
-          })
+          const run = await storage.runs.getById({ projectId: sixb.id, id: result.runId })
+          if (!run) {
+            throw new Error(`[SixbServer] Accepted agent run '${result.runId}' was not found.`)
+          }
+
+          return PostAgentMessageResponseSchema.parse({ run: serializeAgentRun(run) })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -641,23 +693,50 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           }
 
           const parsed = CancelAgentRunBodySchema.parse(body)
-          // A run row exists only once the worker has reserved it. When it does, fence the cancel to
-          // this thread and reject an already-finished run; a run still queued (no row yet) is
-          // accepted — the worker sees the retained cancel signal when it picks the job up.
           const run = await storage.runs.getById({ projectId: sixb.id, id: parsed.runId })
-          if (run && run.threadId !== thread.id) {
+          if (!run || run.threadId !== thread.id) {
             set.status = 404
             return { error: "Agent run not found" }
           }
-          if (run && run.status !== "running") {
-            set.status = 409
-            return { error: "Agent run is not running" }
+          let current = run
+          let cancelledWhileQueued = false
+          if (current.status === "queued") {
+            try {
+              current = await storage.runs.finishQueued({
+                projectId: sixb.id,
+                id: current.id,
+                status: "cancelled",
+              })
+              cancelledWhileQueued = true
+            } catch (error) {
+              if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") {
+                throw error
+              }
+
+              // The worker may have started the run after our read but before finishQueued locked
+              // it. Re-read so that pickup race becomes a running-run cancellation instead of an
+              // invalid-state response. A retained control record is safe even if the worker has
+              // not attached its cancel subscription yet.
+              const refreshed = await storage.runs.getById({ projectId: sixb.id, id: current.id })
+              if (!refreshed || refreshed.threadId !== thread.id) {
+                set.status = 404
+                return { error: "Agent run not found" }
+              }
+              current = refreshed
+            }
           }
 
-          await publishAgentRunCancel(sixb.broker, { projectId: sixb.id, runId: parsed.runId })
+          if (cancelledWhileQueued) {
+            await publishQueuedRunCancellation(sixb, current)
+          } else if (current.status === "running") {
+            await publishAgentRunCancel(sixb.broker, { projectId: sixb.id, runId: current.id })
+          } else {
+            set.status = 409
+            return { error: "Agent run is not active" }
+          }
 
           set.status = 202
-          return CancelAgentRunResponseSchema.parse({ runId: parsed.runId })
+          return CancelAgentRunResponseSchema.parse({ run: serializeAgentRun(current) })
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
@@ -679,6 +758,148 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
         },
       }
     )
+    .post(
+      "/api/agent-threads/:threadId/runs/:runId/retry",
+      async (context) => {
+        const { params, set } = context
+        const { authz, scoped } = requestAuthState(context)
+        try {
+          const storage = sixb.storage.agents
+          if (!storage) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const thread = await getAccessibleThread({
+            scoped,
+            storage,
+            projectId: sixb.id,
+            threadId: params.threadId,
+          })
+          if (!thread) {
+            set.status = 404
+            return { error: "Agent thread not found" }
+          }
+
+          const failedRun = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
+          if (!failedRun || failedRun.threadId !== thread.id) {
+            set.status = 404
+            return { error: "Agent run not found" }
+          }
+          if (failedRun.status !== "failed") {
+            set.status = 409
+            return { error: "Only failed agent runs can be retried" }
+          }
+
+          const run = await storage.runs.create({
+            id: createAgentRunId(),
+            projectId: sixb.id,
+            threadId: thread.id,
+            agentId: failedRun.agentId,
+            triggerMessageId: failedRun.triggerMessageId,
+            requestedByPrincipal: principalForRequest(authz),
+          })
+
+          // As with a new message, the durable queued run is the dispatch intent. A worker will
+          // reconcile it if this best-effort publication cannot reach the queue right now.
+          try {
+            const dispatch = await dispatchQueuedAgentRuns({
+              projectId: sixb.id,
+              storage,
+              queue: sixb.queues.agents,
+              runIds: [run.id],
+            })
+            const failure = dispatch.failures[0]
+            if (failure) {
+              console.error(
+                `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
+                failure.error
+              )
+            }
+          } catch (error) {
+            console.error(
+              `[SixbServer] Could not dispatch retried agent run '${run.id}'; retrying later.`,
+              error
+            )
+          }
+
+          set.status = 202
+          return RetryAgentRunResponseSchema.parse({ run: serializeAgentRun(run) })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentRunParamsSchema.extend({ threadId: z.string().trim().min(1) }),
+        response: {
+          202: RetryAgentRunResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Retry a failed agent run",
+          tags: [OPENAPI_TAGS.agentRuns.name],
+          operationId: "retryAgentRun",
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/agent-threads/:threadId/runs",
+      async (context) => {
+        const { params, query, set } = context
+        const { scoped } = requestAuthState(context)
+        try {
+          const storage = sixb.storage.agents
+          if (!storage) {
+            return missingAgentStorageResponse(set)
+          }
+
+          const thread = await getAccessibleThread({
+            scoped,
+            storage,
+            projectId: sixb.id,
+            threadId: params.threadId,
+          })
+          if (!thread) {
+            set.status = 404
+            return { error: "Agent thread not found" }
+          }
+
+          const parsed = AgentRunListQuerySchema.parse(query)
+          const result = await storage.runs.list({
+            projectId: sixb.id,
+            threadId: thread.id,
+            statuses: parsed.status ? [parsed.status] : undefined,
+            limit: parseOptionalInt(parsed.limit),
+            offset: parseOptionalInt(parsed.offset),
+            order: parsed.order,
+          })
+
+          return AgentRunListResponseSchema.parse({
+            runs: result.runs.map(serializeAgentRun),
+            hasMore: result.hasMore,
+            total: result.total,
+          })
+        } catch (error) {
+          return handleAgentRouteError(error, set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        query: AgentRunListQuerySchema,
+        response: {
+          200: AgentRunListResponseSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "List an agent thread's runs",
+          tags: [OPENAPI_TAGS.agentRuns.name],
+          operationId: "listAgentThreadRuns",
+        },
+      }
+    )
     .get(
       "/api/agent-runs/:runId",
       async (context) => {
@@ -691,9 +912,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           }
 
           const run = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
-          // Keep the existing public contract until the next stack slice adds `queued` to the
-          // canonical run schema. Before this refactor, pre-claim runs were also not readable.
-          if (!run || run.status === "queued") {
+          if (!run) {
             set.status = 404
             return { error: "Agent run not found" }
           }
@@ -709,7 +928,7 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
             return { error: "Agent run not found" }
           }
 
-          return serializeRun(run)
+          return serializeAgentRun(run)
         } catch (error) {
           return handleAgentRouteError(error, set)
         }
