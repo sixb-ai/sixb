@@ -77,6 +77,80 @@ describe("sftp connector", () => {
     }
   })
 
+  test("opens remote files as web streams", async () => {
+    await writeFile(join(server.rootDir, "files", "stream.txt"), "streamed over sftp")
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const stream = await client.open("/files/stream.txt")
+      expect(await new Response(stream).text()).toBe("streamed over sftp")
+      await expect(client.open("/files/missing.txt")).rejects.toThrow()
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("aborts an active remote file stream", async () => {
+    await writeFile(join(server.rootDir, "files", "large.bin"), Buffer.alloc(2 * 1024 * 1024, 1))
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+
+    try {
+      const reader = (await client.open("/files/large.bin", { signal: abort.signal })).getReader()
+      expect((await reader.read()).done).toBe(false)
+
+      abort.abort(new Error("stop sftp read"))
+
+      await expect(reader.read()).rejects.toThrow("stop sftp read")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("rejects an open canceled before it starts", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+    abort.abort(new Error("already canceled"))
+
+    try {
+      await expect(
+        client.open("/files/never-opened.bin", { signal: abort.signal })
+      ).rejects.toThrow("already canceled")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
   test("creates and removes directories", async () => {
     const adapter = sftp({
       host: server.host,

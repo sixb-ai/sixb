@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer"
+import { createHash, randomUUID } from "node:crypto"
 import {
   type AbortBlobUploadInput,
+  assertExpectedBlobSize,
+  assertValidExpectedBlobSize,
   type BlobByteRange,
   type BlobDigest,
   type BlobInfo,
@@ -11,15 +14,14 @@ import {
   blobIdFromDigest,
   type CompleteBlobUploadInput,
   type CreateBlobUploadInput,
-  computeBlobDigest,
   createFileRef,
   type DirectUploadBlobStorage,
   type FileRef,
   type PutBlobInput,
   type RangeReadableBlobStorage,
-  readBlobBody,
   type SignBlobUploadPartInput,
   type SignedBlobUploadPart,
+  streamBlobBody,
 } from "@sixb/core"
 import { S3Client } from "bun"
 import { encodeRfc3986, encodeS3Path, presignS3Url } from "./sigv4"
@@ -27,6 +29,10 @@ import type { S3BlobStorageAcl, S3BlobStorageOptions } from "./types"
 
 const MAX_PRESIGNED_URL_EXPIRES_SECONDS = 7 * 24 * 60 * 60 // 7 days
 const READ_URL_EXPIRES_SECONDS = 60
+const MIN_S3_MULTIPART_PART_SIZE_BYTES = 5 * 1024 * 1024
+const DEFAULT_PUT_PART_SIZE_BYTES = 8 * 1024 * 1024
+const DEFAULT_PUT_CONCURRENCY = 2
+const DEFAULT_PUT_RETRIES = 3
 
 export function normalizeS3BlobBasePath(basePath: string): string {
   return basePath
@@ -122,6 +128,9 @@ export class S3BlobStorage
   private readonly sessionToken: string | undefined
   private readonly acl: S3BlobStorageAcl | undefined
   private readonly pathStyle: boolean
+  private readonly putPartSizeBytes: number
+  private readonly putConcurrency: number
+  private readonly putRetries: number
   private readonly client: S3Client
 
   constructor(options: S3BlobStorageOptions = {}) {
@@ -139,6 +148,23 @@ export class S3BlobStorage
     this.sessionToken = options.sessionToken ?? envValue("S3_SESSION_TOKEN", "AWS_SESSION_TOKEN")
     this.acl = options.acl
     this.pathStyle = options.pathStyle ?? defaultPathStyle(this.endpoint)
+    this.putPartSizeBytes = requireIntegerOption(
+      "putPartSizeBytes",
+      options.putPartSizeBytes ?? DEFAULT_PUT_PART_SIZE_BYTES,
+      MIN_S3_MULTIPART_PART_SIZE_BYTES
+    )
+    this.putConcurrency = requireIntegerOption(
+      "putConcurrency",
+      options.putConcurrency ?? DEFAULT_PUT_CONCURRENCY,
+      1,
+      255
+    )
+    this.putRetries = requireIntegerOption(
+      "putRetries",
+      options.putRetries ?? DEFAULT_PUT_RETRIES,
+      0,
+      255
+    )
     this.client = new S3Client({
       bucket: this.bucket,
       region: this.region,
@@ -151,20 +177,57 @@ export class S3BlobStorage
   }
 
   async put(input: PutBlobInput): Promise<FileRef> {
-    const bytes = await readBlobBody(input.body)
-    const digest = computeBlobDigest(bytes)
-    const hex = blobDigestHex(digest)
-    const info: BlobInfo = {
-      blobId: blobIdFromDigest(digest),
-      digest,
-      sizeBytes: bytes.byteLength,
+    assertValidExpectedBlobSize(input.expectedSizeBytes, "BlobS3")
+    input.signal?.throwIfAborted()
+    const stagingKey = this.uploadKeyForId(`put_${randomUUID().replaceAll("-", "")}`)
+    const hash = createHash("sha256")
+    let sizeBytes = 0
+
+    try {
+      const trackedBody = streamBlobBody(input.body).pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            hash.update(chunk)
+            sizeBytes += chunk.byteLength
+            if (input.expectedSizeBytes !== undefined && sizeBytes > input.expectedSizeBytes) {
+              assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobS3")
+            }
+            controller.enqueue(chunk)
+          },
+        })
+      )
+      const uploadBody = input.signal
+        ? trackedBody.pipeThrough(new TransformStream<Uint8Array, Uint8Array>(), {
+            signal: input.signal,
+          })
+        : trackedBody
+
+      await this.client.write(stagingKey, new Response(uploadBody), {
+        type: input.mediaType,
+        partSize: this.putPartSizeBytes,
+        queueSize: this.putConcurrency,
+        retry: this.putRetries,
+      })
+
+      assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobS3")
+      const staged = await this.client.stat(stagingKey)
+      assertExpectedBlobSize(sizeBytes, staged.size, "BlobS3")
+      input.signal?.throwIfAborted()
+
+      const digest = `sha256:${hash.digest("hex")}` as BlobDigest
+      const info: BlobInfo = {
+        blobId: blobIdFromDigest(digest),
+        digest,
+        sizeBytes,
+      }
+
+      await this.copyObject(stagingKey, this.contentKeyForHex(blobDigestHex(digest)))
+      await this.client.delete(stagingKey)
+      return createFileRef(input, info)
+    } catch (error) {
+      await this.deleteStagedObjectQuietly(stagingKey)
+      throw error
     }
-
-    await this.client.write(this.contentKeyForHex(hex), bytes, {
-      type: input.mediaType,
-    })
-
-    return createFileRef(input, info)
   }
 
   async createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession> {
@@ -352,6 +415,14 @@ export class S3BlobStorage
       : `uploads/${uploadId}/object`
   }
 
+  private async deleteStagedObjectQuietly(stagingKey: string): Promise<void> {
+    try {
+      await this.client.delete(stagingKey)
+    } catch {
+      // Preserve the upload failure. Bucket lifecycle rules are the final cleanup safety net.
+    }
+  }
+
   private async copyObject(sourceKey: string, destinationKey: string): Promise<void> {
     const headers: Record<string, string> = {
       "x-amz-copy-source": this.copySourceHeader(sourceKey),
@@ -423,4 +494,19 @@ export class S3BlobStorage
       secretAccessKey: this.secretAccessKey,
     }
   }
+}
+
+function requireIntegerOption(
+  name: string,
+  value: number,
+  minimum: number,
+  maximum = Number.MAX_SAFE_INTEGER
+): number {
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new BlobStorageError(
+      `[BlobS3] ${name} must be an integer between ${minimum} and ${maximum}.`
+    )
+  }
+
+  return value
 }

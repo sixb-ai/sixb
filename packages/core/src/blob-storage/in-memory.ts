@@ -8,7 +8,13 @@ import type {
   PutBlobInput,
   RangeReadableBlobStorage,
 } from "./types"
-import { computeBlobDigest, createFileRef, readBlobBody } from "./utils"
+import {
+  assertExpectedBlobSize,
+  assertValidExpectedBlobSize,
+  computeBlobDigest,
+  createFileRef,
+  readBlobBody,
+} from "./utils"
 
 type StoredBlob = {
   readonly bytes: Uint8Array
@@ -19,7 +25,9 @@ export class InMemoryBlobStorage implements BlobStorage, RangeReadableBlobStorag
   private readonly blobsById = new Map<string, StoredBlob>()
 
   async put(input: PutBlobInput): Promise<FileRef> {
-    const bytes = await readBlobBody(input.body)
+    assertValidExpectedBlobSize(input.expectedSizeBytes)
+    const bytes = await readBlobBody(input.body, input.signal)
+    assertExpectedBlobSize(input.expectedSizeBytes, bytes.byteLength, "BlobStorage")
     const digest = computeBlobDigest(bytes)
     const blobId = blobIdFromDigest(digest)
 

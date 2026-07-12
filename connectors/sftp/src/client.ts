@@ -1,6 +1,7 @@
 import { posix } from "node:path"
-import type { Callback, SFTPWrapper } from "ssh2"
-import type { SftpClient, SftpStats, SftpWriteData } from "./types"
+import { Readable } from "node:stream"
+import type { Callback, SFTPWrapper, ReadStream as Ssh2ReadStream } from "ssh2"
+import type { SftpClient, SftpOpenOptions, SftpStats, SftpWriteData } from "./types"
 
 export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
   return {
@@ -17,6 +18,9 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
     },
     ensureDir(path) {
       return ensureSftpDirectory(sftpClient, path)
+    },
+    open(path, options) {
+      return openSftpStream(sftpClient, path, options)
     },
     read(path) {
       return callResult((callback) => sftpClient.readFile(path, callback))
@@ -37,6 +41,84 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
       return callVoid((callback) => sftpClient.rmdir(path, callback))
     },
   }
+}
+
+async function openSftpStream(
+  sftpClient: SFTPWrapper,
+  path: string,
+  options: SftpOpenOptions = {}
+): Promise<ReadableStream<Uint8Array>> {
+  options.signal?.throwIfAborted()
+  const nodeStream = sftpClient.createReadStream(path)
+
+  await waitForOpen(nodeStream, options.signal)
+  if (options.signal?.aborted) {
+    nodeStream.destroy()
+    throw abortError(options.signal)
+  }
+
+  const stream = Readable.toWeb(nodeStream, {
+    strategy: {
+      highWaterMark: nodeStream.readableHighWaterMark,
+      size(chunk: Buffer) {
+        return chunk.byteLength
+      },
+    },
+  }) as unknown as ReadableStream<Uint8Array>
+
+  if (options.signal) {
+    const signal = options.signal
+    const onAbort = () => nodeStream.destroy(abortError(signal))
+    const cleanup = () => signal.removeEventListener("abort", onAbort)
+
+    signal.addEventListener("abort", onAbort, { once: true })
+    nodeStream.once("close", cleanup)
+    nodeStream.once("end", cleanup)
+    nodeStream.once("error", cleanup)
+    if (signal.aborted) {
+      onAbort()
+    }
+  }
+
+  return stream
+}
+
+function waitForOpen(stream: Ssh2ReadStream, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      stream.off("open", onOpen)
+      stream.off("error", onError)
+      signal?.removeEventListener("abort", onAbort)
+    }
+    const onOpen = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = (error: Error) => {
+      cleanup()
+      reject(error)
+    }
+    const onAbort = () => {
+      cleanup()
+      stream.destroy()
+      reject(
+        signal ? abortError(signal) : new DOMException("The operation was aborted", "AbortError")
+      )
+    }
+
+    stream.once("open", onOpen)
+    stream.once("error", onError)
+    signal?.addEventListener("abort", onAbort, { once: true })
+    if (signal?.aborted) {
+      onAbort()
+    }
+  })
+}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted", "AbortError")
 }
 
 async function ensureSftpDirectory(sftpClient: SFTPWrapper, path: string): Promise<void> {

@@ -1039,6 +1039,7 @@ export {
 
 export type {
   AbortBlobUploadInput,
+  BlobBody,
   BlobByteRange,
   BlobDigest,
   BlobInfo,
@@ -1057,6 +1058,8 @@ export type {
   SignedBlobUploadPart,
 } from "./blob-storage"
 export {
+  assertExpectedBlobSize,
+  assertValidExpectedBlobSize,
   BlobStorageError,
   blobDigestHex,
   blobIdFromDigest,
@@ -1068,6 +1071,7 @@ export {
   isBlobDigest,
   isFileRef,
   readBlobBody,
+  streamBlobBody,
   supportsDirectUpload,
   supportsRangeRead,
 } from "./blob-storage"

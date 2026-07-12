@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { BlobStorageError, computeBlobDigest } from "@sixb/core"
+import { runBlobStorageContractSuite } from "@sixb/core/testing"
 import { S3Client } from "bun"
 import { S3BlobStorage } from "../src"
 
@@ -26,6 +27,10 @@ function rawS3Client(): S3Client {
     region: "us-east-1",
   })
 }
+
+runBlobStorageContractSuite("S3BlobStorage contract", {
+  createStorage,
+})
 
 describe("S3BlobStorage", () => {
   test("stores and opens blobs through S3", async () => {
@@ -64,6 +69,42 @@ describe("S3BlobStorage", () => {
     expect(second.blobId).toBe(first.blobId)
     expect(second.digest).toBe(first.digest)
     expect(third.blobId).not.toBe(first.blobId)
+  })
+
+  test("streams multipart bodies through bounded staging", async () => {
+    const storage = createStorage()
+    const chunk = new Uint8Array(1024 * 1024).fill(7)
+    const chunkCount = 12
+    const expectedSizeBytes = chunk.byteLength * chunkCount
+    const hash = createHash("sha256")
+    for (let index = 0; index < chunkCount; index += 1) {
+      hash.update(chunk)
+    }
+    let emittedChunks = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (emittedChunks === chunkCount) {
+          controller.close()
+          return
+        }
+        emittedChunks += 1
+        controller.enqueue(chunk)
+      },
+    })
+
+    const fileRef = await storage.put({ body, expectedSizeBytes })
+
+    expect(fileRef.sizeBytes).toBe(expectedSizeBytes)
+    expect(fileRef.digest).toBe(`sha256:${hash.digest("hex")}`)
+    expect(emittedChunks).toBe(chunkCount)
+    expect(
+      await new Response(
+        await storage.openRange(fileRef.blobId, {
+          start: expectedSizeBytes - 1,
+          endInclusive: expectedSizeBytes - 1,
+        })
+      ).bytes()
+    ).toEqual(new Uint8Array([7]))
   })
 
   test("stats existing blobs and treats missing blobs as null", async () => {

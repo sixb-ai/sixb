@@ -456,6 +456,7 @@ src/
 | `EventsRuntime` | Project-scoped domain event API with append, read, latest-cursor, and subscribe |
 | `ObjectStorage` | Latest-state projection storage for objects and links |
 | `TimeseriesStorage` | Time-series storage for telemetry history |
+| `BlobStorage` | Content-addressed binary storage with streaming `put` and `open` operations |
 | `MigrationSet<TContext>` | Ordered migration steps owned by one durable adapter |
 | `MigrationHistoryStore` | Provider-owned persistence for migration history records |
 | `StorageMigrator` | Plan and run one adapter's migration set |
@@ -463,7 +464,8 @@ src/
 | `Queues` | Queue provider with typed job lanes |
 | `Queue<TQueueJob>` | One typed queue lane with lease-based claim/complete/retry/fail semantics |
 
-In-memory implementations included: `InMemoryBroker`, `InMemoryObjectStorage`, `InMemoryTimeseriesStorage`, `InMemoryQueues`.
+In-memory implementations included: `InMemoryBroker`, `InMemoryObjectStorage`,
+`InMemoryTimeseriesStorage`, `InMemoryBlobStorage`, `InMemoryQueues`.
 
 ### Events
 

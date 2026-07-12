@@ -18,8 +18,14 @@ export interface FileRef {
   readonly logicalPath?: string
 }
 
+export type BlobBody = ArrayBuffer | Uint8Array | Blob | ReadableStream<Uint8Array>
+
 export interface PutBlobInput {
-  readonly body: ArrayBuffer | Uint8Array | Blob | ReadableStream<Uint8Array>
+  readonly body: BlobBody
+  /** Reject the write when the consumed byte count differs from this value. */
+  readonly expectedSizeBytes?: number
+  /** Cancels body consumption and provider-side staging work. */
+  readonly signal?: AbortSignal
   readonly fileName?: string
   readonly mediaType?: string
   readonly logicalPath?: string

@@ -21,10 +21,15 @@ const blobStorage = new S3BlobStorage({
   bucket: "company-lake",
   region: "us-east-1",
   basePath: "sixb",
+  putPartSizeBytes: 8 * 1024 * 1024,
+  putConcurrency: 2,
+  putRetries: 3,
 })
 
 const fileRef = await blobStorage.put({
-  body: invoicePdfBytes,
+  body: invoicePdfStream,
+  expectedSizeBytes: invoiceSize,
+  signal,
   fileName: "invoice-1001.pdf",
   mediaType: "application/pdf",
   logicalPath: "invoices/2026/04/invoice-1001.pdf",
@@ -33,6 +38,12 @@ const fileRef = await blobStorage.put({
 const info = await blobStorage.stat(fileRef.blobId)
 const stream = await blobStorage.open(fileRef.blobId)
 ```
+
+`put(...)` streams bodies to a temporary S3 object while computing SHA-256, then promotes the
+completed object into the content-addressed layout with a server-side copy. `putPartSizeBytes` and
+`putConcurrency` bound multipart upload memory per active write; their defaults are 8 MiB and 2.
+Failed and canceled writes attempt to remove their staging object. Byte arrays and `Blob` bodies
+remain supported for small or already-materialized payloads.
 
 ## Staged Direct Uploads
 
@@ -80,10 +91,10 @@ checksums cannot be used for direct uploads.
 
 ### Staging cleanup
 
-Direct uploads land under `<basePath>/uploads/<uploadId>/object` before being promoted to the
-content-addressed `blobs/sha256/` prefix. A crashed or abandoned upload can leave bytes under
-`uploads/`, so configure an S3 lifecycle rule to expire objects under that prefix (there is no
-in-repo sweeper).
+Direct uploads and streamed `put(...)` calls land under `<basePath>/uploads/<uploadId>/object`
+before being promoted to the content-addressed `blobs/sha256/` prefix. A crashed or abandoned
+upload can leave bytes under `uploads/`, so configure an S3 lifecycle rule to expire objects under
+that prefix (there is no in-repo sweeper).
 
 For S3-compatible providers, pass an `endpoint`:
 

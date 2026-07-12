@@ -4,6 +4,7 @@ export type {
   SftpConnection,
   SftpConnector,
   SftpListEntry,
+  SftpOpenOptions,
   SftpStats,
   SftpWriteData,
 } from "./types"
