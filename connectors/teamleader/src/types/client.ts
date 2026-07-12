@@ -34,9 +34,11 @@ import type {
 } from "./deals"
 import type {
   TeamleaderProduct,
+  TeamleaderProductAddRequest,
   TeamleaderProductInfoRequest,
   TeamleaderProductListItem,
   TeamleaderProductListRequest,
+  TeamleaderProductUpdateRequest,
 } from "./products"
 import type {
   TeamleaderDocumentTemplate,
@@ -137,6 +139,15 @@ export interface TeamleaderClient {
       request: TeamleaderProductInfoRequest,
       options?: TeamleaderRequestOptions
     ): Promise<TeamleaderSingleResponse<TeamleaderProduct>>
+    add(
+      request: TeamleaderProductAddRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<TeamleaderSingleResponse<TeamleaderTypeAndId<"product">>>
+    update(
+      request: TeamleaderProductUpdateRequest,
+      options?: TeamleaderRequestOptions
+    ): Promise<void>
+    delete(request: TeamleaderInfoRequest, options?: TeamleaderRequestOptions): Promise<void>
   }
   readonly productCategories: {
     list(

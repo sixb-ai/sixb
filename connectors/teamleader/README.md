@@ -9,6 +9,8 @@ V1 covers:
 - Quotations
 - Quotation actions
 - Quotation reference data
+- Products
+- Product actions
 - Contacts
 - Companies
 - Custom field definitions
@@ -77,6 +79,9 @@ client.quotations.delete(...)
 client.products.list(...)
 client.products.listAll(...)
 client.products.info(...)
+client.products.add(...)
+client.products.update(...)
+client.products.delete(...)
 
 client.productCategories.list(...)
 client.priceLists.list(...)
