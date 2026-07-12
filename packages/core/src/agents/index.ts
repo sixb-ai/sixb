@@ -26,6 +26,13 @@ export {
   isValidAgentApiGatewayCapability,
 } from "./api-gateway"
 export { defineAgent } from "./builders"
+export type {
+  AgentRunDispatchFailure,
+  DispatchedAgentRun,
+  DispatchQueuedAgentRunsInput,
+  DispatchQueuedAgentRunsResult,
+} from "./dispatch"
+export { agentRunQueueJobId, dispatchQueuedAgentRuns } from "./dispatch"
 export {
   AgentDefinitionError,
   AgentMessageAdapterError,

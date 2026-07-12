@@ -60,7 +60,7 @@ export class AgentsRuntime {
     return this.agentsById.get(agentId) ?? null
   }
 
-  /** Trigger an agent turn: persist the user message and enqueue the run intent. */
+  /** Trigger an agent turn: persist its queued run and user message, then dispatch the intent. */
   request(input: RequestAgentRunInput): Promise<RequestAgentRunResult> {
     return this.requestAs(this.runtime, input)
   }

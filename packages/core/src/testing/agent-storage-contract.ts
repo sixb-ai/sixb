@@ -5,8 +5,9 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentStorageErrorCode,
+  type CreateAgentRunInput,
   type CreateAgentThreadInput,
-  type ReserveAgentRunInput,
+  type StartAgentRunInput,
 } from "../storage/agents"
 
 export interface AgentStorageContractSuiteOptions<TStorage extends AgentStorage = AgentStorage> {
@@ -54,7 +55,11 @@ function execution(
   return { token, queueLeaseExpiresAt }
 }
 
-type TestRunInput = ReserveAgentRunInput
+type TestRunInput = CreateAgentRunInput &
+  Omit<StartAgentRunInput, "id" | "projectId"> & {
+    readonly id: string
+    readonly projectId: string
+  }
 
 function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
   return {
@@ -73,8 +78,16 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
 async function createAndStartRun(
   storage: AgentStorage,
   input: TestRunInput
-): Promise<Awaited<ReturnType<AgentStorage["runs"]["reserve"]>>> {
-  return storage.runs.reserve(input)
+): Promise<Awaited<ReturnType<AgentStorage["runs"]["start"]>>> {
+  await storage.runs.create(input)
+  return storage.runs.start({
+    id: input.id,
+    projectId: input.projectId,
+    executionPrincipal: input.executionPrincipal,
+    modelId: input.modelId,
+    execution: input.execution,
+    startedAt: input.startedAt,
+  })
 }
 
 /**
@@ -193,6 +206,82 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       })
     })
 
+    // ── durable queued runs ────────────────────────────────────────────────────────────────────
+
+    test("creates a queued run before execution and claims the thread", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+
+        const queued = await storage.runs.create(runInput({ id: "run_1" }))
+        expect(queued).toMatchObject({ status: "queued", attempt: 0, threadId: "thr_1" })
+        expect(queued.execution).toBeUndefined()
+        expect(queued.startedAt).toBeUndefined()
+        await expect(storage.runs.list({ projectId, statuses: ["queued"] })).resolves.toMatchObject(
+          {
+            runs: [{ id: "run_1", status: "queued" }],
+            total: 1,
+          }
+        )
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
+          activeRunId: "run_1",
+        })
+
+        const started = await storage.runs.start({
+          projectId,
+          id: "run_1",
+          executionPrincipal: serviceAccount,
+          modelId: "test-model",
+          execution: execution("exec_1"),
+          startedAt: at("2026-06-23T10:01:00.000Z"),
+        })
+        expect(started).toMatchObject({ status: "running", attempt: 1, modelId: "test-model" })
+        expect(started.execution).toEqual(execution("exec_1"))
+        expect(started.executionPrincipal).toEqual(serviceAccount)
+        expect(started.startedAt?.toISOString()).toBe("2026-06-23T10:01:00.000Z")
+      })
+    })
+
+    test("finishes a queued run and releases the thread", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput())
+        await storage.runs.create(runInput({ id: "run_1" }))
+
+        const cancelled = await storage.runs.finishQueued({
+          projectId,
+          id: "run_1",
+          status: "cancelled",
+          error: "Cancelled before execution",
+          completedAt: at("2026-06-23T10:01:00.000Z"),
+        })
+        expect(cancelled).toMatchObject({
+          status: "cancelled",
+          attempt: 0,
+          error: "Cancelled before execution",
+        })
+        await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
+          activeRunId: null,
+        })
+        await expectAgentError(
+          storage.runs.start({
+            projectId,
+            id: "run_1",
+            execution: execution("exec_1"),
+          }),
+          "invalid_state"
+        )
+
+        await storage.runs.create(runInput({ id: "run_2" }))
+        await expect(
+          storage.runs.finishQueued({
+            projectId,
+            id: "run_2",
+            status: "failed",
+            error: "Agent is unavailable",
+          })
+        ).resolves.toMatchObject({ status: "failed", attempt: 0, error: "Agent is unavailable" })
+      })
+    })
+
     // ── single-flight execution ─────────────────────────────────────────────────────────────────
 
     test("allows a single active run per thread", async () => {
@@ -220,7 +309,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
       })
     })
 
-    test("never lets two concurrent reservations both claim one thread", async () => {
+    test("never lets two concurrent queued runs both claim one thread", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(threadInput())
 
@@ -407,7 +496,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
         expect(finished.execution).toBeUndefined()
         expect(finished.completedAt?.toISOString()).toBe("2026-06-23T10:07:00.000Z")
 
-        // The thread is released, so a new run can be reserved.
+        // The thread is released → a new queued run can be created and started.
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: null,
         })
@@ -503,6 +592,47 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorage>(
 
         const all = await storage.runs.list({ projectId, order: "desc" })
         expect(all.runs.map((run) => run.id)).toEqual(["run_3", "run_2", "run_1"])
+      })
+    })
+
+    test("filters queued runs by their effective created timestamp", async () => {
+      await withStorage(async (storage) => {
+        await storage.threads.create(threadInput({ id: "thr_before" }))
+        await storage.threads.create(threadInput({ id: "thr_inside" }))
+        await storage.threads.create(threadInput({ id: "thr_after" }))
+
+        await storage.runs.create(
+          runInput({
+            id: "run_before",
+            threadId: "thr_before",
+            createdAt: at("2026-06-23T10:00:00.000Z"),
+          })
+        )
+        await storage.runs.create(
+          runInput({
+            id: "run_inside",
+            threadId: "thr_inside",
+            createdAt: at("2026-06-23T11:00:00.000Z"),
+          })
+        )
+        await storage.runs.create(
+          runInput({
+            id: "run_after",
+            threadId: "thr_after",
+            createdAt: at("2026-06-23T12:00:00.000Z"),
+          })
+        )
+
+        const result = await storage.runs.list({
+          projectId,
+          statuses: ["queued"],
+          startedAfter: at("2026-06-23T10:30:00.000Z"),
+          startedBefore: at("2026-06-23T11:30:00.000Z"),
+          order: "asc",
+        })
+        expect(result.runs.map((run) => run.id)).toEqual(["run_inside"])
+        expect(result.total).toBe(1)
+        expect(result.hasMore).toBe(false)
       })
     })
 

@@ -691,7 +691,9 @@ export function registerAgentRoutes(app: Elysia, sixb: Sixb<readonly OntologySou
           }
 
           const run = await storage.runs.getById({ projectId: sixb.id, id: params.runId })
-          if (!run) {
+          // Keep the existing public contract until the next stack slice adds `queued` to the
+          // canonical run schema. Before this refactor, pre-claim runs were also not readable.
+          if (!run || run.status === "queued") {
             set.status = 404
             return { error: "Agent run not found" }
           }

@@ -3,11 +3,13 @@ import {
   type AgentRunStore,
   AgentStorageError,
   type ConfirmAgentRunExecutionOwnershipInput,
+  type CreateAgentRunInput,
   type FinishAgentRunInput,
+  type FinishQueuedAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
-  type ReserveAgentRunInput,
+  type StartAgentRunInput,
 } from "@sixb/core"
 import type { SQLClient, SqlParameter } from "../pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "../run-list-query"
@@ -20,9 +22,8 @@ const PG_RUN_ID_BATCH_SIZE = 10_000
 export class PgAgentRunStore implements AgentRunStore {
   constructor(private readonly sql: PgStoreClient) {}
 
-  async reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord> {
+  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
     const createdAt = input.createdAt ?? new Date()
-    const startedAt = input.startedAt ?? createdAt
 
     try {
       return await runPgTransaction(this.sql, async (tx) => {
@@ -31,12 +32,14 @@ export class PgAgentRunStore implements AgentRunStore {
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
+
         if (!thread) {
           throw new AgentStorageError(
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
+
         if (thread.active_run_id !== null) {
           throw new AgentStorageError(
             "active_run_exists",
@@ -46,17 +49,27 @@ export class PgAgentRunStore implements AgentRunStore {
 
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
-            project_id, id, thread_id, agent_id, trigger_message_id,
-            requested_by_principal_type, requested_by_principal_id,
-            execution_principal_type, execution_principal_id,
-            status, model_id, attempt, execution_token,
-            execution_queue_lease_expires_at, created_at, started_at
+            project_id,
+            id,
+            thread_id,
+            agent_id,
+            trigger_message_id,
+            requested_by_principal_type,
+            requested_by_principal_id,
+            status,
+            attempt,
+            created_at
           ) VALUES (
-            ${input.projectId}, ${input.id}, ${input.threadId}, ${input.agentId},
-            ${input.triggerMessageId}, ${input.requestedByPrincipal.type},
-            ${input.requestedByPrincipal.id}, ${input.executionPrincipal?.type ?? null},
-            ${input.executionPrincipal?.id ?? null}, ${"running"}, ${input.modelId ?? null}, ${1},
-            ${input.execution.token}, ${input.execution.queueLeaseExpiresAt}, ${createdAt}, ${startedAt}
+            ${input.projectId},
+            ${input.id},
+            ${input.threadId},
+            ${input.agentId},
+            ${input.triggerMessageId},
+            ${input.requestedByPrincipal.type},
+            ${input.requestedByPrincipal.id},
+            ${"queued"},
+            ${0},
+            ${createdAt}
           )
           RETURNING *
         `
@@ -65,6 +78,7 @@ export class PgAgentRunStore implements AgentRunStore {
           UPDATE agent_threads SET active_run_id = ${input.id}, updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `
+
         return rowToRunRecord(row)
       })
     } catch (error) {
@@ -74,8 +88,46 @@ export class PgAgentRunStore implements AgentRunStore {
           `[SixbPg] Agent run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
+
       throw error
     }
+  }
+
+  async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
+    const startedAt = input.startedAt ?? new Date()
+    return runPgTransaction(this.sql, async (tx) => {
+      await this.lockStatus(tx, input.projectId, input.id, "queued")
+      const [row] = await tx<AgentRunRow[]>`
+        UPDATE agent_runs
+        SET
+          status = ${"running"},
+          execution_principal_type = ${input.executionPrincipal?.type ?? null},
+          execution_principal_id = ${input.executionPrincipal?.id ?? null},
+          model_id = ${input.modelId ?? null},
+          attempt = ${1},
+          execution_token = ${input.execution.token},
+          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt},
+          started_at = ${startedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      return rowToRunRecord(row)
+    })
+  }
+
+  async finishQueued(input: FinishQueuedAgentRunInput): Promise<AgentRunRecord> {
+    const completedAt = input.completedAt ?? new Date()
+    return runPgTransaction(this.sql, async (tx) => {
+      const run = await this.lockStatus(tx, input.projectId, input.id, "queued")
+      const [row] = await tx<AgentRunRow[]>`
+        UPDATE agent_runs
+        SET status = ${input.status}, error = ${input.error ?? null}, completed_at = ${completedAt}
+        WHERE project_id = ${input.projectId} AND id = ${input.id}
+        RETURNING *
+      `
+      await this.releaseThread(tx, run, completedAt)
+      return rowToRunRecord(row)
+    })
   }
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {

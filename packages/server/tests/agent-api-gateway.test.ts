@@ -204,16 +204,20 @@ async function createGatewayRuntime(
     createdAt: NOW,
     updatedAt: NOW,
   })
-  await storage.agents.runs.reserve({
+  await storage.agents.runs.create({
     id: runId,
     projectId: PROJECT_ID,
     threadId,
     agentId: "assistant",
     triggerMessageId: "msg-1",
     requestedByPrincipal: { type: "user", id: "usr_requester" },
+    createdAt: NOW,
+  })
+  await storage.agents.runs.start({
+    id: runId,
+    projectId: PROJECT_ID,
     executionPrincipal: { type: "serviceAccount", id: serviceAccountId },
     execution,
-    createdAt: NOW,
     startedAt: NOW,
   })
 

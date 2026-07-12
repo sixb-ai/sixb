@@ -11,8 +11,10 @@ import type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentRunInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
+  FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -20,7 +22,7 @@ import type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  ReserveAgentRunInput,
+  StartAgentRunInput,
 } from "./types"
 
 function key(projectId: string, id: string): string {
@@ -63,7 +65,7 @@ function applyWindow<T>(rows: T[], offset = 0, limit?: number): Window<T> {
 
 /**
  * Shared in-memory state behind the three sub-stores. They are tiered for ergonomics
- * (`storage.runs.reserve(...)`), but several operations span tables — reserving/finishing a run
+ * (`storage.runs.create(...)`), but several operations span tables — creating/finishing a run
  * updates the thread anchor, appending a message bumps thread stats — so they all read and write the
  * same maps through this object.
  */
@@ -149,9 +151,9 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
 class InMemoryAgentRunStore implements AgentRunStore {
   constructor(private readonly state: AgentStoreState) {}
 
-  async reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord> {
-    // Temporary reserve-at-claim bridge. No `await` between read and write: the in-memory critical
-    // section is atomic, so concurrent reservations cannot both claim the thread.
+  async create(input: CreateAgentRunInput): Promise<AgentRunRecord> {
+    // No `await` between read and write: the in-memory critical section is atomic, so two concurrent
+    // queued runs on the same thread cannot both win — the second observes `activeRunId` set.
     const threadKey = key(input.projectId, input.threadId)
     const thread = this.state.threads.get(threadKey)
     if (!thread) {
@@ -183,22 +185,52 @@ class InMemoryAgentRunStore implements AgentRunStore {
       agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
       requestedByPrincipal: clone(input.requestedByPrincipal),
+      status: "queued",
+      attempt: 0,
+      createdAt,
+    }
+    this.state.runs.set(runKey, clone(run))
+
+    const updatedThread: AgentThreadRecord = {
+      ...thread,
+      activeRunId: run.id,
+      updatedAt: createdAt,
+    }
+    this.state.threads.set(threadKey, clone(updatedThread))
+
+    return clone(run)
+  }
+
+  async start(input: StartAgentRunInput): Promise<AgentRunRecord> {
+    const run = this.requireStatus(input.projectId, input.id, "queued")
+    const startedAt = new Date(input.startedAt ?? new Date())
+    const next: AgentRunRecord = {
+      ...run,
+      status: "running",
       ...(input.executionPrincipal === undefined
         ? {}
         : { executionPrincipal: clone(input.executionPrincipal) }),
-      status: "running",
       ...(input.modelId === undefined ? {} : { modelId: input.modelId }),
       attempt: 1,
       execution: clone(input.execution),
-      createdAt,
-      startedAt: new Date(input.startedAt ?? createdAt),
+      startedAt,
     }
-    this.state.runs.set(runKey, clone(run))
-    this.state.threads.set(
-      threadKey,
-      clone({ ...thread, activeRunId: run.id, updatedAt: createdAt })
-    )
-    return clone(run)
+    this.state.runs.set(key(input.projectId, input.id), clone(next))
+    return clone(next)
+  }
+
+  async finishQueued(input: FinishQueuedAgentRunInput): Promise<AgentRunRecord> {
+    const run = this.requireStatus(input.projectId, input.id, "queued")
+    const completedAt = new Date(input.completedAt ?? new Date())
+    const next: AgentRunRecord = {
+      ...run,
+      status: input.status,
+      ...(input.error === undefined ? {} : { error: input.error }),
+      completedAt,
+    }
+    this.state.runs.set(key(input.projectId, input.id), clone(next))
+    this.releaseThread(run, completedAt)
+    return clone(next)
   }
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {

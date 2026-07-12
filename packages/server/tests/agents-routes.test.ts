@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentStorage,
   agentRunControlStreamId,
   agents as agentScope,
   can,
@@ -26,6 +27,21 @@ const model = {
   provider: "test",
   modelId: "test-model",
 } as unknown as Parameters<typeof defineAgent>[1]["model"]
+
+type StartedRunInput = Parameters<AgentStorage["runs"]["create"]>[0] &
+  Omit<Parameters<AgentStorage["runs"]["start"]>[0], "id" | "projectId">
+
+async function createStartedRun(storage: AgentStorage, input: StartedRunInput) {
+  await storage.runs.create(input)
+  return storage.runs.start({
+    id: input.id,
+    projectId: input.projectId,
+    executionPrincipal: input.executionPrincipal,
+    modelId: input.modelId,
+    execution: input.execution,
+    startedAt: input.startedAt,
+  })
+}
 
 const assistant = defineAgent("assistant", {
   name: "Support Assistant",
@@ -235,7 +251,7 @@ describe("agent routes", () => {
     expect(allowedThread.status).toBe(201)
   })
 
-  test("creates a thread, posts a message, and enqueues a reserve-at-claim run", async () => {
+  test("creates a thread, atomically persists a queued run, and dispatches it", async () => {
     const { app, storage, sixb } = createApp()
 
     const createThreadResponse = await app.fetch(
@@ -290,7 +306,19 @@ describe("agent routes", () => {
 
     await expect(
       storage.agents.runs.getById({ projectId: sixb.id, id: postMessageBody.runId })
-    ).resolves.toBeNull()
+    ).resolves.toMatchObject({
+      id: postMessageBody.runId,
+      threadId: createThreadBody.thread.id,
+      status: "queued",
+      attempt: 0,
+    })
+
+    // The next stack slice adds queued runs to the public schema. Preserve the old pre-claim 404
+    // contract until then even though the backend state is now durable.
+    const queuedRunResponse = await app.fetch(
+      new Request(`http://localhost/api/agent-runs/${postMessageBody.runId}`)
+    )
+    expect(queuedRunResponse.status).toBe(404)
 
     const [queuedRun] = await sixb.queues.agents.claim({
       projectId: sixb.id,
@@ -301,7 +329,6 @@ describe("agent routes", () => {
       threadId: createThreadBody.thread.id,
       runId: postMessageBody.runId,
       triggerMessageId: postMessageBody.triggerMessageId,
-      requestedByPrincipal: { type: "system", id: "system" },
     })
 
     const messagesResponse = await app.fetch(
@@ -380,7 +407,7 @@ describe("agent routes", () => {
       ownerPrincipal: { type: "system", id: "system" },
     })
     const executionToken = createAgentRunExecutionToken()
-    await storage.agents.runs.reserve({
+    await createStartedRun(storage.agents, {
       id: "run-diagnostics",
       projectId: sixb.id,
       threadId: thread.id,
@@ -444,7 +471,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    await storage.agents.runs.reserve({
+    await createStartedRun(storage.agents, {
       id: "run-active",
       projectId: sixb.id,
       threadId: thread.id,
@@ -477,7 +504,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const run = await storage.agents.runs.reserve({
+    const run = await createStartedRun(storage.agents, {
       id: "run-readable",
       projectId: sixb.id,
       threadId: thread.id,
@@ -518,7 +545,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const run = await storage.agents.runs.reserve({
+    const run = await createStartedRun(storage.agents, {
       id: "run-cancel",
       projectId: sixb.id,
       threadId: thread.id,
@@ -562,7 +589,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const otherRun = await storage.agents.runs.reserve({
+    const otherRun = await createStartedRun(storage.agents, {
       id: "run-other",
       projectId: sixb.id,
       threadId: otherThread.id,
@@ -664,16 +691,11 @@ describe("agent routes", () => {
       threadId: ownerThread.thread.id,
       runId: postMessageBody.runId,
       triggerMessageId: postMessageBody.triggerMessageId,
-      requestedByPrincipal: { type: "user", id: "usr_owner" },
     })
 
-    await storage.agents.runs.reserve({
+    await storage.agents.runs.start({
       id: postMessageBody.runId,
       projectId: sixb.id,
-      threadId: ownerThread.thread.id,
-      agentId: "assistant",
-      triggerMessageId: postMessageBody.triggerMessageId,
-      requestedByPrincipal: { type: "user", id: "usr_owner" },
       execution: {
         token: createAgentRunExecutionToken(),
         queueLeaseExpiresAt: new Date(Date.now() + 60_000),

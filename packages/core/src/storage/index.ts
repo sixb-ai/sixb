@@ -61,8 +61,10 @@ export type {
   AgentThreadStore,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
+  CreateAgentRunInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
+  FinishQueuedAgentRunInput,
   ListAgentMessagesInput,
   ListAgentMessagesResult,
   ListAgentRunsInput,
@@ -70,7 +72,7 @@ export type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  ReserveAgentRunInput,
+  StartAgentRunInput,
 } from "./agents"
 export {
   AGENT_RUN_DIAGNOSTIC_CODES,

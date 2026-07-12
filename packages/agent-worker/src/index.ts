@@ -2,7 +2,6 @@ export { type BashSandboxHandle, type BashToolOutput, createBashTool } from "./b
 export {
   AgentExecutionLostError,
   AgentFinalizationError,
-  AgentLeaseHeldError,
   AgentTurnTimeoutError,
   AgentWorkerError,
 } from "./errors"

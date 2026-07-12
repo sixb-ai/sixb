@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto"
 
 /**
  * Id helpers for agent persistence. Threads, the run id, and the user (trigger) message are minted
- * by the trigger; the worker reserves the run at queue-claim time, and the assistant message id is
- * minted when the turn finalizes. Prefixes make ids self-describing in logs.
+ * by the trigger; the queued run is persisted with the user message, and the assistant message id
+ * is minted when the turn finalizes. Prefixes make ids self-describing in logs.
  */
 
 export function createAgentThreadId(): string {

@@ -3,7 +3,8 @@ import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { AgentStorage, AgentThreadRecord } from "../storage/agents"
+import { type AgentStorage, AgentStorageError, type AgentThreadRecord } from "../storage/agents"
+import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import type { AgentDefinition } from "./types"
@@ -32,6 +33,8 @@ export interface RequestAgentRunResult {
   readonly runId: string
   /** The persisted user message that triggers the run. */
   readonly triggerMessageId: string
+  /** Durable state of the run when the request is accepted. */
+  readonly status: "queued"
   /** The enqueued job id, when the queue returns one. */
   readonly jobId?: string
   /** Whether this call created the thread. */
@@ -41,13 +44,10 @@ export interface RequestAgentRunResult {
 /**
  * Trigger an agent turn.
  *
- * Reserve-at-claim: this only persists the user message and enqueues an *intent* — no `agent_runs`
- * record is created here. The trigger mints a stable run id for callers/subscribers, while the
- * worker still reserves the run row when it claims the job and owns the lease from birth.
- *
- * Single-flight is enforced at two layers: this trigger rejects a second message while a run is
- * already active (`active_run_exists`, surfaced to the caller — the HTTP layer maps it to 409), and
- * the worker's atomic `runs.reserve` is the ultimate authority on the race + crash redelivery.
+ * The user message and a `queued` run are persisted atomically before the queue intent is
+ * published. This makes accepted work visible immediately and lets refresh reconstruct queue state.
+ * The run's thread claim is the single-flight authority; a second request receives
+ * `active_run_exists` before it can leave an orphan message.
  */
 export async function requestAgentRun(
   runtime: SixbRuntimeContext,
@@ -68,8 +68,7 @@ export async function requestAgentRun(
     principal,
   })
 
-  // Single-flight (trigger layer): a thread runs one turn at a time in V1. The worker's `reserve`
-  // is the atomic authority, but rejecting here avoids persisting an orphan message we cannot serve.
+  // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
   if (thread.activeRunId !== null) {
     throw new AgentRequestError(
       "active_run_exists",
@@ -79,42 +78,71 @@ export async function requestAgentRun(
 
   const runId = createAgentRunId()
   const triggerMessageId = input.messageId ?? createAgentMessageId()
-  await agents.messages.append({
-    id: triggerMessageId,
-    projectId,
-    threadId: thread.id,
-    runId: null,
-    role: "user",
-    parts: [
-      { type: "text", text: input.text },
-      ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
-    ],
-    authorPrincipal: principal,
-  })
+  try {
+    await runtime.storage.transaction(async (tx) => {
+      const agents = tx.agents
+      if (!agents) {
+        throw new AgentRequestError(
+          "storage_unavailable",
+          "[Sixb] Agent storage is not configured."
+        )
+      }
+      await agents.messages.append({
+        id: triggerMessageId,
+        projectId,
+        threadId: thread.id,
+        runId: null,
+        role: "user",
+        parts: [
+          { type: "text", text: input.text },
+          ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
+        ],
+        authorPrincipal: principal,
+      })
+      await agents.runs.create({
+        id: runId,
+        projectId,
+        threadId: thread.id,
+        agentId: agent.id,
+        triggerMessageId,
+        requestedByPrincipal: principal,
+      })
+    })
+  } catch (error) {
+    if (error instanceof AgentStorageError && error.code === "active_run_exists") {
+      throw new AgentRequestError("active_run_exists", error.message)
+    }
+    throw error
+  }
 
-  // Enqueue the intent. Nothing to roll back on failure: no run was reserved, and the user message
-  // is durable — the caller may retry, which re-enqueues against the same thread.
-  const [job] = await runtime.queues.agents.enqueue({
-    projectId,
-    jobs: [
-      {
-        type: "agent.run.requested",
-        payload: {
-          agentId: agent.id,
-          threadId: thread.id,
-          runId,
-          triggerMessageId,
-          requestedByPrincipal: principal,
-        },
-      },
-    ],
-  })
+  // The queued run is also the durable dispatch intent. Publication is best-effort here; an agent
+  // worker scans queued runs and retries with the same deterministic queue job id.
+  let jobId: string | undefined
+  try {
+    const dispatch = await dispatchQueuedAgentRuns({
+      projectId,
+      storage: agents,
+      queue: runtime.queues.agents,
+      runIds: [runId],
+    })
+    jobId = dispatch.dispatched[0]?.jobId
+    const failure = dispatch.failures[0]
+    if (failure) {
+      console.error(
+        `[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`,
+        failure.error
+      )
+    }
+  } catch (error) {
+    console.error(`[Sixb] Could not dispatch queued agent run '${runId}'; retrying later.`, error)
+  }
 
   return {
     threadId: thread.id,
     runId,
     triggerMessageId,
-    ...(job?.id ? { jobId: job.id } : {}),
+    status: "queued",
+    ...(jobId ? { jobId } : {}),
     createdThread,
   }
 }

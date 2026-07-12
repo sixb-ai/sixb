@@ -197,13 +197,17 @@ describe("canAccessAgentRunStream", () => {
       agentId,
       ownerPrincipal: owner,
     })
-    await agents.runs.reserve({
+    await agents.runs.create({
       id: runId,
       projectId,
       threadId,
       agentId,
       triggerMessageId: "msg_ws_1",
       requestedByPrincipal: owner,
+    })
+    await agents.runs.start({
+      id: runId,
+      projectId,
       execution: {
         token: "exec_ws_1",
         queueLeaseExpiresAt: new Date("2099-01-01T00:00:00.000Z"),
