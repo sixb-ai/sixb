@@ -1,21 +1,22 @@
-import { randomUUID } from "node:crypto"
-import { createReadStream } from "node:fs"
-import { mkdir, rename, stat, writeFile } from "node:fs/promises"
+import { createHash, randomUUID } from "node:crypto"
+import { createReadStream, createWriteStream } from "node:fs"
+import { mkdir, rename, rm, stat } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { Readable } from "node:stream"
+import { Readable, Writable } from "node:stream"
 import {
+  assertExpectedBlobSize,
+  assertValidExpectedBlobSize,
   type BlobByteRange,
   type BlobInfo,
   type BlobStorage,
   BlobStorageError,
   blobDigestHex,
   blobIdFromDigest,
-  computeBlobDigest,
   createFileRef,
   type FileRef,
   type PutBlobInput,
   type RangeReadableBlobStorage,
-  readBlobBody,
+  streamBlobBody,
 } from "@sixb/core"
 import type { LocalBlobStorageOptions } from "./types"
 
@@ -23,9 +24,16 @@ async function pathExists(path: string): Promise<boolean> {
   try {
     await stat(path)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return false
+    }
+    throw error
   }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT"
 }
 
 function hexFromBlobId(blobId: string): string | null {
@@ -44,41 +52,75 @@ export class LocalBlobStorage implements BlobStorage, RangeReadableBlobStorage {
   }
 
   async put(input: PutBlobInput): Promise<FileRef> {
-    const bytes = await readBlobBody(input.body)
-    const digest = computeBlobDigest(bytes)
-    const hex = blobDigestHex(digest)
-    const info: BlobInfo = {
-      blobId: blobIdFromDigest(digest),
-      digest,
-      sizeBytes: bytes.byteLength,
-    }
-    const contentPath = this.contentPathForHex(hex)
-
+    assertValidExpectedBlobSize(input.expectedSizeBytes, "BlobLocal")
     await mkdir(this.sha256RootPath(), { recursive: true })
-    if (!(await pathExists(contentPath))) {
-      // Write to a temp file first so interrupted uploads do not leave a partial object at the digest path.
-      const tempPath = join(this.sha256RootPath(), `.tmp-${randomUUID()}`)
-      await writeFile(tempPath, bytes)
-      await rename(tempPath, contentPath)
-    }
+    const tempPath = join(this.sha256RootPath(), `.tmp-${randomUUID()}`)
+    const hash = createHash("sha256")
+    let sizeBytes = 0
 
-    return createFileRef(input, info)
+    try {
+      const trackedBody = streamBlobBody(input.body).pipeThrough(
+        new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, controller) {
+            hash.update(chunk)
+            sizeBytes += chunk.byteLength
+            if (input.expectedSizeBytes !== undefined && sizeBytes > input.expectedSizeBytes) {
+              assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobLocal")
+            }
+            controller.enqueue(chunk)
+          },
+        })
+      )
+      const destination = Writable.toWeb(createWriteStream(tempPath, { flags: "wx" }))
+
+      await trackedBody.pipeTo(destination, {
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      })
+      assertExpectedBlobSize(input.expectedSizeBytes, sizeBytes, "BlobLocal")
+
+      const digest = `sha256:${hash.digest("hex")}` as const
+      const hex = blobDigestHex(digest)
+      const contentPath = this.contentPathForHex(hex)
+      const info: BlobInfo = {
+        blobId: blobIdFromDigest(digest),
+        digest,
+        sizeBytes,
+      }
+
+      if (await pathExists(contentPath)) {
+        await rm(tempPath, { force: true })
+      } else {
+        try {
+          await rename(tempPath, contentPath)
+        } catch (error) {
+          if (!(await pathExists(contentPath))) {
+            throw error
+          }
+          await rm(tempPath, { force: true })
+        }
+      }
+
+      return createFileRef(input, info)
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined)
+      throw error
+    }
   }
 
   async open(blobId: string): Promise<ReadableStream<Uint8Array>> {
     const contentPath = await this.requireContentPath(blobId)
     // Stream from disk rather than buffering the whole blob into memory (mirrors openRange).
-    return Readable.toWeb(createReadStream(contentPath)) as unknown as ReadableStream<Uint8Array>
+    return toByteReadableStream(createReadStream(contentPath))
   }
 
   async openRange(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>> {
     const contentPath = await this.requireContentPath(blobId)
-    return Readable.toWeb(
+    return toByteReadableStream(
       createReadStream(contentPath, {
         start: range.start,
         end: range.endInclusive,
       })
-    ) as unknown as ReadableStream<Uint8Array>
+    )
   }
 
   async stat(blobId: string): Promise<BlobInfo | null> {
@@ -121,4 +163,17 @@ export class LocalBlobStorage implements BlobStorage, RangeReadableBlobStorage {
   private contentPathForHex(hex: string): string {
     return join(this.sha256RootPath(), hex)
   }
+}
+
+function toByteReadableStream(
+  stream: ReturnType<typeof createReadStream>
+): ReadableStream<Uint8Array> {
+  return Readable.toWeb(stream, {
+    strategy: {
+      highWaterMark: stream.readableHighWaterMark,
+      size(chunk: Buffer) {
+        return chunk.byteLength
+      },
+    },
+  }) as unknown as ReadableStream<Uint8Array>
 }

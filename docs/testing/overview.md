@@ -295,14 +295,14 @@ expect(objects(Project).query().where((p) => p.p.status.eq("active")).ir).toEqua
 
 ## Provider contract suites
 
-If you author a backend provider (storage, broker, queue, lake, sandbox, or
-agent/auth storage), `@sixb/core/testing` exports conformance suites —
+If you author a backend provider (storage, broker, queue, lake, blob storage,
+sandbox, or agent/auth storage), `@sixb/core/testing` exports conformance suites —
 `runObjectQueryProviderContractSuite`, `runBrokerContractSuite`,
 `runQueueContractSuite`, `runLakeStorageContractSuite`,
-`runAgentStorageContractSuite`, `runAuthStorageContractSuite`, and
-`runSandboxesContractSuite` — that assert your implementation satisfies the
-provider contract. This is only relevant when building an integration, not when
-testing an app.
+`runBlobStorageContractSuite`, `runAgentStorageContractSuite`,
+`runAuthStorageContractSuite`, and `runSandboxesContractSuite` — that assert your
+implementation satisfies the provider contract. This is only relevant when
+building an integration, not when testing an app.
 
 ## Related
 

@@ -7,6 +7,10 @@ export {
   runAuthStorageContractSuite,
 } from "./auth-storage-contract"
 export {
+  type BlobStorageContractSuiteOptions,
+  runBlobStorageContractSuite,
+} from "./blob-storage-contract"
+export {
   type BrokerContractSuiteOptions,
   runBrokerContractSuite,
 } from "./broker-contract"

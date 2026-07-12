@@ -7,11 +7,16 @@ export type SftpStats = Stats
 
 export type SftpWriteData = string | Buffer | ArrayBuffer | ArrayBufferView
 
+export interface SftpOpenOptions {
+  readonly signal?: AbortSignal
+}
+
 export interface SftpClient {
   list(path: string): Promise<readonly SftpListEntry[]>
   stat(path: string): Promise<SftpStats>
   exists(path: string): Promise<boolean>
   ensureDir(path: string): Promise<void>
+  open(path: string, options?: SftpOpenOptions): Promise<ReadableStream<Uint8Array>>
   read(path: string): Promise<Buffer>
   write(path: string, data: SftpWriteData): Promise<void>
   rename(sourcePath: string, destinationPath: string): Promise<void>

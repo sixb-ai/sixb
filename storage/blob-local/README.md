@@ -20,7 +20,9 @@ const blobStorage = new LocalBlobStorage({
 })
 
 const fileRef = await blobStorage.put({
-  body: invoicePdfBytes,
+  body: invoicePdfStream,
+  expectedSizeBytes: invoiceSize,
+  signal,
   fileName: "invoice-1001.pdf",
   mediaType: "application/pdf",
   logicalPath: "invoices/2026/04/invoice-1001.pdf",
@@ -29,6 +31,12 @@ const fileRef = await blobStorage.put({
 const info = await blobStorage.stat(fileRef.blobId)
 const stream = await blobStorage.open(fileRef.blobId)
 ```
+
+`put(...)` consumes `ReadableStream<Uint8Array>` bodies with backpressure, computes SHA-256 while
+writing to a temporary file, validates `expectedSizeBytes` when supplied, then atomically promotes
+the completed file into the content-addressed layout. Failed and canceled writes remove their
+temporary file. Byte arrays and `Blob` bodies remain supported for small or already-materialized
+payloads.
 
 ## What Gets Stored On Disk
 

@@ -11,6 +11,7 @@ export { BlobStorageError } from "./errors"
 export { InMemoryBlobStorage } from "./in-memory"
 export type {
   AbortBlobUploadInput,
+  BlobBody,
   BlobByteRange,
   BlobStorage,
   BlobUploadPart,
@@ -25,5 +26,12 @@ export type {
   SignBlobUploadPartInput,
   SignedBlobUploadPart,
 } from "./types"
-export { computeBlobDigest, createFileRef, readBlobBody } from "./utils"
+export {
+  assertExpectedBlobSize,
+  assertValidExpectedBlobSize,
+  computeBlobDigest,
+  createFileRef,
+  readBlobBody,
+  streamBlobBody,
+} from "./utils"
 export { supportsDirectUpload, supportsRangeRead } from "./validation"

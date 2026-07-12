@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { sftp } from "../src"
@@ -18,6 +18,10 @@ describe("sftp connector", () => {
   beforeEach(async () => {
     await rm(join(server.rootDir, "files"), { force: true, recursive: true })
     await mkdir(join(server.rootDir, "files"), { recursive: true })
+  })
+
+  afterEach(async () => {
+    await server.waitForIdle()
   })
 
   test("lists and stats remote files", async () => {
@@ -72,6 +76,80 @@ describe("sftp connector", () => {
 
       await client.delete("/files/report-final.txt")
       expect(await client.exists("/files/report-final.txt")).toBe(false)
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("opens remote files as web streams", async () => {
+    await writeFile(join(server.rootDir, "files", "stream.txt"), "streamed over sftp")
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+
+    try {
+      const stream = await client.open("/files/stream.txt")
+      expect(await new Response(stream).text()).toBe("streamed over sftp")
+      await expect(client.open("/files/missing.txt")).rejects.toThrow()
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("aborts an active remote file stream", async () => {
+    await writeFile(join(server.rootDir, "files", "large.bin"), Buffer.alloc(2 * 1024 * 1024, 1))
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+
+    try {
+      const reader = (await client.open("/files/large.bin", { signal: abort.signal })).getReader()
+      expect((await reader.read()).done).toBe(false)
+
+      abort.abort(new Error("stop sftp read"))
+
+      await expect(reader.read()).rejects.toThrow("stop sftp read")
+    } finally {
+      await adapter.disconnect?.(client)
+    }
+  })
+
+  test("rejects an open canceled before it starts", async () => {
+    const adapter = sftp({
+      host: server.host,
+      port: server.port,
+      username: server.username,
+      password: server.password,
+    })
+    const client = await adapter.connect({
+      projectId: "demo",
+      connectorId: "files",
+      signal: new AbortController().signal,
+    })
+    const abort = new AbortController()
+    abort.abort(new Error("already canceled"))
+
+    try {
+      await expect(
+        client.open("/files/never-opened.bin", { signal: abort.signal })
+      ).rejects.toThrow("already canceled")
     } finally {
       await adapter.disconnect?.(client)
     }
@@ -191,6 +269,5 @@ describe("sftp connector", () => {
     })
 
     await adapter.disconnect?.(client)
-    await server.waitForIdle()
   })
 })
