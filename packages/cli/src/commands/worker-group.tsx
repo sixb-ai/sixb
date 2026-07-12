@@ -63,12 +63,19 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
 
     app.rerender(<WorkerGroupView name={sixb.id} workerTypes={workerTypes} warnings={warnings} />)
 
-    await runUntilSignal(async () => {
-      app.unmount()
-      console.log("\nShutting down worker group...")
-      await stopWorkersAndProviders()
-      sixb = null
-    })
+    const workerFailure =
+      workers.length === 0
+        ? new Promise<void>(() => {})
+        : Promise.race(workers.map((worker) => worker.wait()))
+    await Promise.race([
+      runUntilSignal(async () => {
+        app.unmount()
+        console.log("\nShutting down worker group...")
+        await stopWorkersAndProviders()
+        sixb = null
+      }),
+      workerFailure,
+    ])
   } catch (error) {
     app.unmount()
     await stopWorkersAndProviders()

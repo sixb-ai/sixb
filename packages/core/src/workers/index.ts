@@ -1,4 +1,4 @@
-export { WorkerAbortError } from "./errors"
+export { WorkerAbortError, WorkerUnhealthyError } from "./errors"
 export type { QueueDelivery, QueueDeliveryState } from "./queue-delivery"
 export { QueueDeliveryLeaseLostError } from "./queue-delivery"
 export type { QueueWorkerConfig, QueueWorkerFailureDecision } from "./queue-worker"

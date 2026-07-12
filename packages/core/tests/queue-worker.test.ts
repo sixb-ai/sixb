@@ -50,6 +50,41 @@ describe("QueueWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
+  test("restarts the loop after repeated queue claim failures", async () => {
+    const queues = new InMemoryQueues()
+    const originalClaim = queues.syncRuns.claim.bind(queues.syncRuns)
+    let claimCalls = 0
+    queues.syncRuns.claim = (params) => {
+      claimCalls += 1
+      if (claimCalls <= 5) return Promise.reject(new Error("queue unavailable"))
+      return originalClaim(params)
+    }
+
+    let processed = false
+    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob> {
+      protected async execute(): Promise<void> {
+        processed = true
+      }
+    }
+
+    const worker = new TestWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      workerId: "w",
+      idlePollMs: 1,
+    })
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { syncId: "s" } }],
+    })
+
+    await worker.start()
+    await waitFor(() => processed, 2_000)
+    await worker.stop()
+
+    expect(claimCalls).toBeGreaterThan(5)
+  })
+
   test("default policy fails jobs on execution errors", async () => {
     const queues = new InMemoryQueues()
 

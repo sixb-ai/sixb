@@ -20,9 +20,11 @@ export interface QueueWorkerFailureDecision {
 const DEFAULT_LEASE_MS = 15 * 60_000
 const DEFAULT_CLAIM_LIMIT = 1
 const DEFAULT_IDLE_POLL_MS = 1_000
+const MAX_CONSECUTIVE_CLAIM_FAILURES = 5
 
 export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
   protected readonly config: Required<QueueWorkerConfig<TJob>>
+  private consecutiveClaimFailures = 0
 
   constructor(config: QueueWorkerConfig<TJob>) {
     super()
@@ -106,12 +108,21 @@ export abstract class QueueWorker<TJob extends QueueJob> extends Worker {
         limit,
         leaseMs,
       })
+      this.consecutiveClaimFailures = 0
       if (claimed.length === 0) {
         await sleep(idlePollMs, signal).catch(() => {})
       }
       return claimed
-    } catch {
+    } catch (error) {
       if (signal.aborted) return []
+      this.consecutiveClaimFailures += 1
+      if (this.consecutiveClaimFailures >= MAX_CONSECUTIVE_CLAIM_FAILURES) {
+        this.consecutiveClaimFailures = 0
+        throw new Error(
+          `[SixbQueueWorker] Queue claim failed ${MAX_CONSECUTIVE_CLAIM_FAILURES} consecutive times.`,
+          { cause: error }
+        )
+      }
       await sleep(idlePollMs, signal).catch(() => {})
       return []
     }
