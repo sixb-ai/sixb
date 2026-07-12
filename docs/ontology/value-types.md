@@ -1,9 +1,9 @@
 # Value Types & Interfaces
 
-Three mechanisms keep an ontology DRY: **value types** share a property shape,
-**interfaces** share a contract of properties and links, and **extends** lets one
-object type inherit from a parent. All three compose the building blocks from
-[Object Types](object-types.md), [Properties](properties.md), and [Links](links.md).
+Three mechanisms compose the building blocks from [Object Types](object-types.md),
+[Properties](properties.md), and [Links](links.md): **value types** share a property shape and
+**extends** inherits a parent's structure — both real reuse — while **interfaces** classify a type
+by the cross-cutting roles it plays (a label, not reuse).
 
 ## Value Types
 
@@ -72,10 +72,11 @@ and needs no registration.
 
 ## Interfaces
 
-An interface is a reusable contract of properties and links. Define the shared
-shape once, then mark object types as implementing it. Use interfaces for
-cross-cutting roles a type plays — "is billable", "is auditable" — that don't fit a
-single inheritance chain.
+An interface **classifies** the cross-cutting roles a type plays — "is auditable", "is billable" —
+that don't fit a single inheritance chain. Unlike value types and `extends`, an interface does
+**not** add structure: it is declarative classification metadata, not code reuse.
+
+Define the role, and optionally document the shape you expect it to carry:
 
 ```ts
 import { defineInterface, prop, link } from "@sixb/core/ontology"
@@ -89,11 +90,12 @@ export const Auditable = defineInterface({
 })
 ```
 
-`properties` and `links` both default to `[]`.
+`properties` and `links` describe the intended contract for readers and tooling (both default to
+`[]`); Sixb does **not** inject them into implementing types or validate that a type satisfies them.
 
 ### Implementing an interface
 
-Object types declare what they implement by id via `implements`:
+Object types declare the roles they play by id via `implements`:
 
 ```ts
 import { defineObjectType, prop } from "@sixb/core/ontology"
@@ -105,12 +107,18 @@ export const Invoice = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("number", "string"),
+    // Declare the interface's members yourself — they are not inherited.
+    prop("createdAt", "timestamp"),
+    prop("updatedAt", "timestamp"),
   ],
 })
 ```
 
-`implements` is a list of ids, so one type can satisfy several contracts:
-`implements: ["auditable", "billable"]`.
+`implements` is a plain list of ids recorded on the object type, so one type can carry several
+roles: `implements: ["auditable", "billable"]`. Because it is classification only, the interface's
+`createdAt`/`updatedAt`/`createdBy` members must still be declared on each implementing type (or
+inherited via [`extends`](#inheritance-with-extends)). Reach for an interface when you want a shared
+**label**; reach for `extends` when you want shared **structure**.
 
 ## Inheritance with `extends`
 
@@ -165,9 +173,9 @@ when a type belongs to several classifications but inherits structure from one.
 
 | Mechanism      | Reuses                  | Use when                                                       |
 | -------------- | ----------------------- | ------------------------------------------------------------- |
-| **Value type** | One property shape      | Many properties share a schema (and maybe a semantic).        |
-| **Interface**  | A set of props + links  | A cross-cutting role spans otherwise unrelated types.         |
-| **Extends**    | A full parent type      | A subtype is-a parent and should inherit its structure.       |
+| **Value type** | One property shape        | Many properties share a schema (and maybe a semantic).        |
+| **Interface**  | Nothing — classification  | You want to label a cross-cutting role; each type still declares its own structure. |
+| **Extends**    | A full parent type        | A subtype is-a parent and should inherit its structure.       |
 
 ## Related
 
@@ -176,5 +184,3 @@ when a type belongs to several classifications but inherits structure from one.
 - [Links](links.md) — relationships between object types.
 - [Units & Semantics](units-and-semantics.md) — `semanticType` and quantities.
 - [Ontology overview](overview.md) — registration and discovery.
-</content>
-</invoke>

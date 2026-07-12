@@ -16,26 +16,32 @@ import { Device } from "../ontology/device"
 
 events.object(Device).byId(deviceId).telemetry()
 events.object(Device).telemetry(Device.p.temperature)
-events.object(Device).byId(deviceId).upserted()
+events.object(Device).byId(deviceId).created()
+events.object(Device).byId(deviceId).updated()
 events.object(Device).byId(deviceId).deleted()
-events.object(Device).linked(Device.l.installedIn)
+events.object(Device).link(Device.l.installedIn).created()
 ```
 
 Object-type builders carry type information. For example, `telemetry(Device.p.temperature)` narrows
-the event payload to that property, and `upserted()` types `payload.properties` from `Device`.
+the event payload to that property, and `created()` / `updated()` type `payload.properties` from
+`Device`.
 
 Use topic builders when the screen is broader or dynamic:
 
 ```tsx
+events.all()
 events.telemetry().byId(deviceId)
 events.objects()
 events.links()
 events.datasets()
 events.rules()
+events.schedules()
 events.workflows().run(workflowRunId)
 events.pipelines().run(pipelineRunId)
 events.syncs().run(syncRunId)
 ```
+
+`events.all()` is the unscoped catch-all stream; `events.schedules()` scopes to schedule events.
 
 Action events have extra scopes:
 
@@ -58,7 +64,7 @@ import { events, useEvents } from "@sixb/client/hooks"
 import { Invoice } from "../ontology/invoice"
 
 function InvoiceActivity({ invoiceId }: { invoiceId: string }) {
-  const state = useEvents(events.object(Invoice).byId(invoiceId).upserted(), (event) => {
+  const state = useEvents(events.object(Invoice).byId(invoiceId).updated(), (event) => {
     console.log("invoice changed", event.payload.properties)
   })
 
@@ -124,7 +130,7 @@ import { openInvoices } from "../queries/invoices"
 import { Invoice } from "../ontology/invoice"
 
 useInvalidateOnEvent(
-  events.object(Invoice).upserted(),
+  events.object(Invoice).updated(),
   () => [objectQueryKeys.list(openInvoices.limit(50))],
   { debounceMs: 50 }
 )

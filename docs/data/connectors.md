@@ -182,6 +182,33 @@ native Bun SQL client, shared across Postgres, MySQL, and SQLite. `sftp` takes a
 `ConnectConfig`; its `SftpClient` exposes `list`, `stat`, `exists`, `ensureDir`, `read`, `write`,
 `rename`, `delete`, `mkdir`, and `rmdir`. Both adapters close their client on `disconnect`.
 
+### Hosted-service connectors
+
+Sixb also ships typed connectors for common SaaS and platform APIs. Each exports a factory you pass
+to `defineConnector`, and most ship a matching webhook helper for the [Webhooks](#webhooks) below.
+
+| Package | Factory | Connects to | Webhook helper |
+| --- | --- | --- | --- |
+| `@sixb/connector-github` | `github(...)` | GitHub REST API | `githubEventsWebhook` |
+| `@sixb/connector-google` | `google(...)` | Google APIs (Drive, Calendar, Meet) | — |
+| `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
+| `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
+| `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |
+| `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
+| `@sixb/connector-companycam` | `companycam(...)` | CompanyCam jobsite photos | `companyCamEventsWebhook` |
+
+The pattern is the same as any adapter — `defineConnector(id, factory(options))`, then resolve it by
+name in syncs and app code:
+
+```ts
+import { defineConnector } from "@sixb/core"
+import { github } from "@sixb/connector-github"
+
+export const githubConnector = defineConnector("github", github({ token: process.env.GITHUB_TOKEN! }))
+```
+
+Each factory's connected client and full options are documented in its package README.
+
 ## Webhooks
 
 A connector adapter may declare inbound `webhooks` alongside `connect`. Define them with

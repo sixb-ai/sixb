@@ -251,6 +251,53 @@ owner type, so `traverse(Invoice.l.customer, { direction: "incoming" })` returns
 invoices. Wildcard links cannot be traversed through the fluent API, since the result type
 cannot be inferred. See [links](../ontology/links.md).
 
+## Expanding Links
+
+`expand(...)` also follows a link, but unlike `traverse` it **keeps the current result type** and
+attaches the linked objects to each row under `.links`. Reach for it when you want an object
+*together with* its related objects in one query — an invoice with its customer, a customer with
+its recent invoices — instead of switching the result to the target type.
+
+```ts
+const invoices = await sixb
+  .objects(Invoice)
+  .query()
+  .where((invoice) => invoice.p.status.eq("overdue"))
+  .expand(Invoice.l.customer)
+  .list()
+
+const customer = invoices[0]?.links.customer // Customer | null
+```
+
+Each `expand` widens the row, keyed by link id under `.links`: a `"one"` link adds `Target | null`,
+a `"many"` link adds `Target[]`. Expanded targets expose their `.properties`, any edge
+`linkProperties`, and their own nested `.links`. Nest a callback to expand deeper hops:
+
+```ts
+const rows = await sixb
+  .objects(Invoice)
+  .query()
+  .expand(Invoice.l.customer, (customer) => customer.expand(Customer.l.region))
+  .list()
+
+const region = rows[0]?.links.customer?.links.region
+```
+
+For a `"many"` link, bound the fan-out to the top-N target objects per parent with `{ limit,
+orderBy }` (options and a nested callback combine as `expand(link, { limit }, (child) => …)`):
+
+```ts
+.expand(Customer.l.invoices, {
+  limit: 5,
+  orderBy: [{ property: Invoice.p.dueDate, direction: "asc" }],
+})
+```
+
+On PostgreSQL a uniform expansion is pushed down into a single query; other providers resolve it in
+the runtime. Target types stay precise when the link uses direct object targets or resolves through
+the [type manifest](../client/typed-queries.md), and otherwise degrade to a loose base shape. The
+same builder works over HTTP from `@sixb/client` — see [typed queries](../client/typed-queries.md).
+
 ## Sorting and Limits
 
 `orderBy(propertyToken, direction)` gives deterministic ordering. Chain calls for

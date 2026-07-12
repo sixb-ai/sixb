@@ -40,7 +40,9 @@ Terminals run through the object-query routes via the generated SDK:
 | `.facets([…])` | `POST /api/objects/query/facets` | `ObjectQueryFacetResult[]`                     |
 
 Each row carries `primaryId`, `objectTypeId`, `properties`, and `Date`-typed `createdAt`
-and `updatedAt`. `Date` predicate values survive the JSON wire format.
+and `updatedAt`. `Date` predicate values survive the JSON wire format. Rows from an
+`.expand(...)`ed query also carry a typed `links` entry (with optional `linkProperties`) per
+expanded link — see [Expanding links](#expanding-links).
 
 > `validate()` and `explain()` need ontology access and are server-side only — they are not
 > on the client builder.
@@ -54,6 +56,31 @@ pulling the server runtime into the bundle.
 ```ts
 import { defineObjectType, prop } from "@sixb/core/ontology"
 ```
+
+## Expanding links
+
+`.expand(link)` attaches an outgoing link's target objects to each row under `.links`, without
+changing the result type — the client counterpart to the runtime builder (see
+[expanding links](../objects/querying.md#expanding-links) for the full API). A `"one"` link resolves
+to `Target | null`, a `"many"` link to `Target[]`; bound a `"many"` expansion with `{ limit,
+orderBy }` and nest a callback for deeper hops.
+
+```tsx
+const { objects: rows } = await objects(Invoice)
+  .query()
+  .where((invoice) => invoice.p.status.eq("overdue"))
+  .expand(Invoice.l.customer, (customer) => customer.expand(Customer.l.region))
+  .list()
+
+const region = rows[0]?.links.customer?.links.region
+```
+
+Precise expand and link-target types depend on a generated **type manifest**. `sixb typegen` writes
+`.sixb/types/ontology.d.ts`, a module augmentation of `SixbObjectTypeMap` (from
+`@sixb/core/ontology`) that maps object-type ids like `"Customer"` to their exported type. `sixb
+dev`, `sixb build`, and `sixb check` regenerate it automatically; run `sixb typegen` before a bare
+`tsc` (the scaffold's `typecheck` script does exactly this). Without the manifest, string-target
+links and `.expand()` still work at runtime, but their row types degrade to a loose base shape.
 
 ## React hooks
 

@@ -9,11 +9,10 @@ export const tick = defineFunction("tick")
     count++
 
     await sixb.objects(Counter).upsert({
-      key: "default",
-      properties: { name: "My Counter" },
+      properties: { id: "default", name: "My Counter" },
     })
 
     await sixb
       .objects(Counter)
-      .appendTelemetryBatch([{ key: "default", properties: { value: count }, at: new Date() }])
+      .appendTelemetryBatch([{ id: "default", properties: { value: count }, at: new Date() }])
   })

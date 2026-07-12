@@ -93,6 +93,23 @@ Evaluation reacts to object/link `created`, `updated`, and `deleted` events for 
 and any links named in the predicate. See [Events](../events/overview.md) for the full domain-event
 list.
 
+## Reacting to the signal
+
+A rule emits `rule.triggered` and `rule.resolved` [domain events](../events/overview.md). Consume
+them by attaching an [event schedule](../schedules/events.md): select the occurrence with
+`events.rule(rule).triggered()` (or `.resolved()`) and bind it to a workflow, sync, or pipeline.
+
+```ts
+import { defineSchedule, events } from "@sixb/core"
+import { collectionRisk } from "../rules/business-health"
+
+export const onCollectionRisk = defineSchedule("invoice.collection-risk-triggered")
+  .on(events.rule(collectionRisk).triggered())
+```
+
+Attach `onCollectionRisk` to a workflow with `.when(...)` to act on it. In an app, subscribe to the
+same signal live with the client `events.rules()` builder — see [client events](../client/events.md).
+
 ## Register rules
 
 `createSixb()` discovers exported rule definitions from `rules/` automatically:

@@ -150,7 +150,7 @@ Two read paths are available. Prefer the **typed** builder for app screens.
 | Result rows | `ObjectSummary[]` | Typed `TwinObject` rows |
 | Property access | Stringly-typed | Inferred from the object type |
 | Predicates | None (id prefix, timestamps, offset only) | Full `where(...)` predicates |
-| Search / facets / traversal | No | Yes |
+| Search / facets / traversal / expansion | No | Yes |
 | Paging | Offset-based | Cursor-based (`useObjectsInfinite`) |
 | Best for | Quick generic browsing | Real app screens |
 
@@ -171,8 +171,32 @@ const query = useQuery(
 query.data?.map((object) => object.primaryId)
 ```
 
-For everything else — filtering, search, facets, link traversal, paging, and typed rows — use the
-typed builder.
+For everything else — filtering, search, facets, link traversal and expansion, paging, and typed
+rows — use the typed builder.
+
+### Expanding related objects
+
+When a screen needs an object together with its related objects — an invoice and its customer, a
+project and its team — use `.expand(link)` to attach the linked objects to each row under `.links`,
+instead of running a second query. Rows stay typed, so `.links.<link>` is `Target | null` (a
+`"one"` link) or `Target[]` (a `"many"` link).
+
+```tsx
+const projects = useObjectsQuery(
+  objects(Project)
+    .query()
+    .where((project) => project.p.status.eq("active"))
+    .expand(Project.l.customer)
+    .expand(Project.l.tasks, { limit: 5, orderBy: [{ property: Task.p.dueDate, direction: "asc" }] })
+)
+
+const customerName = projects.data?.objects[0]?.links.customer?.properties.name
+```
+
+See [expanding links](../objects/querying.md#expanding-links) for cardinality, nesting, and
+per-parent limits, and note that precise expand types need the generated
+[type manifest](../client/typed-queries.md#expanding-links) (`sixb typegen`, run automatically by
+`sixb dev`).
 
 ## Invalidating After Actions
 

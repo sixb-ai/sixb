@@ -91,6 +91,11 @@ need no extra install — they are for development and tests only, never product
 | `broker` | `RedisBroker` | `@sixb/broker-redis` | Redis Streams; durable, multi-process |
 | `queues` | `InMemoryQueues` | `@sixb/core` | Dev/tests only; loses jobs on restart |
 | `queues` | `BullMqQueues` | `@sixb/queues-bullmq` | Redis/BullMQ; durable, multi-process |
+| `logger` | `PinoLogger` | `@sixb/logger-pino` | **Optional** process-level log output (Pino) |
+
+`logger` is the one **optional** slot. Omit it for broker-only logging (still readable in Atlas,
+`sixb.logs`, and the client `logs` builder); add a `LoggerProvider` such as `PinoLogger` to also
+emit process-level output. See [Logging](../logging/overview.md).
 
 ## Production example
 

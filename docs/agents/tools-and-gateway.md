@@ -48,6 +48,7 @@ data, not a snapshot. These routes are allowed (everything else returns `403`):
 | Objects | `GET /api/objects`, `POST /api/objects/query` (+ `/count`, `/exists`, `/facets`), `GET /api/objects/:objectTypeId/:objectId` |
 | Telemetry | `POST /api/telemetry/history`, `GET .../telemetry/:propertyId/history`, `.../latest` |
 | Actions | `GET /api/actions`, `GET /api/actions/:actionId`, `POST /api/actions/:actionId`, `GET /api/action-runs/:runId` |
+| Files | `GET /api/objects/:objectTypeId/:objectId/files/content`, `GET /api/action-runs/:runId/files/content`, `GET /api/agent-threads/:threadId/messages/:messageId/files/content` |
 
 Requests run under the agent's [execution identity](./authorization.md), so the agent can only see
 and act on what its groups allow — the same checks as any other caller, and only while the run is
