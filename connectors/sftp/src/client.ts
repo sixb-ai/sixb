@@ -3,12 +3,8 @@ import { Readable } from "node:stream"
 import type { Callback, SFTPWrapper, ReadStream as Ssh2ReadStream } from "ssh2"
 import type { SftpClient, SftpOpenOptions, SftpStats, SftpWriteData } from "./types"
 
-const readStreamsByClient = new WeakMap<SftpClient, Set<Ssh2ReadStream>>()
-
 export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
-  const activeReadStreams = new Set<Ssh2ReadStream>()
-
-  const client: SftpClient = {
+  return {
     list(path) {
       return callResult((callback) => sftpClient.readdir(path, callback))
     },
@@ -24,7 +20,7 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
       return ensureSftpDirectory(sftpClient, path)
     },
     open(path, options) {
-      return openSftpStream(sftpClient, path, activeReadStreams, options)
+      return openSftpStream(sftpClient, path, options)
     },
     read(path) {
       return callResult((callback) => sftpClient.readFile(path, callback))
@@ -45,31 +41,15 @@ export function createSftpClient(sftpClient: SFTPWrapper): SftpClient {
       return callVoid((callback) => sftpClient.rmdir(path, callback))
     },
   }
-
-  readStreamsByClient.set(client, activeReadStreams)
-  return client
-}
-
-export async function closeSftpReadStreams(client: SftpClient): Promise<void> {
-  const activeReadStreams = readStreamsByClient.get(client)
-  if (!activeReadStreams) {
-    return
-  }
-
-  await Promise.all([...activeReadStreams].map(closeReadStream))
-  readStreamsByClient.delete(client)
 }
 
 async function openSftpStream(
   sftpClient: SFTPWrapper,
   path: string,
-  activeReadStreams: Set<Ssh2ReadStream>,
   options: SftpOpenOptions = {}
 ): Promise<ReadableStream<Uint8Array>> {
   options.signal?.throwIfAborted()
   const nodeStream = sftpClient.createReadStream(path)
-  activeReadStreams.add(nodeStream)
-  nodeStream.once("close", () => activeReadStreams.delete(nodeStream))
 
   await waitForOpen(nodeStream, options.signal)
   if (options.signal?.aborted) {
@@ -101,17 +81,6 @@ async function openSftpStream(
   }
 
   return stream
-}
-
-function closeReadStream(stream: Ssh2ReadStream): Promise<void> {
-  if (stream.closed) {
-    return Promise.resolve()
-  }
-
-  return new Promise((resolve) => {
-    stream.once("close", resolve)
-    stream.destroy()
-  })
 }
 
 function waitForOpen(stream: Ssh2ReadStream, signal?: AbortSignal): Promise<void> {

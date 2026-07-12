@@ -95,6 +95,14 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
           idleWaiters = []
         }
       })
+      .on("end", () => {
+        // Bun can leave ssh2's accepted socket half-open after the peer ends
+        // a connection with an errored SFTP read still settling. The ssh2
+        // server connection does not expose its transport publicly, so the
+        // test server closes that transport explicitly.
+        const transport = (client as unknown as { _sock?: { destroy(): void } })._sock
+        transport?.destroy()
+      })
   })
 
   const port = await listen(server)

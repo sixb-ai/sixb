@@ -1,6 +1,6 @@
 import type { SFTPWrapper } from "ssh2"
 import { Client } from "ssh2"
-import { closeSftpReadStreams, createSftpClient } from "./client"
+import { createSftpClient } from "./client"
 import type { SftpClient, SftpConnection, SftpConnector } from "./types"
 
 type ConnectionState = {
@@ -47,12 +47,8 @@ export function sftp(connection: SftpConnection): SftpConnector {
         return
       }
 
-      try {
-        await closeSftpReadStreams(client)
-      } finally {
-        await closeClient(state)
-        connections.delete(client)
-      }
+      await closeClient(state)
+      connections.delete(client)
     },
   }
 }
@@ -128,18 +124,14 @@ async function closeClient(state: ConnectionState): Promise<void> {
       resolve()
     }
 
-    const forceClose = () => {
-      state.client.destroy()
-    }
-
     const cleanup = () => {
       state.client.off("close", finish)
-      state.client.off("error", forceClose)
+      state.client.off("error", finish)
     }
 
     state.client.once("close", finish)
-    state.client.once("error", forceClose)
-    state.client.destroy()
+    state.client.once("error", finish)
+    state.client.end()
   })
 }
 
