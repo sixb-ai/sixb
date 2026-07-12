@@ -193,6 +193,7 @@ describe("imap connector", () => {
             part: "1",
             type: "text/plain",
             parameters: { charset: "utf-8" },
+            declaredCharset: "utf-8",
           },
         ],
       },
@@ -288,6 +289,54 @@ describe("imap connector", () => {
       part: "2",
       options: { uid: true, maxBytes: 6 },
     })
+  })
+
+  test("distinguishes the source MIME charset from the downloaded content charset", async () => {
+    const fixture = clientFixture()
+    fixture.configure = (transport) => {
+      transport.searchResult = [11]
+      transport.messages = [
+        {
+          ...message(11),
+          bodyStructure: {
+            type: "multipart/alternative",
+            childNodes: [
+              { part: "1", type: "text/plain", parameters: { charset: "Windows-1252" } },
+              { part: "2", type: "text/html", parameters: { charset: "Windows-1252" } },
+            ],
+          },
+        },
+      ]
+      transport.downloadResult = {
+        meta: {
+          expectedSize: 18,
+          contentType: "text/plain",
+          charset: "utf-8",
+          encoding: "quoted-printable",
+        },
+        content: Readable.from([Buffer.from("à l’étage\nEnvoyé", "utf8")]),
+      }
+    }
+
+    const result = await fixture.client.withMailbox("INBOX", async (mailbox) => {
+      const [message] = await mailbox.listMessages({ limit: 1 })
+      const downloaded = await mailbox.downloadPart({ uid: 11, part: "1", maxBytes: 100 })
+      return {
+        bodyStructure: message?.bodyStructure,
+        meta: downloaded.meta,
+        content: await readAll(downloaded.content),
+      }
+    })
+
+    expect(result.bodyStructure?.childNodes).toMatchObject([
+      { part: "1", declaredCharset: "Windows-1252" },
+      { part: "2", declaredCharset: "Windows-1252" },
+    ])
+    expect(result.meta).toMatchObject({
+      contentCharset: "utf-8",
+      transferEncoding: "quoted-printable",
+    })
+    expect(result.content.toString("utf8")).toBe("à l’étage\nEnvoyé")
   })
 
   test("does not use the message-level expected size as the MIME part limit", async () => {

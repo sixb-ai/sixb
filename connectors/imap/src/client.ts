@@ -349,10 +349,10 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
       meta: {
         expectedSize: downloaded.meta.expectedSize,
         contentType: downloaded.meta.contentType,
-        charset: downloaded.meta.charset ?? null,
+        contentCharset: downloaded.meta.charset ?? null,
         disposition: downloaded.meta.disposition ?? null,
         filename: downloaded.meta.filename ?? null,
-        encoding: downloaded.meta.encoding ?? null,
+        transferEncoding: downloaded.meta.encoding ?? null,
       },
       content,
     }
@@ -481,6 +481,7 @@ function normalizeBodyPart(part: MessageStructureObject): ImapBodyPart {
     part: part.part ?? null,
     type: part.type,
     parameters: { ...(part.parameters ?? {}) },
+    declaredCharset: findMimeParameter(part.parameters, "charset"),
     id: normalizeOptionalString(part.id),
     encoding: normalizeOptionalString(part.encoding),
     size: part.size ?? null,
@@ -488,6 +489,22 @@ function normalizeBodyPart(part: MessageStructureObject): ImapBodyPart {
     dispositionParameters: { ...(part.dispositionParameters ?? {}) },
     childNodes: (part.childNodes ?? []).map(normalizeBodyPart),
   }
+}
+
+function findMimeParameter(
+  parameters: Readonly<Record<string, string>> | undefined,
+  name: string
+): string | null {
+  if (!parameters) {
+    return null
+  }
+
+  for (const [parameter, value] of Object.entries(parameters)) {
+    if (parameter.toLowerCase() === name) {
+      return normalizeOptionalString(value)
+    }
+  }
+  return null
 }
 
 function normalizeDate(value: Date | string | undefined): Date | null {
