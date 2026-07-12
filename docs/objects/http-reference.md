@@ -153,6 +153,70 @@ page requests — only `pageToken` changes:
 ```
 
 
+## Expanding Links
+
+An `expand` node attaches linked objects to each returned object under `links` without changing
+which objects the query returns. Each entry in `expansions` names one link — `linkId`, `direction`
+(`outgoing` or `incoming`), an optional `sourceObjectTypeId` to pin the source of an incoming link,
+an optional `limit` + `orderBy` to bound a `"many"` expansion to the top-N targets per parent, and
+a nested `expand` for deeper hops.
+
+```json
+{
+  "query": {
+    "kind": "expand",
+    "expansions": [
+      {
+        "linkId": "customer",
+        "direction": "outgoing",
+        "expand": [{ "linkId": "region", "direction": "outgoing" }]
+      }
+    ],
+    "input": { "kind": "start", "objectTypeId": "Invoice" }
+  }
+}
+```
+
+Expanded objects appear on each row under `links`, keyed by link id. A `"one"` link resolves to a
+single object (or `null`); a `"many"` link resolves to an array. Expanded children have the same
+object shape — so nested `links` recurse — plus an optional `linkProperties` carrying the
+relationship's edge fields:
+
+```json
+{
+  "objects": [
+    {
+      "primaryId": "inv-1042",
+      "objectTypeId": "Invoice",
+      "properties": { "id": "inv-1042", "amount": 8200, "status": "overdue" },
+      "createdAt": "2026-05-01T09:00:00.000Z",
+      "updatedAt": "2026-06-10T12:30:00.000Z",
+      "links": {
+        "customer": {
+          "primaryId": "cust-7",
+          "objectTypeId": "Customer",
+          "properties": { "id": "cust-7", "name": "Globex" },
+          "createdAt": "2026-01-02T00:00:00.000Z",
+          "updatedAt": "2026-01-02T00:00:00.000Z",
+          "links": {
+            "region": {
+              "primaryId": "eu-west",
+              "objectTypeId": "Region",
+              "properties": { "id": "eu-west" },
+              "createdAt": "2026-01-01T00:00:00.000Z",
+              "updatedAt": "2026-01-01T00:00:00.000Z"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "hasMore": false,
+  "plan": { "mode": "pushdown" }
+}
+```
+
+
 ## Node Reference
 
 | Node | Fields | Purpose |
@@ -162,6 +226,7 @@ page requests — only `pageToken` changes:
 | `text` | `input`, `query`, `fields?` | Keyword search over `search.defaultText` or explicit `fields`. |
 | `vector` | `input`, `vector`, `propertyId`, `k` | Nearest-neighbor search on a numeric-array property. |
 | `traverse` | `input`, `linkId`, `direction`, `sourceObjectTypeId?` | Follow an `outgoing` or `incoming` link. |
+| `expand` | `input`, `expansions` | Attach linked objects to each row under `links`, keeping the result type. See [Expanding Links](#expanding-links). |
 | `set` | `op`, `inputs` | Combine object sets with `union`, `intersect`, or `subtract`. |
 | `sort` | `input`, `fields` | Order by properties or provider relevance. |
 | `limit` | `input`, `limit` | Bound the result count. |

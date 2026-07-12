@@ -10,8 +10,10 @@ they exercise, not in how they are wired.
 
 | Example | What it shows | Storage / broker |
 | --- | --- | --- |
-| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
+| `acme-corp` | The canonical business-operations app: ontology, connectors, syncs, pipelines, projections, file attachments, actions, agents, rules, workflows, scheduled functions, a custom React app, and a typed client | SQLite + in-memory broker |
 | `auth` | Authentication strategies, groups, membership policies, and scoped roles | SQLite + in-memory broker |
+| `panasonic-ac` | Real-device integration: discovers Panasonic AC units, polls their live state as telemetry, and exposes control actions (power, mode, temperature, fan, eco) | Postgres + NATS |
+| `roku-tv` | Device control: discovers Roku TVs, polls device state, and drives them with remote actions (launch app, press button) | SQLite + in-memory broker |
 
 Run any example from its own folder:
 
@@ -36,10 +38,11 @@ example and touches nearly every concept in Sixb, so it is the one to read first
 | `datasets/`, `syncs/`, `schedules/` | Pulling ERP rows into datasets like `erp.invoices` and file-backed `erp.documents` rows on a schedule — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
 | `pipelines/` | `project-reporting` transforms dataset rows — see [Pipelines](../data/pipelines.md) |
 | `projections/` | Mapping dataset and pipeline rows into ontology objects — see [Projections](../data/projections.md) |
-| `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice` — see [Actions](../actions/overview.md) |
+| `actions/` | `createDraftInvoice`, `markPaid`, `sendReminder`, `deleteInvoice`, `attachInvoiceSourceFile` — see [Actions](../actions/overview.md) |
 | `functions/` | `check-overdue-invoices` runs on a cron schedule — see [Schedules](../schedules/overview.md) |
 | `rules/` | Business-health rules like `invoice.collection-risk` and `project.large-active-engagement` — see [Rules](../rules/overview.md) |
-| `workflows/` | `invoice-reminder` drives a multi-step process with a human approval step — see [Workflows](../workflows/overview.md) |
+| `workflows/` | `invoice-reminder` (a human approval step) and `document-intake` — see [Workflows](../workflows/overview.md) |
+| `agents/` | `business-analyst` and `invoice-assistant` conversational agents — see [Agents](../agents/overview.md) |
 | `app/` | A custom React app with project, review, and intervention pages — see [Apps](../apps/overview.md) |
 
 Its `sixb.config.ts` uses local-first providers, so it runs with no external services:

@@ -49,8 +49,10 @@ local for dev, hosted backends for production).
 | `queues` | `Queues` | Queued and background work |
 
 Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
-[Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), and `projectRoot`
-(discovery root, defaults to `process.cwd()`).
+[Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), `logger` (a
+`LoggerProvider` for process-level log output) and `observability` (broker log-capture controls) —
+both covered in [Logging](../logging/overview.md) — and `projectRoot` (discovery root, defaults to
+`process.cwd()`).
 
 ## The Sixb instance
 
@@ -99,6 +101,17 @@ const recent = await sixb.events.read({
 Domain events do **not** trigger functions — functions run on `cron`/`interval` schedules. See
 [Events](../events/overview.md).
 
+### Logs
+
+`sixb.logs` reads the structured logs your runs produce, captured to a bounded broker stream.
+
+```ts
+const page = await sixb.logs.read({ kinds: ["action"], levels: ["error"], limit: 50 })
+```
+
+Handlers write these lines through `ctx.logger`, and apps read them through the client `logs`
+builder. See [Logging](../logging/overview.md).
+
 ### Lifecycle
 
 Background functions and the scheduler are started explicitly — constructing the runtime does not
@@ -119,7 +132,8 @@ await sixb.stopScheduler()
 await sixb.stopFunctions()
 ```
 
-Release connector and broker resources with `sixb.disconnectConnectors()` and `sixb.closeBroker()`.
+Release connector, broker, and logger resources with `sixb.disconnectConnectors()`,
+`sixb.closeBroker()`, and `sixb.closeLogger()`.
 
 ### Scoped views
 

@@ -1,6 +1,6 @@
 # Server & API
 
-The Sixb server wraps a running Sixb runtime in an [Elysia](https://elysiajs.com) HTTP + WebSocket API. It exposes your ontology, objects, telemetry, actions, automation runs, and domain events as JSON routes under `/api/*`, a real-time event stream over `/ws/events`, and interactive OpenAPI docs at `/docs`.
+The Sixb server wraps a running Sixb runtime in an [Elysia](https://elysiajs.com) HTTP + WebSocket API. It exposes your ontology, objects, telemetry, actions, automation runs, agents, and domain events as JSON routes under `/api/*`, real-time WebSocket streams for events (`/ws/events`), logs (`/ws/logs`), and agent runs (`/ws/agents`), and interactive OpenAPI docs at `/docs`.
 
 Reach for it whenever a browser front-end or another service needs to talk to your runtime over the network. The server serves the API only — the built-in admin UI (**atlas**) and any custom app run as separate servers that call it over HTTP.
 
@@ -72,6 +72,8 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
 | Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |
 | Events (WS)    | `GET /ws/events`                                                                     | [Events](../events/overview.md)                 |
+| Agents         | `GET /api/agents`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Agents](../agents/overview.md)  |
+| Logs           | `GET /api/logs`, `GET /ws/logs`                                                      | [Logging](../logging/overview.md)               |
 | Workflows      | `GET /api/workflows`, `/api/workflow-runs`, `/api/workflows/:id/runs`                | [Workflows](../workflows/overview.md)           |
 | Interventions  | `/api/workflow-interventions`, `.../:id/submit`, `.../:id/cancel`                    | [Interventions](../workflows/interventions.md)  |
 | Rules          | `GET /api/rules`, `GET /api/rule-states`                                             | [Rules](../rules/overview.md)                   |
@@ -86,15 +88,17 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 
 ## Real-time events
 
-`GET /ws/events` is a WebSocket stream of [domain events](../events/overview.md) — `object.upserted`, `telemetry.appended`, `link.upserted`, `link.removed`, `action.requested`, and more. Any authenticated principal may connect; each event is filtered per-principal by grants as it streams.
+`GET /ws/events` is a WebSocket stream of [domain events](../events/overview.md) — `object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, and more. Any authenticated principal may connect; each event is filtered per-principal by grants as it streams.
 
-On connect, the server sends a `connected` control frame. Send a `subscribe` message to filter the stream — by `topic` (one domain-event topic) and/or `types` (object types) — and `unsubscribe` to stop:
+On connect, the server sends a `connected` control frame. Send a `subscribe` message to filter the stream — by `topic` (one domain-event topic such as `objects`, `telemetry`, `links`, or `actions`), `types` (specific event types), and/or `objectTypeId` (one object type) — and `unsubscribe` to stop:
 
 ```json
-{ "type": "subscribe", "topic": "object.upserted", "types": ["Invoice"], "limit": 100 }
+{ "type": "subscribe", "topic": "objects", "types": ["object.created", "object.updated"], "objectTypeId": "Invoice", "limit": 100 }
 ```
 
-The example above streams `object.upserted` events for `Invoice` objects only — useful for a billing dashboard that reacts as invoices are created, sent, or marked paid. The server replies with `subscribed` and `unsubscribed` control frames, streams matching events as `{ "type": "event", "event": ... }`, and reports problems as `{ "type": "error", "message": ... }`. For a typed client over this stream, see [Client](../client/overview.md).
+The example above streams create and update events for `Invoice` objects only — useful for a billing dashboard that reacts as invoices are created, sent, or marked paid. The server replies with `subscribed` and `unsubscribed` control frames, streams matching events as `{ "type": "event", "event": ... }`, and reports problems as `{ "type": "error", "message": ... }`. For a typed client over this stream, see [Client](../client/overview.md).
+
+Two more WebSocket streams follow the same connect/subscribe shape: `/ws/logs` for run [logs](../logging/overview.md) and `/ws/agents` for live [agent](../agents/overview.md) runs.
 
 ## OpenAPI
 

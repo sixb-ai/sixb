@@ -45,6 +45,9 @@ export const Customer = defineObjectType({
 | `search` | No | A search profile for this type. See [search metadata](./search-metadata.md). |
 | `extends` | No | A parent object type (or its id) to inherit properties and links from |
 | `parents` | No | Additional parent type ids for multi-parent classification |
+| `implements` | No | Interface role ids this type is classified under. See [Interfaces](./value-types.md#interfaces). |
+| `quantityKind` | No | The physical quantity a sensor/point type measures (a `QuantitativeTypeId`). See [Units & Semantics](./units-and-semantics.md). |
+| `seeAlso` | No | External reference URLs (`string[]`) for documentation. |
 
 The return value carries typed token maps used elsewhere in the API:
 

@@ -81,9 +81,9 @@ are the union of every role whose `grantedTo` group it belongs to.
 
 ## Grants
 
-A grant pairs a capability with the definitions it covers. Four capability builders —
-`can.access`, `can.view`, `can.apply`, and `can.run` — resolve to **eight grant kinds**, one per
-protected target family.
+A grant pairs a capability with the definitions it covers. Five capability builders —
+`can.access`, `can.view`, `can.apply`, `can.run`, and `can.observe` — resolve to **nine grant
+kinds**, one per protected target family.
 
 | Grant kind | Builder | Allows | Targets |
 | --- | --- | --- | --- |
@@ -95,12 +95,14 @@ protected target family.
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
 | `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
+| `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
 
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
 picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
 type-checked, so mixing target families in one call does not compile. `can.view(Type)` also covers
-the type's subtypes.
+the type's subtypes. `can.observe` takes the `"logs"` target literal and grants `observe:logs`,
+which gates reading captured [logs](../logging/overview.md).
 
 ### Selecting definitions
 
@@ -121,8 +123,9 @@ Each builder takes one definition, a list, or a breadth selector.
 | Everything but a few | `can.view(ontology.objects().except([Customer]))` |
 
 The breadth selectors are exported from `@sixb/core`: `ontology.objects()`, `datasets()`,
-`actions()`, `workflows()`, `syncs()`, and `pipelines()`. Each picks its target family's whole
-registered universe and is branded by target, so `can.view(actions())` does not compile.
+`actions()`, `workflows()`, `syncs()`, `pipelines()`, and `agents()`. Each picks its target
+family's whole registered universe and is branded by target, so `can.view(actions())` does not
+compile.
 
 ## Broad grants
 
@@ -277,6 +280,7 @@ auth administration stay on the privileged runtime.
 | `listWorkflows`, `getWorkflowById` | `run:workflow` |
 | `listSyncs`, `getSyncById` | `run:sync` |
 | `listPipelines`, `getPipelineById` | `run:pipeline` |
+| `requestAgentRun`, `listAgents`, `getAgentById`, `listThreads`, `getThread` | `run:agent` |
 | `readEvents` | subject visibility (see below) |
 
 ### Event visibility

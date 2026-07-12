@@ -38,6 +38,8 @@ layer and never touch the transport directly. In a standalone app, configure
 | `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
 | `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, plus `SixbProvider` |
 | `@sixb/client/events` | `SixbEvent` types and the `events.object(...)` builder |
+| `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
+| `@sixb/client/agent-streams` | `useAgentRunStream` — stream a live agent run's messages |
 | `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
 | `@sixb/client/models` | `encode`/`decodeObjectId`, `executeAction`, UI shape mappers |
 
@@ -170,7 +172,7 @@ and `useInvalidateOnEvent`.
 import { events, useEvents } from "@sixb/client/hooks"
 import { Invoice } from "../ontology/invoice"
 
-useEvents(events.object(Invoice).byId(invoiceId).upserted(), (event) => {
+useEvents(events.object(Invoice).byId(invoiceId).updated(), (event) => {
   console.log(event.payload.properties)
 })
 ```
@@ -234,6 +236,8 @@ so they are safe to pass through URLs and route params.
 | React component reading data | `@sixb/client/hooks` |
 | React action button with terminal loading/error state | `useActionRunMutation` (`@sixb/client/hooks`) |
 | Live updates in React | `events.object(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
+| Live run logs in an app | `logs.actions()`/`.syncs()`/… `.subscribe()` (`@sixb/client/logs`) |
+| Stream a live agent run | `useAgentRunStream` (`@sixb/client/agent-streams`) |
 | Bootstrap a standalone browser client | `@sixb/client/browser` |
 | Encode/decode ids or fire actions | `@sixb/client/models` |
 
@@ -241,6 +245,7 @@ so they are safe to pass through URLs and route params.
 
 - [Typed queries](typed-queries.md) — the object-query builder reference
 - [Client events](events.md) — live event builders and React hooks
+- [Logging](../logging/overview.md) — the `@sixb/client/logs` builder
 - [Querying data in apps](../apps/querying-data.md) — hooks in practice
 - [Running actions from apps](../apps/actions.md) — action buttons and terminal mutation state
 - [Events](../events/overview.md) — topics and event types

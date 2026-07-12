@@ -10,6 +10,8 @@ Sixb assembles authentication from a few small pieces, all configured through th
 - **Sessions** — the signed-in state carried in a cookie and resolved on every request.
 - **Allowed domains and bootstrap** — who may sign in, and who gets the very first account.
 - **Invitations and members** — how the team grows and how admins manage existing users.
+- **Programmatic access** — personal access tokens and service accounts for scripts, CLIs, and
+  machine-to-machine calls.
 
 The server ships the sign-in, callback, and sign-out endpoints, so you rarely write request
 handling yourself. See [Auth overview](./overview.md) for how the two layers fit together.
@@ -235,6 +237,50 @@ auth: {
 Sessions are cached in-process briefly to absorb request bursts. The defaults are sensible, so most
 apps leave `session` and `cookies` unset.
 
+Users can list their active sessions (`GET /api/auth/sessions`) and revoke one
+(`POST /api/auth/sessions/:sessionId/revoke`), independent of the blanket `sign-out-all`.
+
+## Programmatic access
+
+Browser users authenticate with the session cookie above. Scripts, CLIs, CI jobs, and other
+services authenticate with a **bearer token** instead — send it as `Authorization: Bearer <token>`
+and the server resolves it to a principal, skipping the cookie/CSRF flow.
+
+```bash
+curl https://api.acme.example/api/objects -H "Authorization: Bearer $SIXB_TOKEN"
+```
+
+Two kinds of bearer credential exist:
+
+- **Personal access tokens** act as *you* — a token bound to your user, carrying a subset of your
+  own groups. Reach for one to call the API from your own script or notebook.
+- **Service accounts** are standalone machine principals with their own group memberships, so their
+  grants are independent of any person, and they issue their own access tokens. Reach for one for
+  unattended jobs and service-to-service calls. Agents run under a managed service account (see
+  [Authorization](./authorization.md)).
+
+Manage both from the built-in admin UI (**Settings → Tokens**) or through `sixb.auth`:
+
+```ts
+// A personal access token for the current user
+const { tokenValue } = await sixb.auth.createPersonalAccessToken(request, { name: "ci-deploy" })
+
+// A service account, then a token for it
+const { serviceAccount } = await sixb.auth.createServiceAccount(request, {
+  name: "nightly-sync",
+  groupIds: [integrations.id],
+})
+const { tokenValue: serviceToken } = await sixb.auth.createServiceAccountAccessToken(request, {
+  serviceAccountId: serviceAccount.id,
+  name: "default",
+})
+```
+
+Use the returned `tokenValue` immediately — only its hash is stored, so it is never shown again.
+The companion methods are `listPersonalAccessTokens` / `revokePersonalAccessToken`,
+`listServiceAccounts` / `disableServiceAccount`, and `createServiceAccountAccessToken` /
+`revokeServiceAccountAccessToken`.
+
 ## Sign-in endpoints
 
 When you serve the runtime, these endpoints are registered for you:
@@ -256,6 +302,15 @@ When you serve the runtime, these endpoints are registered for you:
 | `PATCH /api/auth/members/:userId/groups` | Replace a member's groups |
 | `POST /api/auth/members/:userId/suspend` | Suspend a member and revoke active sessions |
 | `POST /api/auth/members/:userId/reactivate` | Reactivate a suspended member |
+| `GET /api/auth/sessions` | List the current user's active sessions |
+| `POST /api/auth/sessions/:sessionId/revoke` | Revoke one session |
+| `GET`/`POST /api/auth/access-tokens` | List or create personal access tokens |
+| `POST /api/auth/access-tokens/:tokenId/revoke` | Revoke a personal access token |
+| `GET`/`POST /api/auth/service-accounts` | List or create service accounts |
+| `POST /api/auth/service-accounts/:serviceAccountId/disable` | Disable a service account |
+| `GET`/`POST /api/auth/service-accounts/:serviceAccountId/access-tokens` | List or issue service-account tokens |
+| `POST /api/auth/service-accounts/:serviceAccountId/access-tokens/:tokenId/revoke` | Revoke a service-account token |
+| `GET /api/auth/access-management-options` | Groups and capabilities for the tokens/service-accounts UI |
 
 See [Server](../server/overview.md) for how routes are mounted.
 

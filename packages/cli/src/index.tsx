@@ -344,7 +344,9 @@ async function main(): Promise<void> {
     }
 
     case "create": {
-      const name = args[1]
+      // The `create-sixb <name>` bin has no leading subcommand, so the project
+      // name is the first positional; `sixb create <name>` puts it second.
+      const name = executable.startsWith("create-sixb") ? args[0] : args[1]
       if (!name) {
         throw new Error("create requires a project name")
       }

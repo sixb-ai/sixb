@@ -217,10 +217,11 @@ await expect(
 expect(await anonymous.list({})).toEqual({ objects: [], hasMore: false, total: 0 })
 ```
 
-There are eight grant kinds. `access:application` gates browser applications at the server
-boundary. The scoped runtime gates `view:object` (`list`/`getObject`), `view:dataset`
-(`listDatasets`), `apply:action` (`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`,
-`run:pipeline`, and `run:agent`. See [authorization](../auth/authorization.md) for how roles,
+There are nine grant kinds. `access:application` gates browser applications at the server
+boundary, and `observe:logs` gates reading captured [logs](../logging/overview.md). The scoped
+runtime gates the rest: `view:object` (`list`/`getObject`), `view:dataset` (`listDatasets`),
+`apply:action` (`requestAction`), `run:workflow` (`runWorkflow`), `run:sync`, `run:pipeline`, and
+`run:agent`. See [authorization](../auth/authorization.md) for how roles,
 grants, groups, and membership policies resolve; the full pattern lives in
 `examples/auth/tests/atlas-authorization.test.ts`.
 
@@ -294,11 +295,14 @@ expect(objects(Project).query().where((p) => p.p.status.eq("active")).ir).toEqua
 
 ## Provider contract suites
 
-If you author a backend provider (storage, broker, queue, or lake),
-`@sixb/core/testing` exports conformance suites — `runObjectQueryProviderContractSuite`,
-`runBrokerContractSuite`, `runQueueContractSuite`, `runLakeStorageContractSuite` —
-that assert your implementation satisfies the provider contract. This is only
-relevant when building an integration, not when testing an app.
+If you author a backend provider (storage, broker, queue, lake, sandbox, or
+agent/auth storage), `@sixb/core/testing` exports conformance suites —
+`runObjectQueryProviderContractSuite`, `runBrokerContractSuite`,
+`runQueueContractSuite`, `runLakeStorageContractSuite`,
+`runAgentStorageContractSuite`, `runAuthStorageContractSuite`, and
+`runSandboxesContractSuite` — that assert your implementation satisfies the
+provider contract. This is only relevant when building an integration, not when
+testing an app.
 
 ## Related
 

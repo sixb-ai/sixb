@@ -141,8 +141,9 @@ drops its siblings.
 
 Two paths skip the orchestrator. Requesting an [action](../actions/overview.md)
 enqueues onto `queues.actions` directly (the `action.requested` event is an
-observation, not a route), and the API can enqueue a sync, pipeline, or workflow
-run on demand. Both still flow through the queue/worker half of the model.
+observation, not a route) and posting a message to an [agent](../agents/overview.md)
+thread enqueues onto `queues.agents`, while the API can enqueue a sync, pipeline,
+or workflow run on demand. All still flow through the queue/worker half of the model.
 
 ### Queues and workers
 
@@ -156,6 +157,7 @@ queue.
 | `projection` | `queues.projections` | orchestrator, on `dataset.version.committed`         |
 | `workflow`   | `queues.workflows`   | orchestrator (scheduled), or API run-request         |
 | `action`     | `queues.actions`     | a requested action, enqueued directly                |
+| `agent`      | `queues.agents`      | a posted agent-thread message, enqueued directly     |
 
 ### Run records
 
@@ -193,7 +195,7 @@ guarantees that by the time anything emits an event or enqueues a job, the role
 that handles it is already listening. The co-hosted dev runtime applies this
 automatically; when bringing up separate processes, follow the same order:
 
-1. **Consumers first** — rules, functions, then the action, projection,
+1. **Consumers first** — rules, functions, then the action, agent, projection,
    pipeline, workflow, and sync workers.
 2. **Producers last** — the orchestrator (subscribes and enqueues), then the
    scheduler (emits triggers).
