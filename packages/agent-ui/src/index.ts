@@ -11,7 +11,9 @@ export {
   LiveAssistant,
   MessageView,
   ReconnectingMarker,
+  RunCancelledMarker,
   RunErrorMarker,
+  RunFailureMarker,
   ThinkingMarker,
 } from "./components/MessageView"
 export { Transcript, type TranscriptProps } from "./components/Transcript"
@@ -26,6 +28,12 @@ export {
 } from "./liveRun"
 export { type NormalizedPart, type NormalizedTool, normalizeDurableParts } from "./parts"
 export { installAgentResizeObserverGuard } from "./resizeObserver"
+export {
+  DELAYED_WAITING_COPY_MS,
+  findPreStreamFailedRun,
+  isActiveAgentRunStatus,
+  shouldShowDelayedWaitingCopy,
+} from "./runPresentation"
 export type {
   Agent,
   AgentMessage,

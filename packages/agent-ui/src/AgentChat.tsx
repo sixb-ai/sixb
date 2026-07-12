@@ -6,9 +6,12 @@ import {
   listAgentsOptions,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
+  listAgentThreadRunsOptions,
+  listAgentThreadRunsQueryKey,
   listAgentThreadsOptions,
   listAgentThreadsQueryKey,
   postAgentThreadMessageMutation,
+  retryAgentRunMutation,
 } from "@sixb/client/hooks"
 import { EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
@@ -18,12 +21,17 @@ import { useEffect, useMemo, useState } from "react"
 import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { installAgentResizeObserverGuard } from "./resizeObserver"
-import type { AgentFileRef } from "./types"
+import {
+  DELAYED_WAITING_COPY_MS,
+  findPreStreamFailedRun,
+  isActiveAgentRunStatus,
+  shouldShowDelayedWaitingCopy,
+} from "./runPresentation"
+import type { AgentFileRef, AgentRun } from "./types"
 import { useThreadStream } from "./useThreadStream"
 
 interface PendingSend {
-  readonly threadId: string
-  readonly runId: string
+  readonly run: AgentRun
 }
 
 interface PendingUser {
@@ -87,6 +95,15 @@ export function AgentChat({
     enabled: threadId !== null,
   })
   const messages = useMemo(() => messagesQuery.data?.messages ?? [], [messagesQuery.data])
+  const runsQuery = useQuery({
+    ...listAgentThreadRunsOptions({
+      path: { threadId: threadId ?? "" },
+      query: { limit: "50", order: "desc" },
+    }),
+    enabled: threadId !== null,
+  })
+  const runs = useMemo(() => runsQuery.data?.runs ?? [], [runsQuery.data])
+  const latestRun = runs[0] ?? null
 
   // Live run bookkeeping.
   const [pendingSend, setPendingSend] = useState<PendingSend | null>(null)
@@ -113,12 +130,25 @@ export function AgentChat({
 
   const activeRunId =
     threadId !== null
-      ? ((pendingSend?.threadId === threadId ? pendingSend.runId : null) ??
+      ? ((pendingSend?.run.threadId === threadId ? pendingSend.run.id : null) ??
         thread?.activeRunId ??
-        null)
+        (latestRun && isActiveAgentRunStatus(latestRun.status) ? latestRun.id : null))
       : null
 
-  const { live, reconnecting } = useThreadStream({ threadId, runId: activeRunId })
+  const {
+    live,
+    run: streamRun,
+    reconnecting,
+  } = useThreadStream({
+    threadId,
+    runId: activeRunId,
+  })
+  const activeRun =
+    (streamRun?.id === activeRunId ? streamRun : null) ??
+    (pendingSend?.run.id === activeRunId ? pendingSend.run : null) ??
+    runs.find((run) => run.id === activeRunId) ??
+    null
+  const presentationRun = activeRun ?? latestRun
   const finalizedMessageInDurable =
     live.finalizedMessageId !== null &&
     messages.some((message) => message.id === live.finalizedMessageId)
@@ -128,15 +158,23 @@ export function AgentChat({
   // clear `thread.activeRunId` before the messages refetch lands, resetting `live` to null and making
   // the transcript briefly flash/reflow at the end of a response.
   useEffect(() => {
-    if (!pendingSend || live.runId !== pendingSend.runId || live.finishStatus === null) return
+    if (!pendingSend || pendingSend.run.id !== activeRunId) return
+    const terminalFromSnapshot =
+      streamRun?.id === pendingSend.run.id && !isActiveAgentRunStatus(streamRun.status)
+    const terminalFromEvent = live.runId === pendingSend.run.id && live.finishStatus !== null
+    if (!terminalFromSnapshot && !terminalFromEvent) return
     if (live.finalizedMessageId && !finalizedMessageInDurable) return
+    if (!live.finalizedMessageId && !runs.some((run) => run.id === pendingSend.run.id)) return
     setPendingSend(null)
   }, [
     pendingSend,
+    activeRunId,
+    streamRun,
     live.runId,
     live.finishStatus,
     live.finalizedMessageId,
     finalizedMessageInDurable,
+    runs,
   ])
 
   // Drop the optimistic user echo once the durable message lands (or the thread changes).
@@ -160,9 +198,39 @@ export function AgentChat({
   const createThread = useMutation(createAgentThreadMutation())
   const postMessage = useMutation(postAgentThreadMessageMutation())
   const cancelRun = useMutation(cancelAgentRunMutation())
+  const retryRun = useMutation(retryAgentRunMutation())
 
-  const isRunning =
-    activeRunId !== null && !(live.runId === activeRunId && live.finishStatus !== null)
+  const activeRunFinished =
+    (streamRun?.id === activeRunId && !isActiveAgentRunStatus(streamRun.status)) ||
+    (live.runId === activeRunId && live.finishStatus !== null)
+  const isRunning = activeRunId !== null && !activeRunFinished
+  const failedRunFromHistory =
+    !isRunning && !messagesQuery.isLoading && presentationRun?.status === "failed"
+      ? findPreStreamFailedRun(
+          presentationRun === latestRun ? runs : [presentationRun, ...runs],
+          messages
+        )
+      : null
+  const failedRunFromEvent =
+    !isRunning &&
+    live.runId === activeRunId &&
+    live.finishStatus === "failed" &&
+    live.parts.length === 0
+      ? activeRun
+      : null
+  const failedRun = failedRunFromHistory ?? failedRunFromEvent
+  const cancelledBeforeResponse =
+    !isRunning &&
+    live.parts.length === 0 &&
+    ((presentationRun?.status === "cancelled" &&
+      !messagesQuery.isLoading &&
+      !messages.some(
+        (message) => message.role === "assistant" && message.runId === presentationRun.id
+      )) ||
+      (live.runId === activeRunId && live.finishStatus === "cancelled"))
+  const waitingLonger = useDelayedWaitingCopy(
+    isRunning && !live.active && presentationRun?.status === "queued" ? presentationRun : null
+  )
 
   // Clear the stop request once the run it targeted is no longer the active one (it ended, or we
   // navigated away), so a fresh run never starts already showing "stopping".
@@ -226,7 +294,7 @@ export function AgentChat({
           path: { threadId: targetThreadId },
           body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
         })
-        setPendingSend({ threadId: response.run.threadId, runId: response.run.id })
+        setPendingSend({ run: response.run })
         setPendingUser((current) =>
           current && current.threadId === response.run.threadId
             ? { ...current, messageId: response.run.triggerMessageId }
@@ -253,7 +321,7 @@ export function AgentChat({
         path: { threadId: newThreadId },
         body: { text, ...(attachments.length === 0 ? {} : { attachments: [...attachments] }) },
       })
-      setPendingSend({ threadId: newThreadId, runId: response.run.id })
+      setPendingSend({ run: response.run })
       setPendingUser((current) =>
         current && current.threadId === newThreadId
           ? { ...current, messageId: response.run.triggerMessageId }
@@ -279,6 +347,27 @@ export function AgentChat({
       }
       void queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
     }
+  }
+
+  const handleRetry = () => {
+    if (!failedRun || threadId === null) return
+    retryRun.mutate(
+      { path: { threadId, runId: failedRun.id } },
+      {
+        onSuccess: (response) => {
+          setPendingSend({ run: response.run })
+          void Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: getAgentThreadQueryKey({ path: { threadId } }),
+            }),
+            queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+          ])
+        },
+      }
+    )
   }
 
   if (agentsQuery.isLoading) {
@@ -314,7 +403,7 @@ export function AgentChat({
       : null
   const anchorCurrentTurn = Boolean(
     (pendingUser && pendingUser.threadId === threadId) ||
-      (pendingSend && pendingSend.threadId === threadId)
+      (pendingSend && pendingSend.run.threadId === threadId)
   )
 
   return (
@@ -342,6 +431,11 @@ export function AgentChat({
           pendingUserAttachments={pendingUserForThread?.attachments ?? []}
           anchorCurrentTurn={anchorCurrentTurn}
           awaitingResponse={isRunning}
+          waitingLonger={waitingLonger}
+          failedBeforeResponse={failedRun !== null}
+          cancelledBeforeResponse={cancelledBeforeResponse}
+          onRetry={failedRun ? handleRetry : undefined}
+          retrying={retryRun.isPending}
           reconnecting={reconnecting}
           sendError={sendError && sendError.threadId === threadId ? sendError.message : null}
           agents={agents}
@@ -392,4 +486,27 @@ function deriveTitle(text: string): string {
   const firstLine = text.split("\n")[0]?.trim() ?? ""
   if (firstLine.length <= 60) return firstLine
   return `${firstLine.slice(0, 57)}...`
+}
+
+function useDelayedWaitingCopy(run: Pick<AgentRun, "status" | "createdAt"> | null): boolean {
+  const [visible, setVisible] = useState(() => shouldShowDelayedWaitingCopy(run))
+
+  useEffect(() => {
+    if (!run || run.status !== "queued") {
+      setVisible(false)
+      return
+    }
+
+    const remaining = DELAYED_WAITING_COPY_MS - (Date.now() - Date.parse(run.createdAt))
+    if (remaining <= 0) {
+      setVisible(true)
+      return
+    }
+
+    setVisible(false)
+    const timer = window.setTimeout(() => setVisible(true), remaining)
+    return () => window.clearTimeout(timer)
+  }, [run])
+
+  return visible
 }
