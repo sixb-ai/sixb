@@ -13,6 +13,7 @@ import {
   createAgentMessageId,
   fromAiSdk,
   isAbortError,
+  QueueDeliveryLeaseLostError,
   toModelMessages,
 } from "@sixb/core"
 import {
@@ -23,12 +24,8 @@ import {
   toUIMessageStream,
 } from "ai"
 import { attachmentKey, modelSupportsInlineImages, prepareAgentAttachments } from "./attachments"
-import { AgentLeaseLostError, AgentTurnTimeoutError, AgentWorkerError } from "./errors"
-import {
-  appendMessageAndFinishRunOrThrow,
-  finishRunOrThrow,
-  isTerminalOrLeaseGone,
-} from "./finalize"
+import { AgentTurnTimeoutError, AgentWorkerError } from "./errors"
+import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import {
   type AgentOutputAttachmentResult,
   collectAgentOutputAttachments,
@@ -38,10 +35,10 @@ import type { AgentTurnContext } from "./types"
 export const DEFAULT_MAX_STEPS = 25
 
 export interface RunAgentTurnInput {
-  /** The worker's stable execution context (storage, tools, stream sink, lease timings). */
+  /** The worker's stable execution context (storage, tools, stream sink, and turn limits). */
   readonly context: AgentTurnContext
   readonly agent: AgentDefinition
-  /** The run this worker already reserved (or reclaimed). We own `run.lease`. */
+  /** The run this delivery reserved or reclaimed with its execution token. */
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
@@ -50,30 +47,20 @@ export interface RunAgentTurnInput {
 /**
  * Drive one agent turn to completion and persist it.
  *
- * Loads thread history, streams the model with the configured stop condition, keeps the run lease
- * fresh with a heartbeat, then persists the assistant message and finalizes the run with usage +
- * finish reason — all fenced on the lease id. If the lease is lost mid-turn (we were reclaimed as a
- * suspected crash), it throws {@link AgentLeaseLostError} and writes nothing: the run is no longer
- * ours.
+ * Loads thread history, streams the model with the configured stop condition, then persists the
+ * assistant message and finalizes the run with usage and finish reason. Every durable write is
+ * fenced by the delivery's execution token; if queue ownership is lost, the turn writes nothing.
  *
  * On success it returns the finalized (`succeeded`) run record. Model/tool failures and shutdown
  * aborts propagate to the caller (the worker), which records the run's terminal fate.
  */
 export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRecord> {
   const { context, agent, run, signal } = input
-  const {
-    id: projectId,
-    storage,
-    tools,
-    leaseMs,
-    heartbeatMs,
-    defaultMaxSteps,
-    turnTimeoutMs,
-  } = context
+  const { id: projectId, storage, tools, defaultMaxSteps, turnTimeoutMs } = context
   const runId = run.id
-  const leaseId = run.lease?.id
-  if (!leaseId) {
-    throw new AgentWorkerError(`Agent run '${runId}' has no lease to run under.`)
+  const executionToken = run.execution?.token
+  if (!executionToken) {
+    throw new AgentWorkerError(`Agent run '${runId}' has no execution token.`)
   }
   const agents = storage.agents
 
@@ -103,9 +90,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
 
-  // The model call is aborted by worker shutdown, by the heartbeat detecting a lost lease, or by the
-  // turn exceeding its wall-clock budget (a slow-but-alive model must not hold the thread forever).
-  const heartbeatAbort = new AbortController()
+  // The model call is aborted by worker shutdown, queue delivery loss, or the turn exceeding its
+  // wall-clock budget (a slow-but-alive model must not hold the thread forever).
   const timeoutAbort = new AbortController()
   let timedOut = false
   const timeoutTimer = setTimeout(() => {
@@ -126,12 +112,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     provisionAbort.abort()
   })
 
-  const abortSignal = AbortSignal.any([
-    signal,
-    heartbeatAbort.signal,
-    timeoutAbort.signal,
-    provisionAbort.signal,
-  ])
+  const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, provisionAbort.signal])
 
   const result = streamText({
     model: agent.model,
@@ -161,20 +142,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     },
   })
 
-  let leaseLost = false
-  const heartbeat = startLeaseHeartbeat({
-    storage: agents,
-    projectId,
-    runId,
-    leaseId,
-    leaseMs,
-    heartbeatMs,
-    onLost: () => {
-      leaseLost = true
-      heartbeatAbort.abort(new AgentLeaseLostError(runId))
-    },
-  })
-
   let drainError: unknown
   let chunkIndex = 0
   try {
@@ -199,8 +166,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
-    if (leaseLost) {
-      throw new AgentLeaseLostError(runId)
+    if (signal.reason instanceof QueueDeliveryLeaseLostError) {
+      throw signal.reason
     }
     // A sandbox failure and a timeout take precedence over the abort-shaped error they cause.
     if (provisionError !== undefined) {
@@ -217,8 +184,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       agents,
       context,
       run,
-      leaseId,
-      leaseMs,
+      executionToken,
       projectId,
       modelId: agent.model.modelId,
       partial: responseMessage,
@@ -262,7 +228,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw error
     }
 
-    // Cancellation, timeout, or lease loss may happen after the model stream drained while output
+    // Cancellation, timeout, or queue ownership loss may happen after the model stream drained while output
     // files are being collected. Re-check all terminal signals before the fenced write so an abort
     // can never be finalized as success.
     const interruptedAfterCollection = await finalizeIfInterrupted()
@@ -271,14 +237,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
     const assistantParts = assistantPartsWithOutputAttachments(assistant.parts, outputAttachments)
 
-    // One last renew right before we write: a successful renew proves we still hold the lease, and it
-    // pushes expiry out by `leaseMs`, so the (lease-unfenced) message append cannot race a reclaim.
-    await renewOrLost({ storage: agents, projectId, runId, leaseId, leaseMs })
-
     const usage = mapUsage(await result.usage)
     const assistantMessageId = createAgentMessageId()
 
-    // Keep the final signal check adjacent to the transaction. Collection, lease renewal, or usage
+    // Keep the final signal check adjacent to the transaction. Collection, queue renewal, or usage
     // resolution can each yield long enough for a cancellation to arrive.
     const interruptedBeforeCommit = await finalizeIfInterrupted()
     if (interruptedBeforeCommit) {
@@ -304,7 +266,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       finish: {
         projectId,
         id: runId,
-        leaseId,
+        executionToken,
         status: "succeeded",
         modelId: agent.model.modelId,
         finishReason,
@@ -324,7 +286,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     return finalizedRun
   } finally {
     clearTimeout(timeoutTimer)
-    heartbeat.stop()
   }
 }
 
@@ -374,13 +335,12 @@ async function finalizeCancelledTurn(input: {
   readonly agents: AgentStorage
   readonly context: AgentTurnContext
   readonly run: AgentRunRecord
-  readonly leaseId: string
-  readonly leaseMs: number
+  readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
   readonly partial: AgentInboundLike | undefined
 }): Promise<AgentRunRecord> {
-  const { storage, agents, context, run, leaseId, leaseMs, projectId, modelId, partial } = input
+  const { storage, agents, context, run, executionToken, projectId, modelId, partial } = input
 
   // A malformed partial must not turn a cancel into a failure: fall back to a message-less cancel.
   let assistant: AgentMessage | null = null
@@ -390,14 +350,11 @@ async function finalizeCancelledTurn(input: {
     assistant = null
   }
 
-  // Prove we still hold the lease right before writing (mirrors the success path).
-  await renewOrLost({ storage: agents, projectId, runId: run.id, leaseId, leaseMs })
-
   if (!assistant) {
     const finalizedRun = await finishRunOrThrow(agents, {
       projectId,
       id: run.id,
-      leaseId,
+      executionToken,
       status: "cancelled",
     })
     await context.streamSink.publishRunFinished(finalizedRun)
@@ -419,7 +376,7 @@ async function finalizeCancelledTurn(input: {
     finish: {
       projectId,
       id: run.id,
-      leaseId,
+      executionToken,
       status: "cancelled",
       ...(modelId === undefined ? {} : { modelId }),
     },
@@ -489,82 +446,6 @@ function coercePartialAssistantMessage(message: AgentInboundLike): AgentMessage 
 // `toUIMessageStream`'s `onFinish` hands back the SDK `UIMessage`; `fromAiSdk` accepts the wider
 // inbound shape. We keep the parameter loose here and let `fromAiSdk` narrow/validate at runtime.
 type AgentInboundLike = Parameters<typeof fromAiSdk>[0]
-
-interface LeaseHeartbeatInput {
-  readonly storage: AgentStorage
-  readonly projectId: string
-  readonly runId: string
-  readonly leaseId: string
-  readonly leaseMs: number
-  readonly heartbeatMs: number
-  readonly onLost: () => void
-}
-
-/** A self-rescheduling timer that renews the run lease until stopped or the lease is lost. */
-function startLeaseHeartbeat(input: LeaseHeartbeatInput): { stop(): void } {
-  let stopped = false
-  let timer: ReturnType<typeof setTimeout> | undefined
-
-  const tick = async (): Promise<void> => {
-    if (stopped) {
-      return
-    }
-    try {
-      await input.storage.runs.renewLease({
-        projectId: input.projectId,
-        id: input.runId,
-        leaseId: input.leaseId,
-        expiresAt: new Date(Date.now() + input.leaseMs),
-      })
-    } catch (error) {
-      if (isTerminalOrLeaseGone(error)) {
-        input.onLost()
-        return
-      }
-      // Transient storage error: leave the lease as-is and try again on the next tick.
-    }
-    schedule()
-  }
-
-  const schedule = (): void => {
-    if (stopped) {
-      return
-    }
-    timer = setTimeout(() => void tick(), input.heartbeatMs)
-  }
-
-  schedule()
-  return {
-    stop() {
-      stopped = true
-      if (timer) {
-        clearTimeout(timer)
-      }
-    },
-  }
-}
-
-async function renewOrLost(input: {
-  readonly storage: AgentStorage
-  readonly projectId: string
-  readonly runId: string
-  readonly leaseId: string
-  readonly leaseMs: number
-}): Promise<void> {
-  try {
-    await input.storage.runs.renewLease({
-      projectId: input.projectId,
-      id: input.runId,
-      leaseId: input.leaseId,
-      expiresAt: new Date(Date.now() + input.leaseMs),
-    })
-  } catch (error) {
-    if (isTerminalOrLeaseGone(error)) {
-      throw new AgentLeaseLostError(input.runId)
-    }
-    throw error
-  }
-}
 
 /** Map AI SDK usage onto the stored {@link AgentRunUsage}, dropping unknown fields. */
 function mapUsage(usage: LanguageModelUsage): AgentRunUsage | undefined {

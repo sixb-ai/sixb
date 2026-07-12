@@ -48,7 +48,10 @@ describe("PostgresStorage agents", () => {
             agentId: "sales",
             triggerMessageId: "msg_1",
             requestedByPrincipal: { type: "user", id: "usr_1" },
-            lease: { id: "lease_1", expiresAt: new Date("2026-06-23T10:05:00.000Z") },
+            execution: {
+              token: "exec_1",
+              queueLeaseExpiresAt: new Date("2026-06-23T10:05:00.000Z"),
+            },
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })
           await tx.agents?.messages.append({

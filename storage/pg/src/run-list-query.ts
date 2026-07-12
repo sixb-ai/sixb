@@ -11,6 +11,7 @@ type PgRunListTable =
 
 /** Column projection — `sync_runs` needs the derived `checkpoint_present` flag. */
 type PgRunListSelectList = "*" | "*, checkpoint IS NOT NULL AS checkpoint_present"
+type StartedAtExpression = "started_at" | "COALESCE(started_at, created_at)"
 
 export function hasEmptyStatuses(input: { readonly statuses?: readonly unknown[] }): boolean {
   return input.statuses !== undefined && input.statuses.length === 0
@@ -24,7 +25,8 @@ export function appendRunListFilters(
     readonly statuses?: readonly string[]
     readonly startedAfter?: Date
     readonly startedBefore?: Date
-  }
+  },
+  startedAtExpression: StartedAtExpression = "started_at"
 ): number {
   let nextIndex = index
 
@@ -39,12 +41,12 @@ export function appendRunListFilters(
   }
 
   if (input.startedAfter) {
-    whereClauses.push(`started_at >= $${nextIndex++}`)
+    whereClauses.push(`${startedAtExpression} >= $${nextIndex++}`)
     params.push(input.startedAfter)
   }
 
   if (input.startedBefore) {
-    whereClauses.push(`started_at <= $${nextIndex++}`)
+    whereClauses.push(`${startedAtExpression} <= $${nextIndex++}`)
     params.push(input.startedBefore)
   }
 
@@ -72,10 +74,12 @@ export async function queryRunList<TRow>(input: {
   )
 
   const queryParams = [...input.params] as SqlParameter[]
+  const orderColumn =
+    input.tableName === "agent_runs" ? "COALESCE(started_at, created_at)" : "started_at"
   let query = `
     SELECT ${input.selectList ?? "*"} FROM ${input.tableName}
     ${where}
-    ORDER BY started_at ${order}, id ${order}
+    ORDER BY ${orderColumn} ${order}, id ${order}
   `
   let nextIndex = input.nextIndex
 

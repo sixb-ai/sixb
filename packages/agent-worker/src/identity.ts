@@ -73,7 +73,7 @@ export async function reconcileAgentExecutionIdentity(
       })
 
   // Agent-owned memberships should exactly match the current definition. The server-side API
-  // gateway uses this durable identity plus a run lease capability to authorize sandbox calls.
+  // gateway uses this durable identity plus a run execution capability to authorize sandbox calls.
   const groupMemberships = await auth.serviceAccountGroupMemberships.reconcileForServiceAccount({
     projectId,
     serviceAccountId,

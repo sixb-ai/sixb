@@ -6,7 +6,7 @@ import type {
   Storage,
 } from "@sixb/core"
 import { AgentStorageError } from "@sixb/core"
-import { AgentFinalizationError, AgentLeaseLostError } from "./errors"
+import { AgentExecutionLostError, AgentFinalizationError } from "./errors"
 
 /** Short in-place retries that absorb a transient storage blip without re-running the model. */
 const FINALIZE_BACKOFF_MS = [50, 200, 600] as const
@@ -16,10 +16,10 @@ const FINALIZE_BACKOFF_MS = [50, 200, 600] as const
  * these the worker stops touching the run: another worker owns it, or it is already in a terminal
  * state — nothing more to record either way.
  */
-export function isTerminalOrLeaseGone(error: unknown): boolean {
+export function isTerminalOrExecutionGone(error: unknown): boolean {
   return (
     error instanceof AgentStorageError &&
-    (error.code === "lease_lost" ||
+    (error.code === "execution_lost" ||
       error.code === "invalid_state" ||
       error.code === "run_not_found")
   )
@@ -29,7 +29,7 @@ export function isTerminalOrLeaseGone(error: unknown): boolean {
  * Finalize a run, absorbing transient infra blips with a few short in-place retries.
  *
  * - returns the finalized record on success;
- * - throws {@link AgentLeaseLostError} if the run is no longer ours (lease gone / already terminal),
+ * - throws {@link AgentExecutionLostError} if the run is no longer ours (token stale / already terminal),
  *   so the caller acknowledges the (now duplicate) delivery;
  * - throws {@link AgentFinalizationError} if a non-terminal (infra) error persists across retries,
  *   so the caller leaves the job for redelivery instead of acking a still-locked thread.
@@ -75,8 +75,8 @@ async function waitBeforeFinalizeRetry(
   attempt: number,
   error: unknown
 ): Promise<void> {
-  if (isTerminalOrLeaseGone(error)) {
-    throw new AgentLeaseLostError(runId)
+  if (isTerminalOrExecutionGone(error)) {
+    throw new AgentExecutionLostError(runId)
   }
   const delay = FINALIZE_BACKOFF_MS[attempt]
   if (delay === undefined) {

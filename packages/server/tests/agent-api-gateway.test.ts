@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   can,
   createAgentApiGatewayCapability,
-  createAgentRunLeaseId,
+  createAgentRunExecutionToken,
   defineGroup,
   defineObjectType,
   defineRole,
@@ -51,7 +51,7 @@ describe("agent API gateway", () => {
     ])
   })
 
-  test("authorizes allowed API calls from the run lease capability", async () => {
+  test("authorizes allowed API calls from the run execution capability", async () => {
     const { app, gatewayBaseUrl } = await createGatewayRuntime()
 
     const objectTypes = await app.fetch(
@@ -112,8 +112,17 @@ describe("agent API gateway", () => {
     expect(await response.text()).toBe("agent attachment")
   })
 
+  test("rejects a capability after its projected queue ownership expires", async () => {
+    const { app, gatewayBaseUrl } = await createGatewayRuntime({
+      queueLeaseExpiresAt: new Date(Date.now() - 1),
+    })
+
+    const response = await app.fetch(new Request(`${gatewayBaseUrl}/api/object-types`))
+    expect(response.status).toBe(403)
+  })
+
   test("rejects invalid capabilities and undocumented routes", async () => {
-    const { app, gatewayBaseUrl, leaseId, runId, storage } = await createGatewayRuntime()
+    const { app, executionToken, gatewayBaseUrl, runId, storage } = await createGatewayRuntime()
 
     const invalidCapability = await app.fetch(
       new Request(`http://localhost/__sixb/agent-api/${runId}/bad/api/object-types`)
@@ -128,7 +137,7 @@ describe("agent API gateway", () => {
     await storage.agents.runs.finish({
       id: runId,
       projectId: PROJECT_ID,
-      leaseId,
+      executionToken,
       status: "succeeded",
       completedAt: NOW,
     })
@@ -137,10 +146,12 @@ describe("agent API gateway", () => {
   })
 })
 
-async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): Promise<{
+async function createGatewayRuntime(
+  options: { readonly auth?: boolean; readonly queueLeaseExpiresAt?: Date } = {}
+): Promise<{
   readonly app: ReturnType<typeof createSixbApi>
   readonly gatewayBaseUrl: string
-  readonly leaseId: string
+  readonly executionToken: string
   readonly runId: string
   readonly storage: InMemoryStorage
   readonly sixb: Sixb<readonly OntologySource[]>
@@ -181,7 +192,10 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
 
   const threadId = "thread-1"
   const runId = "run-1"
-  const lease = { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) }
+  const execution = {
+    token: createAgentRunExecutionToken(),
+    queueLeaseExpiresAt: options.queueLeaseExpiresAt ?? new Date(Date.now() + 60_000),
+  }
   await storage.agents.threads.create({
     id: threadId,
     projectId: PROJECT_ID,
@@ -198,7 +212,7 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
     triggerMessageId: "msg-1",
     requestedByPrincipal: { type: "user", id: "usr_requester" },
     executionPrincipal: { type: "serviceAccount", id: serviceAccountId },
-    lease,
+    execution,
     createdAt: NOW,
     startedAt: NOW,
   })
@@ -206,7 +220,7 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
   const capability = createAgentApiGatewayCapability({
     projectId: PROJECT_ID,
     runId,
-    leaseId: lease.id,
+    executionToken: execution.token,
   })
   const app = createSixbApi(
     new SixbServer({ sixb, quiet: true, browser: createTestBrowserPolicy() })
@@ -217,7 +231,7 @@ async function createGatewayRuntime(options: { readonly auth?: boolean } = {}): 
     gatewayBaseUrl: `http://localhost/__sixb/agent-api/${encodeURIComponent(
       runId
     )}/${encodeURIComponent(capability)}`,
-    leaseId: lease.id,
+    executionToken: execution.token,
     runId,
     storage,
     sixb,

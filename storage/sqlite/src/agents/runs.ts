@@ -3,11 +3,11 @@ import {
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
+  type ConfirmAgentRunExecutionOwnershipInput,
   type FinishAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
-  type RenewAgentRunLeaseInput,
   type ReserveAgentRunInput,
 } from "@sixb/core"
 import {
@@ -39,7 +39,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
-
       if (thread.active_run_id !== null) {
         throw new AgentStorageError(
           "active_run_exists",
@@ -52,22 +51,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
           .query(
             `
             INSERT INTO agent_runs (
-              project_id,
-              id,
-              thread_id,
-              agent_id,
-              trigger_message_id,
-              requested_by_principal_type,
-              requested_by_principal_id,
-              execution_principal_type,
-              execution_principal_id,
-              status,
-              model_id,
-              attempt,
-              lease_id,
-              lease_expires_at,
-              created_at,
-              started_at
+              project_id, id, thread_id, agent_id, trigger_message_id,
+              requested_by_principal_type, requested_by_principal_id,
+              execution_principal_type, execution_principal_id,
+              status, model_id, attempt, execution_token,
+              execution_queue_lease_expires_at, created_at, started_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, 1, ?, ?, ?, ?)
           `
           )
@@ -82,8 +70,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.executionPrincipal?.type ?? null,
             input.executionPrincipal?.id ?? null,
             input.modelId ?? null,
-            input.lease.id,
-            input.lease.expiresAt.toISOString(),
+            input.execution.token,
+            input.execution.queueLeaseExpiresAt.toISOString(),
             createdAt.toISOString(),
             startedAt.toISOString()
           )
@@ -94,7 +82,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
             `[SixbSqlite] Agent run '${input.id}' already exists for project '${input.projectId}'.`
           )
         }
-
         throw error
       }
 
@@ -103,47 +90,44 @@ export class SqliteAgentRunStore implements AgentRunStore {
           "UPDATE agent_threads SET active_run_id = ?, updated_at = ? WHERE project_id = ? AND id = ?"
         )
         .run(input.id, createdAt.toISOString(), input.projectId, input.threadId)
-
-      return this.requireRun(input.projectId, input.id)
-    })()
-  }
-
-  async renewLease(input: RenewAgentRunLeaseInput): Promise<AgentRunRecord> {
-    return this.db.transaction(() => {
-      const run = this.requireRunning(input.projectId, input.id)
-
-      if (run.lease_id !== input.leaseId) {
-        throw new AgentStorageError(
-          "lease_lost",
-          `[SixbSqlite] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
-        )
-      }
-
-      this.db
-        .query("UPDATE agent_runs SET lease_expires_at = ? WHERE project_id = ? AND id = ?")
-        .run(input.expiresAt.toISOString(), input.projectId, input.id)
-
       return this.requireRun(input.projectId, input.id)
     })()
   }
 
   async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
-    const now = input.now ?? new Date()
+    return this.db.transaction(() => {
+      this.requireRunning(input.projectId, input.id)
+      this.db
+        .query(
+          `
+          UPDATE agent_runs
+          SET
+            attempt = attempt + 1,
+            execution_token = ?,
+            execution_queue_lease_expires_at = ?
+          WHERE project_id = ? AND id = ?
+        `
+        )
+        .run(
+          input.execution.token,
+          input.execution.queueLeaseExpiresAt.toISOString(),
+          input.projectId,
+          input.id
+        )
 
+      return this.requireRun(input.projectId, input.id)
+    })()
+  }
+
+  async confirmExecutionOwnership(
+    input: ConfirmAgentRunExecutionOwnershipInput
+  ): Promise<AgentRunRecord> {
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)
-
-      if (!run.lease_expires_at) {
+      if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
-          "invalid_state",
-          `[SixbSqlite] Agent run '${input.id}' has no lease to reclaim.`
-        )
-      }
-
-      if (new Date(run.lease_expires_at).getTime() > now.getTime()) {
-        throw new AgentStorageError(
-          "lease_not_expired",
-          `[SixbSqlite] Lease on agent run '${input.id}' has not expired yet.`
+          "execution_lost",
+          `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
 
@@ -151,12 +135,11 @@ export class SqliteAgentRunStore implements AgentRunStore {
         .query(
           `
           UPDATE agent_runs
-          SET attempt = attempt + 1, lease_id = ?, lease_expires_at = ?
+          SET execution_queue_lease_expires_at = MAX(execution_queue_lease_expires_at, ?)
           WHERE project_id = ? AND id = ?
         `
         )
-        .run(input.lease.id, input.lease.expiresAt.toISOString(), input.projectId, input.id)
-
+        .run(input.queueLeaseExpiresAt.toISOString(), input.projectId, input.id)
       return this.requireRun(input.projectId, input.id)
     })()
   }
@@ -168,10 +151,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
     return this.db.transaction(() => {
       const run = this.requireRunning(input.projectId, input.id)
 
-      if (run.lease_id !== input.leaseId) {
+      if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
-          "lease_lost",
-          `[SixbSqlite] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
+          "execution_lost",
+          `[SixbSqlite] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
 
@@ -190,8 +173,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
             usage_cached_input_tokens = ?,
             error = ?,
             diagnostics = ?,
-            lease_id = NULL,
-            lease_expires_at = NULL,
+            execution_token = NULL,
+            execution_queue_lease_expires_at = NULL,
             completed_at = ?
           WHERE project_id = ? AND id = ?
         `
@@ -212,16 +195,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
           input.id
         )
 
-      // Release the thread's single-flight anchor, but only if it still points at this run.
-      this.db
-        .query(
-          `
-          UPDATE agent_threads
-          SET active_run_id = NULL, updated_at = ?
-          WHERE project_id = ? AND id = ? AND active_run_id = ?
-        `
-        )
-        .run(completedAt.toISOString(), input.projectId, run.thread_id, input.id)
+      this.releaseThread(run, completedAt)
 
       return this.requireRun(input.projectId, input.id)
     })()
@@ -279,7 +253,7 @@ export class SqliteAgentRunStore implements AgentRunStore {
       args.push(input.agentId)
     }
 
-    appendRunListFilters(whereClauses, args, input)
+    appendRunListFilters(whereClauses, args, input, "COALESCE(started_at, created_at)")
 
     const { rows, total, hasMore } = queryRunList<AgentRunRow>({
       db: this.db,
@@ -295,6 +269,14 @@ export class SqliteAgentRunStore implements AgentRunStore {
   }
 
   private requireRunning(projectId: string, id: string): AgentRunRow {
+    return this.requireStatus(projectId, id, "running")
+  }
+
+  private requireStatus(
+    projectId: string,
+    id: string,
+    status: AgentRunRecord["status"]
+  ): AgentRunRow {
     const row = this.db
       .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
       .get(projectId, id) as AgentRunRow | null
@@ -306,14 +288,26 @@ export class SqliteAgentRunStore implements AgentRunStore {
       )
     }
 
-    if (row.status !== "running") {
+    if (row.status !== status) {
       throw new AgentStorageError(
         "invalid_state",
-        `[SixbSqlite] Agent run '${id}' is not running (status '${row.status}').`
+        `[SixbSqlite] Agent run '${id}' is not ${status} (status '${row.status}').`
       )
     }
 
     return row
+  }
+
+  private releaseThread(run: AgentRunRow, completedAt: Date): void {
+    this.db
+      .query(
+        `
+        UPDATE agent_threads
+        SET active_run_id = NULL, updated_at = ?
+        WHERE project_id = ? AND id = ? AND active_run_id = ?
+      `
+      )
+      .run(completedAt.toISOString(), run.project_id, run.thread_id, run.id)
   }
 
   private requireRun(projectId: string, id: string): AgentRunRecord {

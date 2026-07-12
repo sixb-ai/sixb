@@ -2,11 +2,11 @@ import {
   type AgentRunRecord,
   type AgentRunStore,
   AgentStorageError,
+  type ConfirmAgentRunExecutionOwnershipInput,
   type FinishAgentRunInput,
   type ListAgentRunsInput,
   type ListAgentRunsResult,
   type ReclaimAgentRunInput,
-  type RenewAgentRunLeaseInput,
   type ReserveAgentRunInput,
 } from "@sixb/core"
 import type { SQLClient, SqlParameter } from "../pg-client"
@@ -31,14 +31,12 @@ export class PgAgentRunStore implements AgentRunStore {
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
           FOR UPDATE
         `
-
         if (!thread) {
           throw new AgentStorageError(
             "thread_not_found",
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
-
         if (thread.active_run_id !== null) {
           throw new AgentStorageError(
             "active_run_exists",
@@ -48,39 +46,17 @@ export class PgAgentRunStore implements AgentRunStore {
 
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
-            project_id,
-            id,
-            thread_id,
-            agent_id,
-            trigger_message_id,
-            requested_by_principal_type,
-            requested_by_principal_id,
-            execution_principal_type,
-            execution_principal_id,
-            status,
-            model_id,
-            attempt,
-            lease_id,
-            lease_expires_at,
-            created_at,
-            started_at
+            project_id, id, thread_id, agent_id, trigger_message_id,
+            requested_by_principal_type, requested_by_principal_id,
+            execution_principal_type, execution_principal_id,
+            status, model_id, attempt, execution_token,
+            execution_queue_lease_expires_at, created_at, started_at
           ) VALUES (
-            ${input.projectId},
-            ${input.id},
-            ${input.threadId},
-            ${input.agentId},
-            ${input.triggerMessageId},
-            ${input.requestedByPrincipal.type},
-            ${input.requestedByPrincipal.id},
-            ${input.executionPrincipal?.type ?? null},
-            ${input.executionPrincipal?.id ?? null},
-            ${"running"},
-            ${input.modelId ?? null},
-            ${1},
-            ${input.lease.id},
-            ${input.lease.expiresAt},
-            ${createdAt},
-            ${startedAt}
+            ${input.projectId}, ${input.id}, ${input.threadId}, ${input.agentId},
+            ${input.triggerMessageId}, ${input.requestedByPrincipal.type},
+            ${input.requestedByPrincipal.id}, ${input.executionPrincipal?.type ?? null},
+            ${input.executionPrincipal?.id ?? null}, ${"running"}, ${input.modelId ?? null}, ${1},
+            ${input.execution.token}, ${input.execution.queueLeaseExpiresAt}, ${createdAt}, ${startedAt}
           )
           RETURNING *
         `
@@ -89,7 +65,6 @@ export class PgAgentRunStore implements AgentRunStore {
           UPDATE agent_threads SET active_run_id = ${input.id}, updated_at = ${createdAt}
           WHERE project_id = ${input.projectId} AND id = ${input.threadId}
         `
-
         return rowToRunRecord(row)
       })
     } catch (error) {
@@ -99,24 +74,19 @@ export class PgAgentRunStore implements AgentRunStore {
           `[SixbPg] Agent run '${input.id}' already exists for project '${input.projectId}'.`
         )
       }
-
       throw error
     }
   }
 
-  async renewLease(input: RenewAgentRunLeaseInput): Promise<AgentRunRecord> {
+  async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
-      const run = await this.lockRunning(tx, input.projectId, input.id)
-
-      if (run.lease_id !== input.leaseId) {
-        throw new AgentStorageError(
-          "lease_lost",
-          `[SixbPg] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
-        )
-      }
-
+      await this.lockRunning(tx, input.projectId, input.id)
       const [row] = await tx<AgentRunRow[]>`
-        UPDATE agent_runs SET lease_expires_at = ${input.expiresAt}
+        UPDATE agent_runs
+        SET
+          attempt = attempt + 1,
+          execution_token = ${input.execution.token},
+          execution_queue_lease_expires_at = ${input.execution.queueLeaseExpiresAt}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -125,33 +95,27 @@ export class PgAgentRunStore implements AgentRunStore {
     })
   }
 
-  async reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord> {
-    const now = input.now ?? new Date()
-
+  async confirmExecutionOwnership(
+    input: ConfirmAgentRunExecutionOwnershipInput
+  ): Promise<AgentRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
-
-      if (!run.lease_expires_at) {
+      if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
-          "invalid_state",
-          `[SixbPg] Agent run '${input.id}' has no lease to reclaim.`
-        )
-      }
-
-      if (new Date(run.lease_expires_at).getTime() > now.getTime()) {
-        throw new AgentStorageError(
-          "lease_not_expired",
-          `[SixbPg] Lease on agent run '${input.id}' has not expired yet.`
+          "execution_lost",
+          `[SixbPg] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
 
       const [row] = await tx<AgentRunRow[]>`
         UPDATE agent_runs
-        SET attempt = attempt + 1, lease_id = ${input.lease.id}, lease_expires_at = ${input.lease.expiresAt}
+        SET execution_queue_lease_expires_at = GREATEST(
+          execution_queue_lease_expires_at,
+          ${input.queueLeaseExpiresAt}
+        )
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
-
       return rowToRunRecord(row)
     })
   }
@@ -163,10 +127,10 @@ export class PgAgentRunStore implements AgentRunStore {
     return runPgTransaction(this.sql, async (tx) => {
       const run = await this.lockRunning(tx, input.projectId, input.id)
 
-      if (run.lease_id !== input.leaseId) {
+      if (run.execution_token !== input.executionToken) {
         throw new AgentStorageError(
-          "lease_lost",
-          `[SixbPg] Lease '${input.leaseId}' is no longer held on agent run '${input.id}'.`
+          "execution_lost",
+          `[SixbPg] Execution token is no longer current on agent run '${input.id}'.`
         )
       }
 
@@ -183,18 +147,14 @@ export class PgAgentRunStore implements AgentRunStore {
           usage_cached_input_tokens = ${input.usage?.cachedInputTokens ?? null},
           error = ${errorValue},
           diagnostics = ${input.diagnostics === undefined ? null : JSON.stringify(input.diagnostics)}::text::jsonb,
-          lease_id = ${null},
-          lease_expires_at = ${null},
+          execution_token = ${null},
+          execution_queue_lease_expires_at = ${null},
           completed_at = ${completedAt}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
 
-      // Release the thread's single-flight anchor, but only if it still points at this run.
-      await tx`
-        UPDATE agent_threads SET active_run_id = ${null}, updated_at = ${completedAt}
-        WHERE project_id = ${input.projectId} AND id = ${run.thread_id} AND active_run_id = ${input.id}
-      `
+      await this.releaseThread(tx, run, completedAt)
 
       return rowToRunRecord(row)
     })
@@ -254,7 +214,13 @@ export class PgAgentRunStore implements AgentRunStore {
       params.push(input.agentId)
     }
 
-    index = appendRunListFilters(whereClauses, params, index, input)
+    index = appendRunListFilters(
+      whereClauses,
+      params,
+      index,
+      input,
+      "COALESCE(started_at, created_at)"
+    )
 
     const { rows, total, hasMore } = await queryRunList<AgentRunRow>({
       sql: this.sql,
@@ -270,7 +236,16 @@ export class PgAgentRunStore implements AgentRunStore {
     return { runs: rows.map(rowToRunRecord), hasMore, total }
   }
 
-  private async lockRunning(sql: SQLClient, projectId: string, id: string): Promise<AgentRunRow> {
+  private lockRunning(sql: SQLClient, projectId: string, id: string): Promise<AgentRunRow> {
+    return this.lockStatus(sql, projectId, id, "running")
+  }
+
+  private async lockStatus(
+    sql: SQLClient,
+    projectId: string,
+    id: string,
+    status: AgentRunRecord["status"]
+  ): Promise<AgentRunRow> {
     const [row] = await sql<AgentRunRow[]>`
       SELECT * FROM agent_runs
       WHERE project_id = ${projectId} AND id = ${id}
@@ -284,13 +259,20 @@ export class PgAgentRunStore implements AgentRunStore {
       )
     }
 
-    if (row.status !== "running") {
+    if (row.status !== status) {
       throw new AgentStorageError(
         "invalid_state",
-        `[SixbPg] Agent run '${id}' is not running (status '${row.status}').`
+        `[SixbPg] Agent run '${id}' is not ${status} (status '${row.status}').`
       )
     }
 
     return row
+  }
+
+  private async releaseThread(sql: SQLClient, run: AgentRunRow, completedAt: Date): Promise<void> {
+    await sql`
+      UPDATE agent_threads SET active_run_id = ${null}, updated_at = ${completedAt}
+      WHERE project_id = ${run.project_id} AND id = ${run.thread_id} AND active_run_id = ${run.id}
+    `
   }
 }

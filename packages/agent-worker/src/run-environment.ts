@@ -97,8 +97,6 @@ export async function createAgentRunEnvironment(
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,
-      leaseMs: context.leaseMs,
-      heartbeatMs: context.heartbeatMs,
       defaultMaxSteps: context.defaultMaxSteps,
       turnTimeoutMs: context.turnTimeoutMs,
     },

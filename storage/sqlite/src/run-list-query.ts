@@ -15,6 +15,8 @@ export function hasEmptyStatuses(input: { readonly statuses?: readonly unknown[]
   return input.statuses !== undefined && input.statuses.length === 0
 }
 
+type StartedAtExpression = "started_at" | "COALESCE(started_at, created_at)"
+
 export function appendRunListFilters(
   whereClauses: string[],
   args: SqliteValue[],
@@ -22,7 +24,8 @@ export function appendRunListFilters(
     readonly statuses?: readonly string[]
     readonly startedAfter?: Date
     readonly startedBefore?: Date
-  }
+  },
+  startedAtExpression: StartedAtExpression = "started_at"
 ): void {
   if (input.statuses) {
     if (input.statuses.length === 0) {
@@ -34,12 +37,12 @@ export function appendRunListFilters(
   }
 
   if (input.startedAfter) {
-    whereClauses.push("started_at >= ?")
+    whereClauses.push(`${startedAtExpression} >= ?`)
     args.push(input.startedAfter.toISOString())
   }
 
   if (input.startedBefore) {
-    whereClauses.push("started_at <= ?")
+    whereClauses.push(`${startedAtExpression} <= ?`)
     args.push(input.startedBefore.toISOString())
   }
 }
@@ -61,10 +64,12 @@ export function queryRunList<TRow>(input: {
     .query(`SELECT COUNT(*) AS count FROM ${input.tableName} ${where}`)
     .get(...input.args) as { count: number }
 
+  const orderColumn =
+    input.tableName === "agent_runs" ? "COALESCE(started_at, created_at)" : "started_at"
   let query = `
     SELECT * FROM ${input.tableName}
     ${where}
-    ORDER BY started_at ${order}, id ${order}
+    ORDER BY ${orderColumn} ${order}, id ${order}
   `
   const queryArgs = [...input.args]
 

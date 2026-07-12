@@ -51,7 +51,7 @@ export interface ListAgentThreadsResult {
   readonly total: number
 }
 
-// ── agent_runs — one loop execution (the worker job; attribution + lease anchor) ────────────────
+// ── agent_runs — one loop execution (the worker job; attribution + fencing) ───────────────────
 
 export type AgentRunStatus = "running" | "succeeded" | "failed" | "cancelled"
 
@@ -118,10 +118,15 @@ export interface AgentRunDiagnostic {
   readonly message: string
 }
 
-/** A worker's claim on a run: a unique lease id and an expiry the worker keeps renewing. */
-export interface AgentRunLease {
-  readonly id: string
-  readonly expiresAt: Date
+/**
+ * Authorization state for the current queue delivery.
+ *
+ * `queueLeaseExpiresAt` is a persisted projection of `ClaimedQueueJob.leaseExpiresAt`, not an
+ * independently managed run lease. It may only be extended from a successful queue lease renewal.
+ */
+export interface AgentRunExecution {
+  readonly token: string
+  readonly queueLeaseExpiresAt: Date
 }
 
 export interface AgentRunRecord {
@@ -141,8 +146,9 @@ export interface AgentRunRecord {
   readonly diagnostics?: readonly AgentRunDiagnostic[]
   /** Failure message when the run did not succeed. */
   readonly error?: string
+  /** Execution attempts: `1` on initial reservation, incremented on redelivery. */
   readonly attempt: number
-  readonly lease?: AgentRunLease
+  readonly execution?: AgentRunExecution
   readonly createdAt: Date
   readonly startedAt?: Date
   readonly completedAt?: Date
@@ -157,31 +163,30 @@ export interface ReserveAgentRunInput {
   readonly requestedByPrincipal: Principal
   readonly executionPrincipal?: Extract<Principal, { readonly type: "serviceAccount" }>
   readonly modelId?: string
-  readonly lease: AgentRunLease
+  readonly execution: AgentRunExecution
   readonly createdAt?: Date
   readonly startedAt?: Date
-}
-
-export interface RenewAgentRunLeaseInput {
-  readonly id: string
-  readonly projectId: string
-  readonly leaseId: string
-  readonly expiresAt: Date
 }
 
 export interface ReclaimAgentRunInput {
   readonly id: string
   readonly projectId: string
-  readonly lease: AgentRunLease
-  /** Compared against the current lease expiry; defaults to now. */
-  readonly now?: Date
+  readonly execution: AgentRunExecution
+}
+
+export interface ConfirmAgentRunExecutionOwnershipInput {
+  readonly id: string
+  readonly projectId: string
+  readonly executionToken: string
+  /** Exact expiration returned by the queue claim or its latest successful renewal. */
+  readonly queueLeaseExpiresAt: Date
 }
 
 export type FinishAgentRunInput =
   | {
       readonly id: string
       readonly projectId: string
-      readonly leaseId: string
+      readonly executionToken: string
       readonly status: "succeeded"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
@@ -192,7 +197,7 @@ export type FinishAgentRunInput =
   | {
       readonly id: string
       readonly projectId: string
-      readonly leaseId: string
+      readonly executionToken: string
       readonly status: "failed" | "cancelled"
       readonly modelId?: string
       readonly finishReason?: AgentRunFinishReason
@@ -207,7 +212,9 @@ export interface ListAgentRunsInput {
   readonly threadId?: string
   readonly agentId?: string
   readonly statuses?: readonly AgentRunStatus[]
+  /** Effective start time; runs that never started use `createdAt`. */
   readonly startedAfter?: Date
+  /** Effective start time; runs that never started use `createdAt`. */
   readonly startedBefore?: Date
   readonly limit?: number
   readonly offset?: number
@@ -280,12 +287,15 @@ export interface AgentThreadStore {
 }
 
 export interface AgentRunStore {
-  /** Single-flight: atomically claims the thread's only active run and a lease. */
+  /** Temporary reserve-at-claim bridge: claim the thread and install the first execution token. */
   reserve(input: ReserveAgentRunInput): Promise<AgentRunRecord>
-  /** Heartbeat: bumps the lease expiry; throws `lease_lost` if the lease was reclaimed. */
-  renewLease(input: RenewAgentRunLeaseInput): Promise<AgentRunRecord>
-  /** Take over an expired lease (`attempt++`); throws `lease_not_expired` if still valid. */
+  /** Rotate the execution token for a redelivered running job (`attempt++`). */
   reclaim(input: ReclaimAgentRunInput): Promise<AgentRunRecord>
+  /**
+   * Project the queue's latest confirmed ownership expiration onto the current execution.
+   * Implementations must fence by token and must never move the expiration backwards.
+   */
+  confirmExecutionOwnership(input: ConfirmAgentRunExecutionOwnershipInput): Promise<AgentRunRecord>
   /** Finalize a run and release the thread's `activeRunId`. */
   finish(input: FinishAgentRunInput): Promise<AgentRunRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentRunRecord | null>

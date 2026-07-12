@@ -2,9 +2,9 @@
 
 Runs `agent.run.requested` queue jobs for a Sixb project.
 
-The worker claims queued agent intents created by `sixb.agents.request(...)`, reserves or reclaims
-the run record, keeps the run lease alive while the model is streaming, writes the final assistant
-message, and finalizes the run.
+The worker claims queued intents created by `sixb.agents.request(...)`, reserves or reclaims the run
+record, renews queue ownership while the model is streaming, writes the final assistant message, and
+finalizes the run.
 
 ## Usage
 
@@ -24,10 +24,14 @@ await worker.start()
 
 ## Execution Model
 
-- User requests persist the user message and enqueue an intent.
-- The worker reserves the run at claim time, so queued intents do not create orphan run records.
-- The run lease is the authority for ownership; heartbeat renewal keeps it fresh during the turn.
-- Lease-fenced finalization prevents stale workers from writing after a reclaim.
+- User requests persist the user message and enqueue a run intent.
+- The worker reserves the run at claim time or reclaims it after queue redelivery.
+- The queue lease is the sole authority for liveness and redelivery; the worker renews it during
+  turns.
+- Every delivery rotates a durable execution token that fences stale finalization after redelivery.
+  The run also persists the queue-returned lease expiration for gateway authorization. That value is
+  a projection of the queue lease—not a separate run lease, timer, or heartbeat—and is extended only
+  from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
 
 ## Live Stream
@@ -54,7 +58,7 @@ The terminal run state is stored on the run record:
 - Model or tool failure: `failed`
 - Turn timeout: `failed`
 - Worker shutdown during a turn: `cancelled`
-- Lease lost mid-turn: no writes from the stale worker
+- Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced
 - Finalization storage failure: job is retried up to a bounded attempt limit; if finalization still
   cannot be recorded, the job is marked failed and the run remains non-terminal for repair
 
@@ -65,14 +69,14 @@ The terminal run state is stored on the run record:
   run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, writes Agent Skills into
   `SIXB_SKILLS_DIR`, and creates the sandbox with a restricted network policy allowing the server
   origin. The gateway authorizes scoped ontology, object, telemetry read, and action routes from the
-  run lease and managed agent service account; no bearer token is exposed to the sandbox.
+  run execution token and managed agent service account; no bearer token is exposed to the sandbox.
 - `skillsDir`: optional project Agent Skills directory. Defaults to `<projectRoot>/skills`. Set to
   `false` to install only the built-in Sixb skills.
 - `concurrency`: maximum number of agent run jobs this worker claims and executes at once; defaults
   to `4`.
 - `streamSink`: stream sink override; defaults to a broker-backed sink.
-- `leaseMs`: run lease and queue visibility duration; defaults to 60 seconds.
-- `heartbeatMs`: lease renewal interval; defaults to one third of `leaseMs`.
+- `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
+  runs.
 - `turnTimeoutMs`: wall-clock turn budget; defaults to 5 minutes.
 - `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `25`.
 - `idlePollMs`: queue polling interval while idle.

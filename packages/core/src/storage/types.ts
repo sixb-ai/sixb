@@ -29,10 +29,12 @@ export type {
 export { ActionRunError } from "./action-runs"
 export type {
   AgentMessageRecord,
+  AgentRunExecution,
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
   AppendAgentMessageInput,
+  ConfirmAgentRunExecutionOwnershipInput,
   CreateAgentThreadInput,
   FinishAgentRunInput,
   ListAgentMessagesInput,
@@ -42,7 +44,6 @@ export type {
   ListAgentThreadsInput,
   ListAgentThreadsResult,
   ReclaimAgentRunInput,
-  RenewAgentRunLeaseInput,
   ReserveAgentRunInput,
 } from "./agents"
 export { AgentStorageError } from "./agents"

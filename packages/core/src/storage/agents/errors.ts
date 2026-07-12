@@ -3,13 +3,12 @@ export type AgentStorageErrorCode =
   | "active_run_exists"
   | "run_not_found"
   | "invalid_state"
-  | "lease_lost"
-  | "lease_not_expired"
+  | "execution_lost"
   | "duplicate_id"
 
 /**
- * Error for agent-storage invariants and invalid state transitions (single-flight, lease ownership,
- * run lifecycle, message append). Callers branch on `code` rather than message text.
+ * Error for agent-storage invariants and invalid state transitions (single-flight, execution
+ * ownership, run lifecycle, message append). Callers branch on `code` rather than message text.
  */
 export class AgentStorageError extends Error {
   readonly name = "AgentStorageError"

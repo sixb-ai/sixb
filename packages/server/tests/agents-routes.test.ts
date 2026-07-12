@@ -3,7 +3,7 @@ import {
   agentRunControlStreamId,
   agents as agentScope,
   can,
-  createAgentRunLeaseId,
+  createAgentRunExecutionToken,
   createSessionCredential,
   defineAgent,
   defineGroup,
@@ -379,7 +379,7 @@ describe("agent routes", () => {
       agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
-    const leaseId = createAgentRunLeaseId()
+    const executionToken = createAgentRunExecutionToken()
     await storage.agents.runs.reserve({
       id: "run-diagnostics",
       projectId: sixb.id,
@@ -387,7 +387,10 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
       requestedByPrincipal: { type: "system", id: "system" },
-      lease: { id: leaseId, expiresAt: new Date(Date.now() + 60_000) },
+      execution: {
+        token: executionToken,
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+      },
     })
     await storage.agents.messages.append({
       id: "msg-diagnostics",
@@ -409,7 +412,7 @@ describe("agent routes", () => {
     await storage.agents.runs.finish({
       id: "run-diagnostics",
       projectId: sixb.id,
-      leaseId,
+      executionToken,
       status: "succeeded",
       diagnostics,
     })
@@ -448,9 +451,9 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-existing",
       requestedByPrincipal: { type: "system", id: "system" },
-      lease: {
-        id: createAgentRunLeaseId(),
-        expiresAt: new Date(Date.now() + 60_000),
+      execution: {
+        token: createAgentRunExecutionToken(),
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
       },
     })
 
@@ -466,7 +469,7 @@ describe("agent routes", () => {
     })
   })
 
-  test("reads agent runs without exposing lease details", async () => {
+  test("reads agent runs without exposing execution details", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({
       id: "thread-run",
@@ -482,9 +485,9 @@ describe("agent routes", () => {
       triggerMessageId: "msg-user",
       requestedByPrincipal: { type: "system", id: "system" },
       modelId: "test-model",
-      lease: {
-        id: createAgentRunLeaseId(),
-        expiresAt: new Date(Date.now() + 60_000),
+      execution: {
+        token: createAgentRunExecutionToken(),
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
       },
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
       startedAt: new Date("2026-06-27T10:00:01.000Z"),
@@ -504,7 +507,7 @@ describe("agent routes", () => {
       streamId: `agents.runs.${run.id}`,
       startedAt: "2026-06-27T10:00:01.000Z",
     })
-    expect("lease" in body).toBe(false)
+    expect("execution" in body).toBe(false)
   })
 
   test("cancel publishes a stop signal, rejects a finished run, and fences to the thread", async () => {
@@ -522,7 +525,10 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-user",
       requestedByPrincipal: { type: "system", id: "system" },
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: {
+        token: createAgentRunExecutionToken(),
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+      },
     })
 
     // A running run: 202, and the stop signal lands on the run's control stream for the worker.
@@ -541,7 +547,7 @@ describe("agent routes", () => {
     await storage.agents.runs.finish({
       projectId: sixb.id,
       id: run.id,
-      leaseId: run.lease?.id ?? "",
+      executionToken: run.execution?.token ?? "",
       status: "cancelled",
     })
     const finished = await app.fetch(
@@ -563,7 +569,10 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: "msg-other",
       requestedByPrincipal: { type: "system", id: "system" },
-      lease: { id: createAgentRunLeaseId(), expiresAt: new Date(Date.now() + 60_000) },
+      execution: {
+        token: createAgentRunExecutionToken(),
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
+      },
     })
     const crossThread = await app.fetch(
       jsonRequest(`/api/agent-threads/${thread.id}/cancel`, "POST", { runId: otherRun.id })
@@ -665,9 +674,9 @@ describe("agent routes", () => {
       agentId: "assistant",
       triggerMessageId: postMessageBody.triggerMessageId,
       requestedByPrincipal: { type: "user", id: "usr_owner" },
-      lease: {
-        id: createAgentRunLeaseId(),
-        expiresAt: new Date(Date.now() + 60_000),
+      execution: {
+        token: createAgentRunExecutionToken(),
+        queueLeaseExpiresAt: new Date(Date.now() + 60_000),
       },
     })
 

@@ -1,12 +1,12 @@
 export { type BashSandboxHandle, type BashToolOutput, createBashTool } from "./bash-tool"
 export {
+  AgentExecutionLostError,
   AgentFinalizationError,
   AgentLeaseHeldError,
-  AgentLeaseLostError,
   AgentTurnTimeoutError,
   AgentWorkerError,
 } from "./errors"
-export { finishRunOrThrow, isTerminalOrLeaseGone } from "./finalize"
+export { finishRunOrThrow, isTerminalOrExecutionGone } from "./finalize"
 export {
   createBrokerStreamSink,
   isolateStreamSink,
