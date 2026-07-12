@@ -174,6 +174,9 @@ import type {
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
+  ListAgentThreadRunsData,
+  ListAgentThreadRunsErrors,
+  ListAgentThreadRunsResponses,
   ListAgentThreadsData,
   ListAgentThreadsErrors,
   ListAgentThreadsResponses,
@@ -275,6 +278,9 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunErrors,
   RequestWorkflowRunResponses,
+  RetryAgentRunData,
+  RetryAgentRunErrors,
+  RetryAgentRunResponses,
   RevokeAuthAccessTokenData,
   RevokeAuthAccessTokenErrors,
   RevokeAuthAccessTokenResponses,
@@ -1675,6 +1681,30 @@ export const cancelAgentRun = <ThrowOnError extends boolean = false>(
       ...options.headers,
     },
   })
+
+/**
+ * Retry a failed agent run
+ */
+export const retryAgentRun = <ThrowOnError extends boolean = false>(
+  options: Options<RetryAgentRunData, ThrowOnError>
+) =>
+  (options.client ?? client).post<RetryAgentRunResponses, RetryAgentRunErrors, ThrowOnError>({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/agent-threads/{threadId}/runs/{runId}/retry",
+    ...options,
+  })
+
+/**
+ * List an agent thread's runs
+ */
+export const listAgentThreadRuns = <ThrowOnError extends boolean = false>(
+  options: Options<ListAgentThreadRunsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListAgentThreadRunsResponses,
+    ListAgentThreadRunsErrors,
+    ThrowOnError
+  >({ url: "/api/agent-threads/{threadId}/runs", ...options })
 
 /**
  * Get agent run

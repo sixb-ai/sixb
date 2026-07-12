@@ -5659,12 +5659,57 @@ export type PostAgentThreadMessageResponses = {
    * Response for status 202
    */
   202: {
-    threadId: string
-    runId: string
-    triggerMessageId: string
-    jobId?: string
-    createdThread: boolean
-    streamId: string
+    run: {
+      id: string
+      projectId: string
+      threadId: string
+      agentId: string
+      triggerMessageId: string
+      requestedByPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      executionPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        reasoningTokens?: number
+        cachedInputTokens?: number
+      }
+      diagnostics?: Array<{
+        code:
+          | "output_file_limit_exceeded"
+          | "output_file_too_large"
+          | "output_budget_exhausted"
+          | "output_collection_failed"
+          | "output_file_changed"
+          | "output_storage_failed"
+        severity: "warning" | "error"
+        scope: "output"
+        path?: string
+        message: string
+      }>
+      error?: string
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
   }
 }
 
@@ -5797,11 +5842,250 @@ export type CancelAgentRunResponses = {
    * Response for status 202
    */
   202: {
-    runId: string
+    run: {
+      id: string
+      projectId: string
+      threadId: string
+      agentId: string
+      triggerMessageId: string
+      requestedByPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      executionPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        reasoningTokens?: number
+        cachedInputTokens?: number
+      }
+      diagnostics?: Array<{
+        code:
+          | "output_file_limit_exceeded"
+          | "output_file_too_large"
+          | "output_budget_exhausted"
+          | "output_collection_failed"
+          | "output_file_changed"
+          | "output_storage_failed"
+        severity: "warning" | "error"
+        scope: "output"
+        path?: string
+        message: string
+      }>
+      error?: string
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
   }
 }
 
 export type CancelAgentRunResponse = CancelAgentRunResponses[keyof CancelAgentRunResponses]
+
+export type RetryAgentRunData = {
+  body?: never
+  path: {
+    runId: string
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/runs/{runId}/retry"
+}
+
+export type RetryAgentRunErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type RetryAgentRunError = RetryAgentRunErrors[keyof RetryAgentRunErrors]
+
+export type RetryAgentRunResponses = {
+  /**
+   * Response for status 202
+   */
+  202: {
+    run: {
+      id: string
+      projectId: string
+      threadId: string
+      agentId: string
+      triggerMessageId: string
+      requestedByPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      executionPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        reasoningTokens?: number
+        cachedInputTokens?: number
+      }
+      diagnostics?: Array<{
+        code:
+          | "output_file_limit_exceeded"
+          | "output_file_too_large"
+          | "output_budget_exhausted"
+          | "output_collection_failed"
+          | "output_file_changed"
+          | "output_storage_failed"
+        severity: "warning" | "error"
+        scope: "output"
+        path?: string
+        message: string
+      }>
+      error?: string
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }
+  }
+}
+
+export type RetryAgentRunResponse = RetryAgentRunResponses[keyof RetryAgentRunResponses]
+
+export type ListAgentThreadRunsData = {
+  body?: never
+  path: {
+    threadId: string
+  }
+  query?: {
+    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    limit?: string
+    offset?: string
+    order?: "asc" | "desc"
+  }
+  url: "/api/agent-threads/{threadId}/runs"
+}
+
+export type ListAgentThreadRunsErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+}
+
+export type ListAgentThreadRunsError = ListAgentThreadRunsErrors[keyof ListAgentThreadRunsErrors]
+
+export type ListAgentThreadRunsResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    runs: Array<{
+      id: string
+      projectId: string
+      threadId: string
+      agentId: string
+      triggerMessageId: string
+      requestedByPrincipal: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      executionPrincipal?: {
+        type: "user" | "serviceAccount" | "system"
+        id: string
+      }
+      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+      modelId?: string
+      finishReason?:
+        | "stop"
+        | "length"
+        | "content-filter"
+        | "tool-calls"
+        | "error"
+        | "other"
+        | "unknown"
+      usage?: {
+        inputTokens?: number
+        outputTokens?: number
+        totalTokens?: number
+        reasoningTokens?: number
+        cachedInputTokens?: number
+      }
+      diagnostics?: Array<{
+        code:
+          | "output_file_limit_exceeded"
+          | "output_file_too_large"
+          | "output_budget_exhausted"
+          | "output_collection_failed"
+          | "output_file_changed"
+          | "output_storage_failed"
+        severity: "warning" | "error"
+        scope: "output"
+        path?: string
+        message: string
+      }>
+      error?: string
+      attempt: number
+      streamId: string
+      createdAt: string
+      startedAt?: string
+      completedAt?: string
+    }>
+    hasMore: boolean
+    total: number
+  }
+}
+
+export type ListAgentThreadRunsResponse =
+  ListAgentThreadRunsResponses[keyof ListAgentThreadRunsResponses]
 
 export type GetAgentRunData = {
   body?: never
@@ -5847,7 +6131,7 @@ export type GetAgentRunResponses = {
       type: "user" | "serviceAccount" | "system"
       id: string
     }
-    status: "running" | "succeeded" | "failed" | "cancelled"
+    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
     modelId?: string
     finishReason?:
       | "stop"

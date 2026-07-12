@@ -15943,32 +15943,164 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "threadId": {
-                      "type": "string"
-                    },
-                    "runId": {
-                      "type": "string"
-                    },
-                    "triggerMessageId": {
-                      "type": "string"
-                    },
-                    "jobId": {
-                      "type": "string"
-                    },
-                    "createdThread": {
-                      "type": "boolean"
-                    },
-                    "streamId": {
-                      "type": "string"
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "requestedByPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "executionPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "modelId": {
+                          "type": "string"
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "inputTokens": {
+                              "type": "number"
+                            },
+                            "outputTokens": {
+                              "type": "number"
+                            },
+                            "totalTokens": {
+                              "type": "number"
+                            },
+                            "reasoningTokens": {
+                              "type": "number"
+                            },
+                            "cachedInputTokens": {
+                              "type": "number"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "diagnostics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "output_file_limit_exceeded",
+                                  "output_file_too_large",
+                                  "output_budget_exhausted",
+                                  "output_collection_failed",
+                                  "output_file_changed",
+                                  "output_storage_failed"
+                                ]
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": ["warning", "error"]
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": ["output"]
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "severity", "scope", "message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "streamId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "threadId",
+                        "agentId",
+                        "triggerMessageId",
+                        "requestedByPrincipal",
+                        "status",
+                        "attempt",
+                        "streamId",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
                     }
                   },
-                  "required": [
-                    "threadId",
-                    "runId",
-                    "triggerMessageId",
-                    "createdThread",
-                    "streamId"
-                  ],
+                  "required": ["run"],
                   "additionalProperties": false
                 }
               }
@@ -16294,11 +16426,164 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runId": {
-                      "type": "string"
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "requestedByPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "executionPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "modelId": {
+                          "type": "string"
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "inputTokens": {
+                              "type": "number"
+                            },
+                            "outputTokens": {
+                              "type": "number"
+                            },
+                            "totalTokens": {
+                              "type": "number"
+                            },
+                            "reasoningTokens": {
+                              "type": "number"
+                            },
+                            "cachedInputTokens": {
+                              "type": "number"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "diagnostics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "output_file_limit_exceeded",
+                                  "output_file_too_large",
+                                  "output_budget_exhausted",
+                                  "output_collection_failed",
+                                  "output_file_changed",
+                                  "output_storage_failed"
+                                ]
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": ["warning", "error"]
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": ["output"]
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "severity", "scope", "message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "streamId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "threadId",
+                        "agentId",
+                        "triggerMessageId",
+                        "requestedByPrincipal",
+                        "status",
+                        "attempt",
+                        "streamId",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
                     }
                   },
-                  "required": ["runId"],
+                  "required": ["run"],
                   "additionalProperties": false
                 }
               }
@@ -16340,6 +16625,528 @@
           },
           "409": {
             "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/runs/{runId}/retry": {
+      "post": {
+        "summary": "Retry a failed agent run",
+        "tags": ["Agent Runs"],
+        "operationId": "retryAgentRun",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Response for status 202",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "projectId": {
+                          "type": "string"
+                        },
+                        "threadId": {
+                          "type": "string"
+                        },
+                        "agentId": {
+                          "type": "string"
+                        },
+                        "triggerMessageId": {
+                          "type": "string"
+                        },
+                        "requestedByPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "executionPrincipal": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount", "system"]
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                        },
+                        "modelId": {
+                          "type": "string"
+                        },
+                        "finishReason": {
+                          "type": "string",
+                          "enum": [
+                            "stop",
+                            "length",
+                            "content-filter",
+                            "tool-calls",
+                            "error",
+                            "other",
+                            "unknown"
+                          ]
+                        },
+                        "usage": {
+                          "type": "object",
+                          "properties": {
+                            "inputTokens": {
+                              "type": "number"
+                            },
+                            "outputTokens": {
+                              "type": "number"
+                            },
+                            "totalTokens": {
+                              "type": "number"
+                            },
+                            "reasoningTokens": {
+                              "type": "number"
+                            },
+                            "cachedInputTokens": {
+                              "type": "number"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "diagnostics": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string",
+                                "enum": [
+                                  "output_file_limit_exceeded",
+                                  "output_file_too_large",
+                                  "output_budget_exhausted",
+                                  "output_collection_failed",
+                                  "output_file_changed",
+                                  "output_storage_failed"
+                                ]
+                              },
+                              "severity": {
+                                "type": "string",
+                                "enum": ["warning", "error"]
+                              },
+                              "scope": {
+                                "type": "string",
+                                "enum": ["output"]
+                              },
+                              "path": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["code", "severity", "scope", "message"],
+                            "additionalProperties": false
+                          }
+                        },
+                        "error": {
+                          "type": "string"
+                        },
+                        "attempt": {
+                          "type": "number"
+                        },
+                        "streamId": {
+                          "type": "string"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "startedAt": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "projectId",
+                        "threadId",
+                        "agentId",
+                        "triggerMessageId",
+                        "requestedByPrincipal",
+                        "status",
+                        "attempt",
+                        "streamId",
+                        "createdAt"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": ["run"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/runs": {
+      "get": {
+        "summary": "List an agent thread's runs",
+        "tags": ["Agent Runs"],
+        "operationId": "listAgentThreadRuns",
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["asc", "desc"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "threadId": {
+                            "type": "string"
+                          },
+                          "agentId": {
+                            "type": "string"
+                          },
+                          "triggerMessageId": {
+                            "type": "string"
+                          },
+                          "requestedByPrincipal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "executionPrincipal": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount", "system"]
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          },
+                          "modelId": {
+                            "type": "string"
+                          },
+                          "finishReason": {
+                            "type": "string",
+                            "enum": [
+                              "stop",
+                              "length",
+                              "content-filter",
+                              "tool-calls",
+                              "error",
+                              "other",
+                              "unknown"
+                            ]
+                          },
+                          "usage": {
+                            "type": "object",
+                            "properties": {
+                              "inputTokens": {
+                                "type": "number"
+                              },
+                              "outputTokens": {
+                                "type": "number"
+                              },
+                              "totalTokens": {
+                                "type": "number"
+                              },
+                              "reasoningTokens": {
+                                "type": "number"
+                              },
+                              "cachedInputTokens": {
+                                "type": "number"
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "diagnostics": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "output_file_limit_exceeded",
+                                    "output_file_too_large",
+                                    "output_budget_exhausted",
+                                    "output_collection_failed",
+                                    "output_file_changed",
+                                    "output_storage_failed"
+                                  ]
+                                },
+                                "severity": {
+                                  "type": "string",
+                                  "enum": ["warning", "error"]
+                                },
+                                "scope": {
+                                  "type": "string",
+                                  "enum": ["output"]
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["code", "severity", "scope", "message"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "error": {
+                            "type": "string"
+                          },
+                          "attempt": {
+                            "type": "number"
+                          },
+                          "streamId": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "startedAt": {
+                            "type": "string"
+                          },
+                          "completedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "projectId",
+                          "threadId",
+                          "agentId",
+                          "triggerMessageId",
+                          "requestedByPrincipal",
+                          "status",
+                          "attempt",
+                          "streamId",
+                          "createdAt"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    },
+                    "total": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["runs", "hasMore", "total"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
             "content": {
               "application/json": {
                 "schema": {
@@ -16429,7 +17236,7 @@
                     },
                     "status": {
                       "type": "string",
-                      "enum": ["running", "succeeded", "failed", "cancelled"]
+                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
                     },
                     "modelId": {
                       "type": "string"

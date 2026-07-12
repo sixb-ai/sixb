@@ -62,6 +62,7 @@ import {
   listActions,
   listAgents,
   listAgentThreadMessages,
+  listAgentThreadRuns,
   listAgentThreads,
   listAuthAccessTokens,
   listAuthInvitations,
@@ -99,6 +100,7 @@ import {
   requestPipelineRun,
   requestSyncRun,
   requestWorkflowRun,
+  retryAgentRun,
   revokeAuthAccessToken,
   revokeAuthInvitation,
   revokeAuthServiceAccountAccessToken,
@@ -266,6 +268,9 @@ import type {
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
+  ListAgentThreadRunsData,
+  ListAgentThreadRunsError,
+  ListAgentThreadRunsResponse,
   ListAgentThreadsData,
   ListAgentThreadsError,
   ListAgentThreadsResponse,
@@ -367,6 +372,9 @@ import type {
   RequestWorkflowRunData,
   RequestWorkflowRunError,
   RequestWorkflowRunResponse,
+  RetryAgentRunData,
+  RetryAgentRunError,
+  RetryAgentRunResponse,
   RevokeAuthAccessTokenData,
   RevokeAuthAccessTokenError,
   RevokeAuthAccessTokenResponse,
@@ -3211,6 +3219,99 @@ export const cancelAgentRunMutation = (
   }
   return mutationOptions
 }
+
+/**
+ * Retry a failed agent run
+ */
+export const retryAgentRunMutation = (
+  options?: Partial<Options<RetryAgentRunData>>
+): UseMutationOptions<RetryAgentRunResponse, RetryAgentRunError, Options<RetryAgentRunData>> => {
+  const mutationOptions: UseMutationOptions<
+    RetryAgentRunResponse,
+    RetryAgentRunError,
+    Options<RetryAgentRunData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await retryAgentRun({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+export const listAgentThreadRunsQueryKey = (options: Options<ListAgentThreadRunsData>) =>
+  createQueryKey("listAgentThreadRuns", options)
+
+/**
+ * List an agent thread's runs
+ */
+export const listAgentThreadRunsOptions = (options: Options<ListAgentThreadRunsData>) =>
+  queryOptions<
+    ListAgentThreadRunsResponse,
+    ListAgentThreadRunsError,
+    ListAgentThreadRunsResponse,
+    ReturnType<typeof listAgentThreadRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listAgentThreadRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listAgentThreadRunsQueryKey(options),
+  })
+
+export const listAgentThreadRunsInfiniteQueryKey = (
+  options: Options<ListAgentThreadRunsData>
+): QueryKey<Options<ListAgentThreadRunsData>> =>
+  createQueryKey("listAgentThreadRuns", options, true)
+
+/**
+ * List an agent thread's runs
+ */
+export const listAgentThreadRunsInfiniteOptions = (options: Options<ListAgentThreadRunsData>) =>
+  infiniteQueryOptions<
+    ListAgentThreadRunsResponse,
+    ListAgentThreadRunsError,
+    InfiniteData<ListAgentThreadRunsResponse>,
+    QueryKey<Options<ListAgentThreadRunsData>>,
+    | string
+    | Pick<QueryKey<Options<ListAgentThreadRunsData>>[0], "body" | "headers" | "path" | "query">
+  >(
+    // @ts-ignore
+    {
+      queryFn: async ({ pageParam, queryKey, signal }) => {
+        // @ts-ignore
+        const page: Pick<
+          QueryKey<Options<ListAgentThreadRunsData>>[0],
+          "body" | "headers" | "path" | "query"
+        > =
+          typeof pageParam === "object"
+            ? pageParam
+            : {
+                query: {
+                  offset: pageParam,
+                },
+              }
+        const params = createInfiniteParams(queryKey, page)
+        const { data } = await listAgentThreadRuns({
+          ...options,
+          ...params,
+          signal,
+          throwOnError: true,
+        })
+        return data
+      },
+      queryKey: listAgentThreadRunsInfiniteQueryKey(options),
+    }
+  )
 
 export const getAgentRunQueryKey = (options: Options<GetAgentRunData>) =>
   createQueryKey("getAgentRun", options)

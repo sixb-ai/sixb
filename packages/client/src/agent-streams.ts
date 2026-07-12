@@ -2,6 +2,7 @@ import type { AgentRunStreamEvent, BrokerRecord } from "@sixb/core"
 // Import the schema-version value from the browser-safe streams subpath: the `@sixb/core` root pulls
 // in node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
 import { AGENT_RUN_STREAM_SCHEMA_VERSION } from "@sixb/core/agents/streams"
+import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
@@ -12,6 +13,8 @@ import {
 export type { AgentRunStreamEvent } from "@sixb/core"
 export type { ReconnectingSocket, ReconnectingSocketState } from "./ws-socket"
 
+export type AgentRunSnapshot = GetAgentRunResponses[200]
+
 export interface AgentRunStreamRecord extends Omit<BrokerRecord, "payload"> {
   readonly payload: AgentRunStreamEvent
 }
@@ -19,14 +22,12 @@ export interface AgentRunStreamRecord extends Omit<BrokerRecord, "payload"> {
 export interface AgentRunStreamSubscribeMessage {
   readonly type: "subscribe"
   readonly runId: string
-  readonly threadId?: string
   readonly afterCursor?: string
 }
 
 export interface AgentRunStreamReplayMessage {
   readonly type: "replay"
   readonly runId: string
-  readonly threadId?: string
   readonly afterCursor?: string
   readonly limit?: number
 }
@@ -52,6 +53,7 @@ export type AgentRunStreamServerMessage =
     }
   | { readonly type: "unsubscribed"; readonly runId?: string | null }
   | { readonly type: "error"; readonly message: string }
+  | { readonly type: "run.snapshot"; readonly run: AgentRunSnapshot }
   | { readonly type: "record"; readonly record: AgentRunStreamRecord }
 
 export function createSixbAgentsWebSocketUrl(baseUrl?: string): string {
@@ -60,13 +62,13 @@ export function createSixbAgentsWebSocketUrl(baseUrl?: string): string {
 
 export interface AgentRunSocketOptions {
   readonly runId: string
-  readonly threadId?: string
   readonly afterCursor?: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
   /** Override the API base url. Defaults to the global client config. */
   readonly baseUrl?: string
   readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
+  readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
   readonly onError?: (message: string) => void
   readonly onStateChange?: (state: ReconnectingSocketState) => void
 }
@@ -90,7 +92,6 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
       ({
         type: "subscribe",
         runId: options.runId,
-        ...(options.threadId ? { threadId: options.threadId } : {}),
         ...(latestCursor ? { afterCursor: latestCursor } : {}),
       }) satisfies AgentRunStreamSubscribeMessage,
     onMessage: (data, sink) => {
@@ -100,6 +101,11 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
       if (message.type === "record") {
         latestCursor = message.record.cursor
         options.onEvent(message.record.payload, message.record.cursor)
+        return
+      }
+
+      if (message.type === "run.snapshot") {
+        options.onRunSnapshot?.(message.run)
         return
       }
 
@@ -130,6 +136,10 @@ export function parseAgentRunStreamServerMessage(
 
   if (parsed.type === "record" && isAgentRunStreamRecord(parsed.record)) {
     return { type: "record", record: parsed.record }
+  }
+
+  if (parsed.type === "run.snapshot" && isAgentRunSnapshot(parsed.run)) {
+    return { type: "run.snapshot", run: parsed.run }
   }
 
   if (parsed.type === "error") {
@@ -178,6 +188,24 @@ export function parseAgentRunStreamServerMessage(
   return null
 }
 
+function isAgentRunSnapshot(value: unknown): value is AgentRunSnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.projectId === "string" &&
+    typeof value.threadId === "string" &&
+    typeof value.agentId === "string" &&
+    typeof value.triggerMessageId === "string" &&
+    isRecord(value.requestedByPrincipal) &&
+    typeof value.requestedByPrincipal.type === "string" &&
+    typeof value.requestedByPrincipal.id === "string" &&
+    isDurableAgentRunStatus(value.status) &&
+    isFiniteNumber(value.attempt) &&
+    typeof value.streamId === "string" &&
+    typeof value.createdAt === "string"
+  )
+}
+
 function isAgentRunStreamRecord(value: unknown): value is AgentRunStreamRecord {
   return (
     isRecord(value) &&
@@ -221,6 +249,16 @@ function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEvent {
     default:
       return false
   }
+}
+
+function isDurableAgentRunStatus(value: unknown): value is AgentRunSnapshot["status"] {
+  return (
+    value === "queued" ||
+    value === "running" ||
+    value === "succeeded" ||
+    value === "failed" ||
+    value === "cancelled"
+  )
 }
 
 function isAgentRunStatus(value: unknown): value is "succeeded" | "failed" | "cancelled" {

@@ -42,7 +42,6 @@ export function useThreadStream(options: UseThreadStreamOptions): UseThreadStrea
   const runFinished = live.finishStatus !== null && live.runId === runId
   const { connected, reconnecting } = useAgentRunStream({
     runId,
-    threadId,
     enabled: Boolean(runId && threadId) && !runFinished,
     onEvent: (event) => dispatch({ type: "event", event }),
     onError: (message) => dispatch({ type: "stream-error", message }),
