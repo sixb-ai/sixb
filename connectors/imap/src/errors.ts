@@ -28,6 +28,17 @@ export class ImapDownloadTooLargeError extends ImapConnectorError {
   }
 }
 
+export class ImapPartUnavailableError extends ImapConnectorError {
+  override readonly name = "ImapPartUnavailableError"
+
+  constructor(
+    readonly uid: number,
+    readonly part: string
+  ) {
+    super(`Message ${uid} part ${part} is unavailable: the server returned no content.`)
+  }
+}
+
 export function imapOperationError(
   operation: string,
   error: unknown,

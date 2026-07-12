@@ -2,6 +2,7 @@ export {
   ImapAbortedError,
   ImapConnectorError,
   ImapDownloadTooLargeError,
+  ImapPartUnavailableError,
 } from "./errors"
 export { imap } from "./imap"
 export type {

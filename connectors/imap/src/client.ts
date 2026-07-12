@@ -19,6 +19,7 @@ import {
   ImapAbortedError,
   ImapConnectorError,
   ImapDownloadTooLargeError,
+  ImapPartUnavailableError,
   imapOperationError,
 } from "./errors"
 import type {
@@ -67,7 +68,7 @@ export interface ImapTransport {
     range: string | number | bigint,
     part?: string,
     options?: { uid?: boolean; maxBytes?: number; chunkSize?: number }
-  ): Promise<DownloadObject>
+  ): Promise<Partial<DownloadObject>>
 }
 
 export type ImapTransportFactory = (options: ImapFlowOptions) => ImapTransport
@@ -316,7 +317,7 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
     this.assertActive()
     validateDownloadInput(input)
 
-    let downloaded: DownloadObject
+    let downloaded: Partial<DownloadObject>
     try {
       downloaded = await this.transport.download(input.uid, input.part, {
         uid: true,
@@ -325,6 +326,13 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
       this.assertActive()
     } catch (error) {
       throw imapOperationError("Message part download", error, [this.password])
+    }
+
+    // ImapFlow resolves an empty object (no `meta`/`content`) when the mailbox is no
+    // longer selected or the requested body part is absent from the server response.
+    // Surface that as a typed, actionable error before it poisons `activeStreams`.
+    if (!downloaded.content || !downloaded.meta) {
+      throw new ImapPartUnavailableError(input.uid, input.part)
     }
 
     const content = limitReadable(downloaded.content, input)
@@ -355,9 +363,16 @@ class ImapMailboxSessionImpl implements ImapMailboxSession {
       return
     }
     this.active = false
+    // Cleanup runs inside withMailbox's `finally`, so a throw here would mask the real
+    // operation error. Guard every stream (undefined source, already destroyed) so
+    // teardown always completes.
     for (const [content, source] of this.activeStreams) {
-      content.destroy()
-      source.destroy()
+      if (!content.destroyed) {
+        content.destroy()
+      }
+      if (source && !source.destroyed) {
+        source.destroy()
+      }
     }
     this.activeStreams.clear()
   }
