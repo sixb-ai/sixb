@@ -63,6 +63,9 @@ export class BullMqQueue<TQueueJob extends QueueJob> implements Queue<TQueueJob>
   }): Promise<readonly TQueueJob[]> {
     assertNonEmpty(params.projectId, "projectId")
     if (params.jobs.length === 0) return []
+    for (const job of params.jobs) {
+      if (job.id !== undefined) assertNonEmpty(job.id, "job.id")
+    }
 
     const envelopes = params.jobs.map((job) => buildEnvelope<TQueueJob>(params.projectId, job))
     const queue = this.getQueue(params.projectId)
