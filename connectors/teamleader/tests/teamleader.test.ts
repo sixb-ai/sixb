@@ -254,6 +254,105 @@ describe("teamleader connector", () => {
     ])
   })
 
+  test("supports documented product actions", async () => {
+    const requests: CapturedRequest[] = []
+    const client = createTeamleaderClient({
+      accessToken: "test-token",
+      fetch: mockFetch((input, init) => {
+        requests.push({ input, init })
+        const path = new URL(String(input)).pathname
+
+        if (path === "/products.add") {
+          return Promise.resolve(jsonResponse({ data: { type: "product", id: "product-1" } }))
+        }
+
+        return Promise.resolve(new Response(undefined, { status: 204 }))
+      }),
+    })
+
+    const added = await client.products.add({
+      name: "Hosting",
+      code: "HOST-001",
+      description: "Product used for hosting web solutions",
+      purchase_price: { amount: 50, currency: "EUR" },
+      selling_price: { amount: 100, currency: "EUR" },
+      unit_of_measure_id: "unit-1",
+      price_list_prices: [
+        { price_list_id: "price-list-1", price: { amount: 90, currency: "EUR" } },
+      ],
+      stock: { amount: 12 },
+      configuration: { stock_threshold: { minimum: 4, action: "notify" } },
+      department_id: "department-1",
+      product_category_id: "category-1",
+      tax_rate_id: "tax-rate-1",
+      custom_fields: [{ id: "field-1", value: "external-reference" }],
+    })
+    await client.products.update({
+      id: "product-1",
+      name: "Updated hosting",
+      code: null,
+      description: null,
+      purchase_price: null,
+      selling_price: { amount: 120, currency: "EUR" },
+      unit_of_measure_id: null,
+      price_list_prices: [
+        { price_list_id: "price-list-1", price: { amount: 110, currency: "EUR" } },
+      ],
+      stock: { amount: 10 },
+      configuration: null,
+      department_id: "department-1",
+      product_category_id: "category-1",
+      tax_rate_id: "tax-rate-1",
+      custom_fields: [{ id: "field-1", value: "updated-reference" }],
+    })
+    await client.products.delete({ id: "product-1" })
+
+    expect(added.data).toEqual({ type: "product", id: "product-1" })
+    expect(requests.map((request) => new URL(String(request.input)).pathname)).toEqual([
+      "/products.add",
+      "/products.update",
+      "/products.delete",
+    ])
+    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
+      {
+        name: "Hosting",
+        code: "HOST-001",
+        description: "Product used for hosting web solutions",
+        purchase_price: { amount: 50, currency: "EUR" },
+        selling_price: { amount: 100, currency: "EUR" },
+        unit_of_measure_id: "unit-1",
+        price_list_prices: [
+          { price_list_id: "price-list-1", price: { amount: 90, currency: "EUR" } },
+        ],
+        stock: { amount: 12 },
+        configuration: { stock_threshold: { minimum: 4, action: "notify" } },
+        department_id: "department-1",
+        product_category_id: "category-1",
+        tax_rate_id: "tax-rate-1",
+        custom_fields: [{ id: "field-1", value: "external-reference" }],
+      },
+      {
+        id: "product-1",
+        name: "Updated hosting",
+        code: null,
+        description: null,
+        purchase_price: null,
+        selling_price: { amount: 120, currency: "EUR" },
+        unit_of_measure_id: null,
+        price_list_prices: [
+          { price_list_id: "price-list-1", price: { amount: 110, currency: "EUR" } },
+        ],
+        stock: { amount: 10 },
+        configuration: null,
+        department_id: "department-1",
+        product_category_id: "category-1",
+        tax_rate_id: "tax-rate-1",
+        custom_fields: [{ id: "field-1", value: "updated-reference" }],
+      },
+      { id: "product-1" },
+    ])
+  })
+
   test("exposes quotation reference endpoints", async () => {
     const requests: CapturedRequest[] = []
     const client = createTeamleaderClient({

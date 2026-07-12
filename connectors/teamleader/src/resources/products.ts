@@ -6,6 +6,7 @@ import type {
   TeamleaderProduct,
   TeamleaderProductListItem,
   TeamleaderSingleResponse,
+  TeamleaderTypeAndId,
 } from "../types"
 
 export function createProductsResource(request: TeamleaderRequester): TeamleaderClient["products"] {
@@ -26,6 +27,19 @@ export function createProductsResource(request: TeamleaderRequester): Teamleader
         body,
         requestOptions
       )
+    },
+    add(body, requestOptions) {
+      return request<TeamleaderSingleResponse<TeamleaderTypeAndId<"product">>>(
+        "/products.add",
+        body,
+        requestOptions
+      )
+    },
+    update(body, requestOptions) {
+      return request<void>("/products.update", body, requestOptions)
+    },
+    delete(body, requestOptions) {
+      return request<void>("/products.delete", body, requestOptions)
     },
   }
 

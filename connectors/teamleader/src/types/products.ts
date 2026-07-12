@@ -1,5 +1,5 @@
 import type { TeamleaderMoney, TeamleaderPage, TeamleaderTypeAndId } from "./common"
-import type { TeamleaderCustomField } from "./custom-fields"
+import type { TeamleaderCustomField, TeamleaderCustomFieldInput } from "./custom-fields"
 
 export interface TeamleaderProductListRequest {
   readonly filter?: {
@@ -14,6 +14,41 @@ export interface TeamleaderProductInfoRequest {
   readonly id: string
   /** Comma-separated list of optional includes. Documented value: `suppliers`. */
   readonly includes?: string
+}
+
+export type TeamleaderProductAddRequest =
+  | (TeamleaderProductAddFields & { readonly name: string; readonly code?: string })
+  | (TeamleaderProductAddFields & { readonly code: string; readonly name?: string })
+
+export interface TeamleaderProductAddFields {
+  readonly description?: string
+  readonly purchase_price?: TeamleaderMoney | null
+  readonly selling_price?: TeamleaderMoney | null
+  readonly unit_of_measure_id?: string | null
+  readonly price_list_prices?: readonly TeamleaderProductPriceListPriceInput[]
+  readonly stock?: TeamleaderProductStock
+  readonly configuration?: TeamleaderProductConfiguration | null
+  readonly department_id?: string
+  readonly product_category_id?: string
+  readonly tax_rate_id?: string
+  readonly custom_fields?: readonly TeamleaderCustomFieldInput[]
+}
+
+export interface TeamleaderProductUpdateRequest {
+  readonly id: string
+  readonly name?: string | null
+  readonly code?: string | null
+  readonly description?: string | null
+  readonly purchase_price?: TeamleaderMoney | null
+  readonly selling_price?: TeamleaderMoney | null
+  readonly unit_of_measure_id?: string | null
+  readonly price_list_prices?: readonly TeamleaderProductPriceListPriceInput[]
+  readonly stock?: TeamleaderProductStock
+  readonly configuration?: TeamleaderProductConfiguration | null
+  readonly department_id?: string
+  readonly product_category_id?: string
+  readonly tax_rate_id?: string
+  readonly custom_fields?: readonly TeamleaderCustomFieldInput[]
 }
 
 export interface TeamleaderProductListItem {
@@ -60,4 +95,9 @@ export interface TeamleaderProductSupplier {
 export interface TeamleaderProductPriceListPrice {
   readonly price_list?: TeamleaderTypeAndId<"priceList">
   readonly price?: TeamleaderMoney
+}
+
+export interface TeamleaderProductPriceListPriceInput {
+  readonly price_list_id: string
+  readonly price: TeamleaderMoney
 }
