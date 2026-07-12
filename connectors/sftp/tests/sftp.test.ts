@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { sftp } from "../src"
@@ -18,6 +18,10 @@ describe("sftp connector", () => {
   beforeEach(async () => {
     await rm(join(server.rootDir, "files"), { force: true, recursive: true })
     await mkdir(join(server.rootDir, "files"), { recursive: true })
+  })
+
+  afterEach(async () => {
+    await server.waitForIdle()
   })
 
   test("lists and stats remote files", async () => {
@@ -265,6 +269,5 @@ describe("sftp connector", () => {
     })
 
     await adapter.disconnect?.(client)
-    await server.waitForIdle()
   })
 })
