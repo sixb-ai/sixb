@@ -211,6 +211,7 @@ sixb orchestrator
 sixb worker sync
 sixb worker pipeline
 sixb worker projection
+SIXB_API_PUBLIC_ORIGIN=https://api.example.com sixb worker agent
 ```
 
 **Constrained** — co-host the queue workers in one process to shrink the provider footprint
@@ -224,7 +225,8 @@ sixb worker-group sync pipeline projection
 ```
 
 `sixb worker-group` with no positional types starts every registered queue worker type in one
-process.
+process, including the agent worker when agents and agent storage are configured. Agent workers
+require the API origin through `--api-public-origin` or `SIXB_API_PUBLIC_ORIGIN`.
 
 `sixb dev` uses separated local ports by default:
 
@@ -245,5 +247,6 @@ They fail with a clear error instead of compiling assets at startup.
 `sixb worker <type>` is intended for queue backends that can be shared across processes. Each
 worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue
 workers in a single process for constrained deployments; with no positional types it starts every
-registered worker type. Both reject the built-in `InMemoryQueues` — use `sixb dev`, which co-hosts
-workers in-process.
+registered worker type. Agent workers require `--api-public-origin` or
+`SIXB_API_PUBLIC_ORIGIN`. Both commands reject the built-in `InMemoryQueues` — use `sixb dev`,
+which co-hosts workers in-process.

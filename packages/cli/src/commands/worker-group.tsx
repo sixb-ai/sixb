@@ -13,6 +13,7 @@ import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerGroupView
 export interface WorkerGroupOptions {
   entry?: string
   workerTypes?: readonly string[]
+  apiPublicOrigin?: string
 }
 
 export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
@@ -53,7 +54,11 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
       <LoadingView title="Starting sixb worker group" subtitle={entry} status="Starting workers" />
     )
 
-    workers = workerTypes.map((workerType) => createWorkerForType(sixb as LoadedSixb, workerType))
+    workers = workerTypes.map((workerType) =>
+      createWorkerForType(sixb as LoadedSixb, workerType, {
+        agentApiBaseUrl: options.apiPublicOrigin,
+      })
+    )
     await Promise.all(workers.map((worker) => worker.start()))
 
     const warnings =

@@ -12,6 +12,7 @@ import { ErrorView, LoadingView, renderPersistent, renderStatic, WorkerView } fr
 export interface WorkerOptions {
   entry?: string
   workerType?: string
+  apiPublicOrigin?: string
 }
 
 export async function runWorker(options: WorkerOptions = {}) {
@@ -40,7 +41,9 @@ export async function runWorker(options: WorkerOptions = {}) {
       <LoadingView title="Starting sixb worker" subtitle={entry} status="Starting worker" />
     )
 
-    worker = createWorkerForType(sixb, workerType)
+    worker = createWorkerForType(sixb, workerType, {
+      agentApiBaseUrl: options.apiPublicOrigin,
+    })
     await worker.start()
 
     const workerId = `${workerType}-worker-${sixb.id}`
