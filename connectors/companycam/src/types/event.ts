@@ -1,4 +1,4 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { Logger, OntologySource, Sixb } from "@sixb/core"
 import type { CompanyCamClient } from "../client"
 import type { CompanyCamEventType } from "./webhook"
 
@@ -26,6 +26,7 @@ export interface CompanyCamWebhookEvent {
 export interface CompanyCamEventContext {
   readonly event: CompanyCamWebhookEvent
   readonly sixb: Sixb<readonly OntologySource[]>
+  readonly logger: Logger
   client(): Promise<CompanyCamClient>
 }
 

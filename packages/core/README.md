@@ -258,7 +258,8 @@ const edgeGateway = defineConnector(
           },
         })
         .idempotencyKey(({ request }) => request.headers.get("x-delivery-id"))
-        .handle(async ({ body, sixb }) => {
+        .handle(async ({ body, sixb, logger }) => {
+          logger.info("Received device telemetry", { deviceId: body.deviceId })
           await sixb.upsertObject("Device", {
             id: body.deviceId,
             temperature: body.temperature,
@@ -269,7 +270,8 @@ const edgeGateway = defineConnector(
 )
 ```
 
-Use `.json(schema)` for JSON bodies so payloads are validated at runtime. Omit
+Use `.json(schema)` for JSON bodies so payloads are validated at runtime. The `.verify(...)`,
+`.idempotencyKey(...)`, and `.handle(...)` callbacks each receive a run-scoped `logger`. Omit
 `.idempotencyKey(...)` for deterministic upserts where duplicate provider deliveries are harmless.
 
 ## Syncs

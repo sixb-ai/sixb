@@ -32,9 +32,9 @@ export function pandaDocEventsWebhook(
         new URL(request.url).searchParams.get("signature")
       )
     })
-    .handle<PandaDocClient>(async ({ body, request, sixb, client }) => {
+    .handle<PandaDocClient>(async ({ body, request, sixb, logger, client }) => {
       for (const event of body) {
-        await options.onEvent({ event, events: body, request, sixb, client })
+        await options.onEvent({ event, events: body, request, sixb, logger, client })
       }
 
       return { status: 200 }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
+import { noopLogger } from "@sixb/core"
 import type { GitHubEventContext, GitHubEventHandler, GitHubIssueEvent } from "../src"
 import { github, githubEventsWebhook } from "../src"
 
@@ -671,6 +672,7 @@ describe("github connector", () => {
         }),
         body: JSON.parse(body),
         sixb,
+        logger: noopLogger,
         client,
       } as unknown as HandleCtx)
 
@@ -680,6 +682,7 @@ describe("github connector", () => {
       expect(received[0]?.event.deliveryId).toBe("d-1")
       // The live runtime and client resolver are passed straight through.
       expect(received[0]?.sixb).toBe(sixb as never)
+      expect(received[0]?.logger).toBe(noopLogger)
       expect(received[0]?.client).toBe(client)
     })
 

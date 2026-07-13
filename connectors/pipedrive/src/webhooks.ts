@@ -26,8 +26,8 @@ export function pipedriveEventsWebhook(
       verifyBasicAuth(options.auth, request.headers.get("authorization"))
     })
     .idempotencyKey(({ body }) => body.meta.id ?? body.meta.correlation_id)
-    .handle<PipedriveClient>(async ({ body, sixb, client }) => {
-      await options.onEvent({ event: body, sixb, client })
+    .handle<PipedriveClient>(async ({ body, sixb, logger, client }) => {
+      await options.onEvent({ event: body, sixb, logger, client })
       return { status: 200 }
     })
 }

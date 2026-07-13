@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { noopLogger } from "@sixb/core"
 import type { PipedriveEventContext } from "../src"
 import { pipedrive, pipedriveEventsWebhook } from "../src"
 
@@ -49,6 +50,7 @@ describe("pipedrive events webhook", () => {
       request: new Request("https://x/hook", { method: "POST" }),
       body: webhook.body.parse(body),
       sixb,
+      logger: noopLogger,
       client,
     } as unknown as HandleCtx)
 
@@ -58,6 +60,7 @@ describe("pipedrive events webhook", () => {
     expect(received[0]?.event.meta.entity).toBe("deal")
     expect(received[0]?.event.data).toEqual({ id: 42, title: "Roof job" })
     expect(received[0]?.sixb).toBe(sixb as never)
+    expect(received[0]?.logger).toBe(noopLogger)
     expect(received[0]?.client).toBe(client)
   })
 
